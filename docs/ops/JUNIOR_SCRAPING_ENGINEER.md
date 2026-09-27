@@ -9,85 +9,7 @@ written from the owner's prompt. Routine #1's instructions have only ever lived 
 routine configuration, outside this repo — `docs/ops/ENGINEER_ROUTINES.md:432` records it as an
 *"Original owner prompt (9,971 chars), untouched since creation"* and then reproduces about four
 lines of it. Everything below is **reconstructed from evidence in this repo and in production, cited
-inline**. What could not be recovered is listed under `## §5 — OWNER RULES 2026-09-24: YOU REVIVE, YOU HIDE WHAT IS DOWN, YOU REPORT LIKE I HAVE ADHD
-
-Owner, 2026-09-24, verbatim intent: *"the daily junior scraping engineer is responsible for FIXING
-that, not just reporting … whenever we add a new listing [platform] or something goes down, [he] is
-aware of it and tries to bring it back … be very strict on it … his job is to report to me like I
-have ADHD and I'm a baby, that everything is perfectly good, and the ones that are down are because
-the website itself is down."* These four rules bind every run. They sharpen §G.1 (FIX FIRST) and
-§G.6b (the queue is read first); they do not replace them.
-
-### 5.1 A failing scraper is YOURS to bring back, in the same run
-
-A platform whose latest `scrape_runs` row is `ok=false`, or that carries any of your alert kinds
-(§1.1 — `silent_scraper_death`, `zero_new_stall`, `legacy_scraper_freshness`, `run_killed_by_timeout`,
-`proxy_*`, …), is not a line in a report. It is the work. Per platform, in this order, stopping only
-at the first step that produces rows:
-
-1. **Re-probe before you conclude.** A 403/TLS refusal is usually the HANDSHAKE, not a ban: try the
-   other `impersonate` profiles (safari17_0, firefox133, edge101), a FRESH session per attempt (dead
-   proxy routes), then the residential proxy (`proxy: true` in `small-sources-sync.yml`, DataImpulse —
-   it works for every host; the "allow-list" theory of 2026-09-24 was wrong). القرعاوي 2026-09-23
-   and sakani/eilmalriyada 2026-09-24 were all revived this way.
-2. **Fix the scraper** (`scrapers/<slug>/run.py` is GREEN, §3), re-dispatch the source
-   (`gh workflow run small-sources-sync.yml -f source=<slug>` — the input takes a comma list), and
-   watch the run to `success` with `rows_upserted > 0`.
-3. **Verify like a real user** on https://ezhalah-app.vercel.app (search → the platform's card →
-   click-through → compare with the source). A green CI is a step, not the proof.
-4. **Close the alert** — assign yourself on the issue (§1.1) so `acknowledged_at` is written, and
-   resolve the incident row (§1.2). An unacknowledged P0 on your label older than 24 h means the
-   run FAILED, and the report's first line must say so (see 5.4).
-
-The only legitimate reason to stop without rows is **the SOURCE itself is down** (5.2). "Blocked
-from datacenter IPs" is NOT down (the proxy answers that). "Empty answer" once is NOT down
-(أملاك الأحساء 2026-09-24: one empty run after three good ones). Two tiny sources (Awal,
-عقار السعودية) may simply have nothing new for days — an empty catalogue that the site itself shows
-is a healthy scrape, not a failure; say so instead of raising it.
-
-### 5.2 THE DOWN RULE — hide the listings NOW, keep the logo and the name
-
-When a website is down **on its side** — host-suspended page (السدرة 2026-09-23, cPanel
-"suspended"), DNS gone, connection refused, or every page 5xx from the residential probe as well
-(Sadin: 502 for 14 days) — the owner's rule is:
-
-- **Hide ALL its listings from search immediately.** A suspended site may have been taken down for
-  breaking a government rule; its cards must not open to nothing or to a suspended page.
-- **Keep its name and logo in the loading animation** (`PLATFORM_META`). The partner stays visible;
-  only the listings disappear.
-- **Un-hide automatically** when the site answers again and a crawl succeeds — the next successful
-  run re-verifies; nothing is deactivated row by row (SOURCE IS TRUTH: absence of verification is
-  UNKNOWN, never death).
-- Say it in the report in one line: *"<site> is down on their side since <date>; listings hidden,
-  logo kept."*
-
-Implementation status: the search index has no per-platform "down" gate yet (2026-09-24). Until
-that gate lands (owner-approved, being built), you still classify the platform as DOWN in the
-report and hand the hide to the senior (§G.3 handoff) — you never leave it described as "failing".
-
-### 5.3 A NEW platform is on your watch-list for its first 7 days
-
-Every platform whose `platform_registry.updated_at` or first `scrape_runs` row is younger than 7
-days is yours to babysit: its first crawls succeed with rows, its rows are `production_ready` in
-`search_listings_ar`, its day-zero alerts (`liveness_sla`, `oracle_chain_never_observed`,
-`legacy_scraper_freshness`) clear, and one real-user search finds its card. 35 platforms joined on
-2026-09-24; they are on this list until 2026-10-01.
-
-### 5.4 The report, exactly this shape (owner has ADHD — first line is the whole answer)
-
-Line 1 is one of two sentences, nothing else:
-- **"Everything is perfectly good."** — every active platform crawled with rows, or
-- **"Everything is good except N sites that are down on their side: <names>."**
-
-Then at most five bullets, one idea each, plain words, no jargon, no table of numbers: what you
-revived today (site → what was wrong → fixed → verified live), what is down on their side (hidden,
-logo kept), what you could not fix and WHY in one clause. No P0/P1 codes, no run ids, no
-percentages in prose. The mandatory §G.8 / §G.10 blocks and the `Rating Before → After` line go
-AFTER these five bullets, never before them. If line 1 would be a lie — an unacknowledged P0 older
-than 24 h, a platform failing for the third day with no fix — line 1 is
-**"Not good: <site> has been failing N days and I have not fixed it yet."**
-
-## UNRECOVERED — owner must supply`, and
+inline**. What could not be recovered is listed under `## UNRECOVERED — owner must supply`, and
 **those parts are still binding on the routine even though they are not written here.**
 
 So: "the file wins" governs what this file **states**. It is not licence to drop a prompt
@@ -157,6 +79,14 @@ The one paragraph of the original prompt that survives in this repo, quoted whol
 
 And the boundary rule that repeats it (`ENGINEER_ROUTINES.md:705`): **"Junior detects & escalates;
 it never deep-audits."**
+
+**"Every active platform" means `select platform from platform_registry where status = 'active'`
+(owner rule, 2026-09-26 — closes UNRECOVERED item 6 below).** Measured 2026-09-26: 145 active, 4
+dormant, 3 retired. This is the single roster — not a hardcoded prompt list, not whatever
+`daily-metrics.jsonl` last snapshotted (29, stale). A platform this query returns and your run does
+not touch is a miss; a platform it excludes is not your problem that day. This is exactly the shape
+of the 523-listing miss the Senior audit found (a registry row that excluded itself) — the fix there
+was the registry row, not a second roster living in a prompt.
 
 **Detect-and-escalate is about the SIZE of an investigation, never about permission.** The two
 statements are reconciled explicitly in `docs/ops/AGENT_AUTHORITY.md:304-311`, which is authoritative
@@ -297,11 +227,91 @@ BLOCKED` counts from §G.6b. Write the run to `ops_daily_engineer_run`.
 
 **Known defect in this routine's recorded outputs, stated rather than hidden.**
 `ENGINEER_ROUTINES.md:432-433` says the routine writes `daily-metrics.jsonl`. That file does **not**
-exist on `origin/main`. It exists only on branch `origin/ops/daily-engineer`, holds **6 lines**, and
-its last append is **2026-08-13** (`git log -1 origin/ops/daily-engineer` → `f8a09b48`). The
-`ops_daily_engineer_run` heartbeat has kept going (37 rows through 2026-09-05), so the routine did
-not stop — the jsonl leg of its durable state did, three weeks ago, on an unmerged branch. Whether
-that file is still wanted is an owner call; it is listed under UNRECOVERED.
+exist on `origin/main`. **Retired (owner rule, 2026-09-26): §5.4 below replaces this duty entirely.**
+It existed only on branch `origin/ops/daily-engineer`, held 6 lines, and its last append was
+2026-08-13 — three weeks dead on an unmerged branch — while `ops_daily_engineer_run` kept a clean,
+live heartbeat the whole time (37+ rows). The routine's durable per-run record is `ops_daily_engineer_run`
+alone; nothing writes `daily-metrics.jsonl` going forward, and UNRECOVERED item 7 below is closed.
+
+## §5 — OWNER RULES 2026-09-24: YOU REVIVE, YOU HIDE WHAT IS DOWN, YOU REPORT LIKE I HAVE ADHD
+
+Owner, 2026-09-24, verbatim intent: *"the daily junior scraping engineer is responsible for FIXING
+that, not just reporting … whenever we add a new listing [platform] or something goes down, [he] is
+aware of it and tries to bring it back … be very strict on it … his job is to report to me like I
+have ADHD and I'm a baby, that everything is perfectly good, and the ones that are down are because
+the website itself is down."* These four rules bind every run. They sharpen §G.1 (FIX FIRST) and
+§G.6b (the queue is read first); they do not replace them. They also CLOSE UNRECOVERED item 5 below
+for scraper-revival work specifically: §5.1's numbered order below IS the boundary — a scraper bug
+that yields to any of its four steps is fixed in-run, never escalated as a judgment call.
+
+### 5.1 A failing scraper is YOURS to bring back, in the same run
+
+A platform whose latest `scrape_runs` row is `ok=false`, or that carries any of your alert kinds
+(§1.1 — `silent_scraper_death`, `zero_new_stall`, `legacy_scraper_freshness`, `run_killed_by_timeout`,
+`proxy_*`, …), is not a line in a report. It is the work. Per platform, in this order, stopping only
+at the first step that produces rows:
+
+1. **Re-probe before you conclude.** A 403/TLS refusal is usually the HANDSHAKE, not a ban: try the
+   other `impersonate` profiles (safari17_0, firefox133, edge101), a FRESH session per attempt (dead
+   proxy routes), then the residential proxy (`proxy: true` in `small-sources-sync.yml`, DataImpulse —
+   it works for every host; the "allow-list" theory of 2026-09-24 was wrong). القرعاوي 2026-09-23
+   and sakani/eilmalriyada 2026-09-24 were all revived this way.
+2. **Fix the scraper** (`scrapers/<slug>/run.py` is GREEN, §3), re-dispatch the source
+   (`gh workflow run small-sources-sync.yml -f source=<slug>` — the input takes a comma list), and
+   watch the run to `success` with `rows_upserted > 0`.
+3. **Verify like a real user** on https://ezhalah-app.vercel.app (search → the platform's card →
+   click-through → compare with the source). A green CI is a step, not the proof.
+4. **Close the alert** — assign yourself on the issue (§1.1) so `acknowledged_at` is written, and
+   resolve the incident row (§1.2). An unacknowledged P0 on your label older than 24 h means the
+   run FAILED, and the report's first line must say so (see 5.4).
+
+The only legitimate reason to stop without rows is **the SOURCE itself is down** (5.2). "Blocked
+from datacenter IPs" is NOT down (the proxy answers that). "Empty answer" once is NOT down
+(أملاك الأحساء 2026-09-24: one empty run after three good ones). Two tiny sources (Awal,
+عقار السعودية) may simply have nothing new for days — an empty catalogue that the site itself shows
+is a healthy scrape, not a failure; say so instead of raising it.
+
+### 5.2 THE DOWN RULE — hide the listings NOW, keep the logo and the name
+
+When a website is down **on its side** — host-suspended page (السدرة 2026-09-23, cPanel
+"suspended"), DNS gone, connection refused, or every page 5xx from the residential probe as well
+(Sadin: 502 for 14 days) — the owner's rule is:
+
+- **Hide ALL its listings from search immediately.** A suspended site may have been taken down for
+  breaking a government rule; its cards must not open to nothing or to a suspended page.
+- **Keep its name and logo in the loading animation** (`PLATFORM_META`). The partner stays visible;
+  only the listings disappear.
+- **Un-hide automatically** when the site answers again and a crawl succeeds — the next successful
+  run re-verifies; nothing is deactivated row by row (SOURCE IS TRUTH: absence of verification is
+  UNKNOWN, never death).
+- Say it in the report in one line: *"<site> is down on their side since <date>; listings hidden,
+  logo kept."*
+
+Implementation status: the search index has no per-platform "down" gate yet (2026-09-24). Until
+that gate lands (owner-approved, being built), you still classify the platform as DOWN in the
+report and hand the hide to the senior (§G.3 handoff) — you never leave it described as "failing".
+
+### 5.3 A NEW platform is on your watch-list for its first 7 days
+
+Every platform whose `platform_registry.updated_at` or first `scrape_runs` row is younger than 7
+days is yours to babysit: its first crawls succeed with rows, its rows are `production_ready` in
+`search_listings_ar`, its day-zero alerts (`liveness_sla`, `oracle_chain_never_observed`,
+`legacy_scraper_freshness`) clear, and one real-user search finds its card. 35 platforms joined on
+2026-09-24; they are on this list until 2026-10-01.
+
+### 5.4 The report, exactly this shape (owner has ADHD — first line is the whole answer)
+
+Line 1 is one of two sentences, nothing else:
+- **"Everything is perfectly good."** — every active platform crawled with rows, or
+- **"Everything is good except N sites that are down on their side: <names>."**
+
+Then at most five bullets, one idea each, plain words, no jargon, no table of numbers: what you
+revived today (site → what was wrong → fixed → verified live), what is down on their side (hidden,
+logo kept), what you could not fix and WHY in one clause. No P0/P1 codes, no run ids, no
+percentages in prose. The mandatory §G.8 / §G.10 blocks and the `Rating Before → After` line go
+AFTER these five bullets, never before them. If line 1 would be a lie — an unacknowledged P0 older
+than 24 h, a platform failing for the third day with no fix — line 1 is
+**"Not good: <site> has been failing N days and I have not fixed it yet."**
 
 ## UNRECOVERED — owner must supply
 
@@ -326,38 +336,29 @@ pastes these in, this file is a partial spec and the live prompt is still the on
    (`ENGINEER_ROUTINES.md:433`, `AGENT_AUTHORITY.md:308`) but not the issue title format, the required
    body fields, the label, or what #2 is entitled to assume it will find there. *Why it matters: this
    is the load-bearing #1 → #2 handoff, and it is the one handoff with no schema.*
-5. **The "narrower default blast radius" line.** `AGENT_AUTHORITY.md:306` says the Junior routine has
-   one, and gives one example each way (a one-file scraper bug: fix it; a multi-layer investigation:
-   escalate). Where the boundary actually falls is a judgement the prompt presumably states. *Why it
-   matters: it is the only scope rule in this routine that is deliberately fuzzy, so it is the one a
-   run will get wrong.*
-6. **Which platforms are "every active platform", and where that list lives.** Run 37 says *"34/36
-   platforms clean"* and *"36/36 tracked platforms"*; `daily-metrics.jsonl` snapshots 29. Whether the
-   routine reads `platform_registry`, a hardcoded prompt list, or something else is unknown. *Why it
-   matters: 2026-09-05's own senior finding was a platform serving 523 listings that no detector was
-   looking at — a stale hardcoded roster is exactly that defect's shape.*
-7. **The `daily-metrics.jsonl` duty: still wanted, or retired?** See §4. *Why it matters: either the
-   routine has been silently failing a documented duty for three weeks, or the doc is stale. Both are
-   fixable in one line, but only the owner knows which.*
-8. **Scheduling divergence between two canonical files.** `ENGINEER_ROUTINES.md:12` says 04:00
-   Arizona / 11:00 UTC. `AGENT_AUTHORITY.md:283` still says **05:00 UTC**, and its neighbouring rule
-   *"keep the two routines on different hours"* (`:295`) is stated against 05:00/06:00, not 11:00/11:30
-   — which is a 30-minute gap, not an hour. Confirm which is current and correct the other. *Why it
-   matters: two source-of-truth files disagreeing about when a routine runs is precisely the drift
-   both files exist to prevent.*
-9. **Whether `claude-sonnet-5` is still the intended model.** The roster says it is, and it is the only
+5. **The "narrower default blast radius" line — CLOSED for scraper-revival, still open beyond it.**
+   `AGENT_AUTHORITY.md:306` gives one example each way (a one-file scraper bug: fix it; a multi-layer
+   investigation: escalate). §5.1 (owner, 2026-09-24) now makes that boundary concrete for the single
+   biggest category of this routine's work: any scraper bug that yields to one of §5.1's four
+   numbered steps is fixed in-run, full stop, never escalated as a judgment call. What remains open is
+   the boundary for non-revival work this routine might encounter (e.g. an ingestion-pipeline change
+   that isn't a scraper fix) — narrower now, but not zero.
+6. **Whether `claude-sonnet-5` is still the intended model.** The roster says it is, and it is the only
    routine of eleven not on `claude-opus-5`. The repo records no reason. *Why it matters: §G.11 says
    tokens are not the constraint; a cheaper model on the only routine that reads every platform every
    day may now contradict that, or may be a deliberate cost decision worth writing down.*
-10. **The routine's own report format, if the prompt fixes one.** `ops_daily_engineer_run.report`
-    shows a stable shape (Production Health / Scrapers Healthy / Platforms Healthy / Issues Found /
-    Issues Fixed), which looks prompt-driven, but the repo never states it. *Why it matters:
-    §G.8/§G.10 append to a routine's own domain block, and nothing can append to a block nobody wrote
-    down.*
-11. **Anything in the prompt that is STRICTER than this file.** By construction this reconstruction
-    can only under-state. If the prompt forbids something this file permits, that prohibition is
-    invisible here and will be lost the first time someone treats this file as complete. *Why it
-    matters: it is the failure mode of the whole exercise, and only the owner can rule it out.*
+7. **Anything in the prompt that is STRICTER than this file.** By construction this reconstruction
+   can only under-state. If the prompt forbids something this file permits, that prohibition is
+   invisible here and will be lost the first time someone treats this file as complete. *Why it
+   matters: it is the failure mode of the whole exercise, and only the owner can rule it out.*
+
+**Closed 2026-09-26** (removed from the numbered list above, evidence left in place elsewhere in this
+file): *which platforms count as "every active platform"* → `platform_registry.status = 'active'`
+(§0); *the `daily-metrics.jsonl` duty* → retired, §5.4's report replaces it (§4); *the schedule
+divergence between this file and `AGENT_AUTHORITY.md`* → `AGENT_AUTHORITY.md` corrected to 04:00
+America/Phoenix / 11:00 UTC, matching this file's own Identity table and its stated tie-break rule
+("Arizona is the anchor and wins if the two columns disagree"); *the routine's own report format* →
+§5.4 now states it exactly.
 
 **How to close this section.** Paste the prompt (or the missing parts) into this file, delete the
 lines it answers, and remove the "READ THIS BEFORE APPLYING THE LINE ABOVE" caveat at the top when
