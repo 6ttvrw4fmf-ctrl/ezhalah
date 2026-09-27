@@ -91,6 +91,31 @@ const WAIVED: Record<string, string> = {
   // re-running this repair's UPDATE would now BLANK the real prices the fixed sweep has since
   // written, destroying good data. The standing class detector is the guarantee here, not a
   // re-assertion. Open 20260919092122 to check this reason rather than taking it on trust.
+  // The same two-migrations-minutes-apart shape. The repair realigns the aqarmonthly CARD district
+  // (`neighborhood`, which ResultCard renders verbatim whenever it is Arabic) onto the row's own
+  // already-indexed `district_ar`, after a second, weaker slug parse in map_listing() had glued the
+  // city and «منطقة» onto 1,352 of 1,801 active rows. The repair had to run before its watcher could
+  // exist, so the repair file itself never reaches a mon_detect_* in executed SQL.
+  //
+  // What watches the class: mon_detect_aqarmonthly_card_district_drift(), created in 20260927203335
+  // and rostered into mon_run_all_detectors() in that same migration (the splice RAISES rather than
+  // no-ops if its anchor moved). It is an INVARIANT detector, not a one-instance one: it raises P2
+  // on any active aqarmonthly row whose card district differs from its indexed district, which is
+  // exactly what a re-introduced second parse produces on the very next scrape. It is BLIND-guarded
+  // on aqarmonthly's own run history, because the drift it watches is written by a scrape and a 0
+  // during a stalled crawl would otherwise read as health.
+  //
+  // This is the guarantee migration 20260721104637 lacked — the 1,015-row aqarmonthly district
+  // repair whose silent re-corruption is the incident at the top of this file. Same table, same
+  // class, one column over.
+  '20260927201934_aqarmonthly_card_district_realigned_to_the_parsed_district.sql':
+    'watched by its companion 20260927203335_aqarmonthly_card_district_drift_detector.sql, which '
+    + 'creates mon_detect_aqarmonthly_card_district_drift() and rosters it into '
+    + 'mon_run_all_detectors(); an INVARIANT detector that raises P2 on any active aqarmonthly row '
+    + 'whose card district (neighborhood) differs from its indexed district (district_ar) — the '
+    + 'shape a re-introduced second parse produces on the next scrape — and is BLIND-guarded on '
+    + 'aqarmonthly run history. Re-asserting the repair is unnecessary: the writer now derives both '
+    + 'columns from one value, and the detector fires if that ever stops being true',
   '20260919091545_ksaaqar_every_price_was_the_sidebars_not_the_ads.sql':
     'watched by its companion 20260919092122_detect_price_borrowed_from_page_chrome_fleet_wide.sql, '
     + 'which creates mon_detect_price_borrowed_from_chrome(), rosters it into mon_run_all_detectors() '
