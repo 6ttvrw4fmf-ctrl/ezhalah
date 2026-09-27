@@ -4,7 +4,7 @@ SOURCE SHAPE (measured live 2026-09-27)
 =======================================
 The public site is a Nuxt app over an anonymous JSON API (same origin, app.holoul.io):
   list  https://app.holoul.io/customer/api/v1/units/?page=N&per_page=100   {pages, total, result[]}
-  page  https://app.holoul.io/ar/units/<uuid>
+  page  https://app.holoul.io/units/<uuid>   (NOT /ar/units/ — that path is a 404 shell)
 `Accept-Language: ar` returns Arabic names (city الرياض, district الرمال, type دور/شقة).
 
 TRAP 1 — every query parameter (?status=, ?project_number=, …) is SILENTLY IGNORED: the feed always
@@ -38,7 +38,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
 API = "https://app.holoul.io/customer/api/v1/units/"
-SITE = "https://app.holoul.io/ar/units/"
+SITE = "https://app.holoul.io/units/"   # /ar/units/<id> answers 404 (found in the 2026-09-27 real-user click-through)
 SOURCE = "حلول"
 PREFIX = "HLL"
 SLUG = "holoul"

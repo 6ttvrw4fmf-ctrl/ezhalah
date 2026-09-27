@@ -22,6 +22,7 @@ def _u(**kw):
 def test_halalas_become_riyals_exactly_as_the_page_prints():
     (row, _), why = R.map_unit(_u())
     assert why == "" and row["price_total"] == 785000 and row["price_per_meter"] == 4875 and row["area_m2"] == 161.0
+    assert row["listing_url"] == "https://app.holoul.io/units/u1"      # /ar/units/ is a 404 on the live site
 
 
 def test_an_unlisted_project_or_unit_is_not_a_listing():

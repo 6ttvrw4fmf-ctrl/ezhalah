@@ -93,10 +93,13 @@ def chips(x: dict) -> list[str]:
 
 
 def _chip_num(cs: list[str], label: str) -> Optional[float]:
+    # the FIRST number only: the unit «م٢» carries a digit of its own, and to_int() would glue it on
+    # («708 م٢» → 7082 — every OpenSooq area was ×10+2 until the 2026-09-27 real-user click-through)
     for c in cs:
         if c.startswith(label):
-            v = normalize.to_int(c[len(label):].translate(normalize._TRANS))
-            return float(v) if v else None
+            m = re.search(r"\d[\d,]*(?:\.\d+)?", c[len(label):].translate(normalize._TRANS))
+            f = float(m.group(0).replace(",", "")) if m else 0
+            return f if f > 0 else None
     return None
 
 

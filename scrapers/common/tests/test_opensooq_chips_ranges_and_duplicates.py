@@ -25,6 +25,13 @@ def test_the_listings_own_monthly_chip_is_kept_even_for_a_large_price():
     assert (row["rent_period"], row["price_annual"], row["bedrooms"]) == ("monthly", 792000, 2)
 
 
+def test_the_area_units_own_digit_is_not_part_of_the_area():
+    # «م٢» ends in an Arabic-Indic 2 — «708 م٢» once became 7082
+    assert R._chip_num(["مساحة الأرض: 708 م٢"], "مساحة الأرض:") == 708
+    assert R._chip_num(["المساحة: 1,250.5 م٢"], "المساحة:") == 1250.5
+    assert R.map_listing(_x(["المساحة: 20 م٢"]))[0][0]["area_m2"] == 20
+
+
 def test_an_age_range_is_not_an_exact_age():
     sale = dict(cat1_code="RealEstateForSale", cat2_code="ApartmentsForSale", price_amount="650,000 ريال")
     assert R.map_listing(_x(["عمر البناء: 0 - 11 شهر"], **sale))[0][0]["property_age"] == 0
