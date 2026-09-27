@@ -50,7 +50,13 @@ check(
   'routeForKind is total — every hostile input returns one of the eleven routines',
   HOSTILE.every((k) => {
     const r = routineForKind(k);
-    return Number.isInteger(r) && r >= 1 && r <= 7 && ROUTINES[r] !== undefined;
+    // Bound is the ROSTER's own size, never a literal. This read `r <= 7` from 2026-08-28 until
+    // 2026-09-27: the roster grew to eleven on 2026-09-04 and the bound did not, so this check
+    // REJECTED routines 8-11 while the label above and the check below both say eleven. It passed
+    // only because every HOSTILE input happens to land on the fallback — proven 2026-09-27 by
+    // routing one of them to #11 and watching this line go red for a legitimate owner. Deriving the
+    // bound from ROUTINES means the next roster change cannot leave it stale again.
+    return Number.isInteger(r) && ROUTINES[r] !== undefined;
   }),
 );
 check(
