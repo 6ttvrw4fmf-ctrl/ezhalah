@@ -52,8 +52,8 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
 
-def session() -> cc.Session:
-    s = cc.Session(impersonate="chrome124")
+def session(profile: str = "chrome124") -> cc.Session:
+    s = cc.Session(impersonate=profile)   # impersonate OWNS the User-Agent — never set one here
     s.headers.update({"Accept": "text/html,application/xhtml+xml",
                       "Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
     return s
@@ -404,36 +404,55 @@ def map_listing(url: str, page_html: str, *, source: str, prefix: str) -> tuple[
     return row, category, ""
 
 
-def fetch_catalogue(s: cc.Session, base: str, limit: int = 0) -> list[str]:
+# Browser profiles tried for the sitemap, one per attempt, each on a FRESH session. The first is the
+# run's own session; the rest are what scrapers/common/http.py's IMPERSONATE_ORDER measured hosts
+# answer when they refuse a specific Chrome handshake.
+CATALOGUE_PROFILES = ("chrome124", "safari17_0", "firefox133")
+
+
+def fetch_catalogue(s: cc.Session, base: str, limit: int = 0, *,
+                    make_session=session) -> tuple[list[str], cc.Session, list[str]]:
     """Discover every listing URL from the tenant's own sitemap.
 
     RETRIED, because an empty catalogue is fatal: `run_platform` raises on it (correctly — a
     silent zero would look like "the site has no listings" and is exactly how a blocked crawl
     would present). gudai failed twice on 2026-09-20 with «sitemap returned no /property/ urls»
     while safera and alhumaidan — the same code, the same host — succeeded in the same minute, so
-    the fetch is intermittently flaky rather than the site being down. One attempt turned that
-    flake into a failed run and a day of stale data.
+    the fetch is intermittently flaky rather than the site being down.
 
-    Three passes with growing backoff over BOTH sitemap spellings. Only a genuinely empty result
-    after all of them raises, so the fail-loud guard keeps its meaning."""
-    for attempt in range(3):
+    Each attempt used to REUSE the one chrome124 session, so three retries inside ~10 s replayed
+    the same handshake on the same connection: alhumaidan failed exactly that way on 2026-09-27
+    04:25 (Actions job 108549602049) and crawled cleanly on a re-run at 21:52. A block or a wedged
+    connection is usually the handshake, not the site (docs/ops/SCRAPING_ENGINEER.md step 5a), so
+    every retry now opens a FRESH session with the NEXT browser profile, and the listing pages then
+    ride whichever session actually served the sitemap.
+
+    Returns (urls, the session that served them, a per-attempt trace). The trace names what every
+    profile got, so a genuinely empty result says WHY in the run ledger instead of just "empty"."""
+    trace: list[str] = []
+    for attempt, prof in enumerate(CATALOGUE_PROFILES):
+        sess = s if attempt == 0 else make_session(prof)
         seen: set[str] = set()
         for sm in (f"{base}/property-sitemap.xml", f"{base}/wp-sitemap-posts-property-1.xml"):
             try:
-                r = s.get(sm, timeout=40)
-            except Exception:
+                r = sess.get(sm, timeout=40)
+            except Exception as e:  # noqa: BLE001 — any transport error → next sitemap / profile
+                trace.append(f"{prof}:{sm.rsplit('/', 1)[-1]}:{type(e).__name__}")
                 continue
             if r.status_code == 200 and "<loc" in r.text:
                 seen |= {u for u in re.findall(r"<loc>([^<]+)</loc>", r.text) if "/property/" in u}
+            trace.append(f"{prof}:{sm.rsplit('/', 1)[-1]}:HTTP {r.status_code}"
+                         + ("" if seen else " no /property/ loc"))
             if seen:
                 break
         if seen:
             out = sorted(seen)
-            return out[:limit] if limit else out
-        if attempt < 2:
-            print(f"  sitemap empty (attempt {attempt + 1}/3) — retrying", flush=True)
+            return (out[:limit] if limit else out), sess, trace
+        if attempt < len(CATALOGUE_PROFILES) - 1:
+            print(f"  sitemap empty with {prof} (attempt {attempt + 1}/{len(CATALOGUE_PROFILES)}) — "
+                  f"retrying on a fresh session", flush=True)
             time.sleep(3 * (attempt + 1))
-    return []
+    return [], s, trace
 
 
 def skip_note(skipped: dict[str, int]) -> Optional[str]:
@@ -462,9 +481,9 @@ def run_platform(*, slug: str, base: str, source: str, prefix: str) -> int:
     res: list[dict] = []
     com: list[dict] = []
     try:
-        urls = fetch_catalogue(s, base, limit=args.limit)
+        urls, s, trace = fetch_catalogue(s, base, limit=args.limit)
         if not urls:
-            raise RuntimeError("sitemap returned no /property/ urls")
+            raise RuntimeError(("sitemap returned no /property/ urls | " + "; ".join(trace))[:300])
         print(f"{source}: {len(urls)} listings discovered", flush=True)
         skipped: dict[str, int] = {}
         for u in urls:

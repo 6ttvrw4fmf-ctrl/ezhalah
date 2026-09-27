@@ -163,11 +163,75 @@ CLASS_LIST_RE = re.compile(r'class="([^"]*\brtcl-listing-item\b[^"]*)"')
 
 _local = threading.local()
 
+# ── Handshake negotiation (docs/ops/SCRAPING_ENGINEER.md step 5a) ─────────────────────────────────
+# awal failed every crawl from 2026-09-24 to 2026-09-27 with «stop=http_status page=1 | HTTP 500»
+# and was set dormant, but the crawl had only ever asked with ONE fingerprint (chrome124), directly,
+# once. The rulebook's bar for calling a site "down on their side" is 2+ browser profiles AND the
+# residential proxy; this crawl could never have met it, so "down" was an assumption. The list
+# endpoint is now probed with each profile on a fresh session, then through the proxy when the
+# workflow provides one, and the route that answers is used for the whole run (list AND detail
+# pages). When none answers, every attempt — with the start of the body the source sent — lands in
+# scrape_runs.notes, so "their server is erroring" and "they refused our handshake" read differently.
+PROBE_PROFILES = ("chrome124", "safari17_0", "firefox133")
+_ROUTE: dict = {"profile": "chrome124", "proxies": None}
+
+
+def _proxies() -> Optional[dict]:
+    url = (os.environ.get("AWAL_PROXY_URL") or os.environ.get("WASALT_PROXY_URL") or "").strip()
+    return {"http": url, "https": url} if url else None
+
+
+def _make_session(profile: str, proxies: Optional[dict] = None) -> cc.Session:
+    s = cc.Session(impersonate=profile, proxies=proxies)   # impersonate OWNS the User-Agent
+    s.headers.update({
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
+    })
+    return s
+
+
+def negotiate_list_session(diag: dict, *, make=_make_session, proxies: Optional[dict] = None,
+                           pause: float = 2.0) -> Optional[cc.Session]:
+    """Return a session whose route the list endpoint answers with a JSON list, else None.
+
+    Tries PROBE_PROFILES directly, then the same profiles through `proxies` (if any). Each attempt is
+    recorded in diag["probes"] as "<profile>[+proxy]:<outcome>"; a non-200 outcome carries the first
+    40 visible characters of the body so the ledger shows what the source actually said."""
+    probes: list[str] = diag.setdefault("probes", [])
+    routes = [(prof, None) for prof in PROBE_PROFILES]
+    if proxies:
+        routes += [(prof, proxies) for prof in PROBE_PROFILES]
+    for i, (prof, px) in enumerate(routes):
+        tag = prof + ("+proxy" if px else "")
+        if i and pause:
+            time.sleep(pause)
+        sess = make(prof, px)
+        try:
+            r = sess.get(f"{LIST_API}?per_page=1&page=1", timeout=60,
+                         headers={"Accept": "application/json"})
+        except Exception as e:                          # noqa: BLE001 — recorded, next route
+            probes.append(f"{tag}:{type(e).__name__}")
+            continue
+        if r.status_code == 200:
+            try:
+                ok = isinstance(r.json(), list)
+            except Exception:                           # noqa: BLE001 — not JSON: parked/shell
+                ok = False
+            if ok:
+                probes.append(f"{tag}:200")
+                _ROUTE.update(profile=prof, proxies=px)
+                return sess
+            probes.append(f"{tag}:200 not a JSON list")
+            continue
+        head = _clean(getattr(r, "text", "") or "")[:40]
+        probes.append(f"{tag}:HTTP {r.status_code}" + (f" «{head}»" if head else ""))
+    return None
+
 
 def _session() -> cc.Session:
     s = getattr(_local, "s", None)
     if s is None:
-        s = cc.Session(impersonate="chrome124")
+        s = cc.Session(impersonate=_ROUTE["profile"], proxies=_ROUTE["proxies"])
         s.headers.update({
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
@@ -300,6 +364,8 @@ def why_no_listings(diag: dict) -> str:
     """
     stop = diag.get("stop", "ok")
     detail = diag.get("detail", "")
+    if diag.get("probes"):
+        detail = (detail + " | " if detail else "") + "probes: " + "; ".join(diag["probes"])
     verdict = ("SOURCE-TRUTH: the site answered and published nothing"
                if stop == "empty_first_page" else
                "UNKNOWN: we could not read the source — this is NOT evidence it is empty")
@@ -560,7 +626,6 @@ def main() -> int:
                     help="small validation run: upsert only the first N parsed listings, NO prune")
     args = ap.parse_args()
 
-    s = session()
     # begin_run BEFORE the REST fetch (2026-07-28 audit, same defect jazwtn fixed on 07-27): when
     # awaalun.com was parked on 07-27 the unguarded r.json() crashed the process before begin_run
     # ever ran, so TWO days of failures produced ZERO scrape_runs rows — run-based monitoring saw a
@@ -575,7 +640,11 @@ def main() -> int:
     seen = 0
     try:
         diag: dict = {}
-        posts = fetch_listings(s, diag)
+        s = negotiate_list_session(diag, proxies=_proxies())
+        print(f"Awal: list route probes — {'; '.join(diag.get('probes', []))}", flush=True)
+        if s is None:
+            diag.update(stop="no_route", detail="no profile or route answered the list endpoint")
+        posts = fetch_listings(s, diag) if s is not None else []
         # WP REST occasionally returns error strings/fragments inside the list (seen 2026-07-01:
         # a str where a post object was expected → AttributeError crash at the link comprehension).
         # Degrade to skipping the junk items; if NOTHING valid remains, the 0-post raise below
