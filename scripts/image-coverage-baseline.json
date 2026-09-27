@@ -244,6 +244,12 @@
       "active_rows": 204,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 203 of 204 rows carried photo_urls (the whole catalogue). Floor follows today-minus-about-three."
     },
+    "eightfloor": {
+      "floor_pct": 50,
+      "today_pct": 100.0,
+      "active_rows": 2,
+      "note": "Declared 2026-09-27 (wave-3 batch 5). MEASURED ON THE PRODUCTION ROWS after the first crawl: 2 of 2 active rows carry photo_urls (100.0%). TINY: one listing is ~50.0 points; floor set one listing below the observation."
+    },
     "eilmalriyada": {
       "floor_pct": 95,
       "today_pct": 100.0,
@@ -318,6 +324,12 @@
       "active_rows": 5,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 5 of 5 rows carried photo_urls (the whole catalogue). TINY: one listing is ~20 points; floor set one listing below the observation."
     },
+    "holoul": {
+      "floor_pct": 70,
+      "today_pct": 73.3,
+      "active_rows": 30,
+      "note": "Declared 2026-09-27 (wave-3 batch 5). MEASURED ON THE PRODUCTION ROWS after the first crawl: 22 of 30 active rows carry photo_urls (73.3%). The rest: 8 units publish neither a main picture nor gallery media. TINY: one listing is ~3.3 points; floor set one listing below the observation."
+    },
     "ialqarawi": {
       "floor_pct": 90,
       "today_pct": 100.0,
@@ -369,6 +381,12 @@
       "today_pct": 100.0,
       "active_rows": 76,
       "note": "Declared 2026-09-26 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl of all 77 records (network live, database stubbed): 76 of 76 rows carried photo_urls (the detail record's images). Re-check against the first snapshot."
+    },
+    "manzo": {
+      "floor_pct": 0,
+      "today_pct": 100.0,
+      "active_rows": 1,
+      "note": "Declared 2026-09-27 (wave-3 batch 5). MEASURED ON THE PRODUCTION ROWS after the first crawl: 1 of 1 active rows carry photo_urls (100.0%). TINY: one listing is ~100.0 points; floor set one listing below the observation."
     },
     "maqrat": {
       "floor_pct": 80,
