@@ -190,6 +190,9 @@ export function sourceName(source: string): string {
   if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return 'المسوق الافتراضي';
   if (s.includes('مكسب العقارية') || s.includes('macsaib')) return 'مكسب العقارية';
   if (s.includes('maqrat')) return 'MAQRAT';                           // the site names itself «منصة MAQRAT», Latin only
+  if (s.includes('مانزو') || s.includes('manzo')) return 'مانزو';
+  if (s.includes('الطابق الثامن') || s.includes('8floor') || s.includes('eightfloor')) return 'الطابق الثامن';
+  if (s.includes('حلول') || s.includes('holoul')) return 'حلول';
   if (s.includes('السوق المفتوح') || s.includes('opensooq')) return 'السوق المفتوح';
   if (s.includes('معرض نافذة') || s.includes('nafithh')) return 'معرض نافذة';
   if (s.includes('مباشر') || s.includes('mobasher')) return 'مباشر';

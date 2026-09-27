@@ -155,6 +155,12 @@ export const PLATFORMS: Platform[] = [
   { name: 'مكسب العقارية', domain: 'macsaib.sa', brand: 'Macsaib', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // maqrat: 83 REGA-licensed ads measured 2026-09-26 (58 sale + 24 rent + 1 «مجمع» left unmapped).
   { name: 'MAQRAT', domain: 'maqrat.com', brand: 'MAQRAT', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // manzo: 1 listing measured 2026-09-27 (Dhahran apartment, 48,000/yr). Owner: include.
+  { name: 'مانزو', domain: 'manzo.com.sa', brand: 'Manzo', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  // eightfloor: 2 Riyadh rentals measured 2026-09-27 (its 9 projects are off-plan — owner: excluded). Bare 8floor.sa has no DNS; www works.
+  { name: 'الطابق الثامن', domain: 'www.8floor.sa', brand: '8Floor', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  // holoul: 30 developer units for sale measured 2026-09-27 (of 238 feed rows: project+unit listed, REGA licence, ad type Sale).
+  { name: 'حلول', domain: 'holoul.io', brand: 'Holoul', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
   // opensooq: 78 real-estate items measured 2026-09-26 (72 kept: 2 under construction, 1 deal conflict, 1 multi-use plot, 2 duplicate posts skipped).
   { name: 'السوق المفتوح', domain: 'sa.opensooq.com', brand: 'OpenSooq', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // nafithh: 30 measured 2026-09-26 (22 sale + 8 rent; 2 «مجمع» unmapped). Server-rendered REGA blocks.

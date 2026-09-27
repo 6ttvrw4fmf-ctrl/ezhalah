@@ -1607,6 +1607,30 @@ def upsert_opensooq_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("opensooq_commercial_listings", rows)
 
 
+def upsert_holoul_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("holoul_residential_listings", rows)
+
+
+def upsert_holoul_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("holoul_commercial_listings", rows)
+
+
+def upsert_eightfloor_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("eightfloor_residential_listings", rows)
+
+
+def upsert_eightfloor_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("eightfloor_commercial_listings", rows)
+
+
+def upsert_manzo_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("manzo_residential_listings", rows)
+
+
+def upsert_manzo_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("manzo_commercial_listings", rows)
+
+
 def upsert_vmksa_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("vmksa_residential_listings", rows)
 
