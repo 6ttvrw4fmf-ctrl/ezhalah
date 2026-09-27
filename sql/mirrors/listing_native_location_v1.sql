@@ -10,8 +10,9 @@
 --   The arms were spliced into the previous body in the rendering the wiring migrations use, and the
 --   result was PROVEN equal to production: md5 of the spliced body (trailing newline stripped, which
 --   is how pg_get_viewdef returns it) == md5(pg_get_viewdef('public.listing_native_location_v1',true)).
---   • md5 of everything below this header block: c9fb60d0df760c109e4f524cb5902654
---   • 111,322 -> 127,992 chars.
+--   • md5 of everything below this header block: 6933a8725df7ea9007e04af125a58982
+--   • 111,322 -> 127,992 chars; then batch5 (holoul eightfloor manzo, 20260927021406) -> 131,577,
+--     registry caught up by sql_mirror_expected_catches_up_to_batch5_arms.
 --   • registry caught up in the same pass: sql_mirror_expected_catches_up_through_wave3b_arms.
 --
 -- CAUGHT BY verify-sql-mirrors-not-stale only because the w3b wiring landed on a NEW calendar day:
@@ -497,6 +498,78 @@
             nufouth_commercial_listings.transaction_type
            FROM nufouth_commercial_listings
           WHERE nufouth_commercial_listings.active
+        UNION ALL
+         SELECT 'holoul'::text AS platform,
+            'holoul_residential_listings'::text AS source_table,
+            holoul_residential_listings.id AS listing_id,
+            holoul_residential_listings.city_ar,
+            holoul_residential_listings.city_id,
+            holoul_residential_listings.district_ar,
+            holoul_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            holoul_residential_listings.transaction_type
+           FROM holoul_residential_listings
+          WHERE holoul_residential_listings.active
+        UNION ALL
+         SELECT 'holoul'::text AS platform,
+            'holoul_commercial_listings'::text AS source_table,
+            holoul_commercial_listings.id AS listing_id,
+            holoul_commercial_listings.city_ar,
+            holoul_commercial_listings.city_id,
+            holoul_commercial_listings.district_ar,
+            holoul_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            holoul_commercial_listings.transaction_type
+           FROM holoul_commercial_listings
+          WHERE holoul_commercial_listings.active
+        UNION ALL
+         SELECT 'eightfloor'::text AS platform,
+            'eightfloor_residential_listings'::text AS source_table,
+            eightfloor_residential_listings.id AS listing_id,
+            eightfloor_residential_listings.city_ar,
+            eightfloor_residential_listings.city_id,
+            eightfloor_residential_listings.district_ar,
+            eightfloor_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            eightfloor_residential_listings.transaction_type
+           FROM eightfloor_residential_listings
+          WHERE eightfloor_residential_listings.active
+        UNION ALL
+         SELECT 'eightfloor'::text AS platform,
+            'eightfloor_commercial_listings'::text AS source_table,
+            eightfloor_commercial_listings.id AS listing_id,
+            eightfloor_commercial_listings.city_ar,
+            eightfloor_commercial_listings.city_id,
+            eightfloor_commercial_listings.district_ar,
+            eightfloor_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            eightfloor_commercial_listings.transaction_type
+           FROM eightfloor_commercial_listings
+          WHERE eightfloor_commercial_listings.active
+        UNION ALL
+         SELECT 'manzo'::text AS platform,
+            'manzo_residential_listings'::text AS source_table,
+            manzo_residential_listings.id AS listing_id,
+            manzo_residential_listings.city_ar,
+            manzo_residential_listings.city_id,
+            manzo_residential_listings.district_ar,
+            manzo_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            manzo_residential_listings.transaction_type
+           FROM manzo_residential_listings
+          WHERE manzo_residential_listings.active
+        UNION ALL
+         SELECT 'manzo'::text AS platform,
+            'manzo_commercial_listings'::text AS source_table,
+            manzo_commercial_listings.id AS listing_id,
+            manzo_commercial_listings.city_ar,
+            manzo_commercial_listings.city_id,
+            manzo_commercial_listings.district_ar,
+            manzo_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            manzo_commercial_listings.transaction_type
+           FROM manzo_commercial_listings
+          WHERE manzo_commercial_listings.active
         UNION ALL
          SELECT 'maqam'::text AS platform,
             'maqam_residential_listings'::text AS source_table,
