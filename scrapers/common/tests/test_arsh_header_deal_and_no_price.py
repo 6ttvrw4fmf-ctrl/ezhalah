@@ -61,4 +61,7 @@ def test_a_page_logo_is_never_the_listings_photo():
             'مخطط مميز في الخبر</body></html>')
     (row, _), _ = R.map_page(R.parse_page("x", page))
     assert row["photo_urls"] == []   # [] (writes {}), never None (the upsert would keep a stale value)
+    real = page.replace("malfa+allulu+logo-s.jpg", "plot-photo.jpg")
+    (row, _), _ = R.map_page(R.parse_page("x", real))
+    assert row["photo_urls"] == ["https://x/plot-photo.jpg"]   # a real share image still flows
 
