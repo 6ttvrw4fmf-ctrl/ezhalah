@@ -157,6 +157,8 @@ export const PLATFORMS: Platform[] = [
   { name: 'MAQRAT', domain: 'maqrat.com', brand: 'MAQRAT', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // arsh: 21 land listings measured 2026-09-27 (no prices — «السعر عند الطلب»; owner: include, treat as for sale).
   { name: 'عرش العقارية', domain: 'arshglobal.com.sa', brand: 'Arsh', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // superoffice: 12 available private offices in Riyadh (of 177 offices; 165 booked, 7 meeting rooms skipped) measured 2026-09-27.
+  { name: 'سوبر أوفيس', domain: 'superoffice.sa', brand: 'SuperOffice', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
   // sirdab: 549 warehouses/shops/workshops/factories measured 2026-09-27 (15 storage units skipped).
   { name: 'سرداب', domain: 'marketplace.sirdab.co', brand: 'Sirdab', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // ashab: 575 listings measured 2026-09-27 (239 single ads + 336 available units of 56 buildings; Buraidah/Qassim).

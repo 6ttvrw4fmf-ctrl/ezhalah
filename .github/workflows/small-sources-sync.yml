@@ -256,6 +256,8 @@ jobs:
           - { source: sqcc,        cmd: "python -m scrapers.sqcc.run --type all", tmo: 10 }
           - { source: daraa,       cmd: "python -m scrapers.daraa.run --type all", tmo: 10 }
           - { source: tawia,       cmd: "python -m scrapers.tawia.run --type all", tmo: 10 }
+          # SuperOffice (2026-09-27): owner-approved — available private offices only.
+          - { source: superoffice, cmd: "python -m scrapers.superoffice.run --type all", tmo: 10 }
           # wave 3, batch 5: holoul is an open JSON API (238 rows → 30); eightfloor is a Nuzul tenant (public API, 2 rows); manzo is an open JSON API (1 row).
           - { source: manzo,        cmd: "python -m scrapers.manzo.run --type all", tmo: 10 }
           - { source: eightfloor,   cmd: "python -m scrapers.eightfloor.run --type all", tmo: 10 }
