@@ -11,6 +11,14 @@
 // DATA that is already anon-selectable: does listing_extra_attrs carry ANY row for this exact
 // source_table? Both listing_extra_attrs and search_listings_ar already grant anon SELECT.
 //
+// READS THE SAVED COPY, listing_extra_attrs_mv (2026-09-27). Counting the live view once per table
+// made PostgREST plan its ~260-arm UNION (~22 MB each) about 260 times in two minutes, and the
+// scheduled runs of this workflow lined up with four production restarts (09-26 11:38, 21:23;
+// 09-27 05:35, 12:18). The copy holds the same rows, unique on (source_table, listing_id), and is
+// refreshed hourly by jobid 17 just before the search sync. So "has rows in the copy" is also what
+// listing_native_location_v2 (and therefore search) actually joins: a table with searchable rows
+// but none in the copy IS a gap in what users get.
+//
 // A table that is genuinely wired but momentarily holds zero rows would read as "absent" by
 // data-presence alone — measured live 2026-09-12 while building this file: 10 tables
 // (alta/fursaghyr/gathern/jazwtn/jurash/october/ramzalqasim/satel/shmoualshmal_commercial_listings and
@@ -91,7 +99,7 @@ const rows: ExtraAttrsTableRow[] = [];
 for (const table of SEARCHABLE_TABLES) {
   const [searchable_rows, extra] = await Promise.all([
     countRows('search_listings_ar', table, true),
-    countRows('listing_extra_attrs', table, false),
+    countRows('listing_extra_attrs_mv', table, false),
   ]);
   rows.push({ table, searchable_rows, in_extra_attrs: extra > 0 });
 }
