@@ -60,6 +60,10 @@ jobs:
           # 2026-02-14 (real but LOW-CHURN, so a run returning the same 128 is healthy), and the
           # source publishes NO price at all (0/128 in the REST payload AND the detail pages) —
           # nothing is inferred to fill it, exactly like the 7,534 priceless rows already live.
+          # awal: `proxy: true` (2026-09-27, Scraping Engineer). Every crawl since 09-24 died on one
+          # chrome124 request answering HTTP 500; scrapers/awal/run.py now probes 3 profiles direct and
+          # then the same 3 through the proxy (only if all direct ones fail), so the metered proxy is
+          # spent only when the source refuses a datacenter handshake.
           - { source: awal,        cmd: "python -m scrapers.awal.run --type all", proxy: true }
           - { source: alkhaas,     cmd: "python -m scrapers.alkhaas.run --type all" }
           - { source: abeea,       cmd: "python -m scrapers.abeea.run --type all" }
@@ -446,12 +450,12 @@ jobs:
           # pure waste; if they fail DIRECT with a refusal (403/connection reset rather than a
           # timeout), put `proxy: true` back on them and the old note was right.
           #
-          # sadin, awal, aqaralsaudia (2026-09-27, scraping engineer): all three were dormant on
-          # source-side 5xx (502 / 500 / Cloudflare 522) while pinned to ONE profile with no proxy,
-          # so "down after 2+ profiles AND the proxy" had never been measured. Their main() now
-          # opens with scrapers.common.http.retry_smarter_session(): 3 profiles direct, then the
-          # same 3 through this proxy, and ONLY that probe (plus the session it returns, if the
-          # proxy route is the one that answered) reads the variable. Down, it costs 3 tiny GETs.
+          # sadin, aqaralsaudia (2026-09-27, scraping engineer): both dormant on source-side 5xx
+          # (502 / Cloudflare 522) while pinned to ONE profile with no proxy, so "down after 2+
+          # profiles AND the proxy" had never been measured. Their main() now opens with
+          # scrapers.common.http.retry_smarter_session(): 3 profiles direct, then the same 3 through
+          # this proxy; only that probe (and the session it returns, if the proxy route answered)
+          # reads the variable. Down, it costs 3 tiny GETs. (awal got its own rotation in #5005.)
           #
           # Before adding a source here, check whether its session() reads WASALT_PROXY_URL.
           WASALT_PROXY_URL: ${{ matrix.proxy && secrets.WASALT_PROXY_URL || '' }}

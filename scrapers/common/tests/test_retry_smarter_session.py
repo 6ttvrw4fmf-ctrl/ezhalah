@@ -82,7 +82,7 @@ def test_transport_error_is_recorded_and_next_profile_tried(monkeypatch):
     assert tried == ["direct/chrome124:TimeoutError", "direct/safari17_0:200"]
 
 
-@pytest.mark.parametrize("mod", ["sadin", "awal", "aqaralsaudia"])
+@pytest.mark.parametrize("mod", ["sadin", "aqaralsaudia"])  # awal: its own rotation, #5005
 def test_scraper_main_opens_with_retry_smarter_session(mod):
     """The three sources that were dormant on one pinned profile must use the probe."""
     import importlib
