@@ -1702,6 +1702,10 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
  *  readAloud.ts's own root-cause note was written for. What this journey does NOT prove is anything
  *  about a physical iPhone's voice list or how long it takes to populate (PART 10). */
 const RA_BUTTON = 'استماع للرد';
+// The SAME control's label while speaking — FeedbackRow: label={speaking ? t('Stop reading') : …},
+// i18n «إيقاف الاستماع». It is how the journey asks the APP whether the tap started, instead of
+// inferring it from a pre-tap voice count that `voiceschanged` is free to invalidate (#856).
+const RA_STOP_BUTTON = 'إيقاف الاستماع';
 const RA_DEVICE_VERDICT = 'الاستماع غير متاح على هذا الجهاز';
 const RA_STILL_PREPARING = 'نُجهّز الصوت — أعد المحاولة بعد لحظة';
 const RA_WINDOW_MS = 45_000;   // mirrors RETRY_WINDOW_MS in src/lib/readAloud.ts
@@ -1745,13 +1749,56 @@ JOURNEYS['read-aloud-refusal-is-honest'] = async (mobile) => withPage({ mobile }
   if (voices.ar > 0) { skip(name, `this engine has ${voices.ar} Arabic voice(s), so the tap speaks — no refusal to judge`); return; }
 
   await btn.scrollIntoViewIfNeeded().catch(() => {});
+
+  // WATCH THE TAP, DO NOT JUST LOOK AFTER IT (ops_incident #856).
+  //
+  // A silent 🔊 has TWO possible causes and a single read at +700ms cannot tell them apart:
+  //   (a) the tap NEVER STARTED — speakReadAloud() refused on a branch that shows no sentence;
+  //   (b) the tap STARTED and DIED almost immediately — e.g. an utterance handed a stale cached
+  //       voice — which also leaves no message and, by +700ms, no speaking state either.
+  // Measured 2026-09-27 on production, Chromium: silent 3 times in 32 runs, on BOTH viewports, with
+  // post-tap speaking=false every time. That rules out "it spoke and kept speaking" and nothing more.
+  // So sample tightly THROUGH the tap: if the app was ever in the speaking state, it was (b).
+  // PART 10.2's rule for a surface that is hard to observe — make the failure visible rather than
+  // guess again.
+  const sawSpeaking = { ever: false, atMs: null };
+  const t1 = Date.now();
   await btn.click();
+  for (let i = 0; i < 24; i++) {          // 24 x 50ms = 1.2s, straddling the 700ms verdict below
+    const live = await page.evaluate((stopLabel) =>
+      !!(window.speechSynthesis?.speaking || window.speechSynthesis?.pending)
+      || document.querySelectorAll(`[aria-label="${stopLabel}"]`).length > 0,
+    RA_STOP_BUTTON).catch(() => false);
+    if (live) { sawSpeaking.ever = true; sawSpeaking.atMs = Date.now() - t1; break; }
+    await sleep(50);
+  }
   await sleep(700);
   const body = await bodyText(page);
   const saidDevice = body.includes(RA_DEVICE_VERDICT);
   const saidPreparing = body.includes(RA_STILL_PREPARING);
+
+  const after = await page.evaluate((stopLabel) => ({
+    stop: document.querySelectorAll(`[aria-label="${stopLabel}"]`).length,
+    speaking: !!(window.speechSynthesis?.speaking || window.speechSynthesis?.pending),
+    n: (window.speechSynthesis?.getVoices?.() || []).length,
+    ar: (window.speechSynthesis?.getVoices?.() || []).filter((v) => /^ar/i.test(v.lang)).length,
+  }), RA_STOP_BUTTON);
+  const started = after.stop > 0 || after.speaking || sawSpeaking.ever;
+
   const where = `🔊 appeared at t=${appearedAt}ms since load (window ${RA_WINDOW_MS}ms); `
-    + `engine reports ${voices.n} voice(s), ${voices.ar} Arabic`;
+    + `engine reported ${voices.n} voice(s), ${voices.ar} Arabic BEFORE the tap and `
+    + `${after.n}/${after.ar} after; speaking seen during the tap: `
+    + `${sawSpeaking.ever ? `YES at +${sawSpeaking.atMs}ms` : 'NO (24 samples over 1.2s)'}; `
+    + `at +700ms speaking=${after.speaking}, stop-control=${after.stop}`;
+
+  // A tap that SPOKE is not a refusal, so there is nothing for this journey to judge. Not a pass
+  // either — the refusal path was never exercised (PART 9.5: a run that asserted nothing is a skip).
+  if (started) {
+    skip(name, `the tap started speaking, so no refusal was produced to judge — ${where}. `
+      + `If it was seen speaking only briefly, that is cause (b) above: an utterance that began and `
+      + `died, which src/lib/readAloud.ts's refusal path never gets to explain.`);
+    return;
+  }
 
   if (appearedAt < RA_WINDOW_MS) {
     if (saidDevice && !saidPreparing) {
@@ -1763,7 +1810,9 @@ JOURNEYS['read-aloud-refusal-is-honest'] = async (mobile) => withPage({ mobile }
       pass(name, `a refusal inside the retry window says «${RA_STILL_PREPARING}» and not the device verdict — ${where}`);
     } else {
       defect(name, 'a refused 🔊 tap produced NO message at all — a silent dead control',
-        `${where}. Neither refusal sentence is on screen, so the tap did nothing a user can see.`);
+        `${where}. Neither refusal sentence is on screen AND the app was never seen in the speaking `
+        + `state (sampled every 50ms through the tap, not inferred), so the tap did nothing a user can `
+        + `see and it never started. ops_incident #856.`);
     }
   } else if (saidDevice || saidPreparing) {
     // Past the window the implication does not run backwards (import may be later than load), so
@@ -1773,7 +1822,8 @@ JOURNEYS['read-aloud-refusal-is-honest'] = async (mobile) => withPage({ mobile }
       + `is not decidable from elapsed-since-load in this direction, so only presence is asserted.`);
   } else {
     defect(name, 'a refused 🔊 tap produced NO message at all — a silent dead control',
-      `${where}. Neither refusal sentence is on screen, so the tap did nothing a user can see.`);
+      `${where}. Neither refusal sentence is on screen AND the app was never seen in the speaking `
+      + `state (sampled, not inferred), so the tap did nothing a user can see. ops_incident #856.`);
   }
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error while judging the read-aloud refusal', errs.join(' | ')); }
 });
