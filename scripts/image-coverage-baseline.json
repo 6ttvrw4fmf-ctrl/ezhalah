@@ -364,6 +364,12 @@
       "active_rows": 76,
       "note": "Declared 2026-09-26 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl of all 77 records (network live, database stubbed): 76 of 76 rows carried photo_urls (the detail record's images). Re-check against the first snapshot."
     },
+    "maqrat": {
+      "floor_pct": 80,
+      "today_pct": 81.7,
+      "active_rows": 82,
+      "note": "Declared 2026-09-26 at onboarding, before the first production sweep, from the REAL parse_detail + map_listing over a live crawl of all 83 details pages (network live, database stubbed): 67 of 82 rows carried photo_urls. The other 15 are not a parser gap — the source page shows only the site's default placeholder for them, which is not a photo of the listing and is not stored. TINY: one listing is ~1.2 points; floor set one listing below the observation. Re-check against the first snapshot."
+    },
     "marksa": {
       "floor_pct": 85,
       "today_pct": 100.0,

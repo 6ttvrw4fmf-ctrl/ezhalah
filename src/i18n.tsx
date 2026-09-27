@@ -1033,6 +1033,7 @@ const AR: Record<string, string> = {
   'Rawaf': 'رواف',                                    // the site's own Arabic name
   'Virtual Marketer': 'المسوق الافتراضي',            // the site's own Arabic name (vm-ksa.com)
   'Macsaib': 'مكسب العقارية',                         // the site's own Arabic name (macsaib.sa)
+  'MAQRAT': 'مقرات',                                  // transliteration — the site names itself «منصة MAQRAT», no Arabic name at the source
   'Al Saedan': 'آل سعيدان',                              // the site's own Arabic name
   'Ego Real Estate': 'إيجو عقار',                              // the site's own Arabic name
   'Ahmed Almuhaysini': 'أحمد المحيسني العقارية',                              // the site's own Arabic name

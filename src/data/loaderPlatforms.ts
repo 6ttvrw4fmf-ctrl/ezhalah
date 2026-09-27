@@ -189,6 +189,7 @@ export const PLATFORM_META: LoaderPlatform[] = [
   { name: 'رواف', i18nKey: 'Rawaf', logo: require('../../assets/images/platform-placeholder.png') },
   { name: 'المسوق الافتراضي', i18nKey: 'Virtual Marketer', logo: require('../../assets/images/platform-placeholder.png') },
   { name: 'مكسب العقارية', i18nKey: 'Macsaib', logo: require('../../assets/images/platform-placeholder.png') },
+  { name: 'MAQRAT', i18nKey: 'MAQRAT', logo: require('../../assets/images/platform-placeholder.png') },
   // LOGO-ONLY (owner decision 2026-09-24): brand shown in the strip, no scraper, no tables, never searchable.
   { name: 'Maskanre', i18nKey: 'Maskan United', logo: require('../../assets/images/platform-placeholder.png'), logoOnly: true },
   { name: 'Wetheaddress', i18nKey: 'The Address', logo: require('../../assets/images/platform-placeholder.png'), logoOnly: true },
@@ -389,6 +390,7 @@ const SOURCE_TOKENS: Array<[string, string]> = [
   ['المسوق الافتراضي', 'المسوق الافتراضي'],
   ['macsaib', 'مكسب العقارية'],
   ['مكسب العقارية', 'مكسب العقارية'],
+  ['maqrat', 'MAQRAT'],
   ['aqar', 'Aqar'],
 ];
 

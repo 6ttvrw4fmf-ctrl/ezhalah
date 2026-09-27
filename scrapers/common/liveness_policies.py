@@ -1038,6 +1038,15 @@ POLICIES: dict[str, _P] = {
         "generic shell (ad 551, 2026-09-26), so a re-fetch cannot tell 'gone' from 'blipped' without "
         "a parser-level oracle that is not written yet. The ads carry REGA licence expiry dates "
         "(«تاريخ انتهاء ترخيص الاعلان»), kept in license_expiry for a future oracle."),
+    "maqrat": _P(
+        _pol("maqrat", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over a complete, self-declaring index: the page script's own POST "
+        "paging (/Property/_Properities, start=1..N, length=12) walked until a page is empty, checked "
+        "against #TotalRecord (83 when measured), then every /Property/Details/<id> page re-read. "
+        "run.py suppresses prune_unseen unless the walk reached TotalRecord and every page was readable.",
+        "An oracle is possible — a removed id's details page stops carrying the pd-overview licence "
+        "block — but it is not written yet, so this does not claim a direct check. The ads carry REGA "
+        "licence expiry dates (license_expiry) for a future oracle."),
     "macsaib": _P(
         _pol("macsaib", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over Taearif's complete, self-declaring JSON feed: "
