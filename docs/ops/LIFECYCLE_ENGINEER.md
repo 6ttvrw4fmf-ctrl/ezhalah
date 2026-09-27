@@ -136,7 +136,13 @@ crawl workflows (⚡'s).
    strike. **Three strikes in a row, from three separate checks, hide it.** Any live answer in
    between resets the count to zero. (One reading is never proof: Gathern once answered 200 and
    404 for the same ad within minutes.)
-3. **Comes back within 30 days** (its page is live again) → shown again. A listing its website
+3. **Comes back within 30 days** (its page is live again) → shown again. **A real comeback is rare**
+   (owner, 2026-09-27): once a website removes or sells an ad, it almost never returns. So when a
+   hidden listing turns out to be live, assume first that it was never gone and that our checker
+   hid a live listing. **More than 5% of a website's hidden listings coming back in 7 days is a
+   false-hide bug**: investigate it and fix the checker. For comparison, over the 14 days before
+   2026-09-27 the cleanup's last check found 2,514 Aqar and 285 Gathern "dead" listings alive
+   (about 17% and 12%). Bringing a listing back is the safety net, not the normal path. A listing its website
    marked **sold** comes back only if its own page is live and no longer says sold. A listing
    hidden by a recorded human decision never comes back by itself.
 4. **Still gone after 30 days hidden** → one last check on its website. If it's dead, delete it and
@@ -214,7 +220,8 @@ must go up over time and never down.
    (LISTING_LIVENESS.md §9.2).
 3. **Numbers per website since yesterday:** hidden, brought back, deleted. Compare them with the
    7-day normal. A spike gets investigated before anything else. `mon_unverified_inactivations_24h`
-   must be 0.
+   must be 0. A website with a lot of listings brought back (over 5% of its hidden ones in 7 days)
+   is hiding live listings, so fix it.
 4. **Coverage, every website:**
    - what % of its live listings were checked in time, and how many were never checked? Use
      `ops_liveness_coverage_snapshot`, not the heavy view, for the whole fleet;
