@@ -285,8 +285,6 @@ def map_listing(g: dict, price: dict) -> dict | None:
     place = uri.rsplit("-", 1)[0].replace("-", " ")  # drop trailing -id, dashes → spaces
     city = N.map_city(place)
     region = N.region_for_city(city) if city else None
-    dm = re.search(r"حي\s+(\S+(?:\s+\S+){0,2})", place)
-    district = dm.group(1) if dm else None
 
     monthly = price.get("discounted_price") or price.get("total_price")
     try:
@@ -346,7 +344,16 @@ def map_listing(g: dict, price: dict) -> dict | None:
         # "Other" sentinel — the additive resolve_slug()-derived columns already cover most rows.
         "city":             city,
         "region":           region,
-        "neighborhood":     district,
+        # THE CARD'S OWN DISTRICT LINE. ResultCard shows the RAW scraped district whenever it is
+        # already Arabic (owner 2026-07-06, src/data/remote.ts: `l.district = /[ء-ي]/.test(rawDistrict)
+        # ? rawDistrict : …`), so this column — not the catalog-canonical index value — is what a user
+        # reads. It used to be its own naive slug parse, `re.search(r"حي\s+(\S+(?:\s+\S+){0,2})")`,
+        # which swallows up to 3 words after «حي» and therefore glued the city and the word «منطقة»
+        # onto the district: 1,352 of 1,801 active rows rendered as «الفرسان الدمام الدمام» or «الرمال
+        # الرياض منطقة» while district_ar (and the search index built from it) correctly said «حي
+        # الفرسان» / «حي الرمال». One parse, one answer: this is resolve_slug()'s district, which
+        # strips the trailing catalog city by name, plus the address fallback. Unresolved stays None.
+        "neighborhood":     district_ar_val,
         "title":            _redact((g.get("content") or "").split("\n")[0][:120]),
         "description":      _redact(g.get("content")),
         "photo_urls":       imgs,

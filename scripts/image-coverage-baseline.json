@@ -650,6 +650,12 @@
       "active_rows": 16,
       "note": "Declared 2026-09-26 (missed at onboarding in PR #4578). MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: 16 of 16 active rows carry photo_urls (100%). TINY: one listing is ~6 points; floor set one listing below the observation."
     },
+    "superoffice": {
+      "floor_pct": 75,
+      "today_pct": 83.3,
+      "active_rows": 12,
+      "note": "Declared 2026-09-27 at onboarding. MEASURED ON THE PRODUCTION ROWS after the first crawl: 10 of 12 active rows carry photo_urls (83.3%); the other 2 office pages have no gallery image. TINY: one listing is ~8.3 points; floor set one listing below the observation."
+    },
     "suwar": {
       "floor_pct": 90,
       "today_pct": 100.0,
