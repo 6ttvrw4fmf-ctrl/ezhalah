@@ -820,6 +820,7 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('مكسب العقارية') || s.includes('macsaib')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('maqrat')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('عرش العقارية') || s.includes('arshglobal')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('سرداب') || s.includes('sirdab')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('عشاب العقارية') || s.includes('ashab.sa')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('منافع العقارية') || s.includes('manafe')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
@@ -1006,6 +1007,7 @@ function sourceHost(source: string): string {
   if (s.includes('مكسب العقارية') || s.includes('macsaib')) return 'macsaib.sa';
   if (s.includes('maqrat')) return 'maqrat.com';
   if (s.includes('عرش العقارية') || s.includes('arshglobal')) return 'arshglobal.com.sa';
+  if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return 'superoffice.sa';
   if (s.includes('سرداب') || s.includes('sirdab')) return 'marketplace.sirdab.co';
   if (s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'ashab.sa';
   if (s.includes('منافع العقارية') || s.includes('manafe')) return 'manafe.com.sa';

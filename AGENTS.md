@@ -131,6 +131,11 @@ outside the roster is decoration. Adjudicate every finding against source before
    cases, and prove both directions. (Run #15 assumed absence meant silence on 13 aqaratikom rows;
    the source published «سنوي» on all 13.)
 
+**⛔ The eleven routines below were DELETED by the owner on 2026-09-27 — do NOT recreate them.** A
+new, smaller team is being built one engineer at a time; see the notice at the top of
+`docs/ops/ENGINEER_ROUTINES.md`. First engineer: ⚡ Scraping Engineer, rulebook
+`docs/ops/SCRAPING_ENGINEER.md`. Routine numbers and routine-to-routine handoffs below are history.
+
 **GLOBAL ENGINEERING POLICY (owner, 2026-08-29, extended 2026-09-04) — binds ALL ELEVEN routines.
 Canonical text: `docs/ops/ENGINEER_ROUTINES.md` §G; the file wins over any routine prompt.** It said
 "ALL SEVEN" until 2026-09-05, four routines after the roster grew to eleven — and this is the file

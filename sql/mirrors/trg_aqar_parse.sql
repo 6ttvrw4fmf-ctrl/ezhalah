@@ -14,6 +14,9 @@
 --   already recorded below — nothing about this trigger moved. It still fully owns the Buy total
 --   (`NEW.price_total := parsed_price`), which is why fixing aqar_parse was the correct write-path
 --   fix rather than a data-only repair.
+-- Re-verified 2026-09-27: UNCHANGED. Migration 20260927070718 (price_fidelity snapshot) names
+--   trg_aqar_parse only inside mon_detect_price_fidelity's alert text, so the staleness guard wants a
+--   fresh stamp. md5 of pg_get_functiondef from production = e94517e6…, identical to the one below.
 -- Verified byte-exact; md5 of everything below this header block: e94517e6c07ddb44ac946fe64b1b7ee0
 CREATE OR REPLACE FUNCTION public.trg_aqar_parse()
  RETURNS trigger

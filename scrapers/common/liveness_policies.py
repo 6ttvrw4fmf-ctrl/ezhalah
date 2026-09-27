@@ -1142,6 +1142,11 @@ POLICIES: dict[str, _P] = {
         "the crawl's OWN seen-set over the sitemap + /properties list (5). "
         "run.py suppresses prune_unseen unless every detail page was readable.",
         "No oracle is written yet, so this does not claim a direct check."),
+    "superoffice": _P(
+        _pol("superoffice", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the sitemap's 184 Arabic office pages; a booked office drops out of it. "
+        "run.py suppresses prune_unseen unless every page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
     "arsh": _P(
         _pol("arsh", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the site's own property index /عقارات-عرش (a single "
