@@ -13,7 +13,7 @@ def _catalog(monkeypatch):
 
 
 def _d(content, slug="الخبر-الصدفة-بلك-23"):
-    return {"slug": slug, "content": content, "lat": "26.36", "lng": "50.22", "image": None}
+    return {"slug": slug, "content": content, "lat": "26.36", "lng": "50.22"}
 
 
 BLOCK = ("أراضي سكنية حي الصدفة ( المهندسين ) مخطط رقم ش د 985 بلك رقم 23 نبذة عن المخطط يقع مخطط "
@@ -52,3 +52,13 @@ def test_no_price_is_ever_stored_and_an_empty_page_is_skipped():
     (row, _), _ = R.map_page(_d(BLOCK))
     assert row["price_total"] is None
     assert R.map_page(_d("أرض")) == (None, "empty_page")
+
+
+def test_a_page_logo_is_never_the_listings_photo():
+    # the Duda og:image is the project LOGO; the page has no photo of the plot at all
+    page = ('<html><head><meta property="og:image" content="https://x/malfa+allulu+logo-s.jpg"/></head><body>'
+            'عقارات عرش أخبار عرش أراضي سكنية حي الصدفة ( المهندسين ) مخطط رقم ش د 985 بلك رقم 23 نبذة عن المخطط '
+            'مخطط مميز في الخبر</body></html>')
+    (row, _), _ = R.map_page(R.parse_page("x", page))
+    assert row["photo_urls"] == []   # [] (writes {}), never None (the upsert would keep a stale value)
+

@@ -177,6 +177,12 @@
       "today_pct": 100,
       "active_rows": 1265
     },
+    "arsh": {
+      "floor_pct": 0,
+      "today_pct": 0.0,
+      "active_rows": 21,
+      "note": "Declared 2026-09-27 (wave-3 batch 6). IMAGELESS AT SOURCE: the site has no photo of any plot — its og:image is the project LOGO (one row briefly carried «malfa allulu logo», cleared) and the page images are stock pictures, maps and plans. photo_urls is deliberately NULL; 0 of 21."
+    },
     "awal": {
       "floor_pct": 93,
       "today_pct": 96.1,

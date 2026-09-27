@@ -13,6 +13,8 @@ A hand-built Duda site — no API, no JSON feed:
 project / parcel pages (أرض الروابي التجارية, أرض الجوهرة, جدة لاند, مخطط ملفى اللؤلؤ …).
 
 PRICE: none anywhere (0 × ريال/ر.س/SAR). Stored NULL — the card shows «السعر عند الطلب».
+PHOTOS: none of the plot. og:image (where present) is the project LOGO; the page images are stock
+pictures, maps and plans → photo_urls [] (empty) (measured 2026-09-27 on the first production crawl).
 AREA: block pages show plot sizes only as a screenshot image → NULL. Figures in the prose are the whole
 PLAN's area («2,000,000م2», «881,600 متر مربع»), not the listing's — never stored as area_m2.
 DEAL: 19 of 23 pages state none — owner 2026-09-27: treat Arsh's land as for sale (DEAL_WHEN_UNSTATED).
@@ -88,10 +90,8 @@ def parse_page(slug: str, page: str) -> dict[str, Any]:
     cut = text[:700].rfind("أخبار عرش")
     content = re.sub(r"^\s*Share by:?\s*", "", text[cut + len("أخبار عرش"):] if cut >= 0 else text).strip()
     geo = re.search(r"!2d(-?\d+\.\d+)!3d(-?\d+\.\d+)", page)
-    og = re.search(r'og:image" content="([^"]+)"', page)
     return {"slug": slug, "content": content,
-            "lng": geo.group(1) if geo else None, "lat": geo.group(2) if geo else None,
-            "image": og.group(1) if og else None}
+            "lng": geo.group(1) if geo else None, "lat": geo.group(2) if geo else None}
 
 
 def map_page(d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
@@ -150,7 +150,9 @@ def map_page(d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
         "neighborhood": district_raw,
         "plan_parcel": " / ".join(x for x in ((plan.group(1).strip() if plan else None),
                                                (f"بلك {block.group(1)}" if block else None)) if x) or None,
-        "photo_urls": [d["image"]] if d.get("image") else None,
+        # no photo of the plot exists: og:image is the project LOGO («malfa allulu logo»), the rest are
+        # stock pictures (shutterstock_…), maps and plans — none may stand in as the listing's photo
+        "photo_urls": [],   # [] not None: db.py drops a None, which would freeze a stale logo in place
     }
     row["price_evidence"] = normalize.price_evidence(
         field="(none — the site publishes no price)", raw=None, stored=None, kind="total", unit="total",
