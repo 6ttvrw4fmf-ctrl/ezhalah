@@ -187,7 +187,7 @@ Recompute every Sunday, and the day a website is added:
    log it in `cleanup_deletion_log`. If it's live, bring it back.
 
 ## Extra protections: how you stop bugs before they happen (Claude's advice, owner-approved 2026-09-27)
-1. **Known answers in every check run.** For every big site and Gathern, keep a small set of
+1. **Known answers in every check run.** For Gathern and every big or high-priority website, keep a small set of
    control ads whose answer you already know: a few confirmed live, a few confirmed gone (removed or
    sold). Every checking run includes them. If the checker gets even one control wrong, that run
    hides nothing, and fixing the checker is your first job. This catches a redesigned page, a
