@@ -240,7 +240,11 @@ def _int_of(rx: re.Pattern, text: str) -> Optional[int]:
 
 _H2_RE = re.compile(r"<h2[^>]*>(.*?)</h2>", re.S)
 _TITLE_TAG_RE = re.compile(r"<title>([^<]+)</title>", re.I)
-_IMG_RE = re.compile(r'<img[^>]+src="([^"]+/wp-content/uploads/[^"]+)"')
+# The listing's own gallery is the Elementor swiper: `<img class="swiper-slide-image" (data-)src=…>`.
+# A whole-page <img> scan also took the header/footer branding (gudai's header logo on 12/12 rows,
+# safera's three «سفيرة العقارات» logos + footer logo on 9/9 — measured 2026-09-27), whose file
+# names carry no «logo» for a name filter to catch.
+_IMG_RE = re.compile(r'<img[^>]*\bswiper-slide-image\b[^>]*?\bsrc="([^"]+/wp-content/uploads/[^"]+)"')
 # A transacted ad the office keeps on display — never an active listing.
 _TRANSACTED_RE = re.compile(r"تم\s*(الإيجار|الايجار|البيع)")
 
