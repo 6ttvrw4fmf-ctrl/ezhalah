@@ -17,6 +17,7 @@ import { mapSupabaseUser, signOutBackend, deleteAccountBackend } from '@/lib/aut
 import { setThemeAuthState, resetThemeForSignOut } from '@/theme/theme';
 import { restoreChat, persistedOnly, LOCAL_TRANSCRIPT_ENTRIES, type PersistedChat } from '@/lib/chatTranscript';
 import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, chatsToDelete, type ChatMeta } from '@/lib/chatSync';
+import { beginSessionRestore } from '@/lib/sessionRestore';
 import { mergeOne, pickTranscript, mayPromoteTranscript, withFreshTranscript } from '@/lib/chatMerge';
 import { PROBE_FAILED, isProbeFailure } from '@/lib/afProbe';
 import { buildSyncedName, type BilingualName } from '@/lib/nameSync';
@@ -271,6 +272,7 @@ const removeKeysSync = (keys: string[]) => {
 };
 // The old shared key. We proactively purge it so its stale, cross-account contents never reappear.
 const LEGACY_HISTORY_KEY = 'history';
+
 
 export function AppProvider({ children }: { children: ReactNode }) {
   // The FILTER (home) defaults to Buy highlighted (user request). emptyQuery() stays Rent-default for
@@ -778,16 +780,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setAuthChecked(true); // no backend → there is no session to wait for
       return;
     }
-    let cancelled = false;
-    supabase.auth.getSession().then(({ data }) => {
-      const su = data.session?.user;
-      if (!cancelled && su) {
+    // BOUNDED AND CAUGHT, in src/lib/sessionRestore.ts — which carries the production measurement
+    // this shape exists for. In one line: getSession() makes a NETWORK refresh call on an expired
+    // session, so an unbounded, un-caught wait here leaves the app in a state no gate in this file
+    // expects (`user === null && authChecked === false`) — rendering as a guest while withholding
+    // every guest affordance, with no error emitted. `onChecked` fires exactly once on all four
+    // paths: session, no session, rejection, timeout.
+    const cancelRestore = beginSessionRestore({
+      getSession: () => supabase!.auth.getSession(),
+      onUser: (su) => {
         // Apple stays Apple; everything else (Google, and the two internal email test accounts) reads as
         // Google — the only other provider the product offers since phone sign-in was removed.
         const method = su.app_metadata?.provider === 'apple' ? 'apple' : 'google';
-        setUser(mapSupabaseUser(su, method));
-      }
-      if (!cancelled) setAuthChecked(true);
+        setUser(mapSupabaseUser(su as never, method));
+      },
+      onChecked: () => setAuthChecked(true),
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       const su = session?.user;
@@ -800,7 +807,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setUser(null);
       }
     });
-    return () => sub.subscription.unsubscribe();
+    return () => { cancelRestore(); sub.subscription.unsubscribe(); };
   }, []);
 
   const value = useMemo<AppState>(

@@ -1097,6 +1097,51 @@ POLICIES: dict[str, _P] = {
         "suppresses prune_unseen unless the walk reached that total and every detail was readable.",
         "An oracle is possible — the details endpoint's own display_status / ad_licence_status — "
         "but it is not written yet, so this does not claim a direct check."),
+    "sirdab": _P(
+        _pol("sirdab", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's own list pages /ar/ads?page=N (24 per page, a declared "
+        "totalCount). run.py suppresses prune_unseen unless the walk reached the declared total.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "ashab": _P(
+        _pol("ashab", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's own list /properties?page=N (447 ads, 51 pages) and "
+        "each building's unit cards. run.py suppresses prune_unseen unless every page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "manafe": _P(
+        _pol("manafe", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over /manafemar/project/1…N (the index links only 40; the walk is checked "
+        "against the index's per-section counters). run.py suppresses prune_unseen unless those match and every page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "wajaf": _P(
+        _pol("wajaf", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over /properties?page=N (41 ads) and each subdivision's plot pages. "
+        "run.py suppresses prune_unseen unless every page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "albukaeri": _P(
+        _pol("albukaeri", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the site's own list /properties («البيع المباشر», 31). "
+        "run.py suppresses prune_unseen unless every detail page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "ryadah": _P(
+        _pol("ryadah", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the WP REST property posts (Arabic only). "
+        "run.py suppresses prune_unseen unless every detail page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "sqcc": _P(
+        _pol("sqcc", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the realestate sitemap (33). "
+        "run.py suppresses prune_unseen unless every detail page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "daraa": _P(
+        _pol("daraa", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over /projects?page=N (33 projects). "
+        "run.py suppresses prune_unseen unless every project page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "tawia": _P(
+        _pol("tawia", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the sitemap + /properties list (5). "
+        "run.py suppresses prune_unseen unless every detail page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
     "arsh": _P(
         _pol("arsh", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the site's own property index /عقارات-عرش (a single "

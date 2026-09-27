@@ -15,7 +15,8 @@ Data path: NO public JSON API. Enumerate /property/<id> URLs from the gzipped ch
 Plus a `pi-item__label`/`pi-item__value` spec table in the visible HTML:
   التصنيف(type) · مساحة العقار(area) · عدد الغرف(beds) · عمر العقار(age) · واجهة العقار(direction) ·
   عرض الشارع(street width) · خدمات العقار(services) · license create/expiry dates + status · use ·
-  plan/parcel numbers · deed location text. EXPIRED listings render a "هذا الإعلان منتهي" shell with
+  plan/parcel numbers · deed location text. EXPIRED listings render an end-of-ad shell (see
+#   EXPIRED_BANNERS — the wording changed under us) with
   no JSON-LD → skipped.
 
 PDPL: the page exposes the advertiser NAME (seller.name / المعلن …) and the description free-text
@@ -363,12 +364,110 @@ def sitemap_urls(s: cc.Session) -> list[str]:
 # after AQARCITY_PROBE_MAX_MISS consecutive misses (past the id frontier) or AQARCITY_PROBE_MAX_GAP
 # ids probed (hard cap). When the sitemap is fresh the walk starts at the true frontier and ends in
 # ~max_miss cheap requests finding nothing, so it is safe to run every crawl.
+# ── THE SOURCE'S OWN END-OF-AD WORDING, AND WHY IT IS A CONSTANT NOW (2026-09-27, routine #11) ──
+#
+# This oracle looked for the literal «هذا الإعلان منتهي». Aqar City changed its expired-page wording
+# and dropped the leading «هذا», so the shipped marker matched NOTHING and every genuinely-expired
+# page fell through to 'exists' → `unknown`. The kill was withheld, which is the SAFE direction —
+# §0's UNKNOWN IS NOT DEAD held perfectly and nothing was wrongly deactivated — but the oracle could
+# no longer retire anything at all, which is ops_incident #778 (muktamel: 1,132/1,132 UNKNOWN) and
+# #714 (aqar's looks_closed reading markup aqar had stopped emitting) for a third time.
+#
+# Measured that day, DIRECT, from this egress, cohorts INTERLEAVED so a mid-run block would show up
+# in both (LISTING_LIVENESS.md §4.2 lesson 1):
+#
+#   marker                    already-dead (n=26)   known-alive controls (n=26)
+#   «هذا الإعلان منتهي»  (shipped)         0                        0
+#   «الإعلان غير متاح»                    26                        0
+#   «إعلان منتهي»                         23                        0
+#   application/ld+json                    0                       25
+#
+# Six of those dead rows were `active = true`, past the 3-strike grace (missing_count 3 and 6) and
+# PRESENT in search_listings_ar — users could find and click six listings Aqar City had already
+# expired. That is the §1.1 leak this constant closes.
+#
+# THE SAME REWORD WAS ALREADY FIXED ONCE, TWO DAYS EARLIER, IN THE OTHER COPY. ops_incident #730
+# (2026-09-25) repaired scrapers/common/cleanup.py::_aqarcity_expired for this exact change and left
+# THIS file untouched, because the rule lived in two independent places. So the DELETE tier could
+# see an expired aqarcity ad while the DEACTIVATION tier could not — which is why the 334 eligible
+# rows are correctly queued and the six rows above were never retired. Two copies of a source's
+# wording are two chances to go blind, and only one of them got fixed.
+#
+# «مغلق» also separated 26/0 on the day and was REJECTED: it is an ordinary word a live listing uses
+# about a room («مجلس مغلق»), and a marker that can appear in a description is a false death waiting
+# to happen.
+# TWO independent signals, and the SAME two scrapers/common/cleanup.py already settled on. This file
+# must not invent a third reading of the source's words — that is how the two copies drifted apart in
+# the first place.
+EXPIRED_BANNERS = (
+    "الإعلان غير متاح",   # current banner: <h2 …>الإعلان غير متاح</h2>
+    "الإعلان منتهي",      # the wording this platform used until 2026-09-20
+)
+# Anchored to the TITLE SUFFIX shape, never a bare phrase match: «… - إعلان منتهي | عقار ستي», and the
+# same string in og:title / twitter:title, which terminate with a quote or a tag instead of «|».
+# A bare `"إعلان منتهي" in body` would ALSO match a seller writing it in a free-text description —
+# and on this platform a false dead marker eventually deletes a live listing. This anchoring is
+# cleanup.py's decision (2026-09-25), mirrored deliberately rather than re-derived.
+EXPIRED_TITLE_SUFFIX = re.compile(r"-\s*إعلان منتهي\s*(?:\||\"|<|&)")
+
+
+def _is_expired_body(body: Optional[str]) -> bool:
+    """Does the page carry the source's OWN end-of-ad statement? The one death signal on this
+    platform, and the only thing here allowed to contribute to a kill.
+
+    Deliberately IDENTICAL in behaviour to cleanup.py::_aqarcity_expired. The two live in different
+    tiers (this one deactivates, that one deletes) and scripts/verify-aqarcity-expired-marker-is-the-
+    sources-own-words.ts EXECUTES both over one corpus and fails if they ever disagree.
+    """
+    b = body or ""
+    return (any(m in b for m in EXPIRED_BANNERS)
+            or bool(EXPIRED_TITLE_SUFFIX.search(b)))
+
+
+# ── IN-RUN POSITIVE CONTROL (LISTING_LIVENESS.md §5.4; the sanadak/gathern precedent) ───────────
+# Aqar City expresses "gone" as an HTTP 200, so a template change, a Cloudflare shell or any other
+# whole-site degradation that happened to carry one of the markers would read as a mass death. The
+# canary makes that produce ZERO deactivations instead of all of them, and it FAILS CLOSED: no
+# canary, or a canary that no longer renders its own listing, and no 'gone' verdict may be issued.
+#
+# Armed ONLY from rows THIS run's crawl already fetched and parsed — never from
+# last_verified_alive_at, the self-referential pool that deadlocked gathern for five days
+# (ops_incident #168: a control set that certifies itself cannot detect its own rot).
+_CANARY_LOCK = threading.Lock()
+_canary: dict[str, Any] = {"urls": [], "verdict": None, "reason": "not evaluated"}
+
+
+def set_liveness_canaries(urls) -> None:
+    """Hand the oracle a few listing URLs this run has ALREADY fetched and parsed successfully."""
+    with _CANARY_LOCK:
+        _canary["urls"] = [u for u in (urls or []) if u][:3]
+        _canary["verdict"] = None
+        _canary["reason"] = "not evaluated"
+
+
+def _canary_ok(s: cc.Session) -> tuple[bool, str]:
+    """Is the source still answering us with real, parseable listings right now? Memoised per run."""
+    with _CANARY_LOCK:
+        if _canary["verdict"] is not None:
+            return _canary["verdict"], _canary["reason"]
+        urls = list(_canary["urls"])
+    ok, reason = False, "no canary was supplied, so no removal can be believed"
+    for u in urls:
+        if _probe_id(s, u) == "live":
+            ok, reason = True, f"canary …{u[-12:]} still renders its own listing"
+            break
+        reason = f"canary …{u[-12:]} no longer renders its own listing"
+    with _CANARY_LOCK:
+        _canary["verdict"], _canary["reason"] = ok, reason
+    return ok, reason
+
+
 def _probe_id(s: cc.Session, url: str) -> str:
     """Classify one /property/<id> url: 'live' | 'expired' | 'exists' | 'notfound' | 'error' (≤2 GETs).
 
     'expired' and 'exists' were ONE value until 2026-08-26, and collapsing them put a
     non-evidence condition on a kill path. They mean opposite things to `_verify_gone`:
-      • 'expired' — the page carries «هذا الإعلان منتهي», the source's OWN end-of-ad banner.
+      • 'expired' — the page carries the source's OWN end-of-ad banner (_is_expired_body).
         That is the platform's documented soft-expire and it is authoritative death.
       • 'exists'  — a real id whose page we could not PARSE (no JSON-LD). A Cloudflare
         interstitial, a partial render or a template change all land here, at HTTP 200, on a
@@ -388,7 +487,7 @@ def _probe_id(s: cc.Session, url: str) -> str:
         if "/property/" not in str(r.url) or "Page Not Found" in r.text:
             last = "notfound"
             continue  # a fresh session can 302→/notfound before the cookie lands — retry once
-        if "هذا الإعلان منتهي" in r.text:
+        if _is_expired_body(r.text):
             return "expired"  # the source's own expired banner → authoritative death
         if "application/ld+json" not in r.text:
             return "exists"   # real id, unparseable shell → keeps the walk alive, NEVER proof of death
@@ -549,7 +648,7 @@ def _images(ld: Optional[dict], body: str) -> list[str]:
 
 
 def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
-    if "هذا الإعلان منتهي" in body or "Page Not Found" in body:
+    if _is_expired_body(body) or "Page Not Found" in body:
         return None, "residential"
     ld, bc = _ld_blocks(body)
     if not ld:
@@ -814,7 +913,7 @@ def main() -> int:
                     continue
                 if own:
                     # Landed on this listing's own /property/<id>, and map_listing only returns a row
-                    # for a page with JSON-LD and no «هذا الإعلان منتهي»/«Page Not Found»: the exact
+                    # for a page with JSON-LD and no expiry banner/«Page Not Found»: the exact
                     # shape _probe_id() calls 'live'.
                     db.mark_direct_alive(row, oracle="aqarcity.property_page.jsonld_not_expired")
                 (com_buf if cat == "commercial" else res_buf).append(row)
@@ -853,6 +952,9 @@ def main() -> int:
         except Exception:
             pass
 
+        # Armed from listings THIS run fetched and parsed — never from last_verified_alive_at.
+        set_liveness_canaries([r.get("listing_url") for r in (res + com)[:3]])
+
         def _verify_gone(ad_number: str) -> tuple[str, str]:
             pid = re.sub(r"\D", "", ad_number or "")
             if not pid:
@@ -863,10 +965,17 @@ def main() -> int:
             # used to be mapped to "gone" here — that made an unreadable page indistinguishable
             # from a deleted one, so a Cloudflare shell served at 200 could deactivate a live
             # listing with no source evidence of death whatsoever. It is now held, not killed.
+            # Both kill shapes go through the in-run positive control FIRST. This is strictly more
+            # conservative than what shipped (which killed on 'notfound' with no control at all):
+            # a degraded source now yields UNKNOWN rather than a removal.
+            if status in ("notfound", "expired"):
+                canary_ok, canary_why = _canary_ok(prune_session)
+                if not canary_ok:
+                    return "unknown", f"withheld, source not proven to be answering: {canary_why}"
             if status == "notfound":
                 return "gone", "redirected to /notfoundproperty (control-validated hard 404)"
             if status == "expired":
-                return "gone", "source published «هذا الإعلان منتهي» (own expired banner)"
+                return "gone", "source published its own end-of-ad banner or expiry title suffix"
             if status == "live":
                 return "live", "listing page served with JSON-LD and no expired banner"
             if status == "exists":
