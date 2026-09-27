@@ -964,6 +964,23 @@ Three things to carry forward:
    safer reading was found by **reading the sibling implementation**, not by reasoning from scratch.
    Where two tiers must agree, the stricter tier's decision is the one to copy.
 
+**The fleet-wide variants check, and it came back clean — aqarcity was the only one.** The question
+§G.9.7 actually asks here is *which other platform has its death signal written twice?* Answered by
+reading `scrapers/common/cleanup.py`'s `PLATFORMS` table against each platform's liveness module:
+
+| platform | delete tier | deactivation tier | two independent copies? |
+|---|---|---|---|
+| **aqar** | `_aqar_dead` | `scrapers/aqar/liveness.py` | **no** — cleanup.py *imports* `DEAD_MARKERS` and `looks_closed` from it (line 34). The law already lives once, learned 2026-09-20 the same way. |
+| **wasalt** | `_wasalt_markers` | `scrapers/wasalt/liveness.py` | **no** — reuses aqar's markers, and wasalt's real signal is a hard 404 handled by `verdict()`'s status branch. No soft-close text to drift. |
+| **gathern** | `_never` | `scrapers/gathern/liveness.py` | **no** — 404-only by policy; there is no text signal to reword. |
+| **aqarcity** | `_aqarcity_expired` | `run.py::_probe_id` | **YES** — the only one, and the one that drifted. |
+
+So the class is closed fleet-wide rather than patched for one platform. Note the shape of the answer:
+three of the four were safe because someone had already applied "the law lives once", and the
+exception was the platform where the two tiers happened to be written by different changes at
+different times. **A duplicated rule is not a design decision anyone made; it is what happens when
+two tiers grow independently.**
+
 Also added, because this platform expresses "gone" as an HTTP 200 and §4.2 lesson 3 / `LISTING_
 LIVENESS.md` §5.4 require it: an **in-run positive control** gating both kill shapes, failing closed
 (no canary → no removal), armed only from rows the run actually parsed. This is strictly *more*
