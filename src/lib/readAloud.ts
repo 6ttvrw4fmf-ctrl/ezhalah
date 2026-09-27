@@ -160,6 +160,31 @@ function splitIntoChunks(text: string): string[] {
 // Segments -> a flat ordered list of speak/pause units. Each segment's OWN text is still split on
 // sentence boundaries and chained with NO gap (the Chrome-15s-bug workaround above) — the pause only
 // ever sits BETWEEN segments, which is what makes it read as a structural beat, not just a breath.
+/**
+ * IS THERE ANYTHING HERE A VOICE COULD ACTUALLY SAY?
+ *
+ * ONE PREDICATE FOR BOTH THE CONTROL AND THE ACTION, because two of them disagreed and the gap was a
+ * silent dead control. FeedbackRow rendered 🔊 on `readAloudSegments?.length` — the SEGMENT count —
+ * while speakReadAloud() refuses on `!buildUnits(segments).length` — the SPEAKABLE UNIT count. Those
+ * are different questions: buildUnits skips any segment whose text.trim() is empty, so a non-empty
+ * segment list can yield zero units.
+ *
+ * When they disagreed the tap was a guaranteed no-op that said NOTHING, because the refusal that
+ * follows is `readAloudRefusalVerdict({ voiceConfirmed: true, … })` → 'none' →
+ * readAloudRefusalMessageKey('none') → null. That null is deliberate and correct on its own terms
+ * (its comment: inventing a device verdict when the voice is fine would be the same class of lie in a
+ * new place) — which is exactly why the control must not be OFFERED in that state rather than
+ * explained away in it. PART 5 shape #6: a control doing nothing on a genuine tap.
+ *
+ * Measured on production 2026-09-27 (Chromium, ops_incident #856): a 🔊 tap produced no message at
+ * all, with the journey confirming post-tap `speaking=false` and no stop-control — so the tap neither
+ * spoke nor refused out loud. Every other refusal path in speakReadAloud DOES surface a sentence, so
+ * `!units.length` is the only branch that can be silent.
+ */
+export function hasSpeakableContent(segments: ReadAloudSegment[] | undefined | null): boolean {
+  return !!segments && buildUnits(segments).length > 0;
+}
+
 function buildUnits(segments: ReadAloudSegment[]): Unit[] {
   const units: Unit[] = [];
   for (const seg of segments) {

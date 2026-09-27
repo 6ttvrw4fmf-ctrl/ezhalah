@@ -265,6 +265,47 @@ old build and passes on the fix, not a unit test standing in for the click. At m
     And **when a finding names an old incident, re-read what that incident's assertion actually was**
     before assuming the new observation is the same thing.
 
+16. **A SURFACE PART 1 NAMES CAN BE UNCOVERED IN THE AUTH ROW, NOT ONLY IN READ-ALOUD** (routine #6,
+    2026-09-27, `ops_incident` #854). PART 1's header tells you to ask, once a run, «has any journey
+    ever DRIVEN this» rather than «is it barriered». Taken literally against the list, **"token
+    expiry" had zero hits anywhere in `e2e/`** — and behind it sat a defect reachable by simply
+    coming back to the site with a stale token.
+    `authChecked` gates five things in `src/store.tsx` (local history restore, server pull, sign-in
+    card, cookie-consent banner, intro), and the launch restore awaited `supabase.auth.getSession()`
+    with no timeout and no `.catch()`. **`getSession()` is not the local-only read its name
+    suggests:** on an expired session `@supabase/auth-js`'s `__loadSession()` calls
+    `_callRefreshToken` over the NETWORK. Measured on production, 2/2 fresh contexts per arm, oracle
+    `[data-testid="cookie-consent"]` + `[data-testid="signin-card"]` (both gated on
+    `authChecked && !user`) against a true-guest control rendering both: `refresh_token: ''` left both
+    ABSENT at 20 s, 40 s **and 75 s** (permanent — `_isValidSession()` tests key PRESENCE only, so the
+    slot passes as valid and `_callRefreshToken('')` then throws past every catch in auth-js, so
+    `getSession()` REJECTS, 3 uncaught page errors per load); a BLOCKED refresh request left both
+    absent at 20 s and 40 s, recovering by 75 s. So the app sat in a **fourth state no gate expects**,
+    `user === null && authChecked === false` — rendering as a guest while withholding every affordance
+    a guest gets, with no error shown.
+    Three lessons, each of which cost something this run:
+    · **The hazard was already written down two files away, about the same client.**
+      `GoogleOneTap.tsx` bounds `getUser()` with a timeout, a catch and a settled flag, and its
+      comment says *"the refresh with backoff, so it can take many seconds or never settle"* — measured
+      live 2026-08-18. The sibling call was never given the same treatment. **When you find a
+      defended call site, ask what else calls the same API undefended**; §2 of
+      `scripts/verify-session-restore-always-settles.ts` now makes that a shrink-only ledger so a
+      fourth site is RED until someone states how it is bounded.
+    · **A FIXTURE THAT SEEDS NOTHING IS THE CONTROL ARM.** The new journey passed GREEN 4/4 against
+      the UNFIXED bundle first: `seedInitScript` returns at `if (!wantAuth) return` before writing the
+      auth slot, so a `session` override without `signedIn: true` seeded nothing and both arms ran as
+      plain guests. A differential-against-a-control design **cannot** catch this, because the broken
+      injection collapses onto the control. When a journey compares an injected state against a
+      baseline, **assert the INJECTION took**, not only the comparison.
+    · **Ground a harness timeout in the library's own schedule, not in a round number.** This nearly
+      filed the blocked-refresh arm as PERMANENT off a 25 s observation. auth-js's `retryable` keeps
+      retrying while `now + nextBackoff - startedAt` fits in `AUTO_REFRESH_TICK_DURATION_MS`
+      (30 000, backoff `200*2^(n-1)`) — so 25 s lands INSIDE the retry window and reads as permanent.
+      Re-measured at 20/40/75 s, one arm is permanent and the other self-heals. Both the fix constant
+      (6 000 = a fifth of 30 000) and the barrier's assertion (`bound < 30 000`) are derived from that
+      measured number. PART 11.2's «a real condition, not a bigger number», applied to a number the
+      LIBRARY owns.
+
 Mutation-prove the important ones — deliberately break the fix, prove the barrier goes red, restore
 it. Before writing a new barrier, check whether an existing one already covers the shape (e.g.
 `scripts/verify-new-chat-is-clean.ts`, `scripts/verify-google-onetap.ts`,
