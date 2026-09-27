@@ -1,4 +1,4 @@
--- The detector applied minutes earlier (20260927210556) could NOT raise its own alert.
+-- The detector applied minutes earlier (20260927210420) could NOT raise its own alert.
 --
 -- `live text[] := '{}'` concatenated with a BARE string literal — `live := live || 'some_key'` — does
 -- not resolve to anyarray||anyelement in this Postgres: the untyped literal is coerced to text[] and
