@@ -23,7 +23,14 @@ concurrency:
 jobs:
   district-parity:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 10 was the cap until 2026-09-27, when 9 of 12 consecutive runs were KILLED at 618-620s and
+    # reported as `cancelled` — which the failure->alert bridge classifies as NO_VERDICT, so this
+    # barrier went dark for ~2.5 days with no red anyone read and no alert row. The work grew
+    # honestly (1,772 city × scope × district suggestions). CHECK_DEADLINE_SECONDS below is what
+    # actually prevents a silent kill: the check stops taking new work and reports, strictly inside
+    # this cap. Keep (sum of CHECK_DEADLINE_SECONDS in this job) + 180s <= timeout-minutes * 60 —
+    # pinned by scripts/verify-live-check-deadline-beats-its-job-timeout.ts.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,6 +41,7 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+          CHECK_DEADLINE_SECONDS: '1200'
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-district-suggestion-parity-live.ts
 
       # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────
