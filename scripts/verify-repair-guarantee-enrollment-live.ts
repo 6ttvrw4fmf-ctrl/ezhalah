@@ -51,8 +51,8 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { COMMITTED_NOT_APPLIED_BASELINE } from './lib/migrationDrift.ts';
-import {
 import { postgrestFetch } from './lib/postgrestRetry.ts';
+import {
   repairsData, migrationVersion, enrollmentVerdict, parseWaivers, registryVersionsFromResponse,
 } from './lib/repairClassifier.ts';
 

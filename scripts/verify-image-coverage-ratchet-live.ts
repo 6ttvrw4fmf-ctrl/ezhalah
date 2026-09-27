@@ -25,8 +25,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { rpcProbeOutcome, outcomeIsUsable } from './lib/liveHalf.ts';
-import {
 import { postgrestFetch } from './lib/postgrestRetry.ts';
+import {
   evaluateImageCoverage,
   type ImageBaseline,
   type ImageCoverageRow,

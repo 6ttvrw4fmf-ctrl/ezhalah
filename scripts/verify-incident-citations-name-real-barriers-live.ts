@@ -47,8 +47,8 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
-import {
 import { postgrestFetch } from './lib/postgrestRetry.ts';
+import {
   citationProblems, bareIndex, committedFunctions, treeMentionTest,
   type Artifact, type IncidentRow,
 } from './lib/barrierCitations.ts';

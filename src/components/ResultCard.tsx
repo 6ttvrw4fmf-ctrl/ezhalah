@@ -819,6 +819,9 @@ function SourceBadge({ source }: { source: string }) {
   if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('مكسب العقارية') || s.includes('macsaib')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('maqrat')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('مانزو') || s.includes('manzo')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('الطابق الثامن') || s.includes('8floor') || s.includes('eightfloor')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('حلول') || s.includes('holoul')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('السوق المفتوح') || s.includes('opensooq')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('معرض نافذة') || s.includes('nafithh')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
   if (s.includes('مباشر') || s.includes('mobasher')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
@@ -992,6 +995,9 @@ function sourceHost(source: string): string {
   if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return 'vm-ksa.com';
   if (s.includes('مكسب العقارية') || s.includes('macsaib')) return 'macsaib.sa';
   if (s.includes('maqrat')) return 'maqrat.com';
+  if (s.includes('مانزو') || s.includes('manzo')) return 'manzo.com.sa';
+  if (s.includes('الطابق الثامن') || s.includes('8floor') || s.includes('eightfloor')) return 'www.8floor.sa';
+  if (s.includes('حلول') || s.includes('holoul')) return 'holoul.io';
   if (s.includes('السوق المفتوح') || s.includes('opensooq')) return 'sa.opensooq.com';
   if (s.includes('معرض نافذة') || s.includes('nafithh')) return 'nafithh.sa';
   if (s.includes('مباشر') || s.includes('mobasher')) return 'mobasher.sa';
