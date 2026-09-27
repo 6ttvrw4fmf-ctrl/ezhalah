@@ -1,0 +1,68 @@
+# The ♻️ Lifecycle Engineer's double-check (docs/ops/LIFECYCLE_ENGINEER.md): open a sample of one
+# website's hidden and live ads and report how many answers were wrong. The cloud routine cannot
+# open listing websites itself (they block its address), so it dispatches this and reads the
+# `spot-check` artifact.
+#
+# READ-ONLY: scrapers/common/lifecycle_spot_check.py writes nothing to the database. Dispatch-only,
+# never scheduled: the engineer decides which sites and how many, inside its proxy budget.
+name: Lifecycle spot check
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Platform key (e.g. gathern, aqar, sirdab)"
+        required: true
+        type: string
+      n:
+        description: "Ads to open per side (hidden and live)"
+        type: string
+        default: "30"
+      which:
+        description: "hidden, live or both"
+        type: string
+        default: "both"
+      hidden_days:
+        description: "Only ads hidden within this many days"
+        type: string
+        default: "30"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lifecycle-spot-check-${{ github.event.inputs.platform }}
+
+jobs:
+  spot-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Open the sample
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          PLATFORM: ${{ inputs.platform }}
+          N: ${{ inputs.n }}
+          WHICH: ${{ inputs.which }}
+          HIDDEN_DAYS: ${{ inputs.hidden_days }}
+        run: |
+          exec python -m scrapers.common.lifecycle_spot_check \
+            --platform "$PLATFORM" --n "$N" --which "$WHICH" --hidden-days "$HIDDEN_DAYS"
+      - name: Keep the result for the engineer
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spot-check
+          path: spot-check.json
+          if-no-files-found: ignore
+          retention-days: 14

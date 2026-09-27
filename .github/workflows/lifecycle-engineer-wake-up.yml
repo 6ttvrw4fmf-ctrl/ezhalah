@@ -1,0 +1,63 @@
+# Wakes the ♻️ Lifecycle Engineer the moment a liveness or cleanup job fails
+# (docs/ops/LIFECYCLE_ENGINEER.md, "When you run"), the same way scraping-engineer-wake-up.yml wakes
+# the ⚡ Scraping Engineer on a crawl failure. It uses the documented routine fire endpoint with a
+# per-routine token the owner generates in claude.ai, stored as two repo secrets:
+#   LIFECYCLE_ENGINEER_FIRE_URL    https://api.anthropic.com/v1/claude_code/routines/<trig_…>/fire
+#   LIFECYCLE_ENGINEER_FIRE_TOKEN  sk-ant-oat01-…  (can ONLY fire this one routine; no read access)
+# Until both exist this job does nothing and stays green. Loops are bounded twice: the engineer
+# tries a website at most 3 times a day (hard rule 13), and the endpoint accepts at most 30 fires per
+# routine per hour.
+name: Lifecycle Engineer wake-up
+
+on:
+  workflow_run:
+    workflows:
+      - Aqar liveness
+      - Aqar cleanup
+      - Aqarcity cleanup
+      - Aqar stub recovery
+      - Dealapp liveness
+      - Dealapp recover
+      - Gathern liveness
+      - Gathern cleanup
+      - Wasalt liveness
+      - Wasalt enum liveness
+      - Wasalt cleanup
+      - Platform cleanup (retention)
+      - Verify deletions (post-delete spot-check)
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  wake:
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Fire the Lifecycle Engineer
+        env:
+          FIRE_URL: ${{ secrets.LIFECYCLE_ENGINEER_FIRE_URL }}
+          FIRE_TOKEN: ${{ secrets.LIFECYCLE_ENGINEER_FIRE_TOKEN }}
+          WF_NAME: ${{ github.event.workflow_run.name }}
+          WF_FILE: ${{ github.event.workflow_run.path }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          if [ -z "$FIRE_URL" ] || [ -z "$FIRE_TOKEN" ]; then
+            echo "::notice::Lifecycle Engineer wake-up not configured yet (no fire URL/token secret) — skipping."
+            exit 0
+          fi
+          body=$(jq -n --arg t "INSTANT WAKE-UP: lifecycle workflow \"$WF_NAME\" ($WF_FILE) failed. Run $RUN_ID: $RUN_URL . Handle only the website(s) that job covers." '{text: $t}')
+          code=$(curl -sS -o /tmp/fire.json -w '%{http_code}' -X POST "$FIRE_URL" \
+            -H "Authorization: Bearer $FIRE_TOKEN" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "Content-Type: application/json" \
+            -d "$body")
+          echo "fire endpoint answered HTTP $code"
+          if [ "$code" = "429" ]; then
+            echo "::warning::Hourly fire limit reached — the nightly sweep will pick this failure up."
+            exit 0
+          fi
+          [ "$code" = "200" ] || { cat /tmp/fire.json; exit 1; }
+          jq -r '"engineer session: " + .claude_code_session_url' /tmp/fire.json

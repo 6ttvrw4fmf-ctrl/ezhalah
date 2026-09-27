@@ -66,10 +66,12 @@ your work.
 | fleet checklist: which sites are protected | `select * from ops_platform_protection_matrix();` |
 | check-by coverage per site | `ops_liveness_coverage_snapshot` (refreshed hourly), view `ops_platform_liveness_coverage` |
 | must always read 0 | `mon_unverified_inactivations_24h` |
+| **the double-check** (read-only): opens N hidden + N live ads of one website through the proxy, with known-live controls; result in the run's `spot-check` artifact (`method` says whether the site has a real "gone" check or status only) | workflow `lifecycle-spot-check.yml` (inputs `platform`, `n`, `which`, `hidden_days`), code `scrapers/common/lifecycle_spot_check.py` |
+| **the deletion switch** (your only way to turn a website's 30-day deletion on or off; refuses "on" without a clean dry run in the last 7 days) | `select set_platform_retention('<site>', true \| false, '<dated evidence>')` |
 
 **Workflows you may run:** `aqar-liveness.yml`, `wasalt-liveness.yml`, `wasalt-enum-liveness.yml`,
 `gathern-liveness.yml`, `dealapp-liveness.yml`, `dealapp-recover.yml`, `aqar-stub-recovery.yml`, the
-`*-cleanup.yml` workflows, `platform-cleanup.yml` and `verify-deletions.yml`. **Always run a cleanup
+`*-cleanup.yml` workflows, `platform-cleanup.yml`, `verify-deletions.yml` and `lifecycle-spot-check.yml`. **Always run a cleanup
 with `dry_run: true` first** unless that site's policy is already enabled and its last dry run was
 clean. **Never run** `loader-active-platforms-check.yml` (it crashed the database), and never run
 crawl workflows (⚡'s).
@@ -292,7 +294,7 @@ must go up over time and never down.
    you". That is a money decision.
 9. **No migrations.** Your fixes are code, and code goes through git first. Your only database
    writes are:
-   - turning a site's deletion on or off through its guarded switch (never a raw `update`);
+   - turning a site's deletion on or off through `set_platform_retention()` (never a raw `update`);
    - your own run log (`ops_daily_engineer_run`).
 10. **Safe shipping only.**
     - Work on a fresh branch off `origin/main` and open the PR yourself.
