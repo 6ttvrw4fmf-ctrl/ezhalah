@@ -246,6 +246,12 @@
     "grace": 3
   },
   {
+    "platform": "dallali",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "daryusuf",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
@@ -438,6 +444,12 @@
     "grace": 3
   },
   {
+    "platform": "maqrat",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "marksa",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
@@ -456,8 +468,20 @@
     "grace": 3
   },
   {
+    "platform": "mobasher",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "moftah",
     "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "muajarh",
+    "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
     "grace": 3
   },
@@ -476,6 +500,12 @@
   {
     "platform": "mustqr",
     "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "nafithh",
+    "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
     "grace": 3
   },
@@ -499,6 +529,12 @@
   },
   {
     "platform": "october",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "opensooq",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
     "grace": 3

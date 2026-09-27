@@ -1038,6 +1038,52 @@ POLICIES: dict[str, _P] = {
         "generic shell (ad 551, 2026-09-26), so a re-fetch cannot tell 'gone' from 'blipped' without "
         "a parser-level oracle that is not written yet. The ads carry REGA licence expiry dates "
         "(«تاريخ انتهاء ترخيص الاعلان»), kept in license_expiry for a future oracle."),
+    "dallali": _P(
+        _pol("dallali", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the storefront's complete JSON feed: "
+        "p1.dallali.com/listings/public?purpose=all&page=N walked until it declares `total` (7 when "
+        "measured). run.py suppresses prune_unseen unless the walk reached that total.",
+        "An oracle is possible — /listings/public/<uuid> answers HTTP 404 for an id that does not "
+        "exist — but it is not written yet, so this does not claim a direct check."),
+    "muajarh": _P(
+        _pol("muajarh", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over admin.muajarh.com/api/v1/properties (limit=50, "
+        "meta.totalPages) against the API's own `total` (18 when measured, 7 of them demo rows "
+        "skipped by rule). run.py suppresses prune_unseen unless the walk reached that total and "
+        "every by-slug detail was readable.",
+        "An oracle is possible — /properties/by-slug/<slug> for a removed listing — but it is not "
+        "written yet, so this does not claim a direct check."),
+    "mobasher": _P(
+        _pol("mobasher", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the discovery API's direct-sale feed (status=ACTIVE, "
+        "categoryType=RealEstate), cursor-walked to the end, checked against its own totalItems (28 "
+        "when measured). run.py suppresses prune_unseen unless the walk reached totalItems.",
+        "An oracle is possible — the feed row's own `status` and the listing page — but it is not "
+        "written yet, so this does not claim a direct check."),
+    "nafithh": _P(
+        _pol("nafithh", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the gallery's complete index: /web/gallery/index?page=N (the "
+        "list clamps past its end, so the walk stops on the first page adding no new id — 30 ids = "
+        "12 + 12 + 6, matching the site's own 22 sale + 8 rent buckets). run.py suppresses "
+        "prune_unseen unless every detail page was readable.",
+        "An oracle is possible — /web/gallery/<id> answers HTTP 404 for an unknown id — but it is "
+        "not written yet, so this does not claim a direct check."),
+    "opensooq": _P(
+        _pol("opensooq", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the real-estate SERP's inline JSON (/ar/عقارات?page=N, "
+        "__NEXT_DATA__ serpApiResponse) walked to meta.pages and checked against meta.count (78 "
+        "when measured). run.py suppresses prune_unseen unless the walk reached meta.count.",
+        "An oracle is possible — /ar/search/<id> for a removed post — but it is not written yet, so "
+        "this does not claim a direct check."),
+    "maqrat": _P(
+        _pol("maqrat", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over a complete, self-declaring index: the page script's own POST "
+        "paging (/Property/_Properities, start=1..N, length=12) walked until a page is empty, checked "
+        "against #TotalRecord (83 when measured), then every /Property/Details/<id> page re-read. "
+        "run.py suppresses prune_unseen unless the walk reached TotalRecord and every page was readable.",
+        "An oracle is possible — a removed id's details page stops carrying the pd-overview licence "
+        "block — but it is not written yet, so this does not claim a direct check. The ads carry REGA "
+        "licence expiry dates (license_expiry) for a future oracle."),
     "macsaib": _P(
         _pol("macsaib", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over Taearif's complete, self-declaring JSON feed: "
