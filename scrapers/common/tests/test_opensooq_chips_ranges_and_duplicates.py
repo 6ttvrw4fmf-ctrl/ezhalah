@@ -47,3 +47,17 @@ def test_under_construction_and_a_title_deal_conflict_skip():
 def test_the_member_and_phone_are_never_stored():
     blob = json.dumps(R.map_listing(_x(["شهري"]))[0][0], ensure_ascii=False, default=str)
     assert "مؤسسة حاتم" not in blob and "05970006XX" not in blob
+
+
+def test_multi_use_land_is_listed_as_both_residential_and_commercial_land():
+    # owner 2026-09-27: «الاستخدام المتعدد» means the plot is BOTH — it must answer both searches
+    land = dict(cat1_code="RealEstateForSale", cat2_code="LandsForSale", price_amount="1,500,000 ريال", title="قطعة ارض للبيع")
+    x = _x(["الاستخدام المتعدد", "مساحة الأرض: 655 م٢"], **land)
+    (row, cat), why = R.map_listing(x)
+    twin = R.commercial_twin(x, row)
+    assert why == "" and cat == "residential" and row["property_type"] == "Residential Land"
+    assert twin["property_type"] == "Commercial Land" and twin["ad_number"] == row["ad_number"]
+    assert twin["listing_url"] == row["listing_url"] and twin["area_m2"] == 655
+    single = _x(["سكنية", "مساحة الأرض: 655 م٢"], **land)
+    assert R.commercial_twin(single, R.map_listing(single)[0][0]) is None
+

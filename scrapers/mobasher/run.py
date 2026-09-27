@@ -52,7 +52,8 @@ PREFIX = "MBS"
 SLUG = "mobasher"
 IMPERSONATE = "chrome"
 
-_LAND_BY_USAGE = {("Residential",): "ارض", ("Commercial",): "أرض تجارية",
+# owner 2026-09-27: a plot whose usage lists BOTH Residential and Commercial is Commercial Land
+_LAND_BY_USAGE = {("Residential",): "ارض", ("Commercial",): "أرض تجارية", ("Commercial", "Residential"): "أرض تجارية",
                   ("Industrial",): "Industrial Land", ("Agricultural",): "أرض زراعية"}
 _UTILITIES = {"ELECTRICITY": "electricity", "WATERS": "water_supply", "WATER": "water_supply",
               "SANITATION": "sanitation", "FIBER_OPTICS": "optical_fibers"}

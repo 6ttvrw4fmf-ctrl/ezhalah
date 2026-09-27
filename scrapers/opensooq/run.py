@@ -54,7 +54,10 @@ IMPERSONATE = "chrome"
 _TYPE_AR = {"ApartmentsForSale": "شقة", "ApartmentsForRent": "شقة", "VillasAndPalacesForSale": "فيلا",
             "VillasAndPalacesForRent": "فيلا", "WholeBuildingForSale": "عمارة", "WholeBuildingForRent": "عمارة",
             "property_rent_commercial_Offices": "مكتب", "RE_HotelApartments": "شقة"}
-_LAND_USAGE = {"سكنية": "ارض", "تجارية": "أرض تجارية", "زراعية": "أرض زراعية"}
+_MULTI_USE = "الاستخدام المتعدد"
+# owner 2026-09-27: multi-use land is BOTH residential and commercial land — it maps to residential here
+# and commercial_twin() lists the same ad as Commercial Land too, so it answers both searches
+_LAND_USAGE = {"سكنية": "ارض", "تجارية": "أرض تجارية", "زراعية": "أرض زراعية", _MULTI_USE: "ارض"}
 _PERIOD = {"شهري": "monthly", "سنوي": "annual"}
 _NEVER_STORE = {"member_id", "member_display_name", "member_user_name", "member_avatar_uri", "shop_name",
                 "shop_logo_uri", "phone_number", "phone_reveal_key", "member_rating_avg", "member_rating_count"}
@@ -118,6 +121,13 @@ def _count(cs: list[str], noun_re: str) -> Optional[int]:
     return None
 
 
+def commercial_twin(x: dict, row: dict) -> Optional[dict]:
+    """The Commercial Land copy of a multi-use plot (same ad, same url) — None for every other ad."""
+    if x.get("cat2_code") == "LandsForSale" and _MULTI_USE in chips(x):
+        return dict(row, property_type="Commercial Land")
+    return None
+
+
 def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
     cs = chips(x)
     title = x.get("title") or ""
@@ -132,7 +142,7 @@ def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
 
     cat2 = x.get("cat2_code") or ""
     if cat2 == "LandsForSale":
-        usage = next((c for c in cs if c in _LAND_USAGE or c == "الاستخدام المتعدد"), None)
+        usage = next((c for c in cs if c in _LAND_USAGE), None)
         if usage not in _LAND_USAGE:
             return None, f"land_usage_{usage or 'unstated'}_owner_question"
         type_ar = _LAND_USAGE[usage]
@@ -235,6 +245,9 @@ def main() -> int:
                 continue
             seen_keys.add(key)
             (com if cat == "commercial" else res).append(row)
+            twin = commercial_twin(x, row)
+            if twin:
+                com.append(twin)
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)
