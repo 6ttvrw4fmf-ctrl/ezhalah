@@ -50,6 +50,12 @@ const MIGRATION = '20260927085924_card_link_identity_small_table_granularity_is_
 let failures = 0;
 const fail = (m: string) => { console.log(`FAIL  ${m}`); failures++; };
 const ok = (c: boolean, m: string) => (c ? console.log(`PASS  ${m}`) : fail(m));
+/**
+ * A DIFFERENTIAL mutation proof: `caught` must express that the mutant and the shipped classifier
+ * DISAGREE, so it cannot pass while the guard is vacuous. Named for the shape
+ * verify-new-barriers-are-mutation-proven.ts recognises across the fleet.
+ */
+const mustCatch = (label: string, caught: boolean) => ok(caught, `(mutation) ${label}`);
 
 // ── the classifier, as the SQL decides it ────────────────────────────────────────────────────────
 export const COARSE_SHARE = 0.20;
@@ -136,18 +142,23 @@ console.log('\n§2 mutation proof — the pre-fix classifier must disagree exact
   const misclassified = CASES.filter((k) => k.want === 'P3 granularity_unproven');
   ok(misclassified.length >= 4, `${misclassified.length} cases describe the defect shape`);
   for (const k of misclassified) {
-    ok(classifyPreFix(k.c) === 'P2 dupe' && classifyUrlCollision(k.c) === 'P3 granularity_unproven',
-      `M: pre-fix calls «${k.label}» a P2 duplicate; the fix calls it unproven granularity`);
+    mustCatch(`pre-fix calls «${k.label}» a P2 duplicate; the fix calls it unproven granularity`,
+      classifyPreFix(k.c) !== classifyUrlCollision(k.c)
+        && classifyPreFix(k.c) === 'P2 dupe'
+        && classifyUrlCollision(k.c) === 'P3 granularity_unproven');
   }
   // …and must agree everywhere else, so the change is surgical rather than broad.
   for (const k of CASES.filter((x) => x.want !== 'P3 granularity_unproven')) {
-    ok(classifyPreFix(k.c) === classifyUrlCollision(k.c),
-      `M: unchanged for «${k.label}» (both -> ${k.want})`);
+    mustCatch(`the change is SURGICAL: «${k.label}» is untouched (both -> ${k.want})`,
+      classifyPreFix(k.c) === classifyUrlCollision(k.c) && classifyUrlCollision(k.c) === k.want);
   }
   // The duplicate half is the thing that must never be silenced: prove it survives at every size.
   for (const rows of [2, 10, 19, 49, 50, 3574]) {
-    const v = classifyUrlCollision({ hasAd: true, rows, share: 1.0, repeatAds: 1, collidingUrls: 1 });
-    ok(v.includes('P2 dupe'), `M: a repeated ad_number still raises P2 at ${rows} rows (-> ${v})`);
+    const withRepeat = classifyUrlCollision({ hasAd: true, rows, share: 1.0, repeatAds: 1, collidingUrls: 1 });
+    const without = classifyUrlCollision({ hasAd: true, rows, share: 1.0, repeatAds: 0, collidingUrls: 1 });
+    mustCatch(`a repeated ad_number still raises P2 at ${rows} rows (-> ${withRepeat}), and the `
+      + `otherwise-identical row without one does not (-> ${without})`,
+      withRepeat.includes('P2 dupe') && !without.includes('P2 dupe'));
   }
 }
 
