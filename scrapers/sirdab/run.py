@@ -47,9 +47,10 @@ IMPERSONATE = "chrome"
 
 _TYPE_AR = {"warehouse": "مستودع", "storefront": "محل", "workshop": "ورشة", "factory": "مصنع"}
 _DEAL = {"rent": "Rent", "sale": "Buy"}
+# the source writes diagonals WITHOUT an underscore («northeast», measured 2026-09-27: 10 of 63 facades)
 _FACADE_AR = {"north": "شمالية", "south": "جنوبية", "east": "شرقية", "west": "غربية",
-              "north_east": "شمالية شرقية", "north_west": "شمالية غربية",
-              "south_east": "جنوبية شرقية", "south_west": "جنوبية غربية"}
+              "northeast": "شمالية شرقية", "northwest": "شمالية غربية",
+              "southeast": "جنوبية شرقية", "southwest": "جنوبية غربية"}
 _UTILITIES = {"has_water": "water_supply", "has_sewage": "sanitation", "has_electricity": "electricity"}
 _NEVER_STORE = {"owner_phone", "user_id", "created_by", "building_number", "secondary_number", "zip_code",
                 "short_code"}

@@ -66,3 +66,11 @@ def test_the_owner_phone_and_building_number_are_never_stored():
     blob = json.dumps(row, ensure_ascii=False)
     assert "0551234567" not in blob and "owner_phone" not in blob and "building_number" not in blob
     assert "user_id" not in blob
+
+
+@pytest.mark.parametrize("facade", ["east", "northeast", "southwest"])
+def test_every_facade_the_source_writes_is_read(facade):
+    # the diagonals come WITHOUT an underscore («northeast»); a missed key silently drops the facade
+    (row, _), _ = R.map_ad(_ad(property={"facade": facade}))
+    assert row["direction"]
+
