@@ -434,11 +434,13 @@ def to_int(raw) -> Optional[int]:
     s = s.replace(",", "")            # commas are ALWAYS thousands separators → drop
     if not re.search(r"\d", s):
         return None
-    # A single decimal point with 1-2 fractional digits = a real (halala) fraction → truncate to
-    # whole riyals. Anything else with dots (European '1.234.567' grouping, 3+ "decimals") → dots
-    # are grouping/noise → strip them (preserves the historical integer behaviour for those inputs).
-    m = re.match(r"^(\d+)\.(\d{1,2})$", s)
-    if m:
+    # A single decimal point = a real fraction → truncate to whole riyals, however many fractional
+    # digits it carries (2026-09-27: Earth App sends str(float) '430389.39999999997', which the old
+    # 1-2-digit-only rule glued into 43038939999999997). The one single-dot shape that is ALSO valid
+    # European grouping — 1-3 digits '.' exactly 3 digits ('1.234' → 1234) — stays grouping, as does
+    # any multi-dot value ('1.262.700'): dots are grouping/noise there → strip them.
+    m = re.match(r"^(\d+)\.(\d+)$", s)
+    if m and not re.match(r"^\d{1,3}\.\d{3}$", s):
         return int(m.group(1))
     s = s.replace(".", "")
     return int(s) if s else None
@@ -452,8 +454,8 @@ def to_int_numeric(v) -> Optional[int]:
     Treats None/""/0/"0" as no-value (these APIs use 0 as "not set"). Truncates real decimals
     toward zero (int(float("123.456")) == 123). NOT for display-text prices — "69,000" / "SAR 69,000"
     raise inside float() and come back None here; use to_int() for human-formatted price strings.
-    Kept SEPARATE from to_int() on purpose: to_int() treats 3+ decimals as European digit grouping
-    ("1.234" → 1234), which is correct for display text but would inflate a raw float API value —
+    Kept SEPARATE from to_int() on purpose: to_int() treats 1-3 digits + exactly 3 decimals as European
+    digit grouping ("1.234" → 1234), which is correct for display text but would inflate a raw float API value —
     the exact bug class the 2026-07-13 price-fidelity fix removed. Never swap one for the other
     without a golden old-vs-new comparison over that scraper's real input shapes.
     """
