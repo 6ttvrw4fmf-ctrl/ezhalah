@@ -1639,6 +1639,78 @@ def upsert_arsh_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("arsh_commercial_listings", rows)
 
 
+def upsert_sirdab_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sirdab_residential_listings", rows)
+
+
+def upsert_sirdab_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sirdab_commercial_listings", rows)
+
+
+def upsert_ashab_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ashab_residential_listings", rows)
+
+
+def upsert_ashab_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ashab_commercial_listings", rows)
+
+
+def upsert_manafe_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("manafe_residential_listings", rows)
+
+
+def upsert_manafe_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("manafe_commercial_listings", rows)
+
+
+def upsert_wajaf_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("wajaf_residential_listings", rows)
+
+
+def upsert_wajaf_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("wajaf_commercial_listings", rows)
+
+
+def upsert_albukaeri_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("albukaeri_residential_listings", rows)
+
+
+def upsert_albukaeri_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("albukaeri_commercial_listings", rows)
+
+
+def upsert_ryadah_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ryadah_residential_listings", rows)
+
+
+def upsert_ryadah_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ryadah_commercial_listings", rows)
+
+
+def upsert_sqcc_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sqcc_residential_listings", rows)
+
+
+def upsert_sqcc_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sqcc_commercial_listings", rows)
+
+
+def upsert_daraa_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("daraa_residential_listings", rows)
+
+
+def upsert_daraa_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("daraa_commercial_listings", rows)
+
+
+def upsert_tawia_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("tawia_residential_listings", rows)
+
+
+def upsert_tawia_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("tawia_commercial_listings", rows)
+
+
 def upsert_vmksa_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("vmksa_residential_listings", rows)
 
