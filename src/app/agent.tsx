@@ -55,7 +55,7 @@ import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } 
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
 import { openListing } from '@/lib/openListing';
-import { filterToChat, searchSummary, buildAfSummary, buildAfRoundLog, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, type SearchQuery, type SearchResult } from '@/data/search';
+import { filterToChat, searchSummary, buildAfSummary, buildAfRoundLog, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, NO_RESULTS_GENERIC_FALLBACK_EN, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
@@ -67,6 +67,7 @@ import { resultsRowIsReady } from '@/lib/afResultsRowGate';
 import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { pickResultsFoundSentence } from '@/data/resultsFoundRotation';
+import { pickNoResultsSentence } from '@/data/noResultsRotation';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { screenKeyboardInset } from '@/lib/visualViewportFrame';
@@ -3754,8 +3755,17 @@ export default function Agent() {
               // search #1.
               const rfLang: 'ar' | 'en' = getLocale() === 'en' ? 'en' : 'ar';
               const rfName = rfLang === 'ar' ? (user?.nameAr ?? user?.name) : (user?.nameEn ?? user?.name);
+              // No-Results rotation (owner rule 2026-09-26): noResultsSuggestion() in src/data/search.ts
+              // has ~9 branches — 8 give an EARNED, specific diagnosis ("this district has other
+              // types", "did you mean X city") and stay exactly as they render today. Only its LAST
+              // branch — the true generic catch-all, tagged by NO_RESULTS_GENERIC_FALLBACK_EN — is a
+              // rotation across the owner's 80 messages, same (lang, hasName) shape as
+              // pickResultsFoundSentence above.
+              const isGenericNoResults = introZeroResult && m.result.suggestion === t(NO_RESULTS_GENERIC_FALLBACK_EN);
               const introText = introZeroResult
-                ? (m.result.suggestion ?? t('No exact matches — try broadening your search.'))
+                ? (isGenericNoResults
+                    ? pickNoResultsSentence({ lang: rfLang, name: rfName ?? null, stableKey: m.id })
+                    : (m.result.suggestion ?? t('No exact matches — try broadening your search.')))
                 : introTotal != null
                   ? pickResultsFoundSentence({
                       lang: rfLang,
