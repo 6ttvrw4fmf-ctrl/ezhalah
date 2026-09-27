@@ -37,11 +37,13 @@ console.log('\nAdvanced Filter rounds: never self-reopen, finish at ≤ 50, neve
 // ── 1. The stop line, EXECUTED ───────────────────────────────────────────────────────────────────
 check(`INTERVIEW_STOP_AT is 25 (got ${INTERVIEW_STOP_AT})`, INTERVIEW_STOP_AT === 25);
 check('MIN_TOTAL_TO_SHOW is the stop line + 1 (a question is asked only ABOVE 25)', MIN_TOTAL_TO_SHOW === 26);
-const FP = 10;
 check('≤ 25 reveals EVERY fetched listing (honestTotal 25 → 25 revealed; 18 → 18) — no «عرض المزيد» on a finished set',
-  initialReveal({ fetched: 25, honestTotal: 25, firstPage: FP, stopAt: INTERVIEW_STOP_AT }) === 25
-  && initialReveal({ fetched: 18, honestTotal: 18, firstPage: FP, stopAt: INTERVIEW_STOP_AT }) === 18);
-check('26 is NOT a finished set: first page only', initialReveal({ fetched: 26, honestTotal: 26, firstPage: FP, stopAt: INTERVIEW_STOP_AT }) === FP);
+  initialReveal({ fetched: 25, honestTotal: 25, stopAt: INTERVIEW_STOP_AT }) === 25
+  && initialReveal({ fetched: 18, honestTotal: 18, stopAt: INTERVIEW_STOP_AT }) === 18);
+// No `platforms` passed → safety floor of 1 (owner PERMANENT rule 2026-09-25 retired the fixed
+// floor of 10; src/lib/initialReveal.ts has the full history). This line only cares that 26 is NOT
+// a finished set, not the exact preview width.
+check('26 is NOT a finished set: not fully revealed', initialReveal({ fetched: 26, honestTotal: 26, stopAt: INTERVIEW_STOP_AT }) === 1);
 const agent = stripComments(read('src/app/agent.tsx'));
 check('agent.tsx feeds initialReveal the canonical stop line (stopAt: INTERVIEW_STOP_AT), never a retyped number',
   /stopAt: INTERVIEW_STOP_AT/.test(agent) && !/stopAt: 25\b/.test(agent) && !/stopAt: 50\b/.test(agent));
@@ -152,7 +154,7 @@ const mustCatch = (what: string, caught: boolean) =>
 // The stop line moved back up to 50: a 37-result set would start counting as "finished" and be
 // revealed in full, when at the owner's 2026-09-20 line of 25 it is a browsable set with a pager.
 mustCatch('the stop line moved back to 50 — a 37-result set wrongly reads as finished',
-  initialReveal({ fetched: 37, honestTotal: 37, firstPage: FP, stopAt: 50 }) !== FP);
+  initialReveal({ fetched: 37, honestTotal: 37, stopAt: 50 }) !== 1);
 
 // The canonical constant retyped as a literal at the call site — the shape that drifts the next time
 // the owner moves the line.

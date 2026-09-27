@@ -18,6 +18,7 @@ import {
   MESSAGE_MAX, SUBJECT_MAX, forgetSupportDraft, recallSupportDraft, rememberSupportDraft,
   sendSupportMessage, validateSupportMessage, type SupportField,
 } from '@/lib/support';
+import { centredDialogBox, useForeignPromptInsets } from '@/lib/bottomPromptInset';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { ABOUT_ART_BREAKPOINT, DOCK_BREAKPOINT } from '@/lib/responsive';
@@ -88,6 +89,9 @@ export default function InfoModal() {
 
 function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'privacy'; onClose: () => void }) {
   const insets = useSafeAreaInsets();
+  // The band a THIRD-PARTY prompt has docked over the app — foreign only, never the combined set,
+  // which would fold our own cards back in (ops_incident #163). Zero unless something is docked.
+  const promptInsets = useForeignPromptInsets();
   const { width, height } = useWindowDimensions();
   const { t } = useI18n();
   const reduced = useReducedMotion();
@@ -141,12 +145,46 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
     return attachCardDrag(node, grip, { clamp: clampOffsetOnScreen(node) });
   }, [drag]);
 
-  const availH = height - insets.top - insets.bottom - 48;
+  // BOTH numbers come from one pure, mutation-proven function, because applying only one of them
+  // moves the card and still leaves the × under the prompt (ops_incident #670 — see centredDialogBox).
+  const dialogBox = centredDialogBox(height, 16, insets, promptInsets, 48);
+  const availH = dialogBox.availHeight;
   const maxH = Math.min(availH, about ? ABOUT_MAX_H : 720);
   const maxW = about ? ABOUT_MAX_W : kind === 'legal' ? LEGAL_MAX_W : SUPPORT_MAX_W;
 
   return (
-    <View style={[s.overlay, kind === 'legal' && s.overlayTop]}>
+    <View
+      style={[
+        s.overlay,
+        kind === 'legal' && s.overlayTop,
+        // ── A FIXED OVERLAY IS INVISIBLE TO THE ROOT'S RESERVED BAND (ops_incident #670) ─────────
+        // `_layout.tsx` reserves a top-docked auth prompt's height as the app root's paddingTop,
+        // and that correctly moves everything laid out INSIDE it. This overlay is not: it resolves
+        // against the viewport, so the band passes straight through it and the card — with its ×
+        // pinned to the card's own top-right — stays put underneath Google's frame.
+        //
+        // That is exactly ops_incident #163's lesson («a position: fixed child is NOT laid out
+        // inside it … an ancestor's padding is invisible to it by definition»), which CookieConsent
+        // already answers on the BOTTOM edge via dockedEdgeOffset(). This is the same defect on the
+        // TOP edge, in the component that never got the same treatment.
+        //
+        // MEASURED on production, 375x812, signed out, 2/2 fresh contexts, 2026-09-24, with the
+        // WebKit top-dock shape injected — and it matches what WebKit itself reported in
+        // journey-sweep run 35945059761:
+        //   no dock  → × [308,63,34,34], painted [div, button[info-modal-close], …] idx 1 → CLICK LANDS
+        //   top dock → × [308,63,34,34] (IDENTICAL — the card never moved),
+        //              painted [iframe src=accounts.google.com/gsi/iframe/select, div, div, ×] idx 3
+        //              → real click fails with TimeoutError, 2/2
+        // On WebKit and Firefox One Tap docks to the TOP, so a signed-out guest at 375px could not
+        // dismiss «المساعدة/تواصل معنا» with its ×. Chromium docks to the BOTTOM and was unaffected,
+        // which is why only two of three engines ever showed it.
+        //
+        // FOREIGN insets, never the combined ones: this must clear whoever ELSE is docked, and the
+        // combined set includes our own cards (the #163 self-reference trap). Zero whenever nothing
+        // is docked, so nothing moves on the path that was already correct.
+        promptInsets.top > 0 && { paddingTop: dialogBox.paddingTop },
+      ]}
+    >
       {/* Blurred + softly darkened page behind the dialog — the page stays visible, the card is
           the single sharp layer. */}
       <AnimatedPressable style={[s.backdrop, backdropStyle]} onPress={close} />

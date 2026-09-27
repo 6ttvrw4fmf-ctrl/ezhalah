@@ -13,7 +13,8 @@ import { withPage, settle, bodyText, storedHistory, clickText, clickReason, slee
          ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
          closeMobileSidebar, THREE_CHATS, SUB, BASE, ENGINE, appPageErrors, settledCount,
          classifySearchRpc, classifyTapOwnership, gotoOrRetryTransport,
-         SELECTED_CITY_MARKER } from './harness.mjs';
+         SELECTED_CITY_MARKER, isBottomDocked, dockedBandCap,
+         filterHomeState, filterHomeWhy, paintedTextCarriers, stayedAtZero } from './harness.mjs';
 
 const ONLY = process.env.JOURNEY_ONLY || '';
 const N = Number(process.env.JOURNEY_N || 2);
@@ -22,6 +23,45 @@ const N = Number(process.env.JOURNEY_N || 2);
 
 /** Type like a person: one key at a time, through React's real event path. */
 const typeInto = async (loc, text) => { await loc.click(); await loc.pressSequentially(text, { delay: 60 }); };
+
+/** The TOP dock, in the shape WebKit and Firefox really serve (ops_incident #202): a STATIC gsi
+ *  iframe whose only positioning box is a `position: fixed` #credential_picker_container.
+ *
+ *  ONE definition, two callers. `both-edges-docked-clears-controls` asks whether the HOME screen's
+ *  controls stay clear of it; `support-close-survives-a-top-dock` asks the same of an OVERLAY's own
+ *  dismiss control. Two hand-maintained copies of "what the engines really serve" is precisely the
+ *  drift this repo keeps paying for, so the shape lives here and neither journey owns it.
+ *
+ *  WHY INJECT AT ALL, rather than wait for the real prompt: Google suppresses One Tap freely
+ *  (cooldown, no Google session, opt-out), and PART 5 shape 13 is explicit that its absence is a
+ *  SKIP, never a pass. A barrier that only fires on the days Google feels like showing the prompt
+ *  is not a barrier — ops_incident #670 shipped a dead control behind exactly that gap. */
+const TOP_DOCK_SYNTH = '#credential_picker_container[data-synthetic-top-prompt]';
+const injectTopDockPrompt = (page) => page.evaluate(() => {
+  const box = document.createElement('div');
+  box.id = 'credential_picker_container';
+  box.setAttribute('data-synthetic-top-prompt', '1');
+  Object.assign(box.style, { position: 'fixed', left: '0px', top: '20px', width: '100%',
+                             height: '158px', zIndex: '9999', pointerEvents: 'auto',
+                             background: '#fff', border: '0' });
+  const f = document.createElement('iframe');
+  // The app identifies a prompt with the ATTRIBUTE selector iframe[src*="accounts.google.com/gsi/"],
+  // so the attribute is what has to match — and `srcdoc` takes precedence over `src` for the
+  // document that actually loads. So the frame matches the app's selector while loading NOTHING
+  // from Google. Pointing it at the real endpoint instead fetches real GIS code into a context it
+  // was not served for, and that code throws «ReferenceError: gis is not defined» as an uncaught
+  // page error — the journey manufacturing a defect against the app under test (PART 9.4).
+  f.setAttribute('src', 'https://accounts.google.com/gsi/iframe/select?synthetic=journey');
+  f.setAttribute('srcdoc', '<!doctype html><title>synthetic docked prompt</title>');
+  f.setAttribute('sandbox', '');
+  // STATIC on purpose: a static iframe has no positioning box, so an app measuring the IFRAME
+  // instead of its fixed ancestor under-reserves by the wrapper's extra 8px — incident #202.
+  Object.assign(f.style, { position: 'static', width: '100%', height: '150px', border: '0' });
+  box.appendChild(f);
+  document.body.appendChild(box);
+});
+const removeTopDockPrompt = (page) =>
+  page.evaluate((s) => document.querySelectorAll(s).forEach((n) => n.remove()), TOP_DOCK_SYNTH);
 
 /** Is this text VISIBLE, not merely present in innerText? A CSS-faded toast stays in innerText
  *  (agent.tsx's «شكراً على ملاحظتك» does exactly that), so presence is never the oracle. */
@@ -56,10 +96,15 @@ const JOURNEYS = {};
  *  mobile it does not overflow horizontally (PART 5 shape 11). */
 JOURNEYS['cold-open'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
   const name = `cold-open:${mobile ? 'mobile375' : 'desktop1440'}`;
-  const text = await bodyText(page);
-  if (text.length < 200) defect(name, 'blank page', `body innerText is ${text.length} chars`);
-  else pass(name, `rendered (${text.length} chars)`);
-  if (!text.includes('بحث')) defect(name, 'missing primary control', '«بحث» not rendered on Filter home');
+  // Identity by ELEMENT, never by an innerText substring — see filterHomeVerdict in harness.mjs.
+  // The old line here was `!text.includes('بحث')`, and deleting the real «بحث» control out of the
+  // live production DOM left it TRUE (2/2), so this journey's own named defect could not fire.
+  const home = await filterHomeState(page);
+  if (home.verdict === 'blank') defect(name, 'blank page', filterHomeWhy(home));
+  else pass(name, `rendered (${home.bodyLength} chars)`);
+  if (home.verdict === 'home-missing-search-control') defect(name, 'missing primary control', filterHomeWhy(home));
+  else if (home.verdict === 'not-home') defect(name, 'cold open did not land on the Filter home', filterHomeWhy(home));
+  else if (home.verdict === 'home') pass(name, filterHomeWhy(home));
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on cold open', errs.join(' | ')); }
   if (mobile) {
     const ov = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
@@ -326,10 +371,16 @@ JOURNEYS['back-after-search'] = async (mobile) => withPage({ mobile }, async (pa
     note(`${name}: Back left the app origin (${url}) — a fresh context has no prior in-app entry`);
     return;
   }
-  const text = await bodyText(page);
-  if (text.length < 200) defect(name, 'Back stranded the user', `body is ${text.length} chars at ${url}`);
-  else if (!text.includes('بحث')) defect(name, 'Back landed off-route', `no Filter home controls at ${url}`);
-  else pass(name, `Back returned to a usable screen (${url})`);
+  // PART 5 shape 9 is «Browser Back stranding the user off-route», and the old oracle here could
+  // not see it: `text.includes('بحث')` is TRUE on the agent screen too (the greeting says «أبحث»),
+  // measured 4/4 on production across both viewports. A Back that landed on the wrong screen
+  // reported `pass`. Ask the ELEMENTS instead, and name WHICH failure it is.
+  const home = await filterHomeState(page);
+  if (home.verdict === 'blank') defect(name, 'Back stranded the user', `${filterHomeWhy(home)} at ${url}`);
+  else if (home.verdict === 'home-missing-search-control')
+    defect(name, 'Back landed on the Filter home without its primary control', `${filterHomeWhy(home)} at ${url}`);
+  else if (home.verdict === 'not-home') defect(name, 'Back landed off-route', `${filterHomeWhy(home)} at ${url}`);
+  else pass(name, `Back returned to the Filter home — ${filterHomeWhy(home)} at ${url}`);
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on Back', errs.join(' | ')); }
 });
 
@@ -691,11 +742,18 @@ JOURNEYS['adv-newchat-mid-restore'] = async (mobile) => withPage({ mobile, signe
   if (!(await ensureSidebar(page, mobile))) { skip(name, 'sidebar closed after open'); return; }
   if (!(await clickText(page, 'محادثة جديدة'))) { skip(name, 'New Chat not found'); return; }
   await sleep(5000);
-  const t = await bodyText(page);
   const ta = page.locator('textarea').first();
   const composer = (await ta.count()) ? await ta.inputValue() : '';
-  const leaked = t.includes('أبحث عن') && ['جدة', 'الرياض', 'الخبر'].some((c) => t.includes(c));
-  if (leaked) defect(name, 'interrupted restore leaked into the new chat', 'a restored search bubble is on the blank chat');
+  // THE OLD ORACLE COULD NOT TELL A LEAK FROM THE PRODUCT WORKING (routine #6, 2026-09-26):
+  //   t.includes('أبحث عن') && ['جدة','الرياض','الخبر'].some((c) => t.includes(c))
+  // «أبحث عن» is carried by «وسأبحث عنه» (two greeting strings in src/i18n.tsx) and by the composer's
+  // aria-hidden rotating examples (src/data/introExamples.ts renders «أبحث عن أرض سكنية في الرياض…»),
+  // and the city conjunct was measured PERMANENTLY TRUE — all three city names are on screen from the
+  // sidebar's own saved-chat titles, 2/2 across 21 s of rotation — so it narrowed nothing. Ask for a
+  // PAINTED, non-decoration leaf carrying the phrase as its own word instead: an actual bubble.
+  const bubbles = await paintedTextCarriers(page, 'أبحث عن');
+  if (bubbles.length) defect(name, 'interrupted restore leaked into the new chat',
+    `a restored search bubble is on the blank chat: ${bubbles.map((b) => `«${b}»`).join(' | ')}`);
   else if (composer.trim()) defect(name, 'New Chat inherited composer text', `holds «${composer}»`);
   else pass(name, 'New Chat is blank even when it interrupts a restore');
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on interrupted restore', errs.join(' | ')); }
@@ -713,10 +771,13 @@ JOURNEYS['adv-background-tab'] = async (mobile) => withPage({ mobile, signedIn: 
   await sleep(45_000);
   await page.bringToFront();
   await sleep(3500);
-  const t = await bodyText(page);
-  if (t.length < 200) defect(name, 'backgrounded tab came back blank', `body is ${t.length} chars`);
-  else if (!t.includes('بحث')) defect(name, 'controls missing after backgrounding', 'no «بحث» on return');
-  else pass(name, `survived 45s backgrounded (${t.length} chars, controls present)`);
+  // «no «بحث» on return» was unreachable: the substring survives the control's removal (harness.mjs).
+  // A frozen-rAF screen that came back as the agent chat, or with the button gone, is exactly what
+  // this journey exists to catch — so the verdict has to come from the elements.
+  const home = await filterHomeState(page);
+  if (home.verdict === 'blank') defect(name, 'backgrounded tab came back blank', filterHomeWhy(home));
+  else if (home.verdict !== 'home') defect(name, 'controls missing after backgrounding', filterHomeWhy(home));
+  else pass(name, `survived 45s backgrounded — ${filterHomeWhy(home)}`);
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error after backgrounding', errs.join(' | ')); }
   await other.close().catch(() => {});
 });
@@ -1426,7 +1487,8 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
       const r = await page.evaluate((sel) => {
         for (const f of document.querySelectorAll(sel)) {
           const q = f.getBoundingClientRect();
-          if (q.height > 0) return { top: Math.round(q.top), bottom: Math.round(q.bottom), h: Math.round(q.height) };
+          if (q.height > 0) return { top: Math.round(q.top), bottom: Math.round(q.bottom), h: Math.round(q.height),
+            height: q.height, vh: window.innerHeight, vw: window.innerWidth };
         }
         return null;
       }, SHEET_SEL);
@@ -1486,18 +1548,47 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     // answers "did the sheet win this tap" is whether the TESTED POINT falls inside the sheet's own
     // rect, exactly the two numbers this journey already prints side by side in every finding.
     const winnerIsSheet = !!q && q.height > 0 && cy >= q.top && cy <= q.bottom && cx >= q.left && cx <= q.right;
+    // THE WHOLE STACK, NOT stack[0]. `elementsFromPoint(...)[0]` is by definition what
+    // `elementFromPoint` returns, so reading only the top was the singular question PART 5 shape 13
+    // forbids here — dressed as the plural form, and therefore invisible to
+    // verify-ownership-probes-use-the-painted-stack.ts, whose §1 discovers by CALL SHAPE.
+    //   selfIndex === -1  the control is ABSENT from the painted stack ⇒ CLIPPED, not covered
+    //   selfIndex === 0   the control owns its own centre ⇒ clear
+    //   selfIndex > 0     something paints above it ⇒ genuinely covered
+    // ops_incident #377 measured the first case being filed as the third.
+    const selfIndex = stack.findIndex((n) => n === el || n.contains(el) || el.contains(n));
     return { top: Math.round(r.top), bottom: Math.round(r.bottom), sheetNow,
              winner: t ? `${t.tagName}${t.id ? '#' + t.id : ''}${t.className && typeof t.className === 'string' ? '.' + t.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}` : null,
-             isSelf: !!t && (t === el || t.contains(el) || el.contains(t)),
+             isSelf: selfIndex === 0,
+             selfIndex,
              winnerIsSheet };
   }, { s: sel, sheetSel: SHEET_SEL });
 
   /** Turn a failed hit-test into the RIGHT finding via the pure, mutation-proven classifier in
    *  harness.mjs — One Tap's own class if the sheet is really the blocker, or an honest "some other
-   *  overlay" finding otherwise. Never the wrong one asserted with confidence. */
-  const reportBlocked = (journeyName, controlLabel, r) => {
-    const { what, detail } = classifyBlockedControl(r, controlLabel);
-    defect(journeyName, what, detail);
+   *  overlay" finding otherwise. Never the wrong one asserted with confidence.
+   *
+   *  A CLIPPED control is not a blocked one, and that case is now RESOLVED BY REACHABILITY rather
+   *  than filed on geometry (ops_incident #377): the control is absent from the painted stack, so
+   *  the only question left is whether a person can still get to it. Scroll it into view and click
+   *  it the way a user would — if that lands, the reservation was doing its job and this is a PASS
+   *  with the numbers printed; if it does not, the control really is unreachable and that IS a
+   *  defect, filed with the reason. Either way the outcome is explicit, never a silent drop
+   *  (PART 9.5: a run that asserted nothing is not a pass). */
+  const reportBlocked = async (page, journeyName, controlLabel, r, loc) => {
+    const { what, detail, isClipped } = classifyBlockedControl(r, controlLabel);
+    if (!isClipped) { defect(journeyName, what, detail); return; }
+    let err = null;
+    await loc.scrollIntoViewIfNeeded().catch((e) => { err = `scrollIntoViewIfNeeded: ${String(e).split('\n')[0]}`; });
+    if (!err) await loc.click({ timeout: 10_000 }).catch((e) => { err = String(e).split('\n')[0]; });
+    if (err) {
+      defect(journeyName, `«${controlLabel}» is clipped out of view AND cannot be reached`,
+        `${detail} || scrolling to it and clicking it failed: ${err}`);
+    } else {
+      pass(journeyName, `«${controlLabel}» (${r.top}-${r.bottom}) is clipped by the app's reserved band `
+        + `(absent from the painted stack at its centre, which holds ${r.winner}) but a real scroll+click `
+        + `still reaches it — the reservation working, not an overlay covering it (ops_incident #377)`);
+    }
   };
 
   await withPage({ mobile }, async (page, bag) => {
@@ -1507,7 +1598,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     // Desktop's prompt sits in a corner rather than docked, so «بحث» needs no reserved space there —
     // but the mode-switch check below still runs, because a corner prompt on a 1440px viewport can
     // still land on a control near the top edge, and "not bottom-docked" says nothing about that.
-    const desktopCornerPrompt = sheet.bottom < 660 && !mobile;
+    const desktopCornerPrompt = !isBottomDocked(sheet, sheet.vh) && !mobile;
     if (desktopCornerPrompt) pass(name, `desktop prompt is not bottom-docked (${sheet.top}-${sheet.bottom})`);
 
 
@@ -1523,7 +1614,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     const ms = await winnerAt(page, 'modeswitch');
     if (ms.missing) skip(`${name}/modeswitch`, '«تصفية» not rendered');
     else if (!ms.isSelf) {
-      reportBlocked(`${name}/modeswitch`, 'تصفية', ms);
+      await reportBlocked(page, `${name}/modeswitch`, 'تصفية', ms, page.getByText('تصفية', { exact: true }).first());
     } else {
       let msErr = null;
       await page.getByText('تصفية', { exact: true }).first().click({ timeout: 10_000 })
@@ -1550,7 +1641,7 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     if (cta.skipCta) { /* handled above — fall through to the mode-switch check */ }
     else if (cta.missing) { skip(name, '«بحث» not rendered'); }
     else if (!cta.isSelf) {
-      reportBlocked(name, 'بحث', cta);
+      await reportBlocked(page, name, 'بحث', cta, page.getByText('بحث', { exact: true }).first());
     } else {
       // Not just the hit test — a REAL click must land (PART 9.2 (4)).
       let err = null;
@@ -1572,16 +1663,119 @@ JOURNEYS['onetap-clear-of-controls'] = async (mobile) => {
     await sleep(3500);
     const sheet = await waitForSheet(page);
     if (!sheet) { skip(`${name}/composer`, 'Google never showed the One Tap prompt this run'); return; }
-    if (sheet.bottom < 660 && !mobile) { pass(`${name}/composer`, 'desktop prompt is not bottom-docked'); return; }
+    if (!isBottomDocked(sheet, sheet.vh) && !mobile) { pass(`${name}/composer`, 'desktop prompt is not bottom-docked'); return; }
     const comp = await winnerAt(page, 'composer');
     if (comp.missing) { skip(`${name}/composer`, 'no composer on this screen'); return; }
     if (!comp.isSelf) {
-      reportBlocked(`${name}/composer`, 'the AI Agent composer', comp);
+      await reportBlocked(page, `${name}/composer`, 'the AI Agent composer', comp, page.locator('textarea').first());
     } else {
       pass(`${name}/composer`, `composer (${comp.top}-${comp.bottom}) is clear of the prompt (now ${comp.sheetNow})`);
     }
   });
 };
+
+/** READ ALOUD MUST NOT TELL A USER THEIR DEVICE CANNOT DO SOMETHING IT HAS NOT FINISHED CHECKING.
+ *
+ *  ops_incident #722. PART 1 names the read-aloud controller as this routine's, and until this
+ *  journey existed it had NO real-browser coverage at all — only two offline barriers. PART 5 is
+ *  explicit that a unit test must not stand in for the click, so the decision being executed offline
+ *  by `verify-read-aloud-voice-logic.ts` §6 is proven HERE against the real bundle and a real tap.
+ *
+ *  THE STATE THIS EXERCISES, and why it is the ordinary path rather than a startup edge. `resolveVoice()`
+ *  starts at module import and keeps retrying for `RETRY_WINDOW_MS = 45_000`; the 🔊 control does not
+ *  exist until an agent search has returned cards, measured on production at t = 29,283 / 30,290 /
+ *  30,311 / 30,695 ms since load (4/4). So the button's first availability lands ~15s INSIDE the
+ *  window, every time, and a tap there means "still looking" — not "this device has no Arabic voice".
+ *
+ *  THE ORACLE IS THE ELAPSED TIME, MEASURED, NEVER ASSUMED, and it is deliberately asymmetric:
+ *    · inside the window  ⇒ the message must be the TEMPORARY one. Sound in the safe direction: the
+ *      45s clock starts at module import, which cannot be EARLIER than page load, so "elapsed since
+ *      load < 45s" is a conservative proof that the window is still open.
+ *    · past the window    ⇒ the reverse implication does NOT hold (import may be later than load), so
+ *      this only asserts that SOME honest refusal message appeared, and names which. Claiming the
+ *      device verdict there would be asserting more than the measurement supports.
+ *  Either way an outcome is recorded with its numbers — never a bare return (PART 9.5).
+ *
+ *  A DEVICE WITH ZERO VOICES IS A REAL DEVICE, not a harness artifact: headless Chromium reports 0
+ *  voices of any language, which is exactly a stock install with no Arabic language pack, the case
+ *  readAloud.ts's own root-cause note was written for. What this journey does NOT prove is anything
+ *  about a physical iPhone's voice list or how long it takes to populate (PART 10). */
+const RA_BUTTON = 'استماع للرد';
+const RA_DEVICE_VERDICT = 'الاستماع غير متاح على هذا الجهاز';
+const RA_STILL_PREPARING = 'نُجهّز الصوت — أعد المحاولة بعد لحظة';
+const RA_WINDOW_MS = 45_000;   // mirrors RETRY_WINDOW_MS in src/lib/readAloud.ts
+
+JOURNEYS['read-aloud-refusal-is-honest'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `read-aloud-refusal-is-honest:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const t0 = Date.now();
+  await gotoOrRetryTransport(page, `${BASE}/`);
+  await settle(page);
+  await sleep(2500);
+  // Through the UI, as a person does — a direct /agent deep link is sent Home by design.
+  if (!(await clickText(page, 'الوسيط الذكي', { exact: false }))) {
+    skip(name, `the agent tab was not clickable (${clickReason()})`); return;
+  }
+  await sleep(4000);
+  if (!page.url().includes('/agent')) { skip(name, `the agent tab did not land on /agent (${page.url()})`); return; }
+
+  const box = page.locator('textarea, input[type="text"]');
+  if (!(await box.count())) { skip(name, 'no composer on the agent screen'); return; }
+  const composer = box.first();
+  await composer.click();
+  await composer.pressSequentially('شقة للإيجار في الرياض', { delay: 40 });
+  await composer.press('Enter');
+
+  // The 🔊 control only exists once a results turn has rendered. Poll on THAT condition, never a
+  // fixed sleep (PART 11.2) — and record when it arrived, because the verdict depends on it.
+  let btn = null, appearedAt = null;
+  for (let i = 0; i < 140; i++) {
+    const c = page.getByLabel(RA_BUTTON);
+    if (await c.count()) { btn = c.first(); appearedAt = Date.now() - t0; break; }
+    await sleep(1000);
+  }
+  if (!btn) { skip(name, 'the 🔊 control never appeared — no results turn rendered, so there was nothing to tap'); return; }
+
+  const voices = await page.evaluate(() => ({
+    n: (window.speechSynthesis?.getVoices?.() || []).length,
+    ar: (window.speechSynthesis?.getVoices?.() || []).filter((v) => /^ar/i.test(v.lang)).length,
+  }));
+  // A device that HAS an Arabic voice will speak, so there is no refusal to judge. That is a real
+  // and welcome state, and a skip rather than a pass because nothing was measured.
+  if (voices.ar > 0) { skip(name, `this engine has ${voices.ar} Arabic voice(s), so the tap speaks — no refusal to judge`); return; }
+
+  await btn.scrollIntoViewIfNeeded().catch(() => {});
+  await btn.click();
+  await sleep(700);
+  const body = await bodyText(page);
+  const saidDevice = body.includes(RA_DEVICE_VERDICT);
+  const saidPreparing = body.includes(RA_STILL_PREPARING);
+  const where = `🔊 appeared at t=${appearedAt}ms since load (window ${RA_WINDOW_MS}ms); `
+    + `engine reports ${voices.n} voice(s), ${voices.ar} Arabic`;
+
+  if (appearedAt < RA_WINDOW_MS) {
+    if (saidDevice && !saidPreparing) {
+      defect(name, 'a tap while the voice lookup was STILL RUNNING claimed the device cannot do it',
+        `${where}. The app said «${RA_DEVICE_VERDICT}» — a permanent verdict about the user's hardware — `
+        + `while resolveVoice() was still inside its retry window. ops_incident #722; this is the `
+        + `owner-locked unknown -> NO rule in the read-aloud surface.`);
+    } else if (saidPreparing) {
+      pass(name, `a refusal inside the retry window says «${RA_STILL_PREPARING}» and not the device verdict — ${where}`);
+    } else {
+      defect(name, 'a refused 🔊 tap produced NO message at all — a silent dead control',
+        `${where}. Neither refusal sentence is on screen, so the tap did nothing a user can see.`);
+    }
+  } else if (saidDevice || saidPreparing) {
+    // Past the window the implication does not run backwards (import may be later than load), so
+    // assert only that an honest refusal was shown, and name which one.
+    pass(name, `a refusal past the retry window shows an honest message `
+      + `(«${saidDevice ? RA_DEVICE_VERDICT : RA_STILL_PREPARING}») — ${where}. Which state the app was in `
+      + `is not decidable from elapsed-since-load in this direction, so only presence is asserted.`);
+  } else {
+    defect(name, 'a refused 🔊 tap produced NO message at all — a silent dead control',
+      `${where}. Neither refusal sentence is on screen, so the tap did nothing a user can see.`);
+  }
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error while judging the read-aloud refusal', errs.join(' | ')); }
+});
 
 // ── «تواصل مع الدعم»: shared plumbing ───────────────────────────────────────────────────────────
 // The form landed 2026-09-02 inside InfoModal's dialog and had never been driven by a journey.
@@ -1737,22 +1931,39 @@ JOURNEYS['docked-prompts-stack'] = async (mobile) => withPage({ mobile }, async 
 
   if (!after.card) { skip(name, 'the consent card disappeared while the second prompt was docked'); return; }
 
+  // WHAT THIS JOURNEY IS ALLOWED TO CONCLUDE, corrected by routine #6, 2026-09-25.
+  //
+  // It used to file a DEFECT on `after.reserved < before.reserved` — any DECREASE in the reservation —
+  // before asking whether the BAND had decreased with it. That fired 2/2 against healthy production
+  // on the 2026-09-25 sweep, and the failure text refuted itself in its own arithmetic: reserved
+  // 526 → 416 with the card moving 286-558 → 396-668, i.e. a band of 812-396 = 416 covered by a
+  // reservation of exactly 416, printed as «0px of app content is now under an opaque card». A
+  // smaller reservation for a smaller band is the inset working, not ops_incident #201 recurring:
+  // the synthetic 144px prompt is shorter than the real One Tap sheet it displaced, so the whole
+  // docked stack got shorter and the correct reservation got shorter with it.
+  //
+  // Same CLASS as ops_incident #593 (`r.y < 80`) and the 660 literal beside it: an ABSOLUTE
+  // comparison standing in for an inherently RELATIVE question. The question #201 actually asks is
+  // «does the reservation still COVER the band the card occupies», and that is what is asserted —
+  // once, on coverage. A shrink is reported as CONTEXT in both outcomes so it stays visible in the
+  // log without being mistaken for a verdict.
   const band = after.vh - after.card.top;           // what the card now occupies, from its top down
-  if (after.reserved < before.reserved) {
-    defect(name, 'a SECOND docked prompt SHRANK the reservation the first one had earned',
-      `root reserved ${before.reserved}px → ${after.reserved}px; the card moved `
-      + `${before.card.top}-${before.card.bottom} → ${after.card.top}-${after.card.bottom}, so `
-      + `${band - after.reserved}px of app content is now under an opaque card. ops_incident #201.`);
-  } else if (after.reserved + 1 < Math.min(band, Math.floor(after.vh * 0.5))) {
-    // Not a shrink, but still short of the band the card occupies (allowing the documented 50% cap).
-    defect(name, 'the reservation does not cover the band the consent card occupies',
-      `root reserved ${before.reserved}px → ${after.reserved}px, but the card occupies ${band}px from `
-      + `${after.card.top} down (cap ${Math.floor(after.vh * 0.5)}px), so `
-      + `${Math.min(band, Math.floor(after.vh * 0.5)) - after.reserved}px of app content is under an `
-      + `opaque card. ops_incident #201.`);
+  const need = Math.min(band, dockedBandCap(after.vh));
+  const shrank = after.reserved < before.reserved;
+  const moved = `root reserved ${before.reserved}px → ${after.reserved}px; the card moved `
+    + `${before.card.top}-${before.card.bottom} → ${after.card.top}-${after.card.bottom} (band ${band}px, `
+    + `cap ${dockedBandCap(after.vh)}px, so ${need}px is owed)`;
+  if (after.reserved + 1 < need) {
+    // The two shapes are named apart, because they point at different code: a reservation that
+    // SHRANK while the band did not is #201's signature (a prompt resting on another prompt stopped
+    // being admitted); one that simply never covered the band is the single-prompt arithmetic.
+    defect(name, shrank
+      ? 'a SECOND docked prompt SHRANK the reservation below the band the card still occupies'
+      : 'the reservation does not cover the band the consent card occupies',
+      `${moved}, so ${need - after.reserved}px of app content is under an opaque card. ops_incident #201.`);
   } else {
-    pass(name, `a second docked prompt grew the reservation ${before.reserved}px → ${after.reserved}px `
-      + `(card ${after.card.top}-${after.card.bottom}), so nothing lays out under it`);
+    pass(name, `a second docked prompt left the reservation covering the card's band — ${moved}`
+      + `${shrank ? ' (it shrank, correctly: the docked stack itself got shorter)' : ''}`);
   }
   bag.ok = true;
 });
@@ -1790,8 +2001,38 @@ JOURNEYS['support-draft-survives-dismiss'] = async (mobile) => withPage({ mobile
   // pointer-blocked, click times out, and the whole × check skipped 2/2 while reading as coverage.
   const x = page.locator('[data-testid="info-modal-close"]').first();
   if (await x.count()) {
-    await x.click({ timeout: 10_000 }).catch(() => {});
-    if (!(await waitSupportClosed(page))) { skip(`${name}/x`, 'the X did not close the dialog'); return; }
+    // THE CLICK'S OWN ERROR USED TO BE SWALLOWED, AND THAT IS WHY THIS SKIP SAYS NOTHING
+    // (ops_incident #670, routine #6, 2026-09-24). `.catch(() => {})` threw away the one fact that
+    // distinguishes the two shapes — PART 11.2 rule 4, and the identical trap PR #1146 paid for
+    // (five retries into a swallowed catch). «the X did not close the dialog» reads like a product
+    // verdict and is equally consistent with "the click never landed at all".
+    //
+    // MEASURED, and the reason this is instrumentation rather than a guessed fix: the skip fires
+    // 2/2 on WebKit (sweep 35934755839) AND 2/2 on Firefox (sweep 35941044015), and 0/2 on
+    // Chromium. Two of three engines, so Chromium is the outlier and this points at the product —
+    // but neither failing engine is drivable from this container (PART 11.5), and the #1053
+    // precedent is explicit that the move when you are blind on a surface is to MAKE THE FAILURE
+    // VISIBLE, not to guess a third time. One CI dispatch now answers it on both engines.
+    const clickErr = await x.click({ timeout: 10_000 }).then(() => null, (e) => String(e).split('\n')[0]);
+    if (!(await waitSupportClosed(page))) {
+      // Who actually owns the X's centre? PLURAL, never `elementFromPoint` — a rect is LAYOUT and
+      // being painted is not (PART 5 shape 13; enforced as a class by
+      // scripts/verify-ownership-probes-use-the-painted-stack.ts). A control clipped out of view
+      // keeps its rect, and the singular form would report a healthy build as covered.
+      const at = await x.boundingBox().then((b) => (b ? page.evaluate(([cx, cy]) => {
+        const stack = document.elementsFromPoint(cx, cy);
+        return {
+          painted: stack.slice(0, 3).map((e) => `${e.tagName.toLowerCase()}`
+            + `${e.getAttribute('data-testid') ? `[${e.getAttribute('data-testid')}]` : ''}`),
+          selfIndex: stack.findIndex((e) => e.getAttribute?.('data-testid') === 'info-modal-close'),
+        };
+      }, [b.x + b.width / 2, b.y + b.height / 2]) : null)).catch(() => null);
+      skip(`${name}/x`, 'the X did not close the dialog — '
+        + (clickErr ? `the CLICK ITSELF FAILED: «${clickErr}»` : 'the click resolved without error, so the dialog stayed open on its own')
+        + (at ? ` | painted at the X's centre: [${at.painted.join(', ')}], the X is at index ${at.selfIndex}`
+              : ' | the X had no box to probe'));
+      return;
+    }
     const why3 = await openSupport(page, mobile);
     if (why3) { skip(`${name}/x`, `could not reopen after the X: ${why3}`); return; }
     const afterX = await readSupportDraft(page);
@@ -1802,6 +2043,116 @@ JOURNEYS['support-draft-survives-dismiss'] = async (mobile) => withPage({ mobile
   } else skip(`${name}/x`, 'no close control found on the dialog');
 
   { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error on the support-form path', errs.join(' | ')); }
+});
+
+/** J23 — THE SUPPORT DIALOG'S × MUST SURVIVE A TOP-DOCKED FOREIGN PROMPT (ops_incident #670).
+ *
+ *  THE GAP THIS CLOSES. #670 — a signed-out guest on a phone could not close «المساعدة/تواصل معنا»,
+ *  because Google's One Tap frame docks to the TOP on WebKit and Firefox and painted over the ×  —
+ *  is fixed (centredDialogBox, e5b4a2a) and barriered OFFLINE by verify-bottom-prompt-inset.ts §K.
+ *  In a real browser, though, the only thing that ever exercised it was
+ *  `support-draft-survives-dismiss` running against whatever One Tap happened to do that day.
+ *
+ *  That is not coverage. Google suppresses One Tap freely (cooldown, no Google session, opt-out),
+ *  and PART 5 shape 13 is explicit that the prompt's absence is a SKIP, never a pass. So on any day
+ *  Google declines to show it, #670 could regress and all three engines would report green — which
+ *  is exactly how it shipped in the first place: it was found by accident, in the first WebKit
+ *  sweep after ops_incident #593's drawer fix happened to let that engine reach the step at all.
+ *
+ *  So the dock is INJECTED rather than waited for, which makes the assertion deterministic on every
+ *  engine including Chromium, where the real prompt docks to the bottom and never covered the ×.
+ *
+ *  IT ASSERTS THE USER'S TRUTH, NOT THE GEOMETRY. The offline barrier already pins the arithmetic.
+ *  What no offline check can say is whether the × actually CLOSES the dialog for a person with the
+ *  prompt on screen, so this clicks it for real and waits for the form to be gone. Geometry is
+ *  reported alongside only to tell the two failure shapes apart (PART 11.2 rule 4): a × that is
+ *  COVERED (someone else is painted at its centre) is a different bug from a × that is reachable
+ *  and still does not close the dialog.
+ *
+ *  PLURAL elementsFromPoint, never the singular form — a rect is LAYOUT, being painted is not
+ *  (PART 5 shape 13, enforced as a class by verify-ownership-probes-use-the-painted-stack.ts). */
+JOURNEYS['support-close-survives-a-top-dock'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `support-close-survives-a-top-dock:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const why = await openSupport(page, mobile);
+  if (why) { skip(name, why); return; }
+
+  const x = page.locator('[data-testid="info-modal-close"]').first();
+  if (!(await x.count())) { skip(name, 'the support dialog opened without its × — nothing to test'); return; }
+
+  // Where the × sits with nothing docked, so the move is measurable rather than assumed.
+  const readX = () => page.evaluate(() => {
+    const e = document.querySelector('[data-testid="info-modal-close"]');
+    if (!e) return null;
+    const r = e.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return null;
+    const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+    const stack = document.elementsFromPoint(cx, cy);
+    const desc = (el) => {
+      const b = el.getBoundingClientRect(), cs = getComputedStyle(el);
+      return `<${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}> `
+        + `${Math.round(b.width)}x${Math.round(b.height)} at ${Math.round(b.x)},${Math.round(b.y)} z=${cs.zIndex}`;
+    };
+    return {
+      top: Math.round(r.y), at: [Math.round(cx), Math.round(cy)],
+      // TRUE  = this control is somewhere in the PAINTED stack at its own centre.
+      // FALSE = the stack was read, is non-empty, and the control is absent from it.
+      painted: stack.some((n) => n === e || e.contains(n)),
+      stackTop: stack.length ? desc(stack[0]) : null,
+      stackLen: stack.length,
+    };
+  });
+
+  const before = await readX();
+  if (!before) { skip(name, 'the × has no box before the dock is injected — nothing to measure'); return; }
+
+  await injectTopDockPrompt(page);
+  // Wait on the CONDITION the app reports — the × being pushed clear of the band — not a fixed
+  // sleep (PART 11.2). Bounded, and the assertions below stand whether or not it ever moves.
+  let after = before;
+  for (let i = 0; i < 30; i++) {
+    after = (await readX()) ?? after;
+    if (after.top !== before.top) break;
+    await sleep(300);
+  }
+
+  if (!(await page.locator(TOP_DOCK_SYNTH).count())) {
+    defect(name, 'the injected top dock did not survive in the DOM — the measurement never happened',
+      `× was at y=${before.top}, now y=${after.top}`);
+    return;
+  }
+
+  // THE USER'S QUESTION: does the × still close the dialog with the prompt on screen? The click's
+  // own error is CAPTURED, never swallowed — that is the fact separating «the click never landed»
+  // from «it landed and the dialog stayed open» (PART 11.2 rule 4, and PR #1146's measured trap).
+  const clickErr = await x.click({ timeout: 10_000 }).then(() => null, (e) => String(e).split('\n')[0]);
+  const closed = await waitSupportClosed(page);
+  await removeTopDockPrompt(page);
+
+  // PAINT IS CHECKED BEFORE THE OUTCOME, AND THAT ORDER IS THE POINT (measured while mutation-
+  // proving this journey, 2026-09-24). Playwright's click() scrolls its target into view first, so
+  // it can reach a control a FINGER cannot — and the mutation run proved it: with the card pushed
+  // to y=-28, above the top of the viewport, `painted` was false and the dialog still closed, so an
+  // outcome-only pass branch reported «ok» on a × no user could see or tap. A control that is
+  // absent from the painted stack at its own centre is unreachable to a person whatever the
+  // automation managed to do to it, so that is a defect first and an outcome question second.
+  if (!after.painted) {
+    defect(name, 'a top-docked auth prompt left the support dialog’s × unreachable to a real finger',
+      `the × is at ${JSON.stringify(after.at)} (y ${before.top} → ${after.top}) and is ABSENT from the `
+      + `painted stack there; topmost is ${after.stackTop} of ${after.stackLen}. The dialog `
+      + `${closed ? 'closed anyway — but only because Playwright scrolls its target into view first, '
+        + 'which a finger does not' : 'did not close'}. `
+      + `${clickErr ? `the CLICK ITSELF FAILED: ${clickErr}` : 'the click resolved without error'}. `
+      + `ops_incident #670.`);
+  } else if (closed) {
+    pass(name, `with a top-docked prompt the × stayed reachable (y ${before.top} → ${after.top}, `
+      + `painted at ${JSON.stringify(after.at)}) and closed the dialog`);
+  } else {
+    defect(name, 'the × is reachable under a top-docked prompt but did not close the dialog',
+      `the × is painted at ${JSON.stringify(after.at)} (y ${before.top} → ${after.top}), topmost is `
+      + `${after.stackTop}. ${clickErr ? `the CLICK ITSELF FAILED: ${clickErr}` : 'the click resolved '
+      + 'without error, so the dialog stayed open on its own'}.`);
+  }
+  bag.ok = true;
 });
 
 /** J21 — THE ERROR STATE MUST NAME THE RIGHT FAILURE.
@@ -2104,9 +2455,52 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
   }
 
   if (!sawOverlay) {
-    // Not a pass and not a failure: Google decides whether to show it, and it often does not.
-    skip(name, 'no auth overlay appeared within 20s on either screen — geometry unproven this run '
-      + '(the tab presses above still ran and passed)');
+    // A BARRIER THAT ONLY FIRES ON THE DAYS GOOGLE FEELS LIKE SHOWING THE PROMPT IS NOT A BARRIER.
+    //
+    // That sentence is already in this file, above `injectTopDockPrompt`, and it names the cost:
+    // ops_incident #670 shipped a dead control behind exactly this gap. Absence of the real prompt is
+    // still a SKIP and never a pass (PART 5 shape 13) — but leaving it there is what the sibling
+    // journeys `docked-prompts-stack` and `both-edges-docked-clears-controls` deliberately do NOT do:
+    // they inject the measured shape so the geometry is proven on every run.
+    //
+    // Measured 2026-09-25 (routine #6): across a full production sweep this journey skipped its
+    // geometry half 4/4, on BOTH viewports, while `onetap-clear-of-controls` found a real sheet on
+    // mobile 2/2 in the same sweep. Those are separate browser contexts and Google suppresses
+    // per-context, so it is not a contradiction — but it does mean the owner's 2026-09-06 rule
+    // («One Tap must never cover, block, or intercept any Ezhalah controls») went unproven here on
+    // every run of that sweep, behind a tidy skip. PART 9.5 is explicit: when a journey skips, ask
+    // why before accepting it.
+    //
+    // So the real prompt's absence is recorded as the skip it is, and then the SAME geometry read is
+    // run against the injected shape, as its own clearly-labelled outcome. The synthetic pass is
+    // never dressed up as evidence about Google's real prompt: it proves the APP's reservation and
+    // hit-testing against the geometry the engines were measured serving, which is the half a
+    // suppressed prompt takes away.
+    skip(name, 'no auth overlay appeared within 20s on either screen — the REAL prompt proved nothing '
+      + 'this run (the tab presses above still ran and passed); falling back to the injected shape below');
+
+    await gotoOrRetryTransport(page, BASE + '/');
+    await settle(page);
+    await injectTopDockPrompt(page);
+    await sleep(1500);
+    const synth = await page.evaluate(READ);
+    if (!synth.frames.some((f) => !f.hidden && f.box[3] > 0)) {
+      skip(`${name}/synthetic`, 'the injected prompt did not register as an auth overlay — the app\'s own '
+        + 'selector did not match the shape the engines serve, which is itself worth knowing');
+    } else if (synth.blockedCount) {
+      defect(`${name}/synthetic`, 'an auth overlay sitting at the measured TOP dock blocks an Ezhalah control',
+        `${synth.blockedCount} control(s) blocked — ` + synth.blocked.map((b) => `«${b.label}» at ${b.at}`).join(', ')
+        + `. APP RESERVED top=${synth.reservedTop} bottom=${synth.reservedBottom} appSees=${JSON.stringify(synth.appSees)}`
+        + `. overlay=${JSON.stringify(synth.frames)} viewport=${JSON.stringify(synth.vp)}`
+        + '. INJECTED shape (ops_incident #202 geometry), so this is evidence about OUR reservation and '
+        + 'hit-testing, not about Google\'s real prompt.');
+    } else {
+      pass(`${name}/synthetic`, `an auth overlay at the measured TOP dock blocks 0 controls `
+        + `(app reserved top=${synth.reservedTop} bottom=${synth.reservedBottom}, overlay `
+        + `${JSON.stringify(synth.frames.map((f) => f.box))}) — INJECTED shape, so this proves our own `
+        + 'reservation and hit-testing, never Google\'s real prompt');
+    }
+    await page.evaluate((s) => document.querySelectorAll(s).forEach((n) => n.remove()), TOP_DOCK_SYNTH);
   }
   const errs = appPageErrors(bag, name);
   if (errs.length) defect(name, 'uncaught page error on the auth-overlay journey', errs[0]);
@@ -2145,7 +2539,7 @@ JOURNEYS['auth-overlay-clears-controls'] = async (mobile) => withPage({ mobile }
  */
 JOURNEYS['both-edges-docked-clears-controls'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
   const name = `both-edges-docked-clears-controls:${mobile ? 'mobile375' : 'desktop1440'}`;
-  const SYNTH = '#credential_picker_container[data-synthetic-top-prompt]';
+  const SYNTH = TOP_DOCK_SYNTH;
 
   const READ = `(() => {
     const ORIGINS = ${JSON.stringify(AUTH_OVERLAY_ORIGINS)};
@@ -2222,32 +2616,10 @@ JOURNEYS['both-edges-docked-clears-controls'] = async (mobile) => withPage({ mob
     return;
   }
 
-  // THE TOP DOCK, in the shape WebKit really serves (ops_incident #202): a STATIC gsi iframe whose
-  // only positioning box is a `position: fixed` #credential_picker_container.
-  await page.evaluate(() => {
-    const box = document.createElement('div');
-    box.id = 'credential_picker_container';
-    box.setAttribute('data-synthetic-top-prompt', '1');
-    Object.assign(box.style, { position: 'fixed', left: '0px', top: '20px', width: '100%',
-                               height: '158px', zIndex: '9999', pointerEvents: 'auto',
-                               background: '#fff', border: '0' });
-    const f = document.createElement('iframe');
-    // The app identifies a prompt with the ATTRIBUTE selector iframe[src*="accounts.google.com/gsi/"],
-    // so the attribute is what has to match — and `srcdoc` takes precedence over `src` for the
-    // document that actually loads. So the frame matches the app's selector while loading NOTHING
-    // from Google. Pointing it at the real endpoint instead fetches real GIS code into a context it
-    // was not served for, and that code throws: the mutation run of this journey recorded
-    // «ReferenceError: gis is not defined» as an uncaught page error, i.e. the journey manufacturing
-    // a defect against the app under test (PART 9.4 — a harness defect I introduced is mine).
-    f.setAttribute('src', 'https://accounts.google.com/gsi/iframe/select?synthetic=journey');
-    f.setAttribute('srcdoc', '<!doctype html><title>synthetic docked prompt</title>');
-    f.setAttribute('sandbox', '');
-    // STATIC on purpose: a static iframe has no positioning box, so an app measuring the IFRAME
-    // instead of its fixed ancestor under-reserves by the wrapper's extra 8px — incident #202.
-    Object.assign(f.style, { position: 'static', width: '100%', height: '150px', border: '0' });
-    box.appendChild(f);
-    document.body.appendChild(box);
-  });
+  // THE TOP DOCK, in the shape WebKit really serves (ops_incident #202). The shape itself lives in
+  // injectTopDockPrompt() at the top of this file — one definition, shared with
+  // `support-close-survives-a-top-dock`, so the two cannot drift apart.
+  await injectTopDockPrompt(page);
   // Wait on the CONDITION the app reports — the top reservation appearing — not a fixed sleep
   // (PART 11.2). It is a bounded poll, and the assertions below stand whether or not it moves.
   let after = before;
@@ -2484,6 +2856,107 @@ JOURNEYS['agent-round-trip-is-a-fresh-conversation'] = async (mobile) => withPag
   } else {
     pass(name, `the round trip produced a genuinely new conversation (greeting typed fresh, ${first} → ${max} chars)`);
   }
+});
+
+/** J33 — BROWSER FORWARD. PART 1 names «browser Back/Forward behaves»; before this journey existed,
+ *  `goForward` appeared ZERO times anywhere in `e2e/` or `scripts/` — a surface this routine's own
+ *  spec lists, with no journey that had ever pressed it (PART 1's «has any journey ever DRIVEN it»
+ *  question, 2026-09-26).
+ *
+ *  WHAT IT ASSERTS, and what it deliberately does not. The owner-locked rule is 2026-08-16's: a
+ *  navigation that is not a user search action must produce «no duplicate AI request, duplicate
+ *  property-search RPC, duplicate conversation message, duplicate analytics event, or duplicate saved
+ *  conversation» (src/lib/appSession.ts). Back and Forward are both same-document popstate hops, so
+ *  `isAppSessionStarted()` is TRUE for both — the module flag resets only on a DOCUMENT load — which
+ *  is exactly the state in which a `?filter=` left in the URL WOULD re-execute. `consumeSearchParams()`
+ *  is what makes that safe, and this journey is the only thing that watches it hold across a history
+ *  hop.
+ *
+ *  Measured on production before it was written, 2/2 desktop: «بحث» → `/agent` with the params already
+ *  consumed (bare URL), ONE results-class RPC; Back → `/` with ZERO further results calls and ZERO
+ *  edge-function calls; Forward → `/agent`, again ZERO and ZERO, landing on the greeting screen with a
+ *  composer.
+ *
+ *  It does NOT assert that Forward restores the results. For a guest nothing is persisted, and
+ *  re-running the search to repopulate the screen is the precise thing rule 1 forbids — so «Forward
+ *  shows a blank chat» is the owner's design showing through, not a defect, and pinning either
+ *  behaviour here would be inventing a product decision (PART 9's «a barrier that pins a quirk as
+ *  product behaviour»). What is pinned is: no re-execution, and not stranded. */
+JOURNEYS['back-forward-no-duplicate-search'] = async (mobile) => withPage({ mobile }, async (page, bag) => {
+  const name = `back-forward-no-duplicate-search:${mobile ? 'mobile375' : 'desktop1440'}`;
+  const results = (from) => bag.rpc.slice(from).filter((r) => classifySearchRpc(r) === 'results').length;
+  // The edge function is the AI request half of the owner's rule; bag.rpc only carries /rest/v1/rpc/.
+  const ai = [];
+  page.on('request', (r) => { if (r.url().includes('/functions/v1/')) ai.push(r.url().split('/functions/v1/')[1].split('?')[0]); });
+
+  if (!(await primeSearch(page))) { skip(name, 'search could not be primed'); return; }
+  const homeUrl = page.url();
+  const beforeSearch = bag.rpc.length;
+  await page.getByText('بحث', { exact: true }).last().click().catch(() => {});
+  const submitted = await settledCount(() => results(beforeSearch));
+  if (!submitted.settled || submitted.n < 1) {
+    skip(name, `the search never landed (results calls ${submitted.n}, settled=${submitted.settled}) — `
+      + 'there is no history entry to go Back from, so Forward is not reachable');
+    return;
+  }
+  const resultsUrl = page.url();
+  if (resultsUrl === homeUrl) {
+    skip(name, `«بحث» pushed no history entry (${resultsUrl}) — Forward is not applicable on this route`);
+    return;
+  }
+  // THE URL MUST CARRY NOTHING EXECUTABLE ONCE THE HOP IS OVER. This is the same fact
+  // src/lib/webRefreshRoute.ts's hasRestorableQuery() states, asserted on the real URL after a real
+  // press: it is what makes the two history hops below safe, so it is checked before them.
+  if (/[?&](filter|seed)=/.test(resultsUrl)) {
+    defect(name, 'the search intent was left in the URL', `«بحث» landed on ${resultsUrl} with an `
+      + 'unconsumed param — a Back/Forward hop would re-execute it (owner 2026-08-16)');
+  } else pass(name, `«بحث» consumed its params (${resultsUrl}), so no history hop can re-execute it`);
+
+  // ── BACK ──────────────────────────────────────────────────────────────────────────────────────
+  const beforeBack = bag.rpc.length;
+  const aiBeforeBack = ai.length;
+  await page.goBack().catch(() => {});
+  await settle(page);
+  const backUrl = page.url();
+  if (!backUrl.startsWith(BASE)) {
+    note(`${name}: Back left the app origin (${backUrl}) — a fresh context has no prior in-app entry`);
+    pass(name, 'Back left the origin, which is the browser behaving, not the app');
+    return;
+  }
+  const back = await filterHomeState(page);
+  if (back.verdict !== 'home') defect(name, 'Back did not land on the Filter home', `${filterHomeWhy(back)} at ${backUrl}`);
+  else pass(name, `Back landed on the Filter home — ${filterHomeWhy(back)}`);
+  const backQuiet = await stayedAtZero(() => results(beforeBack));
+  if (!backQuiet.zero || ai.length > aiBeforeBack) {
+    defect(name, 'Back re-executed the search', `${backQuiet.peak} results-class RPC(s) and `
+      + `${ai.length - aiBeforeBack} AI call(s) within ${backQuiet.windowMs} ms of a Back — owner `
+      + '2026-08-16 forbids a duplicate search, RPC, AI request or saved conversation from a '
+      + 'navigation that is not a user search');
+  } else pass(name, `Back fired no search: 0 results RPCs, 0 AI calls over a ${backQuiet.windowMs} ms window`);
+
+  // ── FORWARD — the half nothing in this repo had ever pressed ───────────────────────────────────
+  const beforeFwd = bag.rpc.length;
+  const aiBeforeFwd = ai.length;
+  await page.goForward().catch(() => {});
+  await settle(page);
+  const fwdUrl = page.url();
+  const fwd = await filterHomeState(page);
+  if (fwd.verdict === 'blank') {
+    defect(name, 'Forward stranded the user', `${filterHomeWhy(fwd)} at ${fwdUrl}`);
+  } else pass(name, `Forward landed on a rendered screen (${fwdUrl}, ${fwd.bodyLength} chars) — `
+    + 'results are NOT expected back: re-running the search is what the owner rule forbids');
+  const fwdQuiet = await stayedAtZero(() => results(beforeFwd));
+  if (!fwdQuiet.zero || ai.length > aiBeforeFwd) {
+    defect(name, 'Forward re-executed the search', `${fwdQuiet.peak} results-class RPC(s) and `
+      + `${ai.length - aiBeforeFwd} AI call(s) within ${fwdQuiet.windowMs} ms of a Forward — the `
+      + 'appSession gate only sees a DOCUMENT load, so a param left in the URL re-runs on a '
+      + 'same-document history hop');
+  } else pass(name, `Forward fired no search: 0 results RPCs, 0 AI calls over a ${fwdQuiet.windowMs} ms window`);
+  if (/[?&](filter|seed)=/.test(fwdUrl)) {
+    defect(name, 'Forward restored an executable search intent into the URL',
+      `${fwdUrl} — a refresh from here is a page load carrying params`);
+  }
+  { const errs = appPageErrors(bag, name); if (errs.length) defect(name, 'page error across Back/Forward', errs.join(' | ')); }
 });
 
 let ran = 0;

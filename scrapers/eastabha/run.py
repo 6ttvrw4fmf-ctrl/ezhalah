@@ -735,7 +735,8 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     return row, category, gone
 
 
-def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
+def _pin_sold_inactive(table: str, ad_numbers: list[str],
+                       seen_ad_numbers: list[str]) -> None:
     """Make source-confirmed SOLD/RENTED rows survive the nightly auto_recover_false_inactive() sweep.
 
     That pg_cron job (05:20 UTC) re-activates any active=false row with
@@ -746,8 +747,18 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str]) -> None:
     prune_unseen() never undoes this: it only selects active=true rows and only updates ids NOT
     in its seen set. When a listing is later relisted, its next upsert carries active=true and
     the upsert's own missing_count=0 reset applies — the pin is only written for ids that are
-    sold/rented THIS crawl."""
-    sold_pin.pin_source_confirmed_gone(table, ad_numbers, oracle="eastabha.sold_pin.property_status")
+    sold/rented THIS crawl.
+
+    The `seen_ad_numbers` half is what makes this oracle three-valued instead of one-way: the same
+    status field that publishes a removal also publishes the reversal, and until 2026-09-23 the
+    reversal was read, used, and thrown away — leaving ops_lifecycle_false_resurrection() with a
+    GONE latest verdict that no amount of correct behaviour could clear. See scrapers/common/
+    sold_pin.py. It writes evidence only: never active, never missing_count, never
+    last_verified_alive_at.
+    """
+    sold_pin.pin_source_confirmed_gone(
+        table, ad_numbers, oracle="eastabha.sold_pin.property_status", seen_ad_numbers=seen_ad_numbers,
+    )
 
 
 def main() -> int:
@@ -806,16 +817,28 @@ def main() -> int:
             db.upsert_eastabha_commercial_batch(com)
         # Pin sold/rented rows immediately after the upsert (which reset their missing_count to 0),
         # so the 05:20 auto-recover job can never flip them back to active. See _pin_sold_inactive.
-        if sold_res:
-            _pin_sold_inactive("eastabha_residential_listings", sold_res)
-        if sold_com:
-            _pin_sold_inactive("eastabha_commercial_listings", sold_com)
+        _pin_sold_inactive("eastabha_residential_listings", sold_res,
+                           [r["ad_number"] for r in res])
+        _pin_sold_inactive("eastabha_commercial_listings", sold_com,
+                           [r["ad_number"] for r in com])
 
         pruned = 0
         if not small:  # prune unseen only on full runs (db.prune_unseen guards against 0-scrape wipes)
             # Sold/rented rows were upserted with active=False + pinned missing_count=3 above;
             # prune_unseen never touches them (it only reads active=true rows and only updates ids
             # ABSENT from the seen set), so passing their ad_numbers in rows_seen is harmless.
+            # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+            # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+            # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+            # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+            # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+            superseded = db.retire_superseded_siblings(
+                res_table="eastabha_residential_listings", com_table="eastabha_commercial_listings",
+                res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+                source="Eastabha")
+            if superseded:
+                print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
             for tbl, rows_seen in (("eastabha_residential_listings", res), ("eastabha_commercial_listings", com)):
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Eastabha",
                                     verify_gone=_probe.verify_gone)

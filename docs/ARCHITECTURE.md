@@ -508,6 +508,11 @@ runQuery(q):  normalize (Room=1) ─► resolveLocation()/ensureLocationIndex() 
   impact — it only stops burning ~5.5 GH Actions compute-hours every Monday. Historical rows kept.
   **Re-enable only after the scraper itself is rebuilt** (its enumeration approach needs redesigning,
   not just a longer timeout).
+  **dwelleo — RE-ONBOARDED 2026-09-24 (owner decision).** `scrapers/dwelleo/` is back with the
+  35-platform batch; migration `20260924171203_thirty_five_platforms_registry_and_liveness` flips
+  `platform_cadence.is_active` to true with the note «re-onboarded 2026-09-24 (owner decision)» and
+  inserts its platform_registry / ops_liveness_registry rows (its old tables were dropped, so it
+  starts empty). The 2026-07-15 history below is kept as written.
   **dwelleo, semsar** — `scrapers/dwelleo/` and `scrapers/semsar/` no longer exist in this repo (code
   removed at some point). `scrape_runs` shows dwelleo ran 4 times (last 2026-06-23, 1,540 rows on
   its last successful run) and semsar ran once (2026-06-22, 72 rows) — genuine, working scrapers at
@@ -966,11 +971,23 @@ migration-drift-guard rule in `AGENTS.md`).
       unconditional `(source_table, listing_id)` total-order tiebreaker — so total-order pagination
       (no duplicate/skip across `عرض المزيد` batches, PR #1267) holds regardless of rotation.
     - **THE INITIAL BATCH IS SIZED BY THE MARKET, NOT BY A CONSTANT** (owner PERMANENT rule,
-      2026-09-02, PR #1688). The first screen after a normal search reveals
-      `min(genuine matches, max(10, distinct platforms in the matching set))` — 10 is a FLOOR, never
-      a cap. Tiers 1–3 above already ordered one row per platform before any platform repeats, but
-      the CLIENT truncated that at a hardcoded 10, so every platform past the tenth was erased from
-      the first screen. Measured on production over SUPPORTED scopes only (a city is required — see
+      2026-09-25, REVERSING the 2026-09-02 floor below). The first screen after a normal search
+      reveals `min(genuine matches, max(1, distinct platforms in the matching set))` — exactly one
+      card per matching platform, however many that is. `max(1, …)` is a SAFETY floor only (guards a
+      blank screen if platform-counting ever miscounts as 0 while real matches exist); it is not a
+      fairness floor and never pads beyond the platforms actually present.
+      - **Why the floor of 10 came out.** It fixed a real coverage bug (below), but its `max(10, …)`
+        had a side effect: when only 1-2 platforms genuinely matched, the floor still demanded 10
+        cards, and those extra slots could only come from whichever platform had more inventory to
+        contribute — round-robin naturally hands the big platform every leftover slot once the small
+        one runs out of rows. A platform's SIZE was quietly buying it more first-screen presence than
+        a platform with a single genuine match. Coverage does not regress: revealing every matching
+        platform (instead of padding TO 10) already guarantees none is dropped, so the historical
+        floor was never needed for coverage, only for screen-width.
+      - **The 2026-09-02 rule, for history — the coverage bug it fixed** (PR #1688). Tiers 1–3 above
+        already ordered one row per platform before any platform repeats, but the CLIENT truncated
+        that at a hardcoded 10, so every platform past the tenth was erased from the first screen.
+        Measured on production over SUPPORTED scopes only (a city is required — see
       `CITY_REQUIRED_MSG`; there is no nationwide scope): «الرياض / كل السكني» lost 8 of 18 matching
       platforms, «جدة / كل السكني» 7 of 17, «جدة / شقق / إيجار» 5 of 15, «الدمام / كل السكني» 4 of
       14, «فلل للبيع في الرياض» 3 of 13. A district search («الرياض / حي الملقا», 8 platforms) lost
@@ -983,7 +1000,8 @@ migration-drift-guard rule in `AGENTS.md`).
         contributes one genuine matching listing, and a disabled or non-matching platform
         contributes nothing. Adding a platform must never require editing ranking code.
       - It **cannot weaken MATCH**: it only sizes a PREFIX of the array the RPC already filtered to
-        the eligible set, and stays bounded by rows actually fetched — 7 matches show 7.
+        the eligible set, and stays bounded by rows actually fetched — 7 matches from 3 platforms
+        show exactly 3, never padded up to what would fit on screen.
       - It applies to the INITIAL batch of a normal search. Advanced Filter, narrowing, Trending and
         continuation keep MATCH → DIVERSITY → PHOTO but never widen the eligible universe to
         reproduce an earlier platform spread; a platform that stopped matching stays gone.
@@ -1166,6 +1184,29 @@ migration-drift-guard rule in `AGENTS.md`).
 - **Rent scaling:** monthly price ×12 handling vs Gathern's pre-annualized `price_annual`.
 - **In-app browser proxy** proven for all partners (currently Aqar-centric); reconcile the "iframe
   impossible" note.
+- **`scrapers/common/normalize.category_for_type()`'s residential set is missing "Duplex"/"Studio"
+  fleet-wide (found 2026-09-24).** Every "house pattern" scraper that calls this shared helper
+  unqualified gets `Commercial` for these two types, so they physically land in each platform's
+  `*_commercial_listings` table. **RESOLVED 2026-09-24 (owner decision): this is intentional,
+  fleet-wide, canonical — do NOT route around it per-platform.** It is not a reachability bug:
+  Duplex/Studio are residential-macro clean types with `kinds: BOTH` in `propertyTypes.ts` (dated
+  2026-07-16, "the latent invisible-listing fix"), and the 2026-07-10 broad-Residential
+  misfile-recovery (`resMisfileTypes`/`attachResScopeB` in `remote.ts`) generically recovers any
+  residential-macro `type_ar` sitting in a commercial table — confirmed live via the real anon-key
+  RPC path for bossbih (133/136 misfiled دوبلكس rows returned in one page of a plain
+  Category=Residential search). This same physically-misfiled-but-frontend-compensated pattern is
+  already how a dozen-plus other `kinds: BOTH` types are handled (Rest House, Farm, Agriculture
+  Plot, Residential Land, Bank, Warehouse, Telecom Tower, Hotel, and the المرافق set), so leaving
+  Duplex/Studio on it is consistent with the established architecture, not an exception to it.
+  `scrapers/aqalemhajer/run.py` (batch-36, merged/deployed 2026-09-24) originally shipped a
+  per-scraper `DWELLING_TYPES` override that routed around the shared helper — reverted the same
+  day to match bossbih and every other platform (its 57 already-upserted residential-table
+  Duplex/Studio rows were left as-is; only future scrapes are affected). Both platforms' tests now
+  pin `category == "commercial"` for Duplex/Studio as the intentional, canonical behavior.
+  **If this is ever revisited:** fixing `category_for_type()` itself would require migrating every
+  affected platform's already-upserted rows in one coordinated pass and does not let the frontend
+  `kinds: BOTH` compensation be retired (it is the general reachability safety net for ANY
+  current/future table misfile, not specific to this gap) — so the cost/benefit did not favor it.
 
 **PRD §13 business items — DECIDED 2026-06-09 (don't re-ask these):**
 1. Revenue: **CPC (pay-per-click) first**, subscriptions later. Near-term work = click tracking, not

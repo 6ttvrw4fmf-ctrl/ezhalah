@@ -49,6 +49,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { postgrestFetch } from './lib/postgrestRetry.ts';
 
 export type CoverageRow = {
   platform: string;
@@ -160,7 +161,7 @@ export function judge(live: CoverageRow[], mirror: MirrorRow[]): string[] {
 //    caller can import judge() without touching production. ────────────────────────────────────
 if (import.meta.filename === process.argv[1]) {
   const { url, key } = resolvePublicSupabase();
-  const res = await fetch(
+  const res = await postgrestFetch(
     `${url}/rest/v1/ops_platform_liveness_coverage` +
       '?select=platform,strategy,active,verified_ever,verified_in_sla',
     { headers: { apikey: key, Authorization: `Bearer ${key}` } },

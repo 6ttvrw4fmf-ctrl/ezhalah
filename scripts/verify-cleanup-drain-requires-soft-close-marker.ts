@@ -43,6 +43,7 @@
 // barrier that fails on `main` would block every unrelated PR. It pins the SAFE PAIRING instead:
 // the gap is fine while the drain is unreachable, and the drain may become reachable only once the
 // gap is closed.
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -58,23 +59,93 @@ const check = (name: string, cond: boolean, detail = '') => {
 console.log('verify-cleanup-drain-requires-soft-close-marker: a bounded drain may only be reachable');
 console.log('  for a platform whose dead-marker can see how that platform actually retires a listing.');
 
-// Platforms whose source SOFT-retires (200 + a state signal, never a 404), and the token that must
-// appear in cleanup.py's dead-marker for that platform before its drain may be exposed.
-// Adding a platform here is how a future soft-closing source joins the invariant.
-const SOFT_RETIRING: Record<string, { token: string; why: string }> = {
+// A TOKEN CHECK IS A CLAIM ABOUT SOURCE TEXT, NOT ABOUT WHAT THE MARKER CAN DECIDE
+// (ops_incident #730, 2026-09-25). aqarcity's clause below used to be `token: «الإعلان منتهي»`,
+// and it was GREEN for the five days that marker could not return True for ANY real page: aqarcity
+// had reworded its banner, the literal was still in the source, and the text check saw a marker
+// that "recognises its soft-retired state" while every expired ad re-probed as LIVE — the precise
+// mass-reactivation trap this file exists to prevent. Then it went RED on the REPAIR, because
+// moving the literal into a module-level constant removed it from the function body.
+//
+// So a marker that DECIDES for itself is now proven by EXECUTION against real captured pages, in
+// both directions. A marker that DELEGATES to another platform's predicate keeps a source check —
+// there the claim really is "this marker consults that predicate", and whether the delegate can
+// fire is proven by that predicate's own executed barrier, named below.
+//
+// Adding a platform here is how a future soft-closing source joins the invariant; prefer
+// `fixtures` and add real captures.
+type SoftRetiring =
+  | { kind: 'delegates'; token: string; provenBy: string; why: string }
+  | { kind: 'decides'; expired: string; live: string; why: string };
+
+const SOFT_RETIRING: Record<string, SoftRetiring> = {
   aqar: {
+    kind: 'delegates',
     token: 'looks_closed',
+    provenBy: 'scripts/verify-aqar-soft-close-oracle-can-fire.ts',
     why: 'aqar serves 200 + «مغلق» badge with no offers node (scrapers/aqar/liveness.py looks_closed)',
   },
   wasalt: {
+    kind: 'delegates',
     token: 'looks_closed',
+    provenBy: 'scripts/verify-aqar-soft-close-oracle-can-fire.ts',
     why: 'wasalt shares aqar’s marker via _aqar_wasalt_markers, so it inherits the same blind spot',
   },
   aqarcity: {
-    token: 'الإعلان منتهي',
-    why: 'aqarcity soft-expires with a 200 + «الإعلان منتهي» banner (_aqarcity_expired)',
+    kind: 'decides',
+    expired: 'scrapers/aqarcity/testdata/aqarcity_expired_page.excerpt.html',
+    live: 'scrapers/aqarcity/testdata/aqarcity_live_page.excerpt.html',
+    why: 'aqarcity soft-expires with a 200 + an expiry banner; _aqarcity_expired decides alone, so ' +
+      'it is executed against a real expired page and a real live page rather than grepped',
   },
 };
+
+/**
+ * Runs cleanup.py's REGISTERED dead-marker for `platform` over a fixture's bytes. Executed, never
+ * read — and resolved through the real PLATFORMS registry, so a marker swapped in the registry is
+ * what gets tested.
+ *
+ * The module is NOT imported: `scrapers/common/cleanup.py` imports the Supabase client at module
+ * scope, and `verify-python-route-to-production-is-declared.ts` correctly refuses to let a check in
+ * the required suite reach production (it caught the first draft of this function doing exactly
+ * that). The marker slice — the predicates plus the PLATFORMS literal — is exec'd out of the real
+ * source instead, so the bytes under test are still the bytes that ship.
+ */
+function markerSays(platform: string, fixture: string): boolean {
+  const py = String.raw`
+import json, re, sys
+
+src = open("scrapers/common/cleanup.py", encoding="utf-8").read()
+start = src.index("def _wasalt_markers(")
+end = src.index("DEFAULT_POLICY = {")
+def _refuses(*_a, **_k):
+    # The aqar/wasalt limb lives in scrapers/aqar/liveness.py, which reaches the DB client on
+    # import. It is deliberately NOT imported here: this check must stay hermetic. Those two
+    # platforms are proven by the source-token route and their own executed barrier, so this stub
+    # is never called. If a future platform registered as 'decides' depends on the aqar limb, this
+    # RAISES rather than scoring it with a stub — loud, never a quietly wrong verdict.
+    raise SystemExit("the aqar limb is stubbed in this hermetic slice and must not be scored here")
+
+ns = {"re": re, "AQAR_DEAD_MARKERS": (), "_aqar_looks_closed": _refuses}
+exec(compile(src[start:end], "cleanup_marker_slice", "exec"), ns)
+
+body = open(sys.argv[2], encoding="utf-8").read()
+print(json.dumps(bool(ns["PLATFORMS"][sys.argv[1]]["dead_marker"](body))))
+`;
+  const out = execFileSync('python3', ['-c', py, platform, join(ROOT, fixture)], {
+    cwd: ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
+  });
+  return JSON.parse(out.trim().split('\n').pop()!);
+}
+
+/** True when the platform's marker cannot see how that platform retires a listing. */
+function markerIsBlind(platform: string, spec: SoftRetiring): boolean {
+  if (spec.kind === 'delegates') {
+    const body = deadMarkerBodyFor(platform);
+    return body === null ? false : !body.includes(spec.token);
+  }
+  return !markerSays(platform, spec.expired);
+}
 
 const cleanupSrc = readFileSync(join(ROOT, 'scrapers', 'common', 'cleanup.py'), 'utf8');
 
@@ -122,16 +193,26 @@ for (const platform of exposing) {
   const body = deadMarkerBodyFor(platform);
   check(`${platform}: dead-marker is resolvable from the PLATFORMS registry`, body !== null);
   if (body === null) continue;
+  const blind = markerIsBlind(platform, spec);
   check(
     `${platform}: exposes bounded_cap, so its dead-marker MUST recognise its soft-retired state`,
-    body.includes(spec.token),
-    body.includes(spec.token)
-      ? `marker references ${spec.token}`
-      : `marker does NOT reference ${spec.token} — ${spec.why}. Exposing the bounded drain while ` +
-        'the marker is blind to this state makes every eligible row re-probe as LIVE, and cleanup ' +
-        'REACTIVATES anything it reads as live. Teach the marker in the SAME change that exposes ' +
-        'the drain.',
+    !blind,
+    blind
+      ? `${spec.why}. Exposing the bounded drain while the marker is blind to this state makes ` +
+        'every eligible row re-probe as LIVE, and cleanup REACTIVATES anything it reads as live. ' +
+        'Teach the marker in the SAME change that exposes the drain.'
+      : spec.kind === 'delegates'
+        ? `marker delegates to ${spec.token}, whose ability to fire is proven by ${spec.provenBy}`
+        : 'EXECUTED: the marker scores a real source-expired page as dead',
   );
+  if (spec.kind === 'decides') {
+    // The other direction, and the one a token check can never make: the marker must also say LIVE
+    // on a real live page. A marker that only ever says dead would satisfy the clause above and
+    // delete the whole platform.
+    check(`${platform}: and EXECUTED the other way — a real live page scores live`,
+      !markerSays(platform, spec.live),
+      'a marker that can only say dead would pass the clause above and destroy live inventory');
+  }
 }
 
 // The other half of the pairing: a soft-retiring platform whose marker is still blind must not be
@@ -139,7 +220,7 @@ for (const platform of exposing) {
 for (const [platform, spec] of Object.entries(SOFT_RETIRING)) {
   const body = deadMarkerBodyFor(platform);
   if (body === null) continue;
-  const blind = !body.includes(spec.token);
+  const blind = markerIsBlind(platform, spec);
   if (blind) {
     check(
       `${platform}: dead-marker is blind to its soft-retired state, so the drain must stay unreachable`,

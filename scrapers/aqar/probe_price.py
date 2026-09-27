@@ -83,6 +83,21 @@ TYPE_TO_SLUG = {v: k for k, v in N.SLUG_TO_TYPE.items()}
 # Keys worth reporting if aqar publishes them. Matched as substrings so a renamed field still shows.
 _PRICE_KEY_HINTS = ("price", "rent", "period", "duration", "monthly", "yearly", "annual", "meter")
 
+# The SIZE half of the same question (routine #3, 2026-09-23). `aqar_structured` above filters the
+# payload to price-ish keys, so an AREA dispute was structurally unanswerable by this tool: it would
+# print the parser's area and the DB's area — which agree, because one produced the other — and
+# nothing about what aqar itself published. That is the same shape as the TypeError this script
+# carried on 2026-09-22: the instrument was blind on exactly the cohort a dispute is about.
+#
+# Found by 6 active rows (3 residential, 3 commercial) whose area_m2 EQUALS their price to the riyal
+# — ad 6528840 «غرفة» area 1500 beside 1,500 SAR/yr, 6500587 «استراحة» 2500/2500, 6496996 «مستودع»
+# 10000/10000. The price on all three is source-confirmed (aqar publishes price_text "1,500" and
+# rent_period_text «سنوي»), so the suspect is the area — but "suspect" is not proof, and
+# DATA_INTEGRITY_ENGINEER.md forbids repairing anything Ezhalah cannot be PROVEN to have broken.
+# These keys are what settles it: `area` is the first alias enrich_listing() tries, so seeing its
+# raw value says whether aqar published that number or whether our alias hunt produced it.
+_SIZE_KEY_HINTS = ("area", "size", "space", "length", "width", "deed_area")
+
 # The rendered price slot: a number followed by the billing-period word. Captured verbatim.
 _RENDERED = re.compile(r"([\d][\d,]{2,})\s*[§ر﷼]?\s*/?\s*(سنوي\w*|شهري\w*|يومي\w*|أسبوعي\w*)")
 
@@ -115,6 +130,11 @@ def probe_one(row: dict[str, Any], dump_keys: bool) -> Optional[dict[str, Any]]:
     obj = ER._listing_json(html) or {}
     structured = {k: v for k, v in obj.items()
                   if any(h in k.lower() for h in _PRICE_KEY_HINTS) and not isinstance(v, (dict, list))}
+    # Raw, unjudged: what aqar itself publishes for size. Printed verbatim (including a null or a
+    # missing key) so "the source says nothing here" and "the source says 1500" stay distinguishable
+    # — a missing field is never read as an answer.
+    size_source = {k: v for k, v in obj.items()
+                   if any(h in k.lower() for h in _SIZE_KEY_HINTS) and not isinstance(v, (dict, list))}
     text = ER._html_to_text(html)
     rendered = [f"{m.group(1)} {m.group(2)}" for m in _RENDERED.finditer(
         text.split(ER._AGE_BLOCK_ANCHOR, 1)[0] if ER._AGE_BLOCK_ANCHOR in text else text)][:4]
@@ -130,6 +150,7 @@ def probe_one(row: dict[str, Any], dump_keys: bool) -> Optional[dict[str, Any]]:
         "state": state,
         "head": head,
         "aqar_structured": structured,
+        "aqar_size_source": size_source,
         "aqar_rendered": rendered,
         "parser": {k: parsed.get(k) for k in
                    ("price_annual", "price_total", "price_per_meter", "rent_period", "area_m2")},

@@ -18,8 +18,10 @@ import { join } from 'node:path';
 import { npmTestRuns } from './lib/testRegistry.ts';
 
 const ROOT = join(import.meta.dirname, '..');
-const FW = 'supabase/migrations/20260921183000_remediation_loop_autofix_verify_escalate.sql';
-const ST = 'supabase/migrations/20260921183500_remediation_loop_selftest_chain.sql';
+// Renamed 2026-09-24 to the versions production actually minted (183000 -> 182714, 183500 ->
+// 182734); the old names were hand-picked timestamps that inverted apply order.
+const FW = 'supabase/migrations/20260921182714_remediation_loop_autofix_verify_escalate.sql';
+const ST = 'supabase/migrations/20260921182734_remediation_loop_selftest_chain.sql';
 const ROUTING = 'scripts/lib/alertRouting.ts';
 
 const ok: string[] = [];

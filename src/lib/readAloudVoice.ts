@@ -94,3 +94,66 @@ export function shouldForcePauseFallback(o: {
 }): boolean {
   return o.state === 'paused' && o.playToken === o.tokenAtPause && !o.enginePaused;
 }
+
+/**
+ * WHY a tap on 🔊 produced no speech — the THIRD real state, which the UI used to throw away.
+ *
+ * `speakReadAloud()` returns a boolean, and a boolean cannot carry what readAloud.ts's own voice
+ * resolution genuinely knows. That module keeps THREE states on purpose (its §VOICE RESOLUTION note
+ * spells them out): a confirmed voice; no voice and the search EXHAUSTED; and no voice YET while the
+ * bounded poll plus its `RETRY_WINDOW_MS = 45_000` background retry are still running. The first
+ * speaks. The other two both refuse — and they are not the same fact about the user's device.
+ *
+ * Collapsing them is the repo's owner-locked **silent -> NULL, never unknown -> NO** rule broken in
+ * the read-aloud surface, the same shape AGENTS.md records as "A FAILED FETCH IS NOT AN EMPTY
+ * ANSWER": a lookup still in flight rendered to the user as a confident negative. Here the negative
+ * is «الاستماع غير متاح على هذا الجهاز» — a permanent-sounding verdict about their hardware, shown
+ * while the app was still looking for a voice. i18n.tsx's own comment on that string already stated
+ * the intended contract and had been false since the retry window landed: "shown ONLY when the
+ * device/browser has no Arabic voice at all".
+ *
+ * MEASURED on production (routine #6, 2026-09-25, Chromium, 4/4 fresh contexts, real clicks): the 🔊
+ * control does not exist until an agent search has returned cards, which took t = 29,283 / 30,290 /
+ * 30,311 / 30,695 ms since page load — every one of them ~15s INSIDE the 45s window, because
+ * `resolveVoice()` starts at module import. So this is not a narrow startup race: the moment the
+ * button first becomes tappable and the still-looking window OVERLAP on the ordinary path. readAloud
+ * .ts's own comment claimed the opposite ("rare in practice ... well before a real tap") and the
+ * measurement is what corrects it. Tapping again at t = 52,977 / 53,345 ms, past the window, produced
+ * the byte-identical message, so the two states were indistinguishable to the user.
+ *
+ * PURE, and here rather than in readAloud.ts, for the reason this whole module exists: readAloud.ts
+ * imports expo-speech, so a Node barrier cannot execute anything defined in it, and a barrier that
+ * cannot EXECUTE a decision can only pin its source text — which AGENTS.md records as passing for
+ * the entire time a defect is live. `scripts/verify-read-aloud-voice-logic.ts` runs this.
+ */
+export type ReadAloudRefusal = 'none' | 'no-voice-on-device' | 'still-resolving';
+
+export function readAloudRefusalVerdict(o: {
+  /** A matching Arabic voice has been confirmed — readAloud.ts's `bestArabicVoice`. */
+  voiceConfirmed: boolean;
+  /** The poll AND its background retry window have both finished — `voiceCheckExhausted`. */
+  checkExhausted: boolean;
+}): ReadAloudRefusal {
+  if (o.voiceConfirmed) return 'none';
+  return o.checkExhausted ? 'no-voice-on-device' : 'still-resolving';
+}
+
+/**
+ * Which sentence the user is shown for a refusal — the i18n KEY, or null for "say nothing".
+ *
+ * This lives beside the verdict, and is pure, so a barrier can execute the ENTIRE user-visible
+ * decision — (voiceConfirmed, checkExhausted) -> verdict -> the sentence on screen — rather than
+ * executing the verdict and then grepping FeedbackRow for the branch. AGENTS.md is explicit that a
+ * source-text tripwire passes for the whole time a defect is live, and the defect this replaces was
+ * precisely a wrong BRANCH over a correct state: readAloud.ts already knew it was still looking, and
+ * the component rendered the device verdict anyway.
+ *
+ * 'none' maps to null rather than to a reassuring string: if a tap is ever refused while a voice IS
+ * confirmed, the cause is not the voice (an empty segment list, say) and inventing a verdict about
+ * the device would be the same class of lie in a new place.
+ */
+export function readAloudRefusalMessageKey(r: ReadAloudRefusal): string | null {
+  if (r === 'no-voice-on-device') return "Listening isn't available on this device";
+  if (r === 'still-resolving') return 'Still preparing the voice — tap again in a moment';
+  return null;
+}

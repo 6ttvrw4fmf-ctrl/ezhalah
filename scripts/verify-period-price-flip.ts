@@ -1,49 +1,119 @@
-// Permanent tests — monthly↔annual price-unit flip (audit item 3, owner rule 2026-07-27):
-// changing the rent payment period must NEVER silently keep typed price bounds whose unit meaning
-// just inverted; it clears them and tells the user why. Mirrors the existing Buy↔Rent toggle rule.
+// A period flip must CLEAR the price and SAY SO — never silently reinterpret an annual budget as a
+// monthly one. The bounds a user typed under «سنوي» are not the bounds they meant under «شهري», so
+// the control clears them and tells the user why. Mirrors the existing Buy↔Rent toggle rule.
+//
+// R1, 2026-09-23 (routine #10). This file was on scripts/mutation-proof-grandfathered.txt: seven
+// `wholeFile.includes('…')` assertions that nobody had ever watched fail, over a surface whose blast
+// radius is price. The verdict now lives in scripts/lib/periodPriceFlip.ts as a pure function, and
+// every rule below is proven in BOTH directions against a DELIBERATELY BROKEN COPY OF THE REAL
+// SHIPPED FILE — not against a fixture this barrier invented, which would prove only that the
+// barrier's author can write a string it rejects.
+//
+// Why it still reads source text: the handlers are inline JSX inside a large screen component and
+// cannot be lifted out and executed — the same reason verify-city-rehydration.ts states at its line
+// 44. So it carries what a text reader owes: a negative control (the shipped file is NOT flagged),
+// a fail-closed UNKNOWN on an unreadable source, and one mutation per rule.
+//
 //   node --experimental-strip-types scripts/verify-period-price-flip.ts   (wired into `npm test`)
 import { readFileSync } from 'node:fs';
+import {
+  periodPriceFlipProblems,
+  RULE_IDS,
+  stripWs,
+  type FlipSources,
+} from './lib/periodPriceFlip.ts';
 
 let failed = 0;
-const check = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); };
-const IX = readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
-const NOWS = IX.replace(/\s+/g, '');
+const check = (label: string, ok: boolean, why = '') => {
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : `\n      ${why}`}`);
+  if (!ok) failed++;
+};
 
-// 1) The period onChange clears ALL FOUR price carriers when the period actually changes.
-check('period flip clears priceMin+priceMax+priceInput+priceBand together',
-  NOWS.includes("rentPeriod:next,priceMin:null,priceMax:null,priceInput:'',priceBand:null"));
-// 2) No-op when the same period is re-tapped (no gratuitous clearing).
-check('re-tapping the same period is a no-op', NOWS.includes("if((q.rentPeriod??'annual')===next)returnq;"));
-// 3) Only clears when bounds actually existed; flag drives the user-facing note.
-check('clear happens only when a price was set (hadPrice gate) and raises the note flag',
-  NOWS.includes('consthadPrice=!!(q.priceMin||q.priceMax||q.priceInput||q.priceBand);setPeriodPriceCleared(hadPrice);'));
-// 4) The note renders with the documented i18n key and hides once a new price is typed.
-check('note rendered while cleared and no new price typed',
-  NOWS.includes('periodPriceCleared&&!query.priceMin&&!query.priceMax&&!query.priceInput'));
-const I18N = readFileSync(new URL('../src/i18n.tsx', import.meta.url), 'utf8');
-check('note has a genuine Arabic translation',
-  I18N.includes('تم مسح حدود السعر لأن وحدة السعر تغيّرت'));
-// 5) The sibling rule stayed intact, in an owner-upgraded form (Buy+Rent combined multi-select,
-// 2026-08-20): priceMin/priceMax means "Buy budget" under Buy-only AND under Combined, but "Rent
-// budget" under Rent-only — so the شراء/إيجار toggle clears price state exactly when a press flips
-// WHICH deal that pair prices (Buy-only↔Rent-only, or Rent-only↔Both), never when the meaning stays
-// the same (Buy-only↔Both, Both↔Buy-only) — same "clear + explain" shape as the period rule above,
-// just no-longer an unconditional clear on every press (the old single-select Segmented control had
-// no "meaning didn't change" case to preserve; the two-button toggle does).
-// OWNER CHANGE 2026-08-22 — the CLEARING is unchanged; the NOTICE was removed. The old amber note
-// fired whenever the basis flipped, which includes the ordinary Buy→Rent switch, so a user who
-// simply wanted Rent got an error about a budget they had usually never typed. The rule is now:
-// Buy-only silent, Rent-only silent, Buy+Rent shows one calm helper. `setDealPriceCleared` was the
-// flag that drove ONLY that notice and is therefore gone; asserting it here would pin the retired
-// behaviour and block the fix (a monitor must move when the guard it watches is deliberately
-// retired). The clearing itself is still pinned by both remaining clauses, and the new copy rule has
-// its own mutation-proven barrier: scripts/verify-deal-pair-helper-copy.ts.
-check('Buy/Rent toggle clears price state exactly when priceMin/priceMax flips which deal it prices (owner-upgraded sibling rule)',
-  NOWS.includes('constflips=prevAppliesTo!==nextAppliesTo;') &&
-  NOWS.includes('...(flips?{priceMin:null,priceMax:null,priceBand:null,priceInput:\'\'}:{}),'));
-check('the retired Buy/Rent price-cleared NOTICE is not reintroduced (owner 2026-08-22)',
-  !NOWS.includes('setDealPriceCleared('),
-  'single-deal states must say nothing; see scripts/verify-deal-pair-helper-copy.ts');
+// ── THE SHIPPED FILES ───────────────────────────────────────────────────────────────────────────
+const real: FlipSources = {
+  index: stripWs(readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8')),
+  i18n: stripWs(readFileSync(new URL('../src/i18n.tsx', import.meta.url), 'utf8')),
+};
 
-if (failed) { console.error(`\n✗ ${failed} period-price-flip assertion(s) FAILED`); process.exit(1); }
-console.log('\n✓ all period-price-flip assertions passed (clear + explain, never silent unit inversion)');
+console.log('\nA period or deal flip clears the price and explains it — never a silent unit inversion\n');
+
+const problems = periodPriceFlipProblems(real);
+check(`all ${RULE_IDS.length} clauses of the price-clearing contract still hold in the shipped source`,
+  problems.length === 0, problems.join('\n      '));
+
+// ── MUTATION PROOF — one per rule, each a broken copy of the REAL file ───────────────────────────
+// Every `broken` below is `real` with exactly one shipped needle edited out, so a proof that passes
+// is a statement about production's bytes. If a rule's needle ever stops appearing in the shipped
+// file, its mutation becomes a no-op and would silently pass — so each one also asserts that the
+// edit CHANGED something. That is what keeps this from decaying back into decoration.
+console.log('\n  mutation proof — one broken copy of the shipped file per rule\n');
+let mutFail = 0;
+const mustCatch = (label: string, caught: boolean) => {
+  if (caught) { console.log(`  PASS  catches: ${label}`); return; }
+  mutFail++;
+  console.error(`  FAIL  BLIND to: ${label}`);
+};
+
+/** Replace a needle in the real index source and assert the edit really bit. */
+const brokenIndex = (needle: string, replacement: string): FlipSources | null => {
+  const mutated = real.index.replace(needle, replacement);
+  return mutated === real.index ? null : { ...real, index: mutated };
+};
+
+const catches = (id: string, m: FlipSources | null): boolean =>
+  m !== null && periodPriceFlipProblems(m).some((p) => p.startsWith(`${id}:`));
+
+mustCatch(
+  'priceBand is dropped from the period-flip clear — an annual band survives into a monthly search',
+  catches('period-flip-clears-all-four-carriers', brokenIndex(
+    "rentPeriod:next,priceMin:null,priceMax:null,priceInput:'',priceBand:null",
+    "rentPeriod:next,priceMin:null,priceMax:null,priceInput:''")),
+);
+mustCatch(
+  're-tapping the SAME period stops being a no-op, so the app clears a budget for no reason',
+  catches('same-period-retap-is-a-noop', brokenIndex(
+    "if((q.rentPeriod??'annual')===next)returnq;", '')),
+);
+mustCatch(
+  'the hadPrice gate is removed, so every period tap raises a notice about a budget never typed',
+  catches('clear-is-gated-on-a-price-having-existed', brokenIndex(
+    'consthadPrice=!!(q.priceMin||q.priceMax||q.priceInput||q.priceBand);setPeriodPriceCleared(hadPrice);',
+    'setPeriodPriceCleared(true);')),
+);
+mustCatch(
+  'the explanatory note stops rendering — the clear happens and the user is never told (the defect)',
+  catches('note-renders-while-cleared-and-no-new-price', brokenIndex(
+    'periodPriceCleared&&!query.priceMin&&!query.priceMax&&!query.priceInput', 'false&&')),
+);
+mustCatch(
+  'the Arabic copy for the note is gone, so the user sees a key or nothing',
+  periodPriceFlipProblems({ ...real, i18n: real.i18n.replace(
+    stripWs('تم مسح حدود السعر لأن وحدة السعر تغيّرت'), 'PLACEHOLDER') })
+    .some((p) => p.startsWith('note-has-a-real-arabic-translation:')),
+);
+mustCatch(
+  'the deal toggle clears UNCONDITIONALLY again, wiping a Buy budget on a Buy-only↔Both press',
+  catches('deal-toggle-clears-only-when-the-pair-changes-meaning', brokenIndex(
+    'constflips=prevAppliesTo!==nextAppliesTo;', 'constflips=true;')),
+);
+mustCatch(
+  'the retired Buy/Rent price-cleared NOTICE is reintroduced (owner retired it 2026-08-22)',
+  periodPriceFlipProblems({ ...real, index: real.index + 'setDealPriceCleared(true);' })
+    .some((p) => p.startsWith('retired-deal-notice-not-reintroduced:')),
+);
+mustCatch(
+  'an unreadable product file is reported as UNKNOWN, never as a passing contract',
+  periodPriceFlipProblems({ index: '', i18n: real.i18n }).length > 0,
+);
+mustCatch(
+  '…while the REAL shipped files are NOT flagged (the predicate is not vacuously red)',
+  periodPriceFlipProblems(real).length === 0,
+);
+
+const ok = failed === 0 && mutFail === 0;
+console.log(
+  ok
+    ? '\n✓ all period-price-flip clauses hold, and each one has been watched to fail'
+    : `\n✗ ${failed} assertion(s) failed, ${mutFail} mutation(s) survived`,
+);
+process.exit(ok ? 0 : 1);

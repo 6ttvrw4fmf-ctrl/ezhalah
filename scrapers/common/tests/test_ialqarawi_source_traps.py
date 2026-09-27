@@ -276,6 +276,82 @@ def test_a_district_field_holding_a_city_never_reaches_the_card():
     assert row["additional_info"]["district_field_raw"] == "الدوادمي"
 
 
+# ── A LONE DIRECTIONAL ADJECTIVE IS NEVER A CITY (found live 2026-09-25) ─────────────────────────
+# nid 2613 (a Makkah plot) and nid 2511 (a Khobar/شاطئ نصف القمر plot) both trail off with
+# «…الشرقية»/«…الشرقيه» and NOTHING else the title-scanner recognised, so city_from_title's
+# right-to-left scan landed on that word — which also happens to be the literal name of an
+# unrelated, obscure Asir-region village (city_id 14645) — and both were served as being IN ASIR.
+# _catalog here layers a stub «الشرقية»→14645 on top of the file's own عنيزة/الدوادمي stub, so
+# these tests exercise the exact shape of the real catalog collision, not an invented one.
+def test_a_lone_directional_adjective_is_never_treated_as_the_city(monkeypatch):
+    real_to_catalog = R.to_catalog
+    monkeypatch.setattr(R, "to_catalog", lambda name, region_hint=None: (
+        (14645, 6) if str(name).strip() in ("الشرقية", "الشرقيه") else real_to_catalog(name, region_hint)))
+    row, _, why = mapped(card=card(title="للبيع أرض في الشرقيه امام شاطئ نصف القمر"),
+                         section="اراضي سكنية")
+    assert row is None and why == "city_not_in_catalog", (
+        "a bare «الشرقيه» with no other recognisable city token must be quarantined, never filed "
+        "under the unrelated Asir village that happens to share its literal spelling")
+
+
+def test_a_directional_adjective_does_not_block_the_real_city_further_left(monkeypatch):
+    """The scan must SKIP «الشرقية» and keep going left — not give up the moment it hits a stopped
+    token — so a real city stated earlier in the same title (nid 2613's own «...عنيزة...» stand-in
+    here) is still found."""
+    real_to_catalog = R.to_catalog
+    monkeypatch.setattr(R, "to_catalog", lambda name, region_hint=None: (
+        (14645, 6) if str(name).strip() in ("الشرقية", "الشرقيه") else real_to_catalog(name, region_hint)))
+    row, _, _ = mapped(card=card(title="للبيع أرض سكنية بعنيزة حي النوارية الشرقية مخطط اللابة"),
+                       section="اراضي سكنية")
+    assert row["city_ar"] == UNAIZAH
+    assert row["city_id"] == CITY_ID and row["region_id"] == REGION_ID
+
+
+# ── THE «الحي» FIELD AS A LAST-RESORT CITY (found live 2026-09-25, nid 2511) ─────────────────────
+# «للبيع أرض في الشرقيه امام شاطئ نصف القمر» — «شاطئ نصف القمر» (Half Moon Bay) is a real beach
+# near Khobar/Dammam, but it is a LANDMARK, not a loc_catalog_district entry (checked live: no
+# «نصف القمر»/«القمر» row anywhere in the catalog), so find_district_in_text could never recover
+# it even scoped to the right city. The title itself has no other recognisable city token. The
+# listing's own «الحي» field says «الدمام» plainly — a real catalog city — but nothing used it for
+# CITY resolution before now, only to decide district-vs-neighbourhood AFTER a city already existed.
+DAMMAM_ID, DAMMAM_REGION = 13, 5
+
+
+def _stub_with_dammam(monkeypatch):
+    real_to_catalog = R.to_catalog
+    monkeypatch.setattr(R, "to_catalog", lambda name, region_hint=None: (
+        (DAMMAM_ID, DAMMAM_REGION) if str(name).strip() == "الدمام" else real_to_catalog(name, region_hint)))
+
+
+def test_the_district_field_becomes_the_city_only_when_the_title_finds_nothing(monkeypatch):
+    _stub_with_dammam(monkeypatch)
+    row, _, why = mapped(district="الدمام", section="اراضي خام",
+                         title="للبيع أرض في الشرقيه امام شاطئ نصف القمر")
+    assert why == "" and row is not None
+    assert row["city_ar"] == "الدمام"
+    assert row["city_id"] == DAMMAM_ID and row["region_id"] == DAMMAM_REGION
+    # The field WAS the city, not a district — it must never also leak into neighbourhood.
+    assert row["neighborhood"] is None
+    assert row["additional_info"]["district_field_raw"] == "الدمام"
+
+
+def test_the_district_field_fallback_never_overrides_a_title_that_already_resolved(monkeypatch):
+    """Same «الحي: الدمام» field, but this time the TITLE already names a real city (عنيزة). The
+    fallback must never even be consulted — title wins, exactly like the pre-existing الدوادمي
+    guard two tests up. Regression target: a naive "prefer the field" fix would break this."""
+    _stub_with_dammam(monkeypatch)
+    row, _, _ = mapped(district="الدمام", section="فلل", title="للبيع فيلا بحي الصالحية بعنيزة")
+    assert row["city_ar"] == UNAIZAH
+    assert row["city_id"] == CITY_ID and row["region_id"] == REGION_ID
+
+
+def test_a_blank_district_field_still_quarantines_when_the_title_finds_nothing():
+    """No title city AND no «الحي» field to fall back on — must stay a clean skip, never a crash."""
+    row, _, why = mapped(district="", section="اراضي خام",
+                         title="للبيع أرض في الشرقيه امام شاطئ نصف القمر")
+    assert row is None and why == "city_not_in_catalog"
+
+
 def test_a_title_that_contradicts_the_index_deal_is_skipped():
     """id 217 sits in the RENT index with a «للبيع» title — two source claims, no known deal."""
     row, _, why = mapped(card=card(ty=2, title="للبيع إستراحة شباب بالخليج/عنيزة"),
@@ -345,3 +421,101 @@ def test_a_labelled_per_metre_figure_has_no_plausibility_ceiling():
     ambiguity («1 حد المتر» may be «1 [ألف]») abstains; a large labelled rate is stored as given."""
     assert R.parse_money("250000 حد المتر") == (None, 250000, "")
     assert R.parse_money("1 حد المتر") == (None, None, "ppm_unit_unstated")
+
+
+# ── 2026-09-23: the host started refusing some TLS fingerprints ──────────────────────────────────
+class _Resp:
+    def __init__(self, status, text):
+        self.status_code, self.text = status, text
+        self.headers, self.url = {}, ""
+
+
+class _FakeSession:
+    """Stands in for curl_cffi's Session: answers per impersonate profile, like the live host did."""
+    SERVED = {}
+    seen = []
+
+    def __init__(self, impersonate=None, **_kw):
+        self.impersonate = impersonate
+        self.headers = {}
+        _FakeSession.seen.append(impersonate)
+
+    def get(self, *_a, **_kw):
+        return _FakeSession.SERVED.get(self.impersonate, _Resp(403, "<title>403 - Forbidden</title>"))
+
+
+def test_the_session_walks_past_a_refused_fingerprint_to_one_that_serves_cards(monkeypatch):
+    """Measured live: chrome116/120/124 → an identical 75,193-byte 403; safari/firefox/edge → the
+    full catalogue, same IP. A run that pins one profile reads a block as "no cards" and the
+    platform silently stops refreshing (two daily runs did, 2026-09-22 and 09-23)."""
+    from scrapers.common import http
+    _FakeSession.seen = []
+    _FakeSession.SERVED = {"safari17_0": _Resp(200, '<section class="cards"><a href="index.php?router=card&id=1"></a>')}
+    monkeypatch.setattr(http.cc, "Session", _FakeSession)
+    s = R.session()
+    assert s.impersonate == "safari17_0"
+    assert s.__dict__["_impersonate_profile"] == "safari17_0"
+    assert _FakeSession.seen[0] == "chrome", "the newest chrome is still tried first"
+
+
+def test_a_200_that_is_the_block_page_is_not_accepted_as_a_served_profile(monkeypatch):
+    """The block can arrive as HTTP 200 with a challenge body. A profile counts as served only when
+    the page carries the catalogue section this scraper reads."""
+    from scrapers.common import http
+    _FakeSession.SERVED = {p: _Resp(200, "<title>Just a moment…</title>") for p in http.IMPERSONATE_ORDER}
+    monkeypatch.setattr(http.cc, "Session", _FakeSession)
+    with pytest.raises(RuntimeError) as e:
+        R.session()
+    msg = str(e.value)
+    assert "no TLS profile was served" in msg
+    for prof in http.IMPERSONATE_ORDER:
+        assert prof in msg, "the error must name every profile tried, so a block is not read as a dead site"
+
+
+# ---------------------------------------------------------------------------
+# AREA vs PRICE: «X.YYY» is thousands-grouped in a price cell and a decimal on a
+# surveyed land area. Every string below is a verbatim `area_raw` measured from
+# production (all 2,568 ialqarawi rows, 150 separator strings).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("raw,m2", [
+    ("4,260 م²", 4_260),              # head 1 — canonical grouping
+    ("11.295م", 11_295),              # head 2
+    ("509,879م", 509_879),            # head 3
+    ("175.000 الف متر", 175_000),     # head 3, «الف» is the redundant word again
+    ("1,056,174م", 1_056_174),        # head 1, two groups
+    ("10,630,467 م²", 10_630_467),    # head 2, two groups
+    ("1500.000م", 1_500_000),         # head 4 — this office's «1500 thousand» shorthand
+    ("526م", 526),                    # no separator at all
+    ("517.5م", 517),                  # a 1-2 digit fraction is a decimal and truncates to int4
+])
+def test_an_unambiguous_area_is_read_exactly_as_before(raw, m2):
+    assert R.parse_area(raw) == (m2, "")
+
+
+def test_a_five_plus_digit_head_is_ambiguous_and_the_parser_abstains():
+    """REGRESSION (routine-3, 2026-09-24). Listing QRW3566 — «للبيع أرض زراعية بحي شمال عنيزة»,
+    source area «361788.431م» — was stored and indexed at 361,788,431 m², i.e. 362 km², because
+    parse_area reused the PRICE grammar in which a dot followed by exactly three digits is a
+    thousands separator. The source's own description gives the plot's frontages as 316.64 m /
+    245.70 m / 698.97 m / 504 m, which no 362 km² parcel has.
+
+    That row happens to carry no source price, so it is production_ready=false and was never served
+    as a Normal Filter card — but the parser is the live one, and the next surveyed ialqarawi area
+    that DOES carry a price would reach users 1000x wrong. The defect is the grammar, not the row.
+
+    Both readings (361,788.431 m² and 361,788,431 m²) are grammatically available and differ by
+    1000x, and the stored capture is an auto.v1-fallback with no raw HTML, so nothing on record can
+    settle it. The parser must therefore publish NEITHER: honest NULL beats a guess, and the exact
+    string survives in additional_info.area_raw.
+    """
+    assert R.parse_area("361788.431م") == (None, "ambiguous_thousands_or_decimal")
+    # The class, not just the one row.
+    assert R.parse_area("12345.678 م²") == (None, "ambiguous_thousands_or_decimal")
+
+
+def test_the_price_grammar_is_deliberately_untouched_by_the_area_rule():
+    """A price is never written to three decimals, so parse_money keeps its measured reading —
+    the abstention above must not leak across and start nulling prices."""
+    assert R.parse_money("3850.000")[0] == 3_850_000
+    assert R.parse_money("1.600.000 الف")[0] == 1_600_000

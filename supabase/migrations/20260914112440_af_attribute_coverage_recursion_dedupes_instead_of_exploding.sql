@@ -22,8 +22,7 @@
 -- This is strictly MORE correct than before, not less. `depth < 8` was a truncation: a platform
 -- nested more than eight wrapper views deep was silently reported as NOT covered. Removing the cap
 -- removes that false negative. Verified on production immediately after: 48 platforms, 0 missing
--- from listing_rich_attrs, 0 missing from listing_extra_attrs, HTTP 200 over the anon REST path in
--- 0.62-1.45s across three consecutive calls.
+-- from listing_rich_attrs, 0 missing from listing_extra_attrs.
 create or replace function public.ops_af_attribute_coverage()
 returns table(platform text, in_rich boolean, in_extra boolean, searchable_rows bigint)
 language sql

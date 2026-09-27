@@ -1,0 +1,93 @@
+# CAN EACH PLATFORM'S LIVENESS ORACLE STILL RETIRE ANYTHING? — asked of production, on every PR.
+#
+# THE LIVE HALF of scripts/verify-oracle-never-retires.ts (routine #3, 2026-09-26). Measured that
+# day: muktamel's prune_unseen.verify_gone oracle had been asked 1,132 times and had returned
+# UNKNOWN every single time — zero GONE, zero LIVE — over 3,864 active listings with 443 under
+# strike, and every monitor read green. UNKNOWN never kills (liveness_contract.decide() returns
+# action='none'), so nothing was wrongly deactivated; the harm is the other direction, and it is
+# the owner's own sentence in LISTING_LIVENESS.md §9: a checker that has stopped working must
+# itself be detected, "instead of silently accumulating stale listings".
+#
+# WHY IT IS NOT IN `npm test`. Its verdict is decided by production's probe history, not by the
+# diff, so inside the REQUIRED per-PR suite it would fail unrelated PRs whenever a platform's
+# oracle went quiet. AGENTS.md, "The required suite is HERMETIC". Declared in
+# scripts/test-exclusions.txt, which names THIS file as its home.
+#
+# NO PER-PR COVERAGE IS LOST, and that is why this has a pull_request trigger rather than only a
+# schedule: the JUDGEMENT it applies (oracleNeverRetires, scripts/lib/oracleRetirement.ts) is
+# mutation-proven against nine broken worlds on every PR by the hermetic twin, which also asserts
+# via liveHalfProblems() that this workflow really invokes this file. What runs HERE is the part
+# only production can answer.
+#
+# CHEAP ENOUGH TO RUN PER PR: two anon RPC reads, no npm install, no browser, no secrets. Both
+# functions are `stable` and write nothing — in particular this never calls the mon_detect_* raiser,
+# because a CI run must not move production's alert state. Continuous cover between PRs is
+# mon_detect_oracle_never_retires() on the twice-hourly roster; this is the external reader that
+# would notice that detector going dark.
+#
+# NO SECRETS, SO FORK PRs WORK. scripts/lib/public-supabase.ts carries the anon key as a committed
+# constant (it ships in every visitor's bundle; it is not a credential). `pull_request` — never
+# `pull_request_target` — so a fork's code runs with no secrets and no write token.
+#
+# RETRIED 3x, WHICH CANNOT MASK A DEFECT: a transient 5xx passes on attempt 2 or 3, while a real
+# disagreement between the SQL and the shared predicate is deterministic and fails all three.
+name: Liveness oracle retirement check (live)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Twice daily. The condition this catches appears when an ORACLE degrades in production, not
+    # when a PR is opened, so the schedule is the load-bearing trigger and the PR run is the gate.
+    - cron: "17 3,15 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oracle-retirement-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  retirement:
+    name: Every oracle-claiming platform has answered at least once
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      # No `npm ci`: the script imports nothing outside node builtins and scripts/lib/*.
+      - name: SQL and the shared predicate agree, and the ask floor is load-bearing
+        run: |
+          for attempt in 1 2 3; do
+            if node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \
+                 scripts/verify-oracle-never-retires-live.ts; then
+              exit 0
+            fi
+            echo "::warning::attempt $attempt failed — retrying in 20s (a real disagreement fails all three)"
+            sleep 20
+          done
+          echo "::error::The live oracle-retirement check failed three consecutive attempts."
+          exit 1
+
+      # ── Failure→alert bridge (issue #1349) ──────────────────────────────────────────────────────
+      # This workflow runs unattended on a schedule: a red run notifies nobody, so it has to reach
+      # alert_event to reach a human. That is the same principle the check itself enforces — a
+      # checker whose silence cannot be told from health is not a checker. One open P1 per workflow
+      # file (dedup workflow_failed:oracle-retirement-check.yml); the next green run resolves it.
+      # `always()` so a FAILING run still gets here. Routes to routine #3 (data integrity).
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind data_live_check_failed
+          --workflow oracle-retirement-check.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

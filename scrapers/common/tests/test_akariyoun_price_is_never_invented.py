@@ -329,3 +329,15 @@ def test_street_width_unpublished_dash_is_null_never_a_number():
 
 def test_street_width_accepts_arabic_indic_digits():
     assert _street("عرض الشارع ٢٠") == 20
+
+
+# ── direct-alive stamp gate (fleet liveness, 2026-09-25) ─────────────────────────────────────────
+def test_own_page_gate_requires_landing_on_this_slug_and_the_ad_number():
+    from scrapers.akariyoun import run as _R
+    page = "<div>رقم الاعلان: 12345</div>"
+    base = "https://akariyoun.com/properties"
+    assert _R._own_page_is_live("villa-12", page, f"{base}/villa-12") is True
+    assert _R._own_page_is_live("villa-12", page, f"{base}/villa-12/?ref=x") is True
+    assert _R._own_page_is_live("villa-12", page, f"{base}/other-99") is False, "another ad's page"
+    assert _R._own_page_is_live("villa-12", page, "https://akariyoun.com/") is False, "redirect home"
+    assert _R._own_page_is_live("villa-12", "<div>no number</div>", f"{base}/villa-12") is False

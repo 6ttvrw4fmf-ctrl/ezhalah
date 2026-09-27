@@ -28,6 +28,7 @@
 //   EXPO_PUBLIC_SUPABASE_URL=... EXPO_PUBLIC_SUPABASE_ANON_KEY=... \
 //     node --experimental-strip-types scripts/verify-trending-usable-under-narrowing.ts
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { postgrestFetch } from './lib/postgrestRetry.ts';
 
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase(process.env);
 const H = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
@@ -76,7 +77,7 @@ check(`the corpus keeps at least 4 size+budget states (the shape that broke) —
 
 async function rpc(name: string, body: Record<string, unknown>) {
   const t0 = Date.now();
-  const r = await fetch(`${URL_BASE}/rest/v1/rpc/${name}`, { method: 'POST', headers: H, body: JSON.stringify(body) });
+  const r = await postgrestFetch(`${URL_BASE}/rest/v1/rpc/${name}`, { method: 'POST', headers: H, body: JSON.stringify(body) });
   const j = await r.json().catch(() => null);
   return { ms: Date.now() - t0, ok: r.ok && Array.isArray(j), body: j as unknown };
 }

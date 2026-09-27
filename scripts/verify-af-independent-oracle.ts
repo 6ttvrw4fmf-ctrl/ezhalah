@@ -43,6 +43,15 @@
 //   node --experimental-strip-types scripts/verify-af-independent-oracle.ts
 
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+// THE SCHEMA-CACHE DRIVER (adopted 2026-09-26, routine #5, ops_incident #563). This file was the
+// last row of scripts/pr-gate-schema-cache-baseline.txt: a PR-gating check whose two readers each
+// returned `null` on ANY failure, so a 503/PGRST002 — what any session's function-creating
+// migration triggers — printed «RPC=null PostgREST=null» and concluded «an AF answer means
+// something different than the product intends» on somebody else's unrelated diff. It fails closed,
+// which is right, but the verdict was about the product and the cause was the database's schema
+// cache reloading. That ledger row said converting it needed the driver's Probe threaded through two
+// differently-shaped readers, which is what this is.
+import { afProbeOk, contentRangeTotal, isSchemaCacheUnresolved } from './lib/afLiveProbe.ts';
 
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase(process.env);
 const H = { apikey: KEY, Authorization: `Bearer ${KEY}` };
@@ -111,9 +120,8 @@ async function restCount(c: Case, extra: string): Promise<number | null> {
     + `&production_ready=is.true&region_id=eq.${REGION}`
     + `&deal_ar=eq.${encodeURIComponent(c.deal)}&type_ar=in.(${encodeURIComponent(types)})`
     + periodRest(c.period) + (extra ? `&${extra}` : '');
-  const r = await fetch(q, { headers: { ...H, Prefer: 'count=exact', Range: '0-0' } });
-  const cr = r.headers.get('content-range');
-  return cr && cr.includes('/') ? Number(cr.split('/')[1]) : null;
+  const p = await afProbeOk(`independent count ${c.label}`, q, { headers: { ...H, Prefer: 'count=exact', Range: '0-0' } }, [416]);
+  return contentRangeTotal(p);
 }
 
 async function rpcTotal(c: Case, answer: Record<string, unknown>): Promise<number | null> {
@@ -121,15 +129,21 @@ async function rpcTotal(c: Case, answer: Record<string, unknown>): Promise<numbe
     p_deal: c.deal, p_types: c.types, p_category: c.category, p_region_ids: [REGION],
     p_rent_period: c.period ?? null, p_per_platform: null, p_limit: 1, p_offset: 0, ...answer,
   };
-  const r = await fetch(`${URL_BASE}/rest/v1/rpc/location_search_candidates_ar`,
+  const p = await afProbeOk(`RPC total ${c.label}`, `${URL_BASE}/rest/v1/rpc/location_search_candidates_ar`,
     { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const j = await r.json();
+  let j: unknown;
+  try { j = JSON.parse(p.body); } catch { return null; }
   if (!Array.isArray(j)) return null;
-  return j.length ? Number(j[0].total_count) : 0;
+  return j.length ? Number((j[0] as { total_count: unknown }).total_count) : 0;
 }
 
 console.log('\nAF predicates must agree with an independently-expressed predicate (PostgREST filters)\n');
 
+// A reload that outlasts the measured budget is the INSTRUMENT being unavailable. It still exits 1
+// — this is never a route to green — but it must not print a product verdict, because the sentence
+// below («an AF answer means something different than the product intends») would be a lie about a
+// healthy product. That is the whole repair: the exit code is unchanged, the claim is not.
+try {
 for (const c of CASES) {
   // ── 1. the answered set: RPC vs PostgREST ──
   const [viaRpc, viaRest] = await Promise.all([rpcTotal(c, c.rpc), restCount(c, c.rest)]);
@@ -155,6 +169,16 @@ for (const c of CASES) {
       viaRpc != null && base != null && sum === base,
       `answered=${viaRpc} + notMatching=${notMatching} + unknown=${unknown} = ${sum}, base=${base}`);
   }
+}
+
+} catch (e) {
+  if (isSchemaCacheUnresolved(e)) {
+    console.error(`\n✗ NOT MEASURED — ${(e as Error).message}\n`
+      + '      No conclusion was reached about any AF predicate. Re-run once the cache has settled;\n'
+      + '      a reload lasting past the full budget is itself worth looking at, but it is not an AF defect.\n');
+    process.exit(1);
+  }
+  throw e;
 }
 
 console.log(failures === 0

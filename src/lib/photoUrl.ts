@@ -18,6 +18,10 @@
 // This is the shared/canonical layer: every photo entering the client (remote.ts finalize) passes
 // through here, so a card, a share image, or any future photo consumer all get the renderable URL.
 const SADIN_HOSTS = new Set(['sadin.com.sa', 'www.sadin.com.sa']);
+// eydah.com joined Sadin on 2026-09-24 (batch-36 onboarding): its listing photos
+// (eydah.com/assets/listings/*.jpg) answer with `cross-origin-resource-policy: same-origin`, measured
+// live — the same blocking CORP, the same same-origin rewrite (`/_img/eydah/*`, vercel.json).
+const EYDAH_HOSTS = new Set(['eydah.com', 'www.eydah.com']);
 
 export function photoDisplayUrl(raw: string): string {
   if (!raw || typeof raw !== 'string') return raw;
@@ -28,6 +32,9 @@ export function photoDisplayUrl(raw: string): string {
     // https://sadin.com.sa/<path><query>. Relative on purpose: it resolves against whatever origin
     // is serving the app (prod, preview, or localhost), never a hardcoded domain.
     return `/_img/sadin${u.pathname}${u.search}`;
+  }
+  if (EYDAH_HOSTS.has(u.hostname)) {
+    return `/_img/eydah${u.pathname}${u.search}`;
   }
   return raw;
 }

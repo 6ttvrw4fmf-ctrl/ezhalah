@@ -680,3 +680,50 @@ def test_a_colon_inside_the_unlabelled_value_does_not_cut_it():
     the candidates collapse to [«3374»]."""
     cands, _ = R._loc_segments("غرب عين دار – الاحساء (رقم المخطط: 3374)")
     assert cands[:2] == ["غرب عين دار", "الاحساء"], cands
+
+
+# ── 2026-09-23: the source's hosting account was suspended ───────────────────────────────────────
+class _Resp:
+    def __init__(self, status, text, url="", ctype="application/json"):
+        self.status_code, self.text, self.url = status, text, url
+        self.headers = {"content-type": ctype}
+
+    def json(self):
+        import json as _json
+        return _json.loads(self.text)
+
+
+class _FakeSession:
+    def __init__(self, resp):
+        self.resp = resp
+
+    def get(self, *_a, **_kw):
+        return self.resp
+
+
+_CPANEL = ('<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">'
+           "<html><head><title>Contact Support</title></head><body>"
+           "This Account has been suspended.</body></html>")
+
+
+def test_a_suspended_host_is_reported_as_a_source_outage_not_a_parser_error():
+    """Live 2026-09-23: every request 302s to /cgi-sys/suspendedpage.cgi and the cPanel page is
+    HTML, so r.json() raised «Expecting value: line 1 column 1» and the run ledger blamed nothing.
+    The message must name the source outage — and nothing may be retired on the strength of it."""
+    s = _FakeSession(_Resp(200, _CPANEL, url="https://alsidra.com.sa/cgi-sys/suspendedpage.cgi",
+                           ctype="text/html"))
+    with pytest.raises(RuntimeError) as e:
+        R._api(s, "/wp/v2/types")
+    assert "SUSPENDED" in str(e.value) and "nothing retired" in str(e.value)
+
+
+def test_an_html_answer_that_is_not_json_says_so_instead_of_raising_a_json_error():
+    s = _FakeSession(_Resp(200, "<html>maintenance</html>", ctype="text/html"))
+    with pytest.raises(RuntimeError) as e:
+        R._api(s, "/wp/v2/types")
+    assert "not JSON" in str(e.value)
+
+
+def test_a_healthy_json_answer_still_parses():
+    s = _FakeSession(_Resp(200, '[{"slug":"x"}]'))
+    assert R._api(s, "/wp/v2/types") == [{"slug": "x"}]

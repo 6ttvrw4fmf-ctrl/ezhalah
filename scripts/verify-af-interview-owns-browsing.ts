@@ -127,7 +127,7 @@ check('the wording still follows the rendered buttons (the 2026-09-05 honesty fi
 // code paths that must agree on one line; this executes all three at the boundary.
 const STOP_AT = 25;
 for (const total of [1, 10, 24, 25]) {
-  const reveal = initialRevealPure({ fetched: total, honestTotal: total, firstPage: 10, stopAt: STOP_AT, platforms: 3 });
+  const reveal = initialRevealPure({ fetched: total, honestTotal: total, stopAt: STOP_AT, platforms: 3 });
   const rc = resultCounts({ trueTotal: total, shown: reveal, fetched: total, serverMore: false });
   check(`clause 3 — at ${total} matches (≤ ${STOP_AT}): all revealed, no «عرض المزيد», flow finished`,
     reveal === total && rc.hasMore === false && rc.endKind === 'all'

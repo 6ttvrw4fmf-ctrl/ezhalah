@@ -48,7 +48,7 @@
 // been green through this entire defect on the strength of four comments.
 //
 // Run: node --experimental-strip-types scripts/verify-e2e-targets-still-exist-in-the-product.ts
-import { readdirSync, statSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = join(import.meta.dirname, '..');
@@ -59,40 +59,12 @@ const check = (m: string, cond: boolean) => { if (cond) ok(m); else { console.er
 // this call shape — same assertion, used only at genuine mutation-proof call sites below.
 const mustCatch = check;
 
-const ARABIC = /[؀-ۿ]/;
-
-function walk(dir: string, exts: RegExp): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const p = join(dir, entry);
-    if (statSync(p).isDirectory()) out.push(...walk(p, exts));
-    else if (exts.test(p)) out.push(p);
-  }
-  return out;
-}
-
-// ── THE PRODUCT'S SIDE: Arabic string LITERALS in src/, comments excluded ───────────────────────
-const LITERAL = /'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g;
-const isCommentLine = (line: string) => {
-  const t = line.trim();
-  return t.startsWith('//') || t.startsWith('*') || t.startsWith('/*');
-};
-
-export function productStringCorpus(srcDir: string): Set<string> {
-  const corpus = new Set<string>();
-  for (const file of walk(srcDir, /\.(ts|tsx)$/)) {
-    for (const line of readFileSync(file, 'utf8').split('\n')) {
-      if (isCommentLine(line)) continue;
-      let m: RegExpExecArray | null;
-      LITERAL.lastIndex = 0;
-      while ((m = LITERAL.exec(line))) {
-        const v = m[1] ?? m[2] ?? m[3];
-        if (v && ARABIC.test(v)) corpus.add(v);
-      }
-    }
-  }
-  return corpus;
-}
+// ARABIC, walk(), isCommentLine() and productStringCorpus() now live in scripts/lib/
+// productStrings.ts — verify-screen-identity-is-an-element-not-a-substring.ts asks the mirror
+// question of the SAME corpus, and two readers of the product's strings are free to disagree.
+// Re-exported so anything importing it from here keeps working.
+export { productStringCorpus } from './lib/productStrings.ts';
+import { ARABIC, walk, productStringCorpus } from './lib/productStrings.ts';
 
 // ── THE HARNESS'S SIDE: what the e2e suites actually aim at ─────────────────────────────────────
 // Only QUOTED literals at a real targeting call site, so a comment describing a control (of which

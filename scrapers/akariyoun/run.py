@@ -97,6 +97,29 @@ def session() -> cc.Session:
     return cc.Session(impersonate="chrome124")
 
 
+def _get_page(s: cc.Session, url: str, attempts: int = 3) -> tuple[Optional[str], Optional[str]]:
+    """_get() for a listing's own page, also returning the URL it LANDED on (identity check)."""
+    for i in range(attempts):
+        _throttle()
+        try:
+            r = s.get(url, timeout=40, allow_redirects=True)
+        except Exception:
+            time.sleep(1.5 * (i + 1)); continue
+        if r.status_code == 200:
+            return r.text, str(getattr(r, "url", url) or url)
+        if r.status_code == 404:
+            return None, None
+        time.sleep(1.5 * (i + 1))
+    return None, None
+
+
+def _own_page_is_live(slug: str, body: str, landed: Optional[str]) -> bool:
+    """Landed on /properties/<slug> itself AND the page still renders «رقم الاعلان» — the reading
+    _verify_gone() calls live (a removed ad hard-404s)."""
+    path = re.sub(r"[?#].*$", "", landed or "").rstrip("/")
+    return path.endswith(f"/properties/{slug}") and bool(re.search(r"رقم\s*الاعلان", body or ""))
+
+
 def _get(s: cc.Session, url: str, attempts: int = 3) -> Optional[str]:
     for i in range(attempts):
         _throttle()
@@ -594,7 +617,7 @@ def main() -> int:
     com: list[dict] = []
     seen = unpriced = 0
     for sl in slugs:
-        body = _get(s, f"{BASE}/properties/{sl}")
+        body, landed = _get_page(s, f"{BASE}/properties/{sl}")
         if body is None:
             continue
         row, cat, _raw = map_listing(sl, body)
@@ -614,6 +637,8 @@ def main() -> int:
                 unpriced += 1
         if args.type != "all" and cat != args.type:
             continue
+        if _own_page_is_live(sl, body, landed):
+            db.mark_direct_alive(row, oracle="akariyoun.property_page.ad_number")
         (com if cat == "commercial" else res).append(row)
 
     if res:

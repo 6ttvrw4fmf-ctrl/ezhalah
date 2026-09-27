@@ -34,14 +34,13 @@ const read = (rel: string) => readFileSync(join(root, rel), 'utf8');
 
 console.log(`\nAdvanced Filter reveals up to ${AF_REVEAL_MAX} without a tap (owner 2026-09-20)\n`);
 
-const FP = 10;
 // A realistic broad scope: plenty of platforms, so the non-AF first screen is genuinely wide and the
 // two branches cannot be confused by a coincidentally-equal number.
 const PLATFORMS = 59;
 const af = (fetched: number, honestTotal: number | null) =>
-  initialReveal({ fetched, honestTotal, firstPage: FP, stopAt: INTERVIEW_STOP_AT, platforms: PLATFORMS, afCompleted: true });
+  initialReveal({ fetched, honestTotal, stopAt: INTERVIEW_STOP_AT, platforms: PLATFORMS, afCompleted: true });
 const plain = (fetched: number, honestTotal: number | null) =>
-  initialReveal({ fetched, honestTotal, firstPage: FP, stopAt: INTERVIEW_STOP_AT, platforms: PLATFORMS, afCompleted: false });
+  initialReveal({ fetched, honestTotal, stopAt: INTERVIEW_STOP_AT, platforms: PLATFORMS, afCompleted: false });
 
 // ── 1. The owner's own worked numbers ────────────────────────────────────────────────────────────
 check(`AF_REVEAL_MAX is ${AF_REVEAL_MAX}`, AF_REVEAL_MAX === 400);
@@ -95,7 +94,7 @@ const mustCatch = (what: string, caught: boolean) =>
 
 // The allowance turned into a hard stop: 1000 would reveal everything and the pager would vanish.
 mustCatch('the cap dropped, revealing the whole fetched set (a 1000-card render)',
-  initialReveal({ fetched: 1000, honestTotal: 1000, firstPage: FP, stopAt: 1e9, platforms: PLATFORMS, afCompleted: true }) !== AF_REVEAL_MAX);
+  initialReveal({ fetched: 1000, honestTotal: 1000, stopAt: 1e9, platforms: PLATFORMS, afCompleted: true }) !== AF_REVEAL_MAX);
 // The flag ignored: AF turns would silently fall back to the 10/platform first screen — the exact
 // "why am I tapping after answering questions" complaint this rule exists for.
 mustCatch('the AF flag being ignored (AF falling back to the first-screen width)',

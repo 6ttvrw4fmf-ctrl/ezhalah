@@ -759,6 +759,9 @@ def main() -> int:
                     continue
                 if args.type != "all" and cat != args.type:
                     continue
+                # fetch_one returned only on HTTP 200 carrying the object whose own
+                # advertisementNumber equals this URL's (a soft-404 shell carries none).
+                db.mark_direct_alive(row, oracle="sanadak.listing_page.advertisementNumber")
                 (com_buf if cat == "commercial" else res_buf).append(row)
                 (com if cat == "commercial" else res).append(row)
                 seen += 1
@@ -796,6 +799,18 @@ def main() -> int:
         # started serving shells cannot be mistaken for a catalogue that emptied (§5.4).
         set_liveness_canaries([r.get("listing_url") for r in (res + com)[:3]])
         pruned = 0
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
+        # breakers protect the orphan rather than age it out, after which verify_gone asks "is
+        # this URL live?" — it is, in the sibling table — so the orphan never dies and the same
+        # ad renders as TWO cards on one URL. No-ops unless a flip actually happened this run.
+        superseded = db.retire_superseded_siblings(
+            res_table="sanadak_residential_listings", com_table="sanadak_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source="Sanadak")
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
         for tbl, rows_seen in (("sanadak_residential_listings", res), ("sanadak_commercial_listings", com)):
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Sanadak",
                                 verify_gone=_verify_gone)

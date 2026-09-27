@@ -41,6 +41,6 @@ comment on table public.ops_sync_unindexed_watch is
   'in v2 but not in search_listings_ar during a settled window, and leaves the moment it is indexed. '
   'Age here is how long a listing has been unreachable. NOTE: the original comment claimed the '
   'instantaneous cohort would flap; that was wrong (see migration '
-  '20260920080113_correct_the_stated_reason_for_the_unindexed_duration_clock). The clock is kept '
+  '20260920075900_correct_the_stated_reason_for_the_unindexed_duration_clock). The clock is kept '
   'because it states the SLA explicitly and survives a change to the jobid 17/28 spacing, not '
   'because the cohort is noisy today.';
