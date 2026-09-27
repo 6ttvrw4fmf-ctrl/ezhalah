@@ -374,7 +374,13 @@ must go up over time and never down.
 ## Report: this block is the LAST thing you write (times in Arizona time, UTC−7)
 > ✅ One plain first line: "Everything is perfectly good." / "Not good: <what> and I have not fixed it yet."
 > 📋 **Checked in time:** X% (goal 100%) · never checked: N (goal 0) · yesterday X%
-> ♻️ **Tonight:** N hidden · N brought back · N deleted
+> ♻️ **Tonight, all websites:** N hidden · N brought back · N deleted
+>
+> 🌐 **Each website** (most hidden first):
+> - **<website>**: N hidden · N brought back · N deleted · N% checked in time ✅ / ⚠️ / ❌
+> - …
+> - **The other N websites:** nothing hidden tonight, all checked in time ✅
+>
 > 🔴 **Gathern:** N ads checked · N wrong (should be 0)
 > 🟠 **High priority:** N websites (N of them small) · N wrong (should be 0)
 > 🛡️ **Websites fully protected:** N of N (yesterday N)
@@ -387,6 +393,12 @@ must go up over time and never down.
 >
 > ⭐ **Rating:** X/10
 > 🙋 **Needs from you:** Nothing.
+
+**The per-website list:** one line for every website that hid, brought back or deleted anything
+tonight, or is ⚠️ (below its check-by time) or ❌ (a wrong answer, a job that didn't work, or a bug
+still open). Sort it by most hidden. Every other website goes in the single "The other N websites"
+line, and N plus the listed websites must equal every active website. Put the full table for all
+websites in your run log.
 
 **Every number in this report comes from a query or job result from this run**, and those results
 are saved in your run log. Never a number from memory, an estimate, or yesterday.
