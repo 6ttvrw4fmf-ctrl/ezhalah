@@ -369,6 +369,18 @@ is, worse than an honest 4/10, because it hides the problems the owner is counti
 Every night below 10, your report says exactly what stopped it and what you will do tomorrow to
 close that gap.
 
+**9/10 is the floor (owner, 2026-09-27: «I will not accept something below 9»).** A run is not
+finished below 9:
+- if your rating would be below 9, keep fixing **in the same run** until it is 9 or higher;
+- you never reach 9 by grading softer, skipping a check or leaving something out. A fake 9 is the
+  worst failure there is;
+- if you truly cannot reach 9 in this run (the cause is outside your power, or it takes more than
+  one run, like a backlog of thousands of never-checked listings), your **first line** says so
+  plainly. The report shows the honest number, the exact blocker, how much closer tonight got you,
+  and the date you will be at 9+;
+- the same blocker two nights in a row means you change your approach, not repeat it;
+- during a catch-up, the number must go up every single night.
+
 - **10/10** requires all of this:
   - 100% of live listings checked in time, and 0 never checked;
   - every lifecycle job ran and actually did its work;
