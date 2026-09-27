@@ -126,10 +126,14 @@ def map_page(d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
         or next((c for c in _CITIES if slug.startswith(c) or f"-{c}-" in f"-{slug}-"), None) \
         or next((c for c in _CITIES if c in content[:600]), None)
     city_id, region_id = to_catalog(city_ar) if city_ar else (None, None)
-    # the header's own district: «حي X ( plan )», «مدينة Y ( حي X )», or «حي CITY ( X )» — try each named
-    # token against the catalog of THIS city; one the catalog lacks («العزيزية» in الخبر) stays NULL
-    tokens = [m.strip() for m in re.findall(r"حي ([^()]+?)\s*(?=\(|\)|مخطط)", head)]
-    tokens += [m.strip() for m in re.findall(r"\(\s*(?:حي )?([^()]+?)\s*\)", head)]
+    # the header's own district: «حي X ( plan )», «مدينة Y ( حي X )», or «حي CITY ( X )». A bare bracket is
+    # the PLAN's name («حي العزيزية ( الخزامى )» — الخزامى is also a different Khobar district) and counts
+    # only in «حي CITY ( X )», where «حي» names the city itself. Each token is tried against the catalog of
+    # THIS city; one the catalog lacks («العزيزية» in الخبر) stays NULL — never the bracket instead.
+    named = [m.strip() for m in re.findall(r"حي ([^()]+?)\s*(?=\(|\)|مخطط)", head)]
+    tokens = [t for t in named if t != city_ar]
+    if city_ar and city_ar in named:
+        tokens += [m.strip() for m in re.findall(r"\(\s*(?!حي )([^()]+?)\s*\)", head)]
     district_ar = next((x for x in (find_district_in_text("حي " + tok, city_id) for tok in tokens) if x), None) \
         if city_id else None
     district_raw = tokens[0] if tokens else None
