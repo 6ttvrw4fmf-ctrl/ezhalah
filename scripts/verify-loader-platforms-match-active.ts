@@ -269,10 +269,48 @@ const runtimeSrc = readFileSync(
   'utf8',
 );
 check(
-  'loaderActivePlatforms.ts exports fetchActivePlatformNames (runtime filter is wired)',
+  'loaderActivePlatforms.ts exports fetchActivePlatformNames wired to the STRIP RPC (active minus down)',
   /export async function fetchActivePlatformNames\(/.test(runtimeSrc) &&
-    /supabase\.rpc\(\s*['"]loader_active_platforms_ar['"]/.test(runtimeSrc),
+    /supabase\.rpc\(\s*['"]loader_strip_platforms_ar['"]/.test(runtimeSrc),
+  'the strip must read loader_strip_platforms_ar — reading loader_active_platforms_ar would put a down site\'s logo back',
 );
+
+// ── 6b. A DOWN SITE LEAVES THE STRIP, AND COMES BACK BY ITSELF (owner rule 2026-09-26).
+//
+// loader_strip_platforms_ar() = loader_active_platforms_ar() minus platform_registry 'dormant'/'retired'.
+// The registry is not anon-readable, so this compares the two anon RPCs — the same ones real users'
+// browsers call — and asserts the three properties that make the rule honest in both directions:
+//   (a) the strip never advertises a platform with no rows (strip ⊆ active);
+//   (b) every platform hidden from the strip is still in PLATFORM_META — so when its site answers
+//       again and the engineer flips it back to 'active', its logo returns with no code change. A
+//       down site DELETED from the catalog would stay hidden forever: that is the bug this catches;
+//   (c) the strip is not empty (an empty answer is a failure, not "everything is down").
+const stripRes = await postgrestFetch(`${SUPABASE_URL}/rest/v1/rpc/loader_strip_platforms_ar`, {
+  method: 'POST',
+  headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
+  body: '{}',
+});
+check('RPC loader_strip_platforms_ar() reachable via anon (HTTP 200)', stripRes.status === 200,
+  stripRes.status !== 200 ? `got HTTP ${stripRes.status}` : '');
+if (stripRes.status === 200) {
+  const stripRaws = (await stripRes.json()) as unknown;
+  const strip = new Set(Array.isArray(stripRaws) ? (stripRaws as string[]) : []);
+  const active = new Set(raws as string[]);
+  const notInActive = [...strip].filter((p) => !active.has(p));
+  check('(a) the strip advertises only platforms that have rows (strip ⊆ active)', notInActive.length === 0,
+    notInActive.length ? `in strip but no rows: ${notInActive.join(', ')}` : '');
+  const hiddenDown = [...active].filter((p) => !strip.has(p)).sort();
+  if (hiddenDown.length) console.log(`  ⓘ down on their side, logo hidden from the strip: ${hiddenDown.join(', ')}`);
+  // A down platform that was never in the catalog for an already-excused reason (no logo asset yet,
+  // retired) was never in the strip either — not a regression, so the same excuse applies here.
+  const unrestorable = hiddenDown.filter((raw) => {
+    const n = normalizeSource(raw);
+    return (!n || !catalog.has(n)) && !excusedIfHidden(raw);
+  });
+  check('(b) every down platform is still in PLATFORM_META, so its logo returns by itself when the site does',
+    unrestorable.length === 0, unrestorable.length ? `hidden AND missing from the catalog: ${unrestorable.join(', ')}` : '');
+  check('(c) the strip is not empty', strip.size > 0);
+}
 
 // ── 7. Every rostered platform must have an ARABIC NAME to show. عقاريون shipped with a logo, an
 //       i18nKey and a live row in loader_active_platforms_ar — and this barrier went GREEN while the

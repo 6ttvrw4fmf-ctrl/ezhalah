@@ -312,7 +312,7 @@ real production path counts.
 | Junior/Beginner Daily Engineer | **daily** | 11:00 | `ops_daily_engineer_run` |
 | Senior Production Engineer | **daily** (was every 2 days) | 11:30 | `ops_senior_audit_run` |
 
-**Corrected 2026-09-26** (closes `docs/ops/JUNIOR_SCRAPING_ENGINEER.md` UNRECOVERED item 8): this
+**Corrected 2026-09-26** (the schedule divergence the 2026-09-05 Junior reconstruction had flagged): this
 table still read 05:00/06:00 UTC from the original 2026-08-10 decision below; the schedule moved
 since then and `docs/ops/ENGINEER_ROUTINES.md`'s roster (`:12-13`) is the current source —
 **04:00/04:30 America/Phoenix = 11:00/11:30 UTC**, 30 minutes apart, not an hour. Arizona is the
