@@ -272,7 +272,11 @@ def map_item(item: dict, s: cc.Session) -> Optional[tuple[dict, str]]:
     if specs.get("photo_urls"):
         photos = specs["photo_urls"]
 
-    category = N.category_for_type(property_type)
+    # .lower() is LOAD-BEARING: category_for_type answers "Residential"/"Commercial" capitalized,
+    # and both readers below — the `== "commercial"` test here and crawl()'s res/com split — compare
+    # against the lowercase word. Returning the capitalized form made every comparison False, so
+    # every row landed in the residential table and october_commercial_listings was never written.
+    category = N.category_for_type(property_type).lower()
     # specs["bedrooms"] is schema.org's numberOfRooms — a generic total-room count, not
     # bedroom-specific ("excluding bathrooms and closets" per the spec, but majlis/living rooms are
     # NOT excluded). No source field on this platform is bedroom-scoped. Owner decision 2026-07-28:
@@ -372,6 +376,20 @@ def main() -> int:
                 print("     title:", (r.get("title") or "")[:60])
                 print("     photo:", (r["photo_urls"] or ["(none)"])[0][:74], f"({len(r['photo_urls'])} imgs)")
             return 0
+
+        # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
+        # prune_unseen because it reasons from positive evidence (we parsed and classified the ad
+        # this run), not from absence — prune's guards protect an orphan rather than age it out,
+        # and verify_gone's 'live' verdict then makes it immortal. Required here from the run that
+        # fixed the category split: every row this platform ever wrote went to the residential
+        # table, so the first corrected run flips every commercial ad across and would otherwise
+        # leave its residential twin live forever (one URL, two cards).
+        superseded = db.retire_superseded_siblings(
+            res_table="october_residential_listings", com_table="october_commercial_listings",
+            res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+            source=SOURCE)
+        if superseded:
+            print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
         # Full run: prune unseen via the shared guarded helper (0-scrape/collapse → skip).
         pruned = 0

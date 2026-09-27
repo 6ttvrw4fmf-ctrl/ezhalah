@@ -187,8 +187,16 @@ check('push: the shipped effect uses that predicate, and the activity-stamp diff
   !/const stamp = Math\.max\(it\.ts, it\.tRev \?\? 0\);/.test(store)
   && /if \(!chatNeedsPush\(it, base\)\) continue;/.test(store)
   && /new Map\(rows\.map\(\(r\) =>\n\s*\[r\.id, syncKeyOf\(/.test(store));
-check('push: gated on the pull having merged (a not-yet-merged list can never mass-delete server history)',
-  /if \(syncReadyRef\.current !== historyKey\(user\.sub\)\) return; \/\/ push only after the pull merged/.test(store));
+// RETARGETED to the property, for the reason the note below this check already gives (2026-09-25,
+// ops_incident #693). It used to freeze the exact line
+//     if (syncReadyRef.current !== historyKey(user.sub)) return; // push only after the pull merged
+// comment and all — and an account key is not a session, so that expression armed the push against a
+// baseline a PREVIOUS sign-in had built. The gate is now compared against the live account SCOPE
+// token, which is strictly stronger: it requires the same account AND the same signed-in session.
+// Asserted as two facts rather than one string, so the correct fix cannot be the thing that breaks it.
+check('push: gated on the pull having merged FOR THIS SESSION (a not-yet-merged list can never mass-delete server history)',
+  /if \(syncReadyRef\.current !== accountScopeRef\.current\) return;/.test(store)
+  && !/syncReadyRef\.current !== historyKey\(/.test(store));
 // THIS CHECK USED TO PIN THE DEFECT AS CORRECT (ops_incident #297). Its label claimed "deletions
 // propagate only for ids the server was known to hold" — true, and not the property that mattered.
 // Its regex froze the exact expression

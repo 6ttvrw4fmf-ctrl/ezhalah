@@ -513,10 +513,19 @@ mustCatch('a file that drives no browser and imports nothing local is NOT enlist
   // live journeys import IT. An importer-only closure left it outside the population while its
   // reader was blind, which is how a helper hides.
   const helperSrc = stripComments(readFileSync(join(ROOT, 'scripts/lib/afOfferLive.ts'), 'utf8'));
+  // Its two local imports are themselves driverless helpers — `resultsSentence.mjs` (the shipped
+  // template pool, read off disk) and `liveClick.ts` (the witnessed-click rule, which takes `page`
+  // as `any` and pins no second copy of the driver's types). Stripping them keeps the proof about
+  // what it is about — afOfferLive reaches a browser only through whoever imports IT — and both
+  // helpers are asserted driverless below, so the strip cannot hide a driver arriving by that door.
+  const SIBLING_HELPERS = /from '[^']*(?:resultsSentence\.mjs|liveClick\.ts)'/g;
   mustCatch('scripts/lib/afOfferLive.ts is reached only as a DOM-reading helper of a driver',
     !DRIVES_A_BROWSER.test(helperSrc)
-    && !/from '\.[^']*'/.test(helperSrc.replace(/from '[^']*resultsSentence\.mjs'/, ''))
+    && !/from '\.[^']*'/.test(helperSrc.replace(SIBLING_HELPERS, ''))
     && population.has('scripts/lib/afOfferLive.ts'));
+  const clickSrc = stripComments(readFileSync(join(ROOT, 'scripts/lib/liveClick.ts'), 'utf8'));
+  mustCatch('…and scripts/lib/liveClick.ts, the helper it now imports, drives no browser either',
+    !DRIVES_A_BROWSER.test(clickSrc) && !/from '\.[^']*'/.test(clickSrc));
 }
 
 // THE READER'S OWN BLIND SPOT. A retired regex quoted in a JSDoc block is documentation, not a code

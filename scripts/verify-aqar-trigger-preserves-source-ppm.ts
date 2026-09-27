@@ -54,9 +54,18 @@ function lastDefinitionOf(name: string): { file: string; body: string } | null {
     let m: RegExpExecArray | null;
     while ((m = header.exec(sql)) !== null) {
       const rest = sql.slice(m.index);
-      // Body is dollar-quoted; take through the matching closing tag, else to the end of file.
-      const close = rest.match(/\$(function|procedure)\$\s*;/i);
-      found = { file: f, body: close ? rest.slice(0, close.index! + close[0].length) : rest };
+      // BLIND-GUARD REPAIR, 2026-09-24 (routine-10-barrier). This used to read
+      //   `close ? rest.slice(0, …) : rest`  — i.e. "else to the end of file" —
+      // with `close` matched against the LITERAL tags `$function$`/`$procedure$`. A definition
+      // written with the ordinary `$$` (the style most hand-written migrations in this tree use)
+      // made `close` null and the "body" became THE WHOLE REST OF THE FILE, so every assertion
+      // below matched text that is not in the trigger at all. The identical idiom in
+      // scripts/verify-nonprice-price-monitor.ts was REPRODUCED on 2026-09-24: with the P0
+      // phone/ID-price guard deleted from the winning body, that barrier printed PASS on every
+      // check. Read the tag, require its close, and report UNKNOWN as unreadable — never as the file.
+      const tag = /\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(rest);
+      const closeAt = tag ? rest.indexOf(tag[0], tag.index + tag[0].length) : -1;
+      found = { file: f, body: tag && closeAt >= 0 ? rest.slice(0, closeAt + tag[0].length) : '' };
     }
   }
   return found;

@@ -1,0 +1,20 @@
+# ALERT-RAISING LIVE CHECKS, OUTSIDE af-live-truth-check.yml AND OUTSIDE ANY PR GATE,
+# THAT DO NOT YET SURVIVE A SCHEMA-CACHE RELOAD.
+#
+# routine #10, 2026-09-26 (ops_incident #794, routed here by routine #5). Any session applying a
+# function-creating migration makes PostgREST reload its schema cache and answer 503 PGRST002 for a
+# few seconds. A live check that reads PostgREST without routing through
+# scripts/lib/postgrestRetry.ts therefore has a verdict partly decided by whoever applied a migration
+# in the last minute — and for THESE checks the red is not a stalled merge, it is an accusation
+# against the product, raised as an alert_event nobody is forced to look at.
+#
+# MEASURED on this tree: NINETEEN such checks across twelve workflows the morning this file landed.
+# Eighteen adopted the driver in the same change, so this ledger holds exactly one row.
+#
+# THIS LIST MAY ONLY SHRINK. Its size is pinned by FLEET_UNPROTECTED_CEILING in
+# scripts/verify-fleet-live-checks-survive-schema-cache-reload.ts, so adding a name is a reviewed
+# source change and never a quiet append. A NEW unprotected check is RED. A row the tree has
+# outgrown is RED as STALE, so this ledger can never read better than reality.
+#
+# FORMAT: check | what it reads, and why it is still here
+verify-results-sentence-renders-whole-live.ts | Reaches PostgREST only TRANSITIVELY, through e2e/live-sweep/sweep.mjs, which carries seven /rest/v1 fetches of its own. The check itself makes no network call, so adopting the driver means changing a large shared .mjs harness that several routines drive and that today imports no TypeScript at all — a different change with a different blast radius, deliberately not folded into an eighteen-file adoption. The row is here so the one remaining member is COUNTED rather than invisible.

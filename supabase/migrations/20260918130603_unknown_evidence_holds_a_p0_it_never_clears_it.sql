@@ -17,7 +17,7 @@
 -- This is the repo's own owner-locked rule -- SOURCE IS TRUTH, silent -> NULL, never unknown -> NO
 -- -- violated in the MONITORING layer. Unknown evidence cleared a P0 instead of holding it.
 -- It also destroyed the alert's age: every re-raise is a new row, so "how long has this been
--- open?" always read minutes, never days, and no escalation path ever saw a 3-day-old P0.
+-- open?" always read minutes, never days, and no escalation path ever saw an old P0.
 --
 -- Two changes, plus a barrier for the class:
 --   1. The decision is lifted into mon_cron_frozen_verdict(n_frozen, n_alive), a pure function,

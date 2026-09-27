@@ -32,6 +32,14 @@ import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const POOL_SRC = join(ROOT, 'src', 'data', 'resultsFoundRotation.ts');
+// THE ZERO SENTENCE IS A ROTATION TOO (owner rule 2026-09-26) — and until 2026-09-27 this file did
+// not know it. `noResultsSuggestion()`'s catch-all branch became an 80-template rotation, so the
+// hand-written ZERO_RE below could only see the variants that happen to open with «ما لقينا/ما لقيت/
+// ما فيه». Production rendered «ما طلع لنا تطابق في بحث العقار، جرّب توسّع نطاق البحث وإزهله 😢» for
+// ثادق on 2026-09-27, no clock fired, and the honest-zero journey died on its 70s wait — the SAME
+// defect the SUCCESS half was fixed for on 2026-09-19, repeated on the other half. Derived, not
+// restated, for exactly that reason.
+const NO_RESULTS_SRC = join(ROOT, 'src', 'data', 'noResultsRotation.ts');
 
 /** Arabic-Indic digits → ASCII, so one numeric shape covers both renderings. */
 const ar = (s) => String(s).replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
@@ -43,17 +51,29 @@ const ar = (s) => String(s).replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧�
  * extraction returns exactly the same set — so "read the file" can never quietly mean "read a
  * different file than the app uses".
  */
-export function shippedTemplates(src = readFileSync(POOL_SRC, 'utf8')) {
+export function shippedTemplates(src = readFileSync(POOL_SRC, 'utf8'), where = 'resultsFoundRotation.ts') {
   const start = src.indexOf('const BAKED');
-  if (start < 0) throw new Error('resultsFoundRotation.ts: no BAKED pool found — the matcher cannot be derived');
+  if (start < 0) throw new Error(`${where}: no BAKED pool found — the matcher cannot be derived`);
   const end = src.indexOf('\n];', start);
-  if (end < 0) throw new Error('resultsFoundRotation.ts: BAKED pool is not terminated — refusing to guess');
+  if (end < 0) throw new Error(`${where}: BAKED pool is not terminated — refusing to guess`);
   const block = src.slice(start, end);
   const out = [];
-  for (const m of block.matchAll(/\{\s*lang:\s*'(ar|en)',\s*hasName:\s*(true|false),?\s*template:\s*'((?:[^'\\]|\\.)*)'\s*\}/g)) {
-    out.push({ lang: m[1], hasName: m[2] === 'true', template: m[3].replace(/\\'/g, "'").replace(/\\\\/g, '\\') });
+  // BOTH quote styles. A pool whose strings contain an apostrophe is written with double quotes —
+  // noResultsRotation.ts's 40 English templates are, and a single-quote-only parser returned 40 of
+  // its 80 while `out.length` stayed non-zero, so the "refusing to run blind" guard below never
+  // fired. Measured 2026-09-27: zero pool parsed 40 (ar 40, en 0).
+  for (const m of block.matchAll(/\{\s*lang:\s*'(ar|en)',\s*hasName:\s*(true|false),?\s*template:\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")\s*\}/g)) {
+    const raw = m[3] ?? m[4];
+    out.push({ lang: m[1], hasName: m[2] === 'true', template: raw.replace(/\\(['"\\])/g, '$1') });
   }
-  if (!out.length) throw new Error('resultsFoundRotation.ts: BAKED pool parsed to zero templates — refusing to run blind');
+  // A PARTIAL parse is the dangerous case, not an empty one: it looks like success and quietly
+  // shrinks the clock's vocabulary. Count the entries the pool DECLARES and refuse any shortfall.
+  const declared = (block.match(/\{\s*lang:\s*'(?:ar|en)'\s*,/g) ?? []).length;
+  if (declared !== out.length) {
+    throw new Error(`${where}: BAKED declares ${declared} templates but only ${out.length} parsed — `
+      + 'refusing to run with a partial pool (a shrunken clock reads as a hung page, not as a gap)');
+  }
+  if (!out.length) throw new Error(`${where}: BAKED pool parsed to zero templates — refusing to run blind`);
   return out;
 }
 
@@ -76,6 +96,20 @@ export function templateToRegex(template) {
     // matching, but settledSource() is evaluated on RAW page text inside the browser, where it cannot.
     .join('([\\d٠-٩][\\d٠-٩,٬،]*)');
   return new RegExp(body);
+}
+
+/**
+ * The ZERO-state templates the app ships, from the same kind of BAKED pool as the success sentences.
+ * Same shape, same parser — so a pool that grows tomorrow is covered without editing this file.
+ */
+export function shippedNoResultsTemplates(src = readFileSync(NO_RESULTS_SRC, 'utf8')) {
+  return shippedTemplates(src, 'noResultsRotation.ts');
+}
+
+let ZERO_CACHE = null;
+function zeroMatchers() {
+  if (!ZERO_CACHE) ZERO_CACHE = shippedNoResultsTemplates().map((t) => ({ ...t, re: templateToRegex(t.template) }));
+  return ZERO_CACHE;
 }
 
 let CACHE = null;
@@ -124,14 +158,32 @@ export function hasResultsFoundSentence(text, pool = matchers()) {
 }
 
 /** The zero-result statements. Unchanged by the rotation, but kept here so callers have one import. */
-export const ZERO_RE = /ما لقينا|ما لقيت|ما فيه نتائج|ما فيه إعلانات/;
+// The i18n family of SPECIFIC zero diagnoses (not a rotation). «لا توجد …» are the MSA variants
+// src/i18n.tsx also renders; they are terminal states, so the clock must stop on them too.
+// Widening this can never mask a defect — it only decides when to STOP waiting, and the
+// six-layer assertChain still judges what was actually found.
+export const ZERO_RE = /ما لقينا|ما لقيت|ما فيه نتائج|ما فيه إعلانات|لا توجد نتائج|لا توجد إعلانات/;
+
+/**
+ * "The product SAID there are none" — the zero state, over its whole shipped vocabulary.
+ *
+ * Distinct from `searchSettled` on purpose, and the distinction is the point: a journey that can only
+ * ask «is there a count on screen?» reads a BLANK or hung screen as an honest zero, which is the
+ * «A FAILED FETCH IS NOT AN EMPTY ANSWER» confusion in the assertion layer. visibleState().zero used
+ * the hand-written ZERO_RE and so answered false for every template of the 2026-09-26 rotation — on
+ * production 2026-09-27, ثادق rendered a perfectly good «ما طلع لنا تطابق في بحث العقار …» and the
+ * journey scored it zero:false, passing only because no headline count was present.
+ */
+export function zeroRendered(text) {
+  return ZERO_RE.test(ar(text)) || zeroMatchers().some(({ re }) => re.test(text));
+}
 
 /**
  * "The search has settled" — a shipped sentence quoted a count, or the product said there are none.
  * Replaces the hand-written /لقينا|ما لقيت|ما فيه/ clock, which 6 of 10 AR guest templates defeat.
  */
 export function searchSettled(text) {
-  return hasResultsFoundSentence(text) || ZERO_RE.test(ar(text));
+  return hasResultsFoundSentence(text) || zeroRendered(text);
 }
 
 /**
@@ -143,9 +195,14 @@ export function searchSettled(text) {
  * Arabic-Indic digits are included in the numeric class instead of being normalised first: the page
  * text is tested raw in the browser, where ar() is not available.
  */
-export function settledSource(pool = matchers()) {
+export function settledSource(pool = matchers(), zeroPool = zeroMatchers()) {
   const alts = pool.map(({ re }) => `(?:${re.source})`);
-  return `(?:${alts.join('|')}|${ZERO_RE.source})`;
+  // The ZERO half is now BOTH: the specific diagnoses src/i18n.tsx renders (ZERO_RE — «ما فيه إعلانات
+  // داخل ميزانيتك…» and friends, which are not a rotation) AND every template of the catch-all
+  // rotation. Neither is restated by hand; dropping either one is how the clock stops seeing a real
+  // terminal state and a journey dies on its wait instead of reporting a verdict.
+  const zeroAlts = zeroPool.map(({ re }) => `(?:${re.source})`);
+  return `(?:${[...alts, ...zeroAlts].join('|')}|${ZERO_RE.source})`;
 }
 
 /**

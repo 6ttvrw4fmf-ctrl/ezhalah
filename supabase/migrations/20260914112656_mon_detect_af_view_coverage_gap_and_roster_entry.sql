@@ -20,11 +20,6 @@
 -- IT FAILS CLOSED. If the call errors or exceeds 20s, that raises its own alert rather than being
 -- swallowed as "no gaps found": a failed fetch is not an empty answer. The 20s cap is ~20x the
 -- measured 0.62-1.45s anon latency, so it fires on a genuine regression, not on load.
---
--- MUTATION PROOF (2026-09-14, run inside a transaction that was rolled back): the rakez arm was
--- surgically removed from listing_rich_attrs and the detector raised
--- P2 af_view_coverage_gap:rakez naming exactly that platform; after rollback it returned 0 with no
--- open alerts and all 3,769 rakez rows present.
 create or replace function public.mon_detect_af_view_coverage_gap()
 returns integer
 language plpgsql

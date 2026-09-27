@@ -193,6 +193,18 @@ published before the change — which Layer 3 produces as a side effect.
 - **No bulk re-resolution.** §3 is the argument against it.
 - **No re-opening of the 2026-08-31 repairs.** Those are complete and production-verified.
 
+**Update 2026-09-25 (`docs/ops/DATA_INTEGRITY_ENGINEER.md` §33) — still no bulk re-resolution, and
+the taxonomy question is still untouched.** A per-row audit of the full aqar disagreement set found
+1,322 of 2,146 rows carried CONCRETE per-row proof (the listing's own `neighborhood` field matches a
+real catalog district under the fresh city and not the old one) — a materially different, narrower
+class than "`today_city` disagrees", which §3 already showed is unreliable in bulk. Those 1,322 were
+repaired individually, evidence-backed, exactly as §4's "Repairs stay per-row and evidence-backed"
+principle describes. «الاحساء» → «الهفوف» itself was explicitly re-checked and left untouched — see
+§33 for why (including that `loc_city_cluster` re-clustered it again on 2026-08-31, after this
+proposal was written). This is not a §3 bulk reconciliation and does not settle the reserved
+question; it is the "no broad re-resolution or mass rewrite **without source proof**" carve-out §4
+already reserves, applied for the first time to a real subset.
+
 ## 7. Open questions for the owner
 
 1. **Approve phases 1–3?** Pure observability; makes a frozen store impossible to forget and

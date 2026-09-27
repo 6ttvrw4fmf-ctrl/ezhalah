@@ -346,14 +346,37 @@ def canary_diagnosis(statuses: dict[int, int]) -> str:
 
 
 def _collect_stale(client, cutoff_iso: str, limit: int) -> list[dict]:
-    """Read-only worklist: active rows whose last_seen_at is already stale, oldest first. Collected in
-    full BEFORE any write so flipping active=false mid-sweep can't shift an offset window and skip rows."""
+    """Read-only worklist: active stale rows, LEAST-RECENTLY-LOOKED-AT first. Collected in full
+    BEFORE any write so flipping active=false mid-sweep can't shift an offset window and skip rows.
+
+    THE ORDER IS THE FIX (2026-09-24, owner directive).
+    This ranked by `last_seen_at asc` — oldest crawl sighting first — and that starved the platform.
+    A row this sweep probes and finds DEAD moves neither `last_seen_at` (a crawl fact; a sweep is
+    not a crawl) nor `last_verified_alive_at` (only ALIVE moves it). So a dead row the anomaly cap
+    refuses to kill keeps its ancient last_seen_at and sits at the head of this queue permanently.
+
+    Measured before the fix: 28,639 active gathern rows, the same ~1,500 re-probed every run —
+    an identical `strike=1461` in the run notes on 09-16, 17, 18, 19, 20, 21 and 22 — while 27,102
+    rows had never been looked at once and the oldest last_seen_at was still 2026-07-27. Coverage:
+    0.4% verified-in-SLA. Throughput was never the binding constraint; a faster loop over a queue
+    whose head cannot clear just re-reads the same rows more often.
+
+    `last_liveness_probe_at` (migration 20260924…) records the missing third fact — "we LOOKED at
+    this row, whatever we concluded" — and every verdict branch below now writes it, INCLUDING the
+    quarantined kills the cap declines to action. Ordering `nulls first` therefore puts rows nobody
+    has ever looked at at the front, and a probed row drops to the back for a full cycle.
+
+    NOTE it is ordered on, never read as evidence: a row probed a minute ago and found 404 or
+    blocked has a fresh timestamp here and is still DEAD or UNKNOWN. Only last_verified_alive_at
+    means alive.
+    """
     work: list[dict] = []
     offset = 0
     page = 1000
     while True:
         q = (client.table(TABLE).select("id, ad_number, listing_url, missing_count")
              .eq("source", SOURCE).eq("active", True).lt("last_seen_at", cutoff_iso)
+             .order("last_liveness_probe_at", desc=False, nullsfirst=True)
              .order("last_seen_at", desc=False).order("id", desc=False)
              .range(offset, offset + page - 1))
         batch = q.execute().data or []
@@ -721,6 +744,7 @@ def main() -> int:
         if args.apply and alive_ids:
             for i in range(0, len(alive_ids), 200):
                 client.table(TABLE).update({"last_seen_at": now_iso, "missing_count": 0,
+                                            "last_liveness_probe_at": now_iso,
                                             **direct_alive_patch(now_iso=now_iso)}) \
                     .in_("id", alive_ids[i:i + 200]).execute()
         alive_ids.clear()
@@ -827,7 +851,8 @@ def main() -> int:
     if args.apply and trusted:
         # Strikes: the cap does not govern them, only trust does.
         for rid, nm in strike_pending:
-            client.table(TABLE).update({"missing_count": nm}).eq("id", rid).execute()
+            client.table(TABLE).update({"missing_count": nm,
+                                        "last_liveness_probe_at": now_iso}).eq("id", rid).execute()
         applied_strikes = len(strike_pending)
 
         # ── Anomaly cap gate (2026-07-27) — UNCHANGED and still fully enabled. The trust gate is an
@@ -840,10 +865,20 @@ def main() -> int:
                 # again until the owner reviews and re-runs with an explicit --kill-cap.
                 for i in range(0, len(kill_pending), 200):
                     for rid, nm in kill_pending[i:i + 200]:
-                        client.table(TABLE).update({"missing_count": nm}).eq("id", rid).execute()
+                        # last_liveness_probe_at is written even though NOTHING was inactivated.
+                        # We DID look at this row and reached a verdict; the cap refused to action
+                        # it. Without this the row keeps its stale last_seen_at, stays at the head
+                        # of _collect_stale's queue, and is re-probed tomorrow ahead of rows nobody
+                        # has ever looked at -- which is precisely how the same ~1,500 gathern rows
+                        # were re-probed every run while 27,102 were never reached (2026-09-24).
+                        client.table(TABLE).update({"missing_count": nm,
+                                                    "last_liveness_probe_at": now_iso}) \
+                            .eq("id", rid).execute()
             else:
                 for rid, nm in kill_pending:
-                    client.table(TABLE).update({"missing_count": nm, "active": False}).eq("id", rid).execute()
+                    client.table(TABLE).update({"missing_count": nm, "active": False,
+                                                "last_liveness_probe_at": now_iso}) \
+                        .eq("id", rid).execute()
                 applied_kills = len(kill_pending)
 
     # `applied` must state whether a row actually changed: false for a dry run, false for a batch the

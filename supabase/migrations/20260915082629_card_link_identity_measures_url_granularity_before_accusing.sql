@@ -29,13 +29,6 @@
 --     every platform; only "distinct listings share a coarser source page", which cannot be told
 --     from source-level project pages without fetching the source, is downgraded.
 -- A table with no ad_number column keeps the old unconditional P2: no evidence, no weakening.
---
--- PROVEN BY EXECUTING THE SHIPPED FUNCTION, both directions, against a synthetic platform inside a
--- rolled-back transaction (2026-09-15):
---   60 rows / 30 shared urls, all ad ids distinct  -> granularity P3 = 1, dupe P2 = 0, share 1.0000
---   the same rows with 5 repeated ad ids           -> granularity P3 = 1, dupe P2 = 1, repeated = 5
--- and then on production: rakez's P2 self-resolved into a P3 (share 0.9924, repeated 0) while
--- hajer's P2 stayed OPEN (share 0.0167). The duplicate half is armed, not muted.
 create or replace function public.mon_detect_card_link_identity()
 returns integer language plpgsql security definer set search_path to 'public' as $function$
 declare

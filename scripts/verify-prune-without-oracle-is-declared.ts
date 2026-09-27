@@ -72,7 +72,13 @@ const LEDGER = join(ROOT, 'scrapers', 'absence-only-prune.txt');
 // so removal on this source is a redirect, on a slugless URL that cannot change path benignly.
 // Wired through the shared law with an in-run canary; `not_available_or_zero_price` deliberately
 // stays UNKNOWN because the measured dead shape is a conjunction and fetch_one's gate is not.
-const RATCHET = 23;
+// 23 → 24: alajlan onboarded (wave-2, 2026-09-26). NOT a to-do like every other entry —
+// there is no per-listing URL or detail endpoint anywhere on this platform, so no oracle CAN be
+// built. Every run re-fetches the site's entire /data/projects.json array in one shot, and that one
+// fetch already IS the complete, authoritative per-unit state; a constructed per-row URL the site
+// does not read would look like a real oracle while proving nothing, which is worse than declaring
+// the gap honestly here. Registered CRAWL_PRESENCE_ONLY in liveness_policies.py for the same reason.
+const RATCHET = 40;  // 39 -> 40: arsh onboarded 2026-09-27 (wave-3 batch 6) — an oracle is possible (the index drops a removed page) but none is written yet. 36 -> 39 before that: holoul, eightfloor, manzo onboarded 2026-09-27 (wave-3 batch 5) — each COULD have an oracle (a 404 per id / the record's own status) but none is written yet. 34 -> 36 before that: earthapp and nawafeth onboarded 2026-09-27 (wave 3b) — each prunes only on a COMPLETE, self-declaring walk and neither has a written oracle yet (nawafeth's 404-per-id could be one). maqam, onboarded with them, is NOT here: it wires the Nuzul engine's canary-gated verify_gone_for exactly as yameen does. 29 -> 34 before that: dallali, muajarh, mobasher, nafithh, opensooq (wave-3 batch 4). A NEW platform may raise this; a FIXED one must lower it.
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {

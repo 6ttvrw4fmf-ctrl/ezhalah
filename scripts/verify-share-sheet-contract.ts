@@ -128,8 +128,11 @@ for (const locale of ['ar', 'en'] as const) {
       u.searchParams.get('url') === LINK && !(u.searchParams.get('text') ?? '').includes(LINK),
       `text=${u.searchParams.get('text')}`);
   }
+  // The property is LOCALE, not word order: the English post must be English and must name the
+  // brand — it used to demand `^Ezhalah`, which pinned the first word and went red when the owner
+  // rewrote the sentence to open with the home screen's question (2026-09-23).
   check(`[${locale}] the sentence is still in the user's own language`,
-    locale === 'ar' ? /[؀-ۿ]/.test(out.msg) : /^Ezhalah/.test(out.msg));
+    locale === 'ar' ? /[؀-ۿ]/.test(out.msg) : (!/[؀-ۿ]/.test(out.msg) && /Ezhalah/.test(out.msg)));
 }
 
 // mutation — the exact defect: hand the url=-carrying targets the link-bearing text as well.

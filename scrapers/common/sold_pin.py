@@ -77,6 +77,45 @@ never infer one: absence from a crawl is `EvidenceKind.ABSENCE` and `decide()` r
 `action = "none"` for it, always (`LISTING_LIVENESS.md` §1-§3). And it must never write
 `last_verified_alive_at` — only `scrapers/common/liveness_contract.py` may (§3); a hand-written
 stamp puts a confident, recent-looking timestamp on inventory nobody read.
+
+THE SOLD PIN WAS ONE-WAY, AND A ONE-WAY ORACLE MAKES AN UNCLEARABLE ALERT (2026-09-23, routine #11)
+---------------------------------------------------------------------------------------------------
+Measured over the whole `ops_stale_inactivation_probe` ledger that day:
+
+    prune_unseen.verify_gone      362 GONE /  300 LIVE /  618 UNKNOWN   <- three-valued
+    wasalt.liveness.check_hybrid 1405 GONE /  145 LIVE /    0           <- two-valued
+    *.sold_pin.*  (9 oracles)    5853 GONE /    0 LIVE /    0           <- ONE-WAY
+
+Every other evidence writer in this repo records the source saying "still here". The sold pin
+recorded only "gone", because it is handed just the ids the caller judged sold and writes a row for
+each. The available complement — read from the SAME field, on the SAME page, in the SAME crawl —
+was computed, used to decide, and thrown away.
+
+That is not a bookkeeping complaint either. `ops_lifecycle_false_resurrection()` takes the LATEST
+verdict per ad_number and reports rows where it is GONE while the row is `active = true`. When a
+source RELISTS a unit the scraper does the right thing — the next upsert carries `active = true` —
+but nothing records the contradicting reading, so the ledger's latest verdict stays GONE **forever**
+and the P1 can never clear by any amount of correct behaviour. satel STC0084 was exactly this:
+GONE on 09-14/15/16/17, then silence, the row correctly active, and a DIRECT re-probe on 09-23
+returning the very same `property_status` field reading `"Available"` / `postStatus: "Published"`.
+
+`docs/ops/LISTING_LIFECYCLE_ENGINEER.md` §2.5a names this trap in its exact form: *a permanently
+unclearable P2 is how a detector teaches people to dismiss it* — and §8.3 says this class of
+detector is the one that can least afford to cry wolf. The repair there was to make the predicate
+DISTINGUISH cases rather than silence it. The repair here is the same move one layer earlier: make
+the oracle report the reading it already has, in both directions.
+
+WHY THIS CANNOT HIDE A REAL FALSE RESURRECTION (the direction that matters)
+--------------------------------------------------------------------------
+A LIVE row is written ONLY for an id that (a) this crawl read as available from the pin's own field
+and (b) already carries a GONE verdict. If a listing really is still sold and something wrongly
+reactivated it, THIS SAME CRAWL reads it sold and writes a fresh GONE row — so the latest verdict is
+GONE and the alert fires exactly as before. The two cases are distinguished by the source, every
+crawl, which is the only thing allowed to distinguish them.
+
+It also cannot kill anything: this half writes evidence only, never `active`, never `missing_count`,
+and never `last_verified_alive_at`. Per §0's asymmetry it is a RESTORATIVE write, which
+`LISTING_LIVENESS.md` §5.4 does not gate — a block cannot manufacture a source that says available.
 """
 from __future__ import annotations
 
@@ -139,6 +178,113 @@ def plan_pin(
     return pinnable, conflicted, evidence
 
 
+def plan_relisting_evidence(
+    seen_ad_numbers: Sequence[str],
+    gone_ad_numbers: Sequence[str],
+    previously_gone: Iterable[str],
+    oracle: str,
+    table: str = "",
+) -> list[dict[str, Any]]:
+    """Decide, with NO I/O, which ids deserve a LIVE row: `(seen - gone) ∩ previously_gone`.
+
+    Pure and total, so the law can be EXECUTED by a barrier rather than read as text
+    (`scripts/verify-sold-pin-evidence-law.ts` runs it through `scripts/lib/pythonMutant.ts`,
+    which calls positionally — hence the positional signature here).
+
+    The two intersections are each load-bearing and neither is an optimisation:
+
+    * subtracting `gone_ad_numbers` is what makes it impossible to certify as available an id this
+      very crawl read as sold. A caller that hands over its whole seen-set, sold rows included,
+      still cannot produce a contradictory pair — the law removes them, not the caller.
+    * intersecting `previously_gone` is what keeps this bounded and meaningful. Without it a daily
+      crawl would file tens of thousands of "still available" rows into an evidence ledger that
+      holds ~12k rows in total, and the signal — *the source reversed a removal it had published* —
+      would be buried in its own noise.
+    """
+    if not oracle or not str(oracle).strip():
+        raise ValueError(
+            "record_relisting_evidence requires a non-empty oracle naming the source field that "
+            "said available, e.g. 'satel.sold_pin.property_status'"
+        )
+    gone = set(gone_ad_numbers or ())
+    prior = set(previously_gone or ())
+    seen_already: set[str] = set()
+    rows: list[dict[str, Any]] = []
+    for a in seen_ad_numbers:
+        if a in gone or a in seen_already or a not in prior:
+            continue
+        seen_already.add(a)
+        rows.append({
+            "source_table": table,
+            "ad_number": a,
+            "verdict": "LIVE",
+            "oracle": oracle,
+            "note": "source relisted: the field that published this removal now reads available",
+        })
+    return rows
+
+
+def _previously_gone(table: str, candidates: Sequence[str]) -> set[str]:
+    """The subset of `candidates` this table has ever published a GONE verdict for.
+
+    Asked in `_BATCH`-sized `in_` slices rather than by pulling every GONE ad_number for the table:
+    PostgREST caps an unbounded select at 1000 rows, and a cap that silently truncates would make
+    the intersection above quietly under-report on exactly the busiest platforms.
+    """
+    found: set[str] = set()
+    for i in range(0, len(candidates), _BATCH):
+        res = db._execute(
+            db.sb().table(EVIDENCE_TABLE)
+            .select("ad_number")
+            .eq("source_table", table)
+            .eq("verdict", "GONE")
+            .in_("ad_number", list(candidates[i:i + _BATCH])),
+            what=EVIDENCE_TABLE + ".select_gone",
+        )
+        for r in (getattr(res, "data", None) or []):
+            if r.get("ad_number"):
+                found.add(r["ad_number"])
+    return found
+
+
+def record_relisting_evidence(
+    table: str,
+    seen_ad_numbers: Sequence[str],
+    gone_ad_numbers: Sequence[str],
+    *,
+    oracle: str,
+) -> list[str]:
+    """Record that the source REVERSED a removal it had previously published. Returns the ids.
+
+    Best-effort in exactly the sense the GONE half is: a ledger outage may never change what a user
+    sees, and it may never abort a crawl. Writes evidence only — never `active`, never
+    `missing_count`, and never `last_verified_alive_at` (only `liveness_contract.py` may write that;
+    see the module docstring).
+    """
+    candidates = [a for a in dict.fromkeys(seen_ad_numbers) if a not in set(gone_ad_numbers or ())]
+    if not candidates:
+        return []
+    try:
+        rows = plan_relisting_evidence(
+            candidates, gone_ad_numbers, _previously_gone(table, candidates), oracle, table,
+        )
+        for i in range(0, len(rows), _BATCH):
+            # NOT db._execute: that helper retries, and its own docstring forbids routing a plain
+            # INSERT with no conflict key through it — a transient error raised after the server
+            # committed would file the same reversal twice.
+            db.sb().table(EVIDENCE_TABLE).insert(rows[i:i + _BATCH]).execute()
+        if rows:
+            print(
+                f"{table}: {len(rows)} listing(s) the source had published as gone now read "
+                f"available on the same field — recorded LIVE ({oracle})",
+                flush=True,
+            )
+        return [r["ad_number"] for r in rows]
+    except Exception as e:  # noqa: BLE001 — the ledger must never be able to break a crawl
+        print(f"{table}: could not record relisting evidence ({type(e).__name__}: {e})", flush=True)
+        return []
+
+
 def pin_source_confirmed_gone(
     table: str,
     ad_numbers: Sequence[str],
@@ -146,6 +292,7 @@ def pin_source_confirmed_gone(
     oracle: str,
     notes: Optional[Mapping[str, str]] = None,
     live_ad_numbers: Optional[Iterable[str]] = None,
+    seen_ad_numbers: Optional[Sequence[str]] = None,
 ) -> list[str]:
     """Pin rows the SOURCE ITSELF said are gone, and record why. Returns the ids actually pinned.
 
@@ -167,6 +314,13 @@ def pin_source_confirmed_gone(
             f"authoritative gone evidence): {', '.join(conflicted[:10])}",
             flush=True,
         )
+
+    # The reversal half. Deliberately BEFORE the `not pinnable` exit: a crawl in which nothing is
+    # sold is precisely a crawl in which a previously-sold unit may have come back, and returning
+    # early on an empty sold-set is how the one-way ledger would quietly survive this fix.
+    if seen_ad_numbers is not None:
+        record_relisting_evidence(table, seen_ad_numbers, ad_numbers, oracle=oracle)
+
     if not pinnable:
         return []
 

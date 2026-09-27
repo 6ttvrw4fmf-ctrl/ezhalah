@@ -19,6 +19,8 @@
 // Env wins when set; otherwise the committed PUBLIC endpoint. Before 2026-08-10 this required env
 // and the workflow's repo secret did not exist, so this barrier exited 1 without ever running.
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
+import { postgrestFetch } from './lib/postgrestRetry.ts';
+import { startDeadline, incompleteVerdict, certified } from './lib/checkDeadline.ts';
 const { url: URL_BASE, key: KEY } = resolvePublicSupabase();
 const HEADERS = { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' };
 
@@ -32,13 +34,13 @@ const MAX_DISTRICTS_PER_SCOPE = 40; // bound runtime; each city rarely has more 
 type DistrictOpt = { district_ar: string; listing_count: number; match_values: string[] };
 
 async function post(fn: string, body: Record<string, unknown>): Promise<any[]> {
-  const res = await fetch(`${URL_BASE}/rest/v1/rpc/${fn}`, { method: 'POST', headers: HEADERS, body: JSON.stringify(body) });
+  const res = await postgrestFetch(`${URL_BASE}/rest/v1/rpc/${fn}`, { method: 'POST', headers: HEADERS, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`${fn} ${res.status}: ${await res.text()}`);
   return (await res.json()) as any[];
 }
 
 async function cityId(cityAr: string): Promise<number | null> {
-  const res = await fetch(`${URL_BASE}/rest/v1/loc_catalog_city?select=city_id,city_ar&city_ar=eq.${encodeURIComponent(cityAr)}&limit=1`, { headers: HEADERS });
+  const res = await postgrestFetch(`${URL_BASE}/rest/v1/loc_catalog_city?select=city_id,city_ar&city_ar=eq.${encodeURIComponent(cityAr)}&limit=1`, { headers: HEADERS });
   if (!res.ok) return null;
   const rows = (await res.json()) as { city_id: number }[];
   return rows.length ? rows[0].city_id : null;
@@ -51,7 +53,20 @@ async function searchCount(cityAr: string, deal: string, matchValues: string[], 
   return rows.length ? Number(rows[0].total_count) : 0;
 }
 
-let failed = 0, checked = 0;
+// THE DEADLINE (routine-4, 2026-09-27). This check's work grows with inventory: 1,772
+// (city × scope × district) suggestions today, up from a run that fitted comfortably a week ago. On
+// 2026-09-24 it crossed its 10-minute job cap and 9 of the next 12 runs were KILLED at 618-620s —
+// reported by GitHub as `cancelled`, which the failure->alert bridge classifies as NO_VERDICT and
+// deliberately does not raise on. So this barrier went dark for ~2.5 days while nothing anywhere
+// said so. It now stops taking new work at its own deadline, strictly inside the job cap, and
+// reports the shortfall as NOT EXERCISED with a non-zero exit — a loud alert instead of silence.
+// See scripts/lib/checkDeadline.ts for the full measurement and the inequality a barrier pins.
+const deadline = startDeadline();
+
+let checked = 0;          // suggestions this run actually got an answer for
+let unanswered = 0;       // attempted, but the RPC never answered (transport/other error)
+let unattempted = 0;      // never attempted: the deadline expired first
+let planningFailed = 0;   // a district_options_ar call that never answered
 const deadEnds: string[] = [];
 
 // 1) Gather every populated district suggestion across EVERY scope the District field can be in.
@@ -79,15 +94,18 @@ const SCOPES: Scope[] = [
   { label: 'cat:Commercial',  deals: [BUY, RENT], dopt: { p_category: 'Commercial' },  search: { p_category: 'Commercial' } },
 ];
 const tasks: Task[] = [];
+let planningCut = false;   // the deadline expired while still enumerating suggestions
 for (const cityAr of CITIES) {
+  if (deadline.expired()) { planningCut = true; break; }
   const cid = await cityId(cityAr);
   if (cid == null) { console.log(`SKIP  ${cityAr} — city_id not found`); continue; }
   for (const scope of SCOPES) {
     for (const deal of scope.deals) {
+      if (deadline.expired()) { planningCut = true; break; }
       let opts: DistrictOpt[];
       try {
         opts = (await post('district_options_ar', { p_city_id: cid, p_deal: deal, ...scope.dopt })) as DistrictOpt[];
-      } catch (e) { console.log(`FAIL  district_options_ar(${cityAr}, ${deal}, ${scope.label}) — ${(e as Error).message}`); failed++; continue; }
+      } catch (e) { console.log(`FAIL  district_options_ar(${cityAr}, ${deal}, ${scope.label}) — ${(e as Error).message}`); planningFailed++; continue; }
       for (const o of opts.filter((x) => Number(x.listing_count) > 0).slice(0, MAX_DISTRICTS_PER_SCOPE)) {
         tasks.push({ cityAr, deal, scope: scope.label, district: o.district_ar, count: Number(o.listing_count),
           mv: Array.isArray(o.match_values) && o.match_values.length ? o.match_values : [o.district_ar],
@@ -96,28 +114,49 @@ for (const cityAr of CITIES) {
     }
   }
 }
+if (planningCut) console.log('\nNOT EXERCISED  enumeration cut short — the deadline expired while still reading district_options_ar; some cities/scopes were never planned.');
+const planned = tasks.length;
 
 // 2) Verify each suggestion returns >0 from the real search — bounded-concurrency parallel so the
-//    whole barrier finishes in seconds, not minutes (CI-viable).
+//    whole barrier finishes in seconds, not minutes (CI-viable). A worker takes NO new task once the
+//    deadline has passed: the tasks left over are reported, never silently dropped.
 const CONCURRENCY = 10;
 let cursor = 0;
 async function worker() {
   while (cursor < tasks.length) {
+    if (deadline.expired()) { unattempted += tasks.length - cursor; cursor = tasks.length; break; }
     const task = tasks[cursor++];
     try {
       const n = await searchCount(task.cityAr, task.deal, task.mv, task.searchExtra);
       checked++;
-      if (n === 0) { failed++; deadEnds.push(`${task.cityAr} › ${task.district} (${task.deal}/${task.scope}): suggested with listing_count=${task.count} but search returned 0`); }
-    } catch (e) { failed++; console.log(`FAIL  search(${task.cityAr}/${task.district}/${task.deal}/${task.scope}) — ${(e as Error).message}`); }
+      if (n === 0) { deadEnds.push(`${task.cityAr} › ${task.district} (${task.deal}/${task.scope}): suggested with listing_count=${task.count} but search returned 0`); }
+    } catch (e) { unanswered++; console.log(`FAIL  search(${task.cityAr}/${task.district}/${task.deal}/${task.scope}) — ${(e as Error).message}`); }
   }
 }
 await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 
-console.log(`\nchecked ${checked} populated district suggestions across ${CITIES.length} cities × ${SCOPES.length} scopes (deal-only, monthly, category).`);
+// 3) THE VERDICT. A clean run is one where every planned suggestion was ANSWERED and none was a dead
+//    end. Anything unanswered or unattempted makes the run uncertified — it must never render as the
+//    clean tick, because "no dead ends found" over cells nobody measured is a false clean claim.
+//    Measured on 2026-09-26 run 187, which is why this is spelled out: that run printed
+//    «✓ no dead-end district suggestions — every populated district returns results» while 10 of its
+//    searches had come back 503 and been counted as failures. The exit code was right and the
+//    sentence was wrong, and the sentence is what a human reads.
+const unexercised = unanswered + unattempted + planningFailed;
+const clean = certified({ defects: deadEnds.length, unanswered, unattempted, planningFailed, planningCut });
+
+console.log(`\nchecked ${checked} of ${planned} planned populated district suggestions across ${CITIES.length} cities × ${SCOPES.length} scopes (deal-only, monthly, category).`);
+if (unanswered) console.log(`NOT EXERCISED  ${unanswered} search(es) never answered — see the FAIL lines above. A failed fetch is not an honest zero, so these are neither dead ends nor passes.`);
+if (planningFailed) console.log(`NOT EXERCISED  ${planningFailed} district_options_ar call(s) never answered, so their suggestions were never enumerated.`);
+if (unattempted) console.log(incompleteVerdict(checked, planned, deadline.budgetSeconds));
+
 if (deadEnds.length) {
   console.log(`\n✗ ${deadEnds.length} DEAD-END suggestion(s) — a district shown as populated returned 0 from search:`);
   for (const d of deadEnds) console.log(`   • ${d}`);
-} else {
-  console.log('\n✓ no dead-end district suggestions — every populated district returns results.');
 }
-process.exit(failed === 0 ? 0 : 1);
+if (clean) {
+  console.log('\n✓ no dead-end district suggestions — every populated district returns results.');
+} else if (!deadEnds.length) {
+  console.log(`\n✗ NOT CERTIFIED — no dead end was found, but ${unexercised} suggestion(s) were never measured, so this run does not certify the invariant.`);
+}
+process.exit(clean ? 0 : 1);

@@ -74,7 +74,7 @@ export default function AccountMenu({
   const router = useRouter();
   const { height: winH } = useWindowDimensions();
   const { t, locale, setLocale } = useI18n();
-  const { user, updateUser, signOut, deleteAccount } = useApp();
+  const { user, updateUser, applySyncedName, signOut, deleteAccount } = useApp();
   const { mode, setMode, resolved, colors: C } = useTheme();
   const reduced = useReducedMotion();
   const s = useMemo(() => makeStyles(C, resolved === 'dark'), [C, resolved]);
@@ -170,7 +170,12 @@ export default function AccountMenu({
     // Refresh-proof (owner 2026-08-29): the store patch above is in-memory only — the auth
     // backend's user_metadata is what mapSupabaseUser rebuilds from on the next load.
     persistDisplayName(v);
-    buildSyncedName(v).then((synced) => updateUser({ ...synced, initials: initialsOf(v) }));
+    // applySyncedName, NOT updateUser: this is a network round trip, so renaming twice in quick
+    // succession leaves two continuations in flight and the slower one lands last. An unguarded
+    // updateUser here reverted the name AND the avatar initial to a value the user had already
+    // replaced (routine #8, 2026-09-24 — the #319/#599/#648 stale-continuation class). The store's
+    // applySyncedName drops a patch whose `name` is no longer the current one.
+    buildSyncedName(v).then((synced) => applySyncedName({ ...synced, initials: initialsOf(v) }));
   };
   const saveName = () => {
     const v = name.trim();

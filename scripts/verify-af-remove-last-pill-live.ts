@@ -193,7 +193,9 @@ const R = {
   /** R9.2.2 — the restored turn RENDERED exactly the first page of cards under its headline.
    *  `expected` comes from the PRODUCT's own initialReveal(), never from a copy of the rule here:
    *  FIRST_PAGE stopped being a cap on 2026-09-02 (#1688, owner PERMANENT rule) and became a FLOOR —
-   *  reveal max(10, distinct matching platforms). This assertion still read the old `min(total, 10)`
+   *  reveal max(10, distinct matching platforms) — then the floor itself was retired 2026-09-25 in
+   *  favour of exactly one card per matching platform (src/lib/initialReveal.ts has the full
+   *  history). This assertion still read the old `min(total, 10)`
    *  and so called a correct production broken the moment a scope matched more than ten platforms
    *  (measured: الرياض restored turn rendered 13 cards for 13 platforms, and this reported
    *  `expected=10`). Equality is unchanged — only the number it compares against is now the one the
@@ -600,6 +602,11 @@ try {
   }
   check('the AF offer «خلّنا نحدد الطلب أكثر» is present on the baseline turn', opened,
     opened ? `waited ${lastOffer && lastOffer.opened ? lastOffer.waitedMs : 0}ms`
+           // 'intercepted' is a HARNESS verdict, never an AF one: the offer WAS on screen and the
+           // reflowing conversation took the click (scripts/lib/afOfferLive.ts, ops_incident #340).
+           : lastOffer && !lastOffer.opened && lastOffer.reason === 'intercepted'
+           ? `the offer was present but ${lastOffer.attempts} click(s) landed on «${lastOffer.hit}» ` +
+             `within ${lastOffer.waitedMs}ms — a harness miss, not an AF verdict`
            : `the results turn landed but NO offer rendered on it within ${lastOffer?.waitedMs}ms ` +
              `(N0=${N0} is above INTERVIEW_STOP_AT, so R4.3/R11.1 cannot explain the absence)`);
   if (!opened) throw new Error('offer absent on the baseline turn');
@@ -721,7 +728,7 @@ try {
     R.pageZeroComplete(ROWS2.length, N2, PAGE0_BUFFER), `rows=${ROWS2.length} N2=${N2} buffer=${PAGE0_BUFFER}`);
   platforms2 = searches[searches.length - 1]?.platforms ?? 0;
   expectedFirstPage = N2 == null ? null : initialReveal({
-    fetched: ROWS2.length, honestTotal: N2, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT, platforms: platforms2,
+    fetched: ROWS2.length, honestTotal: N2, stopAt: INTERVIEW_STOP_AT, platforms: platforms2,
   });
   // THE APP'S OWN TARGET FOR THIS TURN, which is NOT expectedFirstPage. removeGuidedFacet re-enters
   // runRefine carrying the guided record, and agent.tsx sets `afCompleted = !!opts?.guided` — so the
@@ -732,7 +739,7 @@ try {
   // (raised, not decided here — ops_incident #597); this journey asserts the app against the rule
   // the app actually implements, and would go red the moment that rule changes.
   revealTarget = N2 == null ? null : initialReveal({
-    fetched: ROWS2.length, honestTotal: N2, firstPage: FIRST_PAGE, stopAt: INTERVIEW_STOP_AT, platforms: platforms2,
+    fetched: ROWS2.length, honestTotal: N2, stopAt: INTERVIEW_STOP_AT, platforms: platforms2,
     afCompleted: true,
   });
   // R9.2.2 / R12.3 — THE TURNS ABOVE ARE HISTORY. This is the assertion ops_incident #338 needed
@@ -819,7 +826,20 @@ try {
 
   // ── 6. the removed question is offerable again, and it is the SAME question ───────────────────
   const reopened = await openOffer();
-  check('R9.2.3 — the offer «خلّنا نحدد الطلب أكثر» is present again after the removal', reopened, reopened ? '' : 'no offer on the restored turn — the removed question may have stayed in the asked carry');
+  // THE FAILURE MESSAGE NAMES WHAT WAS MEASURED, NOT A GUESS (routine #5, 2026-09-25).
+  // It used to read «the removed question may have stayed in the asked carry». That hypothesis is
+  // REFUTED by execution: on production 2026-09-25 the post-removal probe on the wire was
+  // `property_age_option_counts_ar` — the very question that had just been removed — so it IS back
+  // in the pool, and its answer (cnt_total 15,628 with every bucket qualifying) makes the offer
+  // gate's verdict `yes`. The absence was the harness's own (ops_incident #687): the CTA was in the
+  // DOM at every sample while the click probe could not measure it. Keep the two apart here too.
+  check('R9.2.3 — the offer «خلّنا نحدد الطلب أكثر» is present again after the removal', reopened,
+    reopened ? ''
+      : lastOffer && !lastOffer.opened && lastOffer.reason === 'intercepted'
+      ? `the offer WAS on screen but never took a click within ${lastOffer.waitedMs}ms ` +
+        `(${lastOffer.attempts} attempt(s), last hit «${lastOffer.hit}») — a harness miss, not an AF verdict`
+      : `the restored turn landed but NO offer rendered on it within ${lastOffer?.waitedMs}ms ` +
+        `(N2=${N2} is above INTERVIEW_STOP_AT, so R4.3/R11.1 cannot explain the absence)`);
   if (reopened) {
     const ag = await readCardSettled((s) => s.hasCard && !!s.q && s.chip != null);
     const again = ag.value;

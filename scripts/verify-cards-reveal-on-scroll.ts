@@ -127,7 +127,7 @@ const walk = (target: number, cascadeMax: number, chunk: number) => {
   return { shown, steps };
 };
 for (const total of [40, 300, AF_REVEAL_MAX]) {
-  const t = initialReveal({ fetched: total, honestTotal: total, firstPage: 10, stopAt: INTERVIEW_STOP_AT, platforms: 59, afCompleted: true });
+  const t = initialReveal({ fetched: total, honestTotal: total, stopAt: INTERVIEW_STOP_AT, platforms: 59, afCompleted: true });
   const { shown, steps } = walk(t, CASCADE_MAX!, CHUNK!);
   check(`an AF turn of ${total}: the scroll walk reaches exactly ${t} and stops (${steps} chunks)`,
     shown === t, `ended at ${shown}`);

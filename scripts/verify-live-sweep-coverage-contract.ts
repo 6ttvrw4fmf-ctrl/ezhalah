@@ -17,7 +17,7 @@
 //   node --experimental-strip-types scripts/verify-live-sweep-coverage-contract.ts
 
 import { readFileSync } from 'node:fs';
-import { shippedTemplates, resultsFoundCount } from '../e2e/lib/resultsSentence.mjs';
+import { shippedTemplates, resultsFoundCount, shippedNoResultsTemplates, settledSource, ZERO_RE } from '../e2e/lib/resultsSentence.mjs';
 import { SECOND_PAGE_CAP as SHIPPED_SECOND_PAGE_CAP } from '../src/data/resultCount.ts';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -339,6 +339,56 @@ check('the product actually publishes terminal phrasings to check against',
   check('the settle predicate recognises EVERY result/zero state src/i18n.tsx can render',
     re != null && unseen.length === 0,
     unseen.length ? `unrecognised → the sweep would hang on:\n      ${unseen.slice(0, 4).join('\n      ')}` : 'could not parse SETTLED_RE');
+  // ── THE ZERO SENTENCE IS A ROTATION TOO (routine-4, 2026-09-27) ───────────────────────────────
+  //
+  // The i18n scan above discovers its population with a regex SEEDED ON THE PREDICATE'S OWN
+  // ALTERNATIVES (`لقينا|ما لقيت|ما لقينا|ما فيه`), so by construction it can only ever find phrases
+  // the predicate already matches: the check could not fail. Meanwhile `noResultsSuggestion()`'s
+  // catch-all became an 80-template ROTATION on 2026-09-26 (src/data/noResultsRotation.ts, owner
+  // rule) and nothing here looked at that file at all.
+  //
+  // MEASURED on production 2026-09-27: ثادق with an impossible budget rendered
+  // «ما طلع لنا تطابق في بحث العقار، جرّب توسّع نطاق البحث وإزهله 😢» — a correct, honest zero that
+  // the clock could not see. The wait timed out at 70s, the honest-zero journey died as a harness
+  // error, and the sweep went RED on a missed floor while the PRODUCT was perfectly healthy. The
+  // same city's sibling سيهات rendered «ما لقينا تطابق …» and passed, which is why the failure is
+  // intermittent and why five earlier runs looked fine.
+  //
+  // This half is now enumerated FROM THE POOL, so it is predicate-independent and cannot go vacuous.
+  {
+    const zero = shippedNoResultsTemplates();
+    check('the zero-state rotation pool parses COMPLETELY (a partial pool shrinks the clock silently)',
+      zero.length === 80 && zero.filter((t) => t.lang === 'ar').length === 40
+        && zero.filter((t) => t.lang === 'en').length === 40,
+      `parsed ${zero.length} (ar ${zero.filter((t) => t.lang === 'ar').length}, `
+      + `en ${zero.filter((t) => t.lang === 'en').length}) — 40 EN templates are DOUBLE-quoted `
+      + 'because they contain apostrophes, and a single-quote-only parser returned 40 of 80 while '
+      + 'staying non-empty, so the "refusing to run blind" guard never fired');
+
+    // What the app really renders: {name} substituted, exactly as a logged-in user would see it.
+    const rendered = zero.map((t) => t.template.replace(/\{name\}/g, 'سارة'));
+    const clock = new RegExp(settledSource());
+    const blind = rendered.filter((r) => !clock.test(r));
+    check('the settle clock recognises EVERY shipped zero-state template, guest and logged-in',
+      blind.length === 0,
+      blind.length ? `${blind.length} would hang the sweep, e.g.:\n      ${blind.slice(0, 3).join('\n      ')}` : '');
+
+    // MUTATION — the hand-written zero regex that shipped before today must FAIL against the pool,
+    // and must fail specifically on the sentence measured on production.
+    const preFix = /ما لقينا|ما لقيت|ما فيه نتائج|ما فيه إعلانات/;
+    const measured = 'ما طلع لنا تطابق في بحث العقار، جرّب توسّع نطاق البحث وإزهله 😢';
+    const missedByPreFix = rendered.filter((r) => !preFix.test(r));
+    check('MUTATION: the pre-2026-09-27 hand-written zero regex is rejected by the pool it must cover',
+      missedByPreFix.length > 0 && !preFix.test(measured) && clock.test(measured),
+      `pre-fix regex missed ${missedByPreFix.length} of ${rendered.length} shipped zero templates`);
+
+    // …and the discovery must not be seedable back into vacuity: the pool is read from the app's own
+    // file, so a template added tomorrow in ANY wording is covered without editing this check.
+    check('the zero population comes from the shipped pool, not from the predicate',
+      /shippedNoResultsTemplates/.test(read('scripts/verify-live-sweep-coverage-contract.ts')),
+      'enumerating from the predicate is how this check passed for a rotation it could not see');
+  }
+
   // MUTATION — the pre-2026-08-26 predicate must FAIL this check.
   const old = /لقينا|ما لقينا|ما فيه/;
   check('MUTATION: the old predicate is rejected (it could not see «ما لقيت …»)',

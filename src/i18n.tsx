@@ -107,7 +107,14 @@ const AR: Record<string, string> = {
   'One search across every major Saudi property platform.': 'بحث واحد عبر جميع منصات العقارات السعودية الكبرى.',
   // Note #1 — hero copy update. Arabic and English sides are the canonical wording the user supplied.
   'Looking for a property and want to see all available listings in one place? Ezhalah.': 'تدور على عقار وتبي تشوف كل المعروض في مكان واحد؟ إزهله',
-  'Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.': 'إزهله منصة متخصصة للبحث في منصات العقار الإلكترونية بالمملكة باستخدام الذكاء الاصطناعي',
+  // The rotating home headline (owner-authored 2026-09-23) — one per visit, see
+  // src/data/heroTaglineRotation.ts. The Arabic is the owner's own wording.
+  'One site to search every Saudi real-estate platform and website.': 'موقع واحد للبحث في كل المنصات والمواقع العقارية السعودية.',
+  'Every property listing in the Kingdom, in one place': 'كل الإعلانات العقارية بالمملكة في موقع واحد',
+  'The complete property site for every listing in the Kingdom, from every platform': 'الموقع العقاري الشامل لكل الإعلانات بالمملكة من مختلف المنصات والمواقع.',
+  'One site for every property you are looking for in the Kingdom, from every platform': 'موقع واحد لكل العقار الذي تبحث عنه بالمملكة من مختلف المنصات والمواقع.',
+  'Search one site for the property you want across every real-estate platform and website, easily.': 'ابحث في موقع واحد عن العقار الذي تريده في جميع المنصات والمواقع العقارية بكل سهولة.',
+  'Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.': 'إزهله محرك بحث عقاري بالذكاء الاصطناعي متخصص في العقارات داخل السعودية.',
   'Ezhalah, and may your luck be good.': 'إزهله وفالك طيب.',
   "Type anything. I'll search Aqar, Wasalt, Aldarim and more in seconds.": 'اكتب أي شيء. سأبحث في منصات عقار ووصلت والدريم والمزيد في ثواني.',
   "Tell me what you want and I'll find it": 'أخبرني بما تريد وسأجده لك',
@@ -584,6 +591,13 @@ const AR: Record<string, string> = {
   // Graceful failure (owner root-cause fix, 2026-08-22): shown ONLY when the device/browser has no
   // Arabic voice at all — never silently read Arabic text with a non-Arabic (usually English) voice.
   'Listening isn\'t available on this device': 'الاستماع غير متاح على هذا الجهاز',
+  // The OTHER refusal, which used to borrow the line above and so told a user their device could not
+  // do something the app had not finished checking (routine #6, 2026-09-25). readAloud.ts keeps
+  // looking for a voice for RETRY_WINDOW_MS = 45s after load, and the 🔊 control first becomes
+  // tappable ~30s in (measured on production, 4/4), so this state is on the ordinary path. It is
+  // temporary and the user's own next tap clears it, so the copy says exactly that instead of naming
+  // the device — and gives the recovery action rather than leaving a dead end.
+  'Still preparing the voice — tap again in a moment': 'نُجهّز الصوت — أعد المحاولة بعد لحظة',
   // Floating playback controller (owner 2026-08-22, ChatGPT-style pill — Arabic-branded, own layout).
   // Every accessibility label on the controller must be Arabic, no English leak ('Close' reuses the
   // existing app-wide key just below — same word, same meaning, one definition).
@@ -704,6 +718,13 @@ const AR: Record<string, string> = {
   // still true; only the question is dropped, because there is no button on screen to answer it with.
   'I showed you the first {shown} of {total} matching listings.': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق.',
   'I showed you the first {n} listings.': 'عرضت لك أول {n} إعلانات.',
+  // …and the CLOSED-CHAT variants of the same pair (ops_incident #598). Same counts, no invitation
+  // to a button that does not exist — but the chat is over, so the one path that IS open is named,
+  // in the owner's own words from the two terminal notes above.
+  'I showed you the first {shown} of {total} matching listings. For a new search, open the menu and choose Search.':
+    'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي بحث جديد؟ افتح القائمة ☰ فوق واختر «بحث».',
+  'I showed you the first {n} listings. For a new search, open the menu and choose Search.':
+    'عرضت لك أول {n} إعلانات. تبي بحث جديد؟ افتح القائمة ☰ فوق واختر «بحث».',
   // …and the narrow-only pair: «عرض المزيد» is not rendered but «خلّنا نحدد الطلب أكثر» is, so the
   // sentence invites exactly the one button that exists.
   'I showed you the first {shown} of {total} matching listings. Want help finding more precise ones?': 'عرضت لك أول {shown} من أصل {total} إعلان مطابق. تبي أساعدك توصل لنتائج أدق؟',
@@ -964,6 +985,80 @@ const AR: Record<string, string> = {
   'Al Jassim Real Estate Services':      'مكتب الجاسم للخدمات العقارية',           // official (aljassimaqar.com <title> + og:site_name «مكتب الجاسم للخدمات العقارية»)
   'Almotmkenah Real Estate':             'المتمكنة للعقارات',                      // official (almotmkenah.com <title> + og:site_name «المتمكنة للعقارات»)
   'Nufouth Development Real Estate':     'نفوذ التطوير للعقارات وإدارة الأملاك',  // official (nufouth.com page body «نفوذ التطوير للعقارات وإدارة الأملاك»; <title> spells it «وادارة»)
+  // onboarded 2026-09-24 (batch 36) — the Arabic name is the scraper's SOURCE constant, i.e. the name the
+  // site itself publishes (measured in each scrapers/<slug>/run.py docstring). db `source` is the join
+  // key on every stored row; only the DISPLAY name comes from here.
+  'Dwelleo': 'دويليو',
+  'Aqalem Hajer Real Estate Services Office': 'مكتب أقاليم هجر للخدمات العقارية',
+  'Sakani': 'سكني',
+  'Shatri Real Estate Development': 'الشاطري للتطوير العقاري',
+  'Alqasem Real Estate': 'القاسم العقارية',
+  'Fkr Alemar': 'فكر الإعمار',
+  'Wadod Real Estate': 'ودود العقارية',
+  'Al Muteb Real Estate': 'آل متعب العقارية',
+  'Al Barrak Real Estate': 'البراك للعقارات',
+  'Al Rifai Real Estate': 'الرفاعي للعقار',
+  'Sodasyat Real Estate': 'سداسيات العقارية',
+  'Hasaad Economic Real Estate': 'حصاد الاقتصادية للعقارات',
+  'Aqar Alriyadh': 'عقار الرياض',
+  'Just Real Estate': 'فقط نقطة العقارية',
+  'Snam Real Estate': 'سنام العقارية',
+  'Jawher Real Estate Brokerage': 'جواهر للوساطة والتسويق العقاري',
+  'Maqar Al Motamad': 'مقر المعتمد',
+  'Senan Real Estate': 'سنان العقارية',
+  'Golden Deal Real Estate': 'الصفقة الذهبية العقارية',
+  '1000 Real Estate': '1000 العقارية',
+  'Yameen Real Estate': 'يمين العقارية',
+  'Ebriza Real Estate': 'إبريزة العقارية',
+  'Eilm Alriyada': 'علم الريادة الإدارية',
+  'Dar Yusuf Real Estate': 'دار يوسف العقارية',
+  'Albdah Real Estate': 'البداح للعقارات',
+  'Eydah': 'الإيضاح',
+  'Tamyaz Real Estate': 'تمايز العقارية',
+  'Hazim': 'حازم',
+  'Villas SA': 'فلل',
+  'Mar Real Estate': 'مار العقارية',
+  'RightCompound': 'رايت كومباوند',                 // transliteration — the site publishes no Arabic name (CompoundIn precedent «كومباوند إن»)
+  'LivingCompound': 'ليفينج كومباوند',              // transliteration — no Arabic name at the source
+  'Azure': 'أزور',                                  // transliteration — no Arabic name at the source
+  'Expat Trusted Housing': 'إكسبات ترستد هاوسينج',  // transliteration — no Arabic name at the source
+  'Flow': 'فلو',
+  'Abaad': 'أبعاد',                                 // the site's own Arabic name (app.abaadapp.sa writes «أبعاد»)                                    // transliteration — no Arabic name at the source
+  'iBaax': 'أيباكس',                              // the site's own Arabic name
+  'RE/MAX Saudi': 'ريماكس السعودية',                              // the site's own Arabic name
+  'Qmra': 'قمرا',                              // the site's own Arabic name
+  'Al Ajlan': 'العجلان',                              // the site's own Arabic name
+  'Wahadat': 'وحدات',                                 // the site's own Arabic name (og:site_name)
+  'Squares': 'المربعات العقارية',                     // the site's own Arabic name (شركة المربعات العقارية)
+  'Rawaf': 'رواف',                                    // the site's own Arabic name
+  'Virtual Marketer': 'المسوق الافتراضي',            // the site's own Arabic name (vm-ksa.com)
+  'Macsaib': 'مكسب العقارية',                         // the site's own Arabic name (macsaib.sa)
+  'MAQRAT': 'مقرات',                                  // transliteration — the site names itself «منصة MAQRAT», no Arabic name at the source
+  'Arsh': 'عرش العقارية',                    // the site's own Arabic name (arshglobal.com.sa)
+  'Manzo': 'مانزو',                          // the site's own Arabic name (manzo.com.sa)
+  '8Floor': 'الطابق الثامن',                 // the site's own Arabic name (www.8floor.sa)
+  'Holoul': 'حلول',                          // the site's own Arabic name (holoul.io)
+  'OpenSooq': 'السوق المفتوح',               // the site's own Arabic name (sa.opensooq.com)
+  'Nafithh': 'معرض نافذة',                   // the site's own Arabic name (nafithh.sa)
+  'Mobasher': 'مباشر',                       // the site's own Arabic name (mobasher.sa)
+  'Muajarh': 'مؤاجرة',                       // the site's own Arabic name (muajarh.com)
+  'Dallali': 'دلّالي',                       // the site's own Arabic name (dallali.com)
+  'Maqam Development': 'شركة مقام للتطوير العقاري',   // the site's own Arabic name (property.maqamco.sa)
+  'Earth App': 'تطبيق أرض',   // the site's own Arabic name (earthapp.com.sa)
+  'Nawafeth Alwatan': 'نوافذ الوطن',   // the site's own Arabic name (nawafethalwatan.com)
+  'Al Saedan': 'آل سعيدان',                              // the site's own Arabic name
+  'Ego Real Estate': 'إيجو عقار',                              // the site's own Arabic name
+  'Ahmed Almuhaysini': 'أحمد المحيسني العقارية',                              // the site's own Arabic name
+  'Nofodh Investment': 'نفوذ للاستثمار العقاري',                              // the site's own Arabic name
+  'Razre': 'راز العقارية',                              // the site's own Arabic name
+  'Reinvest': 'ري إنفست',                              // the site's own Arabic name
+  'Safa Investment': 'صفا للاستثمار',                              // the site's own Arabic name
+  'Sokok': 'صكوك العقارية',                              // the site's own Arabic name
+  'Sukna': 'سكنة',                              // the site's own Arabic name
+  'Tuba': 'طوبة العقارية',                              // the site's own Arabic name
+  // logo-only strip entries (owner decision 2026-09-24): no scraper, no tables, never searchable.
+  'Maskan United': 'مسكن الموحدة',  // maskanre.sa
+  'The Address': 'العنوان',  // wetheaddress.com
   'Akariyoun':                         'عقاريون',                  // official (akariyoun.sa footer «عقاريون ، جميع الحقوق محفوظة» + tagline «عقاريون إختيارك الاول»; the site's own <title> uses the Latin «Akariyoun»)
   'Awal United for Real Estate':       'أوال المتحدة العقارية', // official (their X @awaalun: «مؤسسة أوال المتحدة العقارية»)
   'Al Khaas':                          'الخاص للاستثمار العقاري',
