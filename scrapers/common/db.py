@@ -1631,6 +1631,14 @@ def upsert_manzo_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("manzo_commercial_listings", rows)
 
 
+def upsert_arsh_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("arsh_residential_listings", rows)
+
+
+def upsert_arsh_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("arsh_commercial_listings", rows)
+
+
 def upsert_vmksa_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("vmksa_residential_listings", rows)
 

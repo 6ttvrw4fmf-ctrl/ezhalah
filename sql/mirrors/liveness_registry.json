@@ -210,6 +210,12 @@
     "grace": 3
   },
   {
+    "platform": "arsh",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "awal",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
