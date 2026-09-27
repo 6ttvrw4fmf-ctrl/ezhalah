@@ -355,6 +355,13 @@ must go up over time and never down.
   sites.
 
 ## Rating (must be earned)
+**Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
+system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
+check, or leaving a problem out of the report.** A 10/10 you didn't earn is the worst failure there
+is, worse than an honest 4/10, because it hides the problems the owner is counting on you to fix.
+Every night below 10, your report says exactly what stopped it and what you will do tomorrow to
+close that gap.
+
 - **10/10** requires all of this:
   - 100% of live listings checked in time, and 0 never checked;
   - every lifecycle job ran and actually did its work;
@@ -392,6 +399,7 @@ must go up over time and never down.
 > - **site**: what was wrong → what you did.
 >
 > ⭐ **Rating:** X/10
+> 🎯 **To reach 10/10:** what's still missing → what you'll do tomorrow. (Skip this line only at 10/10.)
 > 🙋 **Needs from you:** Nothing.
 
 **The per-website list:** one line for every website that hid, brought back or deleted anything
