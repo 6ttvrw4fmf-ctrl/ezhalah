@@ -135,6 +135,47 @@ def negotiated_session(probe_url: str, *, order: tuple[str, ...] = IMPERSONATE_O
     raise RuntimeError(f"no TLS profile was served by {probe_url} (tried {', '.join(order)}; last {last})")
 
 
+RETRY_SMARTER_ORDER = ("chrome124", "safari17_0", "firefox133")
+
+
+def retry_smarter_session(probe_url: str, *, headers: Optional[dict] = None, timeout: int = 40,
+                          order: tuple[str, ...] = RETRY_SMARTER_ORDER,
+                          proxy_env: str = "WASALT_PROXY_URL") -> tuple[cc.Session, list[str]]:
+    """Probe `probe_url` with every profile in `order` DIRECT, then — when `proxy_env` is set —
+    every profile again through that residential proxy, each with a fresh session. Returns the
+    first session the host answers 200, plus one `route/profile:outcome` line per attempt.
+
+    Unlike negotiated_session() this NEVER raises: when nothing is served it returns a plain
+    `order[0]` DIRECT session so the caller's own fetch fails exactly as it did before and its
+    existing failure path (prune guard, end_run ok=False) is untouched. The attempt log is the
+    point — "down at source" needs 2+ profiles AND the proxy on record (SCRAPING_ENGINEER.md
+    step 6), and a scraper pinned to one profile with no proxy could never produce that evidence.
+    """
+    purl = os.environ.get(proxy_env, "").strip()
+    routes: list[tuple[str, Optional[dict]]] = [("direct", None)]
+    if purl:
+        routes.append(("proxy", {"http": purl, "https": purl}))
+    tried: list[str] = []
+    for route, proxies in routes:
+        for prof in order:
+            s = cc.Session(impersonate=prof, proxies=proxies)   # impersonate OWNS the User-Agent
+            if headers:
+                s.headers.update(headers)
+            try:
+                r = s.get(probe_url, timeout=timeout)
+            except Exception as e:             # noqa: BLE001 — recorded, then the next one
+                tried.append(f"{route}/{prof}:{type(e).__name__}")
+                continue
+            tried.append(f"{route}/{prof}:{r.status_code}")
+            if r.status_code == 200:
+                s.__dict__["_impersonate_profile"] = f"{route}/{prof}"
+                return s, tried
+    s = cc.Session(impersonate=order[0])
+    if headers:
+        s.headers.update(headers)
+    return s, tried
+
+
 def _rotate_session() -> cc.Session:
     """Force a fresh TCP connection for this thread by discarding the cached session and
     building a new one. 2026-08-21 incident fix: the OLD code reused ONE session/connection
