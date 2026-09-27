@@ -13,7 +13,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
 import { getListingFeedback, setListingFeedback, type FeedbackRating } from '@/lib/listingFeedback';
-import { speakReadAloud, stopReadAloud, subscribeReadAloud, readAloudRefusal,
+import { speakReadAloud, stopReadAloud, subscribeReadAloud, readAloudRefusal, hasSpeakableContent,
          type ReadAloudSegment } from '@/lib/readAloud';
 import { readAloudRefusalMessageKey, type ReadAloudRefusal } from '@/lib/readAloudVoice';
 
@@ -109,7 +109,11 @@ export default function FeedbackRow({
         <FbButton icon={rating === 'up' ? 'thumbs-up' : 'thumbs-up-outline'} active={rating === 'up'} onPress={() => vote('up')} label={t('Helpful')} />
         <FbButton icon={rating === 'down' ? 'thumbs-down' : 'thumbs-down-outline'} active={rating === 'down'} onPress={() => vote('down')} label={t('Not helpful')} />
         <FbButton icon={copied ? 'checkmark' : 'share-outline'} active={copied} onPress={onShare} label={t('Share')} />
-        {readAloudSegments?.length ? (
+        {/* THE SAME PREDICATE speakReadAloud() USES, not a second one that agrees most of the time.
+            `readAloudSegments?.length` counted SEGMENTS; speaking needs a speakable UNIT, and
+            buildUnits() drops a segment whose text is blank. In the gap the control rendered and its
+            tap was a silent no-op (ops_incident #856) — see hasSpeakableContent()'s header. */}
+        {hasSpeakableContent(readAloudSegments) ? (
           <FbButton
             icon={speaking ? 'stop-circle' : 'volume-high-outline'}
             active={speaking}

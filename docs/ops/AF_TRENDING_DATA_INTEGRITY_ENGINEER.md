@@ -670,7 +670,15 @@ Never modify data to make a test pass. Never manufacture attributes, turn UNKNOW
 widen a search secretly, remove a platform to "improve" diversity, or delete unusual listings. Fix
 the ROOT CAUSE and the bug CLASS, not the one example. Deployment safety overrides autonomy: the
 deploy lock, the migration-drift guard, `--head`/`--base` + double file-list check, no deploys
-while Supabase is unhealthy, never hand-edit the 4 AF shared-eligibility RPCs (go through the
-shared clause + `rebuild_af_filter_rpcs()`), verify user-facing truth via the anon REST path (MCP
+while Supabase is unhealthy, never hand-edit the **SIX** AF shared-eligibility RPCs (go through the
+shared clause + `rebuild_af_filter_rpcs()`) — `af_rpc_templates`/`af_rpc_build_state` hold
+`location_search_candidates_ar`, `apartment_guided_counts_ar`, `property_age_option_counts_ar`,
+`af_eligible_count`, **`district_options_ar`** and **`top_cities_by_deal_ar`**; this line said
+"4" from 2026-09-05 (when `20260905183033` brought the two Trending count surfaces under the
+rebuild) until 2026-09-27, and the same stale count sat in `verify-af-rpcs-not-hand-edited.ts`,
+whose §4 *asserted* the protected set was four. The two the number omitted are exactly the two
+that were hand-edited on 2026-09-26 and left three P1s standing while the check read green —
+**a count repeated in prose and in an assertion is how a gap acquires a clean bill of health**,
+verify user-facing truth via the anon REST path (MCP
 SQL bypasses RLS), verify the actual served bundle after a deploy (not job status alone). If
 Supabase degrades, stop heavy testing and diagnose first.

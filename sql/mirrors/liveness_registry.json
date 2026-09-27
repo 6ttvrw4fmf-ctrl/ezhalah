@@ -48,6 +48,12 @@
     "grace": 3
   },
   {
+    "platform": "albukaeri",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "aldarim",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
@@ -216,6 +222,12 @@
     "grace": 3
   },
   {
+    "platform": "ashab",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "awal",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
@@ -253,6 +265,12 @@
   },
   {
     "platform": "dallali",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "daraa",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
     "grace": 3
@@ -468,6 +486,12 @@
     "grace": 3
   },
   {
+    "platform": "manafe",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "manzo",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
@@ -648,6 +672,12 @@
     "grace": 3
   },
   {
+    "platform": "ryadah",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "sadin",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
@@ -714,6 +744,12 @@
     "grace": 3
   },
   {
+    "platform": "sirdab",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "snam",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
@@ -738,6 +774,12 @@
     "grace": 3
   },
   {
+    "platform": "sqcc",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "squares",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
@@ -758,6 +800,12 @@
   {
     "platform": "tamyaz",
     "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "tawia",
+    "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
     "grace": 3
   },
@@ -799,6 +847,12 @@
   },
   {
     "platform": "wahadat",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "wajaf",
     "strategy": "CRAWL_PRESENCE_ONLY",
     "sla_hours": 168,
     "grace": 3

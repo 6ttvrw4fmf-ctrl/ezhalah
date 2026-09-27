@@ -1,0 +1,209 @@
+-- Batch 7 joins search: the tables of sirdab, ashab, manafe, wajaf, albukaeri, ryadah, sqcc, daraa, tawia become arms of listing_native_location_v1 and
+-- active_listing_ids_v2. THIS IS THE 20260927034721 (batch 6) MACHINERY with only the platform list and
+-- the presence guards changed: capture every dependent, refuse on a broken probe, build BOTH `__mig` twins
+-- first, then swap in ONE short step retried in 3 s lock attempts, then replay the dependents (v2 is
+-- replayed from its live definition, which since 20260927051226 reads the two saved attribute copies).
+-- The new tables are EMPTY here, so no user-visible row changes. Applied right after the :29 sweep
+-- (feedback: cold rebuilt matviews slow every v2 consumer for an hour).
+set local statement_timeout = '30min';
+set local lock_timeout = '15s';   -- the swap below overrides this with 3 s attempts
+DO $do$
+DECLARE
+  base text; arms text; t text; anchor text; d record; n_before int; lost text[]; ok boolean := false;
+  tables text[] := ARRAY[
+    'sirdab_residential_listings','sirdab_commercial_listings','ashab_residential_listings','ashab_commercial_listings','manafe_residential_listings','manafe_commercial_listings','wajaf_residential_listings','wajaf_commercial_listings','albukaeri_residential_listings','albukaeri_commercial_listings','ryadah_residential_listings','ryadah_commercial_listings','sqcc_residential_listings','sqcc_commercial_listings','daraa_residential_listings','daraa_commercial_listings','tawia_residential_listings','tawia_commercial_listings'];
+  wire_v1 boolean := position('sirdab_residential_listings' in pg_get_viewdef('public.listing_native_location_v1'::regclass,true)) = 0;
+  wire_v2 boolean := position('sirdab_residential_listings' in pg_get_viewdef('public.active_listing_ids_v2'::regclass,true)) = 0;
+BEGIN
+  IF NOT wire_v1 AND NOT wire_v2 THEN
+    RAISE NOTICE 'both matviews already carry batch 7 - nothing to do';
+    RETURN;
+  END IF;
+  FOREACH t IN ARRAY tables LOOP
+    IF to_regclass('public.' || t) IS NULL THEN
+      RAISE EXCEPTION 'table % does not exist - apply the batch-7 listing tables first', t;
+    END IF;
+  END LOOP;
+
+  CREATE TEMP TABLE _dep_capture_search ON COMMIT DROP AS
+  WITH RECURSIVE deps AS (
+    SELECT c.oid, c.relkind, 1 AS lvl
+      FROM pg_class c
+     WHERE c.oid IN (
+       SELECT DISTINCT rw.ev_class FROM pg_depend dp JOIN pg_rewrite rw ON rw.oid = dp.objid
+        WHERE dp.refobjid IN ('public.listing_native_location_v1'::regclass, 'public.active_listing_ids_v2'::regclass)
+          AND dp.deptype = 'n'
+          AND rw.ev_class NOT IN ('public.listing_native_location_v1'::regclass, 'public.active_listing_ids_v2'::regclass))
+    UNION
+    SELECT c2.oid, c2.relkind, deps.lvl + 1
+      FROM deps
+      JOIN pg_depend d2 ON d2.refobjid = deps.oid AND d2.deptype = 'n'
+      JOIN pg_rewrite r2 ON r2.oid = d2.objid
+      JOIN pg_class c2 ON c2.oid = r2.ev_class AND c2.oid <> deps.oid
+  ), g AS (
+    SELECT oid, max(relkind::text) AS relkind, max(lvl) AS ord FROM deps GROUP BY oid
+  )
+  SELECT c.relname::text AS nm, g.relkind, g.ord,
+         pg_get_viewdef(g.oid, true) AS def,
+         coalesce((SELECT string_agg(indexdef, ';') FROM pg_indexes
+                    WHERE schemaname = 'public' AND tablename = c.relname), '') AS idx,
+         coalesce((SELECT string_agg(format('GRANT %s ON public.%I TO %I', a.privilege_type, c.relname,
+                                            pg_get_userbyid(a.grantee)), ';')
+                     FROM aclexplode(c.relacl) a WHERE a.grantee <> 0), '') AS grants
+    FROM g JOIN pg_class c ON c.oid = g.oid;
+
+  IF (SELECT count(*) FROM _dep_capture_search) = 0 THEN
+    RAISE EXCEPTION 'captured ZERO dependents - the dependency probe is broken, refusing to drop anything';
+  END IF;
+  IF EXISTS (SELECT 1 FROM _dep_capture_search WHERE def IS NULL OR btrim(def) = '') THEN
+    RAISE EXCEPTION 'a dependent definition came back empty - refusing to drop anything';
+  END IF;
+  RAISE NOTICE 'captured % dependent(s): %', (SELECT count(*) FROM _dep_capture_search),
+    (SELECT string_agg(nm || ':' || relkind, ', ' ORDER BY ord, nm) FROM _dep_capture_search);
+
+  IF wire_v1 THEN
+    base := rtrim(rtrim(pg_get_viewdef('public.listing_native_location_v1'::regclass,true)),';');
+    anchor := 'FROM nufouth_commercial_listings
+          WHERE nufouth_commercial_listings.active';
+    IF (length(base) - length(replace(base, anchor, ''))) / length(anchor) <> 1 THEN
+      RAISE EXCEPTION 'v1 nufouth commercial arm anchor not found exactly once - matview shape changed, refusing to guess';
+    END IF;
+    arms := '';
+    FOREACH t IN ARRAY tables LOOP
+      arms := arms || format($f$
+        UNION ALL
+         SELECT %2$L::text AS platform,
+            %1$L::text AS source_table,
+            %1$I.id AS listing_id,
+            %1$I.city_ar,
+            %1$I.city_id,
+            %1$I.district_ar,
+            %1$I.region_id,
+            'native_scraper'::text AS source_method,
+            %1$I.transaction_type
+           FROM %1$I
+          WHERE %1$I.active$f$,
+        t, regexp_replace(t, '_(residential|commercial)_listings$', ''));
+    END LOOP;
+    EXECUTE 'DROP MATERIALIZED VIEW IF EXISTS public.listing_native_location_v1__mig';
+    EXECUTE 'CREATE MATERIALIZED VIEW public.listing_native_location_v1__mig AS ' ||
+      replace(base, anchor, anchor || arms);
+    EXECUTE 'CREATE UNIQUE INDEX listing_native_location_v1__mig_pk ON public.listing_native_location_v1__mig (source_table, listing_id)';
+    SELECT count(DISTINCT m[1]), array_agg(DISTINCT m[1]) FILTER (WHERE position('FROM ' || m[1] in
+             pg_get_viewdef('public.listing_native_location_v1__mig'::regclass,true)) = 0)
+      INTO n_before, lost
+      FROM regexp_matches(base, 'FROM (\w+_listings)\M', 'g') m;
+    IF n_before < 100 OR lost IS NOT NULL THEN
+      RAISE EXCEPTION 'listing_native_location_v1 splice: % source tables before, lost %', n_before, lost;
+    END IF;
+  END IF;
+
+  IF wire_v2 THEN
+    base := rtrim(rtrim(pg_get_viewdef('public.active_listing_ids_v2'::regclass,true)),';');
+    anchor := 'FROM nufouth_commercial_listings
+  WHERE nufouth_commercial_listings.active IS TRUE';
+    IF (length(base) - length(replace(base, anchor, ''))) / length(anchor) <> 1 THEN
+      RAISE EXCEPTION 'active_listing_ids_v2 nufouth commercial arm anchor not found exactly once - refusing to guess';
+    END IF;
+    arms := '';
+    FOREACH t IN ARRAY tables LOOP
+      arms := arms || format($f$
+UNION ALL
+ SELECT %1$L::text AS source_table,
+    %1$I.id AS listing_id,
+    %1$I.transaction_type,
+    %1$I.property_type,
+    %1$I.price_total,
+    %1$I.price_annual,
+    %1$I.price_per_meter,
+    %1$I.area_m2,
+    %1$I.bedrooms,
+    %1$I.bathrooms,
+    %1$I.rent_period
+   FROM %1$I
+  WHERE %1$I.active IS TRUE$f$, t);
+    END LOOP;
+    EXECUTE 'DROP MATERIALIZED VIEW IF EXISTS public.active_listing_ids_v2__mig';
+    EXECUTE 'CREATE MATERIALIZED VIEW public.active_listing_ids_v2__mig AS ' ||
+      replace(base, anchor, anchor || arms);
+    EXECUTE 'CREATE UNIQUE INDEX active_listing_ids_v2__mig_pk ON public.active_listing_ids_v2__mig (source_table, listing_id)';
+    SELECT count(DISTINCT m[1]), array_agg(DISTINCT m[1]) FILTER (WHERE position('FROM ' || m[1] in
+             pg_get_viewdef('public.active_listing_ids_v2__mig'::regclass,true)) = 0)
+      INTO n_before, lost
+      FROM regexp_matches(base, 'FROM (\w+_listings)\M', 'g') m;
+    IF n_before < 100 OR lost IS NOT NULL THEN
+      RAISE EXCEPTION 'active_listing_ids_v2 splice: % source tables before, lost %', n_before, lost;
+    END IF;
+  END IF;
+
+  -- The swap: both drops + renames in ONE subtransaction, retried until readers drain.
+  FOR i IN 1..150 LOOP
+    BEGIN
+      SET LOCAL lock_timeout = '3s';
+      IF wire_v1 THEN
+        EXECUTE 'DROP MATERIALIZED VIEW public.listing_native_location_v1 CASCADE';
+        EXECUTE 'ALTER MATERIALIZED VIEW public.listing_native_location_v1__mig RENAME TO listing_native_location_v1';
+        EXECUTE 'ALTER INDEX public.listing_native_location_v1__mig_pk RENAME TO listing_native_location_v1_pk';
+        EXECUTE 'GRANT ALL ON public.listing_native_location_v1 TO postgres, anon, authenticated, service_role';
+      END IF;
+      IF wire_v2 THEN
+        EXECUTE 'DROP MATERIALIZED VIEW public.active_listing_ids_v2 CASCADE';
+        EXECUTE 'ALTER MATERIALIZED VIEW public.active_listing_ids_v2__mig RENAME TO active_listing_ids_v2';
+        EXECUTE 'ALTER INDEX public.active_listing_ids_v2__mig_pk RENAME TO active_listing_ids_v2_pk';
+        EXECUTE 'GRANT ALL ON public.active_listing_ids_v2 TO postgres, anon, authenticated, service_role';
+      END IF;
+      ok := true;
+      RAISE NOTICE 'search matviews swapped on attempt %', i;
+      EXIT;
+    EXCEPTION WHEN lock_not_available THEN
+      PERFORM pg_sleep(5);
+    END;
+  END LOOP;
+  IF NOT ok THEN
+    RAISE EXCEPTION 'could not swap the search matviews after 150 short lock attempts (~20 min) - a reader never let go; retry later';
+  END IF;
+
+  FOR d IN SELECT * FROM _dep_capture_search ORDER BY ord, nm LOOP
+    IF to_regclass('public.' || d.nm) IS NOT NULL THEN
+      CONTINUE;
+    END IF;
+    IF d.relkind = 'm' THEN
+      EXECUTE format('CREATE MATERIALIZED VIEW public.%I AS %s', d.nm, rtrim(rtrim(d.def), ';'));
+    ELSE
+      EXECUTE format('CREATE VIEW public.%I AS %s', d.nm, rtrim(rtrim(d.def), ';'));
+    END IF;
+    IF d.idx <> '' THEN EXECUTE d.idx; END IF;
+    IF d.grants <> '' THEN EXECUTE d.grants; END IF;
+  END LOOP;
+END
+$do$;
+
+DO $verify$
+DECLARE t text; missing text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['sirdab','ashab','manafe','wajaf','albukaeri','ryadah','sqcc','daraa','tawia','arsh','holoul','opensooq','dallali','maqrat','vmksa','macsaib','squares','rawaf','wahadat','ibaax','qmra','tuba','abaad'] LOOP
+    IF position(t || '_commercial_listings' in pg_get_viewdef('public.listing_native_location_v1'::regclass,true)) = 0 THEN
+      RAISE EXCEPTION '% did not land in listing_native_location_v1', t;
+    END IF;
+    IF position(t || '_commercial_listings' in pg_get_viewdef('public.active_listing_ids_v2'::regclass,true)) = 0 THEN
+      RAISE EXCEPTION '% did not land in active_listing_ids_v2', t;
+    END IF;
+  END LOOP;
+  IF position('nufouth_commercial_listings' in pg_get_viewdef('public.listing_native_location_v1'::regclass,true)) = 0
+     OR position('sakan_residential_listings' in pg_get_viewdef('public.active_listing_ids_v2'::regclass,true)) = 0 THEN
+    RAISE EXCEPTION 'an existing platform was lost while wiring the new ones';
+  END IF;
+  SELECT string_agg(v, ', ') INTO missing
+    FROM unnest(ARRAY['listing_native_location_v2','mon_search_index_city_drift',
+                      'platforms_deprecated_status','platforms_unsearchable']) v
+   WHERE to_regclass('public.'||v) IS NULL;
+  IF missing IS NOT NULL THEN
+    RAISE EXCEPTION 'CASCADE ate these and replay did not restore them: %', missing;
+  END IF;
+  IF (SELECT count(*) FROM public.listing_native_location_v1) = 0
+     OR (SELECT count(*) FROM public.active_listing_ids_v2) = 0 THEN
+    RAISE EXCEPTION 'a rebuilt matview came back empty';
+  END IF;
+  RAISE NOTICE 'batch 7 is wired into search; arsh, squares, rawaf, wahadat, the wave-2 four and every dependent intact';
+END
+$verify$;
