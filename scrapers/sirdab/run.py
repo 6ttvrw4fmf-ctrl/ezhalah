@@ -131,6 +131,8 @@ def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
     district_ar = find_district_in_text("حي " + district_raw, city_id) if (city_id and district_raw) else None
     area = p.get("area_in_m2")
     photos = [i["url"] for i in sorted(p.get("images") or [], key=lambda i: not i.get("isPrimary")) if i.get("url")]
+    # the page prints «رقم ترخيص الإعلان: 7xxxxxxxxx» (badge «إعلان موثق») — it lives only in the ad's prose
+    lic = normalize.ad_licence_from_prose(desc)
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{a['id']}",
         "listing_url": SITE + (a.get("slug") or a["id"]),
@@ -151,6 +153,7 @@ def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
         "property_age": normalize.exact_age(p.get("property_age")) if p.get("property_age") is not None else None,
         "direction": normalize.one_direction(_FACADE_AR.get(p.get("facade") or ""), diagonal=True),
         "street_width_m": p.get("street_width") if isinstance(p.get("street_width"), (int, float)) and p["street_width"] > 0 else None,
+        "license_number": lic if lic and lic.startswith("7") else None,   # a REGA AD licence only
         "photo_urls": photos,
         **row_price,
     }

@@ -114,3 +114,11 @@ def test_the_map_renders_a_distinct_arabic_facade_for_every_source_form():
     labels = [R._FACADE_AR[f] for f in _SOURCE_FACADES if f in R._FACADE_AR]
     assert len(set(labels)) == len(labels), f"duplicate facade labels: {labels}"
 
+
+
+def test_the_ad_licence_the_page_prints_is_stored():
+    # «رقم ترخيص الإعلان» is shown under the description (badge «إعلان موثق»); 361 of 549 carried one, none stored
+    (row, _), _ = R.map_ad(_ad(description_ar="مستودع مناسب.\n\nرقم ترخيص الإعلان: 7200560460"))
+    assert row["license_number"] == "7200560460"
+    (row, _), _ = R.map_ad(_ad())
+    assert row["license_number"] is None      # silent stays NULL
