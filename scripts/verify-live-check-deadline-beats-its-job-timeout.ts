@@ -53,6 +53,13 @@ let failures = 0;
 const fail = (msg: string) => { console.log(`FAIL  ${msg}`); failures++; };
 const pass = (msg: string) => console.log(`PASS  ${msg}`);
 const ok = (cond: boolean, msg: string) => (cond ? pass(msg) : fail(msg));
+/**
+ * A DIFFERENTIAL mutation proof: `caught` must express that the mutant and the shipped predicate
+ * DISAGREE, so it cannot pass while the guard is vacuous. Named for the shape
+ * verify-new-barriers-are-mutation-proven.ts recognises across the fleet.
+ */
+const mustCatch = (label: string, caught: boolean) =>
+  ok(caught, `(mutation) ${label}`);
 
 const SCRIPTS = 'scripts';
 const WORKFLOWS = join('.github', 'workflows');
@@ -191,22 +198,24 @@ console.log('\n§5 mutation proofs — each defect restored must be caught');
 {
   // M1: the verdict predicate widened to ignore unanswered work (the 2026-09-26 sentence).
   const widened = (m: Measured) => m.defects === 0 && m.unattempted === 0;
-  ok(widened({ ...CLEAN, unanswered: 10 }) && !certified({ ...CLEAN, unanswered: 10 }),
-    'M1 a predicate ignoring `unanswered` calls the 503 run clean; certified() refuses it');
+  mustCatch('M1 a predicate ignoring `unanswered` calls the 503 run clean; certified() refuses it',
+    widened({ ...CLEAN, unanswered: 10 }) !== certified({ ...CLEAN, unanswered: 10 })
+      && certified({ ...CLEAN, unanswered: 10 }) === false);
 
   // M2: the inequality written with the margin dropped — the pre-fix state of both workflows.
   const noMargin = (b: number, cap: number) => b <= cap * 60;
-  ok(noMargin(600, 10) && !deadlineFitsJob(600, 10),
-    'M2 dropping the bridge margin admits a 10m budget under a 10m cap; deadlineFitsJob refuses it');
+  mustCatch('M2 dropping the bridge margin admits a 10m budget under a 10m cap; deadlineFitsJob refuses it',
+    noMargin(600, 10) !== deadlineFitsJob(600, 10) && deadlineFitsJob(600, 10) === false);
 
   // M3: an unbounded budget from a malformed env var.
   const naive = (raw: string | undefined) => Number(raw);
-  ok(Number.isNaN(naive('abc')) && budgetSecondsFrom('abc') === DEFAULT_DEADLINE_SECONDS,
-    'M3 a naive parse yields NaN (an unbounded/never-expiring deadline); budgetSecondsFrom falls back');
+  mustCatch('M3 a naive parse yields NaN (an unbounded/never-expiring deadline); budgetSecondsFrom falls back',
+    Number.isNaN(naive('abc')) && budgetSecondsFrom('abc') === DEFAULT_DEADLINE_SECONDS);
 
   // M4: the real YAML, mutated back to the pre-fix caps, must be rejected by the same §3 arithmetic.
-  ok(!deadlineFitsJob(1200, 10) && !deadlineFitsJob(900, 10),
-    'M4 the caps as they stood on 2026-09-26 (10m) reject both new budgets — the fix is load-bearing');
+  mustCatch('M4 the caps as they stood on 2026-09-26 (10m) reject both new budgets — the fix is load-bearing',
+    !deadlineFitsJob(1200, 10) && !deadlineFitsJob(900, 10)
+      && deadlineFitsJob(1200, 25) && deadlineFitsJob(900, 20));
 }
 
 console.log(`\n${failures === 0 ? '✓ deadline contract holds' : `✗ ${failures} assertion(s) failed`}`);
