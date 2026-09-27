@@ -1623,6 +1623,32 @@ def upsert_macsaib_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("macsaib_commercial_listings", rows)
 
 
+def upsert_maqam_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("maqam_residential_listings", rows)
+
+
+def upsert_maqam_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("maqam_commercial_listings", rows)
+
+
+
+
+def upsert_earthapp_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("earthapp_residential_listings", rows)
+
+
+def upsert_earthapp_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("earthapp_commercial_listings", rows)
+
+
+def upsert_nawafeth_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nawafeth_residential_listings", rows)
+
+
+def upsert_nawafeth_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nawafeth_commercial_listings", rows)
+
+
 def upsert_wahadat_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("wahadat_residential_listings", rows)
 

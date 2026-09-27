@@ -165,6 +165,12 @@ export const PLATFORMS: Platform[] = [
   { name: 'مؤاجرة', domain: 'muajarh.com', brand: 'Muajarh', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
   // dallali: 7 measured 2026-09-26 (3 rent: 2 offices + 1 apartment; 4 KAEC plots). Open JSON API p1.dallali.com.
   { name: 'دلّالي', domain: 'dallali.com', brand: 'Dallali', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // maqam: Nuzul tenant, 50 of 130 `available` (47 kept: 3 Wafi off-plan excluded), measured 2026-09-26. NOT «مقام الوسام» (fahadalshahri).
+  { name: 'شركة مقام للتطوير العقاري', domain: 'property.maqamco.sa', brand: 'Maqam Development', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // earthapp: 54 active ads, 51 kept (47 land priced per m²), measured 2026-09-26. No listing photos exist on the source.
+  { name: 'تطبيق أرض', domain: 'earthapp.com.sa', brand: 'Earth App', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // nawafeth: 20 REGA-licensed ads, 9 kept — 11 state neither sale nor rent in the title and are skipped, never guessed.
+  { name: 'نوافذ الوطن', domain: 'nawafethalwatan.com', brand: 'Nawafeth Alwatan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'العجلان', domain: 'alajlan-re.com', brand: 'Al Ajlan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // Onboarded 2026-09-20 (#3320). Deals from production search_listings_ar, except Fahadalshahri:
   // 0 rent rows today, but its scraper maps «للإيجار» to Rent — absence is not incapability.

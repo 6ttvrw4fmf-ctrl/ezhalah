@@ -1093,6 +1093,25 @@ POLICIES: dict[str, _P] = {
         "unless the walk reached the declared total and every detail record was readable.",
         "An oracle is possible — GET …/properties/<slug> answers RESOURCE_NOT_FOUND for a slug that "
         "does not exist — but it is not written yet, so this does not claim a direct check."),
+    "maqam": _P(
+        _pol("maqam", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the same Nuzul engine as goldendeal/yameen (scrapers/goldendeal/run.py::verify_gone_for on "
+        "tenant maqamco, host maqamco.nzl-backend.com), wired exactly as yameen wires it: "
+        "prune_unseen(..., verify_gone=verify_gone_for(TENANT, make_canary(TENANT, control))). A 404 "
+        "is GONE; a 200 for THIS id is LIVE only while availability_status is available, otherwise "
+        "GONE; another record and 401/403/429/5xx are UNKNOWN; canary-gated (fails CLOSED), complete "
+        "enumeration only. The feed itself states availability for every record (130 = 50 available, "
+        "59 sold, 10 unavailable, 7 reserved, 4 rented, measured 2026-09-26).",
+        "The oracle's semantics are the engine's, measured on yameen 2026-09-23; the canary gate means "
+        "maqam prunes nothing unless its own control answers correctly on the first crawl."),
+    "earthapp": _P(
+        _pol("earthapp", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over earthapp.com.sa/api/offer-list-by-area (pagination.total 54 when measured), which the server itself filters to status=active AND an unexpired REGA licence. run.py prunes only when every list page was read.",
+        'The detail endpoint adds only GIS features, so it cannot act as a liveness oracle.'),
+    "nawafeth": _P(
+        _pol("nawafeth", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set over the antiforgery-token POST listing (Home/FilterAdvertisment, 20 ads when measured), walked until hasMoreAds=0. Each ad page states its REGA licence expiry. run.py prunes only on a complete walk with every ad page readable.",
+        'An unknown advertisement id answers 404, so an oracle is feasible, but it is not written yet.'),
     # ── Tier 3a: the deactivation path IS direct, but the population is still unverified ─────────
     # Same reasoning as aqargate immediately above, applied to every other platform whose prune
     # gained an oracle. These are NOT relabelled tier 2: CANDIDATE_PLUS_DIRECT would be a claim
