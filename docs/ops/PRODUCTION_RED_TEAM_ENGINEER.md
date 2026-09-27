@@ -261,6 +261,26 @@ Three rules make that real, all of them learned in production:
    field per `docs/ops/ADVANCED_FILTER_SOURCE_TRUTH.md`. Never adjust the oracle to match the RPC
    before you know which of them is wrong — that is PART 7.
 
+5. **THE ORACLE INHERITS THE REQUEST'S SCOPE, SO A PERFECT CHAIN CAN SIT ON A TRUNCATED ELIGIBLE SET
+   (measured 2026-09-27, `ops_incident` #869).** The oracle is built **from the captured request**,
+   which is exactly what makes it independent of the RPC's *implementation* — and exactly what makes
+   it blind to a wrong `p_tables`. If the scope the request carried is missing platforms, the oracle
+   asks the same truncated question and agrees with the RPC **for the wrong reason**.
+
+   Measured, on a real browser search of بريدة / للبيع / «أرض سكنية»: the screen said **2199**, the
+   RPC's `total_count` was **2199**, the independent oracle over the captured request returned
+   **2199** — every equality in the chain held — while `search_listings_ar` held **2428**
+   `production_ready` rows for that identical predicate. The 229 difference was the `ashab` and
+   `wajaf` rows whose tables the served bundle could not name, because `#4919` was merged and never
+   deployed. Sixteen chains ran green that day and not one of them could see it.
+
+   **Therefore: never report "N chains green" as "no reachability defect."** Set equality proves the
+   RPC honoured the request it was given. Whether that request could ask for everything Ezhalah holds
+   is a **different question with a different reader** — inventory against served scope, which is
+   `scripts/verify-served-scope-reaches-every-live-platform-live.ts`, and it belongs in the
+   deploy-reality item of PART 2.6 rather than in any chain. Class 4 (count/set) and class 11
+   (post-deploy drift) meet here, and only the second reading sees the meeting.
+
 ### 2.3 — Set equality beats count equality, and where set equality is not available
 
 Compare ID sets whenever the whole eligible set can be held. The RPC serves at most one page (1,500);

@@ -68,9 +68,49 @@ def test_the_owner_phone_and_building_number_are_never_stored():
     assert "user_id" not in blob
 
 
-@pytest.mark.parametrize("facade", ["east", "northeast", "southwest"])
+# THE EIGHT COMPASS FORMS SIRDAB'S OWN PAYLOAD WRITES, measured on production 2026-09-27 (#4959):
+# the diagonals come WITHOUT an underscore («northeast»), which is how 10 of 63 facades were silently
+# dropped while _FACADE_AR expected «north_east».
+#
+# This tuple is stated here DELIBERATELY, and not derived from R._FACADE_AR, because the defect was a
+# form the SOURCE writes that the MAP LACKS: a population read off the map could never catch a missing
+# key — it would be a check whose population is defined by the thing it is checking, the
+# self-confirming shape this repo has already been burned by (see verify-live-sweep-coverage-contract's
+# seeded-on-its-own-alternatives regex, #4890, same day). The source vocabulary is an independent
+# reading; the map is the thing under test.
+_SOURCE_FACADES = ("north", "south", "east", "west", "northeast", "northwest", "southeast", "southwest")
+
+
+@pytest.mark.parametrize("facade", _SOURCE_FACADES)
 def test_every_facade_the_source_writes_is_read(facade):
-    # the diagonals come WITHOUT an underscore («northeast»); a missed key silently drops the facade
+    """EVERY form, not a sample of them.
+
+    Until 2026-09-27 this parametrized ["east", "northeast", "southwest"] — 3 of the 8 — while its own
+    name and #4959's commit message both claimed it pinned «every form the source writes». Measured by
+    mutation that day (routine #9): reverting ONLY «northwest»→«north_west» and «southeast»→«south_east»
+    — re-introducing the exact defect for 2 of the 4 diagonals, 4 of the 10 originally-lost facades —
+    left this file at a full 10/10 GREEN. A barrier that names a class and tests a sample of it reports
+    the class as covered.
+    """
     (row, _), _ = R.map_ad(_ad(property={"facade": facade}))
-    assert row["direction"]
+    assert row["direction"], f"the source writes «{facade}» and the map does not read it"
+
+
+def test_the_map_declares_no_key_the_source_never_writes():
+    """The other direction: a key that can never fire is a corpse, and it is how the defect HID.
+
+    «north_east» sat in _FACADE_AR looking like coverage for four months. Reading the map against the
+    source vocabulary — rather than only the source against the map — is what makes a stale key visible
+    instead of reassuring.
+    """
+    stale = sorted(set(R._FACADE_AR) - set(_SOURCE_FACADES))
+    assert not stale, f"_FACADE_AR keys the source never writes (dead entries): {stale}"
+
+
+def test_the_map_renders_a_distinct_arabic_facade_for_every_source_form():
+    """Truthy is not enough: two forms collapsing onto one Arabic label would silently mislabel one."""
+    # .get, not [] — a MISSING form is the parametrized test's job to name; this one is about two
+    # present forms colliding, and a KeyError here would only obscure which failure a reader is seeing.
+    labels = [R._FACADE_AR[f] for f in _SOURCE_FACADES if f in R._FACADE_AR]
+    assert len(set(labels)) == len(labels), f"duplicate facade labels: {labels}"
 
