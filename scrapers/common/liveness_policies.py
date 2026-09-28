@@ -109,6 +109,13 @@ POLICIES: dict[str, _P] = {
         "Requires the Saudi residential proxy (WASALT_PROXY_URL); datacenter IPs get HTTP 403, "
         "which is UNKNOWN and must never be read as death.",
     ),
+    "aqarmonthly": _P(
+        _pol("aqarmonthly", 3, 48), DIRECT_REVISIT,
+        "aqar's own: 404/410; DEAD_MARKERS phrases (the soft-close limb stays UNKNOWN, as on aqar)",
+        "Its ads ARE sa.aqar.fm pages, so aqar's daily sweep reads them (scrapers/aqar/liveness.py, "
+        "aqar-liveness.yml, one extra shard; owner 2026-09-28: «Aqar Monthly must work like Aqar»). "
+        "Its crawl still prunes on feed absence (scrapers/absence-only-prune.txt).",
+    ),
     # ── Tier 2: source-published candidate set, then a direct confirm ───────────────────────────
     "dealapp": _P(
         _pol("dealapp", 3, 96), CANDIDATE_PLUS_DIRECT,
@@ -1307,7 +1314,7 @@ POLICIES: dict[str, _P] = {
               "reported as unverified, never as verified-alive.")
         for p in (
             "abralosol", "abwbna", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "amlakalahsa", "aouj", "aqaratikom",
-            "aqarmonthly", "arkaan", "awal", "azdad", "bahadhabab", "erapulse",
+            "arkaan", "awal", "azdad", "bahadhabab", "erapulse",
             "fursaghyr", "jurash",
             "october",
             "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
