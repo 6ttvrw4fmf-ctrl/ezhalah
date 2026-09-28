@@ -878,9 +878,6 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "zip_code": addr.get("postalCode") or None,
         "additional_number": extra_num or None,
         "rega_location_verified": bool(rega_no),
-        # the REGA AD licence (7xxxxxxxxx) was only ever kept in additional_info, so the AF «has licence»
-        # filter never saw an aqarcity ad; the column carries it now
-        "license_number": str(rega_no) if rega_no and str(rega_no).startswith("7") and len(str(rega_no)) == 10 else None,
         "title": title,
         "description": description,
         "photo_urls": _images(ld, body),
