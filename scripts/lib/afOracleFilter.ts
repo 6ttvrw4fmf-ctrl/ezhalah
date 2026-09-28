@@ -588,15 +588,17 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
         // wrongly filter Buy rows by a rent column. The app never sends a period without
         // p_deal='إيجار' (rentPeriodParam returns null otherwise), so this is refused, not modelled.
         if (reqBody.p_deal !== 'إيجار') { unhandled.push(`p_rent_period=${v} with p_deal=${JSON.stringify(reqBody.p_deal ?? null)} (the clause only applies a period to Rent rows)`); break; }
-        if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true))`);
-        else if (v === 'شهري') parts.push(`payment_monthly=is.true&rent_now_pay_later=not.is.true`);
+        // Every period arm also admits price on request (price_annual NULL) — the one line the clause
+        // gained 2026-09-28 (owner: «سعر عند الطلب … both monthly and yearly»).
+        if (v === 'سنوي') parts.push(`or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`);
+        else if (v === 'شهري') parts.push(`or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),price_annual.is.null)`);
         // BOTH periods (rentPeriod 'both' → 'كلاهما'), translated VERBATIM from the clause (2026-09-02):
         //   p_rent_period = 'كلاهما' and (s.payment_monthly = true
         //                                 or s.rent_period_ar = 'سنوي'
         //                                 or (s.rent_period_ar = 'شهري' and coalesce(s.rent_now_pay_later,false)))
         // It is the union of the two single-period arms — NOT "no period filter": a rent row whose
         // source published no period at all stays OUT (R1.5.1; migration rent_period_both_monthly_and_annual).
-        else if (v === 'كلاهما') parts.push(`or=(payment_monthly.is.true,rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true))`);
+        else if (v === 'كلاهما') parts.push(`or=(payment_monthly.is.true,rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`);
         else unhandled.push(`p_rent_period=${v}`);
         break;
       // beds/bath/price/floor are handled ABOVE, where the clause's exact-vs-min and

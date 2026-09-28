@@ -45,9 +45,20 @@ def test_an_available_private_office_maps_with_its_monthly_price_and_address_dis
                                  "https://superoffice.sa/uploads/offices/0_1.webp"]
 
 
-def test_a_booked_office_and_a_meeting_room_are_never_listings():
+def test_a_booked_office_and_an_unknown_space_kind_are_never_listings():
     assert _map(status='<a class="alert_btn action_btn"> محجوز </a>')[1] == "status_محجوز"
-    assert _map(kind="غرفة الاجتماعات")[1] == "kind_غرفة الاجتماعات"
+    assert _map(kind="مساحة عمل مشتركة")[1] == "kind_مساحة عمل مشتركة"
+
+
+@pytest.mark.parametrize("kind", ["غرفة الاجتماعات", "غرفة الاجتماعات (صغيرة)"])
+def test_an_available_meeting_room_is_a_monthly_price_on_request_service_facility(kind):
+    # owner rule 2026-09-28: «7000 ريال / بالساعة» is an hourly rate — never multiplied into a rent
+    from scrapers.common import db
+    (row, cat), why = _map(kind=kind, price="7000 ريال / بالساعة")
+    assert why == "" and cat == "commercial" and row["property_type"] == "Meeting Room"
+    assert row["rent_period"] == "monthly" and row["price_annual"] is db.AUTHORITATIVE_NULL
+    assert row["price_evidence"]["stored"] is None and row["price_evidence"]["authoritative_absent"]
+    assert _map(kind=kind, status='<a class="alert_btn action_btn"> محجوز </a>')[1] == "status_محجوز"
 
 
 def test_a_road_named_after_a_district_is_never_the_district():

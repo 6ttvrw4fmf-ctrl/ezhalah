@@ -1147,6 +1147,16 @@ POLICIES: dict[str, _P] = {
         "the crawl's OWN seen-set over the sitemap's 184 Arabic office pages; a booked office drops out of it. "
         "run.py suppresses prune_unseen unless every page was readable.",
         "No oracle is written yet, so this does not claim a direct check."),
+    "shomou": _P(
+        _pol("shomou", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the crawl's OWN seen-set of in-date ads over the 26-page index; an ad past its own «تاريخ إنتهاء الإعلان» drops out. "
+        "run.py suppresses prune_unseen unless every page was readable.",
+        "No oracle is written yet, so this does not claim a direct check."),
+    "maktab": _P(
+        _pol("maktab", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the public offices feed read to its own `total`; an office whose REGA ad licence ends drops out. "
+        "run.py suppresses prune_unseen unless the total matched.",
+        "No oracle is written yet, so this does not claim a direct check."),
     "arsh": _P(
         _pol("arsh", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the site's own property index /عقارات-عرش (a single "

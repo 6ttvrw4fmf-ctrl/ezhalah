@@ -141,8 +141,9 @@ flag does everything, automatically, and deletes nothing:
   go on the next `sync_search_listings_ar` run. The sync silently does nothing without the writer lock,
   so never assume it ran: read the row it returns;
 - **its logo leaves the loading strip and the «Reviewing N platforms» count drops by one**
-  (`loader_strip_platforms_ar()` = platforms with rows, minus `dormant`/`retired`). This one is
-  immediate;
+  (the app reads `loader_platform_status_ar()` once per session and hides every logo whose slugs are
+  all `dormant`/`retired`, see `hiddenLoaderNames` in `src/data/loaderPlatforms.ts`). This one takes
+  effect on each user's next page load, no sync needed;
 - **no row is deleted and no listing is deactivated.** Absence of verification is UNKNOWN, never death.
 
 Say it in the report in one line: *"<site> is down on their side since <date> — listings and logo

@@ -1,4 +1,16 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-09-28 (migration 20260928100046_price_on_request_shows_under_every_rent_period):
+--   CHANGED — one line in the rent-period block: `or (s.price_annual is null and p_rent_period in
+--   ('شهري','سنوي','كلاهما'))`. Owner rule 2026-09-28: «For سعر عند الطلب, we put it both monthly and
+--   yearly» — a rental with no published rent has no figure a period could misstate, so it is shown
+--   under every period; a budget still excludes it. rebuild_af_filter_rpcs() re-rendered the six
+--   templated RPCs; in the same migration 36 priced cohorts (4 types × 3 cities × 3 periods,
+--   price_min 1) were asserted unchanged and one price-on-request row of each period shape
+--   (سنوي / شهري / none) was found under all three periods.
+--   Body below = the previous body plus that one line, PROVEN against production:
+--   Recorded md5 of pg_get_functiondef: cbfa562eb5d75efc4180f2d20f64def7
+--   (length 9,663; the previous text hashed 3aa7830a2349f607963774799d7ece84, 9,497 — the +166 is
+--   exactly this line, which is itself a check on the edit being the only change.)
 -- Re-verified 2026-09-27 (migration 20260927111536_af_rail_catches_up_to_shipped_perf_edits):
 --   CHANGED — one line, the read-side sanity predicate. `coalesce(s.col, 0) >= 0` hides the column
 --   from Postgres's per-column statistics, so the planner fell back to a generic ~33% selectivity
@@ -186,6 +198,7 @@ AS $function$ select E'
       and (p_deal       is null or s.deal_ar = p_deal)
       and (p_rent_period is null
            or s.deal_ar <> ''إيجار''
+           or (s.price_annual is null and p_rent_period in (''شهري'',''سنوي'',''كلاهما''))  -- price on request: no figure a period could misstate (owner 2026-09-28)
            or (p_rent_period = ''شهري'' and s.payment_monthly = true and not coalesce(s.rent_now_pay_later, false))
            or (p_rent_period = ''سنوي'' and (s.rent_period_ar = ''سنوي'' or (s.rent_period_ar = ''شهري'' and coalesce(s.rent_now_pay_later, false))))
            or (p_rent_period = ''كلاهما'' and (s.payment_monthly = true or s.rent_period_ar = ''سنوي'' or (s.rent_period_ar = ''شهري'' and coalesce(s.rent_now_pay_later, false))))
