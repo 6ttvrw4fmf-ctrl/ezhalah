@@ -46,17 +46,20 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
       - name: Open the sample
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
           PLATFORM: ${{ inputs.platform }}
           N: ${{ inputs.n }}
           WHICH: ${{ inputs.which }}
           HIDDEN_DAYS: ${{ inputs.hidden_days }}
         run: |
-          exec python -m scrapers.common.lifecycle_spot_check \
+          exec xvfb-run -a python -m scrapers.common.lifecycle_spot_check \
             --platform "$PLATFORM" --n "$N" --which "$WHICH" --hidden-days "$HIDDEN_DAYS"
       - name: Keep the result for the engineer
         if: always()

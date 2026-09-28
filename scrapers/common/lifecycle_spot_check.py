@@ -4,7 +4,8 @@ checked" and protection 1).
 
 READ-ONLY. It never writes a strike, a hide, a verification stamp or anything else: it only tells the
 engineer whether the site's hiding is right. The verdict for every page comes from the one shared
-judge, `liveness_contract.classify_response()`, and the run is only believed when known-live
+judge, `liveness_contract.classify_response()`, fetched through the deletion tier's own
+transport (`cleanup._probe`, so wasalt goes through the real browser), and the run is only believed when known-live
 controls (listings the crawl saw in the last 24 hours) come back alive — `liveness_trust`'s canary
 gate. An untrusted run reports "void", never "all dead".
 
@@ -24,8 +25,7 @@ import random
 import sys
 from datetime import datetime, timedelta, timezone
 
-from scrapers.common import http
-from scrapers.common.cleanup import PLATFORMS
+from scrapers.common.cleanup import PLATFORMS, _probe
 from scrapers.common.db import sb
 from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN, classify_response
 from scrapers.common.liveness_trust import canary_environment_ok
@@ -94,10 +94,10 @@ def sample(client, table: str, *, active: bool, n: int, since: str | None, rng: 
 
 
 def open_ad(url: str, dead_marker) -> str:
-    resp = http.get(url)
-    if resp is None:
-        return classify_response(None)
-    return classify_response(resp.status_code, resp.text or "", dead_marker=dead_marker)
+    # The deletion tier's own transport: it keeps the real status (a 404 vs a block) and reaches
+    # wasalt only through the browser (WASALT_BROWSER), which curl_cffi can no longer do.
+    status, body = _probe(url)
+    return classify_response(status, body or "", dead_marker=dead_marker)
 
 
 def main() -> int:
