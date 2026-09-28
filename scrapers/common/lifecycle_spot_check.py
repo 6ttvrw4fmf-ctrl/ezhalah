@@ -15,6 +15,11 @@ soft-closed ad serving 200 reads live), and the report says so, so the engineer 
 needs a real "gone" check (backlog B/C).
 
   python -m scrapers.common.lifecycle_spot_check --platform gathern --n 100
+  python -m scrapers.common.lifecycle_spot_check --platform aqar --ids aqar_residential_listings:123,…
+
+`--ids` checks exactly the listings a customer clicked on Ezhalah tonight (the engineer's browser
+check collects them from first-screen cards). They are all visible, so they are judged as "live":
+any one the source says is gone is a dead ad a customer can see.
 """
 from __future__ import annotations
 
@@ -93,6 +98,17 @@ def sample(client, table: str, *, active: bool, n: int, since: str | None, rng: 
     return rng.sample(rows, min(n, len(rows)))
 
 
+def parse_ids(spec: str) -> list[tuple[str, int]]:
+    """'table:id,table:id' → [(table, id)]. Anything malformed is refused, never guessed."""
+    out = []
+    for part in filter(None, (p.strip() for p in spec.split(","))):
+        table, _, rid = part.partition(":")
+        if not table or not rid.isdigit():
+            raise ValueError(f"bad --ids entry {part!r}; expected table:id")
+        out.append((table, int(rid)))
+    return out
+
+
 def open_ad(url: str, dead_marker) -> str:
     # The deletion tier's own transport: it keeps the real status (a 404 vs a block) and reaches
     # wasalt only through the browser (WASALT_BROWSER), which curl_cffi can no longer do.
@@ -107,6 +123,7 @@ def main() -> int:
     ap.add_argument("--which", choices=("hidden", "live", "both"), default="both")
     ap.add_argument("--hidden-days", type=int, default=30, help="only ads hidden within this many days")
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--ids", default="", help="table:id,… — exactly these (visible) listings")
     a = ap.parse_args()
 
     client = sb()
@@ -133,7 +150,16 @@ def main() -> int:
 
     since = (datetime.now(timezone.utc) - timedelta(days=a.hidden_days)).isoformat()
     results = []
-    if canary["ok"]:
+    if canary["ok"] and a.ids:
+        for table, rid in parse_ids(a.ids):
+            rows = client.table(table).select(COLS).eq("id", rid).limit(1).execute().data or []
+            for r in rows:
+                if not r.get("listing_url"):
+                    continue
+                v = open_ad(r["listing_url"], dead_marker)
+                results.append({"side": "live", "table": table, "id": rid, "url": r["listing_url"],
+                                "verdict": v, "judged": judge("live", v)})
+    elif canary["ok"]:
         per_table = max(1, a.n // len(tables))
         for side, active, win in (("hidden", False, since), ("live", True, None)):
             if a.which not in (side, "both"):

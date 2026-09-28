@@ -1,6 +1,8 @@
 """The Lifecycle spot check's judging: a wrong answer in either direction is counted, UNKNOWN is never
 counted as right or wrong, and a run whose controls failed is VOID, never "clean"."""
-from scrapers.common.lifecycle_spot_check import judge, summarize
+import pytest
+
+from scrapers.common.lifecycle_spot_check import judge, parse_ids, summarize
 from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN
 
 
@@ -35,3 +37,12 @@ def test_failed_controls_make_the_run_void_not_clean():
     bad = {"probed": 5, "alive": 1, "ok": False}
     out = summarize("x", "status-only", bad, [])
     assert out["verdict"].startswith("void") and out["trusted"] is False
+
+
+def test_ids_are_parsed_exactly_and_malformed_ones_refused():
+    assert parse_ids("aqar_residential_listings:12, gathern_residential_listings:7") == [
+        ("aqar_residential_listings", 12), ("gathern_residential_listings", 7)]
+    assert parse_ids("") == []
+    for bad in ("aqar_residential_listings", "aqar_residential_listings:x", ":5"):
+        with pytest.raises(ValueError):
+            parse_ids(bad)

@@ -26,6 +26,10 @@ on:
         description: "Only ads hidden within this many days"
         type: string
         default: "30"
+      ids:
+        description: "Optional: table:id,table:id — exactly the listings a customer clicked tonight"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -58,9 +62,10 @@ jobs:
           N: ${{ inputs.n }}
           WHICH: ${{ inputs.which }}
           HIDDEN_DAYS: ${{ inputs.hidden_days }}
+          IDS: ${{ inputs.ids }}
         run: |
           exec xvfb-run -a python -m scrapers.common.lifecycle_spot_check \
-            --platform "$PLATFORM" --n "$N" --which "$WHICH" --hidden-days "$HIDDEN_DAYS"
+            --platform "$PLATFORM" --n "$N" --which "$WHICH" --hidden-days "$HIDDEN_DAYS" --ids "$IDS"
       - name: Keep the result for the engineer
         if: always()
         uses: actions/upload-artifact@v4
