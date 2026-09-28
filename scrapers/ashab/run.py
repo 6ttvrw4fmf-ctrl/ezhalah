@@ -240,7 +240,9 @@ def map_page(d: dict[str, Any], ad_id: str, url: str, unit_of: Optional[str] = N
     desc = redact_pii(d["description"]) or ""
     row_price: dict[str, Any] = {"price_per_meter": ppm}
     if deal == "Buy":
-        row_price["price_total"] = price
+        # a per-m² figure means the source publishes no total: write NULL for real, so a row that earlier
+        # held the per-m² number as its «total» is cleared (a plain None is dropped by the upsert)
+        row_price["price_total"] = db.AUTHORITATIVE_NULL if (per_meter or land_ppm) else price
     else:
         row_price["rent_period"], row_price["price_annual"] = normalize.rent_period_from_ad(
             price, f"{title} {desc}", None, title)

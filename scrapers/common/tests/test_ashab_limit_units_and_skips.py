@@ -110,7 +110,7 @@ def test_a_limit_equal_to_the_per_metre_price_is_per_metre_not_a_total():
     (row, cat), _ = _map(deal="بيع", type_ar="أرض سكنية", header="الحد 470 ر.س", limit="الحد 470 ر.س",
                          ppm="470 ر.س", area="319.61 م²")
     assert cat == "residential" and row["property_type"] == "Residential Land"
-    assert row["price_total"] is None and row["price_per_meter"] == 470 and row["area_m2"] == 319.61
+    assert row["price_total"] is R.db.AUTHORITATIVE_NULL and row["price_per_meter"] == 470 and row["area_m2"] == 319.61
     assert row["price_evidence"]["unit"] == "per_meter"
 
 
@@ -184,7 +184,8 @@ def test_location_icons_photos_and_facts_come_from_the_page():
 def test_a_land_sale_priced_below_any_possible_total_is_per_metre():
     # owner 2026-09-28: «الحد 500» on a 700 m² plot with «سعر المتر» blank — 500 is per m², never the plot's total
     (row, _), _ = _map(deal="بيع", type_ar="أرض سكنية", header="الحد 500 ر.س", limit="الحد 500 ر.س", area="700 م²")
-    assert row["price_total"] is None and row["price_per_meter"] == 500
+    # AUTHORITATIVE_NULL, not None: None is dropped by the upsert and the old «total 500» would survive
+    assert row["price_total"] is R.db.AUTHORITATIVE_NULL and row["price_per_meter"] == 500
     assert row["price_evidence"]["unit"] == "per_meter"
     # a real total stays a total, and a villa is never touched
     (big, _), _ = _map(deal="بيع", type_ar="أرض سكنية", header="الحد 350000 ر.س", limit="الحد 350000 ر.س", area="700 م²")
