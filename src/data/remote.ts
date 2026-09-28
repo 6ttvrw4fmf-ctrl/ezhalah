@@ -1482,12 +1482,16 @@ function keptFiltersReq(q: SearchQuery, table?: string) {
   //    wholesale exactly as they do on a monthly search. (owner feature 2026-08-14.)
   // dealCombined (2026-08-20): same as bothDeals — Rent rows in combined mode have no period filter
   // at all (accepts both known periods AND unpublished-period rows), so none of these branches apply.
+  //  • PRICE ON REQUEST (owner 2026-09-28): a rental with no price (price_annual NULL) passes EVERY
+  //    period branch — it has no figure a period could misstate, and the card prints «سعر عند الطلب»
+  //    with no period suffix. Mirrors the one line af_eligibility_clause() gained, so the rows the
+  //    results RPC returns are never dropped here. A PRICED null-period row is still in neither.
   if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'monthly') {
-    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.eq('rent_period', 'monthly');
+    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.or('rent_period.eq.monthly,price_annual.is.null');
   } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'annual') {
-    req = req.eq('rent_period', 'annual');
+    req = req.or('rent_period.eq.annual,price_annual.is.null');
   } else if (!q.bothDeals && !q.dealCombined && q.deal === 'Rent' && q.rentPeriod === 'both') {
-    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.in('rent_period', ['monthly', 'annual']);
+    if (!MONTHLY_ONLY_TABLE.test(tbl)) req = req.or('rent_period.in.(monthly,annual),price_annual.is.null');
   }
   return req;
 }
