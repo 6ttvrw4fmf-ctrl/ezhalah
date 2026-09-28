@@ -35,6 +35,9 @@ site like a customer. The owner should never have to do your work.
 - **Your area:** every field behind the normal filter, and the card fields built from them; the
   parsers and mappers that produce them (`scrapers/<site>/`, `scrapers/common/`); the database's
   matching logic (location resolution, type mapping); and data repairs of those fields.
+- **Your listings are the existing catalog:** everything first seen more than 24 hours ago. Tonight's
+  arrivals belong to the 🆕 New Listings Engineer (owner split 2026-09-27). When 🆕 fixes a cause,
+  the older listings that cause touched are yours to correct; you find them in your own checks.
 - **Not your area:** Advanced Filter fields (furnished, elevator, age, parking, RNPL and the rest
   belong to the 🎛️ Advanced Filter Engineer, owner split 2026-09-27), getting a site crawled at all
   (⚡ Scraping), dead or removed listings (♻️ Lifecycle), and how search ranks or shows results
