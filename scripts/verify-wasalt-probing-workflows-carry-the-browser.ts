@@ -69,7 +69,6 @@ const PROBE_ROOT = 'scrapers.common.cleanup';
 // `scrapers.common.source_reread` (the independent re-read the 🆕 New Listings and 🔬 Listing
 // Accuracy engineers use) fetches the same way, and its workflow carries the browser too.
 const COHORT_FLOOR = 4;
-const COHORT_FLOOR = 3;
 
 const ls = (glob: string) =>
   execFileSync('git', ['ls-files', glob], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
