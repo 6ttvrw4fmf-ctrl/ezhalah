@@ -112,11 +112,20 @@ check('the alive/restorative flush is NOT gated on trust',
 check('evidence rows record strikes of an untrusted run as not-applied',
   /e\["applied"\]\s*=\s*bool\(args\.apply\)\s*and\s*trusted/.test(sweep));
 
-// ── Part 5: the anomaly cap is UNCHANGED and still enabled ──────────────────────────────────────
-check('the anomaly cap still governs the kill batch',
-  /anomaly\s*=\s*is_anomaly\(len\(kill_pending\), kill_cap\)/.test(sweep));
-check('an over-cap batch still inactivates nothing',
-  /if anomaly:/.test(sweep) && /def is_anomaly\(/.test(sweep));
+// ── Part 5: the anomaly cap still governs every kill batch ──────────────────────────────────────
+// 2026-09-28 (drain mode, scrapers/common/cleanup.py precedent): over the cap a SPIKE still
+// inactivates nothing; a standing backlog inactivates at most `kill_cap` rows (oldest strikes) and
+// carries the rest. The cap's VALUE is untouched (verify-liveness-kill-cap-denominator.ts). The
+// behaviour is EXECUTED in scrapers/common/tests/test_gathern_liveness_drain.py; this pins the shape.
+check('the anomaly cap still governs the kill batch, and is decided with trust',
+  /over_cap\s*=\s*is_anomaly\(len\(kill_pending\), kill_cap\)/.test(sweep) &&
+  /kill_now\s*=\s*plan_kills\(kill_pending, kill_cap, baseline, trusted\)/.test(sweep));
+check('over the cap: an untrusted run or a spike inactivates nothing, a backlog never more than the cap',
+  /def plan_kills\([\s\S]*?if not trusted:\s*\n\s*return \[\][\s\S]*?if is_spike\([^\n]*\):\s*\n\s*return \[\][\s\S]*?\[:kill_cap\]/.test(sweep) &&
+  /def is_anomaly\(/.test(sweep));
+check('only the rows the gate chose are flipped inactive',
+  /if rid in kill_ids:\s*\n\s*payload\["active"\] = False/.test(sweep) &&
+  !/"active":\s*False/.test(sweep.slice(sweep.indexOf('def main('))));
 check('the run is marked not-ok when either gate fires',
   /ok=not \(anomaly or trust_quarantine\)/.test(sweep));
 
