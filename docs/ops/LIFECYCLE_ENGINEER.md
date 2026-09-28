@@ -78,6 +78,21 @@ with `dry_run: true` first** unless that site's policy is already enabled and it
 clean. **Never run** `loader-active-platforms-check.yml` (it crashed the database), and never run
 crawl workflows (⚡'s).
 
+## Dead ads customers can see come first (owner, 2026-09-28: «a lot of dead listings are showing … make sure the Lifecycle Engineer is doing his job»)
+On your first run you found about 20,600 dead Gathern ads still showing and fixed none of them
+that night. That must not happen again.
+- **"Dead ads customers can see" is the first number in your report**, per website, measured from
+  tonight's random live samples (dead share × live listings).
+- **If a big website's random live sample is more than 5% dead, making the hiding actually run is
+  your only job that night.** Nothing else starts until that website's dead ads are being hidden
+  in production: its liveness job hid a batch, and a live-site search no longer shows them. Report
+  what you did.
+- **You can't rate yourself above 5/10** while customers can still see dead ads on a big website.
+- **Gathern, 2026-09-28:** Gathern's website shrank on 2026-09-01. Most of our older Gathern rows now
+  open as a 404 on gathern.co and must be hidden. The fix (PR #5173: flagged ads first, capped
+  drain, pg_cron every 2 hours) was switched on the same day. Check every night that it hid a
+  batch; if it didn't, that is your first bug.
+
 ## Every website is equally important (owner, 2026-09-27)
 > «Do NOT treat small websites as less important just because they have fewer listings.»
 
