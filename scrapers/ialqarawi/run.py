@@ -88,6 +88,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
 import sys
 import threading
@@ -202,10 +203,24 @@ def session() -> cc.Session:
     below is the catalogue page the run needs anyway, so a profile is only accepted when it answers
     with real cards.
     """
-    return http.negotiated_session(
-        f"{BASE}/index.php?router=cards&catid={sorted(CATEGORY_IDS)[0]}&type=1",
-        headers={"Accept-Language": "ar,en;q=0.7"},
-        served=lambda r: r.status_code == 200 and '<section class="cards' in r.text)
+    probe = f"{BASE}/index.php?router=cards&catid={sorted(CATEGORY_IDS)[0]}&type=1"
+    kw = dict(headers={"Accept-Language": "ar,en;q=0.7"},
+              served=lambda r: r.status_code == 200 and '<section class="cards' in r.text)
+    # 2026-09-28: on alternate days every profile DIRECT drew an empty «HTTP 202» (a bot-challenge
+    # page, not a catalogue) from the runner's datacenter IP — 4 of the last 7 crawls died here while
+    # re-runs hours later succeeded. When the direct route is walled, ride the residential proxy
+    # (`proxy: true` in small-sources-sync.yml sets WASALT_PROXY_URL). No proxy configured → the
+    # direct failure is raised unchanged, so the run still says exactly why it stopped.
+    try:
+        return http.negotiated_session(probe, **kw)
+    except RuntimeError as direct_err:
+        purl = os.environ.get("WASALT_PROXY_URL", "").strip()
+        if not purl:
+            raise
+        try:
+            return http.negotiated_session(probe, proxies={"http": purl, "https": purl}, **kw)
+        except RuntimeError as proxy_err:
+            raise RuntimeError(f"{direct_err} | via proxy: {proxy_err}") from None
 
 
 def _clean(raw: Optional[str]) -> str:
