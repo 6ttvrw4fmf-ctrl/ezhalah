@@ -596,6 +596,19 @@ named `<that timestamp>_<a name>.sql` (or recover it later from
 for the next deploy, the drift sweep, or another session to clean up: the person/session that ran
 `apply_migration` is responsible, immediately.
 
+**Check the SQL's citations BEFORE you apply it, not in CI afterwards.** Write the SQL to a file
+first and run `node --experimental-strip-types scripts/check-migration-before-apply.ts <file.sql>`.
+Because `apply_migration` MINTS the version, any 14-digit timestamp written for *this* migration is a
+guess, and after applying, neither way out is free: correcting the text re-opens content-parity drift
+(condition #4/#5) on a file that is otherwise byte-exact, and keeping it costs a line in
+`scripts/migration-reference-baseline.txt` plus a bump to a ratchet that may only shrink — which is
+why two of its 31 entries exist. **Mint the version you cite, or cite nothing.** This runs the same
+predicate `verify-migration-references-resolve.ts` runs in `npm test`
+(`scripts/lib/migrationCitations.ts`), just before the irreversible step instead of after it: a guard
+after the point of no return is not a guard. Knowing about this class is demonstrably not enough to
+avoid it — on 2026-09-27 one session did it twice four hours apart, the second time after being
+caught by the first and writing the rule down.
+
 **The guard checks all FOUR drift conditions (owner extended it 2026-08-21), in both directions:**
 1. **applied-but-not-committed** — a migration live in prod with no git file (the classic drift).
 2. **committed-but-not-applied** — a git migration file whose version was never applied to prod.
