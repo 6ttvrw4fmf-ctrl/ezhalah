@@ -161,6 +161,20 @@ consumer to it is an owner decision, not a code change.
 Until then the ramp monitor is what keeps this honest: dealapp coverage will not increase, the
 monitor will say so, and nobody has to remember.
 
+**Correction, 2026-09-28 (measured from a home IP): it was never egress — it is dealapp's view
+quota.** An anonymous IP gets ~10 fresh ad renders a minute; past that dealapp renders its
+registration page («صفحة التسجيل», 86,728 bytes) in place of the ad (its API: 429
+`error.tooManyAdsViewed`, then 401 `error.user.blocked`), and CloudFront keeps that page under the
+ad's own URL for days. A home IP at the same burst rate gets the same walls; a CI runner at the
+same pace gets real pages. Every failed sample of the 2026-09-28 12-shard crawl was that page, so
+~75% of the catalogue went unseen and the prune guard tripped nightly. The removed ad is a different
+page — dealapp's generic shell, byte-identical to a made-up id, which a browser bounces to the home
+page (API 403 `error.ad.unauthorized` / 410 `error.ad.notFound`). So: every fetcher now spends one
+rolling-minute budget of origin renders (`liveness.OriginBudget`), reads past a cached wall through
+another spelling of the URL, and the crawl counts the no-listing page as a removal only when the
+same runner rendered a live ad just before and just after it (`run.confirmed_absent`). A lone shell
+is still never a death.
+
 ### 5.2 The proxy was measured, not assumed — and it is not the answer
 
 The obvious repair is the Saudi residential proxy wasalt uses. Owner, 2026-08-30: *"I would not
