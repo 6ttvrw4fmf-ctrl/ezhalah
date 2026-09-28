@@ -412,7 +412,7 @@ def test_verify_gone_treats_a_bare_404_as_unknown_not_gone(monkeypatch):
         status_code = 404
         def json(self): return {"code": "waf_blocked"}
     monkeypatch.setattr(R.cc, "get", lambda *a, **k: _R())
-    verdict, why = R._verify_gone("RKZ1")
+    verdict, why = R._verify_gone("RKZ1", {}, {})
     assert verdict == "unknown", f"a 404 without rest_post_invalid_id is not proof of removal: {why}"
 
 
@@ -421,12 +421,13 @@ def test_verify_gone_reads_a_status_flip_as_gone(monkeypatch):
         status_code = 200
         def json(self): return {"id": 1, "acf": {"unit_status": "sold-out"}}
     monkeypatch.setattr(R.cc, "get", lambda *a, **k: _R())
-    assert R._verify_gone("RKZ1")[0] == "gone"
+    assert R._verify_gone("RKZ1", {}, {})[0] == "gone"
 
 
 def test_verify_gone_says_live_while_the_unit_is_still_available(monkeypatch):
     class _R:
         status_code = 200
-        def json(self): return {"id": 1, "acf": {"unit_status": "Available"}}
+        def json(self): return {"id": 1, "acf": {"unit_status": "Available", "unit_project": 66800}}
     monkeypatch.setattr(R.cc, "get", lambda *a, **k: _R())
-    assert R._verify_gone("RKZ1")[0] == "live", "the capital-A variant must not read as dead"
+    assert R._verify_gone("RKZ1", {66800: _project()}, {66800: _project(66825)})[0] == "live", \
+        "the capital-A variant must not read as dead"
