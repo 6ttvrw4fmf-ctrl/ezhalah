@@ -223,6 +223,25 @@ def is_monthly_rental(body: str, unit: str, price: Optional[int], title: str = "
     return keyword_monthly  # numbers don't line up either way — unchanged fallback
 
 
+# ── A PAGE THAT STATES NO PERIOD AT ALL (night audit 2026-09-28) ─────────────────────────────────
+# is_monthly_rental() only says "monthly" when the page does; everything else fell to "annual" — a
+# DEFAULT, and a wrong one: 348 live rents were stored yearly at ≤10,000 (an office «595 /yr», Jeddah
+# apartments «2,000 /yr») from pages that print a bare «المطلوب: 2000 ريال». Owner rule 2026-09-28 for
+# a source that is silent: judge by the price — the shared normalize.MONTHLY_LOOKING_MAX (≤10,000 is a
+# monthly figure). Only when the page names NO period anywhere; any «شهري/سنوي/بالشهر/بالسنة» wording
+# keeps the existing decision (so the ×144 installment guard in is_monthly_rental still rules).
+_ANY_PERIOD_WORD = re.compile(r"شهري|بالشهر|في\s*الشهر|/\s*شهر|سنوي|بالسنة|في\s*السنة|/\s*سنة")
+
+
+def rent_period_for(body: str, unit: str, price: Optional[int], title: str = "") -> str:
+    if is_monthly_rental(body, unit, price, title):
+        return "monthly"
+    if (price and price <= normalize.MONTHLY_LOOKING_MAX and unit not in ("YEAR",)
+            and not _ANY_PERIOD_WORD.search(body or "")):
+        return "monthly"
+    return "annual"
+
+
 # ── DAILY-PRICED ADS (source-proven 2026-09-05, listing 30260, ops_incident #63) ───────────────
 # aqarcity hosts short-let ads that publish a DAILY rate. Ezhalah cannot represent one:
 # search_listings_ar.rent_period_ar has exactly three states — سنوي, شهري and NULL (measured
@@ -731,7 +750,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
             # (owner decision 2026-08-22): the source settled it, so write the NULL.
             rent_period = db.AUTHORITATIVE_NULL
         else:
-            rent_period = "monthly" if is_monthly_rental(body, unit, price, title_raw) else "annual"
+            rent_period = rent_period_for(body, unit, price, title_raw)
     area = _float(pi.get("مساحة العقار"))
     # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
     price_per_meter = None
