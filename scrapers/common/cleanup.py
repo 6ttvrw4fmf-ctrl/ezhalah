@@ -19,6 +19,7 @@ Usage:
   python -m scrapers.common.cleanup --platform gathern              # honor policy.enabled
   python -m scrapers.common.cleanup --platform gathern --dry-run    # probe + classify, delete nothing
   python -m scrapers.common.cleanup --platform aqar --force         # run even if enabled=false (still all guards)
+  python -m scrapers.common.cleanup --all-enabled                   # the daily fleet run (fleet-cleanup.yml)
 """
 from __future__ import annotations
 
@@ -32,6 +33,7 @@ from urllib.parse import urlsplit
 
 from scrapers.common import http
 from scrapers.common.db import begin_run, end_run, sb
+from scrapers.common.liveness_trust import MIN_CANARIES, canary_environment_ok
 from scrapers.aqar.liveness import DEAD_MARKERS as AQAR_DEAD_MARKERS, looks_closed as _aqar_looks_closed
 
 # ── Per-platform "is this URL genuinely dead?" registry. A platform absent here CANNOT be deleted
@@ -117,7 +119,39 @@ PLATFORMS: dict[str, dict] = {
     # 2026-09-20 to 2026-09-25). Delete only on one of those signals; every other 200 is live →
     # self-heal.
     "aqarcity": {"tables": ["aqarcity_residential_listings", "aqarcity_commercial_listings"], "dead_marker": _aqarcity_expired},
+    # ── 2026-09-28, owner: «every day … it removes and hides then deletes it, for everything» ──────
+    # "controls": True = before any row is re-checked, and again before anything is deleted, a few of
+    # the site's own known-live ads (seen by its crawl in the last 48 h) must come back LIVE through
+    # this same probe, or the run deletes nothing (_controls_fail). A 404-only check cannot tell a
+    # removed ad from a site that answers a block with 404 (gathern, LISTING_LIVENESS.md §5.4); the
+    # controls can.
+    #
+    # aqarmonthly: Aqar's monthly furnished rentals. Its ads ARE sa.aqar.fm pages, so a closed one
+    # soft-closes exactly like aqar's (200 + «مغلق» badge, offers node stripped) — aqar's own check.
+    "aqarmonthly": {"tables": ["aqarmonthly_residential_listings"], "dead_marker": _aqar_dead, "controls": True},
+    # 404-only sites. Each measured from GitHub Actions on 2026-09-28 with lifecycle-spot-check.yml
+    # (status-only, 5/5 known-live controls alive in every run): its hidden ads answered 404, its
+    # live ads 200. Every 200 is live → self-heal; only a real 404/410 is gone.
+    #   jazwtn     hidden 5/5 → 404,   live 5/5 → 200    (run 36482507285)
+    #   mizlaj     hidden 4/4 → 404,   live 9/9 → 200    (run 36482549144)
+    #   nowaisiry  hidden 9/9 → 404,   live 8/10 → 200   (run 36482533964; the 2 were really gone)
+    #   raghdan    hidden 10/10 → 404, live 10/10 → 200  (run 36482496559)
+    # NOT registered, same measurement: their hidden ads answer 200 (soft-close, redirect, or a
+    # "withdrawn" page), so a 404-only check would call a dead ad live and bring it back — mustqr,
+    # aqargate, aqaratikom, souq24, abeea, hajer, ramzalqasim, fursaghyr, eaqartabuk, aldarim,
+    # eastabha, erapulse. sanadak and dealapp serve a 200 shell for a removed ad.
+    "jazwtn":    {"tables": ["jazwtn_residential_listings", "jazwtn_commercial_listings"], "dead_marker": _never, "controls": True},
+    "mizlaj":    {"tables": ["mizlaj_residential_listings", "mizlaj_commercial_listings"], "dead_marker": _never, "controls": True},
+    "nowaisiry": {"tables": ["nowaisiry_residential_listings", "nowaisiry_commercial_listings"], "dead_marker": _never, "controls": True},
+    "raghdan":   {"tables": ["raghdan_residential_listings", "raghdan_commercial_listings"], "dead_marker": _never, "controls": True},
 }
+
+# Sites whose cleanup has its own daily workflow (aqar-/gathern-/wasalt-cleanup.yml). Every OTHER
+# enabled site runs in the one daily fleet run (fleet-cleanup.yml → run_fleet()).
+DEDICATED_WORKFLOW = ("aqar", "gathern", "wasalt")
+
+# Known-live controls: ads the site's own crawl saw this recently, and how many to open.
+CONTROL_HOURS = 48
 
 DEFAULT_POLICY = {
     "min_inactive_days": 30, "min_missing_count": 3, "require_source_recheck": True,
@@ -328,6 +362,30 @@ def verdict(status: int | None, body: str, dead_marker) -> str:
     it.
     """
     return verdict_detail(status, body, dead_marker)[0]
+
+
+def _controls_fail(client, tables, dead_marker) -> str | None:
+    """None when the site's known-live controls came back LIVE through this run's own probe and
+    verdict, else why not. The controls are the ads its crawl saw most recently (CONTROL_HOURS), so a
+    control that reads dead means the source is not answering us truthfully — a block dressed as a
+    404, a challenge page — and every 'dead' in the same run is equally suspect
+    (LISTING_LIVENESS.md §5.4). Fails CLOSED: fewer than MIN_CANARIES controls proves nothing."""
+    since = (datetime.now(timezone.utc) - _hours(CONTROL_HOURS)).isoformat()
+    rows = []
+    for t in tables:
+        rows += (client.table(t).select("id, listing_url, last_seen_at").eq("active", True)
+                 .gte("last_seen_at", since).order("last_seen_at", desc=True)
+                 .limit(MIN_CANARIES).execute().data or [])
+    urls = [u for u in ((r.get("listing_url") or "").strip() for r in
+                        sorted(rows, key=lambda r: r.get("last_seen_at") or "", reverse=True)) if u]
+    urls = urls[:MIN_CANARIES]
+    alive = sum(verdict(*_probe(u), dead_marker) == "live" for u in urls)
+    if canary_environment_ok(alive, len(urls)):
+        return None
+    return (f"known-live controls failed: {alive}/{len(urls)} of this site's ads seen by its crawl in "
+            f"the last {CONTROL_HOURS}h came back live (need {MIN_CANARIES}+ controls, 60% live). "
+            f"The source is not answering this run truthfully, so none of its 'dead' answers can be "
+            f"believed — deleting nothing.")
 
 
 # Alert kinds that mean this platform's scraper/liveness signal cannot currently be trusted for
@@ -605,6 +663,13 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                     cands.extend((t, r) for r in rows)
                 cands = cands[: pol["max_delete_per_run"]]     # hard cap across ALL tables
 
+            # Opening controls, before a single candidate is re-checked (see _controls_fail).
+            if cands and (reg or {}).get("controls"):
+                why = _controls_fail(client, tables, dead_marker)
+                if why:
+                    _abort(why)
+                    cands = None
+
             if cands is not None:
                 stats["work_set"] = len(cands)
                 to_delete: dict[str, list] = {}
@@ -686,6 +751,17 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                             f"{stats['reactivated']} reactivation(s) were KEPT (fail-safe "
                             f"direction). Re-run once the source is healthy; nothing was lost.")
 
+                # Closing controls: the source must still be answering truthfully AFTER the
+                # re-checks, or a block that began mid-run would have written this run's 404s
+                # (liveness_trust: a canary must bracket the run). Reactivations are kept, as above.
+                if to_delete and not stats["aborted"] and (reg or {}).get("controls"):
+                    why = _controls_fail(client, tables, dead_marker)
+                    if why:
+                        frozen = sum(len(v) for v in to_delete.values())
+                        to_delete, log_rows = {}, []
+                        _abort(f"closing {why} {frozen} row(s) judged 'dead' were discarded; "
+                               f"{stats['reactivated']} reactivation(s) kept.")
+
                 if not dry_run:
                     for t, ids in to_reactivate.items():   # self-heal a wrongly-inactive live listing
                         for i in range(0, len(ids), _WRITE_CHUNK):
@@ -754,6 +830,11 @@ def _days(n):
     return timedelta(days=int(n))
 
 
+def _hours(n):
+    from datetime import timedelta
+    return timedelta(hours=int(n))
+
+
 def _age_days(last_seen_iso: str | None, now: datetime) -> int | None:
     if not last_seen_iso:
         return None
@@ -764,9 +845,32 @@ def _age_days(last_seen_iso: str | None, now: datetime) -> int | None:
         return None
 
 
+def run_fleet(*, dry_run: bool = False) -> int:
+    """The daily fleet run: every site whose platform_retention_policy is enabled, except the ones
+    with their own workflow, one after another, each with its own policy, caps and guards exactly as
+    a single-site run. An enabled site with no registered check is still RUN, so it aborts on the
+    record (default-deny) instead of being skipped in silence. One site failing never stops the rest.
+    Returns the number of sites that aborted or died."""
+    rows = (sb().table("platform_retention_policy").select("platform").eq("enabled", True)
+            .execute().data or [])
+    todo = sorted({r["platform"] for r in rows} - set(DEDICATED_WORKFLOW))
+    print(f"fleet cleanup: {len(todo)} enabled site(s): {', '.join(todo) or 'none'}", flush=True)
+    bad = 0
+    for p in todo:
+        try:
+            bad += bool(run(p, dry_run=dry_run)["aborted"])
+        except Exception as e:  # noqa: BLE001 — run() already recorded it; keep going
+            print(f"✗ cleanup {p}: {e}", flush=True)
+            bad += 1
+    return bad
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Config-driven per-platform retention cleanup")
-    ap.add_argument("--platform", required=True)
+    who = ap.add_mutually_exclusive_group(required=True)
+    who.add_argument("--platform")
+    who.add_argument("--all-enabled", action="store_true",
+                     help="Every enabled site without its own cleanup workflow (the daily fleet run).")
     ap.add_argument("--dry-run", action="store_true", help="Probe + classify + report; delete nothing.")
     ap.add_argument("--force", action="store_true", help="Run even if policy.enabled=false (all safety guards still apply).")
     ap.add_argument("--bounded-cap", type=int, default=None, metavar="N",
@@ -775,6 +879,10 @@ def main() -> int:
                           "exceed what an unbounded run would already permit — see run()'s docstring. Never used "
                           "by the scheduled cron path; explicit invocation only.")
     args = ap.parse_args()
+    if args.all_enabled:
+        if args.force or args.bounded_cap is not None:
+            ap.error("--all-enabled honours every site's policy: no --force, no --bounded-cap")
+        return 1 if run_fleet(dry_run=args.dry_run) and not args.dry_run else 0
     stats = run(args.platform, dry_run=args.dry_run, force=args.force, bounded_cap=args.bounded_cap)
     return 1 if stats["aborted"] and not args.dry_run else 0
 
