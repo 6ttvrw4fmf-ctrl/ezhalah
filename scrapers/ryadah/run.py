@@ -56,6 +56,7 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, norm_district_tok, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
@@ -65,7 +66,6 @@ ARCHIVE = BASE + "/property/"
 SOURCE = "ريادة العقارية"
 PREFIX = "RYD"
 SLUG = "ryadah"
-IMPERSONATE = "chrome"
 
 _DEAL = {"للإيجار": "Rent", "للايجار": "Rent", "للبيع": "Buy"}
 # the site's property-type terms that ARE a unit type → the Arabic word the shared map knows
@@ -86,7 +86,7 @@ def fetch(s: cc.Session, url: str) -> Any:
     """The response for 200/400/404 (a past-the-end page is an answer, not a failure); retries anything else."""
     for attempt in range(3):
         try:
-            r = s.get(url, impersonate=IMPERSONATE, timeout=60)
+            r = s.get(url, timeout=60)
             if r.status_code in (200, 400, 404):
                 return r
             raise RuntimeError(f"HTTP {r.status_code} for {url}")
@@ -272,7 +272,11 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 2026-09-28: the WP REST list answered HTTP 403 to the runner's datacenter IP on the pinned
+    # chrome profile (one run 200, the next 403). Probe 3 profiles DIRECT, then through the
+    # residential proxy (`proxy: true` → WASALT_PROXY_URL), and keep the session that is served.
+    s, tried = retry_smarter_session(f"{API}?per_page=1")
+    print(f"{SOURCE}: probe {' '.join(tried)}", flush=True)
     posts, walked_all = walk_posts(s)
     terms = type_terms(s)
     print(f"{SOURCE}: {len(posts)} Arabic property post(s) (REST walk complete={walked_all}); "
