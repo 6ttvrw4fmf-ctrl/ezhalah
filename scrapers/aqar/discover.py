@@ -35,7 +35,9 @@ CATEGORIES = {
     ("rest_house", "rent"): "استراحة-للإيجار",
     ("rest_house", "buy"):  "استراحة-للبيع",
     ("chalet",     "rent"): "شاليه-للإيجار",
-    ("chalet",     "buy"):  "شاليه-للبيع",
+    # No ("chalet", "buy"): aqar serves no «شاليه-للبيع» page. It failed with a non-200 in every city
+    # of every sweep, so no 0-row town could ever prove its emptiness and the sweep stayed red
+    # (2026-09-28; test_aqar_sweep_requests_only_pages_aqar_serves.py).
     ("camp",       "rent"): "مخيم-للإيجار",
     ("land",       "buy"):  "أراضي-للبيع",
     # ── Commercial categories (verified against Aqar's own menu). Written to the
