@@ -53,6 +53,12 @@ MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 # apartments/studios; 104 chalet; 105/107 rest-house/farm stays; 106 caravan/camp. Default Apartment.
 CATEGORY_TYPE = {101: "Apartment", 102: "Apartment", 103: "Apartment",
                  104: "Chalet", 105: "Rest House", 106: "Camp", 107: "Rest House"}
+# 108 is Aqar's own «قاعة للحجز» (event/meeting halls; the site's category name, measured 2026-09-28).
+# Owner rule 2026-09-28: a commercial space we cannot place goes in مرافق خدمية under the source's word
+# («قاعة» = Event Hall), MONTHLY, and PRICE ON REQUEST — a hall is booked by the hour or night (ad
+# 6834468: «السعر للساعه 200 ريال»), so Aqar's 30-day booking calculator is not a monthly rent anyone
+# publishes. The price is stored NULL (authoritatively, so an older calculated figure is cleared).
+HALL_CATEGORY = 108
 
 # ── polite per-host throttle (spaces request STARTS, like common/http) ──────────────────────────
 _last = [0.0]
@@ -383,7 +389,8 @@ def map_listing(g: dict, price: dict) -> dict | None:
     # type (source is truth) and never invent a commercial one here (taxonomy is an owner decision).
     # A MISSING category stays what it always was (type unknown → NULL); only a category the source
     # names and we have no residential mapping for is out of scope.
-    if g.get("category") is not None and g.get("category") not in CATEGORY_TYPE:
+    hall = g.get("category") == HALL_CATEGORY
+    if g.get("category") is not None and g.get("category") not in CATEGORY_TYPE and not hall:
         return None
     place = uri.rsplit("-", 1)[0].replace("-", " ")  # drop trailing -id, dashes → spaces
     city = N.map_city(place)
@@ -396,7 +403,7 @@ def map_listing(g: dict, price: dict) -> dict | None:
         return None
     if monthly <= 0:
         return None
-    price_annual_val = round(monthly * 12)
+    price_annual_val = None if hall else round(monthly * 12)
     area_m2_val = N.to_int(g.get("area"))
 
     imgs = ["https://images.aqar.fm/" + k for k in (g.get("imgs") or []) if k][:30]
@@ -420,11 +427,11 @@ def map_listing(g: dict, price: dict) -> dict | None:
         # An UNKNOWN category id must not default to Apartment (that fabricates a type). None →
         # normalize maps it to the honest «غير معروف» sentinel and the novel-type alarm quarantines
         # the new id for review. (audit item 7, owner rule 2026-07-27.)
-        "property_type":    CATEGORY_TYPE.get(g.get("category")),
+        "property_type":    "Event Hall" if hall else CATEGORY_TYPE.get(g.get("category")),
         "transaction_type": "Rent",
         "rent_period":      "monthly",
         "source":           "Aqar Monthly",
-        "price_annual":     price_annual_val,  # app shows price_annual / 12 = the monthly figure
+        "price_annual":     db.AUTHORITATIVE_NULL if hall else price_annual_val,  # app shows price_annual / 12
         # PRICE = SOURCE evidence (owner invariant 2026-08-04, alert_event 523). Previously every
         # aqarmonthly row was written with NO price_evidence at all — the sibling scrapers
         # (dealapp, wasalt) already record this; aqarmonthly was the one gap.
@@ -435,6 +442,7 @@ def map_listing(g: dict, price: dict) -> dict | None:
             kind="monthly",
             unit="total",
             origin="api",
+            authoritative_absent=hall,
         ),
         "area_m2":          area_m2_val,
         # "beds" is a furnished/short-stay field (this is a daily-rental vertical) — conventionally
