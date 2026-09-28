@@ -78,9 +78,10 @@ def test_one_price_is_stored_verbatim_per_metre_and_arabic_digits_included():
     assert row["area_m2"] is None                                        # a number in words is not parsed
 
 
-def test_a_rent_goes_through_the_period_rule_never_a_hardcoded_annual():
+def test_a_rent_is_judged_by_its_price_when_no_period_is_stated():
+    # owner 2026-09-28: no stated period → above 10,000 is yearly (a 25 m² shop at 12,000 a MONTH is impossible)
     (row, cat), _ = Q.map_listing(URL, _d("محل للايجار", "١٢٠٠٠ ريال", "المساحة ٢٥م", []), RENT, "الدمام")
-    assert row["transaction_type"] == "Rent" and row["price_annual"] == 12000 and row["rent_period"] is None
+    assert row["transaction_type"] == "Rent" and row["price_annual"] == 12000 and row["rent_period"] == "annual"
     assert row["area_m2"] == 25.0 and row["property_type"] == "Shop" and cat == "commercial"
     (row, _), _ = Q.map_listing(URL, _d("غرفة وصالة للايجار", "3300 ريال", "", ["3300 ريال ايجار شهري"]), RENT, "الدمام")
     assert row["rent_period"] == "monthly" and row["price_annual"] == 39600

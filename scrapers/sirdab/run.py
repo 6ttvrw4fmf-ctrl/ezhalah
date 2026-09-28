@@ -14,9 +14,11 @@ Measured: 564 active (528 rent, 36 sale) — warehouse 356 · storefront 157 · 
 · storage_yard 9 · storage 6.
 
 TYPE: warehouse → مستودع, storefront → محل, workshop → ورشة, factory → مصنع. «storage_yard» and
-«storage» (self-storage units) have no honest mapping in the taxonomy (حوش maps to Villa) → skipped,
-never guessed.
-PRICE: price_in_cents / 100, verbatim. Below 1 riyal (0.1 SAR placeholders measured) is no price.
+«storage» fit no box (حوش maps to Villa), so by the owner rule of 2026-09-28 they go in مرافق خدمية under
+the site's own words: «ساحة تخزين» (Storage Yard) and «تخزين ذاتي» (Self Storage).
+PRICE: price_in_cents / 100, verbatim. Below 100 riyals is a placeholder, not a price (measured
+2026-09-28: 0.1, 1 and 1.7 SAR on 1,000-3,200 m² warehouses; the smallest real price is 22,000) —
+unless the ad prices «بالمتر المربع», when that figure is the source's per-m² rate (6 SAR, 1,200 m²).
 PERIOD: the site prints a constant «/سنة» after EVERY rent — a card label, not the ad's own words —
 so the period goes through the shared normalize.rent_period_from_ad (the ad's own text first).
 PDPL: owner_phone, user_id, created_by and building/secondary numbers are never stored.
@@ -45,7 +47,16 @@ PREFIX = "SRD"
 SLUG = "sirdab"
 IMPERSONATE = "chrome"
 
-_TYPE_AR = {"warehouse": "مستودع", "storefront": "محل", "workshop": "ورشة", "factory": "مصنع"}
+_TYPE_AR = {"warehouse": "مستودع", "storefront": "محل", "workshop": "ورشة", "factory": "مصنع",
+            "storage_yard": "ساحة تخزين", "storage": "تخزين ذاتي"}
+_TYPE_OVERRIDES = {"ساحة تخزين": "Storage Yard", "تخزين ذاتي": "Self Storage"}   # مرافق خدمية (owner 2026-09-28)
+_MIN_PRICE = 100
+# DISTRICT: the structured district_name is empty or an English city («riyadh») on 288 of 564 ads
+# (2026-09-28), which kept them out of every district search. The ad's own title usually names it —
+# «شارع التل، حي المروة، جنوب الرياض» — so an EXPLICIT «حي X» in the title is read, longest match
+# first, and only inside the ad's own city catalog (never a free-text guess across cities).
+_TITLE_DISTRICT_RE = re.compile(r"(?:^|[\s،,(\-–])حي\s+([^\s،,()\-–|]+(?:\s+[^\s،,()\-–|]+){0,2})")
+_PER_M2 = re.compile(r"بالمتر|للمتر")
 _DEAL = {"rent": "Rent", "sale": "Buy"}
 # the source writes diagonals WITHOUT an underscore («northeast», measured 2026-09-27: 10 of 63 facades)
 _FACADE_AR = {"north": "شمالية", "south": "جنوبية", "east": "شرقية", "west": "غربية",
@@ -101,6 +112,18 @@ def walk(s: cc.Session) -> tuple[list[dict], Optional[int]]:
     return list(ads.values()), declared
 
 
+def _district_from_title(title: str, city_id: Optional[int]) -> Optional[str]:
+    if not city_id:
+        return None
+    for m in _TITLE_DISTRICT_RE.finditer(title or ""):
+        words = m.group(1).split()
+        for n in range(len(words), 0, -1):
+            hit = find_district_in_text("حي " + " ".join(words[:n]), city_id)
+            if hit:
+                return hit
+    return None
+
+
 def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
     if a.get("status") != "active" or a.get("deleted_at"):
         return None, f"status_{a.get('status')}"
@@ -108,7 +131,7 @@ def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
     if not deal:
         return None, f"deal_unmapped_{a.get('listing_type')}"
     p = a.get("property") or {}
-    ptype = normalize.map_type_exact(_TYPE_AR.get(p.get("property_type") or ""))
+    ptype = normalize.map_type_exact(_TYPE_AR.get(p.get("property_type") or ""), _TYPE_OVERRIDES)
     if not ptype:
         return None, f"type_unmapped_{p.get('property_type')}"
     category = normalize.category_for_type(ptype).lower()
@@ -118,17 +141,26 @@ def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
     title = a.get("title_ar") or a.get("title_en") or ""
     desc = a.get("description_ar") or ""
     row_price: dict[str, Any] = {}
+    placeholder = price is not None and price < _MIN_PRICE
+    if placeholder:
+        if _PER_M2.search(f"{title} {desc}"):
+            row_price["price_per_meter"] = price
+        price = None
     if deal == "Buy":
-        row_price["price_total"] = price
+        row_price["price_total"] = db.AUTHORITATIVE_NULL if placeholder else price
     else:
         row_price["rent_period"], row_price["price_annual"] = normalize.rent_period_from_ad(
             price, f"{title} {desc}", "annual", title)
+        if placeholder:   # the source's placeholder settles it: clear a stored 1-riyal «monthly» rent
+            row_price["price_annual"] = db.AUTHORITATIVE_NULL
+            row_price["rent_period"] = row_price["rent_period"] or db.AUTHORITATIVE_NULL
 
     city = p.get("cities") or {}
     city_ar = city.get("name_ar") or p.get("city_name_ar")
     city_id, region_id = to_catalog(city_ar) if city_ar else (None, None)
     district_raw = (p.get("district_name") or "").strip() or None
-    district_ar = find_district_in_text("حي " + district_raw, city_id) if (city_id and district_raw) else None
+    district_ar = ((find_district_in_text("حي " + district_raw, city_id) if (city_id and district_raw) else None)
+                   or _district_from_title(title, city_id))
     area = p.get("area_in_m2")
     photos = [i["url"] for i in sorted(p.get("images") or [], key=lambda i: not i.get("isPrimary")) if i.get("url")]
     # the page prints «رقم ترخيص الإعلان: 7xxxxxxxxx» (badge «إعلان موثق») — it lives only in the ad's prose
@@ -161,6 +193,7 @@ def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
         if p.get(flag) is True:
             row[col] = True
     stored = row.get("price_total") if deal == "Buy" else row.get("price_annual")
+    stored = None if stored is db.AUTHORITATIVE_NULL else stored
     row["price_evidence"] = normalize.price_evidence(
         field="price_in_cents", raw=cents, stored=stored, kind="total" if deal == "Buy" else "annual",
         unit="total", origin="structured", authoritative_absent=False)

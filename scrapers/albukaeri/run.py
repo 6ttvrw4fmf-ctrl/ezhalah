@@ -24,11 +24,14 @@ PRICE: one page of 31 shows «السعر 850,000 ر.س» (a total); the other 30
 FACADE / STREET: the deed bounds «الـحـدود و الأطـوال» (شمالاً/شرقاً/جنوباً/غرباً). A plot with a street on
 exactly ONE side faces that side, at that street's width; two or more streets (a corner) → NULL, raw kept.
 PDPL: «رقم الصك» (deed number) is never stored. The page's WhatsApp number is never read. «رقم عقد
-الوساطة» (a REGA brokerage-contract number, 62…) is kept in additional_info; no ad licence (7…) is shown.
+الوساطة» (a REGA brokerage-contract number, 62…) is kept in additional_info.
+LICENCE: some pages carry a «بيانات رخصة الإعلان» block (lr-label/lr-value: «رخصة الإعلان 7201032695» and
+«تاريخ النهاية» as a data-fmt-date attribute) — the REGA ad licence and its end date are stored.
 """
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import html as ihtml
 import json
 import re
@@ -132,6 +135,9 @@ def parse_page(pid: str, page: str) -> dict[str, Any]:
         # the listing's own share image (its card photo) — only when the page has no gallery
         "og_image": og.group(1) if og and "/uploads/" in og.group(1) else None,
         "video": video.group(1) if video else None,
+        "licence": _pairs(page, "lr-label", "lr-value"),
+        "licence_end": (re.search(r'lr-label">تاريخ النهاية</span><span class="lr-value" data-fmt-date="\w{3} (\w{3} \d{1,2} \d{4})',
+                                  page) or [None, None])[1],
     }
 
 
@@ -203,6 +209,11 @@ def map_page(d: dict[str, Any], type_ar: Optional[str]) -> tuple[Optional[tuple[
         "photo_urls": list(d["photos"]) or ([d["og_image"]] if d.get("og_image") else []),
         "video_url": d.get("video"),
     }
+    lic = ((d.get("licence") or {}).get("رخصة الإعلان") or "").strip()
+    if re.fullmatch(r"7\d{9}", lic):   # a REGA AD licence only
+        row["license_number"] = lic
+        if d.get("licence_end"):
+            row["license_expiry"] = datetime.strptime(d["licence_end"], "%b %d %Y").date().isoformat()
     if ptype in _DWELLING:   # «الغرف» counts bedrooms only in a dwelling
         row["bedrooms"] = _count(stats.get("الغرف"))
         row["bathrooms"] = _count(stats.get("دورات المياه"))

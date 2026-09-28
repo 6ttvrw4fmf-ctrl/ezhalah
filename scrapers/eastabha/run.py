@@ -582,6 +582,13 @@ def _listing_url(p: dict) -> str:
     return f"{BASE}/properties/{p.get('id')}/"
 
 
+_NOT_SAUDI = {"أبو ظبي", "ابو ظبي", "أبوظبي", "ابوظبي", "دبي", "الشارقة", "عجمان", "رأس الخيمة", "راس الخيمة",
+              "الفجيرة", "أم القيوين", "ام القيوين", "الإمارات", "الامارات", "الإمارات العربية المتحدة",
+              "الكويت", "البحرين", "المنامة", "الدوحة", "قطر", "مسقط", "سلطنة عمان"}
+
+NOT_SAUDI = "not_saudi"   # map_listing's reason when the ad's own city/region is outside Saudi Arabia
+
+
 def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured_src: Optional[str]):
     """Return (row, category, gone) or (None, None, False) if it must be skipped (auction / unmappable)."""
     actions = _names(p, "property_action_category", taxd)
@@ -630,6 +637,12 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     region_ar = next((r for r in region_names if REGION_MAP_AR.get(r)), None) or next(
         (r for r in region_names if r != "المملكة العربية السعودية"), None
     )
+    # Ezhalah is Saudi-only. eastabha's WordPress still serves 12 ads from 2014 in أبو ظبي / دبي (Yas
+    # Island, Shakhbout City, JLT…) — never a Saudi listing. Skipped, and main() RETIRES the stored
+    # copies (_retire_not_saudi): prune_unseen never would, because the URL is live and verify_gone
+    # keeps a live URL forever. Exact names only: «العين» is left out, it is also a Saudi place name.
+    if city_ar.strip() in _NOT_SAUDI or any(r.strip() in _NOT_SAUDI for r in region_names):
+        return None, NOT_SAUDI, False
     # Overrides first (Eastabha's historical labels, exact match), then the shared canonical map —
     # which also brings map_city()'s normalization + substring tolerance to inputs the old private
     # .get() missed (those all returned an honest None before, so this is coverage gain only).
@@ -761,6 +774,21 @@ def _pin_sold_inactive(table: str, ad_numbers: list[str],
     )
 
 
+def _retire_not_saudi(table: str, ad_numbers: list[str]) -> list[str]:
+    """Retire the stored rows of ads whose OWN page names a city outside Saudi Arabia (2026-09-28: 12
+    ads from 2014 in أبو ظبي / دبي were served on no-location searches). The shared evidenced pin is
+    used so every retirement leaves a verdict naming the field that was read; only rows actually
+    stored and active in `table` are pinned, so the ledger never gains a row for an absent ad."""
+    if not ad_numbers:
+        return []
+    got = db._execute(db.sb().table(table).select("ad_number").in_("ad_number", ad_numbers).eq("active", True),
+                      what=table + ".not_saudi")
+    stored = sorted({r["ad_number"] for r in (got.data or [])})
+    return sold_pin.pin_source_confirmed_gone(
+        table, stored, oracle="eastabha.country_gate.property_city",
+        notes={a: "outside Saudi Arabia (the ad's own property_city / region)" for a in stored})
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="East Abha (eastabha.sa) scraper")
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -783,6 +811,7 @@ def main() -> int:
     sold_com: list[str] = []
     gone_ct = 0
     skipped_auction = 0
+    not_saudi: list[str] = []
     seen = 0
     try:
         for p in listings:
@@ -799,7 +828,10 @@ def main() -> int:
                     featured_src = (mr.json() or {}).get("source_url")
             row, cat, gone = map_listing(p, taxd, detail, featured_src)
             if not row:
-                skipped_auction += 1
+                if cat == NOT_SAUDI:
+                    not_saudi.append(f"EA{pid}")
+                else:
+                    skipped_auction += 1
                 continue
             if args.type != "all" and cat != args.type:
                 continue
@@ -821,6 +853,10 @@ def main() -> int:
                            [r["ad_number"] for r in res])
         _pin_sold_inactive("eastabha_commercial_listings", sold_com,
                            [r["ad_number"] for r in com])
+        retired_abroad = sum(len(_retire_not_saudi(t, not_saudi))
+                             for t in ("eastabha_residential_listings", "eastabha_commercial_listings"))
+        if not_saudi:
+            print(f"  {len(not_saudi)} ad(s) outside Saudi Arabia skipped, {retired_abroad} stored row(s) retired")
 
         pruned = 0
         if not small:  # prune unseen only on full runs (db.prune_unseen guards against 0-scrape wipes)

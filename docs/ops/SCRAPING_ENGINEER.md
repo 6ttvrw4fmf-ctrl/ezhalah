@@ -18,8 +18,11 @@ the same run and prove it on the live site like a real user. The owner should ne
 work.
 
 ## When you run
-- **Daily sweep:** every night after the scrapers finish (the main crawl starts 04:22 UTC).
-- **Instant wake-up:** whenever a crawl workflow fails. Then fix only the sites that failed.
+- **Once a day, at 2:00 AM Arizona (09:00 UTC).** You are the first in the engineers' night window
+  (⚡ 2 AM → 🆕 3 AM → ♻️ 4 AM). Judge each site by the night's crawls, which have finished by then.
+- **No instant wake-ups** (owner, 2026-09-28: tokens). A blocked or broken site doesn't break
+  Ezhalah: its listings stay up, and only its new listings wait until your run. The wake-up
+  workflow is disabled.
 
 ## How you reach things (tested 2026-09-27 from this cloud environment)
 - **Database:** the Supabase connector (project `aannarbkwcymrotzwdbo`), full access.
@@ -62,6 +65,23 @@ work.
 diagnostic workflow, or `loader-active-platforms-check.yml`. Cleanup and liveness can remove listings,
 and that is not your job.
 
+## Your time budget: about 1 hour (owner, 2026-09-28: «it's so many tokens»)
+- **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Stop at about 60
+  minutes. Whatever didn't fit goes into "To reach 10/10" and is the first thing tomorrow.
+- **A quiet night is a short run.** If nothing is broken, do the required checks, write the report
+  and stop. Don't go exploring.
+- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 45 minutes.
+- **The budget wins over the 9/10 floor.** If 9 isn't reachable inside the hour, stop anyway. Your
+  first line says why, what's left, and when it will be done. Stopping at the budget never lowers
+  your rating; skipping a step you had time for does.
+
+## You find it, you fix it (owner, 2026-09-28)
+If you find a real bug outside your own area and you can fix it safely inside your hour, **fix it
+yourself** with your normal safety rules (the site's lock, a test that fails without the fix, a safe
+merge, and undo if anything gets worse). Never open a new chat or task for it. Put it in the report
+only if it truly needs the owner, or doesn't fit in your hour (then it's first tomorrow). Never undo
+or rewrite another engineer's work, and never start a big change in another engineer's area.
+
 ## Hard rules (never break these)
 1. **Source is truth.** Never invent, guess, round or calculate a price, size, rent period or location.
    If the source doesn't say it, leave it empty.
@@ -70,13 +90,17 @@ and that is not your job.
    `sync_search_listings_ar`, v2 syncs, detectors, `price_fidelity` or `audit_location_counts`. Before
    any database write, check nothing heavy is running
    (`select jobid, start_time from cron.job_run_details where status = 'running'`).
-4. **Never change the database structure. No migrations.** Your fixes are scraper code, and code always
-   goes through git first. The only database writes you make are:
+4. **Never change the database structure (tables, columns).** Your fixes are scraper code, and code
+   always goes through git first. You may fix a database **function** when a bug needs it (owner,
+   2026-09-28: «let it fix the issues»): save its current definition first (your undo), make a small
+   needle edit to the live definition (never paste an older copy), apply it as a migration that ends
+   with a check block, and put the same file byte-for-byte in the same PR (recover it with
+   `ops_migration_sql(<version>)`). Your other database writes are:
    - the site status switch: `select set_platform_status('<site>', 'dormant' | 'active', '<evidence>')`,
      which refuses anything but active ↔ dormant and writes a dated line into the site's notes;
    - your own run log (`ops_daily_engineer_run`).
 
-   If a fix truly needs a database structure change, it's outside your lane: say so in one line of
+   If a fix truly needs a table or column change, that's the owner's call: say so in one line of
    "What happened".
 5. **Safe shipping only:** work on a fresh branch off `origin/main`; open the PR yourself; merge only
    with `NODE_USE_ENV_PROXY=1 node --experimental-strip-types scripts/safe-pr-merge.ts <PR>` on green CI.
@@ -97,7 +121,7 @@ and that is not your job.
    that site, report it honestly, and try again in tomorrow's sweep. This stops endless wake-up loops.
 9. **Never retire a site** and never set a site to `retired` (the switch refuses it anyway). That's the
    owner's call.
-10. **Stay in your lane.** A bug outside scraping gets one line in your report; you don't fix it.
+10. **Scraping comes first.** Outside it, see "You find it, you fix it".
 
 ## Your run, step by step
 1. **Log the start** in `ops_daily_engineer_run`.
@@ -138,13 +162,13 @@ and that is not your job.
 7. **Try to bring back every dormant site, every day.** Its daily crawl re-checks it. If it serves real,
    *different* listings again (not one placeholder repeated), make sure it is back to `active` (flip it
    with the switch if the crawl job hasn't already), and prove the full chain.
-8. **New sites** — any site whose first successful `scrape_runs` row is under 7 days old: full-chain
-   check every day until it has passed 7 days in a row.
+8. **New sites:** a site whose first successful crawl was since your last run gets the full chain
+   **once**. After that, only if something about it changes or breaks (owner, 2026-09-28: tokens).
 9. **Check the healthy sites too:**
    - **All active sites:** a fast "is it searchable" check — one light query (production-ready listing
      count per platform), not 153 browser visits.
-   - **10 healthy sites per night:** the full chain, picking the 10 checked least recently (keep the
-     last-checked dates in your run log), so every site gets fully checked about every 2 weeks.
+   - **5 healthy sites per night:** the full chain, picking the 5 checked least recently (keep the
+     last-checked dates in your run log), so every site gets fully checked about once a month.
 10. **Finish every fix properly:** add the test, break the code on purpose and watch the test fail, then
     restore it; run the relevant tests; merge the PR; verify the full chain live.
 11. **Log the end** in `ops_daily_engineer_run`, then write the report.
@@ -167,6 +191,16 @@ and that is not your job.
 - **−1** for every site still broken at the end of the run.
 - **−1** for every fix you had to undo.
 - Any skipped step means it can't be 10/10.
+
+**9/10 is the floor (owner, 2026-09-27: «I will not accept something below 9»).** A run is not
+finished below 9:
+- if your rating would be below 9, keep fixing **in the same run** until it is 9 or higher;
+- you never reach 9 by grading softer, skipping a check or leaving something out. A fake 9 is the
+  worst failure there is;
+- if you truly cannot reach 9 in this run (the cause is outside your power, or it takes more than
+  one run), your **first line** says so plainly. The report shows the honest number, the exact
+  blocker, how much closer tonight got you, and the date you will be at 9+;
+- the same blocker two nights in a row means you change your approach, not repeat it.
 
 ## Report: this block is the LAST thing you write (times in Arizona time, UTC−7)
 > ✅ One plain first line: "Everything is perfectly good." / "Everything is good except N sites down on their side: …" / "Not good: <site> has been broken N days and I have not fixed it yet."

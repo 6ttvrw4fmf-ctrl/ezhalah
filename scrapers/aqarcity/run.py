@@ -223,6 +223,25 @@ def is_monthly_rental(body: str, unit: str, price: Optional[int], title: str = "
     return keyword_monthly  # numbers don't line up either way — unchanged fallback
 
 
+# ── A PAGE THAT STATES NO PERIOD AT ALL (night audit 2026-09-28) ─────────────────────────────────
+# is_monthly_rental() only says "monthly" when the page does; everything else fell to "annual" — a
+# DEFAULT, and a wrong one: 348 live rents were stored yearly at ≤10,000 (an office «595 /yr», Jeddah
+# apartments «2,000 /yr») from pages that print a bare «المطلوب: 2000 ريال». Owner rule 2026-09-28 for
+# a source that is silent: judge by the price — the shared normalize.MONTHLY_LOOKING_MAX (≤10,000 is a
+# monthly figure). Only when the page names NO period anywhere; any «شهري/سنوي/بالشهر/بالسنة» wording
+# keeps the existing decision (so the ×144 installment guard in is_monthly_rental still rules).
+_ANY_PERIOD_WORD = re.compile(r"شهري|بالشهر|في\s*الشهر|/\s*شهر|سنوي|بالسنة|في\s*السنة|/\s*سنة")
+
+
+def rent_period_for(body: str, unit: str, price: Optional[int], title: str = "") -> str:
+    if is_monthly_rental(body, unit, price, title):
+        return "monthly"
+    if (price and price <= normalize.MONTHLY_LOOKING_MAX and unit not in ("YEAR",)
+            and not _ANY_PERIOD_WORD.search(body or "")):
+        return "monthly"
+    return "annual"
+
+
 # ── DAILY-PRICED ADS (source-proven 2026-09-05, listing 30260, ops_incident #63) ───────────────
 # aqarcity hosts short-let ads that publish a DAILY rate. Ezhalah cannot represent one:
 # search_listings_ar.rent_period_ar has exactly three states — سنوي, شهري and NULL (measured
@@ -563,6 +582,22 @@ def _ld_blocks(body: str) -> tuple[Optional[dict], Optional[dict]]:
     return listing, breadcrumb
 
 
+# 2026-09 REDESIGN: the «pi-item» table became a card grid — «<span class="text-xs font-medium">LABEL</span>
+# </div><div class="… text-end">VALUE</div>». PI_RE matched nothing, so EVERY field read from this table went
+# silent at once: 1,800 of 1,800 live rows were stored as type «unknown» (shown as «غير معروف»), with no
+# area, age, facade, street width or services. Both layouts are read; the grid's renamed labels are aliased
+# onto the names the rest of this file reads.
+PI_GRID_RE = re.compile(
+    r'<span class="text-xs font-medium">\s*(.*?)\s*</span>\s*</div>\s*<div class="[^"]*text-end[^"]*">\s*(.*?)\s*</div>',
+    re.S)
+_PI_ALIASES = {"نوع العقار": "التصنيف",
+               "تاريخ إصدار الترخيص": "تاريخ إنشاء ترخيص الإعلان",
+               "تاريخ انتهاء رخصة الإعلان": "تاريخ انتهاء ترخيص الإعلان"}
+# PDPL: the grid prints the ad officer's NAME and PHONE — never read into the row, not even transiently.
+_PI_NEVER = ("مسؤول الإعلان", "رقم مسؤول الإعلان")
+_DEED_PREFIX = "الوصف حسب الصك"
+
+
 def _pi_table(body: str) -> dict[str, str]:
     out: dict[str, str] = {}
     for m in PI_RE.finditer(body):
@@ -570,6 +605,19 @@ def _pi_table(body: str) -> dict[str, str]:
         v = _strip_tags(m.group(2))
         if k and v and v != "—":
             out[k] = v
+    for m in PI_GRID_RE.finditer(body):
+        k = _strip_tags(m.group(1))
+        v = _strip_tags(m.group(2))
+        if not k or k in _PI_NEVER:
+            continue
+        if k.startswith(_DEED_PREFIX):
+            # the grid folds the deed text INTO the label cell: «الوصف حسب الصك <deed text> رقم الإعلان» → «#id»
+            deed = re.sub(r"\s*رقم الإعلان\s*$", "", k[len(_DEED_PREFIX):]).strip()
+            if deed:
+                out.setdefault("وصف موقع العقار حسب الصك", deed)
+            continue
+        if v and v != "—":
+            out.setdefault(_PI_ALIASES.get(k, k), v)
     return out
 
 
@@ -589,14 +637,22 @@ def _breadcrumb_parts(bc: Optional[dict]) -> dict[str, str]:
     return parts
 
 
+_ALEF = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا"})
+
+
 def _map_type(*candidates: str) -> Optional[str]:
+    # hamza-insensitive: the grid prints «إستراحة» where the map holds «استراحة» (2026-09 redesign)
+    folded = {k.translate(_ALEF): v for k, v in TYPE_MAP_AR.items()}
     for c in candidates:
         if not c:
             continue
-        c = c.strip()
-        if c in TYPE_MAP_AR:
-            return TYPE_MAP_AR[c]
-        for word, eng in TYPE_MAP_AR.items():
+        exact = normalize.map_type_exact(c.strip())      # the shared canonical map first («أرض تجارية» etc.)
+        if exact:
+            return exact
+        c = c.strip().translate(_ALEF)
+        if c in folded:
+            return folded[c]
+        for word, eng in folded.items():
             if word in c:
                 return eng
     return None
@@ -694,7 +750,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
             # (owner decision 2026-08-22): the source settled it, so write the NULL.
             rent_period = db.AUTHORITATIVE_NULL
         else:
-            rent_period = "monthly" if is_monthly_rental(body, unit, price, title_raw) else "annual"
+            rent_period = rent_period_for(body, unit, price, title_raw)
     area = _float(pi.get("مساحة العقار"))
     # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
     price_per_meter = None
@@ -753,7 +809,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         area = _float(fs.get("value")) if isinstance(fs, dict) else None
 
     # ── REGA ad-license number: JSON-LD adLicenseNumber first, else the description free-text ──
-    rega_no = _int(ap.get("adLicenseNumber"))
+    rega_no = _int(ap.get("adLicenseNumber")) or _int(pi.get("رقم ترخيص الإعلان"))   # grid label (2026-09 redesign)
     if not rega_no:
         m = re.search(r"ترخيص الإعلان[^0-9٠-٩]{0,4}([0-9٠-٩]{9,12})", ld.get("description") or "")
         if m:
