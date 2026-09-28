@@ -277,7 +277,7 @@ def test_an_old_cached_copy_is_not_an_answer(monkeypatch):
 
 def test_a_shell_on_one_cache_key_falls_through_to_a_fresh_render(monkeypatch):
     monkeypatch.setattr(R, "_throttle", lambda: None)
-    slash, en = REQ.format(5) + "/", "https://dealapp.sa/en/ad-details/5"
+    slash, en = REQ.format(5) + "/", "https://dealapp.sa/en/ad-details/5/"
     sess = _Sess({slash: _Resp(200, "<html>shell</html>", slash),
                   en: _Resp(200, SCHEMA.format(5), en)})
     assert R.probe_listing(sess, REQ.format(5)) == (R.ALIVE, 200)
@@ -286,9 +286,8 @@ def test_a_shell_on_one_cache_key_falls_through_to_a_fresh_render(monkeypatch):
 
 def test_a_shell_on_every_key_stays_unknown_never_dead(monkeypatch):
     monkeypatch.setattr(R, "_throttle", lambda: None)
-    slash, en = REQ.format(9) + "/", "https://dealapp.sa/en/ad-details/9"
-    sess = _Sess({slash: _Resp(200, "<html>shell</html>", slash),
-                  en: _Resp(200, "<html>shell</html>", en)})
+    keys = [REQ.format(9) + "/", "https://dealapp.sa/en/ad-details/9/", "https://dealapp.sa/en/ad-details/9"]
+    sess = _Sess({k: _Resp(200, "<html>shell</html>", k) for k in keys})
     assert R.probe_listing(sess, REQ.format(9))[0] == R.UNKNOWN
 
 
@@ -327,3 +326,13 @@ def test_canaries_probe_a_recent_alive_row_and_the_bogus_id(monkeypatch):
     c = R._canaries(_Client(recent), object(), None)
     assert urls[0] == REQ.format(7) + "/" and REQ.format(R.BOGUS_ADID) + "/" in urls
     assert c == {"live": 1, "live_n": 1, "live_ok": True, "bogus_alive": False}
+
+
+def test_the_scheduled_run_is_bounded_when_it_uses_the_proxy():
+    """The schedule may use the shared pool only with a hard request ceiling."""
+    from pathlib import Path
+    import re
+    wf = (Path(__file__).resolve().parents[3] / ".github/workflows/dealapp-liveness.yml").read_text()
+    assert '"${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.proxy }}" = "true"' in wf
+    cap = re.search(r"--max-requests \"\$\{\{ inputs.max_requests \|\| '(\d+)' \}\}\"", wf)
+    assert cap and 0 < int(cap.group(1)) <= 3000

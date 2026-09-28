@@ -172,15 +172,16 @@ def _canaries(client, s, budget: Optional[RequestBudget]) -> dict:
 # (a different cache key, so a fresh origin render) carried that ad's schema. The origin render is
 # itself flaky, and CloudFront freezes whichever outcome it got — which is why retrying the bare URL
 # never recovered (dealapp-fetch-diagnostic retry mode: 0/49 up to 120 s) and why different egress
-# saw different shell rates. So: never read an old cached copy as an answer, and ask two fresh
-# renders under two cache keys before settling for UNKNOWN. A dead ad renders a shell on every key,
+# saw different shell rates. So: never read an old cached copy as an answer, and ask up to three
+# fresh renders under three cache keys before settling for UNKNOWN. A dead ad renders a shell on every key,
 # so it stays UNKNOWN exactly as before — this only recovers answers, it creates no deaths.
 FRESH_MAX_AGE_S = 3600
 
 
 def _variants(listing_url: str) -> list[str]:
     base = listing_url.rstrip("/")
-    return [base + "/", base.replace("/ar/ad-details/", "/en/ad-details/", 1)]
+    en = base.replace("/ar/ad-details/", "/en/ad-details/", 1)
+    return [base + "/", en + "/", en]
 
 
 def probe_listing(s: cc.Session, listing_url: str, budget: Optional[RequestBudget] = None
