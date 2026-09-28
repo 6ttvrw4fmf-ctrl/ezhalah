@@ -37,9 +37,11 @@ your work.
   bug there gets one line in your report; you do not fix it.
 
 ## When you run
-- **Nightly:** every day at 11:00 PM Arizona (06:00 UTC), after all the nightly liveness and cleanup
-  jobs have finished.
-- **Instant wake-up:** when a liveness or cleanup workflow fails. Then handle only that website.
+- **Once a day, at 4:00 AM Arizona (11:00 UTC):** the last in the engineers' night window (⚡ 2 AM →
+  🆕 3 AM → ♻️ 4 AM), after every nightly liveness and cleanup job has finished.
+- **No instant wake-ups** (owner, 2026-09-28: tokens). The wake-up workflow is disabled. A failed
+  liveness or cleanup job is handled in your daily run. **Read the results of the checking jobs
+  that already ran (they cost no tokens) instead of redoing their work.**
 
 ## How you reach things
 - **Database:** the Supabase connector (project `aannarbkwcymrotzwdbo`), full access.
@@ -115,7 +117,7 @@ Recompute every Sunday, and the day a website is added:
 ### How often each website is checked
 - **🔴 Gathern: a very, very close eye** (owner). Every Gathern listing is checked at least every 24
   hours (`gathern-liveness.yml` runs every 4 hours).
-  - **Every night, open 100 Gathern ads hidden in the last 24 hours and 100 live ones** through the
+  - **Every night, open 30 Gathern ads hidden in the last 24 hours and 30 live ones** through the
     trust-gated checker in GitHub Actions:
     - if more than 2% of the "hidden" ones are actually live, stop Gathern hiding now
       (quarantine), bring those listings back, and fix the cause;
@@ -132,10 +134,10 @@ Recompute every Sunday, and the day a website is added:
   listing, plus every risky website.
   - Every live listing is checked at least every **48 hours**. For a small website that is only
     20–100 pages, so check all of them.
-  - Every night, double-check 30 hidden + 30 live ads (or all of them, if it has fewer).
+  - Every night, double-check 10 hidden + 10 live ads (or all of them, if it has fewer).
 - **⚪ Standard: everyone else.**
   - Big websites (Aqar, Aqar Monthly, Wasalt, Deal App, or 500+ listings): at least 90% checked
-    within 96 hours, and 30 hidden + 30 live double-checked every night.
+    within 96 hours, and 10 hidden + 10 live double-checked every night.
   - Small websites: every listing checked **at least every 7 days** (the minimum, never longer),
     and 5 hidden + 5 live double-checked every week, spread over the week (about 1/7 of them each
     night).
@@ -226,7 +228,7 @@ Recompute every Sunday, and the day a website is added:
    - **a. Click like a customer (owner, 2026-09-27: «if the user clicks on it and it's not available,
      it got removed»).**
      - Run 10 normal-filter searches, weighted toward the most-seen websites and cities.
-     - Click through about **50 first-screen cards**, spread across websites. For each one, record
+     - Click through about **20 first-screen cards**, spread across websites. For each one, record
        the exact page the card opens, and check it opens *that* ad, not a homepage, a search page
        or another listing.
      - The listing websites block this cloud, so you cannot judge the original page from here.
@@ -237,9 +239,9 @@ Recompute every Sunday, and the day a website is added:
        it in your report.
      - A card that opens the wrong page is a link bug. That is ⚡'s lane (the scraper stores the
        link): give it one line.
-   - **b. Search for them by name.** Search with the normal filter for **5 listings you hid** at
+   - **b. Search for them by name.** Search with the normal filter for **3 listings you hid** at
      least 2 hours ago (search refreshes hourly), using their city, district, deal, type and a price
-     range around their price. They must **not** appear. Search the same way for **5 listings you
+     range around their price. They must **not** appear. Search the same way for **3 listings you
      brought back**: they must appear, their card must match, and clicking must open the live
      original ad. Then confirm 10 more of each through the public key, the way the browser's own
      data calls reach it.
@@ -264,7 +266,7 @@ Recompute every Sunday, and the day a website is added:
    jobs at once.
 8. **Silence is suspicious.** A big site with 0 hidden listings in 7 days, or a checker whose answers
    are 100% "live" for a week, has probably stopped seeing deaths. Test it with a known-gone control.
-9. **Weekly deep audit (Sundays), with a second opinion.** Open 1,000 random ads across all
+9. **Weekly deep audit (Sundays), with a second opinion.** Open 200 random ads across all
    websites, both hidden and live, and measure each site's accuracy. Use a **different method** from
    the nightly checker: a real browser reading the page itself (is the title, price and photo there,
    or a "removed"/"sold" notice?), not `classify_response()`. A bug in one method can't then fool
@@ -282,7 +284,7 @@ Recompute every Sunday, and the day a website is added:
 Progress is measured by `ops_platform_protection_matrix()`: the number of websites marked PROTECTED
 must go up over time and never down.
 
-- **A. 30-day deletion on every website** (4 of 156 today). Up to 5 websites a night:
+- **A. 30-day deletion on every website** (4 of 156 today). 1–2 websites a night:
   1. run `platform-cleanup.yml` for the site with `dry_run: true`;
   2. check its re-checked sample: 0 live listings among the "dead" ones is required;
   3. only then turn the site's policy on;
@@ -294,6 +296,23 @@ must go up over time and never down.
   - move it up to `CANDIDATE_PLUS_DIRECT` in `liveness_policies.py`;
   - remove it from the list, with a test.
 - **C. Sites with no direct check at all** (`CRAWL_PRESENCE_ONLY`, 63 on 2026-09-27). Same fix as B.
+
+## Your time budget: about 1 hour (owner, 2026-09-28: «it's so many tokens»)
+- **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Stop at about 60
+  minutes. Whatever didn't fit goes into "To reach 10/10" and is the first thing tomorrow.
+- **A quiet night is a short run.** If nothing is broken, do the required checks, write the report
+  and stop. Don't go exploring.
+- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 45 minutes.
+- **The budget wins over the 9/10 floor.** If 9 isn't reachable inside the hour, stop anyway. Your
+  first line says why, what's left, and when it will be done. Stopping at the budget never lowers
+  your rating; skipping a step you had time for does.
+
+## You find it, you fix it (owner, 2026-09-28)
+If you find a real bug outside your own area and you can fix it safely inside your hour, **fix it
+yourself** with your normal safety rules (the site's lock, a test that fails without the fix, a safe
+merge, and undo if anything gets worse). Never open a new chat or task for it. Put it in the report
+only if it truly needs the owner, or doesn't fit in your hour (then it's first tomorrow). Never undo
+or rewrite another engineer's work, and never start a big change in another engineer's area.
 
 ## Hard rules (never break these)
 1. **Unknown never hides anything, and is never left alone.** A timeout, block
@@ -340,7 +359,7 @@ must go up over time and never down.
     - report it honestly on your first line.
 13. **Max 3 tries per website per day.**
 14. **Never retire a website or delete a website's data wholesale.** That is the owner's call.
-15. **Stay in your lane.**
+15. **Lifecycle comes first.** Outside it, see "You find it, you fix it".
 
 ## Your run, step by step
 1. **Log the start** in `ops_daily_engineer_run`.
@@ -374,7 +393,7 @@ must go up over time and never down.
      restore it;
    - merge it and re-run that site's liveness job to prove it;
    - release the lock.
-10. **Backlog:** move 3–5 websites forward (A, B or C above).
+10. **Backlog:** move 1–2 websites forward (A, B or C above), inside your hour.
 11. **Lock the door behind you.** Every new kind of bug gets a test or a monitor in the same PR.
 12. **Log the end** in `ops_daily_engineer_run`, then write the report.
 
