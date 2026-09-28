@@ -9,14 +9,16 @@
 // fairness to users (no logos they cannot reach) AND to platforms (no advertising a platform we
 // cannot deliver).
 //
-// TWO-LAYER HONESTY. The static PLATFORM_META list below is the CATALOG (every platform we have a
-// logo asset for AND that we consider a real scraping target). At runtime, SearchLoader calls
-// `fetchActivePlatformNames()` — an RPC over `search_listings_ar` — and filters PLATFORM_META down
-// to platforms that currently have any active row. If the RPC fails, SearchLoader falls back to
-// the full PLATFORM_META (safe degradation — the user might see one platform they cannot reach
-// during that outage, never fewer). `scripts/verify-loader-platforms-match-active.ts` enforces at
-// CI time that PLATFORM_META, when mapped through SOURCE_TOKENS, equals the production active set —
-// so the two lists cannot silently drift.
+// TWO-LAYER HONESTY, AS AMENDED (owner 2026-09-20 + 2026-09-26). The static PLATFORM_META list below
+// is the CATALOG, and the strip shows ALL of it — a scraper going cold does NOT hide a logo (2026-09-20:
+// "show 59 … even if it's dead, till I manually [remove it]"). The ONE runtime exception is a website
+// that is DOWN ON ITS SIDE (platform_registry.status 'dormant', or 'retired'): its logo leaves the
+// strip and the «Reviewing N platforms» count drops, and both return by themselves when the site is
+// flipped back to 'active' (2026-09-26). The statuses arrive ONCE per app session
+// (loaderActivePlatforms.ts → loader_platform_status_ar()); hiddenLoaderNames() below turns them into
+// logos to hide. If that read fails, nothing is hidden — the full catalog, never a guess.
+// `scripts/verify-loader-platforms-match-active.ts` still checks the catalog against production at CI
+// time, and `scripts/verify-loader-hides-down-sites.ts` executes the hide rule in `npm test`.
 //
 // The logo require() map is deliberately DUPLICATED from ResultCard.tsx rather than shared, so the
 // result-card rendering path is never touched by this feature. If a logo asset is renamed, update it
@@ -97,6 +99,8 @@ export const PLATFORM_META: LoaderPlatform[] = [
   // toor's brand on the list anyway. It is listed LAST and called out here so the exception is
   // visible rather than looking like drift, and so that whoever reads
   // verify-loader-platforms-match-active.ts next finds the reason instead of a mystery.
+  // NOTE (2026-09-27): toor is 'retired' in platform_registry, so HIDDEN_STATUSES hides this logo at
+  // runtime. If the 2026-09-19 decision should still win, that is the line to change.
   { name: 'Toor',         i18nKey: 'Toor',                                    logo: require('../../assets/images/toor.png') },
   // ── onboarded 2026-09-20 ──────────────────────────────────────────────────────────────────────
   // These seven share the NEUTRAL placeholder asset while the owner supplies their real marks.
@@ -473,7 +477,29 @@ export function normalizeSource(raw: string | null | undefined): string | null {
 // RUNTIME truth source lives in a separate file (loaderActivePlatforms.ts) so this file has zero
 // dependency on the Supabase client — the barrier (scripts/verify-loader-platforms-match-active.ts)
 // can import PLATFORM_META and normalizeSource without pulling Metro-only path aliases into a
-// plain-Node test process. See loaderActivePlatforms.ts for fetchActivePlatformNames().
+// plain-Node test process. See loaderActivePlatforms.ts for loadHiddenPlatformNames().
+
+// A website in one of these registry states is DOWN ON ITS SIDE (dormant) or retired: its logo leaves
+// the strip (owner rule 2026-09-26). Same two states loader_strip_platforms_ar() excludes.
+export const HIDDEN_STATUSES: ReadonlySet<string> = new Set(['dormant', 'retired']);
+
+// Registry rows (slug + status, from loader_platform_status_ar()) → the PLATFORM_META names to hide.
+//
+// A slug is mapped with normalizeSource(), the same matcher the rest of the strip uses. A logo hides
+// only when NO slug behind it is up, because slugs share logos: 'deal' is retired while 'dealapp' is
+// active, and both are Deal App; 'aqarmonthly' is Aqar. Hiding per slug would take Deal App's logo
+// off the strip today, and Aqar's the day aqarmonthly went down. A slug that maps to nothing hides
+// nothing.
+export function hiddenLoaderNames(rows: ReadonlyArray<{ platform: string; status: string }>): Set<string> {
+  const down = new Set<string>();
+  const up = new Set<string>();
+  for (const r of rows) {
+    const name = normalizeSource(r.platform);
+    if (name) (HIDDEN_STATUSES.has(r.status) ? down : up).add(name);
+  }
+  for (const name of up) down.delete(name);
+  return down;
+}
 
 // A rotating cursor so each search shows a DIFFERENT mix and, over many searches, every platform
 // eventually appears (instead of replaying the same handful). Seeded from localStorage on web so the
@@ -503,22 +529,21 @@ function rotate<T>(arr: T[], by: number): T[] {
 
 // Choose which platforms the searching strip shows for THIS search.
 //
-// If `activeNames` is provided (from fetchActivePlatformNames), the roster is FILTERED to just
-// platforms that currently have reachable rows in production — a scraper that went cold today
-// stops advertising within one page-load without a deploy. If undefined (RPC not yet resolved, or
-// the request failed), the full PLATFORM_META is used — safe degradation, never fewer than reality.
+// The full PLATFORM_META minus `hiddenNames` (hiddenLoaderNames() — websites down on their side). If
+// `hiddenNames` is null (statuses not loaded yet, or the read failed) nothing is hidden: the full
+// catalog, never a guess.
 //
 // `resultSources` (raw source values from the listings that actually came back, once known) only
 // REORDERS the display — platforms that truly contributed lead the strip — it never removes a
-// platform. `offset` rotates the rest per search so repeat searches don't always show the same
-// visual order.
+// platform, and never brings a hidden one back. `offset` rotates the rest per search so repeat
+// searches don't always show the same visual order.
 export function pickLoaderPlatforms(
   resultSources: string[] | undefined,
   offset: number,
-  activeNames?: Set<string> | null,
+  hiddenNames?: ReadonlySet<string> | null,
 ): LoaderPlatform[] {
-  const catalog = activeNames && activeNames.size
-    ? PLATFORM_META.filter((p) => activeNames.has(p.name))
+  const catalog = hiddenNames && hiddenNames.size
+    ? PLATFORM_META.filter((p) => !hiddenNames.has(p.name))
     : PLATFORM_META;
   const inResults = new Set((resultSources ?? []).map((s) => normalizeSource(s)).filter(Boolean) as string[]);
   const pri = catalog.filter((p) => inResults.has(p.name));
