@@ -87,9 +87,9 @@ These cost your first runs a lot of time. Use them instead of working them out a
   GitHub connector's `get_job_logs` with `tail_lines`.
 
 ## Testing on the live site (what your first runs learned)
-- **Save your browser test in the repo and reuse it.** The first time, commit it as
-  `e2e/engineers/full-chain.mjs` in your PR. Every run after that uses it instead of building a new
-  one, because rebuilding it each night eats your hour.
+- **Save your browser test in the repo and reuse it.** The first time, commit it in your PR in the
+  folder described by `e2e/engineers/README.md` (e.g. as full-chain.mjs). Every run after that uses it
+  instead of building a new one, because rebuilding it each night eats your hour.
 - **Buy/Rent chips start on Buy.** For rent only, tap «إيجار», then tap «شراء» to turn Buy off.
   Commercial listings need the «تجاري» chip, then the right group.
 - **A rental with no stated period never shows in rent searches** (owner rule). Pick test listings
