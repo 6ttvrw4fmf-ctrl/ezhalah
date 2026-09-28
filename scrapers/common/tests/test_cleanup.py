@@ -860,3 +860,61 @@ def test_wasalt_empty_body_self_heal_is_preserved():
     v, why = C.verdict_detail(200, "", dm)
     assert v == "live", "wasalt's empty-body self-heal encoding was broken"
     assert why, "even the encoded case must state itself in the record"
+
+
+# ── handshake-block escape (2026-09-28): aqar 403s chrome124 and serves safari17_0. Before the
+# escape every aqar recheck was inconclusive (runs 02:00 and 11:10 UTC, 2000/2000) and cleanup froze.
+
+class _Resp:
+    def __init__(self, status, text=""): self.status_code = status; self.text = text
+
+
+class _Sess:
+    def __init__(self, answers, log, name): self.answers = answers; self.log = log; self.name = name
+    def get(self, url, **_kw):
+        self.log.append(self.name)
+        a = self.answers.get(self.name)
+        if isinstance(a, Exception):
+            raise a
+        return _Resp(*a)
+
+
+def _routes(monkeypatch, answers):
+    from scrapers.common import http as H
+    log: list[str] = []
+    monkeypatch.setattr(H, "session", lambda: _Sess(answers, log, "chrome124"))
+    monkeypatch.setattr(H, "_route_session", lambda p, _v, fresh=False: _Sess(answers, log, p))
+    C._probe_route.clear()
+    return log
+
+
+AQAR_URL = "https://sa.aqar.fm/ad/123"
+
+
+def test_probe_escapes_handshake_403_and_pins_the_working_profile(monkeypatch):
+    log = _routes(monkeypatch, {"chrome124": (403,), "safari17_0": (200, "<html>live</html>")})
+    assert _REAL_PROBE(AQAR_URL) == (200, "<html>live</html>")
+    assert C._probe_route["sa.aqar.fm"] == "safari17_0"
+    log.clear()
+    assert _REAL_PROBE(AQAR_URL)[0] == 200
+    assert log == ["safari17_0"], "a pinned host must go straight to its working profile"
+
+
+def test_probe_escape_returns_a_real_404_from_the_working_profile(monkeypatch):
+    _routes(monkeypatch, {"chrome124": (403,), "safari17_0": (404,)})
+    assert _REAL_PROBE(AQAR_URL)[0] == 404
+
+
+def test_probe_blocked_on_every_profile_stays_inconclusive(monkeypatch):
+    _routes(monkeypatch, {"chrome124": (403,), "safari17_0": (403,), "firefox133": RuntimeError("x"),
+                          "edge101": (401,)})
+    status, _ = _REAL_PROBE(AQAR_URL)
+    assert status in (None, 403)
+    assert C.verdict(status, "", C._never) == "unknown"
+    assert "sa.aqar.fm" not in C._probe_route
+
+
+def test_probe_does_not_escape_a_non_block_answer(monkeypatch):
+    log = _routes(monkeypatch, {"chrome124": (404,)})
+    assert _REAL_PROBE(AQAR_URL)[0] == 404
+    assert log == ["chrome124"]
