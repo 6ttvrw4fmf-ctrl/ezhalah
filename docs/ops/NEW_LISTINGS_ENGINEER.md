@@ -331,24 +331,7 @@ how many arrived and how well every field matched, then the totals, then a short
 >
 > 🆕 **New in the last 24 hours:** N listings from N websites · N% searchable
 >
-> ━━━━━━━━ **📦 PART 1: TODAY IN TOTAL (all websites together)** ━━━━━━━━
->
-> 📊 **Match rate:**
-> - 📍 **Location:** Region N% · City N% · District N%
-> - 🏷️ **Deal & type:** Buy/Rent N% · Rent period N% · Category N% · Type N%
-> - 💰 **Numbers:** Price N% · Size N% · Rooms N%
-> - 🎛️ **Advanced Filter:** N%
-> - ✅ **Fully matched:** N of N (N%)
->
-> 🏷️ **Deal:** Buy N · Rent yearly N · Rent monthly N · Rent with no stated period N
-> 🏠 **Property types:** شقة N · فيلا N · أرض N · دور N · عمارة N · محل N · … (every type)
-> 🛏️ **Bedrooms:** 1 → N · 2 → N · 3 → N · 4 → N · 5+ → N · not stated N
-> 📐 **Size:** under 100 m² N · 100–200 N · 200–400 N · 400–1,000 N · over 1,000 N · not stated N
-> 📍 **Regions:** <region> N · <region> N · … and top cities: <city> N · <city> N · …
-> 💰 **Prices, as published:** Buy from N to N (typical N) · Yearly rent from N to N (typical N) · Monthly rent from N to N (typical N)
-> 🎛️ **Advanced Filter** (yes / no / unknown): Furnished N/N/N · Elevator N/N/N · Parking N/N/N · Kitchen N/N/N · AC N/N/N · Maid room N/N/N · … (every field) · Bathrooms 1 → N · 2 → N · 3+ → N · Age new N · 1–5 N · 6–10 N · 10+ N
->
-> ━━━━━━━━ **🌐 PART 2: EACH WEBSITE (one block each, most new listings first)** ━━━━━━━━
+> ━━━━━━━━ **🌐 PART 1: EACH WEBSITE (one block each, most new listings first)** ━━━━━━━━
 >
 > **<Website>** · N new · all fields N% ✅ / ⚠️ / ❌
 >
@@ -366,6 +349,60 @@ how many arrived and how well every field matched, then the totals, then a short
 > 📊 **Matched:** Region N% · City N% · District N% · Deal N% · Period N% · Type N% · Price N% · Size N% · Rooms N% · AF N%
 >
 > *(…the same block for every website that sent listings)*
+>
+> ━━━━━━━━ **📦 PART 2: TODAY IN TOTAL (all websites together)** ━━━━━━━━
+> (Each group on its own lines, one item per line, with a blank line between groups, never crammed
+> into one line.)
+>
+> 📊 **Matched**
+> - 📍 Location: N% (Region N% · City N% · District N%)
+> - 🏷️ Deal & type: N% (Buy/Rent N% · Rent period N% · Category N% · Type N%)
+> - 💰 Numbers: N% (Price N% · Size N% · Rooms N%)
+> - 🎛️ Advanced Filter: N%
+> - ✅ Fully matched: N of N (N%)
+>
+> 🏷️ **Deal**
+> - Buy: N
+> - Rent yearly: N
+> - Rent monthly: N
+> - Rent with no stated period: N
+>
+> 🏠 **Property types**
+> - <type>: N
+> - … (every type, most first)
+>
+> 🛏️ **Bedrooms**
+> - 1 room: N
+> - 2 rooms: N
+> - 3 rooms: N
+> - 4 rooms: N
+> - 5+ rooms: N
+> - not stated: N
+>
+> 📐 **Size**
+> - under 100 m²: N
+> - 100–200 m²: N
+> - 200–400 m²: N
+> - 400–1,000 m²: N
+> - over 1,000 m²: N
+> - not stated: N
+>
+> 📍 **Regions**
+> - <region>: N (top cities: <city> N · <city> N · <city> N)
+> - … (every region)
+>
+> 💰 **Prices, as published**
+> - Buy: N to N · typical N
+> - Yearly rent: N to N · typical N
+> - Monthly rent: N to N · typical N
+>
+> 🎛️ **Advanced Filter** (yes / no / unknown)
+> - Furnished: N / N / N
+> - Elevator: N / N / N
+> - Parking: N / N / N
+> - … (every field, one per line)
+> - Bathrooms: 1 → N · 2 → N · 3+ → N · unknown N
+> - Property age: new N · 1–5 yrs N · 6–10 yrs N · 10+ N · unknown N
 >
 > ━━━━━━━━ **📖 PART 3: SUMMARY** ━━━━━━━━
 >
