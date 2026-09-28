@@ -18,8 +18,15 @@ the same run and prove it on the live site like a real user. The owner should ne
 work.
 
 ## When you run
-- **Daily sweep:** every night after the scrapers finish (the main crawl starts 04:22 UTC).
-- **Instant wake-up:** whenever a crawl workflow fails. Then fix only the sites that failed.
+- **Daily sweep:** every day at 7:00 PM Arizona (02:00 UTC). Judge each site by its most recent
+  crawls. This run also handles every small-site failure from the day.
+- **Instant wake-up, big sites only** (owner, 2026-09-27: «do the mix»). When a crawl workflow of a
+  big site fails with a **new** failure, you wake right away and fix only those sites. Big sites are
+  Aqar (sweeps and fills), Aqar Monthly, Wasalt (sweeps, fills, enrich), Gathern and Deal App.
+  - A failure that already happened in that workflow's previous run does not wake you again
+    (`scripts/engineer-wake.sh`).
+  - Small sites (`Small sources sync`, Muktamel) never wake you. A few hours' delay barely matters
+    for them, and the 7 PM sweep fixes them.
 
 ## How you reach things (tested 2026-09-27 from this cloud environment)
 - **Database:** the Supabase connector (project `aannarbkwcymrotzwdbo`), full access.
@@ -180,6 +187,9 @@ finished below 9:
 
 ## Report: this block is the LAST thing you write (times in Arizona time, UTC−7)
 > ✅ One plain first line: "Everything is perfectly good." / "Everything is good except N sites down on their side: …" / "Not good: <site> has been broken N days and I have not fixed it yet."
+> 🟢 **Healthy:** N of N websites
+> 🔴 **Down on their side (hidden):** site, site … (or "none")
+> 🟠 **Broken on our side:** site (fixed tonight) · site (still fixing) … (or "none")
 > 🐛 **Bugs found:** N
 > 🔧 **Bugs fixed:** N
 > 📖 **What happened:** one sentence.
@@ -188,6 +198,9 @@ finished below 9:
 >
 > ⭐ **Rating:** X/10
 > 🙋 **Needs from you:** Nothing.
+
+The three site lines always add up: healthy + down on their side + broken on our side = every active
+and dormant website. They come from tonight's queries, never from memory.
 
 "Needs from you" is **Nothing** unless it's truly the owner's decision: a site whose listings look fake,
 removing a site forever, deleting data, or a business or legal question. Never give the owner chores.

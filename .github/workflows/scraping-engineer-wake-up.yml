@@ -17,8 +17,9 @@ name: Scraping Engineer wake-up
 
 on:
   workflow_run:
+    # BIG SITES ONLY (owner, 2026-09-27: «do the mix»). Small sites (Small sources sync, Muktamel)
+    # never wake the engineer: the 7 PM daily sweep handles them.
     workflows:
-      - Small sources sync
       - Aqar residential sweep
       - Aqar commercial sweep
       - Aqar residential deep fill
@@ -31,8 +32,6 @@ on:
       - Wasalt enrich
       - Gathern sync
       - Deal App sharded crawl
-      - Muktamel sync
-      - Muktamel sharded crawl
     types: [completed]
 
 permissions:
