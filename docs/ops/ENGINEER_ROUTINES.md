@@ -4,8 +4,9 @@
 >
 > | Engineer | Rulebook | Status |
 > |---|---|---|
-> | ⚡ Scraping Engineer | **`docs/ops/SCRAPING_ENGINEER.md`** | live since 2026-09-27 (daily 7:00 PM Arizona) |
-> | ♻️ Lifecycle Engineer | **`docs/ops/LIFECYCLE_ENGINEER.md`** | built 2026-09-27 (daily 11:00 PM Arizona) |
+> | ⚡ Scraping Engineer | **`docs/ops/SCRAPING_ENGINEER.md`** | live, daily 2:00 AM Arizona |
+> | 🆕 New Listings Engineer | **`docs/ops/NEW_LISTINGS_ENGINEER.md`** | live, daily 3:00 AM Arizona |
+> | ♻️ Lifecycle Engineer | **`docs/ops/LIFECYCLE_ENGINEER.md`** | live, daily 4:00 AM Arizona |
 >
 > Everything below is kept as history (and because barriers still read its roster) until this file is
 > rewritten for the new team. The GLOBAL ENGINEERING POLICY (§G) remains good guidance.
