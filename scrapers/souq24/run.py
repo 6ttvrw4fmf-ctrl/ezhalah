@@ -244,8 +244,11 @@ INFO_POSTAL_RE = re.compile(r"الرمز\s*البريدي\s*:\s*([0-9٠-٩]{4,6}
 INFO_PLAN_RE = re.compile(r"رقم\s*المخطط\s*:\s*([^\r\n<|]{1,40})")
 INFO_PARCEL_RE = re.compile(r"رقم\s*القطعة\s*:\s*([^\r\n<|]{1,40})")
 REGA_NO_RE = re.compile(r"رقم\s*رخصة\s*الاعلان\s*:?\s*([0-9٠-٩]{6,})")
-REGA_ISSUE_RE = re.compile(r"تاريخ\s*إصدار\s*الإعلان\s*:?\s*([0-9٠-٩]{1,4}[/\-][0-9٠-٩]{1,2}[/\-][0-9٠-٩]{2,4})")
-REGA_EXPIRY_RE = re.compile(r"تاريخ\s*انتهاء\s*الترخيص\s*:?\s*([0-9٠-٩]{1,4}[/\-][0-9٠-٩]{1,2}[/\-][0-9٠-٩]{2,4})")
+# The panel prints label and value in sibling <span>s (verified 2026-09-28 on /1275: «تاريخ انتهاء الترخيص»
+# </span> <span>07/05/2027); the old `\s*:?\s*` could never cross the tags, so no expiry was ever stored.
+_TAGS = r"(?:\s|:|<[^>]{0,80}>)*"
+REGA_ISSUE_RE = re.compile(r"تاريخ\s*إصدار\s*الإعلان" + _TAGS + r"([0-9٠-٩]{1,4}[/\-][0-9٠-٩]{1,2}[/\-][0-9٠-٩]{2,4})")
+REGA_EXPIRY_RE = re.compile(r"تاريخ\s*انتهاء\s*الترخيص" + _TAGS + r"([0-9٠-٩]{1,4}[/\-][0-9٠-٩]{1,2}[/\-][0-9٠-٩]{2,4})")
 IMG_RE = re.compile(r"https://24\.com\.sa/images/imagesPosts/[^\s\"'<>\\)]+?\.(?:jpe?g|png|webp)", re.I)
 # the deal/services chips referenced "المرافق" section start
 SERVICES_MARK = "المرافق"
@@ -834,6 +837,7 @@ def map_listing(pid: int, body: str) -> tuple[Optional[dict], str]:
         "additional_info": info,
     }
     row.update(_services(body))
+    normalize.gate_ad_end(row, info.get("rega_license_expiry_date"))  # the ad's OWN licence end date: expired → inactive + pinned
     return row, category
 
 

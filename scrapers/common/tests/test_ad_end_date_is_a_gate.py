@@ -15,12 +15,19 @@ from pathlib import Path
 from scrapers.common.normalize import ad_expiry_state
 
 ROOT = Path(__file__).resolve().parents[2]
-_END_LABEL = re.compile(r"(?:إنتهاء|انتهاء)\s*(?:الإعلان|رخصة\s*الإعلان|ترخيص\s*الإعلان|الترخيص)|license_end_date")
-# Frozen 2026-09-28. Each READS an ad-licence end date and does not (yet) refuse an expired ad at map
-# time. abaad and aqarcity use it in their liveness oracles; the rest only capture it. Shrink only.
+# Widened 2026-09-28: tuba kept 39 expired ads live through `advalidatorinfo.endDate`, a reader the
+# Arabic label alone never saw. An API key that feeds the end date counts as reading it.
+_END_LABEL = re.compile(r"(?:إنتهاء|انتهاء)\s*(?:الإعلان|رخصة\s*الإعلان|ترخيص\s*الإعلان|الترخيص)|license_end_date"
+                        r'|"license_expiry"|licence_expiry|\bendDate\b|"End Date"')
+# Frozen 2026-09-28, then cut to what is left after the fleet gate the same day (every platform that had
+# an active row past its own date is gated). Shrink only:
+#   reinvest — names «تاريخ إنتهاء رخصة الإعلان» in prose only; its API does not publish the date.
+#   sadin    — down (502) since 2026-09-26; its field is unverifiable until it serves pages again.
+#   the other 10 became visible when the label was widened; 0 active rows past their date on 09-28,
+#   each joins the gate once its field is verified live as the ad's own end date.
 UNGATED_BASELINE = frozenset({
-    "abaad", "aqaratikom", "aqarcity", "maqrat", "mizlaj", "nafithh", "reinvest", "sadin", "sakani",
-    "souq24", "sukna", "villassa",
+    "reinvest", "sadin",
+    "dallali", "earthapp", "ebriza", "ego", "holoul", "muajarh", "nawafeth", "raghdan", "remaxsa", "vmksa",
 })
 T = datetime.date(2026, 9, 28)
 
@@ -37,7 +44,7 @@ def test_the_gate_reads_only_real_gregorian_end_dates():
 
 def _calls_the_gate(src: str) -> bool:
     """A real CALL, found by AST — a docstring or comment naming the gate is not a code path."""
-    return any(isinstance(n, ast.Call) and getattr(n.func, "attr", getattr(n.func, "id", None)) == "ad_expiry_state"
+    return any(isinstance(n, ast.Call) and getattr(n.func, "attr", getattr(n.func, "id", None)) in ("ad_expiry_state", "gate_ad_end")
                for n in ast.walk(ast.parse(src)))
 
 
@@ -49,4 +56,33 @@ def test_every_scraper_that_reads_an_ad_end_date_gates_on_it():
                              "an expired ad would be published (the Shomou 835/1,028 class)")
     stale = UNGATED_BASELINE - (readers - gated)
     assert not stale, f"{sorted(stale)} no longer ungated readers — remove them from UNGATED_BASELINE (ratchet)"
-    assert {"shomou", "maktab"} <= gated
+    assert {"shomou", "maktab", "tuba", "sukna", "ibaax", "abaad", "sakani", "muhaysini", "aqaratikom",
+            "mizlaj"} <= gated   # every platform that had an active row past its own date on 2026-09-28
+
+
+def test_an_expired_ad_is_upserted_inactive_and_pinned_with_its_date(monkeypatch):
+    """gate_ad_end → the shared upsert: the marker never reaches PostgREST, the expired ad is written
+    active=false and pinned with GONE evidence naming its date, an in-date ad is offered as LIVE."""
+    from scrapers.common import db, normalize, sold_pin
+
+    class _Q:
+        def __init__(self, payload): self.payload = payload
+
+    class _C:
+        def table(self, _name): return self
+
+        def upsert(self, payload, on_conflict=None): return _Q(list(payload))
+
+    sent, pins = [], []
+    monkeypatch.setattr(db, "sb", lambda: _C())
+    monkeypatch.setattr(db, "_execute", lambda q, what=None: sent.extend(q.payload))
+    monkeypatch.setattr(sold_pin, "pin_source_confirmed_gone", lambda t, ads, **kw: pins.append((t, ads, kw)))
+    rows = [normalize.gate_ad_end({"ad_number": "SKN1", "license_expiry": "25/07/2026"}, "25/07/2026", T),
+            normalize.gate_ad_end({"ad_number": "SKN2", "license_expiry": "03/01/2027"}, "03/01/2027", T),
+            normalize.gate_ad_end({"ad_number": "SKN3"}, None, T)]
+    db._wasalt_batch("sukna_residential_listings", rows)
+    assert all(normalize.AD_END_KEY not in r for r in sent)
+    assert {r["ad_number"]: r["active"] for r in sent} == {"SKN1": False, "SKN2": True, "SKN3": True}
+    (table, ads, kw), = pins
+    assert (table, ads, kw["oracle"]) == ("sukna_residential_listings", ["SKN1"], "sukna.sold_pin.ad_end_date")
+    assert "25/07/2026" in kw["notes"]["SKN1"] and kw["seen_ad_numbers"] == ["SKN2"]

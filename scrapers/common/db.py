@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 from supabase import Client, create_client
 
 from scrapers.common.liveness_contract import direct_alive_patch
+from scrapers.common.normalize import AD_END_KEY
 from scrapers.common.pii import is_free_text, redact_capture, redact_pii
 from scrapers.common.placeholder_tokens import PLACEHOLDER_TOKENS, is_placeholder
 
@@ -868,8 +869,11 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
         return
     now = datetime.now(timezone.utc).isoformat()
     seen: dict[str, dict[str, Any]] = {}
+    ad_end: dict[str, tuple] = {}   # normalize.gate_ad_end()'s marker, consumed before PostgREST
     for r in rows:
         r = dict(r)
+        if AD_END_KEY in r:
+            ad_end[r["ad_number"]] = r.pop(AD_END_KEY)
         r["last_seen_at"] = now
         # Seen on the source THIS crawl → reset the consecutive-miss counter (prune_unseen only
         # deactivates after `grace` consecutive misses), and reactivate it: a listing that
@@ -907,6 +911,15 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
         groups[frozenset(r.keys())].append(r)
     for grp in groups.values():
         _execute(sb().table(table).upsert(grp, on_conflict="ad_number"), what=table)
+    if ad_end:
+        # The ad's OWN end date passed → pin it (missing_count=3, out of auto_recover_false_inactive's
+        # reach) with GONE evidence naming the date; a date read as live records a renewal as LIVE.
+        from scrapers.common import sold_pin  # local: sold_pin imports this module
+        expired = {a: f"ad end date {raw} is before today" for a, (st, raw) in ad_end.items()
+                   if st == "expired" and seen.get(a, {}).get("active") is False}
+        sold_pin.pin_source_confirmed_gone(
+            table, sorted(expired), oracle=table.split("_")[0] + ".sold_pin.ad_end_date", notes=expired,
+            seen_ad_numbers=[a for a, (st, _) in ad_end.items() if st == "live" and seen.get(a, {}).get("active") is True])
 
 
 def upsert_wasalt_residential_batch(rows: list[dict[str, Any]]) -> None:

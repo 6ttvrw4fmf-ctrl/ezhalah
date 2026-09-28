@@ -583,6 +583,7 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     # DIRECT evidence: this row was built from a fetch of THIS unit's own record, whose own
     # `data.id` was checked against the id requested (see fetch_units). Costs zero requests.
     db.mark_direct_alive(row, oracle="sukna.api.v1.units.detail.unit_payload")
+    normalize.gate_ad_end(row, row.get("license_expiry"))  # the ad's OWN licence end date: expired → inactive + pinned
     return row, category, ""
 
 
