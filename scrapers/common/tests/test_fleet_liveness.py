@@ -27,8 +27,10 @@ class _Q:
     def select(self, *a, count=None): self.counting = count == "exact"; return self
     def eq(self, col, v): self.f.append(lambda r: r.get(col) == v); return self
     def gte(self, col, v): self.f.append(lambda r: (r.get(col) or "") >= v); return self
+    def in_(self, col, vals): vs = set(vals); self.f.append(lambda r: r.get(col) in vs); return self
     def order(self, col, desc=False, nullsfirst=False): self.orders.append((col, desc)); return self
     def limit(self, n): self.n = n; return self
+    def range(self, a, b): self.off, self.n = a, b - a + 1; return self
     def update(self, p): self.op = ("update", p); return self
     def insert(self, p): self.op = ("insert", p); return self
 
@@ -45,7 +47,8 @@ class _Q:
         for col, desc in reversed(self.orders):
             rows.sort(key=lambda r: (r.get(col) is None, r.get(col) or 0) if not desc
                       else (r.get(col) is not None, r.get(col) or 0), reverse=desc)
-        return _Res([dict(r) for r in rows[: self.n or None]], count=len(rows))
+        off = getattr(self, "off", 0)
+        return _Res([dict(r) for r in rows[off: off + self.n if self.n else None]], count=len(rows))
 
 
 class _Client:
@@ -66,7 +69,7 @@ def site(monkeypatch):
         monkeypatch.setattr(F, "sb", lambda: client)
         monkeypatch.setattr(F, "begin_run", lambda name: 1)
         monkeypatch.setattr(F, "end_run", lambda *a, **k: True)
-        monkeypatch.setitem(F.SITES, "testsite", ((T,), "unused:x"))
+        monkeypatch.setitem(F.SITES, "testsite", "unused:x")
         monkeypatch.setattr(F, "APPLY", frozenset({"testsite"} if apply else ()))
         monkeypatch.setattr(F, "policy_for", lambda s: _Policy())
         monkeypatch.setattr(F, "PACE_S", 0)
@@ -76,7 +79,7 @@ def site(monkeypatch):
             calls["n"] += 1
             a = answers(ad, calls["n"]) if callable(answers) else answers.get(ad, default)
             return (a, f"test says {a}")
-        monkeypatch.setattr(F, "oracle_for", lambda spec: oracle)
+        monkeypatch.setattr(F, "oracle_for", lambda spec, control: oracle)
         return client
     return install
 
@@ -151,20 +154,38 @@ def test_a_site_outside_apply_is_shadow_and_writes_nothing(site):
     assert not [e for e in c.log if e[0] in ("update", "insert")]
 
 
-def test_struck_rows_are_read_first(site, monkeypatch):
-    rows = [_row(i) for i in range(1, 40)] + [_row(40, mc=2)]
+def test_struck_rows_are_read_first_across_both_tables(site):
+    rows = [_row(i) for i in range(1, 40)]
     seen = []
     c = site(rows, lambda ad, n: seen.append(ad) or "live")
-    monkeypatch.setattr(F, "MAX_READS", 3)
+    c.rows["testsite_commercial_listings"] = [_row(40, mc=2)]      # the struck row, in the other table
     F.run_site("testsite", shadow=True)
     assert seen[5] == "A40", "after the 5 opening controls, the struck row is the first one read"
 
-
 def test_every_site_resolves_to_its_scrapers_own_oracle():
-    for site, (tables, spec) in F.SITES.items():
-        fn = F.oracle_for(spec)
-        assert callable(fn) and spec.startswith(f"scrapers.{site}.run:"), site
-        assert tables == (f"{site}_residential_listings", f"{site}_commercial_listings")
+    for site, spec in F.SITES.items():
+        assert spec.startswith(f"scrapers.{site}.run:"), site
+        assert callable(F.oracle_for(spec, None)), site
+        assert callable(F.oracle_for(spec, {"ad_number": "X1", "listing_url": "https://x/1"})), site
+
+
+def test_a_factory_oracle_is_built_from_the_sites_freshest_control(monkeypatch):
+    import types
+    got = {}
+    mod = types.ModuleType("fake_site_run")
+    mod.make = lambda control: got.setdefault("control", control) and (lambda ad: ("live", ""))
+    monkeypatch.setitem(__import__("sys").modules, "fake_site_run", mod)
+    assert callable(F.oracle_for("fake_site_run:make()", {"ad_number": "C1"}))
+    assert got["control"] == {"ad_number": "C1"}
+    assert F.oracle_for("fake_site_run:make", None) is mod.make      # no () → the callable itself
+
+
+def test_a_site_out_of_time_says_how_much_it_covered(site, monkeypatch):
+    rows = [_row(i) for i in range(1, 11)]
+    site(rows, {})
+    monkeypatch.setattr(F, "BUDGET_S", -1)
+    st = F.run_site("testsite", shadow=True)
+    assert st["probed"] == 0 and st["covered"] == 0.0
 
 
 def test_read_maps_anything_but_gone_or_live_to_unknown():
