@@ -561,6 +561,18 @@ POLICIES: dict[str, _P] = {
         "37993/37767/37614 → 200 available (3/3); the HTML route soft-404s with 200 «Property Not "
         "Found». 46/46 available today. Every row built from its own record carries the "
         "direct-alive stamp."),
+    "october": _P(
+        _pol("october", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the same Nuzul engine as m3tmd (scrapers/jawher/run.py::make_verify_gone on "
+        "www.1october.com.sa): the record's own API detail route — a 404 JSON with a «message» is "
+        "GONE; a 200 for THIS id is LIVE only while availability_status == available, otherwise "
+        "GONE; another record and 401/403/429/5xx are UNKNOWN; canary-gated (fails CLOSED), after a "
+        "complete enumeration only. PLUS a sold pin: a unit the API still lists with a status other "
+        "than available (its own record, fetched this run) is pinned inactive the same run.",
+        "Moved off the HTML list 2026-09-28 (it saw 9 of meta.total 18 and never read the status: "
+        "8 of 12 active rows were rented/sold/reserved). Tier stays CRAWL_PRESENCE_ONLY until the "
+        "ops_liveness_registry row is re-tiered by migration; the scraper stamps no "
+        "last_verified_alive_at of its own meanwhile."),
     "senan": _P(
         _pol("senan", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the same engine as jawher (scrapers/jawher/run.py::make_verify_gone on this tenant's host): "
@@ -1320,7 +1332,6 @@ POLICIES: dict[str, _P] = {
             "abralosol", "abwbna", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "amlakalahsa", "aouj", "aqaratikom",
             "arkaan", "awal", "azdad", "bahadhabab", "erapulse",
             "fursaghyr", "jurash",
-            "october",
             "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
             "shmoualshmal", "therc",
         )
