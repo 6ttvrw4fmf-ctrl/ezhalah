@@ -123,3 +123,22 @@ def test_the_deed_number_and_phones_are_never_stored_and_the_similar_rail_is_ign
     assert row["additional_info"]["bounds"]["شرقاً"] == "البحر + قطعة رملية بطول 21.68 م"   # not the similar-ads rail
     (row, _), _ = _map(gallery=())
     assert row["photo_urls"] == ["https://albukaeri.sa/uploads/thumbImage-9.png"]   # its own card photo
+
+
+# ── the «بيانات رخصة الإعلان» block (live /property/6a4f82d6306e73ab4e053c58, 2026-09-28) ─────────────
+_LICENCE = """<section><h2 class="prop-card-title">بيانات رخصة الإعلان</h2><div class="license-rows">
+<div class="license-row"><span class="lr-label">رخصة الإعلان</span><span class="lr-value">7201032695</span></div>
+<div class="license-row"><span class="lr-label">تاريخ الإصدار</span><span class="lr-value" data-fmt-date="Tue Jul 07 2026 00:00:00 GMT+0000 (Coordinated Universal Time)"></span></div>
+<div class="license-row"><span class="lr-label">تاريخ النهاية</span><span class="lr-value" data-fmt-date="Sat Aug 15 2026 00:00:00 GMT+0000 (Coordinated Universal Time)"></span></div>
+</div></section>"""
+
+
+def test_the_ad_licence_block_is_stored_with_its_end_date():
+    page = _page().replace("<h2>عقارات مشابهة</h2>", _LICENCE + "<h2>عقارات مشابهة</h2>")   # as live: before the rail
+    row = R.map_page(R.parse_page("6a4f82d6306e73ab4e053c58", page), "شقة سكنية")[0][0]
+    assert row["license_number"] == "7201032695" and row["license_expiry"] == "2026-08-15"
+
+
+def test_a_page_without_the_block_claims_no_licence():
+    row = R.map_page(R.parse_page("6aa543f3c9a6ea5730d10c42", _page()), "شقة سكنية")[0][0]
+    assert "license_number" not in row and "license_expiry" not in row
