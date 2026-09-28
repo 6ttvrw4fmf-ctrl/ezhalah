@@ -199,16 +199,20 @@ _SUB_MONTHLY_RE = re.compile(
     r"|لليلة|بالليلة|الليلة الواحدة|باليوم|لليوم|/\s*(?:يوم|ليلة)|نصف\s*سنوي|ربع\s*سنوي")
 
 
+_CATALOGUE_ATTEMPTS = 6
+
+
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome")   # impersonate OWNS the User-Agent; never set one
     s.headers.update({"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"})
     return s
 
 
-def _get_json(s: cc.Session, url: str, *, params: Optional[dict] = None) -> tuple[Optional[int], Any]:
-    """(status, parsed json | None) with 3 attempts on transport errors / 5xx / 429."""
+def _get_json(s: cc.Session, url: str, *, params: Optional[dict] = None,
+              attempts: int = 3) -> tuple[Optional[int], Any]:
+    """(status, parsed json | None) with `attempts` tries on transport errors / 5xx / 429."""
     status, data = None, None
-    for attempt in range(3):
+    for attempt in range(attempts):
         try:
             r = s.get(url, params=params, timeout=40)
             status = r.status_code
@@ -218,7 +222,8 @@ def _get_json(s: cc.Session, url: str, *, params: Optional[dict] = None) -> tupl
                 return status, None
         except Exception:  # noqa: BLE001 — retried below
             status = None
-        time.sleep(1.5 * (attempt + 1))
+        if attempt + 1 < attempts:
+            time.sleep(1.5 * (attempt + 1))
     return status, data
 
 
@@ -229,7 +234,10 @@ def fetch_catalogue(s: cc.Session, limit: int = 0) -> tuple[dict[int, dict], int
     items: dict[int, dict] = {}
     total, page, complete = 0, 1, True
     while True:
-        status, payload = _get_json(s, API, params={"page": page})
+        # 6 tries (~22 s of backoff), not 3 (~9 s): the catalogue API throws short bursts of HTTP 500
+        # on a random page (381 on 09-25, 119 on 09-28) and one burst killed the whole ~4 h walk,
+        # while the same page served minutes later. A page still failing after this still raises.
+        status, payload = _get_json(s, API, params={"page": page}, attempts=_CATALOGUE_ATTEMPTS)
         data = (payload or {}).get("data") if isinstance(payload, dict) else None
         if not isinstance(data, dict):
             raise RuntimeError(f"catalogue page {page} answered HTTP {status} with no data")
