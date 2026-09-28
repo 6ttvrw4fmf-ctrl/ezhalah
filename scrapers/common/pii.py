@@ -40,6 +40,25 @@ _PHONE_RE = re.compile(
     r"|واتس\S*\s*\d[\d\s\-]{6,}"              # واتساب/واتس اب followed by digits
 )
 
+# Contact numbers in the SHAPES the patterns above miss (night audit 2026-09-28: ~230 live aqar
+# descriptions still showed a phone). Measured on active rows: Arabic-Indic digits «٠٥٥١٢٣٤٥٦٧»
+# (109), a mobile split by spaces / dashes / dots «055 123 4567», «0 5 5 1 2 …» (86), the
+# international form with a bracketed trunk zero «+966 (0) 58 123 4567» (31), a Riyadh/Jeddah
+# landline «٠١١ …» (3) and «واتس اب : 5XXXXXXXX» (6). One pattern, every shape, either digit set;
+# no digit may touch either end, so REGA/FAL licences («٧٢٠٠…», «١١٠٠…»), CR numbers, prices and
+# areas never match. The SAME pattern text runs in the DB floor (_redact_pii_sql) — a test pins it.
+_D = r"[0-9٠-٩]"
+_SEP = r"[\s.\-]?"
+_PHONE_SHAPES_RE = re.compile(
+    r"واتس\S*(?:\s+اب)?\s*[:\-]?\s*\+?" + _D + r"(?:[\s\-]?" + _D + r"){7,11}"
+    + r"|(?<![0-9٠-٩])(?:"
+    + r"(?:\+|00)?(?:966|٩٦٦)[\s.\-]*(?:\([0٠]\))?[\s.\-]*[0٠]?[5٥](?:" + _SEP + _D + r"){8}"
+    + r"|[0٠]" + _SEP + r"[5٥](?:" + _SEP + _D + r"){8}"
+    + r"|٥[٠-٩]{8}"
+    + r"|[0٠]" + _SEP + r"[1١][1-7١-٧](?:" + _SEP + _D + r"){7}"
+    + r")(?![0-9٠-٩])"
+)
+
 # A PERSON'S NAME behind a label (owner PDPL rule, 2026-09-27). REGA's standard ad block prints
 # «صاحب الترخيص : <licence holder>» and «الموظف المسؤول عن الإعلان: <employee>»; on 2026-09-27
 # dealapp alone showed 4,363 such names on result cards. The label stays, the name becomes
@@ -100,6 +119,7 @@ def redact_pii(text: Any) -> Any:
     out = _WA_RE.sub(_REDACTED, text)
     out = _EMAIL_RE.sub(_REDACTED, out)
     out = _PHONE_LOOSE.sub(_REDACTED, out)
+    out = _PHONE_SHAPES_RE.sub(_REDACTED, out)
     out = _PHONE_RE.sub(_REDACTED, out)
     out = _NAME_LABEL_RE.sub(r"\1" + _REDACTED, out)   # before the collapse: a line break ends a name
     out = re.sub(r"\s+", " ", out).strip()
