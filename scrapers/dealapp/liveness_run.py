@@ -47,7 +47,7 @@ from scrapers.common.liveness_contract import (
 )
 from scrapers.common.liveness_policies import policy_for
 from scrapers.dealapp.liveness import (
-    classify_dealapp, environment_is_trustworthy, sitemap_candidate_rank,
+    OriginBudget, classify_dealapp, environment_is_trustworthy, from_edge, sitemap_candidate_rank,
 )
 
 BASE = "https://dealapp.sa"
@@ -62,6 +62,10 @@ MIN_INTERVAL = 0.35
 # incident (failure 0.1% -> 66.7%) is what it costs.
 RUN_NAME_CI = "dealapp_liveness"
 RUN_NAME_PROXY = "dealapp_liveness_proxy"
+
+
+_ORIGIN = OriginBudget()
+_DEADLINE = time.monotonic() + 50 * 60   # pacing must never outlast the 60-min job
 
 
 class RequestBudget:
@@ -154,9 +158,15 @@ def probe(s: cc.Session, url: str, budget: Optional[RequestBudget] = None
     for attempt in range(3):
         if budget is not None and not budget.spend():
             return None, "", ""      # out of budget => UNKNOWN, which writes nothing
+        if time.monotonic() > _DEADLINE:
+            return None, "", ""      # out of time => UNKNOWN, which writes nothing
         try:
-            _throttle()
+            # dealapp's anonymous view quota (liveness.py): an unpaced sweep walls itself after
+            # ~10 renders and leaves the wall cached under each ad's URL for days.
+            slot = _ORIGIN.acquire()
             r = s.get(url, timeout=45, allow_redirects=True)
+            if from_edge(r):
+                _ORIGIN.refund(slot)
             return r.status_code, (r.text or ""), str(getattr(r, "url", "") or "")
         except Exception:
             time.sleep(1.0 * (attempt + 1))
