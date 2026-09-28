@@ -327,6 +327,9 @@ def main() -> None:
                     help="Consecutive sweeps a listing must be missing before we kill it.")
     ap.add_argument("--table", default="aqar_residential_listings",
                     choices=["aqar_residential_listings", "aqar_commercial_listings",
+                             # Aqar Monthly's ads ARE sa.aqar.fm pages: same site, same checker,
+                             # same markers, same 3 strikes (owner, 2026-09-28).
+                             "aqarmonthly_residential_listings",
                              "wasalt_residential_listings", "wasalt_commercial_listings"],
                     help="Which listings table to sweep. Run once per table to cover both verticals.")
     ap.add_argument("--shards", type=int, default=1,
@@ -430,7 +433,7 @@ def main() -> None:
     # flush is best-effort for the same reason gathern's is — an audit-log write must never fail or
     # roll back a liveness sweep. `applied` is False under --report-only, where the row is
     # untouched, so a verify run can never be read back as a real deactivation.
-    detail_on = table.startswith("aqar_")  # wasalt rows swept by this same script have their own
+    detail_on = table.startswith(("aqar_", "aqarmonthly_"))  # wasalt rows swept by this same script have their own
     detail_buf: list[dict] = []            # ledger (wasalt_liveness_pilot_detail); never cross them
 
     def _flush_detail() -> None:

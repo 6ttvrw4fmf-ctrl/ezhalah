@@ -12,7 +12,12 @@
 name: Aqar liveness
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "all (as scheduled), aqar, or aqarmonthly"
+        required: false
+        default: "all"
 
 concurrency:
   group: aqar-liveness
@@ -21,6 +26,7 @@ concurrency:
 jobs:
   liveness:
     name: Liveness ${{ matrix.table }} #${{ matrix.shard }}
+    if: inputs.only != 'aqarmonthly'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
@@ -55,3 +61,29 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: exec python -m scrapers.aqar.liveness --table ${{ matrix.table }} --shards 16 --shard ${{ matrix.shard }}
+
+  # Aqar Monthly (owner, 2026-09-28: «Aqar Monthly must work like Aqar»). Its ads ARE sa.aqar.fm
+  # pages, so the SAME sweep reads them: same checker, same markers, same 3 strikes. ~3.5k rows is
+  # one shard's worth (an aqar shard is ~5.8k rows and takes 30-40 min).
+  aqarmonthly:
+    name: Liveness aqarmonthly_residential_listings
+    if: inputs.only != 'aqar'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+
+      - name: Run liveness sweep (aqarmonthly_residential_listings)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: exec python -m scrapers.aqar.liveness --table aqarmonthly_residential_listings --shards 1 --shard 0
