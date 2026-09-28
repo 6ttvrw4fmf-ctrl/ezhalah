@@ -133,8 +133,8 @@ outside the roster is decoration. Adjudicate every finding against source before
 
 **⛔ The eleven routines below were DELETED by the owner on 2026-09-27 — do NOT recreate them.** A
 new, smaller team is being built one engineer at a time; see the notice at the top of
-`docs/ops/ENGINEER_ROUTINES.md`. ⚡ Scraping Engineer: `docs/ops/SCRAPING_ENGINEER.md`. ♻️ Lifecycle
-Engineer: `docs/ops/LIFECYCLE_ENGINEER.md`. Routine numbers and routine-to-routine handoffs below are history.
+`docs/ops/ENGINEER_ROUTINES.md`. ⚡ Scraping Engineer: `docs/ops/SCRAPING_ENGINEER.md`. 🆕 New Listings
+Engineer: `docs/ops/NEW_LISTINGS_ENGINEER.md`. ♻️ Lifecycle Engineer: `docs/ops/LIFECYCLE_ENGINEER.md`. Routine numbers and routine-to-routine handoffs below are history.
 
 **GLOBAL ENGINEERING POLICY (owner, 2026-08-29, extended 2026-09-04) — binds ALL ELEVEN routines.
 Canonical text: `docs/ops/ENGINEER_ROUTINES.md` §G; the file wins over any routine prompt.** It said
