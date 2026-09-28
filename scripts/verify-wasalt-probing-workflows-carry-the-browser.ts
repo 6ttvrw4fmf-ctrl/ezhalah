@@ -63,7 +63,10 @@ const PROBE_ROOT = 'scrapers.common.cleanup';
 // `scrapers.common.verify_deletions`, which imports its `_probe`. A FLOOR, not a list — a module
 // that imports that probe tomorrow needs no edit here, and LOWERING it is a deliberate reviewed
 // change, because a shrinking cohort is how this check stops checking.
-const COHORT_FLOOR = 2;
+// Raised to 3 on 2026-09-27: `scrapers.common.lifecycle_spot_check` (the Lifecycle Engineer's
+// read-only double-check) opens ads through cleanup's `_probe`, so it joined the cohort, and its
+// workflow carries the browser like the other two.
+const COHORT_FLOOR = 3;
 
 const ls = (glob: string) =>
   execFileSync('git', ['ls-files', glob], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
