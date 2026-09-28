@@ -69,7 +69,7 @@ def site(monkeypatch):
         monkeypatch.setitem(F.SITES, "testsite", ((T,), "unused:x"))
         monkeypatch.setattr(F, "APPLY", frozenset({"testsite"} if apply else ()))
         monkeypatch.setattr(F, "policy_for", lambda s: _Policy())
-        monkeypatch.setattr(F, "MIN_SLICE", 100)
+        monkeypatch.setattr(F, "PACE_S", 0)
         calls = {"n": 0}
 
         def oracle(ad):
@@ -155,7 +155,7 @@ def test_struck_rows_are_read_first(site, monkeypatch):
     rows = [_row(i) for i in range(1, 40)] + [_row(40, mc=2)]
     seen = []
     c = site(rows, lambda ad, n: seen.append(ad) or "live")
-    monkeypatch.setattr(F, "MIN_SLICE", 3)
+    monkeypatch.setattr(F, "MAX_READS", 3)
     F.run_site("testsite", shadow=True)
     assert seen[5] == "A40", "after the 5 opening controls, the struck row is the first one read"
 
@@ -172,3 +172,11 @@ def test_read_maps_anything_but_gone_or_live_to_unknown():
     assert F.read(lambda a: ("live", "x"), "A")[0] == F.ALIVE
     assert F.read(lambda a: ("unknown", "x"), "A")[0] == F.UNKNOWN
     assert F.read(lambda a: 1 / 0, "A")[0] == F.UNKNOWN
+
+
+def test_every_active_row_is_read_every_run_like_aqar(site):
+    rows = [_row(i) for i in range(1, 60)]
+    seen = []
+    site(rows, lambda ad, n: seen.append(ad) or "live")
+    F.run_site("testsite", shadow=True)
+    assert {f"A{i}" for i in range(1, 60)} <= set(seen[5:]), "aqar's window: every live row, daily"

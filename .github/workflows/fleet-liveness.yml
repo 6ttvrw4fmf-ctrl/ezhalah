@@ -5,7 +5,7 @@
 # per-site cap stops a broken checker from hiding in bulk. A site outside fleet_liveness.APPLY only
 # decides and reports (shadow) until its shadow run has been read.
 #
-# Triggered daily by pg_cron (job gh-fleet-liveness). pg_cron dispatches with NO inputs, so shadow
+# Triggered daily by pg_cron (job gh-fleet-liveness, migration 20260928212952). pg_cron dispatches with NO inputs, so shadow
 # MUST default to "false"; sites outside APPLY stay shadow regardless.
 name: Fleet liveness (small sites)
 

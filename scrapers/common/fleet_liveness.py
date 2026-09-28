@@ -6,9 +6,10 @@ in a row hide one, and a live answer clears the strikes and stamps last_verified
 site's crawl only tells us an ad is still in its index; this job asks each ad's own page.
 
 PER SITE, EVERY RUN (each site on its own run label, fleet_liveness:<site>, LISTING_LIVENESS.md §9):
-  1. Worklist: its active rows, struck ones first, then the longest since we last looked
-     (last_liveness_probe_at, never-looked first). The slice is ceil(active / COVER_DAYS), at least
-     MIN_SLICE, so every live listing is read at least once a week.
+  1. Worklist: EVERY active row, every day — aqar's own window (owner, 2026-09-28: «every website
+     must be as strong as Aqar»: aqar is DIRECT_REVISIT/48h, swept daily, 93.7% in time). Struck
+     rows first, then the longest since we last looked, so a run cut short still reads the rows
+     that matter. One read per PACE_S per site, at most MAX_READS per site per run (the safe rate).
   2. Opening controls: MIN_CANARIES ads its crawl saw most recently must come back 'live' through the
      site's own oracle, or the site is skipped this run (liveness_trust.canary_environment_ok).
   3. Each ad is read by THE SITE'S OWN measured oracle — the same `verify_gone` its scraper hands
@@ -33,6 +34,7 @@ import argparse
 import importlib
 import math
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 from scrapers.common.db import begin_run, end_run, sb
@@ -53,8 +55,8 @@ SITES: dict[str, tuple[tuple[str, ...], str]] = {
 # Sites whose shadow run was read and found right. Everything else only decides.
 APPLY: frozenset[str] = frozenset()
 
-COVER_DAYS = 7          # every active listing read at least once a week (LIFECYCLE_ENGINEER.md: small sites)
-MIN_SLICE = 25          # a small site is cheap: read more of it than the bare 1/7
+PACE_S = 1.0            # one read a second per site: a small WordPress site's safe rate
+MAX_READS = 3000        # × PACE_S + fetch time stays inside the workflow's 120-minute ceiling
 CONTROL_HOURS = 48
 KILL_FLOOR, KILL_FRAC = 3, 0.10
 _VERDICT = {"gone": DEAD, "live": ALIVE}
@@ -119,7 +121,10 @@ def run_site(site: str, *, shadow: bool) -> dict:
         if not ok:
             st["quarantined"] = f"opening {why}: the site is not answering truthfully, nothing read"
         else:
-            size = max(MIN_SLICE, math.ceil(st["active"] / COVER_DAYS))
+            size = min(st["active"], MAX_READS)
+            if st["active"] > MAX_READS:
+                print(f"{site}: {st['active']} active > {MAX_READS} reads/run — cannot reach aqar's "
+                      f"daily window at {PACE_S}s/read", flush=True)
             order = [("missing_count", True), ("last_liveness_probe_at", False)]
             work = []
             for t in tables:
@@ -128,6 +133,7 @@ def run_site(site: str, *, shadow: bool) -> dict:
             work = sorted(work, key=lambda r: (-(r.get("missing_count") or 0), r.get("last_liveness_probe_at") or ""))[:size]
             alive, looked, dead_side = [], [], []
             for r in work:
+                time.sleep(PACE_S)
                 v, why = read(oracle, r["ad_number"])
                 st["probed"] += 1
                 st[v] += 1
