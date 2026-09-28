@@ -42,7 +42,16 @@ const MIGRATION = 'supabase/migrations/20260830022719_migration_content_parity_c
 // barrier's own header calls "an ordinary workflow that will recur". The file now tells a reader the
 // truth; only its comment differs from what ran. NOT a precedent for a NEW migration: mint the
 // version you cite, or cite nothing.
-const MAX_BASELINE_ENTRIES = 76;
+// 76 -> 77 on 2026-09-28, and this one is a REPEAT, which is the only reason it is spelled out at
+// length. 20260928014300's header comment cited `20260927234500`, a version apply_migration never
+// minted — the SAME mistake as 20260927211052 hours earlier, typing a plausible timestamp for "this
+// migration" instead of reading one back. Once applied, the two ratchets are mutually exclusive and
+// correction is the mandated side (verify-migration-references-resolve: "Do NOT baseline it"), so the
+// cost lands here. Divergence is comment-only: code_md5 is identical, so classifyDivergence() reports
+// 'comment'. THE PROCESS FIX, so there is no third: run
+// `node --experimental-strip-types scripts/verify-migration-references-resolve.ts` against the
+// migration TEXT before calling apply_migration — after apply, no option is free.
+const MAX_BASELINE_ENTRIES = 77;
 
 const problems: string[] = [];
 const ok: string[] = [];
