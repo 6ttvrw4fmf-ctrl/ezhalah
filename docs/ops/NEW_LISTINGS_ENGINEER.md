@@ -335,9 +335,20 @@ how many arrived and how well every field matched, then the totals, then a short
 >
 > **<Website>** · N new · all fields N% ✅ / ⚠️ / ❌
 >
-> 📍 **Where**
-> - <region> · N
->   - <city> · N: <district> N · <district> N · <district> N · <district> N · <district> N · +N more districts (N)
+> 📍 **Where** (a tree inside a code block, so the lines stay straight on a phone)
+> ```
+> <region> · N
+> ├── <city> · N
+> │   ├── <district> · N
+> │   ├── <district> · N
+> │   ├── <district> · N
+> │   ├── <district> · N
+> │   ├── <district> · N
+> │   └── +N more districts · N
+> └── <city> · N
+>     ├── <district> · N
+>     └── +N more districts · N
+> ```
 > - ❓ **Unmatched districts:** «exact spelling» (city) ×N → taught and fixed / asking the owner (or "none ✅")
 >
 > 🏷️ **Deal:** Buy N · Rent yearly N · Rent monthly N · No stated period N
@@ -387,9 +398,17 @@ how many arrived and how well every field matched, then the totals, then a short
 > - over 1,000 m²: N
 > - not stated: N
 >
-> 📍 **Regions**
-> - <region>: N (top cities: <city> N · <city> N · <city> N)
-> - … (every region)
+> 📍 **Regions → cities** (a tree inside a code block)
+> ```
+> <region> · N
+> ├── <city> · N
+> ├── <city> · N
+> └── +N more cities · N
+> <region> · N
+> ├── <city> · N
+> └── …
+> ```
+> (every region; its top 3 cities, then "+N more")
 >
 > 💰 **Prices, as published**
 > - Buy: N to N · typical N
