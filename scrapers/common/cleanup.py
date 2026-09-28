@@ -28,6 +28,7 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from scrapers.common import http
 from scrapers.common.db import begin_run, end_run, sb
@@ -229,11 +230,49 @@ def _probe(url: str) -> tuple[int | None, str]:
         purl = os.environ.get("WASALT_PROXY_URL", "").strip()
         if purl:
             proxies = {"http": purl, "https": purl}
+    if proxies is None:
+        pinned = _probe_route.get(urlsplit(url).netloc)
+        if pinned is not None:
+            s = http._route_session(pinned, False)
     try:
         r = s.get(url, timeout=25, allow_redirects=True, proxies=proxies)
-        return r.status_code, (r.text or "")
+        status, body = r.status_code, (r.text or "")
     except Exception:
-        return None, ""
+        status, body = None, ""
+    if proxies is None and (status is None or status in http.BLOCK_STATUSES):
+        return _probe_escape(url, status, body)
+    return status, body
+
+
+# ── A handshake block is not a dead source (2026-09-28, Lifecycle Engineer) ──────────────────────
+# From 2026-09-28 sa.aqar.fm answers curl_cffi's default chrome124 fingerprint with 403 and serves
+# safari17_0 normally (aqar-liveness run 36364499528: "escaped via direct/safari17_0:200 (tried
+# direct/chrome124:HTTP 403 …)"). http.get() learned to escape that the day before (#5055), but this
+# probe calls the session directly because it needs the REAL status — http.get() collapses a 404 to
+# None — so it never escaped: aqar cleanup runs 02:00 and 11:10 UTC both came back 2000/2000
+# inconclusive and froze. Nothing was wrongly deleted (the freeze held); nothing could be deleted
+# either. This walks the same direct fallback profiles http.get() uses (never the metered proxy),
+# returns the first answer that is not itself a block, and pins a profile per host once it has
+# served a 200, so the escape costs a few requests once per run, not per row. A block on every
+# profile stays exactly what it was: an inconclusive answer that deletes nothing.
+_probe_route: dict[str, str] = {}
+
+
+def _probe_escape(url: str, status: int | None, body: str) -> tuple[int | None, str]:
+    host = urlsplit(url).netloc
+    for profile in http.FALLBACK_PROFILES:
+        if profile == _probe_route.get(host, "chrome124"):
+            continue
+        try:
+            r = http._route_session(profile, False, fresh=True).get(url, timeout=25, allow_redirects=True)
+        except Exception:
+            continue
+        if r.status_code in http.BLOCK_STATUSES:
+            continue
+        if r.status_code == 200:
+            _probe_route[host] = profile
+        return r.status_code, (r.text or "")
+    return status, body
 
 
 def verdict_detail(status: int | None, body: str, dead_marker) -> tuple[str, str]:
