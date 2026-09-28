@@ -328,3 +328,17 @@ def test_canaries_probe_a_recent_alive_row_and_the_bogus_id(monkeypatch):
     assert urls[0] == REQ.format(7) + "/" and REQ.format(R.BOGUS_ADID) + "/" in urls
     assert c == {"live": 1, "live_n": 1, "live_ok": True, "bogus_alive": False}
 
+
+
+def test_the_sweep_runs_often_enough_to_cover_the_catalogue_in_days_not_weeks():
+    """One paced run checks ~600 ads (dealapp's per-visitor quota). Once a day that is a ~27-day
+    cycle over ~16.5k ads; the owner wants Aqar's 48 h window, which needs cadence."""
+    import re
+    from pathlib import Path
+    wf = (Path(__file__).resolve().parents[3] / ".github/workflows/dealapp-liveness.yml").read_text()
+    crons = re.findall(r'cron:\s*"([^"]+)"', wf)
+    assert crons, "the sweep must stay scheduled"
+    hour = crons[0].split()[1]
+    runs_per_day = 24 // int(hour.split("/")[1]) if hour.startswith("*/") else len(hour.split(","))
+    assert runs_per_day >= 12
+    assert "cancel-in-progress: false" in wf, "runs must queue, never cut a paced sweep short"
