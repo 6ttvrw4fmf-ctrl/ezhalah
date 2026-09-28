@@ -77,7 +77,8 @@ def wire(monkeypatch):
         def _probe(s, url, budget=None):
             if budget is not None and not budget.spend():
                 return None, "", ""
-            return responses[url]
+            # Scripted per AD, whichever cache-key variant probe_listing() asks for.
+            return responses[url.rstrip("/").replace("/en/", "/ar/")]
         monkeypatch.setattr(R, "probe", _probe)
         monkeypatch.setattr("sys.argv", ["liveness_run", *argv])
         R.main()
@@ -249,6 +250,55 @@ def test_sitemap_present_rows_are_probed_first(wire):
     assert seen == [REQ.format(2)]
 
 
+# ── CloudFront (2026-09-28): a days-old cached shell was being read as the source's answer ──────
+
+class _Resp:
+    def __init__(self, status, text, url, age=None):
+        self.status_code, self.text, self.url = status, text, url
+        self.headers = {} if age is None else {"age": str(age)}
+
+
+class _Sess:
+    def __init__(self, by_url):
+        self.by_url, self.asked = by_url, []
+    def get(self, url, **k):
+        self.asked.append(url)
+        return self.by_url[url]
+
+
+def test_an_old_cached_copy_is_not_an_answer(monkeypatch):
+    monkeypatch.setattr(R, "_throttle", lambda: None)
+    u = REQ.format(5) + "/"
+    stale = _Sess({u: _Resp(200, SCHEMA.format(5), u, age=130553)})
+    assert R.probe(stale, u) == (None, "", ""), "a 36-hour-old CDN copy says nothing about now"
+    fresh = _Sess({u: _Resp(200, SCHEMA.format(5), u, age=40)})
+    assert R.probe(fresh, u)[0] == 200
+
+
+def test_a_shell_on_one_cache_key_falls_through_to_a_fresh_render(monkeypatch):
+    monkeypatch.setattr(R, "_throttle", lambda: None)
+    slash, en = REQ.format(5) + "/", "https://dealapp.sa/en/ad-details/5"
+    sess = _Sess({slash: _Resp(200, "<html>shell</html>", slash),
+                  en: _Resp(200, SCHEMA.format(5), en)})
+    assert R.probe_listing(sess, REQ.format(5)) == (R.ALIVE, 200)
+    assert sess.asked == [slash, en], "the bare URL is the stale cache key — never ask it"
+
+
+def test_a_shell_on_every_key_stays_unknown_never_dead(monkeypatch):
+    monkeypatch.setattr(R, "_throttle", lambda: None)
+    slash, en = REQ.format(9) + "/", "https://dealapp.sa/en/ad-details/9"
+    sess = _Sess({slash: _Resp(200, "<html>shell</html>", slash),
+                  en: _Resp(200, "<html>shell</html>", en)})
+    assert R.probe_listing(sess, REQ.format(9))[0] == R.UNKNOWN
+
+
+def test_a_slash_stripping_redirect_is_not_read_as_moved_off_the_ad(monkeypatch):
+    monkeypatch.setattr(R, "_throttle", lambda: None)
+    slash = REQ.format(5) + "/"
+    sess = _Sess({slash: _Resp(200, SCHEMA.format(5), REQ.format(5))})   # served at the bare URL
+    assert R.probe_listing(sess, REQ.format(5))[0] == R.ALIVE
+
+
 def test_a_bogus_id_reading_alive_blocks_every_write(wire):
     rows = [_row(i, strikes=2) for i in range(1, 41)]
     responses = {REQ.format(i): (200, SCHEMA.format(i), REQ.format(i)) for i in range(1, 41)}
@@ -272,8 +322,8 @@ def test_canaries_probe_a_recent_alive_row_and_the_bogus_id(monkeypatch):
     urls: list[str] = []
     recent = [{"listing_url": REQ.format(7), "last_verified_alive_at": "2026-09-28"}]
     monkeypatch.setattr(R, "probe", lambda s, url, budget=None: (
-        urls.append(url), (200, SCHEMA.format(7), url) if url.endswith("/7") else
+        urls.append(url), (200, SCHEMA.format(7), url) if "/7" in url else
         (200, "<html>shell</html>", url))[1])
     c = R._canaries(_Client(recent), object(), None)
-    assert urls == [REQ.format(7), REQ.format(R.BOGUS_ADID)]
+    assert urls[0] == REQ.format(7) + "/" and REQ.format(R.BOGUS_ADID) + "/" in urls
     assert c == {"live": 1, "live_n": 1, "live_ok": True, "bogus_alive": False}

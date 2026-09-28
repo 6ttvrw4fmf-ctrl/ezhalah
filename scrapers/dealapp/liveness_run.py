@@ -160,22 +160,49 @@ def _canaries(client, s, budget: Optional[RequestBudget]) -> dict:
     rows = (client.table(TABLE).select("listing_url, last_verified_alive_at")
             .eq("active", True).not_.is_("last_verified_alive_at", "null")
             .order("last_verified_alive_at", desc=True).limit(3).execute().data or [])
-    live = 0
-    for r in rows:
-        url = r["listing_url"]
-        st, body, final = probe(s, url, budget)
-        live += classify_dealapp(st, body=body, adid=_adid(url), final_url=final,
-                                 requested_url=url) == ALIVE
-    bogus = f"{BASE}/ar/ad-details/{BOGUS_ADID}"
-    st, body, final = probe(s, bogus, budget)
-    bogus_alive = classify_dealapp(st, body=body, adid=BOGUS_ADID, final_url=final,
-                                   requested_url=bogus) == ALIVE
+    live = sum(probe_listing(s, r["listing_url"], budget)[0] == ALIVE for r in rows)
+    bogus_alive = probe_listing(s, f"{BASE}/ar/ad-details/{BOGUS_ADID}", budget)[0] == ALIVE
     return {"live": live, "live_n": len(rows), "live_ok": live > 0, "bogus_alive": bogus_alive}
+
+
+# ── A CDN copy is not the source's answer (2026-09-28) ─────────────────────────────────────────
+# dealapp.sa sits behind CloudFront, which caches the rendered ad page for DAYS and keys it on the
+# path only (a query string is ignored). Measured from one POP: the bare /ar/ad-details/{id} of a
+# live ad came back as a listing-less shell with `Age: 130553` (36 h), while /ar/ad-details/{id}/
+# (a different cache key, so a fresh origin render) carried that ad's schema. The origin render is
+# itself flaky, and CloudFront freezes whichever outcome it got — which is why retrying the bare URL
+# never recovered (dealapp-fetch-diagnostic retry mode: 0/49 up to 120 s) and why different egress
+# saw different shell rates. So: never read an old cached copy as an answer, and ask two fresh
+# renders under two cache keys before settling for UNKNOWN. A dead ad renders a shell on every key,
+# so it stays UNKNOWN exactly as before — this only recovers answers, it creates no deaths.
+FRESH_MAX_AGE_S = 3600
+
+
+def _variants(listing_url: str) -> list[str]:
+    base = listing_url.rstrip("/")
+    return [base + "/", base.replace("/ar/ad-details/", "/en/ad-details/", 1)]
+
+
+def probe_listing(s: cc.Session, listing_url: str, budget: Optional[RequestBudget] = None
+                  ) -> tuple[str, Optional[int]]:
+    """(verdict, http_status) for one ad: the first variant that is not UNKNOWN, else UNKNOWN."""
+    adid = _adid(listing_url)
+    status: Optional[int] = None
+    for url in _variants(listing_url):
+        status, body, final = probe(s, url, budget)
+        # requested_url without the trailing slash: a slash-stripping redirect must not read as
+        # "moved off the ad path" (DEAD) — the id path is still in the final URL.
+        v = classify_dealapp(status, body=body, adid=adid, final_url=final,
+                             requested_url=url.rstrip("/"))
+        if v != UNKNOWN:
+            return v, status
+    return UNKNOWN, status
 
 
 def probe(s: cc.Session, url: str, budget: Optional[RequestBudget] = None
           ) -> tuple[Optional[int], str, str]:
     """(status, body, final_url). An exception is (None, '', '') → UNKNOWN, never a death.
+    A CloudFront copy older than FRESH_MAX_AGE_S is also (None, '', ''): not a current answer.
 
     A retry costs the pool another request, so retries are charged to the budget too.
     """
@@ -185,6 +212,12 @@ def probe(s: cc.Session, url: str, budget: Optional[RequestBudget] = None
         try:
             _throttle()
             r = s.get(url, timeout=45, allow_redirects=True)
+            try:
+                age = int((r.headers or {}).get("age") or 0)
+            except (TypeError, ValueError):
+                age = 0
+            if age > FRESH_MAX_AGE_S:
+                return None, "", ""
             return r.status_code, (r.text or ""), str(getattr(r, "url", "") or "")
         except Exception:
             time.sleep(1.0 * (attempt + 1))
@@ -248,9 +281,7 @@ def main() -> int:
             adid = _adid(row["listing_url"])
             if budget.exhausted:
                 break        # stop cleanly on the boundary; a partial sweep is a normal outcome
-            status, body, final_url = probe(s, row["listing_url"], budget)
-            verdict = classify_dealapp(status, body=body, adid=adid,
-                                       final_url=final_url, requested_url=row["listing_url"])
+            verdict, status = probe_listing(s, row["listing_url"], budget)
             stats["scanned"] += 1
             stats[{ALIVE: "alive", DEAD: "dead", UNKNOWN: "unknown"}[verdict]] += 1
 
