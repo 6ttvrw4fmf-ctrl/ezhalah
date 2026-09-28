@@ -170,6 +170,7 @@ and that is not your job.
 
 ## Report: this block is the LAST thing you write (times in Arizona time, UTC−7)
 > ✅ One plain first line: "Everything is perfectly good." / "Everything is good except N sites down on their side: …" / "Not good: <site> has been broken N days and I have not fixed it yet."
+> 🌐 **Websites:** X of Y working · Z down (names) · W broken on our side (names)
 > 🐛 **Bugs found:** N
 > 🔧 **Bugs fixed:** N
 > 📖 **What happened:** one sentence.
@@ -178,6 +179,16 @@ and that is not your job.
 >
 > ⭐ **Rating:** X/10
 > 🙋 **Needs from you:** Nothing.
+
+**The 🌐 Websites line is required in every report (owner, 2026-09-28).** Count it fresh from
+`platform_registry` at the end of the run, never copy it from an older report:
+- **Y (total)** = every site with status `active` or `dormant`.
+- **Z down** = the `dormant` ones: the site itself is down, so its listings are hidden.
+- **W broken on our side** = `active` sites that are still broken (step 4's tests) when the run ends.
+- **X working** = Y − Z − W.
+
+Always write all three parts, even when a number is 0 (then write "none" instead of names). Example:
+`🌐 **Websites:** 156 of 159 working · 3 down (aqaralsaudia, awal, sadin) · 0 broken on our side (none)`
 
 "Needs from you" is **Nothing** unless it's truly the owner's decision: a site whose listings look fake,
 removing a site forever, deleting data, or a business or legal question. Never give the owner chores.
