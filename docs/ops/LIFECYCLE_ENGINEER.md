@@ -219,9 +219,19 @@ Recompute every Sunday, and the day a website is added:
 4. **Only the ad's own page can undo a hide.** A crawl or list page that still shows the ad does not
    bring it back; only its own page answering "live" does. This stops sold listings coming back by
    mistake, and stops ⚡ and ♻️ undoing each other.
-5. **Prove it reached customers.** Every night, pick 10 listings you hid last night and confirm they
-   are gone from live search, through the public key the way a customer's browser reaches it. Pick
-   10 you brought back and confirm they can be found.
+5. **Prove it on the live site, like a real customer** (owner's supreme rule: live means tested like
+   a real user). Every night, in a real browser with a phone-size screen, on
+   https://ezhalah-app.vercel.app:
+   - search with the normal filter for **5 listings you hid** at least 2 hours ago (search refreshes
+     hourly), using their city, district, deal, type and a price range around their price. They
+     must **not** appear;
+   - search the same way for **5 listings you brought back**. They must appear, their card must
+     match, and clicking must open the live original ad;
+   - then confirm 10 more of each through the public key, the way the browser's own data calls reach
+     it.
+
+   The browser launch that works in the cloud is in `docs/ops/SCRAPING_ENGINEER.md` ("How you reach
+   things"). A hidden listing still showing, or a returned one missing, is tonight's first fix.
 6. **Every deletion keeps a copy for 30 days, and the log is never taken as proof.** Deleted rows
    are copied into `purged_listings_archive` (trigger `trg_archive_hard_delete`) so a wrong deletion
    can be restored. A `cleanup_deletion_log` row is written **before** the delete, so it records an
@@ -330,8 +340,8 @@ must go up over time and never down.
    - work the retry list: every UNKNOWN from the last 24 hours gets another, different try;
    - any website whose coverage went down since yesterday is tonight's first fix.
 5. **Extra protections:** controls in every run, evidence on every hide, fast-confirm follow-ups for
-   yesterday's first "gone" readings, the customer check (10 hidden gone from search, 10 brought
-   back findable), and every intended deletion checked against reality. On Sundays, the search replay and
+   yesterday's first "gone" readings, the real-customer check in the browser (5 hidden not
+   findable, 5 brought back findable and clickable, plus 10 + 10 through the public key), and every intended deletion checked against reality. On Sundays, the search replay and
    the 1,000-ad second-opinion audit.
 6. **🔴 Gathern checks** (above).
 7. **🟠 High-priority websites**, whatever their size (above).
