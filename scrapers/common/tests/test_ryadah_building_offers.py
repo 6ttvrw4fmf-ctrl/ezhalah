@@ -52,19 +52,20 @@ def test_the_page_head_is_read_not_the_similar_property_cards():
 def test_on_call_is_an_authoritative_null_and_the_building_size_is_never_the_area():
     (row, cat), why = _map()
     assert why == "" and cat == "residential" and row["property_type"] == "Apartment"
-    assert row["transaction_type"] == "Rent" and row["price_annual"] is None and row["rent_period"] is None
+    assert row["transaction_type"] == "Rent" and row["price_annual"] is None
+    assert row["rent_period"] == "annual"          # owner 2026-09-28: price on request, shown in yearly rent
     assert row["price_evidence"]["authoritative_absent"] is True and row["price_evidence"]["found"] is False
     assert row["area_m2"] is None and row["additional_info"]["building_size_text"] == "5591 متر مربع"
     assert row["city_ar"] == "الخبر" and row["district_ar"] == "حي قرطبة" and row["neighborhood"] == "قرطبة"
     assert row["parking"] is True and row["photo_urls"] == ["https://ryadah.com.sa/wp-content/uploads/Retan-1.jpg"]
 
 
-def test_a_published_rent_goes_through_the_period_rule_never_a_hardcoded_annual():
+def test_a_published_rent_goes_through_the_period_rule_and_is_yearly_unless_stated():
     page = PAGE.replace("عند الاتصال", "5,000 ريال")
     (row, _), _ = _map(page=page, REAL_HOMES_property_price="5000", REAL_HOMES_property_price_postfix="شهري")
     assert row["rent_period"] == "monthly" and row["price_annual"] == 60000
     (row, _), _ = _map(page=page, REAL_HOMES_property_price="90000")
-    assert row["price_annual"] == 90000 and row["rent_period"] is None      # no period stated → unknown
+    assert row["price_annual"] == 90000 and row["rent_period"] == "annual"   # no period stated → yearly (owner)
     (row, _), _ = _map(status="للبيع", terms=("فيلا",), page=page,
                        REAL_HOMES_property_price="3500", REAL_HOMES_property_price_postfix="ريال / متر مربع")
     assert row["price_per_meter"] == 3500 and row["price_total"] is None
