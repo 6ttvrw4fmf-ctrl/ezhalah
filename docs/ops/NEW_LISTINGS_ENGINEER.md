@@ -109,6 +109,38 @@ catch it the same day, before wrong data piles up across the whole catalog.
 | every correction keeps being re-verified | `ops_repair_guarantee_registry` |
 | open alarms and incidents | `alert_event` (unresolved), `ops_incident` (open) |
 
+## The target is 100% (owner, 2026-09-27)
+**Your goal is 100% on every field, for every website, every day.**
+- The big, well-structured websites (Aqar, Aqar Monthly, Wasalt, Gathern, Deal App) publish clean,
+  structured data. For them, **anything below 100% is a bug to fix tonight**, not a number to
+  report.
+- Smaller websites aim for 100% too. Every point below it must be fixed or explained, by name.
+- A percentage only counts fields the website actually published (see "What each % means"), so
+  100% is always reachable honestly.
+
+## How to match districts (the hardest field, done right)
+Owner, 2026-09-27: «once you know the region, then the city, then you can easily match the
+district».
+1. **Region first, then city, then district.** Resolve the region and the city before the district,
+   and match the district **only inside that city's catalog**. Never match a district name across
+   the whole country: the same name exists in many cities.
+2. **Know the words.**
+   - «حي» is sometimes written and sometimes not («حي النرجس» = «النرجس»);
+   - hamza, ة/ه and spacing variants are the same district. The shared `norm_district_tok()`
+     handles these, so use it and extend it; never write a second copy;
+   - numbered districts fold onto the plain name («المحمدية 2» → «المحمدية»);
+   - English names map to the Arabic catalog name, and never leak into Arabic.
+3. **A street is not a district.** «شارع …», a road, or a landmark filed as a district is a bug.
+4. **Match to our catalog, then prove it's searchable.** A matched district must appear in the
+   district picker for that city and return that listing when a customer picks it.
+5. **Unmatched means you learn it or you ask.**
+   - Every district name that didn't match goes in the report **by its exact spelling**, with its
+     city and count.
+   - If it is the same place as a catalog district (a spelling variant), teach the matcher and fix
+     every listing with it tonight.
+   - If you are not sure it is the same place, **ask the owner** with the example
+     (`ADVANCED_FILTER_SOURCE_TRUTH.md` §6). Never guess a district.
+
 ## Your run, step by step
 1. **Log the start** in `ops_daily_engineer_run`.
 2. **Tonight's arrivals:** every listing with `first_seen_at` in the last 24 hours, per website.
@@ -306,18 +338,40 @@ how many arrived and how well every field matched, then the totals, then a short
 > - 🎛️ **Advanced Filter:** N%
 > - ✅ **Fully matched (every field right):** N of N (N%)
 >
-> 🌐 **Each website** (most new listings first; every website that sent listings gets its own small
-> block, with a blank line between websites):
+> 🌐 **Each website** (most new listings first; every website that sent listings gets its own block,
+> with a blank line between websites):
 >
-> **<website>** · N new ✅ / ⚠️ / ❌
-> - 📍 Region N% · City N% · District N%
-> - 🏷️ Buy/Rent N% · Period N% · Type N%
-> - 💰 Price N% · Size N% · Rooms N%
-> - 🎛️ Advanced Filter N%
+> **<website>** · N new · all fields N% ✅ / ⚠️ / ❌
 >
-> **<website where every field is 100%>** · N new · everything 100% ✅
+> 📍 **Where** (region → city → district, with counts)
+> - <region> · N
+>   - <city> · N: <district> N · <district> N · <district> N · <district> N · <district> N · +N more districts (N)
+>   - <city> · N: …
+> - <region> · N
+>   - …
+> - ❓ **Unmatched districts:** «exact spelling» (city) ×N · … → taught and fixed / asking the owner (or "none ✅")
 >
-> 🎛️ **Advanced Filter by field:** furnished N% · elevator N% · parking N% · age N% · bathrooms N% · … (every field that had new values)
+> 🏷️ **What**
+> - Buy N · Rent yearly N · Rent monthly N · Rent with no stated period N (kept out of rent searches)
+> - Types: <type> N · <type> N · <type> N · +N more
+>
+> 💰 **Prices, as the website published them**
+> - Buy: from N to N SAR · typical N SAR
+> - Yearly rent: from N to N SAR · typical N SAR
+> - Monthly rent: from N to N SAR · typical N SAR
+>
+> 🎛️ **Advanced Filter** (yes / no / unknown)
+> - Furnished N / N / N · Elevator N / N / N · Parking N / N / N · Kitchen N / N / N · AC N / N / N
+> - Maid room N / N / N · Driver room N / N / N · Private entrance N / N / N · Rent now, pay later N / N / N
+> - Bathrooms: 1 → N · 2 → N · 3+ → N · unknown N
+> - Property age: new → N · 1–5 yrs → N · 6–10 → N · 10+ → N · unknown N
+> - … every other Advanced Filter field this website published values for
+> - Matched: N% of the Advanced Filter values it published reached search correctly
+>
+> **<website where every field is 100%>** · N new · everything 100% ✅ (its block still follows, shorter:
+> Where, What, Prices and Advanced Filter on one line each)
+>
+> 🎛️ **Advanced Filter, all new listings, by field** (matched %): furnished N% · elevator N% · parking N% · age N% · bathrooms N% · … (every field that had new values)
 > 🔍 **Re-read against the original ad:** N listings · N fields · N wrong (should be 0)
 > 👆 **Tested like a real customer:** N of 10 found with the normal filter · N of 5 right in the Advanced Filter · N fixes proven
 > 🎯 **Known answers:** N checked · N wrong (should be 0) · 🕳️ **blind spots:** N websites (should be 0)
@@ -342,8 +396,12 @@ how many arrived and how well every field matched, then the totals, then a short
 - **AF (per website) and Advanced Filter by field:** the share of the Advanced Filter values the
   website published that reached search correctly as yes / no / unknown.
 - **Fully matched:** a new listing counts only if every field it has is right.
-- **Layout:** one small block per website, never one crowded line. A website where every field is
-  exactly 100% gets the single line "everything 100% ✅" instead of a block.
+- **Layout:** one block per website, never one crowded line. In "Where", list the top 5 districts
+  of each city by count, then "+N more districts (N listings)". **Every unmatched district is always
+  listed by name, never folded into "+N more".** The full region → city → district tree for every
+  website goes into your run log (`ops_daily_engineer_run`), so nothing is lost.
+- **"Typical" price is the middle listing's price (the median)**, from the prices as published. It
+  describes what arrived and never changes any listing.
 - Show the real number, never rounded up. 99.6% is written as 99.6%, not 100%. Mark a website ⚠️
   below 98% on any field and ❌ below 90%, and every ⚠️ or ❌ must appear in "What got fixed" or
   "To reach 10/10".
