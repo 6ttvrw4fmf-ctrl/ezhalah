@@ -10,6 +10,13 @@ again; scrapers/muktamel/diag_page_structure.py is the tool for it. MIN_ID_DEFAU
 deliberately (never silently narrow the space you enumerate) -- callers (the sharded workflow)
 pass the evidenced range explicitly instead.
 
+THE TOP OF THE RANGE IS READ FROM THE SOURCE EVERY RUN (find_ceiling, 2026-09-28). --max-id is only
+a FLOOR: main() walks upward from it until the site stops assigning ids. The workflow's constant
+32300 had become a ceiling -- our highest active id was exactly 32300 while the site's ids ran to
+~34310, so ~890 live listings were never fetched. Measured the same day: 32301-32664 assigned, then
+a ~1,000-id /404 gap (32665-~33671), then assigned again to ~34311 -- so the walk's give-up window
+must be wider than any gap, or it stops in the hole and misses the newest band.
+
 Data path — the page is Nuxt 2: every field is server-rendered into a `window.__NUXT__=(function(...){
 ...}(...))` IIFE. That payload is NOT plain JSON (Nuxt 2's minified-arg format), so we evaluate the
 IIFE in a tiny Node subprocess (`node` ships on the runners) and read back clean JSON:
@@ -44,7 +51,7 @@ Field map (Muktamel → our schema):
   offer.photos[].path /OffersImages/<uuid>       → Azure blob -md.jpg URLs → photo_urls
 
 Usage:  python -m scrapers.muktamel.run [--type residential|commercial|all] [--limit N]
-        [--min-id 1] [--max-id 32000]
+        [--min-id 1] [--max-id 32000]   (--max-id is a floor; the top is probed each run)
 """
 from __future__ import annotations
 
@@ -58,7 +65,8 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
+from urllib.parse import urlparse
 
 from curl_cffi import requests as cc
 
@@ -735,6 +743,58 @@ def shard_ids(min_id: int, max_id: int, shards: int, shard: int) -> list[int]:
     return [i for i in range(min_id, max_id + 1) if i % shards == shard]
 
 
+# ── Ceiling: where the site's ids currently end, asked of the source each run ───────
+# An unassigned or removed id 302s to /404; an assigned one 302s to its slugged /real-estates/<id>/…
+# (measured 2026-09-28). Reading only the redirect (allow_redirects=False) costs a 0-byte response,
+# not the 1.4 MB page. Sampled every CEILING_STRIDE ids, sequentially -- one request at a time, far
+# gentler than the crawl's own 8 workers. CEILING_GIVE_UP is 3x the widest measured /404 gap
+# (~1,000 ids); CEILING_BOUND is a runaway backstop only, never reached by a sane walk.
+CEILING_STRIDE = 100
+CEILING_GIVE_UP = 3000
+CEILING_BOUND = 50_000
+_NEVER_ASSIGNED_ID = 999_999_999  # negative control: must read as absent or the signal is broken
+
+
+def _id_exists(listing_id: int) -> bool:
+    """True ONLY on the source's affirmative word that this id is assigned. /404, 5xx and network
+    errors are all False: they are not evidence of an id, so they never raise the ceiling."""
+    for attempt in range(3):
+        try:
+            r = _session().get(f"{BASE}/real-estates/{listing_id}", timeout=45, allow_redirects=False)
+        except Exception:  # noqa: BLE001 — unreachable is not evidence either way
+            time.sleep(1.0 * (attempt + 1))
+            continue
+        if r.status_code == 200:
+            return True
+        if r.status_code in (301, 302, 303, 307, 308):
+            loc = urlparse(r.headers.get("location") or "").path.rstrip("/")
+            return loc == f"/real-estates/{listing_id}" or loc.startswith(f"/real-estates/{listing_id}/")
+        if r.status_code < 500:
+            return False
+        time.sleep(1.0 * (attempt + 1))
+    return False
+
+
+def find_ceiling(floor: int, exists: Callable[[int], bool], *, stride: int = CEILING_STRIDE,
+                 give_up: int = CEILING_GIVE_UP, bound: int = CEILING_BOUND) -> int:
+    """Highest id worth sweeping: walk up from `floor` every `stride` ids until `give_up` ids pass
+    with no assigned id, and return the last hit + (stride-1) -- the unsampled ids just above it.
+    Never below `floor`. If the negative control reads as assigned, the /404 signal cannot be
+    trusted this run, so the walk is skipped and `floor` is swept exactly as before."""
+    if exists(_NEVER_ASSIGNED_ID):
+        print(f"⚠ Muktamel ceiling: id {_NEVER_ASSIGNED_ID} reads as assigned — "
+              f"the /404 signal is broken; sweeping to the floor {floor} only", flush=True)
+        return floor
+    top, i = floor, floor + stride
+    while i <= floor + bound and i - top <= give_up:
+        if exists(i):
+            top = i
+        i += stride
+    if i > floor + bound:
+        print(f"⚠ Muktamel ceiling: walk hit its {bound}-id backstop above {floor}", flush=True)
+    return top + stride - 1
+
+
 # ── Main ────────────────────────────────────────────────────────────────────────
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -742,7 +802,9 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0,
                     help="validation run: upsert only the first N LIVE listings, NO prune")
     ap.add_argument("--min-id", type=int, default=MIN_ID_DEFAULT)
-    ap.add_argument("--max-id", type=int, default=MAX_ID_DEFAULT)
+    ap.add_argument("--max-id", type=int, default=MAX_ID_DEFAULT,
+                    help="FLOOR of the sweep's top: the real ceiling is probed from the source "
+                         "each run (find_ceiling) and is never below this")
     ap.add_argument("--shards", type=int, default=1,
                      help="split the id range across N parallel crawls (same convention as dealapp)")
     ap.add_argument("--shard", type=int, default=0,
@@ -751,8 +813,9 @@ def main() -> int:
     if not (0 <= args.shard < max(1, args.shards)):
         ap.error(f"--shard must be in 0..{max(0, args.shards - 1)} for --shards {args.shards}")
 
-    ids = shard_ids(args.min_id, args.max_id, args.shards, args.shard)
-    print(f"Muktamel: sweeping ids {args.min_id}..{args.max_id}"
+    max_id = find_ceiling(args.max_id, _id_exists)
+    ids = shard_ids(args.min_id, max_id, args.shards, args.shard)
+    print(f"Muktamel: sweeping ids {args.min_id}..{max_id} (floor {args.max_id}, ceiling from source)"
           f"{f' shard {args.shard}/{args.shards}' if args.shards > 1 else ''} "
           f"({len(ids)} candidates, {WORKERS} workers)"
           f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
