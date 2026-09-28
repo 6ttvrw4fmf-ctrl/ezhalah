@@ -48,6 +48,8 @@ PIN_COVERED = [
     "abeea", "aqaratikom", "hajer", "jurash", "dealapp",
     # later arrivals, both publishing تم البيع / تم التأجير in property_status
     "alta", "amaall",
+    # 2026-09-28: the Nuzul API lists rented/sold units with availability_status
+    "october",
 ]
 
 # The canonical pin payload — active=false plus the prune 3-strike missing_count so the row can
