@@ -871,8 +871,9 @@ function dbFilterFromRequest(req, tax, cities) {
   // p_region_ids is a plain column predicate in the served index, so it needs no interpretation.
   if (req.p_region_ids?.length) f += `&region_id=in.(${req.p_region_ids.map((n) => Number(n)).join(',')})`;
   if (req.p_deal) f += `&deal_ar=eq.${enc(req.p_deal)}`;
-  if (req.p_rent_period === 'سنوي') f += `&or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true))`;
-  if (req.p_rent_period === 'شهري') f += '&payment_monthly=is.true&rent_now_pay_later=not.is.true';
+  // price on request (price_annual NULL) is in every period — owner 2026-09-28
+  if (req.p_rent_period === 'سنوي') f += `&or=(rent_period_ar.eq.${enc('سنوي')},and(rent_period_ar.eq.${enc('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`;
+  if (req.p_rent_period === 'شهري') f += '&or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),price_annual.is.null)';
   // ── المدينة: mirror the RPC's THREE arms, never the label alone ───────────────────────────────
   // The RPC's city predicate is (read from prosrc 2026-09-01, and what §42.2 describes):
   //     normalize_ar(s.city_ar) = any(city_tokens)      ← the LABEL arm
