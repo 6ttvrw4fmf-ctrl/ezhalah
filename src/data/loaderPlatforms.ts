@@ -99,8 +99,8 @@ export const PLATFORM_META: LoaderPlatform[] = [
   // toor's brand on the list anyway. It is listed LAST and called out here so the exception is
   // visible rather than looking like drift, and so that whoever reads
   // verify-loader-platforms-match-active.ts next finds the reason instead of a mystery.
-  // NOTE (2026-09-27): toor is 'retired' in platform_registry, so HIDDEN_STATUSES hides this logo at
-  // runtime. If the 2026-09-19 decision should still win, that is the line to change.
+  // NOTE (2026-09-28): toor is 'retired' in platform_registry. HIDDEN_STATUSES hides only 'dormant'
+  // (down on its side), so the owner's 2026-09-19 decision to keep this logo still holds.
   { name: 'Toor',         i18nKey: 'Toor',                                    logo: require('../../assets/images/toor.png') },
   // ── onboarded 2026-09-20 ──────────────────────────────────────────────────────────────────────
   // These seven share the NEUTRAL placeholder asset while the owner supplies their real marks.
@@ -479,9 +479,11 @@ export function normalizeSource(raw: string | null | undefined): string | null {
 // can import PLATFORM_META and normalizeSource without pulling Metro-only path aliases into a
 // plain-Node test process. See loaderActivePlatforms.ts for loadHiddenPlatformNames().
 
-// A website in one of these registry states is DOWN ON ITS SIDE (dormant) or retired: its logo leaves
-// the strip (owner rule 2026-09-26). Same two states loader_strip_platforms_ar() excludes.
-export const HIDDEN_STATUSES: ReadonlySet<string> = new Set(['dormant', 'retired']);
+// A website that is DOWN ON ITS SIDE ('dormant') leaves the strip and the count (owner rule
+// 2026-09-26). 'retired' is deliberately NOT here: the search gate hides only dormant listings, so a
+// retired site's listings are still searchable and its logo stays; the owner also chose on
+// 2026-09-19 to keep Toor's (retired) logo.
+export const HIDDEN_STATUSES: ReadonlySet<string> = new Set(['dormant']);
 
 // Registry rows (slug + status, from loader_platform_status_ar()) → the PLATFORM_META names to hide.
 //

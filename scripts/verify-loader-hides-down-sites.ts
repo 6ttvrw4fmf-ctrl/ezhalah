@@ -37,7 +37,7 @@ const ROWS: Row[] = [
   { platform: 'awal', status: 'dormant' },
   { platform: 'sadin', status: 'dormant' },
   { platform: 'aqaralsaudia', status: 'dormant' },
-  { platform: 'deal', status: 'retired' },
+  { platform: 'deal', status: 'dormant' },   // fixture only: a down slug that shares a logo with a live one
   { platform: 'toor', status: 'retired' },
   { platform: 'alnokhba', status: 'retired' },
   { platform: 'dealapp', status: 'active' },
@@ -52,11 +52,15 @@ const catalog = PLATFORM_META.map((p) => p.name);
 
 // ── 1. The rule itself ─────────────────────────────────────────────────────────────────────────────
 for (const n of DOWN_LOGOS) check(`the fixture's down logo "${n}" is in PLATFORM_META (so the test is not vacuous)`, catalog.includes(n));
-check('HIDDEN_STATUSES hides dormant (down on its side) and never active', HIDDEN_STATUSES.has('dormant') && !HIDDEN_STATUSES.has('active'));
+check('HIDDEN_STATUSES hides dormant (down on its side), never active, and never retired (still searchable)',
+  HIDDEN_STATUSES.has('dormant') && !HIDDEN_STATUSES.has('active') && !HIDDEN_STATUSES.has('retired'));
 
 const strip = names(ROWS);
+// A logo counts as down only when every slug behind it is dormant (Deal App stays while dealapp is up).
 const leaked = ROWS.filter((r) => r.status === 'dormant')
-  .map((r) => normalizeSource(r.platform)).filter((n): n is string => !!n && strip.includes(n));
+  .map((r) => normalizeSource(r.platform))
+  .filter((n): n is string => !!n && strip.includes(n)
+    && !ROWS.some((u) => u.status !== 'dormant' && normalizeSource(u.platform) === n));
 check('no website that is dormant (down on its side) has a logo in the strip', leaked.length === 0,
   `in the strip while down: ${leaked.join(', ')}`);
 
@@ -68,8 +72,9 @@ const loader = stripComments(readFileSync(join(import.meta.dirname, '..', 'src/c
 check('the «Reviewing N platforms» number is the number of logos actually shown',
   /platformCount=\{platforms\.length\}/.test(loader));
 
-check('a logo shared with a live slug stays: deal is retired but dealapp is active → Deal App shown',
+check('a logo shared with a live slug stays: deal is down but dealapp is active → Deal App shown',
   strip.includes('Deal App'));
+check('a retired website keeps its logo (toor: the owner kept it on 2026-09-19)', strip.includes('Toor'));
 check('aqarmonthly going down does not take the Aqar logo while aqar is up',
   names([...ROWS.filter((r) => r.platform !== 'aqarmonthly'), { platform: 'aqarmonthly', status: 'dormant' }]).includes('Aqar'));
 // Exactly these, nothing more: alnokhba maps to no logo and hides nothing; Deal App stays (above).
@@ -106,7 +111,7 @@ const unfiltered = pickLoaderPlatforms(undefined, 0, null).map((p) => p.name);
 mustCatch('a strip that ignores the down set (what production shipped until this fix)',
   DOWN_LOGOS.some((n) => unfiltered.includes(n)));
 const perSlug = new Set(ROWS.filter((r) => HIDDEN_STATUSES.has(r.status)).map((r) => normalizeSource(r.platform)));
-mustCatch('hiding per slug instead of per logo (Deal App would vanish because "deal" is retired)',
+mustCatch('hiding per slug instead of per logo (Deal App would vanish because "deal" is down)',
   perSlug.has('Deal App') && !hidden.has('Deal App'));
 mustCatch('SearchLoader going back to the unfiltered pick',
   !/pickLoaderPlatforms\(resultSources, offsetRef\.current \?\? 0, hiddenPlatformNames\(\)\)/.test(
