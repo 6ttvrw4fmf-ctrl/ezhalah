@@ -141,3 +141,20 @@ def test_the_ad_licence_the_page_prints_is_stored():
     assert row["license_number"] == "7200560460"
     (row, _), _ = R.map_ad(_ad())
     assert row["license_number"] is None      # silent stays NULL
+
+
+# ── district from the ad's own title when the structured field is empty/English (288 of 564 ads) ──
+_CATALOG = {"حي المروة", "حي السويدي", "حي السويدي الغربي", "حي السلي"}
+
+
+@pytest.mark.parametrize("title,district", [
+    ("شارع التل، حي المروة، جنوب الرياض", "حي المروة"),
+    ("شارع الفجر، حي السويدي الغربي، غرب الرياض", "حي السويدي الغربي"),   # longest match wins
+    ("مستودع للإيجار في حي السلي، الرياض", "حي السلي"),
+    ("مستودع على طريق الملك عبدالعزيز", None),                           # no explicit «حي» → nothing
+    ("مستودع في حي غير موجود، الرياض", None),                             # not in the city catalog
+])
+def test_the_title_names_the_district_when_the_field_does_not(monkeypatch, title, district):
+    monkeypatch.setattr(R, "find_district_in_text", lambda t, cid: t if t in _CATALOG else None)
+    (row, _), _ = R.map_ad(_ad(title_ar=title, property={"district_name": "riyadh"}))
+    assert row["district_ar"] == district
