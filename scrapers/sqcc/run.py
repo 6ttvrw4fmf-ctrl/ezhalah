@@ -23,7 +23,11 @@ PRICE (owner rule: price = source):
   * two prices («250,000 / 270,000»), a «تبدأ من» range, «مساحات …» (several unit sizes) or a spec list
     quoting two rents («الفتحة الكبيرة … 100,000 / الصغيرة … 75,000») = several units in one ad →
     price NULL and area NULL, raw text in additional_info["price_text"] / ["area_text"].
-  * rent period: the site prints none → rent_period_from_ad(…, card_period=None).
+  * rent period: the site prints none on any page. OWNER DECISION 2026-09-28 («judge by the price»): a
+    stated period still wins, ≤10,000 is monthly by the shared rule, and above that the rent is YEARLY
+    (card_period='annual'). Measured: a 25 m² shop at 12,000, 200–321 m² duplexes at 50,000–60,000, a
+    500 m² building at 300,000 — monthly would be impossible; Aqar lists a 200 m² duplex in the same
+    حي طيبة at 50,000 /سنوي.
 AREA: «المساحة 400م» → 400. «م2/م٢» is a unit, never a digit. «مليونان م» (words) → NULL, raw kept.
 READY ONLY: «مؤجرة» on a SALE («شقق استثمارية مؤجرة», «العمارة مؤجرة ودخلها …») is the income of a
 tenanted investment still for sale — only a RENT listing that says مؤجر/تم التأجير is off the market.
@@ -216,7 +220,8 @@ def map_listing(url: str, d: dict[str, Any], cats: dict[str, set[str]],
     if deal == "Buy":
         row_price["price_total"] = None if per_m else price
     elif not per_m:
-        row_price["rent_period"], row_price["price_annual"] = normalize.rent_period_from_ad(price, own, None, title)
+        row_price["rent_period"], row_price["price_annual"] = normalize.rent_period_from_ad(
+            price, own, "annual", title)   # above 10,000 with no stated period → yearly (owner 2026-09-28)
     an = _NUM.findall(re.sub(r"م\s*[2٢²]", "م", area_txt))
     area = normalize.to_int(an[0]) if len(an) == 1 and not several else None
 

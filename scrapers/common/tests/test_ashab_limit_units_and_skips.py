@@ -179,3 +179,15 @@ def test_location_icons_photos_and_facts_come_from_the_page():
     assert row["bedrooms"] == 5 and row["car_entrance"] is True and row["direction"] == "شمال"
     (row, _), _ = _map(loc="بريدة،ق/ب/6660")                              # a plan number is not a district
     assert row["neighborhood"] is None and row["district_ar"] is None and row["plan_parcel"] == "ق/ب/6660"
+
+
+def test_a_land_sale_priced_below_any_possible_total_is_per_metre():
+    # owner 2026-09-28: «الحد 500» on a 700 m² plot with «سعر المتر» blank — 500 is per m², never the plot's total
+    (row, _), _ = _map(deal="بيع", type_ar="أرض سكنية", header="الحد 500 ر.س", limit="الحد 500 ر.س", area="700 م²")
+    assert row["price_total"] is None and row["price_per_meter"] == 500
+    assert row["price_evidence"]["unit"] == "per_meter"
+    # a real total stays a total, and a villa is never touched
+    (big, _), _ = _map(deal="بيع", type_ar="أرض سكنية", header="الحد 350000 ر.س", limit="الحد 350000 ر.س", area="700 م²")
+    assert big["price_total"] == 350000 and big["price_per_meter"] is None
+    (villa, _), _ = _map(deal="بيع", type_ar="فيلا", header="الحد 900 ر.س", limit="الحد 900 ر.س")
+    assert villa["price_total"] == 900
