@@ -129,6 +129,24 @@ PI_RE = re.compile(
     r'<div class="pi-item__value">\s*(.*?)\s*</div>',
     re.S,
 )
+# The page was rebuilt on Tailwind cards before the 2026-09-25 18:02 UTC crawl; PI_RE then matched
+# nothing on every page: all 1,800 active rows became type 'unknown', lost their spec keys, 1,450 had
+# rega_location_verified flipped to false and 198 commercial ads were retired as "superseded".
+# The label is plain text, so it can never swallow a neighbouring card.
+PI_CARD_RE = re.compile(
+    r'<span class="text-xs font-medium">\s*([^<]{1,60}?)\s*</span>\s*</div>\s*'
+    r'<div class="min-w-0 text-sm font-semibold text-zinc-900[^"]*">\s*(.*?)\s*</div>',
+    re.S,
+)
+# The same fields under their new labels (verified on /property/27200, 27370, 27375, 27388), read under
+# the keys map_listing already uses. Both «ترخيص الإعلان» and «رخصة الإعلان» spellings stay readable.
+_PI_RENAMED = {
+    "نوع العقار": "التصنيف",
+    "تاريخ إصدار الترخيص": "تاريخ إنشاء ترخيص الإعلان",
+    "تاريخ انتهاء رخصة الإعلان": "تاريخ انتهاء ترخيص الإعلان",
+    "كود البناء السعودي": "مطابقة كود البناء السعودي",
+    "الوصف حسب الصك": "وصف موقع العقار حسب الصك",
+}
 LDJSON_RE = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
 
 _local = threading.local()
@@ -565,11 +583,11 @@ def _ld_blocks(body: str) -> tuple[Optional[dict], Optional[dict]]:
 
 def _pi_table(body: str) -> dict[str, str]:
     out: dict[str, str] = {}
-    for m in PI_RE.finditer(body):
+    for m in (*PI_RE.finditer(body), *PI_CARD_RE.finditer(body)):
         k = _strip_tags(m.group(1))
         v = _strip_tags(m.group(2))
         if k and v and v != "—":
-            out[k] = v
+            out[_PI_RENAMED.get(k, k)] = v
     return out
 
 
@@ -659,6 +677,14 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
 
     # ── type + category ──
     mapped_type = _map_type(pi.get("التصنيف", ""), crumb.get("category", ""))
+    if not pi and not mapped_type:
+        # Neither the spec table nor the breadcrumb yields a type: our parser meeting new markup, not
+        # a listing without one. Write nothing — the stored row keeps what it had (the prune oracle
+        # self-heals it as live) instead of becoming 'unknown', being routed residential and
+        # "superseding" its own commercial row.
+        # ponytail: guards the type; an unreadable spec table beside a breadcrumb type still replaces
+        # the stored spec keys (additional_info is written whole) — a DB-side jsonb merge closes that.
+        return None, "residential"
     # Unmapped type → STORE the raw التصنيف/breadcrumb text, never a guessed default (owner
     # directive 2026-07-16: never confidently misclassify — the raw value trips the DB novel-type
     # detector, which quarantines + alerts). The legacy value below feeds ONLY the routing/sanity rules.
@@ -753,13 +779,13 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         area = _float(fs.get("value")) if isinstance(fs, dict) else None
 
     # ── REGA ad-license number: JSON-LD adLicenseNumber first, else the description free-text ──
-    rega_no = _int(ap.get("adLicenseNumber"))
+    rega_no = _int(ap.get("adLicenseNumber")) or _int(pi.get("رقم ترخيص الإعلان"))
     if not rega_no:
         m = re.search(r"ترخيص الإعلان[^0-9٠-٩]{0,4}([0-9٠-٩]{9,12})", ld.get("description") or "")
         if m:
             rega_no = _int(m.group(1))
-    fal_no = None
-    m = re.search(r"رخصة فال\s*([0-9٠-٩]{6,})", body)
+    fal_no = _int(pi.get("رخصة فال"))
+    m = None if fal_no else re.search(r"رخصة فال\s*([0-9٠-٩]{6,})", body)
     if m:
         fal_no = _int(m.group(1))
 
@@ -797,7 +823,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "longitude": geo.get("longitude"),
         "street_address": _redact(addr.get("streetAddress")),
         "postal_code": addr.get("postalCode"),
-        "date_published": ld.get("datePublished"),
+        "date_published": ld.get("datePublished") or ld.get("datePosted"),
         "date_modified": ld.get("dateModified"),
         "availability": offers.get("availability"),
         "availability_ends": offers.get("availabilityEnds"),
@@ -844,7 +870,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "title": title,
         "description": description,
         "photo_urls": _images(ld, body),
-        "date_added": ld.get("datePublished") or None,
+        "date_added": ld.get("datePublished") or ld.get("datePosted") or None,
         "last_update": ld.get("dateModified") or None,
         "additional_info": info,
     }
