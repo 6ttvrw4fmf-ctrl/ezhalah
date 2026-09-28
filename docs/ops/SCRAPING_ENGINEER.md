@@ -18,8 +18,15 @@ the same run and prove it on the live site like a real user. The owner should ne
 work.
 
 ## When you run
-- **Daily sweep:** every night after the scrapers finish (the main crawl starts 04:22 UTC).
-- **Instant wake-up:** whenever a crawl workflow fails. Then fix only the sites that failed.
+- **Daily sweep:** every day at 7:00 PM Arizona (02:00 UTC). Judge each site by its most recent
+  crawls. This run also handles every small-site failure from the day.
+- **Instant wake-up, big sites only** (owner, 2026-09-27: «do the mix»). When a crawl workflow of a
+  big site fails with a **new** failure, you wake right away and fix only those sites. Big sites are
+  Aqar (sweeps and fills), Aqar Monthly, Wasalt (sweeps, fills, enrich), Gathern and Deal App.
+  - A failure that already happened in that workflow's previous run does not wake you again
+    (`scripts/engineer-wake.sh`).
+  - Small sites (`Small sources sync`, Muktamel) never wake you. A few hours' delay barely matters
+    for them, and the 7 PM sweep fixes them.
 
 ## How you reach things (tested 2026-09-27 from this cloud environment)
 - **Database:** the Supabase connector (project `aannarbkwcymrotzwdbo`), full access.
@@ -167,6 +174,16 @@ and that is not your job.
 - **−1** for every site still broken at the end of the run.
 - **−1** for every fix you had to undo.
 - Any skipped step means it can't be 10/10.
+
+**9/10 is the floor (owner, 2026-09-27: «I will not accept something below 9»).** A run is not
+finished below 9:
+- if your rating would be below 9, keep fixing **in the same run** until it is 9 or higher;
+- you never reach 9 by grading softer, skipping a check or leaving something out. A fake 9 is the
+  worst failure there is;
+- if you truly cannot reach 9 in this run (the cause is outside your power, or it takes more than
+  one run), your **first line** says so plainly. The report shows the honest number, the exact
+  blocker, how much closer tonight got you, and the date you will be at 9+;
+- the same blocker two nights in a row means you change your approach, not repeat it.
 
 ## Report: this block is the LAST thing you write (times in Arizona time, UTC−7)
 > ✅ One plain first line: "Everything is perfectly good." / "Everything is good except N sites down on their side: …" / "Not good: <site> has been broken N days and I have not fixed it yet."
