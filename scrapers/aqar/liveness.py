@@ -43,6 +43,7 @@ from typing import Optional
 from scrapers.common.db import begin_run, end_run, sb
 from scrapers.common.http import get
 from scrapers.common.liveness_contract import direct_alive_patch
+from scrapers.common.normalize import ad_expiry_state
 from scrapers.common.shard_partition import shard_worklist
 
 
@@ -469,7 +470,8 @@ def main() -> None:
                 lambda ids=chunk: _cohort(
                     client.table(table)
                     .select("id, ad_number, listing_url, missing_count, transaction_type,"
-                            " price_total, area_m2, price_per_meter"))
+                            " price_total, area_m2, price_per_meter"
+                            + (", license_expiry" if table.startswith("aqar_") else "")))
                 .in_("id", ids)
                 .order("id", desc=False)
                 .limit(len(ids))
@@ -490,8 +492,13 @@ def main() -> None:
                 # this run had to fix: it wrote last_verified_alive_at onto ads aqar had closed.
                 # UNKNOWN writes nothing to the row — no strike, no kill, no alive patch — so the
                 # row keeps exactly the state it had, and the verdict is still recorded as evidence.
+                # EXCEPT when the ad's OWN licence end date has passed (2026-09-28): aqar closes an ad
+                # when its REGA licence expires (status 10, «ترخيص هذا الإعلان منتهي»), so a closed page
+                # plus a past «تاريخ نهاية الترخيص» is not ambiguous — it strikes under the normal grace.
+                # Measured: 40 of 41 sampled active rows past their date were closed on aqar.
                 if (r is not None and status == 200 and not SOFT_CLOSE_ARMED
-                        and looks_closed(body)):
+                        and looks_closed(body)
+                        and ad_expiry_state(row.get("license_expiry")) != "expired"):
                     mc_now = row.get("missing_count") or 0
                     _detail(row["id"], status, "unknown_soft_closed", mc_now, mc_now, applied=False)
                     unknown_soft_closed += 1

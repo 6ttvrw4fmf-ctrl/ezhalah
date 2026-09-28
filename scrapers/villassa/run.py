@@ -351,6 +351,7 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
     }.items() if v is not None and v != ""}
     # A direct read of THIS record (id matched, status "1") — zero extra requests.
     db.mark_direct_alive(row, oracle=ORACLE)
+    normalize.gate_ad_end(row, details.get("تاريخ انتهاء رخصة الإعلان"))  # the ad's OWN licence end date: expired → inactive + pinned
     return row, category, ""
 
 

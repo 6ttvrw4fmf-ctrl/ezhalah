@@ -570,6 +570,7 @@ def map_listing(md: dict, listing: Optional[dict]) -> tuple[Optional[dict], str]
         "additional_info": info,
     }
     row.update(amenities)
+    normalize.gate_ad_end(row, info.get("rega_license_end_date"))  # the ad's OWN licence end date: expired → inactive + pinned
     return row, category
 
 

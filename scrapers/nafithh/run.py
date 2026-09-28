@@ -189,6 +189,7 @@ def map_listing(pid: str, d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]]
     row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v not in (None, "", "-", [])})
     cap = {k: v for k, v in kv.items() if k not in _NEVER_STORE}
     row["source_capture"] = strip_pii_fields({"schema": "nafithh.gallery.v1", "fields": cap, "title": row["title"]})
+    normalize.gate_ad_end(row, row.get("license_expiry"))  # the ad's OWN licence end date: expired → inactive + pinned
     return (row, category), ""
 
 

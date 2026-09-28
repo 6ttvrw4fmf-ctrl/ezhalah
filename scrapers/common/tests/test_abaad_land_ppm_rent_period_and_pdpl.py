@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -557,7 +557,7 @@ def test_a_hand_typed_spelling_of_the_same_word_maps_identically():
 
 # ── 7. The removal oracle: a 200 is NOT proof of life ───────────────────────────────────────────
 
-_TODAY = date.today()
+_TODAY = datetime.now(timezone(timedelta(hours=3))).date()   # the Saudi day the oracle judges by, not this machine's
 
 
 def _page(expiry: date | None) -> str:

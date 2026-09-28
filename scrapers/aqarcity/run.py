@@ -849,6 +849,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "additional_info": info,
     }
     row.update(amenities)  # electricity/water_supply/sanitation/optical_fibers booleans
+    normalize.gate_ad_end(row, info.get("rega_license_expiry_date"))  # the ad's OWN licence end date: expired → inactive + pinned
     return row, category
 
 

@@ -622,6 +622,25 @@ def ad_expiry_state(raw: Optional[str], today: Any = None) -> str:
     return "live" if end >= today else "expired"
 
 
+# Transient, never a column: db._wasalt_batch() pops it, pins the expired ads (sold_pin) and records
+# a renewal as LIVE evidence.
+AD_END_KEY = "_ad_end_date"
+
+
+def gate_ad_end(row: dict, raw: Optional[str], today: Any = None) -> dict:
+    """The fleet gate for a scraper that keeps its row (2026-09-28): 'expired' → active=False, pinned
+    by the shared upsert with GONE evidence naming the date. A plain skip is not enough — the old
+    active row would then be kept alive by a verify_gone oracle that reads a 200 as 'live' (the
+    retire_superseded_siblings trap) or revived by auto_recover_false_inactive(). 'unknown' changes
+    nothing: the source did not state a date we can read."""
+    state = ad_expiry_state(raw, today)
+    if state != "unknown":
+        row[AD_END_KEY] = (state, raw)
+    if state == "expired":
+        row["active"] = False
+    return row
+
+
 # ── Property age: the SHARED Saudi Arabic age vocabulary ──────────────────────────────────────────
 # WHY THIS EXISTS (2026-07-17): every scraper parsed «عمر العقار» with an int-only regex of the shape
 # `عمر\s*العقار[\s:]*?(\d+)`. That regex can only ever match a LATIN DIGIT, so the three non-numeric

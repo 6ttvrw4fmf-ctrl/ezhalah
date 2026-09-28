@@ -504,6 +504,7 @@ def map_listing(idx: dict, rich: dict, detail: Optional[dict],
         "index": redact_capture(_public(rich)),
         "detail": redact_capture(_public(detail)) if detail is not None else None,
     }
+    normalize.gate_ad_end(row, lic.get("end_date"))  # the ad's OWN licence end date: expired → inactive + pinned
     return row, category, ""
 
 

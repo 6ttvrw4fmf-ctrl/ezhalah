@@ -623,6 +623,7 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "rega": {k: (_scrub(ar[k], names) if k in _FREE_TEXT else ar[k])
                  for k in _REGA_KEYS if k in ar},
     })
+    normalize.gate_ad_end(row, row.get("license_expiry"))  # the ad's OWN licence end date: expired → inactive + pinned
     return row, category, ""
 
 

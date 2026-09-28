@@ -173,7 +173,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -557,6 +557,7 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         {"schema": "abaad.get-estate-all.v1",
          **{k: (redact_pii(rec[k]) if k in _CAPTURE_FREE_TEXT else rec[k])
             for k in _CAPTURE_KEYS if k in rec}})
+    normalize.gate_ad_end(row, row.get("license_expiry"))  # the ad's OWN licence end date: expired → inactive + pinned
     return row, category, ""
 
 
@@ -635,7 +636,7 @@ def _signal(status, body, _moved) -> Optional[str]:
     exp = _expiry_date(body)
     if exp is None:
         return None                     # 200 but no «تاريخ انتهاء رخصة الإعلان» — no opinion
-    today = date.today()
+    today = datetime.now(timezone(timedelta(hours=3))).date()   # the SAUDI day, not the runner's clock
     if exp < today:
         return "gone"                   # the licence lapsed: why the source stopped publishing it
     if exp == today:

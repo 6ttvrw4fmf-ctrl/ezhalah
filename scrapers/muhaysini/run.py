@@ -794,6 +794,7 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "advertisement": {k: (redact_pii(rega[k]) if k in _FREE_TEXT else rega[k])
                           for k in _CAPTURE_REGA if k in rega},
     })
+    normalize.gate_ad_end(row, row.get("license_expiry"))  # the ad's OWN licence end date: expired → inactive + pinned
     return row, category, ""
 
 
