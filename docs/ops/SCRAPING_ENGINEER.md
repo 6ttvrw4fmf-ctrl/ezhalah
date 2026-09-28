@@ -65,6 +65,45 @@ work.
 diagnostic workflow, or `loader-active-platforms-check.yml`. Cleanup and liveness can remove listings,
 and that is not your job.
 
+## Facts you don't need to rediscover (from your first runs, 2026-09-27)
+These cost your first runs a lot of time. Use them instead of working them out again.
+- **Start with your last report:** read your latest `ops_daily_engineer_run` report. Whatever it
+  left under "To reach 10/10" is tonight's first work.
+- **Websites are `platform_registry` rows with `kind = 'source'`** (147 active, 3 dormant, 3 retired
+  on 2026-09-28). `kind = 'internal'` rows are job labels (shards, liveness jobs), not websites:
+  never test or report them as sites. Big sites log crawls under several labels (aqar's per-city
+  jobs, dealapp and wasalt shards), so judge the website by all its labels together.
+- **Exact columns, so you never guess:**
+  - `scrape_runs`: id, platform, started_at, finished_at, ok, rows_seen, rows_upserted, notes. The
+    reason a run failed is in `notes`; there is no `error` column;
+  - `platform_registry`: platform, status, expected_cadence_hours, window_days, notes, updated_at, kind;
+  - `ops_daily_engineer_run`: id (generated, never insert it), run_at, phase, push_ok, issues_found,
+    issues_fixed, report, metrics, notes;
+  - `alert_event`: id, created_at, severity, kind, platform, dedup_key, detail, acknowledged_at,
+    resolved_at, dispatched_at, last_affirmed_at, owner_routine. There is no `message` column; the
+    text is in `detail`;
+  - `ops_deploy_lock`: lock_name, holder, acquired_at, expires_at, note.
+- **GitHub job logs:** `curl` to a log download fails here (CONNECT 403 on the redirect). Use the
+  GitHub connector's `get_job_logs` with `tail_lines`.
+
+## Testing on the live site (what your first runs learned)
+- **Save your browser test in the repo and reuse it.** The first time, commit it in your PR in the
+  folder described by `e2e/engineers/README.md` (e.g. as full-chain.mjs). Every run after that uses it
+  instead of building a new one, because rebuilding it each night eats your hour.
+- **Buy/Rent chips start on Buy.** For rent only, tap «إيجار», then tap «شراء» to turn Buy off.
+  Commercial listings need the «تجاري» chip, then the right group.
+- **A rental with no stated period never shows in rent searches** (owner rule). Pick test listings
+  whose period is stated, and tap «شهري» for monthly ones.
+- **Some city names exist in two regions** (e.g. «العمار»). Pick the suggestion in the listing's own
+  region.
+- **A card may also show a per-month line** worked out from the annual price (e.g. «من ر.س 4,080/شهر»).
+  That's display. Compare the stored price with the source, not that line.
+- **Some websites have no page per listing** (tamyaz links to its homepage plus a `#section`).
+  Compare links without the part after `#`.
+- **Compare with the real ad, not just our copy.** The cloud can't open listing websites, so
+  dispatch `source-reread.yml` with `ids: table:id,…` and read its `source-reread` artifact. It shows
+  what the page itself says next to what we store.
+
 ## Your time budget: about 1 hour (owner, 2026-09-28: «it's so many tokens»)
 - **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Stop at about 60
   minutes. Whatever didn't fit goes into "To reach 10/10" and is the first thing tomorrow.
@@ -126,7 +165,7 @@ or rewrite another engineer's work, and never start a big change in another engi
 ## Your run, step by step
 1. **Log the start** in `ops_daily_engineer_run`.
 2. **Load the site list fresh:** `select platform, status, expected_cadence_hours from platform_registry
-   where status in ('active', 'dormant')`. Also look for any platform that has listings in
+   where kind = 'source' and status in ('active', 'dormant')`. Also look for any platform that has listings in
    `search_listings_ar` but is missing from that list, and add it (someone forgot).
 3. **Wait for the crawl:** if any crawl workflow run from the last 6 hours is still running, wait for it
    to finish before judging anything.
@@ -151,7 +190,8 @@ or rewrite another engineer's work, and never start a big change in another engi
      listings (`rows_upserted > 0`).
    - **d. Prove the FULL CHAIN like a real user:** original website → scraper saved it → it's in the
      database → it's searchable on ezhalah-app.vercel.app → the card's price, size, location and rent
-     period match the original exactly → clicking the card opens that exact original listing.
+     period match the original exactly (check the real page with `source-reread.yml`) → clicking the
+     card opens that exact original listing.
    - **e. Close it:** resolve its alert and incident, then release the lock.
 6. **Down on their side?** Only if the crawl, after step 5a on 2+ browser profiles AND the proxy, shows
    one of these: a suspended or closed page, a domain that no longer exists, connection refused, or every

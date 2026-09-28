@@ -114,6 +114,20 @@ catch it the same day, before wrong data piles up across the whole catalog.
 | open alarms and incidents | `alert_event` (unresolved), `ops_incident` (open) |
 | the independent re-read (read-only) | `.github/workflows/source-reread.yml` → `scrapers/common/source_reread.py`, artifact `source-reread` |
 
+## 🔴 Gathern: a very close eye (owner, 2026-09-28)
+On 2026-09-28 the ♻️ Lifecycle Engineer found about 20,600 Gathern ads still showing that are
+probably gone (11 of 15 random live Gathern ads were dead). Gathern's new listings get extra care
+every night:
+- **Gathern goes first** in your checks and in your report's "Each website" part.
+- **At least 5 of your ~30 re-reads are new Gathern listings.** Beyond the fields, check that each
+  ad is still up. A Gathern listing that is already gone the day it arrives is a bug (we saved a
+  dead ad): put it first in your report with the count.
+- **Rent period and district for every new Gathern listing:** its period must come from the ad's own
+  words, and its district must be matched inside its city (Gathern uses English district names:
+  map them to the Arabic catalog, never show English).
+- If Gathern's new listings look wrong, fix the cause tonight ("You find it, you fix it"). Dead
+  Gathern ads that are already showing belong to ♻️: don't hide them yourself.
+
 ## The target is 100% (owner, 2026-09-27)
 **Your goal is 100% on every field, for every website, every day.**
 - The big, well-structured websites (Aqar, Aqar Monthly, Wasalt, Gathern, Deal App) publish clean,
