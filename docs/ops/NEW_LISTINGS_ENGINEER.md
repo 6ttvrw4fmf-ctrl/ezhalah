@@ -329,47 +329,45 @@ how many arrived and how well every field matched, then the totals, then a short
 
 > ✅ One plain first line: "Everything is perfect: all N new listings matched." / "Everything is good except …" / "Not good: <what> and I have not fixed it yet."
 >
-> 🆕 **New in the last 24 hours:** N listings from N websites · N searchable (N%)
+> 🆕 **New in the last 24 hours:** N listings from N websites · N% searchable
 >
-> 📊 **Match rate, all new listings:**
+> ━━━━━━━━ **📦 PART 1: TODAY IN TOTAL (all websites together)** ━━━━━━━━
+>
+> 📊 **Match rate:**
 > - 📍 **Location:** Region N% · City N% · District N%
 > - 🏷️ **Deal & type:** Buy/Rent N% · Rent period N% · Category N% · Type N%
 > - 💰 **Numbers:** Price N% · Size N% · Rooms N%
 > - 🎛️ **Advanced Filter:** N%
-> - ✅ **Fully matched (every field right):** N of N (N%)
+> - ✅ **Fully matched:** N of N (N%)
 >
-> 🌐 **Each website** (most new listings first; every website that sent listings gets its own block,
-> with a blank line between websites):
+> 🏷️ **Deal:** Buy N · Rent yearly N · Rent monthly N · Rent with no stated period N
+> 🏠 **Property types:** شقة N · فيلا N · أرض N · دور N · عمارة N · محل N · … (every type)
+> 🛏️ **Bedrooms:** 1 → N · 2 → N · 3 → N · 4 → N · 5+ → N · not stated N
+> 📐 **Size:** under 100 m² N · 100–200 N · 200–400 N · 400–1,000 N · over 1,000 N · not stated N
+> 📍 **Regions:** <region> N · <region> N · … and top cities: <city> N · <city> N · …
+> 💰 **Prices, as published:** Buy from N to N (typical N) · Yearly rent from N to N (typical N) · Monthly rent from N to N (typical N)
+> 🎛️ **Advanced Filter** (yes / no / unknown): Furnished N/N/N · Elevator N/N/N · Parking N/N/N · Kitchen N/N/N · AC N/N/N · Maid room N/N/N · … (every field) · Bathrooms 1 → N · 2 → N · 3+ → N · Age new N · 1–5 N · 6–10 N · 10+ N
 >
-> **<website>** · N new · all fields N% ✅ / ⚠️ / ❌
+> ━━━━━━━━ **🌐 PART 2: EACH WEBSITE (one block each, most new listings first)** ━━━━━━━━
 >
-> 📍 **Where** (region → city → district, with counts)
+> **<Website>** · N new · all fields N% ✅ / ⚠️ / ❌
+>
+> 📍 **Where**
 > - <region> · N
 >   - <city> · N: <district> N · <district> N · <district> N · <district> N · <district> N · +N more districts (N)
->   - <city> · N: …
-> - <region> · N
->   - …
-> - ❓ **Unmatched districts:** «exact spelling» (city) ×N · … → taught and fixed / asking the owner (or "none ✅")
+> - ❓ **Unmatched districts:** «exact spelling» (city) ×N → taught and fixed / asking the owner (or "none ✅")
 >
-> 🏷️ **What**
-> - Buy N · Rent yearly N · Rent monthly N · Rent with no stated period N (kept out of rent searches)
-> - Types: <type> N · <type> N · <type> N · +N more
+> 🏷️ **Deal:** Buy N · Rent yearly N · Rent monthly N · No stated period N
+> 🏠 **Types:** <type> N · <type> N · <type> N · +N more
+> 🛏️ **Bedrooms:** 1 → N · 2 → N · 3 → N · 4 → N · 5+ → N · not stated N
+> 📐 **Size:** under 100 N · 100–200 N · 200–400 N · 400–1,000 N · over 1,000 N · not stated N
+> 💰 **Prices, as published:** Buy N–N (typical N) · Yearly N–N (typical N) · Monthly N–N (typical N)
+> 🎛️ **Advanced Filter** (yes / no / unknown): Furnished N/N/N · Elevator N/N/N · Parking N/N/N · … · Bathrooms 1 → N · 2 → N · 3+ → N · Age new N · 1–5 N · 6–10 N · 10+ N
+> 📊 **Matched:** Region N% · City N% · District N% · Deal N% · Period N% · Type N% · Price N% · Size N% · Rooms N% · AF N%
 >
-> 💰 **Prices, as the website published them**
-> - Buy: from N to N SAR · typical N SAR
-> - Yearly rent: from N to N SAR · typical N SAR
-> - Monthly rent: from N to N SAR · typical N SAR
+> *(…the same block for every website that sent listings)*
 >
-> 🎛️ **Advanced Filter** (yes / no / unknown)
-> - Furnished N / N / N · Elevator N / N / N · Parking N / N / N · Kitchen N / N / N · AC N / N / N
-> - Maid room N / N / N · Driver room N / N / N · Private entrance N / N / N · Rent now, pay later N / N / N
-> - Bathrooms: 1 → N · 2 → N · 3+ → N · unknown N
-> - Property age: new → N · 1–5 yrs → N · 6–10 → N · 10+ → N · unknown N
-> - … every other Advanced Filter field this website published values for
-> - Matched: N% of the Advanced Filter values it published reached search correctly
->
-> **<website where every field is 100%>** · N new · everything 100% ✅ (its block still follows, shorter:
-> Where, What, Prices and Advanced Filter on one line each)
+> ━━━━━━━━ **📖 PART 3: SUMMARY** ━━━━━━━━
 >
 > 🎛️ **Advanced Filter, all new listings, by field** (matched %): furnished N% · elevator N% · parking N% · age N% · bathrooms N% · … (every field that had new values)
 > 🔍 **Re-read against the original ad:** N listings · N fields · N wrong (should be 0)
