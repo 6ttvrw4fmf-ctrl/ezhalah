@@ -69,8 +69,8 @@ def _throttle(url: str) -> None:
 _local = threading.local()
 
 
-def _build_session() -> cc.Session:
-    s = cc.Session(impersonate="chrome124")
+def _build_session(profile: str = "chrome124", proxies: Optional[dict] = None) -> cc.Session:
+    s = cc.Session(impersonate=profile, proxies=proxies)   # impersonate OWNS the User-Agent
     s.headers.update(
         {
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -135,6 +135,47 @@ def negotiated_session(probe_url: str, *, order: tuple[str, ...] = IMPERSONATE_O
     raise RuntimeError(f"no TLS profile was served by {probe_url} (tried {', '.join(order)}; last {last})")
 
 
+RETRY_SMARTER_ORDER = ("chrome124", "safari17_0", "firefox133")
+
+
+def retry_smarter_session(probe_url: str, *, headers: Optional[dict] = None, timeout: int = 40,
+                          order: tuple[str, ...] = RETRY_SMARTER_ORDER,
+                          proxy_env: str = "WASALT_PROXY_URL") -> tuple[cc.Session, list[str]]:
+    """Probe `probe_url` with every profile in `order` DIRECT, then — when `proxy_env` is set —
+    every profile again through that residential proxy, each with a fresh session. Returns the
+    first session the host answers 200, plus one `route/profile:outcome` line per attempt.
+
+    Unlike negotiated_session() this NEVER raises: when nothing is served it returns a plain
+    `order[0]` DIRECT session so the caller's own fetch fails exactly as it did before and its
+    existing failure path (prune guard, end_run ok=False) is untouched. The attempt log is the
+    point — "down at source" needs 2+ profiles AND the proxy on record (SCRAPING_ENGINEER.md
+    step 6), and a scraper pinned to one profile with no proxy could never produce that evidence.
+    """
+    purl = os.environ.get(proxy_env, "").strip()
+    routes: list[tuple[str, Optional[dict]]] = [("direct", None)]
+    if purl:
+        routes.append(("proxy", {"http": purl, "https": purl}))
+    tried: list[str] = []
+    for route, proxies in routes:
+        for prof in order:
+            s = cc.Session(impersonate=prof, proxies=proxies)   # impersonate OWNS the User-Agent
+            if headers:
+                s.headers.update(headers)
+            try:
+                r = s.get(probe_url, timeout=timeout)
+            except Exception as e:             # noqa: BLE001 — recorded, then the next one
+                tried.append(f"{route}/{prof}:{type(e).__name__}")
+                continue
+            tried.append(f"{route}/{prof}:{r.status_code}")
+            if r.status_code == 200:
+                s.__dict__["_impersonate_profile"] = f"{route}/{prof}"
+                return s, tried
+    s = cc.Session(impersonate=order[0])
+    if headers:
+        s.headers.update(headers)
+    return s, tried
+
+
 def _rotate_session() -> cc.Session:
     """Force a fresh TCP connection for this thread by discarding the cached session and
     building a new one. 2026-08-21 incident fix: the OLD code reused ONE session/connection
@@ -167,6 +208,10 @@ def get(url: str, *, max_retries: int = 3, timeout: int = 25) -> Optional[cc.Res
         if purl:
             proxies = {"http": purl, "https": purl}
     host = urlsplit(url).netloc
+    pinned = None if proxies is not None else _host_route.get(host)
+    if pinned is not None:
+        s = _route_session(*pinned)
+    blocked = None    # the reason the default route looks BLOCKED (401/403 or refused), if it does
     for attempt in range(max_retries):
         _throttle(url)
         try:
@@ -174,12 +219,17 @@ def get(url: str, *, max_retries: int = 3, timeout: int = 25) -> Optional[cc.Res
         except Exception as e:
             print(f"   ⚠ http.get attempt {attempt + 1}/{max_retries} for {host} raised "
                   f"{type(e).__name__}: {str(e)[:160]}")
+            blocked = type(e).__name__
             if attempt < max_retries - 1:
-                s = _rotate_session()
+                s = _route_session(*pinned, fresh=True) if pinned else _rotate_session()
             time.sleep(2 * (attempt + 1))
             continue
         if r.status_code == 200:
+            _escape_failures.pop(host, None)
             return r
+        if r.status_code in BLOCK_STATUSES:
+            blocked = f"HTTP {r.status_code}"
+            break
         if r.status_code in TRANSIENT_STATUSES:
             # Server-side temporary hiccup — back off, rotate the connection, and retry.
             print(f"   ⚠ http.get attempt {attempt + 1}/{max_retries} for {host} got "
@@ -190,4 +240,96 @@ def get(url: str, *, max_retries: int = 3, timeout: int = 25) -> Optional[cc.Res
             continue
         # 4xx (other than rate-limit) is permanent — bail out.
         return None
+    if blocked is not None and proxies is None:
+        return _escape_block(url, host, blocked, timeout=timeout, current=pinned)
     return None
+
+
+# ── Retry smarter on a BLOCK (2026-09-28, Scraping Engineer) ──────────────────────────────────────
+# aqar-sweep run 36360844470: all 95 city shards fetched 0 pages in ~5s each, and the commercial
+# sweep 10 minutes later died the same way, after weeks of ~13.6k rows per run. get() gave up on
+# the first 403 with no log line, pinned to ONE fingerprint (chrome124) on ONE route, so the crawl
+# could neither get past a handshake block nor say what the host answered. A block is usually the
+# handshake, not a ban (SCRAPING_ENGINEER.md step 5a): on 401/403 or a refused connection, try the
+# other browser profiles DIRECT, then — only when the workflow opts in with SCRAPE_PROXY_FALLBACK_URL
+# — every profile through the residential proxy. The first route that answers 200 is pinned for that
+# host for the rest of the process, so the escape costs a few requests once, not per page. When no
+# route works for EXHAUST_AFTER escapes in a row (any 200 resets the count, so one page that is
+# genuinely 403 on a healthy host cannot end the run) the host is marked exhausted and later calls
+# fail fast exactly as before (None), so a real ban cannot become a probe storm or a proxy bill. A 404/410 is never escaped: a
+# page that is gone stays gone. The metered proxy is never used unless the workflow set the var.
+BLOCK_STATUSES = frozenset({401, 403})
+FALLBACK_PROFILES = ("chrome124", "safari17_0", "firefox133", "edge101")
+_host_route: dict[str, tuple[str, bool]] = {}      # host -> (profile, via_proxy) that answered 200
+_host_exhausted: set[str] = set()
+_escape_failures: dict[str, int] = {}
+EXHAUST_AFTER = 3
+_escape_locks: dict[str, threading.Lock] = {}
+_escape_locks_guard = threading.Lock()
+
+
+def _proxy_fallback() -> Optional[dict]:
+    purl = os.environ.get("SCRAPE_PROXY_FALLBACK_URL", "").strip()
+    return {"http": purl, "https": purl} if purl else None
+
+
+def _route_session(profile: str, via_proxy: bool, *, fresh: bool = False) -> cc.Session:
+    routes = _local.__dict__.setdefault("routes", {})
+    s = None if fresh else routes.get((profile, via_proxy))
+    if s is None:
+        s = _build_session(profile, _proxy_fallback() if via_proxy else None)
+        routes[(profile, via_proxy)] = s
+    return s
+
+
+def _escape_block(url: str, host: str, reason: str, *, timeout: int,
+                  current: Optional[tuple[str, bool]]) -> Optional[cc.Response]:
+    with _escape_locks_guard:
+        lock = _escape_locks.setdefault(host, threading.Lock())
+    with lock:   # one thread probes per host; the others then reuse its verdict
+        if host in _host_exhausted:
+            return None
+        route = _host_route.get(host)
+        if route is not None and route != current:
+            # Another thread already found a working route while we waited — use it.
+            return _fetch_on(route, url, timeout)
+        tried = [f"{'proxy' if current and current[1] else 'direct'}/"
+                 f"{current[0] if current else 'chrome124'}:{reason}"]
+        legs = [(p, False) for p in FALLBACK_PROFILES]
+        if _proxy_fallback() is not None:
+            legs += [(p, True) for p in FALLBACK_PROFILES]
+        for leg in legs:
+            if leg == (current or ("chrome124", False)):
+                continue
+            _throttle(url)
+            try:
+                r = _route_session(*leg, fresh=True).get(url, timeout=timeout, allow_redirects=True)
+            except Exception as e:             # noqa: BLE001 — recorded, then the next leg
+                tried.append(f"{'proxy' if leg[1] else 'direct'}/{leg[0]}:{type(e).__name__}")
+                continue
+            tried.append(f"{'proxy' if leg[1] else 'direct'}/{leg[0]}:{r.status_code}")
+            if r.status_code == 200:
+                _escape_failures.pop(host, None)
+                _host_route[host] = leg
+                print(f"   ↻ http.get {host} blocked, escaped via {tried[-1]} "
+                      f"(tried {', '.join(tried)}) — pinned for this run", flush=True)
+                return r
+        _escape_failures[host] = _escape_failures.get(host, 0) + 1
+        final = _escape_failures[host] >= EXHAUST_AFTER
+        if final:
+            _host_exhausted.add(host)
+            _host_route.pop(host, None)
+        print(f"   ✗ http.get {host} BLOCKED on every route (tried {', '.join(tried)}"
+              f"{'' if _proxy_fallback() else '; proxy fallback not enabled'})"
+              + (f" — {EXHAUST_AFTER} in a row, failing fast for the rest of this run" if final else ""),
+              flush=True)
+        return None
+
+
+def _fetch_on(route: tuple[str, bool], url: str, timeout: int) -> Optional[cc.Response]:
+    _throttle(url)
+    try:
+        r = _route_session(*route).get(url, timeout=timeout, allow_redirects=True)
+    except Exception:                          # noqa: BLE001
+        return None
+    return r if r.status_code == 200 else None
