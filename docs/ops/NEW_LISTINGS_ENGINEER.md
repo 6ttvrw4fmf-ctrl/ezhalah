@@ -49,9 +49,10 @@ catch it the same day, before wrong data piles up across the whole catalog.
   are 🔬's and 🎛️'s. They find them in their own checks, and you never hand work over by message.
 
 ## When you run
-- **Nightly:** every day at 12:30 AM Arizona (07:30 UTC). That is after the main crawl, after the
-  database's heavy window (01:00–06:00 UTC), and after ♻️ has finished. You judge the last 24 hours
-  of arrivals.
+- **Every morning:** you start at 4:00 AM Arizona (11:00 UTC), so the owner's report is ready
+  **around 5:00 AM Arizona** (owner, 2026-09-27: «every day at 5 am»). That is after the night's
+  crawls, after the database's heavy window (01:00–06:00 UTC), and after ♻️ has finished. You judge
+  the last 24 hours of arrivals.
 
 ## The owner's rules you enforce (never change them)
 1. **Source is truth.** The value we show is the value the website published. Never calculate,
@@ -291,27 +292,49 @@ finished below 9:
 - Any skipped step means it can't be 10/10.
 
 ## Report: this block is the LAST thing you write (times in Arizona time, UTC−7)
-> ✅ One plain first line: "Everything is perfectly good." / "Not good: <what> and I have not fixed it yet."
-> 🆕 **New today:** N listings from N websites · N searchable (N%) · N not searchable (reasons)
-> 🗂️ **Normal filter:** N filed right · N wrong → N fixed
-> 🎛️ **Advanced Filter:** N fields checked · N problems (stuck, dropped, unknown→no, trapped) → N fixed
+The owner reads this at 5 AM (owner, 2026-09-27). It shows, for every website that sent new listings,
+how many arrived and how well every field matched, then the totals, then a short explanation.
+
+> ✅ One plain first line: "Everything is perfect: all N new listings matched." / "Everything is good except …" / "Not good: <what> and I have not fixed it yet."
+>
+> 🆕 **New in the last 24 hours:** N listings from N websites · N searchable (N%)
+>
+> 📊 **Match rate, all new listings:**
+> Region N% · City N% · District N% · Buy/Rent N% · Rent period N% · Category N% · Type N% · Price N% · Size N% · Rooms N% · Advanced Filter N%
+> **Fully matched (every field right):** N of N (N%)
+>
+> 🌐 **Each website** (most new listings first, one line each, every website that sent listings):
+> - **<website>**: N new · Region N% · City N% · District N% · Buy/Rent N% · Period N% · Type N% · Price N% · Size N% · Rooms N% · AF N% ✅ / ⚠️ / ❌
+> - …
+>
+> 🎛️ **Advanced Filter by field:** furnished N% · elevator N% · parking N% · age N% · bathrooms N% · … (every field that had new values)
 > 🔍 **Re-read against the original ad:** N listings · N fields · N wrong (should be 0)
 > 👆 **Tested like a real customer:** N of 10 found with the normal filter · N of 5 right in the Advanced Filter · N fixes proven
 > 🎯 **Known answers:** N checked · N wrong (should be 0) · 🕳️ **blind spots:** N websites (should be 0)
 >
-> 🌐 **Each website** (most problems first):
-> - **<website>**: N new · N searchable · N wrong → N fixed ✅ / ⚠️ / ❌
-> - …
-> - **The other N websites:** all new listings right ✅
->
+> 📖 **What happened:** 2–3 short sentences in plain words (e.g. "Wasalt sent 53 new listings but 35 had no city matched. Their city names were written in a new way, and I taught the matcher that spelling and fixed all 35.")
 > 🐛 **Bugs found:** N · 🔧 **Bugs fixed:** N · 🛟 **New listings corrected from the source:** N
-> 📖 **What happened:** one sentence.
 > 🛠️ **What got fixed:**
 > - **site / field**: what was wrong → what you did (and how many listings).
 >
 > ⭐ **Rating:** X/10
 > 🎯 **To reach 10/10:** what's still missing → what you'll do tomorrow. (Skip this line only at 10/10.)
 > 🙋 **Needs from you:** Nothing.
+
+**What each % means, so a 100% can never hide anything:**
+- **Out of the new listings where the website gave that field.** A field the website didn't publish is
+  honestly unknown, never a failure, and never counted as matched.
+- **Region, City, District, Category and Type:** the share we matched to our own catalog, filed
+  exactly right.
+- **Buy/Rent, Rent period, Price, Size and Rooms:** the share stored exactly as the website published
+  it (a rent period only where the ad states one), checked on every listing and confirmed on
+  tonight's re-read sample.
+- **AF (per website) and Advanced Filter by field:** the share of the Advanced Filter values the
+  website published that reached search correctly as yes / no / unknown.
+- **Fully matched:** a new listing counts only if every field it has is right.
+- Show the real number, never rounded up. 99.6% is written as 99.6%, not 100%. Mark a website ⚠️
+  below 98% on any field and ❌ below 90%, and every ⚠️ or ❌ must appear in "What got fixed" or
+  "To reach 10/10".
 
 **Every number in this report comes from a query or job result from this run**, and those results
 are saved in your run log. Never from memory, an estimate or yesterday.
