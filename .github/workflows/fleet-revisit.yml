@@ -1,0 +1,52 @@
+# Fleet revisit — prove listings alive on platforms whose crawl never opens a listing's own page.
+#
+# Runs scrapers/common/fleet_revisit.py: every platform that defines `revisit_verify()` in its
+# run.py has its own validated per-listing oracle run over its least-recently-verified active rows.
+# It may only write last_verified_alive_at (on 'live', via liveness_contract) and
+# last_liveness_probe_at; it never deactivates, strikes or touches last_seen_at. Each platform's run
+# is recorded in scrape_runs as "<platform>_revisit", and a run whose oracle answered nothing ends
+# ok=false. Dispatched daily by pg_cron (trigger_gh_workflow), the repo's standard scheduler.
+name: Fleet revisit
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "One platform (blank = every platform with revisit_verify)"
+        default: ""
+      limit:
+        description: "Rows per platform per run"
+        default: "400"
+      dry_run:
+        description: "Check but write nothing"
+        type: boolean
+        default: false
+
+concurrency:
+  group: fleet-revisit
+  cancel-in-progress: false
+
+jobs:
+  revisit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Revisit
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_MIN_INTERVAL: "0.5"
+          PYTHONUNBUFFERED: "1"
+        run: |
+          exec python -m scrapers.common.fleet_revisit \
+            ${{ inputs.platform && format('--platform {0}', inputs.platform) || '' }} \
+            --limit ${{ inputs.limit || '400' }} \
+            ${{ inputs.dry_run && '--dry-run' || '' }}

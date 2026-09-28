@@ -70,6 +70,12 @@ def session():
     return _session(TENANT)
 
 
+def revisit_verify():
+    """scrapers/common/fleet_revisit.py hook: this platform's oracle, unable to return 'gone'."""
+    from scrapers.common.fleet_revisit import refuse_removals
+    return verify_gone_for(TENANT, refuse_removals, session_factory=session)
+
+
 def map_listing(L: dict, tenant: Tenant = TENANT, **kw):
     row, cat, why = _map_listing(L, tenant, **kw)
     if row:

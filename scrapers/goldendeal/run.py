@@ -595,6 +595,12 @@ def verify_gone_for(tenant: Tenant, canary: Callable[[], tuple[bool, str]],
     return _verify
 
 
+def revisit_verify():
+    """scrapers/common/fleet_revisit.py hook: this platform's oracle, unable to return 'gone'."""
+    from scrapers.common.fleet_revisit import refuse_removals
+    return verify_gone_for(TENANT, refuse_removals)
+
+
 def print_dry(source: str, res: list[dict], com: list[dict]) -> None:
     print(f"✓ {source} VALIDATION: {len(res)} residential + {len(com)} commercial (nothing written)")
     for r0 in (res + com)[:12]:

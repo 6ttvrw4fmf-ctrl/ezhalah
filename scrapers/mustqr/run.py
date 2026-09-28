@@ -780,6 +780,12 @@ def fetch_all(s: cc.Session, jwt: str, limit: Optional[int] = None) -> list[dict
     return out
 
 
+def revisit_verify():
+    """scrapers/common/fleet_revisit.py hook: the same oracle prune_unseen consults. The revisit job
+    only ever stamps a 'live' answer; a 'gone' is counted there, never acted on."""
+    return _verify_gone
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
