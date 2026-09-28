@@ -563,6 +563,22 @@ def _ld_blocks(body: str) -> tuple[Optional[dict], Optional[dict]]:
     return listing, breadcrumb
 
 
+# 2026-09 REDESIGN: the «pi-item» table became a card grid — «<span class="text-xs font-medium">LABEL</span>
+# </div><div class="… text-end">VALUE</div>». PI_RE matched nothing, so EVERY field read from this table went
+# silent at once: 1,800 of 1,800 live rows were stored as type «unknown» (shown as «غير معروف»), with no
+# area, age, facade, street width or services. Both layouts are read; the grid's renamed labels are aliased
+# onto the names the rest of this file reads.
+PI_GRID_RE = re.compile(
+    r'<span class="text-xs font-medium">\s*(.*?)\s*</span>\s*</div>\s*<div class="[^"]*text-end[^"]*">\s*(.*?)\s*</div>',
+    re.S)
+_PI_ALIASES = {"نوع العقار": "التصنيف",
+               "تاريخ إصدار الترخيص": "تاريخ إنشاء ترخيص الإعلان",
+               "تاريخ انتهاء رخصة الإعلان": "تاريخ انتهاء ترخيص الإعلان"}
+# PDPL: the grid prints the ad officer's NAME and PHONE — never read into the row, not even transiently.
+_PI_NEVER = ("مسؤول الإعلان", "رقم مسؤول الإعلان")
+_DEED_PREFIX = "الوصف حسب الصك"
+
+
 def _pi_table(body: str) -> dict[str, str]:
     out: dict[str, str] = {}
     for m in PI_RE.finditer(body):
@@ -570,6 +586,19 @@ def _pi_table(body: str) -> dict[str, str]:
         v = _strip_tags(m.group(2))
         if k and v and v != "—":
             out[k] = v
+    for m in PI_GRID_RE.finditer(body):
+        k = _strip_tags(m.group(1))
+        v = _strip_tags(m.group(2))
+        if not k or k in _PI_NEVER:
+            continue
+        if k.startswith(_DEED_PREFIX):
+            # the grid folds the deed text INTO the label cell: «الوصف حسب الصك <deed text> رقم الإعلان» → «#id»
+            deed = re.sub(r"\s*رقم الإعلان\s*$", "", k[len(_DEED_PREFIX):]).strip()
+            if deed:
+                out.setdefault("وصف موقع العقار حسب الصك", deed)
+            continue
+        if v and v != "—":
+            out.setdefault(_PI_ALIASES.get(k, k), v)
     return out
 
 
@@ -589,14 +618,22 @@ def _breadcrumb_parts(bc: Optional[dict]) -> dict[str, str]:
     return parts
 
 
+_ALEF = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا"})
+
+
 def _map_type(*candidates: str) -> Optional[str]:
+    # hamza-insensitive: the grid prints «إستراحة» where the map holds «استراحة» (2026-09 redesign)
+    folded = {k.translate(_ALEF): v for k, v in TYPE_MAP_AR.items()}
     for c in candidates:
         if not c:
             continue
-        c = c.strip()
-        if c in TYPE_MAP_AR:
-            return TYPE_MAP_AR[c]
-        for word, eng in TYPE_MAP_AR.items():
+        exact = normalize.map_type_exact(c.strip())      # the shared canonical map first («أرض تجارية» etc.)
+        if exact:
+            return exact
+        c = c.strip().translate(_ALEF)
+        if c in folded:
+            return folded[c]
+        for word, eng in folded.items():
             if word in c:
                 return eng
     return None
@@ -753,7 +790,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         area = _float(fs.get("value")) if isinstance(fs, dict) else None
 
     # ── REGA ad-license number: JSON-LD adLicenseNumber first, else the description free-text ──
-    rega_no = _int(ap.get("adLicenseNumber"))
+    rega_no = _int(ap.get("adLicenseNumber")) or _int(pi.get("رقم ترخيص الإعلان"))   # grid label (2026-09 redesign)
     if not rega_no:
         m = re.search(r"ترخيص الإعلان[^0-9٠-٩]{0,4}([0-9٠-٩]{9,12})", ld.get("description") or "")
         if m:

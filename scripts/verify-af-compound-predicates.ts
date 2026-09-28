@@ -73,9 +73,10 @@ const CASES: Case[] = [
     slices: [{ p_amenities: ['electricity', 'water_supply'] }, { p_street_width_min: 10 }] },
 ];
 
+// Price on request (price_annual NULL) is in EVERY period (owner 2026-09-28): no figure to misstate.
 const periodRest = (p?: string) =>
-  p === 'سنوي'  ? '&or=(rent_period_ar.eq.سنوي,and(rent_period_ar.eq.شهري,rent_now_pay_later.is.true))'
-  : p === 'شهري' ? '&payment_monthly=is.true&rent_now_pay_later=not.is.true'
+  p === 'سنوي'  ? '&or=(rent_period_ar.eq.سنوي,and(rent_period_ar.eq.شهري,rent_now_pay_later.is.true),price_annual.is.null)'
+  : p === 'شهري' ? '&or=(and(payment_monthly.is.true,rent_now_pay_later.not.is.true),price_annual.is.null)'
   : '';
 
 type RowKey = string;

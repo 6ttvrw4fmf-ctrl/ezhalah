@@ -145,9 +145,11 @@ check('the monthly-only sources stay OUT of Buy and of an annual Rent search',
   && monthlyIn({ deal: 'Rent', rentPeriod: 'annual' }).length === 0,
   `Buy → [${monthlyIn({ deal: 'Buy' }).join(', ')}], annual → [${monthlyIn({ deal: 'Rent', rentPeriod: 'annual' }).join(', ')}]`);
 
+// A PRICED row must carry a published monthly|annual period; a row with NO price (price on request,
+// owner 2026-09-28) is admitted under every period — it has no figure a period could misstate.
 check("candidate-level period filter has an explicit 'both' branch",
-  /rentPeriod\s*===\s*'both'\s*\)\s*\{[\s\S]{0,220}?\.in\(\s*'rent_period',\s*\[\s*'monthly',\s*'annual'\s*\]/.test(remote),
-  "mixed platforms must still require a PUBLISHED monthly|annual period — a null one is neither");
+  /rentPeriod\s*===\s*'both'\s*\)\s*\{[\s\S]{0,220}?\.or\(\s*'rent_period\.in\.\(monthly,annual\),price_annual\.is\.null'\s*\)/.test(remote),
+  "mixed platforms must still require a PUBLISHED monthly|annual period for a priced row — a null one is neither");
 
 // Buy+Rent COMBINED (owner feature 2026-08-20) is the THIRD way into the monthly pool, and until
 // 2026-08-27 nothing pinned it — the two checks above only cover 'monthly'/'both', so deleting the

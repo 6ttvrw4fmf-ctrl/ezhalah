@@ -49,7 +49,11 @@ export const HIERARCHY: Record<Macro, SubGroup[]> = {
 export const SERVICE_FACILITY_TYPES = ['Bank', 'School', 'Health Center', 'Telecom Tower', 'Parking',
   // owner decision 2026-09-11 (ops_incident #172): four more source-published facility types join the
   // same box — see the RAW_TO_CLEAN comment for the sentinel story. Still one box, still a MIX.
-  'Hospital', 'Business Center', 'Resort', 'ATM Site'];
+  'Hospital', 'Business Center', 'Resort', 'ATM Site',
+  // owner rule 2026-09-28: a commercial space whose type fits no box above goes in مرافق خدمية, and its
+  // card keeps the source's own word — Aqar «قاعة للحجز» (event/meeting halls, category 108), SuperOffice
+  // «غرفة الاجتماعات», Sirdab «ساحات تخزين» and «تخزين ذاتي». 'Event Hall' is NOT 'Hall' (صالة → Commercial Building).
+  'Event Hall', 'Meeting Room', 'Storage Yard', 'Self Storage'];
 export const SUBGROUPS: Record<string, string[]> = { 'Service Facilities': SERVICE_FACILITY_TYPES };
 
 // Verified type_ar labels (as stored in search_listings_ar) for the facility types. Used to type-SCOPE
@@ -59,6 +63,7 @@ export const SUBGROUPS: Record<string, string[]> = { 'Service Facilities': SERVI
 export const FACILITY_TYPE_AR: Record<string, string> = {
   'Bank': 'بنك', 'School': 'مدرسة', 'Health Center': 'مركز صحي', 'Telecom Tower': 'برج اتصالات', 'Parking': 'مواقف',
   'Hospital': 'مستشفى', 'Business Center': 'مركز أعمال', 'Resort': 'منتجع', 'ATM Site': 'موقع صراف',
+  'Event Hall': 'قاعة', 'Meeting Room': 'غرفة اجتماعات', 'Storage Yard': 'ساحة تخزين', 'Self Storage': 'تخزين ذاتي',
 };
 
 // Flat clean-type → macro lookup (derived from HIERARCHY, the single source).
@@ -175,6 +180,11 @@ const RAW_TO_CLEAN: Record<string, string> = {
   'Business Center': 'Business Center', 'مركز أعمال': 'Business Center',
   'Resort': 'Resort', 'منتجع': 'Resort',
   'ATM Site': 'ATM Site', 'موقع صراف': 'ATM Site',
+  // owner rule 2026-09-28 (see SERVICE_FACILITY_TYPES): unplaceable commercial spaces, the source's own word.
+  'Event Hall': 'Event Hall', 'قاعة': 'Event Hall',
+  'Meeting Room': 'Meeting Room', 'غرفة اجتماعات': 'Meeting Room',
+  'Storage Yard': 'Storage Yard', 'ساحة تخزين': 'Storage Yard',
+  'Self Storage': 'Self Storage', 'تخزين ذاتي': 'Self Storage',
   // Long-tail dealapp raw types → existing clean types (owner-approved 2026-07-06; each verified against
   // the live listing — the card still shows the ORIGINAL scraped value). [[property-card-and-type-mapping-rule]]
   'تاون هاوس': 'Villa',               // titled فيلا, 4br + garage + majlis
@@ -274,6 +284,11 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   'Business Center':     { rawTypes: ['Business Center', 'مركز أعمال'], kinds: BOTH },
   'Resort':              { rawTypes: ['Resort', 'منتجع'], kinds: BOTH },
   'ATM Site':            { rawTypes: ['ATM Site', 'موقع صراف'], kinds: BOTH },
+  // owner rule 2026-09-28: kinds BOTH — aqarmonthly's halls sit in its only (residential) table.
+  'Event Hall':          { rawTypes: ['Event Hall', 'قاعة'], kinds: BOTH },
+  'Meeting Room':        { rawTypes: ['Meeting Room', 'غرفة اجتماعات'], kinds: BOTH },
+  'Storage Yard':        { rawTypes: ['Storage Yard', 'ساحة تخزين'], kinds: BOTH },
+  'Self Storage':        { rawTypes: ['Self Storage', 'تخزين ذاتي'], kinds: BOTH },
   // ('Service Facilities' is DERIVED from SERVICE_FACILITY_TYPES right after this object — single source of truth.)
   'Gas Station':         { rawTypes: ['Gas Station', 'Station', 'محطة بنزين'], kinds: BOTH },
   'Staff Housing':       { rawTypes: ['سكن عمال'], kinds: BOTH },
@@ -313,6 +328,7 @@ export const EN_TO_AR: Record<string, string> = {
   // مرافق خدمية expansion (owner 2026-09-11): reverse entries so an EN-translated capture can never be
   // Latin-guarded into the «غير معروف» sentinel (the aqargate 'Compound' precedent above).
   'Hospital': 'مستشفى', 'Business Center': 'مركز أعمال', 'Resort': 'منتجع', 'ATM Site': 'موقع صراف',
+  'Event Hall': 'قاعة', 'Meeting Room': 'غرفة اجتماعات', 'Storage Yard': 'ساحة تخزين', 'Self Storage': 'تخزين ذاتي',
 };
 
 // DERIVED from CLEAN_TO_QUERY (the single source for a clean type's raw strings) + EN_TO_AR — so adding a

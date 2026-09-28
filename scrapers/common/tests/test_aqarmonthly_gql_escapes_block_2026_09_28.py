@@ -107,8 +107,18 @@ def no_catalog(monkeypatch):
         monkeypatch.setattr(al, name, {})
 
 
-def test_non_residential_category_is_not_written(no_catalog):
-    assert m.map_listing(dict(_G), _P) is None
+def test_an_unknown_category_is_not_written(no_catalog):
+    assert m.map_listing(dict(_G, category=199), _P) is None
+
+
+def test_a_hall_for_booking_is_an_event_hall_monthly_price_on_request(no_catalog):
+    # owner rule 2026-09-28: «قاعة للحجز» → مرافق خدمية («قاعة»), monthly, price on request —
+    # 174,000 is Aqar's 30-night booking total, not a monthly rent the advertiser published.
+    from scrapers.common import db
+    row = m.map_listing(dict(_G), _P)
+    assert row["property_type"] == "Event Hall" and row["rent_period"] == "monthly"
+    assert row["price_annual"] is db.AUTHORITATIVE_NULL
+    assert row["price_evidence"]["stored"] is None and row["price_evidence"]["authoritative_absent"]
 
 
 def test_every_mapped_residential_category_still_maps(no_catalog):

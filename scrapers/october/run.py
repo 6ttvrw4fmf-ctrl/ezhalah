@@ -40,6 +40,15 @@ TYPE_MAP = {
     "istraha": "Rest House", "farm": "Farm", "chalet": "Chalet", "station": "Other",
 }
 
+# The ad's own title names a type the shared map has no word for (2026-09-28: «كشك للإيجار», «موقع
+# تأجير صراف ألي» were stored «Other» → «غير معروف»). Both are existing clean types.
+_TITLE_TYPES = (("كشك", "Kiosk"), ("صراف", "ATM Site"))
+
+
+def _type_for(tok: str, name: str, desc: str) -> str:
+    return (TYPE_MAP.get(tok) or N.map_type(name) or N.map_type(desc)
+            or next((t for w, t in _TITLE_TYPES if w in name), None) or "Other")
+
 # PDPL: drop phones (incl. leetspeak o5o→050) and truncate at broker/contact markers.
 _PHONE = re.compile(r"(?:\+?9665\d{7,}|\b0?5\d{8}\b|\b9[02]0\d{6,}\b|\b800\d{6,}\b|wa\.me/\S+)")
 _OBF = re.compile(r"[oO0٠-٩]{8,}")
@@ -234,7 +243,7 @@ def map_item(item: dict, s: cc.Session) -> Optional[tuple[dict, str]]:
     desc = (item.get("description") or "").strip()       # "<type_token> <deal_arabic>"
     name = (item.get("name") or "").strip()
     tok = desc.split(" ")[0].lower() if desc else ""
-    property_type = TYPE_MAP.get(tok) or N.map_type(name) or N.map_type(desc) or "Other"
+    property_type = _type_for(tok, name, desc)
 
     blob = name + " " + desc
     if any(k in blob for k in ("للإيجار", "للايجار", "إيجار", "ايجار", "rent")):
