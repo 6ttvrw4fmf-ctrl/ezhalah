@@ -227,11 +227,15 @@ jobs:
           # headless=False is what clears the challenge; the runner has no display, so xvfb-run
           # supplies a virtual one. --workers 1 because Playwright's sync API is thread-bound
           # (liveness.py forces it anyway; passing it keeps the command honest).
+          # --max-seconds 4200 (70 min) sits under timeout-minutes: 90 with room for one stuck
+          # browser check (~9 min hard deadline). A browser confirm is ~5 s, so 1,500 rows need
+          # ~2 h; without the budget run 36350303259 was cancelled at 90:00 with nothing written.
           exec xvfb-run -a python -m scrapers.wasalt.liveness \
             --mode enum-strike \
             --grace 3 \
             --workers 1 \
             --confirm-limit ${{ inputs.confirm_limit || '1500' }} \
+            --max-seconds 4200 \
             ${{ inputs.dry_run && '--dry-run' || '' }}
 
   repair:
