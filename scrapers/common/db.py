@@ -943,6 +943,16 @@ def _ad_shard(ad_number: Optional[str], shards: int) -> Optional[int]:
     return int(m.group()) % max(1, shards)
 
 
+# Every collapse/coverage trip of prune_unseen() this process, until end_run() writes them into the run's
+# notes. A tripped guard withholds the whole prune, and most callers flatten its -1 into «pruned=0», so the
+# trip used to vanish: gathern's prune tripped EVERY day from at least 2026-09-21 to 2026-09-28 (re-saw
+# ~4.4k of ~28k active) while writing «pruned=0» and ok=true, and ~23k listings whose gathern.co page was
+# 404 stayed in search. end_run() appends «prune guard tripped: …», the phrase
+# mon_detect_enumeration_incomplete() already watches — so a withheld prune alerts on every platform
+# without trusting 144 call sites to report it.
+_PRUNE_TRIPS: list[str] = []
+
+
 def prune_unseen(
     table: str,
     seen_ads,
@@ -1044,9 +1054,12 @@ def prune_unseen(
         return -1  # nothing scraped → site almost certainly down → keep everything active
     gone = [r for r in existing if r["ad_number"] not in seen]
     if len(existing) >= min_active_guard:
+        resaw = f"re-saw {len(existing) - len(gone)} of {len(existing)} active"
         if len(gone) > max_prune_frac * len(existing):
+            _PRUNE_TRIPS.append(f"{table} collapse ({resaw})")
             return -1  # collapse guard: a big fraction vanished at once → treat as a broken crawl
         if (len(existing) - len(gone)) / len(existing) < min_coverage:
+            _PRUNE_TRIPS.append(f"{table} coverage ({resaw}, floor {min_coverage:.0%})")
             return -1  # partial-scrape guard: saw too little of the catalog to trust a prune
     if not gone:
         return 0
@@ -1520,6 +1533,10 @@ def end_run(
     if demotions:
         tag = "RC-B demoted ok=False: " + "; ".join(demotions)
         final_notes = f"{notes} | {tag}" if notes else tag
+    if _PRUNE_TRIPS:
+        tag = "prune guard tripped: " + "; ".join(_PRUNE_TRIPS)
+        final_notes = f"{final_notes} | {tag}" if final_notes else tag
+        _PRUNE_TRIPS.clear()
     _execute(
         sb().table("scrape_runs").update(
             {
