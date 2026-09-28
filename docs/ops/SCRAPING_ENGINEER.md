@@ -65,6 +65,14 @@ work.
 diagnostic workflow, or `loader-active-platforms-check.yml`. Cleanup and liveness can remove listings,
 and that is not your job.
 
+## The owner's open requests (do these first, then delete each line when it's done and proven)
+- **Gathern monthly coverage (owner, 2026-09-28: «we are not scraping much of Gathern monthly
+  data»).** Measure how many monthly listings Gathern itself publishes (its own site or API,
+  through a crawl job) against how many live Gathern monthly listings we have, per city. Find where
+  the crawl misses them (categories, cities, pages, filters, a cap) and fix it, so we carry every
+  monthly listing Gathern publishes. Prove it: our count matches Gathern's, and 3 new ones are
+  findable on the live site with the «شهري» chip.
+
 ## Facts you don't need to rediscover (from your first runs, 2026-09-27)
 These cost your first runs a lot of time. Use them instead of working them out again.
 - **Start with your last report:** read your latest `ops_daily_engineer_run` report. Whatever it
