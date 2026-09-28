@@ -51,6 +51,11 @@ _TYPE_AR = {"warehouse": "مستودع", "storefront": "محل", "workshop": "و
             "storage_yard": "ساحة تخزين", "storage": "تخزين ذاتي"}
 _TYPE_OVERRIDES = {"ساحة تخزين": "Storage Yard", "تخزين ذاتي": "Self Storage"}   # مرافق خدمية (owner 2026-09-28)
 _MIN_PRICE = 100
+# DISTRICT: the structured district_name is empty or an English city («riyadh») on 288 of 564 ads
+# (2026-09-28), which kept them out of every district search. The ad's own title usually names it —
+# «شارع التل، حي المروة، جنوب الرياض» — so an EXPLICIT «حي X» in the title is read, longest match
+# first, and only inside the ad's own city catalog (never a free-text guess across cities).
+_TITLE_DISTRICT_RE = re.compile(r"(?:^|[\s،,(\-–])حي\s+([^\s،,()\-–|]+(?:\s+[^\s،,()\-–|]+){0,2})")
 _PER_M2 = re.compile(r"بالمتر|للمتر")
 _DEAL = {"rent": "Rent", "sale": "Buy"}
 # the source writes diagonals WITHOUT an underscore («northeast», measured 2026-09-27: 10 of 63 facades)
@@ -107,6 +112,18 @@ def walk(s: cc.Session) -> tuple[list[dict], Optional[int]]:
     return list(ads.values()), declared
 
 
+def _district_from_title(title: str, city_id: Optional[int]) -> Optional[str]:
+    if not city_id:
+        return None
+    for m in _TITLE_DISTRICT_RE.finditer(title or ""):
+        words = m.group(1).split()
+        for n in range(len(words), 0, -1):
+            hit = find_district_in_text("حي " + " ".join(words[:n]), city_id)
+            if hit:
+                return hit
+    return None
+
+
 def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
     if a.get("status") != "active" or a.get("deleted_at"):
         return None, f"status_{a.get('status')}"
@@ -142,7 +159,8 @@ def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
     city_ar = city.get("name_ar") or p.get("city_name_ar")
     city_id, region_id = to_catalog(city_ar) if city_ar else (None, None)
     district_raw = (p.get("district_name") or "").strip() or None
-    district_ar = find_district_in_text("حي " + district_raw, city_id) if (city_id and district_raw) else None
+    district_ar = ((find_district_in_text("حي " + district_raw, city_id) if (city_id and district_raw) else None)
+                   or _district_from_title(title, city_id))
     area = p.get("area_in_m2")
     photos = [i["url"] for i in sorted(p.get("images") or [], key=lambda i: not i.get("isPrimary")) if i.get("url")]
     # the page prints «رقم ترخيص الإعلان: 7xxxxxxxxx» (badge «إعلان موثق») — it lives only in the ad's prose
