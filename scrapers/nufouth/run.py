@@ -203,6 +203,23 @@ _PLURAL_TO_SINGULAR = (("مصاعد", "مصعد"),)
 _SHARED_SPACE_PREFIX = "مداخل"
 
 
+
+# PDPL (2026-09-28): the «-H» office names an owner's asset «<asset> - <owner's full name> [- n] F-H123»
+# (seen on F-, O-, G- and U- codes; 101 active titles carried a private person's full name). A name
+# is never stored, so for every «-H» code the title keeps only the asset and the code; everything
+# between them is dropped (on government «G-H» rows that is «عقار مالية ـ محضر…», no loss that
+# matters). ad_number is hashed from the RAW unit name, so a listing's identity does not change.
+_OWNER_TITLE_RE = re.compile(r"^(.*?)\s+-\s+.*\s([A-Z]-H\d+)\s*$")
+
+
+def _public_title(name: Optional[str]) -> Optional[str]:
+    name = (name or "").strip()
+    if not name:
+        return None
+    m = _OWNER_TITLE_RE.match(name)
+    return f"{m.group(1).strip()} {m.group(2)}" if m else name
+
+
 def _vocab(text: str) -> str:
     """Normalize this source's amenity vocabulary to the shared token list's spelling."""
     for plural, singular in _PLURAL_TO_SINGULAR:
@@ -400,7 +417,7 @@ def map_listing(msg: dict, ad: dict, unit: Optional[dict],
         "listing_url": listing_url,
         "source": SOURCE,
         "active": True,
-        "title": (unit.get("name") if unit else prop.get("name")) or None,
+        "title": _public_title(unit.get("name") if unit else prop.get("name")),
         "description": description,
         **_amenities(msg, unit, description),
         "property_type": property_type,

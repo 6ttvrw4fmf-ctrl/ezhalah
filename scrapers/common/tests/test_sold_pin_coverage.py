@@ -50,6 +50,8 @@ PIN_COVERED = [
     "alta", "amaall",
     # azdad's own `status` «مباع» (2026-09-28: AD202509210004 resurrected daily without it)
     "azdad",
+    # 2026-09-28: the Nuzul API lists rented/sold units with availability_status
+    "october",
 ]
 
 # The canonical pin payload — active=false plus the prune 3-strike missing_count so the row can

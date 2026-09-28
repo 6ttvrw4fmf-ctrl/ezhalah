@@ -26,9 +26,13 @@
 # and a blocked or 0-row shard prunes nothing. Proven by
 # scrapers/common/tests/test_muktamel_shard_partition.py.
 #
-# The MIN/MAX below are this workflow's own evidenced range, not scrapers/muktamel/run.py's
-# MIN_ID_DEFAULT (deliberately left at 1 — see that file's docstring for why). Re-measure with
-# scrapers/muktamel/diag_page_structure.py before widening either bound.
+# The MIN below is this workflow's own evidenced floor, not scrapers/muktamel/run.py's
+# MIN_ID_DEFAULT (deliberately left at 1 — see that file's docstring for why). MAX is NOT a ceiling
+# (2026-09-28): it is only the floor of the top — every shard asks the source where its ids end
+# (run.py find_ceiling) and sweeps up to that. As a constant it had silently capped the crawl at
+# 32300 while the site ran to ~34311 (~890 live listings never fetched). Measured that day the
+# swept range is ~10,400 ids → ~1,300/shard → ~73 min at the worst observed rate, inside 120m; the
+# range only grows, so re-size the shard count when a shard's own log nears the timeout.
 
 name: Muktamel sharded crawl
 
@@ -58,7 +62,7 @@ on:
         required: false
         default: "24000"
       max_id:
-        description: "Highest listing id across ALL shards"
+        description: "Floor for the top of the sweep — the real ceiling is probed from the source each run"
         required: false
         default: "32300"
 
