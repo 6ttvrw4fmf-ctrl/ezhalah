@@ -300,12 +300,22 @@ how many arrived and how well every field matched, then the totals, then a short
 > 🆕 **New in the last 24 hours:** N listings from N websites · N searchable (N%)
 >
 > 📊 **Match rate, all new listings:**
-> Region N% · City N% · District N% · Buy/Rent N% · Rent period N% · Category N% · Type N% · Price N% · Size N% · Rooms N% · Advanced Filter N%
-> **Fully matched (every field right):** N of N (N%)
+> - 📍 **Location:** Region N% · City N% · District N%
+> - 🏷️ **Deal & type:** Buy/Rent N% · Rent period N% · Category N% · Type N%
+> - 💰 **Numbers:** Price N% · Size N% · Rooms N%
+> - 🎛️ **Advanced Filter:** N%
+> - ✅ **Fully matched (every field right):** N of N (N%)
 >
-> 🌐 **Each website** (most new listings first, one line each, every website that sent listings):
-> - **<website>**: N new · Region N% · City N% · District N% · Buy/Rent N% · Period N% · Type N% · Price N% · Size N% · Rooms N% · AF N% ✅ / ⚠️ / ❌
-> - …
+> 🌐 **Each website** (most new listings first; every website that sent listings gets its own small
+> block, with a blank line between websites):
+>
+> **<website>** · N new ✅ / ⚠️ / ❌
+> - 📍 Region N% · City N% · District N%
+> - 🏷️ Buy/Rent N% · Period N% · Type N%
+> - 💰 Price N% · Size N% · Rooms N%
+> - 🎛️ Advanced Filter N%
+>
+> **<website where every field is 100%>** · N new · everything 100% ✅
 >
 > 🎛️ **Advanced Filter by field:** furnished N% · elevator N% · parking N% · age N% · bathrooms N% · … (every field that had new values)
 > 🔍 **Re-read against the original ad:** N listings · N fields · N wrong (should be 0)
@@ -332,6 +342,8 @@ how many arrived and how well every field matched, then the totals, then a short
 - **AF (per website) and Advanced Filter by field:** the share of the Advanced Filter values the
   website published that reached search correctly as yes / no / unknown.
 - **Fully matched:** a new listing counts only if every field it has is right.
+- **Layout:** one small block per website, never one crowded line. A website where every field is
+  exactly 100% gets the single line "everything 100% ✅" instead of a block.
 - Show the real number, never rounded up. 99.6% is written as 99.6%, not 100%. Mark a website ⚠️
   below 98% on any field and ❌ below 90%, and every ⚠️ or ❌ must appear in "What got fixed" or
   "To reach 10/10".
