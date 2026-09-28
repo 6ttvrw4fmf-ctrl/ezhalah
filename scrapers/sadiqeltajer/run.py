@@ -315,7 +315,14 @@ def parse_deal(text: str) -> Optional[str]:
 # parentheses and conjunctions — «بيع تجاري عمائر و شقق ( تجارية و سكني )». A capture limited to
 # Arabic letters and spaces matched none of those (18 of 40 sampled pages), so the span is taken
 # whole and normalised, then mapped through a CLOSED map.
-_TYPE_RE = re.compile(r"-->\s*(?:بيع|إيجار|ايجار)\s+(.{1,60}?)\s*كود\s*الاعلان")
+#
+# A FEATURED ad carries the site's «مميز» badge in front of the deal word — «--> مميز بيع فلل كود
+# الاعلان : 8134». Anchoring the deal word directly on «-->» skipped every featured ad on the site
+# (8 on 2026-09-28) as if it had no category at all. The badge is page chrome, not a category.
+_TYPE_RE = re.compile(r"-->\s*(?:مميز\s+)?(?:بيع|إيجار|ايجار)\s+(.{1,60}?)\s*كود\s*الاعلان")
+# Rent ads sometimes restate the deal after the category — «فلل ودبلكسات (ايجار)». That is the
+# same category with the deal repeated, never a different one.
+_DEAL_SUFFIX = re.compile(r"\s*\(\s*(?:ايجار|إيجار|بيع)\s*\)$")
 
 _TYPE_AR = {
     "ارض": "أرض", "أرض": "أرض", "اراضي": "أرض", "أراضي": "أرض",
@@ -325,13 +332,21 @@ _TYPE_AR = {
     "شقق": "شقة", "شقة": "شقة", "عمائر": "عمارة", "عمارة": "عمارة",
     "محلات": "محل", "محل": "محل", "مستودعات": "مستودع", "مستودع": "مستودع",
     "مزارع": "مزرعة", "مزرعة": "مزرعة", "بيوت": "بيت", "بيت": "بيت",
-    "مكاتب": "مكتب", "مكتب": "مكتب", "دور": "دور", "أدوار": "دور",
+    "مكاتب": "مكتب", "مكتب": "مكتب", "دور": "دور", "أدوار": "دور", "ادوار": "دور",
     # the compound families this source actually prints
     "تجاري عمائر و شقق ( تجارية و سكني )": "عمارة",
     "تجاري عمائر و شقق": "عمارة",
     "تجاري محلات و صالات تجارية": "محل",
     "تجاري محلات": "محل",
     "وحدات": "شقة",
+    # Categories the 2026-09-28 coverage audit found skipped as if unknown (count on that day's
+    # sitemap). Each is ONE property type in the source's own words, mapped to a type the shared
+    # map already has — never a new one:
+    "دبلكسات": "دوبلكس",                  # 48 + 1 featured → Duplex
+    "تجاري ارض": "أرض تجارية",           # 63 + 1 featured → Commercial Land
+    "محلات و صالات تجارية": "محل",        # 33 — the RENT spelling of «تجاري محلات و صالات تجارية»
+    "ورش صناعية": "ورشة",                 # 5 → Workshop
+    "تجاري فندق": "فندق",                 # 1 → Hotel
 }
 
 # «مخططات» is a SUBDIVISION PLAN — a whole layout of many plots, not one property with one price.
@@ -339,43 +354,69 @@ _TYPE_AR = {
 # put a plan's headline figure on a card as if it were a single plot (AMBIGUOUS-MAPPING ASK-FIRST).
 _TYPE_SKIP = {"مخططات", "مخطط"}
 
+# MIXED BUCKETS — deliberately NOT mapped (AMBIGUOUS-MAPPING ASK-FIRST). Each holds several
+# property types, and the category alone cannot say which one a given ad is. Measured 2026-09-28:
+#   «دور و شقتين و ادوار» (37): «دور ارضي» (a floor), «دور وشقتين» (a floor + two flats, i.e. a
+#       whole building), «بيت قديم», «مجمع سكني», and ad 5965 whose title says «فله» while its own
+#       description says «دور مع شاليه».
+#   «دورين» (21): «دورين مفصولات» (two separate floors), «فله دورين», «عمارة دورين», «بيت شعبي
+#       دورين», «دور علوي نظام دبلوكس».
+#   «مستودعات و ورش» (25): warehouse OR workshop — and one is a factory («مصنع»).
+#   «تجاري ارض للمستودعات و للورش» (12): commercial OR industrial land.
+#   «بيع تجاري» (9, header «بيع بيع تجاري»): no type at all.
+# Filing any of these under one type would put the wrong type on the card. They are counted by
+# name in the run notes so the owner can decide, and stay out until then.
+
+
+def type_category(text: str) -> Optional[str]:
+    """The source's own header category, normalised, or None when the header has none."""
+    m = _TYPE_RE.search(text)
+    if not m:
+        return None
+    return _DEAL_SUFFIX.sub("", re.sub(r"\s+", " ", m.group(1).strip(" .،-|")))
+
 
 def parse_type_ar(text: str) -> Optional[str]:
     """The source's own category from the header, mapped through a CLOSED map. Anything outside it
     yields None and the listing is skipped — never bucketed into a nearest guess."""
-    m = _TYPE_RE.search(text)
-    if not m:
-        return None
-    raw = re.sub(r"\s+", " ", m.group(1).strip(" .،-|"))
-    if raw in _TYPE_SKIP:
+    raw = type_category(text)
+    if not raw or raw in _TYPE_SKIP:
         return None
     return _TYPE_AR.get(raw)
 
 
-def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str]:
+def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
+    """(row, category, skip_reason). A skipped ad always says WHY, so the run notes can count each
+    reason on its own — a single lumped «no_type_deal_or_city» tally hid which real categories were
+    being dropped (the 2026-09-28 coverage audit)."""
     text = own_section(page_html)
     if not text:
-        return None, "residential"
+        return None, "residential", "empty_page"
 
     code = ad_code(text)
     if not code:
-        return None, "residential"
+        return None, "residential", "no_ad_code"
 
+    raw_type = type_category(text)
+    if not raw_type:
+        return None, "residential", "no_category_header"
+    if raw_type in _TYPE_SKIP:
+        return None, "residential", "subdivision_plan"
     type_ar = parse_type_ar(text)
     if not type_ar:
-        return None, "residential"
+        return None, "residential", f"unmapped:{raw_type}"
     property_type = normalize.map_type_exact(type_ar)
     if not property_type:
-        return None, "residential"
+        return None, "residential", f"type_unmapped:{type_ar}"
     category = normalize.category_for_type(property_type).lower()
 
     deal = parse_deal(text)
     if not deal:
-        return None, category
+        return None, category, "no_deal"
 
     region_ar, city_ar, district_raw = parse_location(text)
     if not city_ar:
-        return None, category
+        return None, category, "no_city"
     city = normalize.map_city(city_ar)
     city_id, region_id = to_catalog(city_ar, region_ar)
     district_ar = find_district_in_text(district_raw, city_id) if (district_raw and city_id) else None
@@ -425,7 +466,7 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str]:
         "price_published": (price_total is not None) or (price_per_meter is not None),
     }
     row["additional_info"] = {k: v for k, v in extra.items() if v is not None}
-    return row, category
+    return row, category, ""
 
 
 def fetch_catalogue(s: cc.Session, limit: int = 0) -> list[str]:
@@ -482,9 +523,9 @@ def main() -> int:
             if r.status_code != 200:
                 skipped[f"http_{r.status_code}"] = skipped.get(f"http_{r.status_code}", 0) + 1
                 continue
-            row, cat = map_listing(u, r.text)
+            row, cat, why = map_listing(u, r.text)
             if not row:
-                skipped["no_type_deal_or_city"] = skipped.get("no_type_deal_or_city", 0) + 1
+                skipped[why] = skipped.get(why, 0) + 1
                 continue
             if args.type != "all" and cat != args.type:
                 continue
@@ -492,9 +533,9 @@ def main() -> int:
             if i % 250 == 0:
                 print(f"   … {i}/{len(urls)}", flush=True)
 
+        skip_notes = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
         if skipped:
-            print("  skipped (not guessed): "
-                  + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1])))
+            print("  skipped (not guessed): " + skip_notes)
 
         if dry:
             print(f"✓ {SOURCE} VALIDATION: {len(res)} residential + {len(com)} commercial (nothing written)")
@@ -532,6 +573,7 @@ def main() -> int:
 
         n = len(res) + len(com)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(urls), rows_upserted=n,
+                             notes=f"skipped: {skip_notes or 'none'}"[:300],
                              check_tables=["sadiqeltajer_residential_listings",
                                            "sadiqeltajer_commercial_listings"])
         if not healthy:
