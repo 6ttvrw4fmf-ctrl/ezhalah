@@ -1647,6 +1647,22 @@ def upsert_superoffice_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("superoffice_commercial_listings", rows)
 
 
+def upsert_shomou_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("shomou_residential_listings", rows)
+
+
+def upsert_shomou_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("shomou_commercial_listings", rows)
+
+
+def upsert_maktab_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("maktab_residential_listings", rows)
+
+
+def upsert_maktab_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("maktab_commercial_listings", rows)
+
+
 def upsert_sirdab_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("sirdab_residential_listings", rows)
 

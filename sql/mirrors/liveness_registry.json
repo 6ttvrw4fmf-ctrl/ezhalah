@@ -798,6 +798,18 @@
     "grace": 3
   },
   {
+    "platform": "shomou",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
+    "platform": "maktab",
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "suwar",
     "strategy": "CANDIDATE_PLUS_DIRECT",
     "sla_hours": 168,
