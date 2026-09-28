@@ -34,7 +34,10 @@ site's dot-grouped «الحد 60.000» / «الحد 4.500000» as 60000 / 450000
 «السوم» (107 ads) is the CURRENT OFFER a buyer made — never the price, kept as text. «سعر المتر» (42 ads)
 → price_per_meter. When the price figure IS the page's own «سعر المتر» (land: «الحد 470» + «سعر المتر 470»,
 unit header «500 ر.س» + «سعر المتر 500») the source labels that figure per-m² → price_per_meter only,
-price_total NULL (almotmkenah precedent). «0 ر.س» is no price. The site states NO rent period
+price_total NULL (almotmkenah precedent). LAND PRICED BELOW ANY POSSIBLE TOTAL (≤ 10,000 on a sale) is
+the platform's per-m² figure even when «سعر المتر» is blank — owner decision 2026-09-28 («judge by the
+price»): measured 35 land ads at 350–1,400 for 238–2,781 m² plots and NONE between 1,400 and 50,000, and
+ad 688953 prints «سعر المتر 300» equal to its offer («السوم 300») beside «الحد 350». «0 ر.س» is no price. The site states NO rent period
 (3 ads' prose does) → normalize.rent_period_from_ad(price, title+description, None, title).
 TYPE: the site's «نوع العقار». Two values are COMBINED buckets — «معارض - محلات» and «شاليه - استراحة» —
 resolved only when the listing's own title names exactly one side (محل → Shop, معرض → Showroom; شاليه →
@@ -98,6 +101,8 @@ _NUM_RE = re.compile(r"[\d٠-٩][\d٠-٩,٬.]*")
 _SAR_RE = re.compile(r"([\d٠-٩][\d٠-٩,٬.]*)\s*ر\.?\s*س")
 _DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
+
+_LAND_PPM_MAX = 10_000   # a land sale below this is a per-m² figure (no plot here costs ≤ 10,000 in total)
 
 def get(s: cc.Session, url: str) -> str:
     for attempt in range(3):
@@ -224,7 +229,12 @@ def map_page(d: dict[str, Any], ad_id: str, url: str, unit_of: Optional[str] = N
     ppm_raw = d["spec"].get("سعر المتر") or ""
     ppm = _sar(ppm_raw)
     per_meter = bool(price and ppm and price == ppm)             # the source labels this figure per-m²
-    if per_meter:
+    # a land sale priced below any possible plot total is this site's per-m² figure (owner 2026-09-28, see top)
+    land_ppm = bool(not per_meter and price and price <= _LAND_PPM_MAX and deal == "Buy"
+                    and ptype in ("Residential Land", "Commercial Land"))
+    if land_ppm:
+        ppm = price
+    if per_meter or land_ppm:
         price = None
     title = redact_pii(d["title"]) or ""
     desc = redact_pii(d["description"]) or ""
@@ -285,9 +295,9 @@ def map_page(d: dict[str, Any], ad_id: str, url: str, unit_of: Optional[str] = N
     stored = row.get("price_total") if deal == "Buy" else row.get("price_annual")
     row["price_evidence"] = normalize.price_evidence(
         field="سعر المتر" if per_meter else price_field, raw=(ppm_raw if per_meter else price_raw) or None,
-        stored=ppm if per_meter else stored,
-        kind="per_meter" if per_meter else ("total" if deal == "Buy" else "annual"),
-        unit="per_meter" if per_meter else "total", origin="spec_table",
+        stored=ppm if (per_meter or land_ppm) else stored,
+        kind="per_meter" if (per_meter or land_ppm) else ("total" if deal == "Buy" else "annual"),
+        unit="per_meter" if (per_meter or land_ppm) else "total", origin="spec_table",
         authoritative_absent=not price and not ppm and bool(re.search(r"لا يوجد|^0 ر", price_raw.strip())))
     info = {
         "source_ad_id": d["spec"].get("معرف الإعلان"),
