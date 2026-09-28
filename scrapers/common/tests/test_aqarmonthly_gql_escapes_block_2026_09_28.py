@@ -91,3 +91,34 @@ def test_workflow_opts_in_to_the_proxy_fallback():
     from pathlib import Path
     wf = (Path(m.__file__).resolve().parents[2] / ".github/workflows/aqarmonthly-sync.yml").read_text()
     assert "SCRAPE_PROXY_FALLBACK_URL: ${{ secrets.WASALT_PROXY_URL }}" in wf
+
+
+# ── run 36385996203: category 108 (event hall / meeting room / warehouse) written with NULL type ──
+_G = {"id": 6380538, "category": 108, "uri": "شارع-ثابت-حي-نبلاء-المدينة-المنورة-منطقة-المدينة-المنورة-6380538",
+      "area": 1200, "content": "قاعتين للمناسبات", "imgs": [], "address": None, "city_id": 41}
+_P = {"discounted_price": 174000}
+
+
+@pytest.fixture
+def no_catalog(monkeypatch):
+    from scrapers.common import arabic_location as al
+    monkeypatch.setattr(al, "_load", lambda: None)  # never hit the network
+    for name in ("_CITY", "_CID_AR", "_REGION_NORM", "_DISTRICT_AR_BY_CITY"):
+        monkeypatch.setattr(al, name, {})
+
+
+def test_non_residential_category_is_not_written(no_catalog):
+    assert m.map_listing(dict(_G), _P) is None
+
+
+def test_every_mapped_residential_category_still_maps(no_catalog):
+    for cat, ptype in m.CATEGORY_TYPE.items():
+        row = m.map_listing(dict(_G, category=cat), _P)
+        assert row is not None and row["property_type"] == ptype
+
+
+def test_missing_category_keeps_the_old_null_type_behaviour(no_catalog):
+    g = dict(_G)
+    g.pop("category")
+    row = m.map_listing(g, _P)
+    assert row is not None and row["property_type"] is None
