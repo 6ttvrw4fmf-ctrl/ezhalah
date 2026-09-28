@@ -304,7 +304,7 @@ def main() -> int:
         if not complete:
             print(f"  NOT pruning: {unreadable} of {len(nids)} page(s) unreadable", flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(nids), rows_upserted=len(res) + len(com),
-                             check_tables=[RES_TABLE, COM_TABLE])
+                             check_tables=["shomou_residential_listings", "shomou_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()", flush=True)
             return 1

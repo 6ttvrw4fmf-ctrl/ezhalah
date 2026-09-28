@@ -212,7 +212,7 @@ def main() -> int:
         if not complete:
             print("  NOT pruning: the feed's total did not match what was read", flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(offices), rows_upserted=len(res) + len(com),
-                             check_tables=[RES_TABLE, COM_TABLE])
+                             check_tables=["maktab_residential_listings", "maktab_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()", flush=True)
             return 1
