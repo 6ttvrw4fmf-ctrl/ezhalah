@@ -61,7 +61,9 @@ if str(ROOT.parent) not in sys.path:
 from scrapers.common import db, normalize  # noqa: E402
 
 BASE = "https://www.aqarcity.net"
-SITEMAP_INDEX = f"{BASE}/sitemaps/sitemap-index.xml"
+# /sitemaps/sitemap-index.xml answers 404 since the 2026-09 redesign; robots.txt now names
+# /sitemap.xml, a plain <urlset> carrying the /property/<id> urls itself (1,794 on 2026-09-28).
+SITEMAP_INDEX = f"{BASE}/sitemap.xml"
 SITEMAP_FALLBACK = f"{BASE}/sitemap.xml"
 # Cloudflare-fronted origin; keep concurrency gentle (same spirit as Sanadak's 4 workers).
 WORKERS = int(os.environ.get("AQARCITY_WORKERS", "4"))
@@ -339,11 +341,13 @@ def _redact(text: Optional[str]) -> Optional[str]:
 
 # ── Sitemap enumeration ───────────────────────────────────────────────────────
 def sitemap_urls(s: cc.Session) -> list[str]:
-    """Return /property/<id> URLs from the gzipped child sitemap (fallback: plain sitemap.xml)."""
+    """Return /property/<id> URLs from the sitemap (a plain urlset, or an index of child sitemaps)."""
     urls: list[str] = []
     try:
         idx = s.get(SITEMAP_INDEX, timeout=30).text
-        children = re.findall(r"<loc>([^<]+)</loc>", idx)
+        urls += re.findall(r"<loc>([^<]+/property/\d+)</loc>", idx)  # a urlset lists them directly
+        # Only CHILD SITEMAPS are followed — never every <loc>, which in a urlset is a listing page.
+        children = re.findall(r"<loc>([^<]+\.xml(?:\.gz)?)</loc>", idx)
         for child in children:
             try:
                 r = s.get(child, timeout=30)
@@ -503,7 +507,14 @@ def _probe_id(s: cc.Session, url: str) -> str:
         except Exception:
             time.sleep(1.0)
             continue
-        if "/property/" not in str(r.url) or "Page Not Found" in r.text:
+        # THE SOURCE'S OWN NOT-FOUND. Before the 2026-09 redesign a removed ad redirected to
+        # /notfoundproperty («Page Not Found»). Now it answers a real HTTP 404 on its own URL with
+        # an Arabic «الصفحة غير موجودة» page — measured 2026-09-28: AC30614/30884/30885/30886 (active
+        # at grace) and a made-up id all 404, five sitemap ids 200 + JSON-LD. Reading that 404 as
+        # 'exists' held every removal as UNKNOWN and kept the id-walk from ever reaching max_miss.
+        # A body is required (LISTING_LIVENESS.md §1: an empty 404 is not an answer).
+        if (r.status_code in (404, 410) and r.text) \
+                or "/property/" not in str(r.url) or "Page Not Found" in r.text:
             last = "notfound"
             continue  # a fresh session can 302→/notfound before the cookie lands — retry once
         if _is_expired_body(r.text):
@@ -1029,7 +1040,8 @@ def main() -> int:
                 if not canary_ok:
                     return "unknown", f"withheld, source not proven to be answering: {canary_why}"
             if status == "notfound":
-                return "gone", "redirected to /notfoundproperty (control-validated hard 404)"
+                return "gone", ("the source's own not-found: HTTP 404/410 on the listing's own URL "
+                                "or a redirect to /notfoundproperty (canary-gated)")
             if status == "expired":
                 return "gone", "source published its own end-of-ad banner or expiry title suffix"
             if status == "live":
