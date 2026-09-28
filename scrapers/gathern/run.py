@@ -176,15 +176,17 @@ def _throttle() -> None:
 
 
 def session() -> cc.Session:
-    # NO `source: web` header (owner 2026-09-28: «we are not getting much of Gathern»). With it the
-    # search API serves a web subset of the month-bookable catalogue — Riyadh 3,267 vs 12,972 without it,
-    # Jeddah 801 vs 6,108, ×4.6 over the top 11 cities — so ~¾ of the homes bookable for the next 30
-    # nights never reached us and most stored rows went unrefreshed. The items are the same shape either
-    # way (nights=30, long_stay=true, final_price = the discounted 30-night total).
+    # `source: web` IS LOAD-BEARING — never drop it (PR #5177 did, 2026-09-28, and was reverted the same
+    # day). Without it the search API also serves APP-ONLY units, ~4× more (Riyadh 12,939 vs 3,238), and
+    # their gathern.co pages are 404: measured 2026-09-28 from a clean home connection, Riyadh page 1–12,
+    # web-feed units 15/15 HTTP 200, full-feed-only units 19/20 HTTP 404. Every card we show opens the
+    # listing's gathern.co page, so an app-only unit is a card that lands on «not found». The web view is
+    # not a quarter of the catalogue; it is the part of it a web user can open.
     s = cc.Session(impersonate="chrome124")
     s.headers.update({
         "Accept": "application/json",
         "Accept-Language": "ar,en-US;q=0.7,en;q=0.6",
+        "source": "web",
         "Origin": BASE_WEB,
         "Referer": f"{BASE_WEB}/",
     })
@@ -982,9 +984,7 @@ def crawl(s: cc.Session, cities: list[dict], ci: str, co: str,
         # _meta.pageCount under-reports the real tail (Jeddah: pageCount=121 but units run to ~p129),
         # so we page until empty pages — not to pageCount. Guard with a generous hard cap so a
         # mis-behaving city can't loop forever.
-        # 2,000: the full catalogue runs ~1,300 pages for Riyadh at 10 per page (2026-09-28); the old 400
-        # was sized for the web subset and would have stopped the biggest cities a third of the way in.
-        hard_cap = max_pages or 2000
+        hard_cap = max_pages or 400
         city_kept = 0
         page = 1
         empties = 0
