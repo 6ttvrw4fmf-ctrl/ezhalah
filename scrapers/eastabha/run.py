@@ -582,6 +582,10 @@ def _listing_url(p: dict) -> str:
     return f"{BASE}/properties/{p.get('id')}/"
 
 
+_NOT_SAUDI = {"أبو ظبي", "ابو ظبي", "أبوظبي", "ابوظبي", "دبي", "الشارقة", "عجمان", "رأس الخيمة", "راس الخيمة",
+              "الفجيرة", "أم القيوين", "ام القيوين", "الإمارات", "الامارات", "الإمارات العربية المتحدة",
+              "الكويت", "البحرين", "المنامة", "الدوحة", "قطر", "مسقط", "سلطنة عمان"}
+
 def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured_src: Optional[str]):
     """Return (row, category, gone) or (None, None, False) if it must be skipped (auction / unmappable)."""
     actions = _names(p, "property_action_category", taxd)
@@ -630,6 +634,11 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     region_ar = next((r for r in region_names if REGION_MAP_AR.get(r)), None) or next(
         (r for r in region_names if r != "المملكة العربية السعودية"), None
     )
+    # Ezhalah is Saudi-only. eastabha's WordPress still serves 12 ads from 2014 in أبو ظبي (Yas Island,
+    # Shakhbout City) — never a Saudi listing; skipped (the seen-set prune retires the stored copies).
+    # Exact names only: «العين» is left out on purpose, it is also a Saudi place name.
+    if city_ar.strip() in _NOT_SAUDI or any(r.strip() in _NOT_SAUDI for r in region_names):
+        return None, None, False
     # Overrides first (Eastabha's historical labels, exact match), then the shared canonical map —
     # which also brings map_city()'s normalization + substring tolerance to inputs the old private
     # .get() missed (those all returned an honest None before, so this is coverage gain only).
