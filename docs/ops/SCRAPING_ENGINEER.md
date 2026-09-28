@@ -65,6 +65,16 @@ work.
 diagnostic workflow, or `loader-active-platforms-check.yml`. Cleanup and liveness can remove listings,
 and that is not your job.
 
+## The owner's open requests (do these first, then delete each line when it's done and proven)
+- **Gathern monthly coverage (owner, 2026-09-28: «we are not scraping much of Gathern monthly
+  data»).** Measured the same day: Gathern's full catalogue has about 31,445 homes (Riyadh 11,011),
+  but its **website** only shows about 4,462 (Riyadh 1,321), and we already crawl about 100% of
+  those. The rest open as a 404 on gathern.co (19 of 20 tested): they are app-only, so a customer
+  clicking them would land on a dead page, and we must not list them (PRs #5177 → reverted #5180).
+  Gathern's web view shrank on 2026-09-01 (Riyadh 13,388 → 2,666). **Your job now:** every week,
+  compare Gathern's web-view count with ours per city. If the web view grows back, crawl it the same
+  day. Delete this line only if Gathern's web view comes back and we carry it.
+
 ## Facts you don't need to rediscover (from your first runs, 2026-09-27)
 These cost your first runs a lot of time. Use them instead of working them out again.
 - **Start with your last report:** read your latest `ops_daily_engineer_run` report. Whatever it
