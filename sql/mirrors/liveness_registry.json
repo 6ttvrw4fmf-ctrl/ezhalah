@@ -199,8 +199,8 @@
   },
   {
     "platform": "aqarmonthly",
-    "strategy": "CRAWL_PRESENCE_ONLY",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
