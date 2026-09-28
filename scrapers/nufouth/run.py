@@ -105,6 +105,13 @@ FIELDS WORTH NAMING (the traps)
   src='…'/></div>»), not URLs; `images_prop_main` / `images_unit_main` are plain paths. Paths
   contain SPACES and Arabic and must be percent-encoded (verified: the quoted URL returns 200
   image/jpeg). Photos measured on 324/324 units, median 8.
+· `unit.name` / `property.name` ARE INTERNAL DOC NAMES THAT CARRY THE OWNER'S NAME (PDPL).
+  «(<unit_no>-<type>)-<asset> - <owner> [- n] F-H123»; the name also sits INSIDE <asset> («فيلا
+  <person>», «عمارة <person>») and after the dash on N/R codes, so no cut on the dash can remove
+  it. Measured 2026-09-28: a named individual in 117 of 295 stored titles, a family name in ~85.
+  The site never shows these strings (0 hits on its four public pages); its own modal labels a
+  unit «<unit_type> <unit_no>» (generateModalTabName) and a whole-property offer by its
+  property_type. That label is the title. unit.name is only ever HASHED, into the ad identity.
 
 WRITES go through db.upsert_nufouth_{residential,commercial}_batch; REMOVALS through prune_unseen
 with the record-level oracle above main() (see LIVENESS).
@@ -390,7 +397,8 @@ def map_listing(msg: dict, ad: dict, unit: Optional[dict],
         "listing_url": listing_url,
         "source": SOURCE,
         "active": True,
-        "title": (unit.get("name") if unit else prop.get("name")) or None,
+        # The site's own label, never unit/property.name: those carry the owner's name (docstring).
+        "title": f"{type_ar} {(unit or {}).get('unit_no') or ''}".strip(),
         "description": description,
         **_amenities(msg, unit, description),
         "property_type": property_type,
