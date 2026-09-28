@@ -134,15 +134,43 @@ def _adid(listing_url: str) -> str:
 
 
 def _collect_candidates(client, limit: int) -> list[dict]:
-    """Active rows, never-verified first. Ordering by last_verified_alive_at NULLS FIRST is the
-    point of the column: rows nobody has ever proved alive are exactly the ones to probe first."""
+    """Active rows, least-recently LOOKED AT first (LISTING_LIFECYCLE_ENGINEER.md §4.1d).
+
+    This used to order by last_verified_alive_at NULLS FIRST. A row dealapp answers with a shell
+    never gets that stamp, so it stayed at the head forever: over 2026-09-21..28, 312 rows were
+    probed on all 8 runs and 159 on 7, every one UNKNOWN, and from an ordinary network all 16
+    sampled render the same listing-less page as bogus id 999999999. The run re-read the same
+    unresolvable rows daily and reported "560 of 600 UNKNOWN". last_liveness_probe_at moves on
+    every verdict, so a probed row goes to the back for a full cycle."""
     rows = (client.table(TABLE)
             .select("id, ad_number, listing_url, missing_count, last_verified_alive_at")
             .eq("active", True)
-            .order("last_verified_alive_at", desc=False, nullsfirst=True)
+            .order("last_liveness_probe_at", desc=False, nullsfirst=True)
             .limit(max(limit * 4, limit) if limit else 20000)
             .execute().data or [])
     return [r for r in rows if (r.get("listing_url") or "").strip()]
+
+
+BOGUS_ADID = "999999999"
+
+
+def _canaries(client, s, budget: Optional[RequestBudget]) -> dict:
+    """Positive: the 3 rows most recently proved alive; at least one must still read ALIVE.
+    Negative: an id that cannot exist must NOT read ALIVE. Charged to the request budget."""
+    rows = (client.table(TABLE).select("listing_url, last_verified_alive_at")
+            .eq("active", True).not_.is_("last_verified_alive_at", "null")
+            .order("last_verified_alive_at", desc=True).limit(3).execute().data or [])
+    live = 0
+    for r in rows:
+        url = r["listing_url"]
+        st, body, final = probe(s, url, budget)
+        live += classify_dealapp(st, body=body, adid=_adid(url), final_url=final,
+                                 requested_url=url) == ALIVE
+    bogus = f"{BASE}/ar/ad-details/{BOGUS_ADID}"
+    st, body, final = probe(s, bogus, budget)
+    bogus_alive = classify_dealapp(st, body=body, adid=BOGUS_ADID, final_url=final,
+                                   requested_url=bogus) == ALIVE
+    return {"live": live, "live_n": len(rows), "live_ok": live > 0, "bogus_alive": bogus_alive}
 
 
 def probe(s: cc.Session, url: str, budget: Optional[RequestBudget] = None
@@ -197,12 +225,24 @@ def main() -> int:
         sitemap = harvest_sitemap_ids(s, budget)
         stats["sitemap_ids"] = len(sitemap)
 
+        # Canaries first: one row we proved alive most recently must still read ALIVE, and a bogus
+        # id must NOT. The second is the one that matters — if a page that cannot exist reads
+        # ALIVE, the classifier or the transport is lying and nothing this run sees is written.
+        canary = _canaries(client, s, budget)
+        stats["canary"] = canary
+        if canary["bogus_alive"]:
+            print(f"✗ CANARY: bogus id {BOGUS_ADID} read ALIVE — nothing will be written", flush=True)
+
         cands = _collect_candidates(client, args.limit)
-        # Sitemap-absent first — probe order only, never a verdict.
-        cands.sort(key=lambda r: sitemap_candidate_rank(_adid(r["listing_url"]), sitemap)
-                   if sitemap else 1)
+        # Within the least-recently-probed window, sitemap-PRESENT first. dealapp gives no death
+        # signal on the ad URL (a removed ad renders the same shell as a bogus id, which is
+        # UNKNOWN), so leading with sitemap-absent rows only spent the budget on answers that can
+        # never come. Probe order only, never a verdict; the rotation still reaches every row.
+        cands.sort(key=lambda r: -sitemap_candidate_rank(_adid(r["listing_url"]), sitemap)
+                   if sitemap else 0)
         cands = cands[:args.limit] if args.limit else cands
 
+        writes_ok = args.apply and not canary["bogus_alive"]
         pending: list[tuple[dict, str, int, int]] = []   # (row, action, strikes, http_status)
         for row in cands:
             adid = _adid(row["listing_url"])
@@ -218,7 +258,7 @@ def main() -> int:
                        policy=policy, evidence=EvidenceKind.DIRECT)
             pending.append((row, d.action, d.strikes, status))
 
-            if args.apply and d.action == "reset":
+            if writes_ok and d.action == "reset":
                 # last_liveness_probe_at = "we LOOKED", whatever the verdict. It is what lets
                 # this sweep's own worklist rotate fairly instead of re-reading the rows it can
                 # never resolve (migration 20260924). Never evidence of life on its own.
@@ -228,11 +268,21 @@ def main() -> int:
                 stats["verified"] += 1
 
         # A run that verified almost nothing is being served shells; its deaths are not evidence.
-        trusted = environment_is_trustworthy(stats["alive"], stats["scanned"])
+        trusted = (environment_is_trustworthy(stats["alive"], stats["scanned"])
+                   and canary["live_ok"] and not canary["bogus_alive"])
         if not trusted:
             stats["quarantined"] = True
 
-        if args.apply and trusted:
+        if writes_ok:
+            # "We LOOKED", for every row this run read that no branch below writes: UNKNOWNs, and
+            # strikes/kills the trust gate held back. Never evidence — only the rotation key.
+            looked = [row["id"] for row, action, _s, _st in pending
+                      if action not in ("reset",) and not (trusted and action in ("strike", "deactivate"))]
+            for i in range(0, len(looked), 200):
+                client.table(TABLE).update({"last_liveness_probe_at": now_iso}) \
+                    .in_("id", looked[i:i + 200]).execute()
+
+        if writes_ok and trusted:
             for row, action, strikes, _status in pending:
                 if action == "strike":
                     client.table(TABLE).update({"missing_count": strikes,
@@ -273,7 +323,7 @@ def main() -> int:
                 "verdict": {"strike": "strike", "deactivate": "kill"}.get(action, "unknown"),
                 "missing_count_before": int(row.get("missing_count") or 0),
                 "missing_count_after": strikes,
-                "applied": bool(args.apply and trusted and action in ("strike", "deactivate")),
+                "applied": bool(writes_ok and trusted and action in ("strike", "deactivate")),
             }
             for row, action, strikes, st in pending
             if action != "reset"
@@ -292,8 +342,10 @@ def main() -> int:
                 f"scanned={stats['scanned']} "
                 f"alive={stats['alive']} dead={stats['dead']} unknown={stats['unknown']} "
                 f"verified={stats['verified']} strike={stats['struck']} "
-                f"inactivated={stats['deactivated']} sitemap_ids={stats['sitemap_ids']}"
-                + ("" if trusted else " | QUARANTINED: verified-rate too low, no deactivation written"))
+                f"inactivated={stats['deactivated']} sitemap_ids={stats['sitemap_ids']} "
+                f"canary_live={canary['live']}/{canary['live_n']} "
+                f"canary_bogus={'ALIVE!' if canary['bogus_alive'] else 'not-alive'}"
+                + ("" if trusted else " | QUARANTINED: verified-rate or canary failed, no deactivation written"))
         print(note, flush=True)
         end_run(run_id, ok=True, rows_seen=stats["scanned"],
                 rows_upserted=stats["verified"] + stats["deactivated"],

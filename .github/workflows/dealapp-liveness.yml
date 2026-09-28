@@ -37,15 +37,15 @@ on:
         default: "600"
       proxy:
         description: >-
-          EXPERIMENT ONLY. Route through the shared Saudi residential proxy. That pool is
-          capacity-limited and shared with wasalt (ARCHITECTURE.md §20 rule 14) — always pair
-          with max_requests. Scheduled runs NEVER take this path.
+          Route through the shared Saudi residential proxy (the scheduled path does). That pool
+          is capacity-limited and shared with wasalt (ARCHITECTURE.md §20 rule 14) — always
+          paired with max_requests. false = measure plain CI egress.
         type: boolean
-        default: false
+        default: true
       max_requests:
-        description: "Hard ceiling on TOTAL requests (sitemap + probes + retries). 0 = unlimited."
+        description: "Hard ceiling on TOTAL requests (sitemap + canaries + probes + retries). 0 = unlimited."
         required: false
-        default: "0"
+        default: "800"
 
 concurrency:
   group: dealapp-liveness
@@ -80,18 +80,21 @@ jobs:
             APPLY="--apply"
           fi
 
-          # PROXY IS DISPATCH-ONLY, BY CONSTRUCTION. The condition tests inputs.proxy, which is
-          # empty on a schedule event, so the cron path cannot reach the shared pool however the
-          # inputs are defaulted. Routing a daily job onto a capacity-limited resource is an owner
-          # decision; this flag exists to MEASURE whether that decision is worth making.
+          # THE SCHEDULED RUN USES THE PROXY (2026-09-28, owner order "WE NEED IT ALL FIXED").
+          # From GitHub egress dealapp renders a listing-less shell for ~78-88% of LIVE ids, the
+          # same for every client (dealapp-fetch-diagnostic runs 33000533871/33001226104: four TLS
+          # profiles and system curl alike; no recovery on retry up to 120 s). A shell is UNKNOWN,
+          # so from CI the job cannot answer. It is one sequential session (0.35 s throttle) with a
+          # hard 800-request ceiling, ~30 KB/page brotli, logged as dealapp_liveness_proxy so
+          # mon_detect_proxy_contention() counts it. A dispatch can pass proxy=false to measure CI.
           PROXY=""
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.proxy }}" = "true" ]; then
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.proxy }}" = "true" ]; then
             PROXY="--proxy"
           fi
 
           exec python -m scrapers.dealapp.liveness_run \
             --limit "${{ inputs.limit || '600' }}" \
-            --max-requests "${{ inputs.max_requests || '0' }}" \
+            --max-requests "${{ inputs.max_requests || '800' }}" \
             $PROXY $APPLY
 
       # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────
