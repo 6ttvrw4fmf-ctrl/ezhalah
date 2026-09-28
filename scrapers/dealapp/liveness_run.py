@@ -47,7 +47,7 @@ from scrapers.common.liveness_contract import (
 )
 from scrapers.common.liveness_policies import policy_for
 from scrapers.dealapp.liveness import (
-    classify_dealapp, environment_is_trustworthy, sitemap_candidate_rank,
+    OriginBudget, classify_dealapp, environment_is_trustworthy, from_edge, sitemap_candidate_rank,
 )
 
 BASE = "https://dealapp.sa"
@@ -62,6 +62,10 @@ MIN_INTERVAL = 0.35
 # incident (failure 0.1% -> 66.7%) is what it costs.
 RUN_NAME_CI = "dealapp_liveness"
 RUN_NAME_PROXY = "dealapp_liveness_proxy"
+
+
+_ORIGIN = OriginBudget()
+_DEADLINE = time.monotonic() + 50 * 60   # pacing must never outlast the 60-min job
 
 
 class RequestBudget:
@@ -168,13 +172,12 @@ def _canaries(client, s, budget: Optional[RequestBudget]) -> dict:
 # ── A CDN copy is not the source's answer (2026-09-28) ─────────────────────────────────────────
 # dealapp.sa sits behind CloudFront, which caches the rendered ad page for DAYS and keys it on the
 # path only (a query string is ignored). Measured from one POP: the bare /ar/ad-details/{id} of a
-# live ad came back as a listing-less shell with `Age: 130553` (36 h), while /ar/ad-details/{id}/
-# (a different cache key, so a fresh origin render) carried that ad's schema. The origin render is
-# itself flaky, and CloudFront freezes whichever outcome it got — which is why retrying the bare URL
-# never recovered (dealapp-fetch-diagnostic retry mode: 0/49 up to 120 s) and why different egress
-# saw different shell rates. So: never read an old cached copy as an answer, and ask up to three
-# fresh renders under three cache keys before settling for UNKNOWN. A dead ad renders a shell on every key,
-# so it stays UNKNOWN exactly as before — this only recovers answers, it creates no deaths.
+# live ad came back as dealapp's registration wall (the view-quota page, see liveness.py) with
+# `Age: 130553` (36 h), while /ar/ad-details/{id}/ (a different cache key, so a fresh origin render)
+# carried that ad's schema. CloudFront freezes whichever page the origin gave — which is why retrying
+# the bare URL never recovered (dealapp-fetch-diagnostic retry mode: 0/49 up to 120 s). So: never
+# read an old cached copy as an answer; when the copy we got is stale, ask the next cache key (an
+# edge hit is refunded to the quota). A fresh render is final.
 FRESH_MAX_AGE_S = 3600
 
 
@@ -188,16 +191,16 @@ def probe_listing(s: cc.Session, listing_url: str, budget: Optional[RequestBudge
                   ) -> tuple[str, Optional[int]]:
     """(verdict, http_status) for one ad: the first variant that is not UNKNOWN, else UNKNOWN."""
     adid = _adid(listing_url)
-    status: Optional[int] = None
     for url in _variants(listing_url):
         status, body, final = probe(s, url, budget)
-        # requested_url without the trailing slash: a slash-stripping redirect must not read as
-        # "moved off the ad path" (DEAD) — the id path is still in the final URL.
-        v = classify_dealapp(status, body=body, adid=adid, final_url=final,
-                             requested_url=url.rstrip("/"))
-        if v != UNKNOWN:
-            return v, status
-    return UNKNOWN, status
+        if status is None:
+            continue          # a stale CDN copy (or no answer): ask the next cache key
+        # A fresh render is final — every extra key is one more render against dealapp's
+        # per-visitor quota (liveness.OriginBudget). requested_url without the trailing slash: a
+        # slash-stripping redirect must not read as "moved off the ad path" (DEAD).
+        return classify_dealapp(status, body=body, adid=adid, final_url=final,
+                                requested_url=url.rstrip("/")), status
+    return UNKNOWN, None
 
 
 def probe(s: cc.Session, url: str, budget: Optional[RequestBudget] = None
@@ -210,9 +213,15 @@ def probe(s: cc.Session, url: str, budget: Optional[RequestBudget] = None
     for attempt in range(3):
         if budget is not None and not budget.spend():
             return None, "", ""      # out of budget => UNKNOWN, which writes nothing
+        if time.monotonic() > _DEADLINE:
+            return None, "", ""      # out of time => UNKNOWN, which writes nothing
         try:
-            _throttle()
+            # dealapp's anonymous view quota (liveness.py): an unpaced sweep walls itself after
+            # ~10 renders and leaves the wall cached under each ad's URL for days.
+            slot = _ORIGIN.acquire()
             r = s.get(url, timeout=45, allow_redirects=True)
+            if from_edge(r):
+                _ORIGIN.refund(slot)
             try:
                 age = int((r.headers or {}).get("age") or 0)
             except (TypeError, ValueError):

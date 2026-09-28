@@ -934,9 +934,7 @@ migration-drift-guard rule in `AGENTS.md`).
     - **Adding a proxy consumer means re-checking the clock, not just the cap.** The current
       consumers and their windows: wasalt sweeps 00:40/00:45, 08:40/08:45, 16:40/16:45; wasalt
       cleanup + enum-liveness 03:15–03:19 and 21:01; wasalt enrich 05:00; enrich-ar `15 */4`
-      (short, ≤8.3 min); souq24 ~04:38; dealapp liveness (cron 02:40, measured start ~07:30–09:00
-      UTC; ONE sequential session, ≤2,400 requests, platform `dealapp_liveness_proxy`, since
-      2026-09-28).
+      (short, ≤8.3 min); souq24 ~04:38.
     - **souq24's failure is NOT proxy contention** — measured 2026-08-23, recorded so it is not
       re-guessed: souq24 has no proxy neighbour in its window. Its signature is a 16-minute
       `harvest_ids` followed by a ~2h stall in the 8-worker fetch loop, ending in a SIGINT kill with

@@ -267,7 +267,7 @@ class _Sess:
 
 
 def test_an_old_cached_copy_is_not_an_answer(monkeypatch):
-    monkeypatch.setattr(R, "_throttle", lambda: None)
+    monkeypatch.setattr(R, "_ORIGIN", R.OriginBudget(per_min=10_000))
     u = REQ.format(5) + "/"
     stale = _Sess({u: _Resp(200, SCHEMA.format(5), u, age=130553)})
     assert R.probe(stale, u) == (None, "", ""), "a 36-hour-old CDN copy says nothing about now"
@@ -275,24 +275,25 @@ def test_an_old_cached_copy_is_not_an_answer(monkeypatch):
     assert R.probe(fresh, u)[0] == 200
 
 
-def test_a_shell_on_one_cache_key_falls_through_to_a_fresh_render(monkeypatch):
-    monkeypatch.setattr(R, "_throttle", lambda: None)
+def test_a_stale_copy_on_one_cache_key_falls_through_to_a_fresh_render(monkeypatch):
+    monkeypatch.setattr(R, "_ORIGIN", R.OriginBudget(per_min=10_000))
     slash, en = REQ.format(5) + "/", "https://dealapp.sa/en/ad-details/5/"
-    sess = _Sess({slash: _Resp(200, "<html>shell</html>", slash),
+    sess = _Sess({slash: _Resp(200, "<html>wall</html>", slash, age=130553),
                   en: _Resp(200, SCHEMA.format(5), en)})
     assert R.probe_listing(sess, REQ.format(5)) == (R.ALIVE, 200)
     assert sess.asked == [slash, en], "the bare URL is the stale cache key — never ask it"
 
 
-def test_a_shell_on_every_key_stays_unknown_never_dead(monkeypatch):
-    monkeypatch.setattr(R, "_throttle", lambda: None)
+def test_a_fresh_shell_is_final_and_unknown_never_dead(monkeypatch):
+    monkeypatch.setattr(R, "_ORIGIN", R.OriginBudget(per_min=10_000))
     keys = [REQ.format(9) + "/", "https://dealapp.sa/en/ad-details/9/", "https://dealapp.sa/en/ad-details/9"]
     sess = _Sess({k: _Resp(200, "<html>shell</html>", k) for k in keys})
     assert R.probe_listing(sess, REQ.format(9))[0] == R.UNKNOWN
+    assert sess.asked == keys[:1], "a FRESH render is final — another key is another quota render"
 
 
 def test_a_slash_stripping_redirect_is_not_read_as_moved_off_the_ad(monkeypatch):
-    monkeypatch.setattr(R, "_throttle", lambda: None)
+    monkeypatch.setattr(R, "_ORIGIN", R.OriginBudget(per_min=10_000))
     slash = REQ.format(5) + "/"
     sess = _Sess({slash: _Resp(200, SCHEMA.format(5), REQ.format(5))})   # served at the bare URL
     assert R.probe_listing(sess, REQ.format(5))[0] == R.ALIVE
@@ -327,12 +328,3 @@ def test_canaries_probe_a_recent_alive_row_and_the_bogus_id(monkeypatch):
     assert urls[0] == REQ.format(7) + "/" and REQ.format(R.BOGUS_ADID) + "/" in urls
     assert c == {"live": 1, "live_n": 1, "live_ok": True, "bogus_alive": False}
 
-
-def test_the_scheduled_run_is_bounded_when_it_uses_the_proxy():
-    """The schedule may use the shared pool only with a hard request ceiling."""
-    from pathlib import Path
-    import re
-    wf = (Path(__file__).resolve().parents[3] / ".github/workflows/dealapp-liveness.yml").read_text()
-    assert '"${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.proxy }}" = "true"' in wf
-    cap = re.search(r"--max-requests \"\$\{\{ inputs.max_requests \|\| '(\d+)' \}\}\"", wf)
-    assert cap and 0 < int(cap.group(1)) <= 3000

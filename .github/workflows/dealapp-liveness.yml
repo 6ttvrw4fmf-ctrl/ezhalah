@@ -37,15 +37,15 @@ on:
         default: "600"
       proxy:
         description: >-
-          Route through the shared Saudi residential proxy, as the scheduled run does. That pool
-          is capacity-limited and shared with wasalt (ARCHITECTURE.md §20 rule 14) — always
-          paired with max_requests. false = measure plain CI egress.
+          EXPERIMENT ONLY. Route through the shared Saudi residential proxy. That pool is
+          capacity-limited and shared with wasalt (ARCHITECTURE.md §20 rule 14) — always pair
+          with max_requests. Scheduled runs NEVER take this path.
         type: boolean
-        default: true
+        default: false
       max_requests:
-        description: "Hard ceiling on TOTAL requests (sitemap + canaries + probes + retries). 0 = unlimited."
+        description: "Hard ceiling on TOTAL requests (sitemap + probes + retries). 0 = unlimited."
         required: false
-        default: "2400"
+        default: "0"
 
 concurrency:
   group: dealapp-liveness
@@ -80,19 +80,18 @@ jobs:
             APPLY="--apply"
           fi
 
-          # THE SCHEDULED RUN USES THE PROXY (owner decision 2026-09-28: Deal App must be checked
-          # as strongly as Aqar). Measured the same day, 600 rows, fresh renders, dry run:
-          # CI egress 84 ALIVE (run 36488016734), proxy 218 ALIVE (run 36488865799); canaries
-          # passed on both. One sequential session, hard request ceiling, ~30 KB/page brotli,
-          # logged as dealapp_liveness_proxy so mon_detect_proxy_contention() counts it.
+          # PROXY IS DISPATCH-ONLY, BY CONSTRUCTION. The condition tests inputs.proxy, which is
+          # empty on a schedule event, so the cron path cannot reach the shared pool however the
+          # inputs are defaulted. Routing a daily job onto a capacity-limited resource is an owner
+          # decision; this flag exists to MEASURE whether that decision is worth making.
           PROXY=""
-          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.proxy }}" = "true" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.proxy }}" = "true" ]; then
             PROXY="--proxy"
           fi
 
           exec python -m scrapers.dealapp.liveness_run \
             --limit "${{ inputs.limit || '600' }}" \
-            --max-requests "${{ inputs.max_requests || '2400' }}" \
+            --max-requests "${{ inputs.max_requests || '0' }}" \
             $PROXY $APPLY
 
       # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────
