@@ -13,9 +13,11 @@ Measured: 177 private offices (12 «احجز», 165 «محجوز») + 7 meeting 
 
 TRAPS
 -----
-1. ONLY «مكاتب خاصة» + «احجز» is a listing. A booked office is let; a meeting room is hourly and has
-   no monthly price — both skipped with a counted reason, never guessed. A booked office that frees
-   up simply appears on the next crawl; one that gets booked is pruned by the seen-set.
+1. ONLY «احجز» is a listing — a booked space is let, skipped with a counted reason. A booked office that
+   frees up simply appears on the next crawl; one that gets booked is pruned by the seen-set.
+   «مكاتب خاصة» is an office. «غرفة الاجتماعات» / «غرفة الاجتماعات (صغيرة)» is priced only «ريال /
+   بالساعة»: owner rule 2026-09-28 puts it in مرافق خدمية as «غرفة اجتماعات» (Meeting Room), MONTHLY,
+   PRICE ON REQUEST — an hourly rate is never multiplied into a rent.
 2. PRICE = SOURCE: «3499.76 ريال / شهر» → to_int truncates the halalas (3,499) and the shared
    rent_period_from_ad reads «شهر» → monthly (stored ×12, the fleet convention).
 3. DISTRICT comes from the page's OWN address line, not the branch's marketing name: the «السويدي»
@@ -110,17 +112,21 @@ def parse_page(url: str, page: str) -> dict[str, Any]:
 
 
 def map_page(d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
-    if d.get("kind") != "مكاتب خاصة":
-        return None, f"kind_{d.get('kind') or 'none'}"
+    kind = d.get("kind") or ""
+    room = kind.startswith("غرفة الاجتماعات")
+    if kind != "مكاتب خاصة" and not room:
+        return None, f"kind_{kind or 'none'}"
     if d.get("status") != "احجز" or not d.get("book_link"):
         return None, f"status_{d.get('status') or 'none'}"
-    ptype = normalize.map_type_exact("مكتب")
+    ptype = "Meeting Room" if room else normalize.map_type_exact("مكتب")
     title = d.get("name") or ""
     price_text = d.get("price_text") or ""
     price = normalize.to_int(price_text)
-    price = price if price and price > 0 else None
+    price = price if price and price > 0 and not room else None
     # «ريال / شهر» is the ad's own words about THIS price → the shared rule reads it
     period, annual = normalize.rent_period_from_ad(price, price_text, None, title)
+    if room:
+        period, annual = "monthly", db.AUTHORITATIVE_NULL
 
     addr = d.get("address") or ""
     city_ar = CITY_AR if CITY_AR in addr else None
@@ -159,8 +165,8 @@ def map_page(d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
     if "أثاث" in (d.get("services") or []):      # the office's own service list: «أثاث» (furniture)
         row["furnished"] = True
     row["price_evidence"] = normalize.price_evidence(
-        field="div.price", raw=price_text, stored=annual, kind="annual", unit="total",
-        origin="html", authoritative_absent=False)
+        field="div.price", raw=price_text, stored=None if room else annual, kind="annual", unit="total",
+        origin="html", authoritative_absent=room)
     info = {
         "source_slug": d["slug"],
         "space_kind_ar": d.get("kind"),

@@ -3,7 +3,7 @@
 -- plus the ambiguous «Building» raw; identical to the propertyTypes.ts RAW_TO_CLEAN key set + «Building»).
 -- This is the discovery allowlist detect_novel_property_types() (pg_cron jobid 33) diffs live data
 -- against; a raw type absent here is flagged as novel. APPEND-ONLY: existing rows' added_at / note are
--- preserved (ON CONFLICT DO NOTHING), so applying this never resets discovery history. 64 known raw aliases.
+-- preserved (ON CONFLICT DO NOTHING), so applying this never resets discovery history. 72 known raw aliases.
 create table if not exists public.known_property_types (
   raw_type text primary key,
   added_at timestamptz not null default now(),
@@ -22,6 +22,7 @@ insert into public.known_property_types (raw_type) values
   ('Commercial Building'),
   ('Commercial Land'),
   ('Duplex'),
+  ('Event Hall'),
   ('Factory'),
   ('Farm'),
   ('Floor'),
@@ -34,6 +35,7 @@ insert into public.known_property_types (raw_type) values
   ('Industrial Land'),
   ('Kiosk'),
   ('Land'),
+  ('Meeting Room'),
   ('Office'),
   ('Palace'),
   ('Parking'),
@@ -42,9 +44,11 @@ insert into public.known_property_types (raw_type) values
   ('Rest House'),
   ('Room'),
   ('School'),
+  ('Self Storage'),
   ('Shop'),
   ('Showroom'),
   ('Station'),
+  ('Storage Yard'),
   ('Studio'),
   ('Telecom Tower'),
   ('Villa'),
@@ -55,11 +59,15 @@ insert into public.known_property_types (raw_type) values
   ('برج اتصالات'),
   ('بنك'),
   ('تاون هاوس'),
+  ('تخزين ذاتي'),
   ('حوش'),
   ('درايف ثرو'),
+  ('ساحة تخزين'),
   ('ستوديو'),
   ('سكن عمال'),
   ('شقَّة صغيرة (استوديو)'),
+  ('غرفة اجتماعات'),
+  ('قاعة'),
   ('مبنى شقق مخدومة'),
   ('مجمع'),
   ('مجمع سكني'),
