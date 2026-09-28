@@ -109,10 +109,10 @@ def parse_detail(nid: str, page: str) -> Optional[dict[str, Any]]:
         return None
     art = m.group(0)
     divs, levels, price, price_label, description = [], [], None, None, None
-    for content, level, frag in _DIV_RE.findall(art):
+    for price_attr, level, frag in _DIV_RE.findall(art):
         txt = _text(frag)
-        if content:
-            price = N.to_int(content.split('"')[1])
+        if price_attr:                      # the machine attribute content="14000", not rendered text
+            price = N.to_int(price_attr.split('"')[1])
             price_label = divs[-1] if divs else None
             # the prose is the h2 line right before the label — never the floor line or a short tag
             prev = divs[-2] if len(divs) >= 2 and levels[-2] == "2" else ""
