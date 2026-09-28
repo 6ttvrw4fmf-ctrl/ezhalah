@@ -55,9 +55,9 @@ def _by_key(d: ast.Dict) -> dict[str, ast.expr]:
 
 
 def test_all_four_modes_are_covered() -> None:
-    assert len(_insert_dicts()) == 4, (
-        "expected the pilot, enforce, enum-strike and repair-clock-bug-backlog inserts; a new mode "
-        "must carry the same timestamp contract")
+    assert len(_insert_dicts()) == 5, (
+        "expected the pilot, enforce, enum-strike, repair-clock-bug-backlog and its control-failed "
+        "inserts; a new insert must carry the same timestamp contract")
 
 
 def test_both_timestamps_are_sent_explicitly() -> None:
