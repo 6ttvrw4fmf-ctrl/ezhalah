@@ -1,0 +1,68 @@
+# Re-read original ads, independently of our parsers (docs/ops/NEW_LISTINGS_ENGINEER.md, step 6
+# way (b)). Saves, for each listing, what the PAGE says (JSON-LD, meta tags, the visible lines that
+# carry a price, size, rooms or an amenity) next to every value we serve, in the `source-reread`
+# artifact. The cloud engineers cannot open listing websites themselves (the sites block their
+# address), so they dispatch this and read the artifact.
+#
+# READ-ONLY: scrapers/common/source_reread.py writes nothing to the database. Dispatch-only.
+name: Source re-read
+
+on:
+  workflow_dispatch:
+    inputs:
+      ids:
+        description: "table:id,table:id — exactly these listings (or leave empty and give platform)"
+        type: string
+        default: ""
+      platform:
+        description: "Sample this website's new listings instead of ids"
+        type: string
+        default: ""
+      n:
+        description: "How many to sample when using platform"
+        type: string
+        default: "20"
+      new_hours:
+        description: "New = first seen within this many hours"
+        type: string
+        default: "24"
+
+permissions:
+  contents: read
+
+jobs:
+  reread:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
+      - name: Re-read the original ads
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
+          IDS: ${{ inputs.ids }}
+          PLATFORM: ${{ inputs.platform }}
+          N: ${{ inputs.n }}
+          NEW_HOURS: ${{ inputs.new_hours }}
+        run: |
+          exec xvfb-run -a python -m scrapers.common.source_reread \
+            --ids "$IDS" --platform "$PLATFORM" --n "$N" --new-hours "$NEW_HOURS"
+      - name: Keep the result for the engineer
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-reread
+          path: reread.json
+          if-no-files-found: ignore
+          retention-days: 14

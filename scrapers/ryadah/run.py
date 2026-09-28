@@ -24,6 +24,9 @@ EVERY POST IS A WHOLE BUILDING / COMPOUND offering its units («كمباوند �
 65 وحدة 80–160 م²»), completed and leased or sold by Ryadah. Kept as ONE listing per post with its
 single unit type. Consequences, never guessed around:
   * PRICE: every post shows «عند الاتصال» and an empty price meta → NULL (authoritative absence).
+  * RENT PERIOD: no post states one. OWNER DECISION 2026-09-28: these leased buildings (malls, office
+    towers, compounds) are shown as YEARLY rent with «price on request» — a period the post states still
+    wins, and a published price ≤10,000 is monthly by the shared rule.
   * AREA: REAL_HOMES_property_size is the BUILDING's area (65,000 m² for سي فرونت; «5 طوابق» for
     بيوتات البندرية) and the unit sizes are ranges («من 75 إلى 120 م²») → area_m2 NULL, both texts kept.
   * TYPE: a post carries several terms. Categories (سكني/تجاري) and Ryadah's SERVICES (إدارة التسويق,
@@ -53,6 +56,7 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, norm_district_tok, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
@@ -62,7 +66,6 @@ ARCHIVE = BASE + "/property/"
 SOURCE = "ريادة العقارية"
 PREFIX = "RYD"
 SLUG = "ryadah"
-IMPERSONATE = "chrome"
 
 _DEAL = {"للإيجار": "Rent", "للايجار": "Rent", "للبيع": "Buy"}
 # the site's property-type terms that ARE a unit type → the Arabic word the shared map knows
@@ -83,7 +86,7 @@ def fetch(s: cc.Session, url: str) -> Any:
     """The response for 200/400/404 (a past-the-end page is an answer, not a failure); retries anything else."""
     for attempt in range(3):
         try:
-            r = s.get(url, impersonate=IMPERSONATE, timeout=60)
+            r = s.get(url, timeout=60)
             if r.status_code in (200, 400, 404):
                 return r
             raise RuntimeError(f"HTTP {r.status_code} for {url}")
@@ -203,9 +206,10 @@ def map_property(post: dict, d: dict[str, Any], terms: list[str]) -> tuple[Optio
     if deal == "Buy":
         row_price["price_total"] = None if per_m else price
     elif not per_m:
-        card = "monthly" if "شهر" in postfix else ("annual" if re.search(r"سن[ةوي]", postfix) else None)
-        row_price["rent_period"], row_price["price_annual"] = normalize.rent_period_from_ad(
-            price, f"{title} {overview} {desc}", card, title)
+        card = "monthly" if "شهر" in postfix else "annual"      # yearly unless stated (owner 2026-09-28)
+        period, annual = normalize.rent_period_from_ad(price, f"{title} {overview} {desc}", card, title)
+        # «عند الاتصال»: no price to judge by — the building is still a yearly lease offer (owner 2026-09-28)
+        row_price["rent_period"], row_price["price_annual"] = period or (card if price is None else None), annual
 
     city_ar = crumbs[-1] if len(crumbs) >= 3 else None
     city_id, region_id = to_catalog(city_ar) if city_ar else (None, None)
@@ -268,7 +272,11 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 2026-09-28: the WP REST list answered HTTP 403 to the runner's datacenter IP on the pinned
+    # chrome profile (one run 200, the next 403). Probe 3 profiles DIRECT, then through the
+    # residential proxy (`proxy: true` → WASALT_PROXY_URL), and keep the session that is served.
+    s, tried = retry_smarter_session(f"{API}?per_page=1")
+    print(f"{SOURCE}: probe {' '.join(tried)}", flush=True)
     posts, walked_all = walk_posts(s)
     terms = type_terms(s)
     print(f"{SOURCE}: {len(posts)} Arabic property post(s) (REST walk complete={walked_all}); "

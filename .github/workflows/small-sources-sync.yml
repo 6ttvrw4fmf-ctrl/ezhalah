@@ -131,7 +131,10 @@ jobs:
           - { source: almotmkenah, cmd: "python -m scrapers.almotmkenah.run --type all", tmo: 30 }
           #   ialqarawi: 66 whole-category pages, then ~2,641 detail pages over 8 worker threads
           #   (~0.6s each → ~4 min).
-          - { source: ialqarawi,   cmd: "python -m scrapers.ialqarawi.run --type all", tmo: 45 }
+          #   ialqarawi: `proxy: true` (2026-09-28, Scraping Engineer) — every profile DIRECT drew an
+          #   empty HTTP 202 challenge on 4 of 7 crawls; session() now tries DIRECT first and rides
+          #   the residential proxy only when DIRECT is walled.
+          - { source: ialqarawi,   cmd: "python -m scrapers.ialqarawi.run --type all", tmo: 45, proxy: true }
           #   bossbih: 10 index pages + ~1,485 detail pages, sequential, 0.25s pause + ~0.2s
           #   response → ~11 min.
           - { source: bossbih,     cmd: "python -m scrapers.bossbih.run --type all", tmo: 60 }
@@ -256,7 +259,9 @@ jobs:
           - { source: manafe,      cmd: "python -m scrapers.manafe.run --type all", tmo: 25 }
           - { source: wajaf,       cmd: "python -m scrapers.wajaf.run --type all", tmo: 10 }
           - { source: albukaeri,   cmd: "python -m scrapers.albukaeri.run --type all", tmo: 10 }
-          - { source: ryadah,      cmd: "python -m scrapers.ryadah.run --type all", tmo: 10 }
+          #   ryadah: `proxy: true` (2026-09-28) — WP REST 403'd the runner IP; the probe tries 3
+          #   profiles DIRECT before the proxy, so the proxy is only used when DIRECT is refused.
+          - { source: ryadah,      cmd: "python -m scrapers.ryadah.run --type all", tmo: 10, proxy: true }
           - { source: sqcc,        cmd: "python -m scrapers.sqcc.run --type all", tmo: 10 }
           - { source: daraa,       cmd: "python -m scrapers.daraa.run --type all", tmo: 10 }
           - { source: tawia,       cmd: "python -m scrapers.tawia.run --type all", tmo: 10 }
