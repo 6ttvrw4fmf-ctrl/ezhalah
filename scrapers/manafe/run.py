@@ -40,9 +40,12 @@ TRAPS
   rows in an apartment building) is SKIPPED as a conflict — never guessed.
 * PRICE: «0 ر.س» (97 rows) and an empty «ر.س» are the site's no-price → the source AFFIRMS no price
   (AUTHORITATIVE_NULL, «السعر عند الطلب»). Unit rows otherwise print one plain number, verbatim.
-* PERIOD: no page and no card states a period anywhere (0 × سنوي/شهري on all 210 pages). The period comes
-  only from the shared rule (≤10,000 looks monthly); above that it stays UNKNOWN — never a hard-coded annual.
-  NB 1-room units priced 4,800–10,000 look YEARLY at this company (owner decision pending).
+* PERIOD: no page and no card states a period anywhere (0 × سنوي/شهري on all 210 pages) — so a silent
+  page is ANNUAL by OWNER ATTESTATION (2026-09-28), on the company's own evidence: its villa «مجمع الخير
+  السكني 471» (REGA ad licence 7200942068) prints «125000 ر.س» here and «125,000 /سنوي» on Aqar, posted by
+  «شركة منافع الاقتصادية للعقار» itself (Aqar ad 6662364, RNPL «11,146 شهريا» = 125,000/12 × ~1.07). Every
+  silent rent (1-room 15,000 … villas 125,000, warehouses 300,000) only makes sense yearly. A page whose own
+  text ties سنوي/شهري to the price still wins. Registered in ops_rent_period_single_value_ok.
 * SALE: a «عقارات للبيع» BUILDING (القسم العمائر) lists its composition as rows — «1 شقة», «10 شقق», «5 معارض»
   — each printing the SAME 9,000,000: that is the building's price, so the building is ONE listing (type
   Building). A sale VILLA row is a villa and stays one listing per row.
@@ -233,8 +236,11 @@ def map_unit(b: dict[str, Any], u: dict[str, Any], idx: int, deal: str,
     if deal == "Buy":
         row["price_total"] = price
     else:
-        row["rent_period"], row["price_annual"] = normalize.rent_period_from_ad(
-            price, f"{title} {b['purpose']}", None, title)   # the site states no period anywhere — no card label
+        # a period the page ties to THIS price wins; a silent page is annual (owner attestation, see top)
+        stated = normalize.stated_rent_period(price, f"{title} {b['purpose']}")
+        period = stated or ("annual" if price else None)
+        row["rent_period"], row["price_annual"] = normalize.rent_period_and_annual(
+            price, {"monthly": "شهري", "annual": "سنوي"}.get(period or ""))
     no_price = price is None and not u.get("price_text")      # the cell reads «0 ر.س» / «ر.س»: the source says none
     if no_price:
         row["price_total" if deal == "Buy" else "price_annual"] = db.AUTHORITATIVE_NULL

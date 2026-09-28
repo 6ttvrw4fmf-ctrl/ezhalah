@@ -53,10 +53,10 @@ def test_page_kinds_tell_a_missing_id_from_a_host_error():
     assert R.page_kind("<title>Just a moment...</title>") == "unreadable"
 
 
-def test_a_rent_unit_keeps_its_price_verbatim_and_no_period_is_invented():
+def test_a_rent_unit_keeps_its_price_verbatim_and_a_silent_page_is_annual():
     [((row, cat), why)] = _map()
     assert why == "" and cat == "residential" and row["property_type"] == "Apartment"
-    assert (row["rent_period"], row["price_annual"]) == (None, 18000)   # no «سنوي» anywhere → never annual
+    assert (row["rent_period"], row["price_annual"]) == ("annual", 18000)   # owner attestation 2026-09-28
     assert row["ad_number"] == "MNF8-1" and row["listing_url"].endswith("/manafemar/project/8")
     assert row["license_number"] == "7200935018" and row["bedrooms"] == 2 and row["area_m2"] is None
     assert row["maid_room"] is None                                      # a form 0 is silence, not «no»
@@ -64,9 +64,10 @@ def test_a_rent_unit_keeps_its_price_verbatim_and_no_period_is_invented():
     assert row["district_ar"] == "حي الصفا" and row["neighborhood"] == "الصفا"
 
 
-def test_a_monthly_looking_price_and_the_zero_price():
+def test_a_small_price_is_still_annual_here_and_the_zero_price():
     [((low, _), _), ((zero, _), _)] = _map(rows=[_row("1", "شقة", 1, "6000 ر.س"), _row("2", "شقة", 3, "0 ر.س")])
-    assert (low["rent_period"], low["price_annual"]) == ("monthly", 72000)   # the shared ≤10,000 rule
+    # this company prices yearly (its own Aqar cross-post), so the shared ≤10,000-looks-monthly rule does NOT apply
+    assert (low["rent_period"], low["price_annual"]) == ("annual", 6000)
     assert zero["price_annual"] is db.AUTHORITATIVE_NULL and zero["price_evidence"]["authoritative_absent"]
 
 
@@ -112,3 +113,9 @@ def test_the_index_counters_declare_the_sections():
     idx = ('<strong data-to="185">185</strong>\n  <label>العمائر</label> '
            '<strong data-to="3">3</strong><label>المستودعات</label>')
     assert R.declared_counts(idx) == {"العمائر": 185, "المستودعات": 3}
+
+
+def test_a_period_the_page_ties_to_the_price_still_wins():
+    # the unit's own name is part of the text the period is read from
+    [((row, _), _)] = _map(rows=[_row("شقة 1 إيجار شهري 2000", "شقة", 2, "2000 ر.س")])
+    assert (row["rent_period"], row["price_annual"]) == ("monthly", 24000)
