@@ -27,37 +27,33 @@ on:
       - Verify deletions (post-delete spot-check)
     types: [completed]
 
-permissions: {}
+permissions:
+  actions: read
+  contents: read
 
 jobs:
   wake:
     if: github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
-      - name: Fire the Lifecycle Engineer
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/engineer-wake.sh
+          sparse-checkout-cone-mode: false
+      # Wakes only for NEW failures (jobs that did not fail in the previous run of the same
+      # workflow). A repeat of a known failure is left to the nightly run. See the script.
+      - name: Fire the Lifecycle Engineer (new failures only)
         env:
           FIRE_URL: ${{ secrets.LIFECYCLE_ENGINEER_FIRE_URL }}
           FIRE_TOKEN: ${{ secrets.LIFECYCLE_ENGINEER_FIRE_TOKEN }}
-          WF_NAME: ${{ github.event.workflow_run.name }}
-          WF_FILE: ${{ github.event.workflow_run.path }}
-          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           RUN_ID: ${{ github.event.workflow_run.id }}
-        run: |
-          if [ -z "$FIRE_URL" ] || [ -z "$FIRE_TOKEN" ]; then
-            echo "::notice::Lifecycle Engineer wake-up not configured yet (no fire URL/token secret) — skipping."
-            exit 0
-          fi
-          body=$(jq -n --arg t "INSTANT WAKE-UP: lifecycle workflow \"$WF_NAME\" ($WF_FILE) failed. Run $RUN_ID: $RUN_URL . Handle only the website(s) that job covers." '{text: $t}')
-          code=$(curl -sS -o /tmp/fire.json -w '%{http_code}' -X POST "$FIRE_URL" \
-            -H "Authorization: Bearer $FIRE_TOKEN" \
-            -H "anthropic-version: 2023-06-01" \
-            -H "Content-Type: application/json" \
-            -d "$body")
-          echo "fire endpoint answered HTTP $code"
-          if [ "$code" = "429" ]; then
-            echo "::warning::Hourly fire limit reached — the nightly sweep will pick this failure up."
-            exit 0
-          fi
-          [ "$code" = "200" ] || { cat /tmp/fire.json; exit 1; }
-          jq -r '"engineer session: " + .claude_code_session_url' /tmp/fire.json
+          WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
+          WF_NAME: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          ENGINEER: Lifecycle Engineer
+          KIND: lifecycle
+          SCOPE: "Handle only the website(s) those jobs cover."
+        run: bash scripts/engineer-wake.sh
