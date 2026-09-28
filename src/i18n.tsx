@@ -1036,6 +1036,8 @@ const AR: Record<string, string> = {
   'MAQRAT': 'مقرات',                                  // transliteration — the site names itself «منصة MAQRAT», no Arabic name at the source
   'Arsh': 'عرش العقارية',                    // the site's own Arabic name (arshglobal.com.sa)
   'SuperOffice': 'سوبر أوفيس',     // the site's own Arabic name (superoffice.sa)
+  'Shomou': 'شموع العقار',         // «مكتب شموع العقار للاستثمار والتطوير العقاري» (shomoalaqar.com.sa footer)
+  'Maktab': 'منصة مكتب',            // the site's own title (maktab.sa)
   'Sirdab': 'سرداب',               // the site's own Arabic name (marketplace.sirdab.co)
   'Ashab': 'عشاب العقارية',        // the site's own Arabic name (ashab.sa)
   'Manafe': 'منافع العقارية',      // the site's own Arabic name (manafe.com.sa)
