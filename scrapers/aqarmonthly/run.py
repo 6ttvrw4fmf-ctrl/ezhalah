@@ -375,6 +375,16 @@ def map_listing(g: dict, price: dict) -> dict | None:
     uri = g.get("uri") or ""
     if not uri:
         return None
+    # Out of scope, not "type unknown" (2026-09-28, run 36385996203): Aqar's DailyRenting vertical
+    # began serving category 108 — an event hall, a meeting room and a pallet warehouse on the first
+    # day. This is the FURNISHED RESIDENTIAL monthly product (the table is *_residential_listings), so
+    # a category with no residential mapping is not written at all. Writing it with property_type
+    # NULL is what tripped mon_check_run_field_ranges and failed 13 of 16 shards. Never default a
+    # type (source is truth) and never invent a commercial one here (taxonomy is an owner decision).
+    # A MISSING category stays what it always was (type unknown → NULL); only a category the source
+    # names and we have no residential mapping for is out of scope.
+    if g.get("category") is not None and g.get("category") not in CATEGORY_TYPE:
+        return None
     place = uri.rsplit("-", 1)[0].replace("-", " ")  # drop trailing -id, dashes → spaces
     city = N.map_city(place)
     region = N.region_for_city(city) if city else None
