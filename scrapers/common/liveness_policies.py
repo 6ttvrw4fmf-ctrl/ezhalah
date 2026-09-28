@@ -244,9 +244,11 @@ POLICIES: dict[str, _P] = {
         "«This compound is no longer listed» ON A 200 — NOT a 404. Control-validated live "
         "2026-09-19: a delisted compound answers HTTP **200** with that sentence in its <h1> and a "
         "strip of OTHER compounds beneath it, and 62 of the 129 compounds in the sitemap are in "
-        "that state right now. A policy keyed on 404 would never retire anything here. So: 200 "
-        "WITHOUT that sentence AND carrying unit cards is LIVE; 200 WITH it is GONE; a 404, any "
-        "401/403/408/429/5xx, a transport failure and an unlookupable row are UNKNOWN.",
+        "that state right now. A policy keyed on 404 would never retire anything here. So, read on "
+        "the row's stored listing_url: 200 WITH that sentence is GONE; 200 carrying THIS unit's own "
+        "data-cin-contact-unit card is LIVE; a listed page without it (not yet measured), a 404, any "
+        "401/403/408/429/5xx, a transport failure and an unlookupable row are UNKNOWN. Wired into "
+        "prune_unseen 2026-09-28, complete crawls only.",
         "Rows are UNITS, not compounds, so one delisted compound retires every unit that belonged "
         "to it — which is correct: the units went with it."),
     "wslnaa": _P(

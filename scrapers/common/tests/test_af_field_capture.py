@@ -150,15 +150,14 @@ def test_new_labels_are_in_the_stop_set(label: str) -> None:
 
 
 def test_compoundin_pairs_chips_per_unit_not_page_wide() -> None:
-    """Defect 3. The fix must pair chips with units BY POSITION and, when the counts disagree,
-    write no amenities at all rather than attach them to the wrong unit."""
-    import inspect
+    """Defect 3. Chips are read INSIDE each unit's own card (2026-09-28: every card field is), so a
+    card without chips gets none and never borrows the next card's."""
     from scrapers.compoundin import run as cin
-    src = inspect.getsource(cin.map_units)
-    assert "unit_chips" in src and "len(chips) == len(units)" in src, \
-        "per-unit chip pairing (with a count guard) must be present"
-    assert not re.search(r"amenities_en[\"']?\s*:\s*\(lambda m", src), \
-        "the page-wide first-match lambda must be gone"
+    card = ('<article class="cin-compound-card cin-unit-card"><h3 class="cin-unit-card__title">Apartment'
+            '</h3>{chips}<button data-cin-contact-unit="{uid}"></button></article>')
+    page = (card.format(chips="", uid="1")
+            + card.format(chips='<p class="cin-unit-card__amenities">Furnished · Kitchen</p>', uid="2"))
+    assert [c["chips"] for c in cin.unit_cards(page)] == [None, "Furnished · Kitchen"]
 
 
 def test_every_new_parser_writes_af_columns() -> None:
