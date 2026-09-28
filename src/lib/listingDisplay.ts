@@ -192,6 +192,8 @@ export function sourceName(source: string): string {
   if (s.includes('maqrat')) return 'MAQRAT';                           // the site names itself «منصة MAQRAT», Latin only
   if (s.includes('عرش العقارية') || s.includes('arshglobal')) return 'عرش العقارية';
   if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return 'سوبر أوفيس';
+  if (s.includes('شموع العقار') || s.includes('shomou')) return 'شموع العقار';
+  if (s.includes('منصة مكتب') || s.includes('maktab')) return 'منصة مكتب';
   if (s.includes('سرداب') || s.includes('sirdab')) return 'سرداب';
   if (s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'عشاب العقارية';
   if (s.includes('منافع العقارية') || s.includes('manafe')) return 'منافع العقارية';
