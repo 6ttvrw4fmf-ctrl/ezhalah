@@ -412,6 +412,11 @@ def main() -> None:
     # this same script but their price comes from the wasalt API payload, so JSON-LD is not their
     # source of truth and must not overwrite it.
     price_refresh_on = table.startswith("aqar_")
+    # http.get() turns every 4xx into None, so without `keep` a 404/410 reached this sweep as "no
+    # answer" (transient) and looks_dead()'s 404 branch could never fire (found 2026-09-28: 1 of 15
+    # visible aqarmonthly ads answered 404 to lifecycle-spot-check). sa.aqar.fm tables only: wasalt
+    # rows run through here too, and their dead check is measured on their own transport.
+    gone_statuses = () if table.startswith("wasalt_") else (404, 410)
     started = time.time()
 
     # ── Per-row evidence (aqar_liveness_detail, migration 20260831003901) ─────────────────────────
@@ -485,7 +490,7 @@ def main() -> None:
                 if not url:
                     continue  # no URL → can't check, skip
 
-                r = get(url, max_retries=2)
+                r = get(url, max_retries=2, keep=gone_statuses)
                 status = r.status_code if r is not None else 0
                 body = r.text if r is not None else ""
 

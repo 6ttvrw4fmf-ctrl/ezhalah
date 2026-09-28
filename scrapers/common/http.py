@@ -188,9 +188,14 @@ def _rotate_session() -> cc.Session:
     return s
 
 
-def get(url: str, *, max_retries: int = 3, timeout: int = 25) -> Optional[cc.Response]:
+def get(url: str, *, max_retries: int = 3, timeout: int = 25,
+        keep: tuple[int, ...] = ()) -> Optional[cc.Response]:
     """Polite, retry-on-soft-fail GET. Returns the Response on 2xx, None on permanent failure.
-    Routes wasalt.sa requests through WASALT_PROXY_URL when set (cloud liveness needs this)."""
+    Routes wasalt.sa requests through WASALT_PROXY_URL when set (cloud liveness needs this).
+
+    `keep`: statuses returned as a Response instead of None. A liveness sweep passes (404, 410):
+    for it a 404 is the ANSWER ("gone"), not a failure, and collapsing it to None made it read as
+    "no answer" — aqar's sweep could never strike on a 404 (2026-09-28)."""
     s = session()
     # Per-request proxy: wasalt.sa from cloud needs the Saudi residential proxy or every page
     # comes back as "blocked" and liveness would wrongly strike every Wasalt listing. Aqar URLs
@@ -238,6 +243,8 @@ def get(url: str, *, max_retries: int = 3, timeout: int = 25) -> Optional[cc.Res
                 s = _rotate_session()
             time.sleep(3 * (attempt + 1))
             continue
+        if r.status_code in keep:
+            return r
         # 4xx (other than rate-limit) is permanent — bail out.
         return None
     if blocked is not None and proxies is None:

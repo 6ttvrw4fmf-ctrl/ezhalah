@@ -80,7 +80,13 @@ def swept(monkeypatch):
     monkeypatch.setattr(L, "begin_run", lambda name: client.inserted.setdefault("run", []).append(name) or 1)
     monkeypatch.setattr(L, "end_run", lambda *a, **k: True)
     monkeypatch.setattr(L, "reconcile_orphaned_stubs", lambda *a, **k: 0)
-    monkeypatch.setattr(L, "get", lambda url, **k: pages[url.rsplit("/", 1)[1]])
+    def get(url, **k):
+        # The real http.get() semantics: any 4xx is None unless the caller asked to keep it.
+        r = pages[url.rsplit("/", 1)[1]]
+        if r is None or r.status_code == 200 or r.status_code in k.get("keep", ()):
+            return r
+        return None
+    monkeypatch.setattr(L, "get", get)
     monkeypatch.setattr(sys, "argv", ["liveness", "--table", TABLE, "--shards", "1", "--shard", "0"])
     L.main()
     return {r["id"]: r for r in client.rows[TABLE]}, client

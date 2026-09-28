@@ -109,3 +109,12 @@ def test_wasalt_explicit_proxy_path_is_untouched(monkeypatch):
     calls = _install(monkeypatch, lambda r, p, u: 403, proxy_url="http://p.test:1")
     assert http.get("https://wasalt.sa/x") is None
     assert len(calls) == 1
+
+
+def test_a_kept_404_is_returned_as_the_answer_not_collapsed_to_none(monkeypatch):
+    """Liveness passes keep=(404, 410): for it a 404 IS the answer. Without keep, None (unchanged)."""
+    _install(monkeypatch, lambda r, p, u: 404)
+    assert http.get(URL) is None
+    assert http.get(URL, keep=(404, 410)).status_code == 404
+    _install(monkeypatch, lambda r, p, u: 403)
+    assert http.get(URL, keep=(404, 410)) is None      # a block is never kept: still no answer
