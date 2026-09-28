@@ -176,6 +176,12 @@ def _throttle() -> None:
 
 
 def session() -> cc.Session:
+    # `source: web` IS LOAD-BEARING — never drop it (PR #5177 did, 2026-09-28, and was reverted the same
+    # day). Without it the search API also serves APP-ONLY units, ~4× more (Riyadh 12,939 vs 3,238), and
+    # their gathern.co pages are 404: measured 2026-09-28 from a clean home connection, Riyadh page 1–12,
+    # web-feed units 15/15 HTTP 200, full-feed-only units 19/20 HTTP 404. Every card we show opens the
+    # listing's gathern.co page, so an app-only unit is a card that lands on «not found». The web view is
+    # not a quarter of the catalogue; it is the part of it a web user can open.
     s = cc.Session(impersonate="chrome124")
     s.headers.update({
         "Accept": "application/json",
