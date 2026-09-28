@@ -1,36 +1,43 @@
 // RUNTIME truth source for the search-loading strip (SearchLoader.tsx). Lives in its own file so
-// `loaderPlatforms.ts` — which the barrier reads directly — has zero dependency on the Supabase
-// client (Metro-only path aliases would otherwise break the barrier's plain-Node run).
+// `loaderPlatforms.ts` — which the barriers import directly — has zero dependency on the Supabase
+// client (Metro-only path aliases would otherwise break a plain-Node run).
 //
-// See loaderPlatforms.ts and scripts/verify-loader-platforms-match-active.ts for the full contract.
-// Owner rule 2026-08-29.
+// See loaderPlatforms.ts (hiddenLoaderNames) and scripts/verify-loader-hides-down-sites.ts.
 
 import { supabase } from '@/lib/supabase';
-import { normalizeSource } from '@/data/loaderPlatforms';
+import { hiddenLoaderNames } from '@/data/loaderPlatforms';
 import { boundedRpc } from '@/data/boundedRpc';
 
+// Websites down on their side (owner rule 2026-09-26): their logos leave the strip and the
+// «Reviewing N platforms» count drops. Read ONCE per app session, never per search — the per-search
+// loader_active_platforms_ar() round trip cost 0.4-3.7 s and was removed on 2026-09-21. null = not
+// known (not loaded yet, or the read failed): the strip then shows the full catalog, never a guess.
+type StatusRow = { platform: string; status: string };
+let hidden: Set<string> | null = null;
+let inFlight: Promise<void> | null = null;
+
+/** The logos to hide, or null while unknown. Synchronous so a search's roster can freeze at mount. */
+export function hiddenPlatformNames(): Set<string> | null {
+  return hidden;
+}
+
 /**
- * Calls the `loader_strip_platforms_ar()` RPC — the platforms with rows in the index MINUS the ones
- * whose website is down on its side (platform_registry 'dormant'/'retired', owner rule 2026-09-26:
- * a down site's logo leaves the strip and the «Reviewing N platforms» count drops with it; both come
- * back on their own when the site does). Maps each raw platform value (`aqar`, `wasalt`, …) to its
- * canonical loader name via SOURCE_TOKENS. Returns a Set of names on success, or null on any failure
- * (network, RPC missing, RLS refusal). The caller falls back to the full PLATFORM_META on null — safe
- * degradation, never silently smaller than reality.
+ * Loads the registry statuses via `loader_platform_status_ar()`. After one success it never calls
+ * again this session; after a failure the next call retries (a failed read is never cached as "none").
  */
-export async function fetchActivePlatformNames(): Promise<Set<string> | null> {
-  if (!supabase) return null;
-  try {
-    // Bounded: an unbounded await here never returns, and the loader waits forever (#269).
-    const { data, error } = await boundedRpc<string[]>(supabase.rpc('loader_strip_platforms_ar'));
-    if (error || !Array.isArray(data)) return null;
-    const names = new Set<string>();
-    for (const raw of data as string[]) {
-      const n = normalizeSource(raw);
-      if (n) names.add(n);
+export function loadHiddenPlatformNames(): Promise<void> {
+  if (hidden || inFlight) return inFlight ?? Promise.resolve();
+  inFlight = (async () => {
+    if (!supabase) return;
+    try {
+      // Bounded: an unbounded await here never returns (#269).
+      const { data, error } = await boundedRpc<StatusRow[]>(supabase.rpc('loader_platform_status_ar'));
+      // An empty registry is a failure, not "every site is up".
+      if (error || !Array.isArray(data) || data.length === 0) return;
+      hidden = hiddenLoaderNames(data);
+    } catch {
+      // stays null → full catalog
     }
-    return names.size ? names : null;
-  } catch {
-    return null;
-  }
+  })().finally(() => { inFlight = null; });
+  return inFlight;
 }

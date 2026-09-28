@@ -5,7 +5,8 @@
 // DESIGN (owner 2026-07-09 v4 polish, LOCKED — Perplexity-quality interaction, Ezhalah-branded; the
 // platform logos are the PRIMARY TRUST SIGNAL, not decoration):
 // • The COMPLETE supported roster renders — every platform pill, never a 3–4 sample (Buy still hides
-//   rent-only Gathern; a user platform-filter shows only those).
+//   rent-only Gathern; a user platform-filter shows only those; a website down on its side is
+//   hidden, owner 2026-09-26).
 // • Pills reveal GRADUALLY (fade + slight upward motion, ~75ms stagger → the set lands in ~1.5–2.5s),
 //   then a calm highlight travels pill to pill: soft background/border emphasis + a gentle glow +
 //   ~2% scale. NO checkmarks, NO ticks, NO checklist feel, no bouncing, no flash.
@@ -44,6 +45,7 @@ import {
   pickLoaderPlatforms,
   type LoaderPlatform,
 } from '@/data/loaderPlatforms';
+import { hiddenPlatformNames, loadHiddenPlatformNames } from '@/data/loaderActivePlatforms';
 import { fetchLoaderScaleStats, type LoaderScaleStats } from '@/data/loaderScaleStats';
 import { PILL_STAGGER, highlightStepMs, waveDelayMs, PILL_GROUP, WAVE_RISE, WAVE_HOLD, WAVE_FALL } from '@/lib/searchLoaderTiming';
 import { buildSearchLoaderTitles, readingDurationMs } from '@/lib/searchLoaderTitles';
@@ -51,6 +53,10 @@ import type { SearchQuery } from '@/data/search';
 import { grouped } from '@/data/search';
 
 const IS_WEB = Platform.OS === 'web';
+// Which websites are down on their side — read once per session, started here at app load so it has
+// normally resolved before the first search mounts the strip. Not during the web static render
+// (app.json output "static"), which runs this module in Node at build time.
+if (!IS_WEB || typeof window !== 'undefined') void loadHiddenPlatformNames();
 const EASE_OUT = Easing.bezier(0.22, 1, 0.36, 1);
 
 // Rotating searching headlines (owner-approved copy, v4 set — short, alive, smooth cross-fades).
@@ -303,15 +309,18 @@ export default function SearchLoader({
   if (offsetRef.current == null) offsetRef.current = currentRotation();
   useEffect(() => { bumpRotation(); }, []);
 
-  // THE FULL ROSTER, ALWAYS (owner 2026-09-20, reversing the 2026-08-29 active-only rule): "show 59
-  // … whenever I add a new website that number changes and it stays stable … even if it's dead, till
-  // I manually [remove it]". The strip is the catalog in PLATFORM_META, full stop — it no longer
-  // shrinks at runtime when a scraper goes cold. The catalog itself still moves only by a deliberate
-  // edit, and verify-loader-platforms-match-active.ts still checks it against production at CI time.
+  // THE FULL ROSTER, MINUS WEBSITES DOWN ON THEIR SIDE. Owner 2026-09-20 (reversing the 2026-08-29
+  // active-only rule): "show 59 … whenever I add a new website that number changes and it stays stable
+  // … even if it's dead, till I manually [remove it]" — so a scraper going cold does NOT shrink the
+  // strip. Owner 2026-09-26, the one exception: a website down on ITS side (platform_registry
+  // 'dormant'/'retired') loses its logo and the count drops; both return when it is flipped back to
+  // 'active'. hiddenPlatformNames() is that set (null until known → full roster, never a guess).
   //
-  // Removing the runtime filter also removed its round trip: loader_active_platforms_ar ran on every
-  // search mount, beside the search, measured 0.4-3.7 s (9,004 calls in 9.3 days) — database time
-  // spent competing with the query the user was actually waiting for (2026-09-21).
+  // No per-search round trip: loader_active_platforms_ar ran on every search mount, measured 0.4-3.7 s
+  // (9,004 calls in 9.3 days), competing with the query the user was waiting for (removed 2026-09-21).
+  // The statuses are read once per SESSION instead (module scope above); this retries only if that
+  // read failed, and does nothing once it has succeeded.
+  useEffect(() => { void loadHiddenPlatformNames(); }, []);
 
   // The "big database" marketing numbers (owner 2026-09-12) — resolved once per mount, same
   // null-on-failure/no-guess contract used across the loader. See loaderScaleStats.ts.
@@ -327,13 +336,13 @@ export default function SearchLoader({
   // Roster is computed once per (query, resultSources) and FROZEN — `resultSources`
   // arriving later (as the query resolves) only reorders which pills lead; it must never reshuffle
   // or hide pills already on screen. `query` just gates WHEN the strip mounts (a search is actually
-  // underway); its contents do not affect WHICH platforms show. If the active-names fetch resolves
+  // underway); its contents do not affect WHICH platforms show. If the down-site statuses resolve
   // AFTER the strip already mounted for THIS search, the frozen roster stays — the next search
   // picks up the filtered set. That prevents mid-search jitter.
   const frozenRef = useRef<LoaderPlatform[] | null>(null);
   const platforms = useMemo<LoaderPlatform[]>(() => {
     if (frozenRef.current && frozenRef.current.length) return frozenRef.current;
-    const picked = query ? pickLoaderPlatforms(resultSources, offsetRef.current ?? 0) : [];
+    const picked = query ? pickLoaderPlatforms(resultSources, offsetRef.current ?? 0, hiddenPlatformNames()) : [];
     if (picked.length) frozenRef.current = picked;
     return picked;
   }, [query, resultSources]);
