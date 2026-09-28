@@ -1011,8 +1011,12 @@ POLICIES: dict[str, _P] = {
         "wp-json unit status: a 404 the API itself attributes to rest_post_invalid_id (the unit was "
         "deleted at source), OR an HTTP 200 whose acf.unit_status has left 'available' for "
         "'reserved'/'sold-out' — on this platform a unit stops being purchasable far more often "
-        "than it is deleted. A bare 404, any 401/403/408/429/5xx, an unparseable body, an id "
-        "mismatch and an unrecognised status are all UNKNOWN and hold the strike without "
+        "than it is deleted. ALSO (2026-09-28): a REST 401 rest_forbidden (unit unpublished) ONLY "
+        "when its public /?p=<id> answers the site's own 404; an available unit whose project is "
+        "unpublished ONLY when the listing's own /ar/project/<id>/ answers 404; and an available "
+        "unit whose project terms exclude it exactly as the crawl does (soon / sold / marketing "
+        "stopped / off-plan). A bare 404, any other 401/403/408/429/5xx, an unparseable body, an "
+        "id mismatch and an unrecognised status are all UNKNOWN and hold the strike without "
         "deactivating.",
         "Absence from the crawl only SELECTS candidates; scrapers/rakez/run.py::_verify_gone gives "
         "each at-grace row a DIRECT confirm before prune_unseen may deactivate it. Measured "
@@ -1220,6 +1224,18 @@ POLICIES: dict[str, _P] = {
         _pol("earthapp", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over earthapp.com.sa/api/offer-list-by-area (pagination.total 54 when measured), which the server itself filters to status=active AND an unexpired REGA licence. run.py prunes only when every list page was read.",
         'The detail endpoint adds only GIS features, so it cannot act as a liveness oracle.'),
+    "fursaghyr": _P(
+        _pol("fursaghyr", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the post's own WordPress record, /wp-json/wp/v2/properties/<id>: status `expired`, or a 404 "
+        "rest_post_invalid_id (deleted). Its page answers 200 either way, so the page is never read "
+        "as evidence. `publish` is live; any other status, 401/403/429/5xx or an id mismatch is "
+        "UNKNOWN. Measured 2026-09-28: 11/11 feed posts `publish`, the 8 active rows out of the "
+        "feed since 08-27 all `expired`.",
+        "scrapers/fursaghyr/run.py hands prune_unseen this oracle and the crawl skips a feed item the "
+        "record calls expired. TIER NOT YET PROMOTED: CANDIDATE_PLUS_DIRECT needs the registry "
+        "migration applied and mirrored (AGENTS.md, apply-and-mirror in one change). And on an "
+        "18-row table 8 missing trips prune_unseen's collapse guard BEFORE the oracle is asked, so "
+        "those 8 are not retired by this path."),
     "nawafeth": _P(
         _pol("nawafeth", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the antiforgery-token POST listing (Home/FilterAdvertisment, 20 ads when measured), walked until hasMoreAds=0. Each ad page states its REGA licence expiry. run.py prunes only on a complete walk with every ad page readable.",
@@ -1331,7 +1347,7 @@ POLICIES: dict[str, _P] = {
         for p in (
             "abralosol", "abwbna", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "amlakalahsa", "aouj", "aqaratikom",
             "arkaan", "awal", "azdad", "bahadhabab", "erapulse",
-            "fursaghyr", "jurash",
+            "jurash",
             "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
             "shmoualshmal", "therc",
         )
