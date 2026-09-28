@@ -807,6 +807,9 @@ def run_enum_rollup(args) -> int:
     return 0
 
 
+_CONFIRM_FLUSH_EVERY = 100
+
+
 def run_enum_strike(args) -> int:
     started = time.time()
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -901,15 +904,23 @@ def run_enum_strike(args) -> int:
     killed = 0
     total_bytes = 0
     aborted_flips = False
+    budget_stopped = False
     if args.dry_run:
         print(f"  DRY-RUN: skipping network confirm; {len(cohort)} rows WOULD be HEAD/GET-verified "
               f"(flips only for GET-confirmed dead).", flush=True)
     elif cohort:
         # 3a) control first — if the checker can't see known-live rows as live, trust nothing.
         c_live = c_dead = c_failed = 0
+        c_alive: dict[str, list[int]] = {t: [] for t in TABLES}
         for _tbl, _lid, _cur, verdict, _g, nbytes, _hc, _gc in _pmap(check_hybrid, control, args.workers):
                 total_bytes += nbytes
                 c_live += verdict == "live"; c_dead += verdict == "dead"; c_failed += verdict == "failed"
+                if verdict == "live":
+                    c_alive[_tbl].append(_lid)
+        # A control read IS a direct read of that listing's own page: a live one is verified, not
+        # just "seen". It cost the same bandwidth whether we record it or not.
+        for tbl, ids in c_alive.items():
+            _flush_alive(tbl, ids, now_iso)
         if not control_ok(c_live, c_dead, c_failed, len(control), args.control_min_live):
             aborted_flips = True
             print(f"⚠ enum-strike CONTROL GUARD: known-live controls verified live={c_live} dead={c_dead} "
@@ -918,10 +929,38 @@ def run_enum_strike(args) -> int:
             print(f"  control healthy: live={c_live}/{len(control)} (dead={c_dead} failed={c_failed})",
                   flush=True)
             # 3b) verify the cohort; flip ONLY GET-confirmed dead. live → self-heal. failed → untouched.
+            #
+            # WRITTEN AS IT GOES, AND BOUNDED BY THE CLOCK (2026-09-28). This loop used to hold
+            # every verdict in memory and write once at the end. Through the browser a confirm is
+            # ~5 s, so the 1,500-row cohort needs ~2 h against the job's 90-minute timeout: run
+            # 36350303259 was cancelled at 90:00 and every one of its ~1,000 paid-for direct reads
+            # was thrown away — no kill, no self-heal, no evidence row, no run row. Same shape as
+            # ops_incident #708, fixed in the repair mode above but never here. Now each batch is
+            # flushed before the next row is checked, and the loop stops at --max-seconds so the
+            # run ends by itself and records what it did; unreached rows wait for the next run.
+            deadline = (started + args.max_seconds) if args.max_seconds > 0 else None
             alive_ids: dict[str, list[int]] = {t: [] for t in TABLES}
             dead_ids: dict[str, list[int]] = {t: [] for t in TABLES}
             detail: list[dict] = []
-            for tbl, lid, _cur, verdict, used_get, nbytes, hc, gc in _pmap(check_hybrid, cohort, args.workers):
+
+            def flush() -> int:
+                _flush_detail(detail)   # evidence first: written even if a flip below fails
+                for tbl, ids in alive_ids.items():
+                    _flush_alive(tbl, ids, now_iso)          # missing_count=0 + fresh last_seen
+                n = 0
+                for tbl, ids in dead_ids.items():
+                    for i in range(0, len(ids), 200):
+                        db._execute(db.sb().table(tbl).update(
+                            {"active": False,
+                             "last_liveness_probe_at": datetime.now(timezone.utc).isoformat()}).in_("id", ids[i:i + 200]),
+                                    what=f"{tbl}.enum_kill")
+                    n += len(ids)
+                detail.clear()
+                for t in TABLES:
+                    alive_ids[t] = []; dead_ids[t] = []
+                return n
+
+            for tbl, lid, _cur, verdict, used_get, nbytes, hc, gc in _imap(check_hybrid, cohort, args.workers):
                     checked += 1
                     total_bytes += nbytes
                     detail.append({
@@ -937,21 +976,20 @@ def run_enum_strike(args) -> int:
                         dead += 1; dead_ids[tbl].append(lid)
                     else:
                         failed += 1
-            _flush_detail(detail)   # evidence first: written even if a flip below fails
-            for tbl, ids in alive_ids.items():
-                _flush_alive(tbl, ids, now_iso)          # missing_count=0 + fresh last_seen
-            for tbl, ids in dead_ids.items():
-                for i in range(0, len(ids), 200):
-                    db._execute(db.sb().table(tbl).update(
-                        {"active": False,
-                         "last_liveness_probe_at": datetime.now(timezone.utc).isoformat()}).in_("id", ids[i:i + 200]),
-                                what=f"{tbl}.enum_kill")
-                killed += len(ids)
+                    if len(detail) >= _CONFIRM_FLUSH_EVERY:
+                        killed += flush()
+                    if deadline is not None and time.time() >= deadline:
+                        budget_stopped = True
+                        print(f"  ⏳ out of time budget ({args.max_seconds:.0f}s) after {checked}/"
+                              f"{len(cohort)} — the rest wait for the next run", flush=True)
+                        break
+            killed += flush()
 
     runtime = round(time.time() - started, 1)
     notes = (f"mode=enum-strike enum_run={cur['id']} enum_rows={cur['rows_seen']} "
              f"struck={sum(struck.values())} cohort={len(cohort)} killed={killed} "
-             f"aborted_flips={aborted_flips} dry_run={args.dry_run} runtime_s={runtime}")
+             f"aborted_flips={aborted_flips} budget_stopped={budget_stopped} "
+             f"dry_run={args.dry_run} runtime_s={runtime}")
     if not args.dry_run:
         db._execute(db.sb().table("wasalt_liveness_runs").insert({
             "started_at": now_iso, "finished_at": datetime.now(timezone.utc).isoformat(),
@@ -1157,6 +1195,9 @@ def main() -> int:
     ap.add_argument("--confirm-limit", type=int, default=1500,
                     help="ENUM-STRIKE: max rows HEAD/GET-verified per run (bounds proxy bandwidth; the "
                          "backlog simply drains across days).")
+    ap.add_argument("--max-seconds", type=float, default=0.0,
+                    help="ENUM-STRIKE: stop confirming once the run is this old (0 = no budget) and "
+                         "record what was done; must sit under the job's timeout-minutes.")
     ap.add_argument("--control-n", type=int, default=30,
                     help="ENUM-STRIKE: known-live control rows verified first; flips abort if they fail.")
     ap.add_argument("--control-min-live", type=float, default=0.90,
