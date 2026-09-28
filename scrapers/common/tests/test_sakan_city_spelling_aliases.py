@@ -1,8 +1,8 @@
 """sakan: the four city spellings the catalogue did not know (coverage audit 2026-09-28) resolve
 through the SHARED alias table, never through a sakan-only map.
 
-The alias rows live in sql/proposed/sakan_city_spelling_aliases.sql (staged until a session with
-write authority applies and mirrors it). This test reads THAT file's VALUES rows, loads them into
+The alias rows live in migration 20260928224418_sakan_city_spelling_aliases (applied 2026-09-28,
+mirrored byte-exact). This test reads THAT file's VALUES rows, loads them into
 the shared resolver exactly as arabic_location._load() loads loc_catalog_city_alias
 (alias_norm = normalize_ar(alias) → the city's (city_id, region_id)), and runs sakan's real
 map_listing() on the raw labels sakan's breadcrumb prints. Without the rows every one of them is
@@ -28,7 +28,7 @@ sys.modules.setdefault("dotenv", _dotenv_mod)
 from scrapers.common import arabic_location as AL  # noqa: E402
 from scrapers.sakan import run as S  # noqa: E402
 
-SQL = Path(__file__).resolve().parents[3] / "sql" / "proposed" / "sakan_city_spelling_aliases.sql"
+SQL = Path(__file__).resolve().parents[3] / "supabase" / "migrations" / "20260928224418_sakan_city_spelling_aliases.sql"
 # The catalogue rows these aliases must land on (loc_catalog_city / loc_catalog_region, 2026-09-28).
 CATALOG = {"الاحساء": (3677, 5), "محايل": (1801, 6), "قصر ابن عقيل": (2990, 4),
            "مدينة الملك عبدالله الاقتصادية": (3666, 2)}
