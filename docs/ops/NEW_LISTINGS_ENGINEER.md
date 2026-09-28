@@ -356,7 +356,7 @@ how many arrived and how well every field matched, then the totals, then a short
 > 🛏️ **Bedrooms:** 1 → N · 2 → N · 3 → N · 4 → N · 5+ → N · not stated N
 > 📐 **Size:** under 100 N · 100–200 N · 200–400 N · 400–1,000 N · over 1,000 N · not stated N
 > 💰 **Prices, as published:** Buy N–N (typical N) · Yearly N–N (typical N) · Monthly N–N (typical N)
-> 🎛️ **Advanced Filter** (yes / no / unknown): Furnished N/N/N · Elevator N/N/N · Parking N/N/N · … · Bathrooms 1 → N · 2 → N · 3+ → N · Age new N · 1–5 N · 6–10 N · 10+ N
+> 🎛️ **Advanced Filter** (the grouped table below, inside a code block so the columns line up)
 > 📊 **Matched:** Region N% · City N% · District N% · Deal N% · Period N% · Type N% · Price N% · Size N% · Rooms N% · AF N%
 >
 > *(…the same block for every website that sent listings)*
@@ -415,13 +415,7 @@ how many arrived and how well every field matched, then the totals, then a short
 > - Yearly rent: N to N · typical N
 > - Monthly rent: N to N · typical N
 >
-> 🎛️ **Advanced Filter** (yes / no / unknown)
-> - Furnished: N / N / N
-> - Elevator: N / N / N
-> - Parking: N / N / N
-> - … (every field, one per line)
-> - Bathrooms: 1 → N · 2 → N · 3+ → N · unknown N
-> - Property age: new N · 1–5 yrs N · 6–10 yrs N · 10+ N · unknown N
+> 🎛️ **Advanced Filter** (the grouped table below, inside a code block so the columns line up)
 >
 > ━━━━━━━━ **📖 PART 3: SUMMARY** ━━━━━━━━
 >
@@ -438,6 +432,41 @@ how many arrived and how well every field matched, then the totals, then a short
 > ⭐ **Rating:** X/10
 > 🎯 **To reach 10/10:** what's still missing → what you'll do tomorrow. (Skip this line only at 10/10.)
 > 🙋 **Needs from you:** Nothing.
+
+**The Advanced Filter table** (same layout in every website block and in today's total):
+```
+⭐ MAIN               yes     no  unknown  matched
+Furnished              N      N       N      N%
+Elevator               N      N       N      N%
+Air conditioning       N      N       N      N%
+Private entrance       N      N       N      N%
+Kitchen                N      N       N      N%
+Parking                N      N       N      N%
+Maid room              N      N       N      N%
+Driver room            N      N       N      N%
+Rent now, pay later    N      N       N      N%
+
+🏡 EXTRAS             yes     no  unknown  matched
+Balcony · Garden · Pool · Gym · Laundry room · Fiber internet   (one row each)
+
+⚡ UTILITIES          yes     no  unknown  matched
+Separate electricity meter · Separate water meter · Electricity · Water · Sanitation · Car entrance
+
+🔢 NUMBERS
+Bathrooms      1 → N · 2 → N · 3+ → N · unknown N
+Property age   new N · 1–5 yrs N · 6–10 yrs N · 10+ N · unknown N
+Floor          ground N · 1–3 N · 4+ N · unknown N
+Street width   under 15 m N · 15–30 m N · over 30 m N · unknown N
+
+🧭 OTHER
+Direction      north N · south N · east N · west N · … · unknown N
+Licence        given N · unknown N
+Tenant type    <value> N · … · unknown N
+```
+- "matched" is the share of that field's published values that reached search correctly.
+- Only fields that got at least one yes, no or number today get a row. Fields no website published
+  today go in one line under the table: "Not published by any website today: …".
+- Group order and names stay fixed, so the owner always finds a field in the same place.
 
 **What each % means, so a 100% can never hide anything:**
 - **Out of the new listings where the website gave that field.** A field the website didn't publish is
