@@ -593,6 +593,35 @@ def rent_period_from_ad(price: Optional[int], text: Optional[str], card_period: 
     return rent_period_and_annual(price, {"monthly": "شهري", "annual": "سنوي"}.get(period or ""))
 
 
+# ── The ad's OWN end date is a gate, not a caption (owner 2026-09-28) ────────────────────────────
+# Shomou (shomoalaqar.com.sa) prints «تاريخ إنتهاء الإعلان» on every ad and never takes an expired one
+# down: 835 of 1,028 listed ads were past their own date. The owner: «build the 155» (the in-date ones)
+# «add barriers so dont have it again». Every scraper that reads such a date routes it through here
+# (scrapers/common/tests/test_ad_end_date_is_a_gate.py enforces it): 'expired' → never a listing.
+# Only a Gregorian year 2015-2100 is a date; a Hijri year or a build year typed into the field
+# («1433-02-11», «1983-02-16») is 'unknown' — the source did not state an end date we can read.
+_END_DATE_RE = re.compile(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})|(\d{1,2})[-/](\d{1,2})[-/](\d{4})")
+
+
+def ad_expiry_state(raw: Optional[str], today: Any = None) -> str:
+    """'live' (end date today or later) · 'expired' (before today) · 'unknown' (no readable date).
+    `today` defaults to the Saudi calendar date (UTC+3) — an ad valid «until 2026-09-28» is live all
+    of that Saudi day."""
+    from datetime import date, datetime, timedelta, timezone
+    m = _END_DATE_RE.search((raw or "").translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")))
+    if not m:
+        return "unknown"
+    y, mo, d = (m.group(1), m.group(2), m.group(3)) if m.group(1) else (m.group(6), m.group(5), m.group(4))
+    try:
+        end = date(int(y), int(mo), int(d))
+    except ValueError:
+        return "unknown"
+    if not 2015 <= end.year <= 2100:
+        return "unknown"
+    today = today or datetime.now(timezone(timedelta(hours=3))).date()
+    return "live" if end >= today else "expired"
+
+
 # ── Property age: the SHARED Saudi Arabic age vocabulary ──────────────────────────────────────────
 # WHY THIS EXISTS (2026-07-17): every scraper parsed «عمر العقار» with an int-only regex of the shape
 # `عمر\s*العقار[\s:]*?(\d+)`. That regex can only ever match a LATIN DIGIT, so the three non-numeric

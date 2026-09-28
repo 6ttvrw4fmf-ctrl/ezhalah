@@ -10,13 +10,16 @@
 --   The arms were spliced into the previous body in the rendering the wiring migrations use, and the
 --   result was PROVEN equal to production: md5 of the spliced body (trailing newline stripped, which
 --   is how pg_get_viewdef returns it) == md5(pg_get_viewdef('public.listing_native_location_v1',true)).
---   • md5 of everything below this header block: c5ecf54a3590d794cb1f7e752c11d89c
+--   • md5 of everything below this header block: 5f223424d56192158ef4e40c69e12c31
 --   • 111,322 -> 127,992 chars; then batch5 (holoul eightfloor manzo, 20260927021406) -> 131,577,
 --     registry caught up by sql_mirror_expected_catches_up_to_batch5_arms; then batch6 (arsh,
 --     20260927034721) -> 132,712, registry caught up by sql_mirror_expected_catches_up_to_batch6_arms;
 --     then batch 7 (9 platforms, 20260927113204 + the 123833 location-index replay) -> 143,227, registry
 --     caught up by sql_mirror_expected_catches_up_to_batch7_arms; then superoffice (20260927203450) -> 144,502,
---     registry caught up by sql_mirror_expected_catches_up_to_superoffice_arms.
+--     registry caught up by sql_mirror_expected_catches_up_to_superoffice_arms; then shomou + maktab
+--     (20260928033432) -> 146,852, registry caught up by sql_mirror_expected_catches_up_to_shomou_maktab_arms.
+-- Re-verified 2026-09-28 (migration 20260928033432_shomou_maktab_wiring_into_search): 4 arms spliced after
+--   the nufouth commercial anchor; md5(live pg_get_viewdef) == 5f223424d56192158ef4e40c69e12c31 == body below.
 --   • registry caught up in the same pass: sql_mirror_expected_catches_up_through_wave3b_arms.
 --
 -- CAUGHT BY verify-sql-mirrors-not-stale only because the w3b wiring landed on a NEW calendar day:
@@ -502,6 +505,54 @@
             nufouth_commercial_listings.transaction_type
            FROM nufouth_commercial_listings
           WHERE nufouth_commercial_listings.active
+        UNION ALL
+         SELECT 'shomou'::text AS platform,
+            'shomou_residential_listings'::text AS source_table,
+            shomou_residential_listings.id AS listing_id,
+            shomou_residential_listings.city_ar,
+            shomou_residential_listings.city_id,
+            shomou_residential_listings.district_ar,
+            shomou_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            shomou_residential_listings.transaction_type
+           FROM shomou_residential_listings
+          WHERE shomou_residential_listings.active
+        UNION ALL
+         SELECT 'shomou'::text AS platform,
+            'shomou_commercial_listings'::text AS source_table,
+            shomou_commercial_listings.id AS listing_id,
+            shomou_commercial_listings.city_ar,
+            shomou_commercial_listings.city_id,
+            shomou_commercial_listings.district_ar,
+            shomou_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            shomou_commercial_listings.transaction_type
+           FROM shomou_commercial_listings
+          WHERE shomou_commercial_listings.active
+        UNION ALL
+         SELECT 'maktab'::text AS platform,
+            'maktab_residential_listings'::text AS source_table,
+            maktab_residential_listings.id AS listing_id,
+            maktab_residential_listings.city_ar,
+            maktab_residential_listings.city_id,
+            maktab_residential_listings.district_ar,
+            maktab_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            maktab_residential_listings.transaction_type
+           FROM maktab_residential_listings
+          WHERE maktab_residential_listings.active
+        UNION ALL
+         SELECT 'maktab'::text AS platform,
+            'maktab_commercial_listings'::text AS source_table,
+            maktab_commercial_listings.id AS listing_id,
+            maktab_commercial_listings.city_ar,
+            maktab_commercial_listings.city_id,
+            maktab_commercial_listings.district_ar,
+            maktab_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            maktab_commercial_listings.transaction_type
+           FROM maktab_commercial_listings
+          WHERE maktab_commercial_listings.active
         UNION ALL
          SELECT 'superoffice'::text AS platform,
             'superoffice_residential_listings'::text AS source_table,
