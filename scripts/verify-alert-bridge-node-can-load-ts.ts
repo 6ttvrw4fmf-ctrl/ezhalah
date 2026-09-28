@@ -58,20 +58,20 @@ export function problems(files: Record<string, string>): string[] {
 
 // ── Mutation proof: the predicate must catch the exact shape that broke muktamel ──────────────────
 const job = (pin: string) => `jobs:\n  bridge:\n    steps:\n      - uses: actions/setup-node@v4\n        with:\n          node-version: ${pin}\n      - run: node scripts/ops/${BRIDGE}\n`;
-const selfTest: [string, string, boolean][] = [
-  ['node 20 (the 2026-09-27 break)', job('"20"'), true],
-  ['node 22.4', job('"22.4"'), true],
-  ['lts/* (unprovable)', job('lts/*'), true],
-  ['node 24', job('"24"'), false],
-  ['node 22.18', job('22.18'), false],
-  ['no pin (runner default)', `jobs:\n  bridge:\n    steps:\n      - run: node scripts/ops/${BRIDGE}\n`, false],
-  ['node 20 in a job WITHOUT the bridge', `jobs:\n  crawl:\n    steps:\n      - uses: actions/setup-node@v4\n        with:\n          node-version: "20"\n  bridge:\n    steps:\n      - run: node scripts/ops/${BRIDGE}\n`, false],
-];
 let failed = false;
-for (const [label, yml, shouldFlag] of selfTest) {
-  const flagged = problems({ 'self.yml': yml }).length > 0;
-  if (flagged !== shouldFlag) { console.error(`✗ self-test: ${label} — flagged=${flagged}, expected ${shouldFlag}`); failed = true; }
+let proofs = 0;
+const flags = (yml: string) => problems({ 'self.yml': yml }).length > 0;
+function mustCatch(label: string, caught: boolean): void {
+  proofs++;
+  if (!caught) { console.error(`✗ mutation not caught: ${label}`); failed = true; }
 }
+mustCatch('a bridge job pinned to node 20 (the 2026-09-27 break)', flags(job('"20"')));
+mustCatch('a bridge job pinned to node 22.4 (before type stripping)', flags(job('"22.4"')));
+mustCatch('a bridge job pinned to lts/* (unprovable)', flags(job('lts/*')));
+mustCatch('node 24 is NOT flagged', !flags(job('"24"')));
+mustCatch('node 22.18 is NOT flagged', !flags(job('22.18')));
+mustCatch('an unpinned bridge job (runner default) is NOT flagged', !flags(`jobs:\n  bridge:\n    steps:\n      - run: node scripts/ops/${BRIDGE}\n`));
+mustCatch('node 20 in a job WITHOUT the bridge is NOT flagged', !flags(`jobs:\n  crawl:\n    steps:\n      - uses: actions/setup-node@v4\n        with:\n          node-version: "20"\n  bridge:\n    steps:\n      - run: node scripts/ops/${BRIDGE}\n`));
 
 const files: Record<string, string> = {};
 for (const f of readdirSync(DIR).filter((x) => x.endsWith('.yml') || x.endsWith('.yaml'))) {
@@ -83,4 +83,4 @@ for (const p of real) console.error(`✗ ${p}`);
 if (bridged === 0) { console.error(`✗ no workflow invokes ${BRIDGE} — the scan is looking in the wrong place`); failed = true; }
 
 if (failed || real.length) process.exit(1);
-console.log(`✓ alert bridge: ${bridged} workflows invoke ${BRIDGE}, none pins a Node that cannot load .ts (${selfTest.length} self-tests)`);
+console.log(`✓ alert bridge: ${bridged} workflows invoke ${BRIDGE}, none pins a Node that cannot load .ts (${proofs} mutation proofs)`);
