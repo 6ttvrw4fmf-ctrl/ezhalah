@@ -9,53 +9,46 @@
 # drops out of the has_available feed and goes stale just like a delisted one. Only the detail page
 # tells them apart (404/410 = gone, 200 = live). See scrapers/gathern/liveness.py.
 #
-# AUTOMATIC (owner-authorized 2026-08-10) — daily apply at 06:00 UTC. Every safety rule is PERMANENT and
+# AUTOMATIC (owner-authorized 2026-08-10) — applies 6x/day via pg_cron. Every safety rule is PERMANENT and
 # unchanged; automation only removes the "remember to run it manually" gap:
 #   • SOURCE-CONFIRMED ONLY — inactivates only on a real 404/410 from the unit's own gathern page.
 #   • 200 = ALIVE — resets strikes + refreshes last_seen (rescues live-but-booked units).
 #   • TRANSIENT (429/5xx/timeout/no-response) NEVER counts as dead — the row is left untouched.
-#   • 3-STRIKE grace — a unit must 404 on THREE separate DAILY runs before active=false; the first
-#     run after a clean history kills nothing. (Daily cadence => the July-2026 776-kill scare, which
-#     needed 3 apply runs within ONE HOUR, is structurally impossible.)
-#   • ANOMALY CAP — a kill batch above max(150, 2% of active) is QUARANTINED: strikes recorded, 0 rows
-#     flipped, run marked ok=false for review. A partial / blocked / site-wide-404 crawl can NOT
-#     mass-inactivate. (Guarded by scrapers/common/tests/test_gathern_liveness.py.)
+#   • 3-STRIKE grace — a unit must 404 on THREE separate trusted runs before active=false, each
+#     reading >= 6h after the last (REPROBE_MIN_HOURS), so the July-2026 776-kill scare, which
+#     needed 3 apply runs within ONE HOUR, is structurally impossible.
+#   • ANOMALY CAP — a run never inactivates more than max(150, 2% of active). Over it, a SPIKE vs the
+#     last 24h is QUARANTINED (strikes recorded, 0 rows flipped, ok=false); a standing backlog
+#     drains the cap's worth of oldest strikes per run (2026-09-28). A partial / blocked /
+#     site-wide-404 crawl can NOT mass-inactivate. (Guarded by scrapers/common/tests/test_gathern_liveness*.py.)
 #   • SINGLE RUNNER at ~1 req/s — Gathern 429s above ~2 req/s across ALL IPs; never a shard matrix.
 #   • RESURRECTION stays possible — a killed row is pinned at missing_count=grace so the guarded
 #     auto_recover can't revive it, but a genuine return to the feed reactivates it via the crawl upsert.
-# A manual workflow_dispatch still defaults to DRY-RUN (apply=false) for ad-hoc inspection.
+# A manual dispatch on any branch other than main is always a DRY-RUN; on main untick `apply` for one.
 
 name: Gathern liveness
 
 on:
-  schedule:
-    # SIX runs a day, not one (owner directive 2026-09-24: "put a very close eye on gathern").
-    #
-    # THE BATCH SIZE IS UNCHANGED AND SO IS THE REQUEST RATE. This adds capacity by running the
-    # same 1,500-row sweep more often, never by probing harder — gathern rate-limits detail pages
-    # GLOBALLY (429 above ~2 req/s across ALL IPs), so a bigger or faster batch buys nothing and
-    # risks the block that makes every verdict worthless.
-    #
-    # The arithmetic, from measured production runs (0.79–0.96 rows/s, 1,500 rows in ~29 min):
-    #   in-run rate      ~0.85 req/s   — unchanged, and well under the ~2 req/s global ceiling
-    #   daily volume     6 × 1,500 = 9,000 probes
-    #   daily average    9,000 / 86,400 s = ~0.10 req/s — gentler than one big burst
-    #   full pass        28,639 active / 9,000 ≈ 3.2 days  <  the 96h SLA it declares
-    # One run a day gave 1,500/day ⇒ a 19-day pass against a 4-day SLA: unreachable by ~5x.
-    #
-    # Slots dodge gathern's own jobs so the sweep never competes with them for the same global
-    # budget: gh-gathern-cleanup runs 03:00 and gh-gathern-daily 04:40.
-    #
-    # This is only half the fix. Cadence alone would have re-probed the SAME 1,500 rows six times a
-    # day — see _collect_stale's docstring and migration 20260924 (last_liveness_probe_at) for the
-    # rotation-fairness bug that was the real cause of 0.4% coverage.
-    - cron: "0 1,7,11,15,19,23 * * *"   # every 4h, avoiding 03:00 cleanup and 04:40 crawl
+  # DISPATCHED BY pg_cron job `gh-gathern-liveness` ('37 1,7,11,15,19,23 * * *'), NOT by GitHub's
+  # `schedule:` (moved 2026-09-28). Six runs a day is the owner directive of 2026-09-24 ("put a very
+  # close eye on gathern"); GitHub's scheduler delivered ~3.1/day of the declared 6 over
+  # 2026-09-24..28 (the 07:00 slot never fired, 11:00 landed ~12:40) — the same starvation
+  # 20260829073551 measured on alert-dispatch.yml. pg_cron fires to the second. Never add a
+  # `schedule:` back while that job is active: the two would double-fire against gathern's GLOBAL
+  # ~2 req/s detail-page budget.
+  #
+  # Batch size and request rate are unchanged (1,500 rows at ~1 req/s, ~30 min), slots dodge
+  # gh-gathern-cleanup (03:00) and gh-gathern-daily (04:40). Rotation fairness: _collect_stale.
   workflow_dispatch:
     inputs:
       apply:
-        description: "Actually write missing_count / active=false (false = dry-run report only). Scheduled runs always apply."
+        # DEFAULTS TO TRUE because pg_cron's trigger_gh_workflow() dispatches with NO inputs, so the
+        # default IS the scheduled run (same convention as gathern-cleanup.yml's dry_run=false).
+        # Applies ONLY from main: a dispatch on any other branch is always a dry run, so unmerged
+        # code can never write to production by leaving this box ticked.
+        description: "Actually write missing_count / active=false (untick = dry-run report only). Only a run on main can apply."
         type: boolean
-        default: false
+        default: true
       limit:
         description: "Max oldest-stale rows to probe this run (0 = all stale)"
         # 1500 sized so a run COMPLETES within timeout-minutes even at gathern's worst observed detail-
@@ -122,7 +115,7 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
-      - name: Gathern liveness sweep (${{ (github.event_name == 'schedule' || inputs.apply) && 'APPLY' || 'dry-run' }})
+      - name: Gathern liveness sweep (${{ (inputs.apply && github.ref == 'refs/heads/main') && 'APPLY' || 'dry-run' }})
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -139,7 +132,7 @@ jobs:
           # rendered a step literally titled "APPLY" and then ran a DRY-RUN. Observed 2026-08-17:
           # `DRY-RUN scanned=1500 dead=676 WOULD inactivate=314`. A run that mislabels itself is
           # worse than one that fails, because the log reads like the work happened.
-          APPLY_FLAG: ${{ (github.event_name == 'schedule' || inputs.apply) && '--apply' || '' }}
+          APPLY_FLAG: ${{ (inputs.apply && github.ref == 'refs/heads/main') && '--apply' || '' }}
         run: |
           # ── HOLD RELEASED 2026-08-17 by the owner (DIE run #26). History kept deliberately. ──
           # Until 2026-08-16 the auto cap silently resolved to its 150 floor because the denominator
