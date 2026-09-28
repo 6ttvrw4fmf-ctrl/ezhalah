@@ -45,7 +45,11 @@
     "Hospital": "مستشفى",
     "Business Center": "مركز أعمال",
     "Resort": "منتجع",
-    "ATM Site": "موقع صراف"
+    "ATM Site": "موقع صراف",
+    "Event Hall": "قاعة",
+    "Meeting Room": "غرفة اجتماعات",
+    "Storage Yard": "ساحة تخزين",
+    "Self Storage": "تخزين ذاتي"
   },
   "buildingAmbiguous": {
     "raw": "Building",
@@ -62,7 +66,11 @@
     "Hospital",
     "Business Center",
     "Resort",
-    "ATM Site"
+    "ATM Site",
+    "Event Hall",
+    "Meeting Room",
+    "Storage Yard",
+    "Self Storage"
   ],
   "cleanTypes": [
     {
@@ -734,6 +742,74 @@
         "rawTypes": [
           "ATM Site",
           "موقع صراف"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Event Hall",
+      "macro": "Commercial",
+      "hierarchy": null,
+      "serviceFacility": true,
+      "query": {
+        "rawTypes": [
+          "Event Hall",
+          "قاعة"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Meeting Room",
+      "macro": "Commercial",
+      "hierarchy": null,
+      "serviceFacility": true,
+      "query": {
+        "rawTypes": [
+          "Meeting Room",
+          "غرفة اجتماعات"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Storage Yard",
+      "macro": "Commercial",
+      "hierarchy": null,
+      "serviceFacility": true,
+      "query": {
+        "rawTypes": [
+          "Storage Yard",
+          "ساحة تخزين"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Self Storage",
+      "macro": "Commercial",
+      "hierarchy": null,
+      "serviceFacility": true,
+      "query": {
+        "rawTypes": [
+          "Self Storage",
+          "تخزين ذاتي"
         ],
         "kinds": [
           "res",

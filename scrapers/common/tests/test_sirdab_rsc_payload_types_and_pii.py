@@ -56,9 +56,28 @@ def test_a_sub_riyal_placeholder_is_no_price_and_a_sale_is_a_total():
     assert (row["transaction_type"], row["price_total"]) == ("Buy", 2500000)
 
 
-@pytest.mark.parametrize("t", ["storage", "storage_yard"])
-def test_storage_units_and_yards_are_never_guessed_into_a_type(t):
-    assert R.map_ad(_ad(property={"property_type": t}))[1] == f"type_unmapped_{t}"
+@pytest.mark.parametrize("t,ptype", [("storage", "Self Storage"), ("storage_yard", "Storage Yard")])
+def test_storage_units_and_yards_go_in_service_facilities_under_the_sites_word(t, ptype):
+    (row, cat), _ = R.map_ad(_ad(property={"property_type": t}))       # owner rule 2026-09-28
+    assert (row["property_type"], cat) == (ptype, "commercial")
+
+
+def test_an_unknown_source_type_is_still_never_guessed():
+    assert R.map_ad(_ad(property={"property_type": "hangar"}))[1] == "type_unmapped_hangar"
+
+
+@pytest.mark.parametrize("cents", [100, 170, 9900])
+def test_a_one_riyal_placeholder_clears_the_stored_rent(cents):
+    from scrapers.common import db
+    (row, _), _ = R.map_ad(_ad(price_in_cents=cents))                    # measured: 1 and 1.7 SAR «rents»
+    assert row["price_annual"] is db.AUTHORITATIVE_NULL and row["rent_period"] is db.AUTHORITATIVE_NULL
+    assert "price_per_meter" not in row and row["price_evidence"]["stored"] is None
+
+
+def test_a_per_square_metre_rate_is_kept_as_the_rate_not_a_rent():
+    from scrapers.common import db
+    (row, _), _ = R.map_ad(_ad(price_in_cents=600, title_ar="مساحات تخزين ايجار بالمتر المربع"))
+    assert row["price_per_meter"] == 6 and row["price_annual"] is db.AUTHORITATIVE_NULL
 
 
 def test_the_owner_phone_and_building_number_are_never_stored():

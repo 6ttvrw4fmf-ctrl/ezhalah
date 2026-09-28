@@ -42,6 +42,9 @@ def test_a_grid_page_maps_to_its_real_type_and_facts():
     assert row is not None and cat == "residential"
     assert row["property_type"] == "Villa"             # was «unknown» for every live row
     assert row["area_m2"] == 250 and row["property_age"] == 0 and row["street_width_m"] == 18
-    assert row["license_number"] == "7200776150"       # the grid's «رقم ترخيص الإعلان»
+    # the grid's «رقم ترخيص الإعلان» reaches additional_info, where the index reads it; the aqarcity
+    # tables have NO license_number column (run 36404400023 died on PGRST204 writing one)
+    assert row["additional_info"]["rega_ad_license_number"] == 7200776150
+    assert "license_number" not in row
     blob = json.dumps(row, ensure_ascii=False, default=str)
     assert "اسم المسؤول" not in blob and "0500000000" not in blob
