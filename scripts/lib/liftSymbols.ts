@@ -14,8 +14,9 @@ import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-/** A declaration to lift: the line it starts on, and the line that ends it. */
-export type Symbol = { header: string; endsWith?: RegExp };
+/** A declaration to lift: the line it starts on, the line that ends it, and an optional rewrite of
+ *  syntax Node cannot strip (e.g. JSX in a return value) — never of the logic being tested. */
+export type Symbol = { header: string; endsWith?: RegExp; rewrite?: (code: string) => string };
 
 function slice(src: string, header: string, endsWith: RegExp): string {
   const lines = src.split("\n");
@@ -44,7 +45,8 @@ export async function liftSymbols(
     const end = s.endsWith ?? (/^(export )?function /.test(s.header) ? /^\}$/ : /^\};$/);
     // Drop a leading `export` from the lifted declaration: we re-export explicitly at the bottom, and
     // keeping both is a duplicate-export syntax error.
-    parts.push(slice(src, s.header, end).replace(/^export /, ""));
+    const code = slice(src, s.header, end).replace(/^export /, "");
+    parts.push(s.rewrite ? s.rewrite(code) : code);
   }
   parts.push(`export { ${exportNames.join(", ")} };`);
   const dir = mkdtempSync(join(tmpdir(), "ezhalah-lift-"));
