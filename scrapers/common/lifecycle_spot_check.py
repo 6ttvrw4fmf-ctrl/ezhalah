@@ -30,7 +30,7 @@ import random
 import sys
 from datetime import datetime, timedelta, timezone
 
-from scrapers.common.cleanup import PLATFORMS, _probe
+from scrapers.common.cleanup import PLATFORMS, _probe, _site_oracle, oracle_verdict
 from scrapers.common.db import sb
 from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN, classify_response
 from scrapers.common.liveness_trust import canary_environment_ok
@@ -109,7 +109,11 @@ def parse_ids(spec: str) -> list[tuple[str, int]]:
     return out
 
 
-def open_ad(url: str, dead_marker) -> str:
+def open_ad(url: str, dead_marker, oracle=None, ad_number: str | None = None) -> str:
+    # A site registered with its own oracle (cleanup._site_oracle) is judged by it, exactly as its
+    # deletion is: its dead ads answer 200 on the listing URL, so the page alone would call them live.
+    if oracle is not None:
+        return {"live": ALIVE, "dead": DEAD}.get(oracle_verdict(oracle, ad_number)[0], UNKNOWN)
     # The deletion tier's own transport: it keeps the real status (a 404 vs a block) and reaches
     # wasalt only through the browser (WASALT_BROWSER), which curl_cffi can no longer do.
     status, body = _probe(url)
@@ -130,11 +134,12 @@ def main() -> int:
     rng = random.Random(a.seed)
     reg = PLATFORMS.get(a.platform, {})
     dead_marker = reg.get("dead_marker")
-    method = "registered-marker" if dead_marker else "status-only"
     tables = tables_for(client, a.platform)
     if not tables:
         print(json.dumps({"platform": a.platform, "verdict": "void: no listing tables found"}))
         return 1
+    oracle = _site_oracle(client, a.platform, tables)
+    method = "site-oracle" if oracle else "registered-marker" if dead_marker else "status-only"
 
     # Controls first: listings the crawl saw in the last 24 hours must come back alive, or the
     # environment (a block, a proxy failure) is lying and the run is void.
@@ -145,7 +150,7 @@ def main() -> int:
                 .filter("listing_url", "not.is", "null").limit(50).execute().data or [])
         ctl += [dict(r, table=t) for r in rows]
     ctl = rng.sample(ctl, min(CANARIES, len(ctl)))
-    ctl_alive = sum(open_ad(r["listing_url"], dead_marker) == ALIVE for r in ctl)
+    ctl_alive = sum(open_ad(r["listing_url"], dead_marker, oracle, r["ad_number"]) == ALIVE for r in ctl)
     canary = {"probed": len(ctl), "alive": ctl_alive, "ok": canary_environment_ok(ctl_alive, len(ctl))}
 
     since = (datetime.now(timezone.utc) - timedelta(days=a.hidden_days)).isoformat()
@@ -156,7 +161,7 @@ def main() -> int:
             for r in rows:
                 if not r.get("listing_url"):
                     continue
-                v = open_ad(r["listing_url"], dead_marker)
+                v = open_ad(r["listing_url"], dead_marker, oracle, r["ad_number"])
                 results.append({"side": "live", "table": table, "id": rid, "url": r["listing_url"],
                                 "verdict": v, "judged": judge("live", v)})
     elif canary["ok"]:
@@ -168,7 +173,7 @@ def main() -> int:
             for t in tables:
                 picked += [dict(r, table=t) for r in sample(client, t, active=active, n=per_table, since=win, rng=rng)]
             for r in picked[: a.n]:
-                v = open_ad(r["listing_url"], dead_marker)
+                v = open_ad(r["listing_url"], dead_marker, oracle, r["ad_number"])
                 results.append({"side": side, "table": r["table"], "id": r["id"], "url": r["listing_url"],
                                 "verdict": v, "judged": judge(side, v)})
 

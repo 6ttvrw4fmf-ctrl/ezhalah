@@ -25,7 +25,7 @@ import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
 const LEDGER = join(ROOT, 'scrapers', 'lifecycle-gaps.txt');
-const RATCHET_LIMIT = 143; // the committed ledger's size; may only fall (a new gap is a reviewed raise)
+const RATCHET_LIMIT = 139; // the committed ledger's size; may only fall (a new gap is a reviewed raise)
 
 let failed = 0;
 const check = (ok: boolean, what: string, detail = '') => {
