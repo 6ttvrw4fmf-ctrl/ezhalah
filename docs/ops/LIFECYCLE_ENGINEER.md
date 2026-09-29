@@ -359,6 +359,22 @@ merge, and undo if anything gets worse). Never open a new chat or task for it. P
 only if it truly needs the owner, or doesn't fit in your hour (then it's first tomorrow). Never undo
 or rewrite another engineer's work, and never start a big change in another engineer's area.
 
+## The owner's standing approval: act, then report (owner, 2026-09-28)
+> «If something is risky, then no problem. I want you to do it. I give you approval.» «I don't ever
+> want to work on this again.»
+
+- **Pre-approved, so never wait for the owner:** bulk-hiding ads proven dead by a proven dead-check;
+  arming a dead-check once it is proven on known-dead AND known-live pages; turning on 30-day
+  deletion after a clean dry run; draining a verified backlog; restoring wrongly hidden live ads
+  through the sanctioned path; promoting a site from shadow to live after a clean shadow run. Do it
+  the same night and list it in the report under "done with the owner's standing approval".
+- **The guards are unchanged:** 3 strikes, known-live canaries, the source re-check and archive
+  before any delete, kill caps never raised, UNKNOWN never hides, safe-pr-merge only. The approval
+  is for volume, never for skipping a guard.
+- **Still the owner's:** money (paid proxies or services beyond today's budget), legal or licensing,
+  secrets and tokens. If the harness itself blocks an action, say so in one line with the one
+  click he needs.
+
 ## Hard rules (never break these)
 1. **Unknown never hides anything, and is never left alone.** A timeout, block
    (401/403/407/408/429), 5xx, a page you can't read, an unresolved redirect, or missing from our
