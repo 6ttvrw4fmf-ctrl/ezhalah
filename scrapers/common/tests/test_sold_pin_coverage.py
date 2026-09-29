@@ -48,6 +48,8 @@ PIN_COVERED = [
     "abeea", "aqaratikom", "hajer", "jurash", "dealapp",
     # later arrivals, both publishing تم البيع / تم التأجير in property_status
     "alta", "amaall",
+    # azdad's own `status` «مباع» (2026-09-28: AD202509210004 resurrected daily without it)
+    "azdad",
     # 2026-09-28: the Nuzul API lists rented/sold units with availability_status
     "october",
 ]
