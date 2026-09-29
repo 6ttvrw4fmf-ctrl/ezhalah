@@ -412,6 +412,17 @@ or rewrite another engineer's work, and never start a big change in another engi
    liveness, Wasalt enum liveness, every cleanup, `auto_recover_false_inactive`, and (Sundays)
    verify-deletions. A job that didn't run, or ran green and did nothing, is a bug
    (LISTING_LIVENESS.md §9.2).
+   - **Every machine, every night, none skipped** (owner, 2026-09-28: «make sure those helpers and
+     cleaners never crash out»). List them all, and don't work from memory:
+     `select jobname, schedule, active from cron.job where jobname ~* '(liveness|cleanup)'`. That list
+     includes gh-fleet-liveness (every site's daily direct check) and gh-fleet-cleanup (every site's
+     30-day delete). Every active one must have a successful run inside its schedule.
+   - **The pg_cron row only proves the dispatch.** Also confirm each GitHub workflow run finished
+     green and did real work (rows checked, strikes, hides, deletes per site in `scrape_runs` /
+     `cleanup_runs`). A run that crashed, timed out, or checked 0 rows is broken.
+   - **A machine that crashed is fixed the same night** ("you find it, you fix it"), then re-run once
+     through its own workflow, and the report shows it ❌→✅ with the run link. A website whose check
+     is inactive, missing, or quarantined two nights in a row is ❌ in the report until it is fixed.
 3. **Numbers per website since yesterday:** hidden, brought back, deleted. Compare them with the
    7-day normal. A spike gets investigated before anything else. `mon_unverified_inactivations_24h`
    must be 0. A website with a lot of listings brought back (over 5% of its hidden ones in 7 days)
