@@ -605,6 +605,10 @@ recorded every sweep (`aqar_liveness_detail.verdict = 'unknown_soft_closed'`, mi
 silent one. `AQAR_SOFT_CLOSE_ARMED=1` lets it strike and kill under aqar's declared 3-strike / 48h
 grace once the owner has approved the volume.
 
+**ARMED 2026-09-28 (owner: «yes if they are removed»).** 9,133 rows read `unknown_soft_closed` in the
+prior 48 h; 6/6 sampled pages showed «محذوفة» (5) or «مغلق» (1) in a real browser. Both aqar-liveness.yml
+jobs set `AQAR_SOFT_CLOSE_ARMED=1`.
+
 **The general rule this platform paid for: a liveness oracle that parses RENDERED MARKUP has a
 silent expiry date set by someone else's frontend team.** Prefer the source's own state field.
 Where markup is genuinely the only signal, the barrier must EXECUTE the predicate against a stored
