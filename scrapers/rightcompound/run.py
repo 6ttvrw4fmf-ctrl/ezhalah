@@ -20,6 +20,11 @@ SOURCE SHAPE (measured live 2026-09-24, nothing below is assumed):
     not monthly». That is the source's statement about every price it prints, so rent_period is
     'annual' and the figure is stored unconverted in price_annual. A price whose label is not
     «Rent» (none seen in 254 pages, guarded anyway) is skipped as deal_not_rent — never parked.
+    EXCEPT (measured 2026-09-28, owner rule 2026-09-26 «never use a generic card label when it
+    conflicts with the actual listing»): some unit NAMES state their own period — «Apartment - One
+    Bedroom (Monthly Rate)» 12,000, «Flat 1 ( Monthly)» 3,700 — and «Two bedroom fully furnished
+    apartment» at 7,000 cannot be a year's rent. The unit's own word wins, then a price ≤ 10,000 is
+    monthly, and only then the platform's annual statement (unit_period below). Monthly is ×12.
   · AREA: «300 sqm» is m². Star Compound prints «245 sqf» — a different unit (or a typo), which is
     not converted or guessed: area_m2 NULL, the raw text kept in additional_info.area_raw.
   · LANGUAGE: English only. hreflang="ar" points at the same URL and Accept-Language: ar still
@@ -162,11 +167,16 @@ _RENT_PRICE_RE = re.compile(r"^\s*Rent\s*-\s*\(SR\)\s*([\d,]+)\s*$", re.I)
 # («DELUXE SUITE», «Suite Type 1») and a name with no type word at all («Two Bedroom Fully
 # Furnished Unit Type A») still stay unmapped and are skipped — a suite may be a hotel-style room,
 # which this product excludes (owner confirmed 2026-09-24: leave those out).
+# 2026-09-28 coverage audit: «Flat 1», «Family two bedroom flat Type A» (flat IS the apartment),
+# «Villa1»/«villa3» (a unit number glued to the noun), «Garden Vila» / «Appartment» / «Aprtment»
+# (the source's own misspellings of the noun) and «EXECUTIVE 3.5( BHK)» were real units skipped
+# type_unmapped.
 _TYPE_WORDS = (("studio", "استوديو"), ("townhouse", "فيلا"), ("town house", "فيلا"),
-               ("villa", "فيلا"), ("penthouse", "شقة"), ("apartment", "شقة"), ("apt", "شقة"),
+               ("villa", "فيلا"), ("vila", "فيلا"), ("penthouse", "شقة"), ("apartment", "شقة"),
+               ("appartment", "شقة"), ("aprtment", "شقة"), ("apt", "شقة"), ("flat", "شقة"),
                ("condominium", "شقة"), ("condo", "شقة"),
                ("chalet", "شاليه"), ("duplex", "دوبلكس"))
-_BHK_RE = re.compile(r"\d\s*bhk\b", re.I)
+_BHK_RE = re.compile(r"\d(?:\.\d)?\s*\(?\s*bhk\b", re.I)
 
 
 def unit_type_ar(name: str) -> Optional[str]:
@@ -181,7 +191,7 @@ def unit_type_ar(name: str) -> Optional[str]:
     for word, ar in _TYPE_WORDS:
         if word in ("studio", "duplex"):
             continue
-        for m in re.finditer(r"\b" + re.escape(word) + r"s?\b", low):   # «Apartments with …»
+        for m in re.finditer(r"\b" + re.escape(word) + r"s?\d*\b", low):   # «Apartments», «villa3»
             if last is None or m.start() > last[0]:
                 last = (m.start(), ar)
     if last:
@@ -227,6 +237,15 @@ def rent_price(price_raw: str) -> tuple[Optional[int], str]:
         return None, "deal_not_rent"
     n = normalize.to_int(m.group(1).replace(",", ""))
     return (n if n else None), ""
+
+
+def unit_period(name: str, amount: int) -> str:
+    """The owner's period order (2026-09-26): the unit's own period word → a price ≤ 10,000 is
+    monthly → the platform's annual statement."""
+    own = re.search(r"\b(month|annual|year)", name, re.I)
+    if own:
+        return "monthly" if own.group(1).lower() == "month" else "annual"
+    return "monthly" if amount <= normalize.MONTHLY_LOOKING_MAX else "annual"
 
 
 def _ld_blocks(page_html: str) -> list[dict]:
@@ -332,6 +351,8 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str, dict[str, int]
         if why:
             skip(why)
             continue
+        period = unit_period(u["name"], amount) if amount is not None else None
+        annual = normalize.annualize_rent(amount, period)
         a_m2, a_raw = area_m2(u["meta"])
         bm, hm = _BED_RE.search(u["meta"]), _BATH_RE.search(u["meta"])
         row: dict[str, Any] = {
@@ -354,20 +375,23 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str, dict[str, int]
             "bathrooms": normalize.to_int(hm.group(1)) if hm else None,
             # A unit the site prices «0» has no price and therefore no period; the NULL is
             # authoritative so a value stored by an earlier read is cleared, never frozen.
-            "price_annual": amount if amount is not None else db.AUTHORITATIVE_NULL,
-            # The platform's own statement, not a per-unit token: see the module header.
-            "rent_period": "annual" if amount is not None else db.AUTHORITATIVE_NULL,
+            "price_annual": annual if annual is not None else db.AUTHORITATIVE_NULL,
+            # unit_period(): the unit's own word, else ≤ 10,000 → monthly, else the platform's.
+            "rent_period": period or db.AUTHORITATIVE_NULL,
             "zip_code": facts["postal"],
             "photo_urls": photos(page_html),
             "price_evidence": normalize.price_evidence(
-                field="rc-cd-unit__price", raw=u["price_raw"] or None, stored=amount,
-                kind="annual", origin="structured"),
+                field="rc-cd-unit__price", raw=u["price_raw"] or None, stored=annual,
+                kind=period or "annual", origin="structured"),
             "additional_info": {k: v for k, v in {
                 "unit_name": u["name"], "unit_id": u["villa_id"], "compound": facts["name"],
                 "latitude": facts["lat"], "longitude": facts["lng"],
                 "area_raw": a_raw, "unit_meta": u["meta"],
-                "period_statement": "platform: /api/v1/compounds rentPeriod=year; /llms.txt "
-                                    "«Prices are ANNUAL rent in Saudi Riyals (SAR), not monthly»",
+                "period_statement": (
+                    "platform: /api/v1/compounds rentPeriod=year; /llms.txt «Prices are ANNUAL rent "
+                    "in Saudi Riyals (SAR), not monthly»" if period != "monthly" else
+                    "owner rule 2026-09-26: the unit's own «month» word, or a price ≤ 10,000, is "
+                    "monthly — over the platform's annual statement"),
                 "compound_facilities_en": ", ".join(facts["features"]) or None,
             }.items() if v is not None},
         }
