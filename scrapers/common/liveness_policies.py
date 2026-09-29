@@ -1371,6 +1371,9 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     "eilmalriyada", "expattrusted", "flow", "gomenassat", "hajer", "hasaad", "hazim", "ialqarawi",
     "ibaax", "jazwtn", "justsa", "livingcompound", "marksa", "moftah", "qmra", "raghdan", "razre",
     "remaxsa", "rightcompound", "safa", "snam", "sodasyat", "souq24", "suwar", "tamyaz",
+    # 2026-09-29: shadow read (runs 36490769167) with controls right, every would-hide re-read gone
+    # by its own record AND a second route, and the dead signal seen on a real removed ad.
+    "dwelleo", "muhaysini", "nofodh", "nufouth", "reinvest", "sokok", "sukna", "villassa", "wadod",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
