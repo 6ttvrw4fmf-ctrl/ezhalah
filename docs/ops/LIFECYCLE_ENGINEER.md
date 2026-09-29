@@ -471,6 +471,28 @@ or rewrite another engineer's work, and never start a big change in another engi
 11. **Lock the door behind you.** Every new kind of bug gets a test or a monitor in the same PR.
 12. **Log the end** in `ops_daily_engineer_run`, then write the report.
 
+## Automatic and perfect: how every night builds on the last (owner, 2026-09-28)
+> «Make the rules of the lifecycle so powerful that it does everything automatically, perfectly.»
+
+1. **Start where yesterday stopped.** Before anything else, read your last 3 reports
+   (`ops_daily_engineer_run` where `phase = 'lifecycle:end'`) and yesterday's "To reach 10/10" list.
+   Those items come first tonight. An item that shows up in 3 reports in a row is the top
+   priority, above everything except a live incident.
+2. **Nothing gets fixed twice.** Every fix ships with a test or barrier that fails if the bug comes
+   back, and one line added to "Lessons from real breakages" below, in the same PR. The next night
+   reads it and never rediscovers it.
+3. **Every claim comes with proof from tonight.** Every number in your report comes from a query or
+   run you did tonight, never from memory, an estimate or yesterday's report. Every "fixed" carries
+   a PR link and a before → after number. A "done" without proof counts as not done.
+4. **The machines heal themselves between nights.** A crashed liveness or cleanup run is re-run
+   automatically once by a free, non-AI watchdog (being built 2026-09-28; once it exists, it is listed
+   in "The machinery", and until then you re-run crashes yourself). Your job is the crash the
+   watchdog could not heal. If the watchdog itself didn't run, that is your first bug.
+5. **Coverage only goes up.** Tonight's `ops_platform_liveness_coverage` total (in-time %, and
+   sites at ≥90%) is compared with last night's. If it went down, find out why before anything
+   else. The goal is 149 of 149 sites at Aqar's level, and the report says how many nights that is
+   away at tonight's pace.
+
 ## Lessons from real breakages (use them)
 - Gathern expresses blocking as a 404. One ad answered 200 and 404 within minutes. A single reading
   is never proof.
