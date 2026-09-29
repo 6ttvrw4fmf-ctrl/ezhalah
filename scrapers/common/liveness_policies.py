@@ -1356,6 +1356,27 @@ POLICIES: dict[str, _P] = {
     },
 }
 
+# ── Daily DIRECT revisit through each site's OWN oracle (owner, 2026-09-28: «every website must be as
+# strong as Aqar») ──────────────────────────────────────────────────────────────────────────────────
+# scrapers/common/fleet_liveness.py reads EVERY active listing of these sites every day through the
+# verify_gone their own scraper hands to prune_unseen (never a copy): three direct "gone" answers hide
+# a listing, a live answer stamps last_verified_alive_at. That is aqar's mechanism and aqar's window,
+# so they are DIRECT_REVISIT/48h. Each was admitted after a shadow run (GitHub Actions run
+# 36490769167, 2026-09-28; registry migration 20260929000852) with its known-live controls right, 100% of its active listings read, and
+# every listing it would have hidden confirmed gone by a second transport (lifecycle-spot-check.yml).
+# fleet_liveness.APPLY IS this tuple: one list, so the tier and the writes cannot disagree.
+FLEET_DAILY_DIRECT: tuple[str, ...] = (
+    "abaad", "akariyoun", "albdah", "aldarim", "aljassim", "almotmkenah", "alsaedan", "alshawaf",
+    "aqaralriyadh", "aqargate", "azure", "bossbih", "daryusuf", "eaqartabuk", "ebriza", "ego",
+    "eilmalriyada", "expattrusted", "flow", "gomenassat", "hajer", "hasaad", "hazim", "ialqarawi",
+    "ibaax", "jazwtn", "justsa", "livingcompound", "marksa", "moftah", "qmra", "raghdan", "razre",
+    "remaxsa", "rightcompound", "safa", "snam", "sodasyat", "souq24", "suwar", "tamyaz",
+)
+for _p in FLEET_DAILY_DIRECT:
+    POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
+                      "Daily direct revisit of every active listing (fleet_liveness.py, 2026-09-28). "
+                      + POLICIES[_p]["note"])
+
 
 def policy_for(platform: str) -> LivenessPolicy:
     """The registered policy, or a hard error. There is no silent default — an unregistered
