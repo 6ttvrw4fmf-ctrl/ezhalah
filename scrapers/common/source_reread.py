@@ -129,6 +129,17 @@ def main() -> int:
             f.write(f"### Source re-read: {len(out)} listing(s)\n\n")
             for it in out:
                 f.write(f"- `{it['table']}:{it['id']}` status={it.get('status')} verdict={it.get('verdict')}\n")
+    # One compact line per listing in the job LOG as well. The artifact lives in blob storage that a
+    # cloud engineer session cannot reach (its egress proxy refuses the CONNECT), while the job log is
+    # readable through the GitHub connector — so without this the evidence was write-only.
+    for it in out:
+        page = it.get("page") or {}
+        line = {k: it.get(k) for k in ("table", "id", "url", "status", "verdict", "stored", "card_district_raw")}
+        line["page"] = {"title": page.get("title"), "meta": page.get("meta"),
+                        "jsonld": json.dumps(page.get("jsonld"), ensure_ascii=False, default=str)[:2500],
+                        "evidence_lines": (page.get("evidence_lines") or [])[:30],
+                        "text_head": (page.get("text_head") or "")[:800]}
+        print("REREAD " + json.dumps(line, ensure_ascii=False, default=str))
     print(f"re-read {len(out)} listing(s) → reread.json")
     return 0
 
