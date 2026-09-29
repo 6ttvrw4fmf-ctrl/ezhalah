@@ -131,7 +131,7 @@ Recompute every Sunday, and the day a website is added:
 
 ### How often each website is checked
 - **🔴 Gathern: a very, very close eye** (owner). Every Gathern listing is checked at least every 24
-  hours (`gathern-liveness.yml` runs every 4 hours).
+  hours (`gathern-liveness.yml` runs every hour at :37 except 03:00 UTC, pg_cron job 152).
   - **Every night, open 30 Gathern ads hidden in the last 24 hours and 30 live ones** through the
     trust-gated checker in GitHub Actions:
     - if more than 2% of the "hidden" ones are actually live, stop Gathern hiding now
@@ -151,10 +151,10 @@ Recompute every Sunday, and the day a website is added:
     20–100 pages, so check all of them.
   - Every night, double-check 10 hidden + 10 live ads (or all of them, if it has fewer).
 - **⚪ Standard: everyone else.**
-  - Big websites (Aqar, Aqar Monthly, Wasalt, Deal App, or 500+ listings): at least 90% checked
-    within 96 hours, and 10 hidden + 10 live double-checked every night.
-  - Small websites: every listing checked **at least every 7 days** (the minimum, never longer),
-    and 5 hidden + 5 live double-checked every week, spread over the week (about 1/7 of them each
+  - **Every website, big or small: Aqar's standard.** Every live listing is checked at least every
+    **48 hours** (see "Aqar is the standard" below). Big websites (Aqar, Aqar Monthly, Wasalt,
+    Deal App, or 500+ listings) get 10 hidden + 10 live double-checked every night. Small websites
+    get 5 hidden + 5 live double-checked every week, spread over the week (about 1/7 of them each
     night).
   - A standard website that becomes risky, or starts appearing more on first screens, moves up to
     high priority **the same day**, without waiting for Sunday.
@@ -165,13 +165,43 @@ Recompute every Sunday, and the day a website is added:
   being old, and never report an old listing as a problem. That is about what to expect, never
   about checking it less carefully.
 
+## Aqar is the standard for every website (owner, 2026-09-28)
+> «Aqar is so good … we need everything, Aqar Monthly and all websites, to be powerful like it.»
+
+- Aqar works because it has all three parts: (1) a **daily direct check** of its live ads, where
+  each ad is opened on the source (`DIRECT_REVISIT`, 48 h, 3 strikes); (2) **hiding** at 3 strikes
+  behind the canary gate; (3) **deleting** after 30 days through the cleanup engine, with a last
+  source check and an archive copy. **Every website must have all three, at Aqar's level:** the
+  same 48 h window and the same in-time rate (Aqar ≈ 92–94%; the goal is 100%).
+- **The machines do the work; you are the manager.** The checkers and the cleanup run every day on
+  their own, without you. Your job each night is to prove they worked (open real ads like a
+  customer), repair any machine that broke (usually a website changed its design), and find any
+  website that is missing a part. A website without all three parts is your bug, not a note.
+- **New websites get all three parts the day they go live.** A barrier fails when an active
+  `platform_registry` row with `kind='source'` has no entry in `liveness_policies.py` or
+  `cleanup.PLATFORMS`, unless it is on the reasoned allowlist (sites that block direct checks,
+  each with a reason and a date; being added 2026-09-28, and until it exists, run this check
+  yourself every night). An allowlisted site is ❌ in your report until it is fixed.
+- **A website that can't reach Aqar's level** (rate limits, blocking) is named in the report with
+  the number it does reach and the blocker. Never settle for less quietly.
+
+### Gathern's hiding is slow on purpose; don't mistake it for broken
+- A dead Gathern ad needs **3 dead readings at least 6 hours apart** (`REPROBE_MIN_HOURS`), so it is
+  hidden about 12 hours after its first strike, never sooner.
+- One run hides at most the kill cap (2% of active Gathern rows, e.g. 493). A bigger backlog hides
+  the cap's worth of oldest strikes and carries the rest to the next hour.
+- The **first** over-cap batch after a quiet day is quarantined once (no baseline yet: "SPIKE …
+  baseline=None"). That is by design. The next trusted run measures against it and drains.
+- **Broken** means: two trusted runs in a row with `kill_candidates` over the cap, a baseline
+  present, and `inactivated=0`, or the count of visible Gathern ads not falling over 24 h while
+  runs report dead ads. That is your bug to fix the same night.
+
 ## Every single listing gets a real answer (owner, 2026-09-27)
 > «Just because you didn't reach a specific page … doesn't mean you hide it. You need to reach
 > every specific page.»
 
 - **The goal is 100%.** Every live listing on every website has a real ALIVE or DEAD answer from its
-  own page within its check-by time (Gathern 24 h, high priority 48 h, big sites 96 h, small sites 7
-  days), and **0
+  own page within its check-by time (Gathern 24 h, every other website 48 h: Aqar's standard), and **0
   listings are never checked.** Hidden listings keep being checked too, until they are deleted.
 - **Where we started (2026-09-27, `ops_liveness_coverage_snapshot`):** 46.7% of 275,339 live
   listings checked in time, and 137,794 never checked at all. Only 29 of 147 websites were at 90%+.
@@ -378,7 +408,7 @@ or rewrite another engineer's work, and never start a big change in another engi
 
 ## Your run, step by step
 1. **Log the start** in `ops_daily_engineer_run`.
-2. **Did tonight's jobs really run?** Check aqar liveness, Gathern liveness (every 4 hours), Deal App
+2. **Did tonight's jobs really run?** Check aqar liveness, Gathern liveness (hourly), Deal App
    liveness, Wasalt enum liveness, every cleanup, `auto_recover_false_inactive`, and (Sundays)
    verify-deletions. A job that didn't run, or ran green and did nothing, is a bug
    (LISTING_LIVENESS.md §9.2).
