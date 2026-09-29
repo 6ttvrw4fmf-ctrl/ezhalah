@@ -431,3 +431,27 @@ def test_verify_gone_says_live_while_the_unit_is_still_available(monkeypatch):
     monkeypatch.setattr(R.cc, "get", lambda *a, **k: _R())
     assert R._verify_gone("RKZ1", {66800: _project()}, {66800: _project(66825)})[0] == "live", \
         "the capital-A variant must not read as dead"
+
+
+# ── fleet_liveness's daily direct check reads rakez through _make_verify_gone (2026-09-29) ──────────
+def test_fleet_oracle_is_lazy_and_is_the_crawls_own_verify_gone(monkeypatch):
+    fetched, judged, bridged = [], [], []
+    monkeypatch.setattr(R, "session", lambda: "S")
+    monkeypatch.setattr(R, "fetch_projects", lambda s, lang="": fetched.append(lang) or {7: {"id": 7}})
+    monkeypatch.setattr(R, "arabic_project_id", lambda s, en: bridged.append(en) or 7)
+    monkeypatch.setattr(R, "_verify_gone", lambda ad, en, br: judged.append((ad, en, br.get(7), br.get(7))) or ("live", ""))
+    verify = R._make_verify_gone({"ad_number": "RKZ1"})
+    assert fetched == [], "building the oracle reads nothing; the first read does"
+    assert verify("RKZ1") == ("live", "") and verify("RKZ2") == ("live", "")
+    assert fetched == ["", "ar"], "project records are read once per run, not per listing"
+    assert bridged == [7], "each project's Arabic twin is bridged once"
+    assert judged[0][:2] == ("RKZ1", {7: {"id": 7}}) and judged[0][2] == {"id": 7}
+
+
+def test_fleet_oracle_with_no_projects_raises_never_judges(monkeypatch):
+    monkeypatch.setattr(R, "session", lambda: "S")
+    monkeypatch.setattr(R, "fetch_projects", lambda s, lang="": {})
+    monkeypatch.setattr(R, "_verify_gone", lambda *a: ("gone", "must not be reached"))
+    verify = R._make_verify_gone()
+    with pytest.raises(RuntimeError):
+        verify("RKZ1")
