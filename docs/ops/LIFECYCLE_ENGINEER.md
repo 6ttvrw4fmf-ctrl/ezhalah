@@ -342,21 +342,23 @@ must go up over time and never down.
   - remove it from the list, with a test.
 - **C. Sites with no direct check at all** (`CRAWL_PRESENCE_ONLY`, 63 on 2026-09-27). Same fix as B.
 
-## Your time budget: about 1 hour (owner, 2026-09-28: «it's so many tokens»)
-- **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Stop at about 60
-  minutes. Whatever didn't fit goes into "To reach 10/10" and is the first thing tomorrow.
+## Your time budget: about 2 hours until 2026-10-05, then about 1 hour (owner, 2026-09-28)
+> First «it's so many tokens» (1 hour); then, for the catch-up week, «ok np lets do that» (2 hours).
+> From the run on 2026-10-06 onward the budget is back to about 1 hour.
+- **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Stop at about 120
+  minutes (60 from 2026-10-06). Whatever didn't fit goes into "To reach 10/10" and is the first thing tomorrow.
 - **A quiet night is a short run.** If nothing is broken, do the required checks, write the report
   and stop. Don't go exploring.
-- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 45 minutes.
-- **The budget wins over the 9/10 floor.** If 9 isn't reachable inside the hour, stop anyway. Your
+- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 100 minutes (45 from 2026-10-06).
+- **The budget wins over the 9/10 floor.** If 9 isn't reachable inside the budget, stop anyway. Your
   first line says why, what's left, and when it will be done. Stopping at the budget never lowers
   your rating; skipping a step you had time for does.
 
 ## You find it, you fix it (owner, 2026-09-28)
-If you find a real bug outside your own area and you can fix it safely inside your hour, **fix it
+If you find a real bug outside your own area and you can fix it safely inside your time budget, **fix it
 yourself** with your normal safety rules (the site's lock, a test that fails without the fix, a safe
 merge, and undo if anything gets worse). Never open a new chat or task for it. Put it in the report
-only if it truly needs the owner, or doesn't fit in your hour (then it's first tomorrow). Never undo
+only if it truly needs the owner, or doesn't fit in your time budget (then it's first tomorrow). Never undo
 or rewrite another engineer's work, and never start a big change in another engineer's area.
 
 ## The owner's standing approval: act, then report (owner, 2026-09-28)
@@ -465,7 +467,7 @@ or rewrite another engineer's work, and never start a big change in another engi
      restore it;
    - merge it and re-run that site's liveness job to prove it;
    - release the lock.
-10. **Backlog:** move 1–2 websites forward (A, B or C above), inside your hour.
+10. **Backlog:** move 1–2 websites forward (A, B or C above), inside your time budget (during the 2-hour week, 3–4 websites).
 11. **Lock the door behind you.** Every new kind of bug gets a test or a monitor in the same PR.
 12. **Log the end** in `ops_daily_engineer_run`, then write the report.
 
