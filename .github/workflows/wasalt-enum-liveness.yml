@@ -57,8 +57,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # This dispatch's start, before any shard runs. The rollup sums only shard rows started after it:
+  # its 36h window alone also swept in the PREVIOUS dispatch's shards whenever two dispatches landed
+  # <36h apart (see run_enum_rollup()).
+  stamp:
+    if: ${{ !inputs.skip_enum && !inputs.repair_clock_bug_backlog }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      at: ${{ steps.t.outputs.at }}
+    steps:
+      - id: t
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
   enum:
     name: Enum ${{ matrix.slug }} ${{ matrix.deal }}
+    needs: stamp
     # PILOT skip (run strike against the last completed enum) OR the one-time repair dispatch —
     # either way the 4.5h enum has no reason to run.
     if: ${{ !inputs.skip_enum && !inputs.repair_clock_bug_backlog }}
@@ -160,7 +174,7 @@ jobs:
 
   rollup:
     name: Roll the shards up into one enumeration
-    needs: enum
+    needs: [stamp, enum]
     # Only runs when EVERY shard succeeded. `fail-fast: false` lets the other slices finish so the
     # rollup can report exactly which are missing, but a single failed shard still stops publication:
     # a slice nobody enumerated is a slice whose every live listing would be counted "unseen".
@@ -188,6 +202,7 @@ jobs:
           exec python -m scrapers.wasalt.liveness \
             --mode enum-rollup \
             --shards-expected 34 \
+            --since "${{ needs.stamp.outputs.at }}" \
             ${{ inputs.dry_run && '--dry-run' || '' }}
 
   strike:
@@ -227,11 +242,15 @@ jobs:
           # headless=False is what clears the challenge; the runner has no display, so xvfb-run
           # supplies a virtual one. --workers 1 because Playwright's sync API is thread-bound
           # (liveness.py forces it anyway; passing it keeps the command honest).
+          # --max-seconds 4200 (70 min) sits under timeout-minutes: 90 with room for one stuck
+          # browser check (~9 min hard deadline). A browser confirm is ~5 s, so 1,500 rows need
+          # ~2 h; without the budget run 36350303259 was cancelled at 90:00 with nothing written.
           exec xvfb-run -a python -m scrapers.wasalt.liveness \
             --mode enum-strike \
             --grace 3 \
             --workers 1 \
             --confirm-limit ${{ inputs.confirm_limit || '1500' }} \
+            --max-seconds 4200 \
             ${{ inputs.dry_run && '--dry-run' || '' }}
 
   repair:

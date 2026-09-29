@@ -249,7 +249,6 @@ verify-sanadak-building-age-mapped.ts
 verify-satel-listing-url.ts
 verify-scraper-type-tokens-mapped.ts
 verify-search-is-free.ts
-verify-selector-reliability.ts
 verify-sentry-mandate-runs-first.ts
 verify-sentry-routing-wired.ts
 verify-sentry-third-party-noise-dropped.ts

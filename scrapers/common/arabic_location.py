@@ -159,6 +159,13 @@ _SLUG_STOP = {"شارع", "طريق", "حي", "امارة", "منطقه", "مد�
 _ADMIN_SUFFIX_TOKENS = ("اماره", "منطقه")
 
 
+# LEADING street markers, in NORMALISED form. A «حي X» capture that OPENS with one of these is a
+# street Aqar glued onto an empty «حي» label (see resolve_slug step 3), never a district name — no
+# catalog district starts with any of them (checked live against loc_catalog_district, 2026-09-27).
+# «مدينة» is deliberately NOT here: «حي مدينة العمال» (الخبر, AQM6288645) is a real district.
+_STREET_MARKERS = frozenset({"شارع", "طريق", "ممر"})
+
+
 def strip_city_suffix(district_ar: Optional[str], city_ar: Optional[str]) -> Optional[str]:
     """Strip a TRAILING run of city/admin tokens that a delimiter-less source slug glued onto the
     district — e.g. «...حي-المهدية-الرياض-...» captured as district «حي المهدية الرياض».
@@ -258,11 +265,29 @@ def resolve_slug(text: Optional[str], region_hint: Union[int, str, None] = None)
     if region_id is None and region_hint is not None:
         region_id = _hint_to_id(region_hint)
 
-    # 3) district from «حي Y» (keep the original spelling from raw, up to 3 words).
+    # 3) district from «حي Y» (original spelling from raw, up to 3 words) — the first «حي» that
+    # introduces a DISTRICT rather than a street.
+    #
+    # Aqar builds the slug by joining its own address segments with «-», and the first segment is the
+    # district-TYPE label «حي» carrying NO value whenever the ad names only a street. Address
+    # «حي ، شارع ابن هلال الفلالي ، حي الرمال ، الرياض ، منطقة الرياض» becomes slug
+    # «حي-شارع-ابن-هلال-الفلالي-حي-الرمال-الرياض-منطقة-الرياض», so a first-match capture reads the
+    # STREET and silently ignores the real district named later in the SAME slug. Found live
+    # 2026-09-27: 34 active aqarmonthly rows sat in search_listings_ar — and on the card — as
+    # «حي شارع ابن هلال», «حي شارع جبل اجا», or just «حي شارع», the word "street" as a district.
+    #
+    # So skip a capture that OPENS with a street marker and read the next «حي …». The capture is a
+    # zero-width LOOKAHEAD on purpose: a skipped 3-token window swallows the very «حي» that follows
+    # it («حي شارع النرجس حي الصحافة …»), and a consuming match would eat the district's own marker
+    # and find nothing after it. Nothing is invented — when no «حي» in the slug names a district this
+    # stays None, and the caller's catalog-validated address fallback decides, else the value is NULL.
     district_ar = None
-    md = re.search(r"\bحي\s+([؀-ۿ]+(?:\s+[؀-ۿ]+){0,2})", raw)
-    if md:
-        district_ar = "حي " + re.sub(r"\s+", " ", md.group(1)).strip()
+    for md in re.finditer(r"\bحي\s+(?=([؀-ۿ]+(?:\s+[؀-ۿ]+){0,2}))", raw):
+        cand = re.sub(r"\s+", " ", md.group(1)).strip()
+        if norm_ar(cand.split()[0]) in _STREET_MARKERS:
+            continue
+        district_ar = "حي " + cand
+        break
 
     def _scan(tokens: list[str]) -> Optional[tuple[int, int]]:
         """Find a WHOLE-NAME catalog city in tokens, region-scoped to region_id when known. Picks the

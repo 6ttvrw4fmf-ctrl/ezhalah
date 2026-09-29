@@ -117,8 +117,14 @@ _PHONE_RE = re.compile(
 )
 _PHONE_LOOSE = re.compile(r"[\(\[\{«]{1,3}\s*0?5[\d\s\.\-]{7,}\s*[\)\]\}»]{1,3}")
 
-# Listing "gone" markers — sold/under_construction we mark inactive.
-GONE_AVAL = {"sold"}
+# Listing "gone" markers — sold/under_construction we mark inactive. The source's `avalible` enum is
+# available · sold · under_construction · in_prograss (measured 2026-09-28: 151 · 42 · 3 · 2).
+# under_construction is the office saying the unit is NOT BUILT YET (174: «الدبلوكسات تحت الانشاء»,
+# 95/173: «توثيق مراحل البناء», «بادر بحجز فلتك») — off-plan, which the product excludes (owner
+# 2026-09-13: only not-yet-built inventory is out). It was named in this comment but missing from the
+# set, so 3 off-plan units sat active. in_prograss is NOT here: neither page says what is in
+# progress (a sale? the build? the ad?) — both carry price 0 — so it is left for the owner.
+GONE_AVAL = {"sold", "under_construction"}
 
 _last = 0.0
 

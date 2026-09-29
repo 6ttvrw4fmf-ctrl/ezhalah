@@ -91,6 +91,69 @@ const WAIVED: Record<string, string> = {
   // re-running this repair's UPDATE would now BLANK the real prices the fixed sweep has since
   // written, destroying good data. The standing class detector is the guarantee here, not a
   // re-assertion. Open 20260919092122 to check this reason rather than taking it on trust.
+  // The same two-migrations-minutes-apart shape. The repair realigns the aqarmonthly CARD district
+  // (`neighborhood`, which ResultCard renders verbatim whenever it is Arabic) onto the row's own
+  // already-indexed `district_ar`, after a second, weaker slug parse in map_listing() had glued the
+  // city and «منطقة» onto 1,352 of 1,801 active rows. The repair had to run before its watcher could
+  // exist, so the repair file itself never reaches a mon_detect_* in executed SQL.
+  //
+  // What watches the class: mon_detect_aqarmonthly_card_district_drift(), created in 20260927203335
+  // and rostered into mon_run_all_detectors() in that same migration (the splice RAISES rather than
+  // no-ops if its anchor moved). It is an INVARIANT detector, not a one-instance one: it raises P2
+  // on any active aqarmonthly row whose card district differs from its indexed district, which is
+  // exactly what a re-introduced second parse produces on the very next scrape. It is BLIND-guarded
+  // on aqarmonthly's own run history, because the drift it watches is written by a scrape and a 0
+  // during a stalled crawl would otherwise read as health.
+  //
+  // This is the guarantee migration 20260721104637 lacked — the 1,015-row aqarmonthly district
+  // repair whose silent re-corruption is the incident at the top of this file. Same table, same
+  // class, one column over.
+  '20260927201934_aqarmonthly_card_district_realigned_to_the_parsed_district.sql':
+    'watched by its companion 20260927203335_aqarmonthly_card_district_drift_detector.sql, which '
+    + 'creates mon_detect_aqarmonthly_card_district_drift() and rosters it into '
+    + 'mon_run_all_detectors(); an INVARIANT detector that raises P2 on any active aqarmonthly row '
+    + 'whose card district (neighborhood) differs from its indexed district (district_ar) — the '
+    + 'shape a re-introduced second parse produces on the next scrape — and is BLIND-guarded on '
+    + 'aqarmonthly run history. Re-asserting the repair is unnecessary: the writer now derives both '
+    + 'columns from one value, and the detector fires if that ever stops being true',
+
+  // 2026-09-27, the SAME table and the same shape one defect over. 20260927205755 repaired 36 rows
+  // whose district was a STREET — «حي شارع ابن هلال», and on two rows the bare word «حي شارع» —
+  // because Aqar prefixes an EMPTY «حي» label onto the street segment when an ad names no district,
+  // and resolve_slug() took the FIRST «حي» in the slug. The repair had to run before its watcher
+  // could exist, so the repair file itself never reaches a mon_detect_* in executed SQL.
+  //
+  // What watches the class: mon_detect_aqarmonthly_street_as_district(), created in 20260927210420
+  // and rostered into mon_run_all_detectors() in that same migration (the splice RAISES rather than
+  // no-ops if its anchor moved). Corrected in 20260927211052 — as first written it could not raise
+  // AT ALL, because `live text[] || 'bare literal'` throws 22P02 here and every limb reaches that
+  // line only when it has something to report; widened in 20260927213758 to make «حي » optional and
+  // to add a third limb on listings_arabic_locations.
+  //
+  // It is an INVARIANT detector, not a one-instance one, and it watches all THREE surfaces that can
+  // serve a street: the raw table (district_ar AND the card's neighborhood), search_listings_ar, and
+  // the listings_arabic_locations fallback that listing_native_location_v1 COALESCEs to when the
+  // native district is NULL — the surface that kept serving «حي شارع ابي الفتوح» after the platform
+  // table was already clean. BLIND-guarded on aqarmonthly run history, because the corruption is
+  // written by a scrape and a 0 during a stalled crawl would read as health.
+  //
+  // Unlike the entries above, this one's raise path is not merely reasoned about: it was EXECUTED in
+  // production. While the served index was still stale it raised P2 on dedup key
+  // aqarmonthly_street_as_district:index with rows=34, raw_rows=0, and mon_resolve_stale_keys()
+  // closed that key at 21:44:57 UTC once the index agreed. Raise and resolve, both observed.
+  '20260927205755_aqarmonthly_street_is_not_a_district.sql':
+    'watched by its companion 20260927210420_aqarmonthly_street_as_district_detector.sql, which '
+    + 'creates mon_detect_aqarmonthly_street_as_district() and rosters it into '
+    + 'mon_run_all_detectors() (corrected in 20260927211052, which fixed a 22P02 that made every '
+    + 'limb unable to raise; widened in 20260927213758). An INVARIANT detector that raises P2 on any '
+    + 'aqarmonthly row whose district is a street, across all three surfaces that can serve one — '
+    + 'the raw table (district_ar and the card\'s neighborhood), search_listings_ar, and the '
+    + 'listings_arabic_locations fallback v1 COALESCEs to — and BLIND-guarded on aqarmonthly run '
+    + 'history. Proven live, not just reasoned: it raised aqarmonthly_street_as_district:index '
+    + '(rows=34, raw_rows=0) while the index was stale and auto-resolved at 21:44:57 UTC once it was '
+    + 'clean. Re-asserting the repair is unnecessary: resolve_slug() now skips a capture opening with '
+    + 'a street marker (8 executed regression cases, all failing on the pre-fix parser), and the '
+    + 'detector fires if that ever stops being true',
   '20260919091545_ksaaqar_every_price_was_the_sidebars_not_the_ads.sql':
     'watched by its companion 20260919092122_detect_price_borrowed_from_page_chrome_fleet_wide.sql, '
     + 'which creates mon_detect_price_borrowed_from_chrome(), rosters it into mon_run_all_detectors() '

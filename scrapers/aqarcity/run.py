@@ -15,7 +15,8 @@ Data path: NO public JSON API. Enumerate /property/<id> URLs from the gzipped ch
 Plus a `pi-item__label`/`pi-item__value` spec table in the visible HTML:
   التصنيف(type) · مساحة العقار(area) · عدد الغرف(beds) · عمر العقار(age) · واجهة العقار(direction) ·
   عرض الشارع(street width) · خدمات العقار(services) · license create/expiry dates + status · use ·
-  plan/parcel numbers · deed location text. EXPIRED listings render a "هذا الإعلان منتهي" shell with
+  plan/parcel numbers · deed location text. EXPIRED listings render an end-of-ad shell (see
+#   EXPIRED_BANNERS — the wording changed under us) with
   no JSON-LD → skipped.
 
 PDPL: the page exposes the advertiser NAME (seller.name / المعلن …) and the description free-text
@@ -60,7 +61,9 @@ if str(ROOT.parent) not in sys.path:
 from scrapers.common import db, normalize  # noqa: E402
 
 BASE = "https://www.aqarcity.net"
-SITEMAP_INDEX = f"{BASE}/sitemaps/sitemap-index.xml"
+# /sitemaps/sitemap-index.xml answers 404 since the 2026-09 redesign; robots.txt now names
+# /sitemap.xml, a plain <urlset> carrying the /property/<id> urls itself (1,794 on 2026-09-28).
+SITEMAP_INDEX = f"{BASE}/sitemap.xml"
 SITEMAP_FALLBACK = f"{BASE}/sitemap.xml"
 # Cloudflare-fronted origin; keep concurrency gentle (same spirit as Sanadak's 4 workers).
 WORKERS = int(os.environ.get("AQARCITY_WORKERS", "4"))
@@ -222,6 +225,25 @@ def is_monthly_rental(body: str, unit: str, price: Optional[int], title: str = "
     return keyword_monthly  # numbers don't line up either way — unchanged fallback
 
 
+# ── A PAGE THAT STATES NO PERIOD AT ALL (night audit 2026-09-28) ─────────────────────────────────
+# is_monthly_rental() only says "monthly" when the page does; everything else fell to "annual" — a
+# DEFAULT, and a wrong one: 348 live rents were stored yearly at ≤10,000 (an office «595 /yr», Jeddah
+# apartments «2,000 /yr») from pages that print a bare «المطلوب: 2000 ريال». Owner rule 2026-09-28 for
+# a source that is silent: judge by the price — the shared normalize.MONTHLY_LOOKING_MAX (≤10,000 is a
+# monthly figure). Only when the page names NO period anywhere; any «شهري/سنوي/بالشهر/بالسنة» wording
+# keeps the existing decision (so the ×144 installment guard in is_monthly_rental still rules).
+_ANY_PERIOD_WORD = re.compile(r"شهري|بالشهر|في\s*الشهر|/\s*شهر|سنوي|بالسنة|في\s*السنة|/\s*سنة")
+
+
+def rent_period_for(body: str, unit: str, price: Optional[int], title: str = "") -> str:
+    if is_monthly_rental(body, unit, price, title):
+        return "monthly"
+    if (price and price <= normalize.MONTHLY_LOOKING_MAX and unit not in ("YEAR",)
+            and not _ANY_PERIOD_WORD.search(body or "")):
+        return "monthly"
+    return "annual"
+
+
 # ── DAILY-PRICED ADS (source-proven 2026-09-05, listing 30260, ops_incident #63) ───────────────
 # aqarcity hosts short-let ads that publish a DAILY rate. Ezhalah cannot represent one:
 # search_listings_ar.rent_period_ar has exactly three states — سنوي, شهري and NULL (measured
@@ -319,11 +341,13 @@ def _redact(text: Optional[str]) -> Optional[str]:
 
 # ── Sitemap enumeration ───────────────────────────────────────────────────────
 def sitemap_urls(s: cc.Session) -> list[str]:
-    """Return /property/<id> URLs from the gzipped child sitemap (fallback: plain sitemap.xml)."""
+    """Return /property/<id> URLs from the sitemap (a plain urlset, or an index of child sitemaps)."""
     urls: list[str] = []
     try:
         idx = s.get(SITEMAP_INDEX, timeout=30).text
-        children = re.findall(r"<loc>([^<]+)</loc>", idx)
+        urls += re.findall(r"<loc>([^<]+/property/\d+)</loc>", idx)  # a urlset lists them directly
+        # Only CHILD SITEMAPS are followed — never every <loc>, which in a urlset is a listing page.
+        children = re.findall(r"<loc>([^<]+\.xml(?:\.gz)?)</loc>", idx)
         for child in children:
             try:
                 r = s.get(child, timeout=30)
@@ -363,12 +387,110 @@ def sitemap_urls(s: cc.Session) -> list[str]:
 # after AQARCITY_PROBE_MAX_MISS consecutive misses (past the id frontier) or AQARCITY_PROBE_MAX_GAP
 # ids probed (hard cap). When the sitemap is fresh the walk starts at the true frontier and ends in
 # ~max_miss cheap requests finding nothing, so it is safe to run every crawl.
+# ── THE SOURCE'S OWN END-OF-AD WORDING, AND WHY IT IS A CONSTANT NOW (2026-09-27, routine #11) ──
+#
+# This oracle looked for the literal «هذا الإعلان منتهي». Aqar City changed its expired-page wording
+# and dropped the leading «هذا», so the shipped marker matched NOTHING and every genuinely-expired
+# page fell through to 'exists' → `unknown`. The kill was withheld, which is the SAFE direction —
+# §0's UNKNOWN IS NOT DEAD held perfectly and nothing was wrongly deactivated — but the oracle could
+# no longer retire anything at all, which is ops_incident #778 (muktamel: 1,132/1,132 UNKNOWN) and
+# #714 (aqar's looks_closed reading markup aqar had stopped emitting) for a third time.
+#
+# Measured that day, DIRECT, from this egress, cohorts INTERLEAVED so a mid-run block would show up
+# in both (LISTING_LIVENESS.md §4.2 lesson 1):
+#
+#   marker                    already-dead (n=26)   known-alive controls (n=26)
+#   «هذا الإعلان منتهي»  (shipped)         0                        0
+#   «الإعلان غير متاح»                    26                        0
+#   «إعلان منتهي»                         23                        0
+#   application/ld+json                    0                       25
+#
+# Six of those dead rows were `active = true`, past the 3-strike grace (missing_count 3 and 6) and
+# PRESENT in search_listings_ar — users could find and click six listings Aqar City had already
+# expired. That is the §1.1 leak this constant closes.
+#
+# THE SAME REWORD WAS ALREADY FIXED ONCE, TWO DAYS EARLIER, IN THE OTHER COPY. ops_incident #730
+# (2026-09-25) repaired scrapers/common/cleanup.py::_aqarcity_expired for this exact change and left
+# THIS file untouched, because the rule lived in two independent places. So the DELETE tier could
+# see an expired aqarcity ad while the DEACTIVATION tier could not — which is why the 334 eligible
+# rows are correctly queued and the six rows above were never retired. Two copies of a source's
+# wording are two chances to go blind, and only one of them got fixed.
+#
+# «مغلق» also separated 26/0 on the day and was REJECTED: it is an ordinary word a live listing uses
+# about a room («مجلس مغلق»), and a marker that can appear in a description is a false death waiting
+# to happen.
+# TWO independent signals, and the SAME two scrapers/common/cleanup.py already settled on. This file
+# must not invent a third reading of the source's words — that is how the two copies drifted apart in
+# the first place.
+EXPIRED_BANNERS = (
+    "الإعلان غير متاح",   # current banner: <h2 …>الإعلان غير متاح</h2>
+    "الإعلان منتهي",      # the wording this platform used until 2026-09-20
+)
+# Anchored to the TITLE SUFFIX shape, never a bare phrase match: «… - إعلان منتهي | عقار ستي», and the
+# same string in og:title / twitter:title, which terminate with a quote or a tag instead of «|».
+# A bare `"إعلان منتهي" in body` would ALSO match a seller writing it in a free-text description —
+# and on this platform a false dead marker eventually deletes a live listing. This anchoring is
+# cleanup.py's decision (2026-09-25), mirrored deliberately rather than re-derived.
+EXPIRED_TITLE_SUFFIX = re.compile(r"-\s*إعلان منتهي\s*(?:\||\"|<|&)")
+
+
+def _is_expired_body(body: Optional[str]) -> bool:
+    """Does the page carry the source's OWN end-of-ad statement? The one death signal on this
+    platform, and the only thing here allowed to contribute to a kill.
+
+    Deliberately IDENTICAL in behaviour to cleanup.py::_aqarcity_expired. The two live in different
+    tiers (this one deactivates, that one deletes) and scripts/verify-aqarcity-expired-marker-is-the-
+    sources-own-words.ts EXECUTES both over one corpus and fails if they ever disagree.
+    """
+    b = body or ""
+    return (any(m in b for m in EXPIRED_BANNERS)
+            or bool(EXPIRED_TITLE_SUFFIX.search(b)))
+
+
+# ── IN-RUN POSITIVE CONTROL (LISTING_LIVENESS.md §5.4; the sanadak/gathern precedent) ───────────
+# Aqar City expresses "gone" as an HTTP 200, so a template change, a Cloudflare shell or any other
+# whole-site degradation that happened to carry one of the markers would read as a mass death. The
+# canary makes that produce ZERO deactivations instead of all of them, and it FAILS CLOSED: no
+# canary, or a canary that no longer renders its own listing, and no 'gone' verdict may be issued.
+#
+# Armed ONLY from rows THIS run's crawl already fetched and parsed — never from
+# last_verified_alive_at, the self-referential pool that deadlocked gathern for five days
+# (ops_incident #168: a control set that certifies itself cannot detect its own rot).
+_CANARY_LOCK = threading.Lock()
+_canary: dict[str, Any] = {"urls": [], "verdict": None, "reason": "not evaluated"}
+
+
+def set_liveness_canaries(urls) -> None:
+    """Hand the oracle a few listing URLs this run has ALREADY fetched and parsed successfully."""
+    with _CANARY_LOCK:
+        _canary["urls"] = [u for u in (urls or []) if u][:3]
+        _canary["verdict"] = None
+        _canary["reason"] = "not evaluated"
+
+
+def _canary_ok(s: cc.Session) -> tuple[bool, str]:
+    """Is the source still answering us with real, parseable listings right now? Memoised per run."""
+    with _CANARY_LOCK:
+        if _canary["verdict"] is not None:
+            return _canary["verdict"], _canary["reason"]
+        urls = list(_canary["urls"])
+    ok, reason = False, "no canary was supplied, so no removal can be believed"
+    for u in urls:
+        if _probe_id(s, u) == "live":
+            ok, reason = True, f"canary …{u[-12:]} still renders its own listing"
+            break
+        reason = f"canary …{u[-12:]} no longer renders its own listing"
+    with _CANARY_LOCK:
+        _canary["verdict"], _canary["reason"] = ok, reason
+    return ok, reason
+
+
 def _probe_id(s: cc.Session, url: str) -> str:
     """Classify one /property/<id> url: 'live' | 'expired' | 'exists' | 'notfound' | 'error' (≤2 GETs).
 
     'expired' and 'exists' were ONE value until 2026-08-26, and collapsing them put a
     non-evidence condition on a kill path. They mean opposite things to `_verify_gone`:
-      • 'expired' — the page carries «هذا الإعلان منتهي», the source's OWN end-of-ad banner.
+      • 'expired' — the page carries the source's OWN end-of-ad banner (_is_expired_body).
         That is the platform's documented soft-expire and it is authoritative death.
       • 'exists'  — a real id whose page we could not PARSE (no JSON-LD). A Cloudflare
         interstitial, a partial render or a template change all land here, at HTTP 200, on a
@@ -385,10 +507,17 @@ def _probe_id(s: cc.Session, url: str) -> str:
         except Exception:
             time.sleep(1.0)
             continue
-        if "/property/" not in str(r.url) or "Page Not Found" in r.text:
+        # THE SOURCE'S OWN NOT-FOUND. Before the 2026-09 redesign a removed ad redirected to
+        # /notfoundproperty («Page Not Found»). Now it answers a real HTTP 404 on its own URL with
+        # an Arabic «الصفحة غير موجودة» page — measured 2026-09-28: AC30614/30884/30885/30886 (active
+        # at grace) and a made-up id all 404, five sitemap ids 200 + JSON-LD. Reading that 404 as
+        # 'exists' held every removal as UNKNOWN and kept the id-walk from ever reaching max_miss.
+        # A body is required (LISTING_LIVENESS.md §1: an empty 404 is not an answer).
+        if (r.status_code in (404, 410) and r.text) \
+                or "/property/" not in str(r.url) or "Page Not Found" in r.text:
             last = "notfound"
             continue  # a fresh session can 302→/notfound before the cookie lands — retry once
-        if "هذا الإعلان منتهي" in r.text:
+        if _is_expired_body(r.text):
             return "expired"  # the source's own expired banner → authoritative death
         if "application/ld+json" not in r.text:
             return "exists"   # real id, unparseable shell → keeps the walk alive, NEVER proof of death
@@ -464,6 +593,22 @@ def _ld_blocks(body: str) -> tuple[Optional[dict], Optional[dict]]:
     return listing, breadcrumb
 
 
+# 2026-09 REDESIGN: the «pi-item» table became a card grid — «<span class="text-xs font-medium">LABEL</span>
+# </div><div class="… text-end">VALUE</div>». PI_RE matched nothing, so EVERY field read from this table went
+# silent at once: 1,800 of 1,800 live rows were stored as type «unknown» (shown as «غير معروف»), with no
+# area, age, facade, street width or services. Both layouts are read; the grid's renamed labels are aliased
+# onto the names the rest of this file reads.
+PI_GRID_RE = re.compile(
+    r'<span class="text-xs font-medium">\s*(.*?)\s*</span>\s*</div>\s*<div class="[^"]*text-end[^"]*">\s*(.*?)\s*</div>',
+    re.S)
+_PI_ALIASES = {"نوع العقار": "التصنيف",
+               "تاريخ إصدار الترخيص": "تاريخ إنشاء ترخيص الإعلان",
+               "تاريخ انتهاء رخصة الإعلان": "تاريخ انتهاء ترخيص الإعلان"}
+# PDPL: the grid prints the ad officer's NAME and PHONE — never read into the row, not even transiently.
+_PI_NEVER = ("مسؤول الإعلان", "رقم مسؤول الإعلان")
+_DEED_PREFIX = "الوصف حسب الصك"
+
+
 def _pi_table(body: str) -> dict[str, str]:
     out: dict[str, str] = {}
     for m in PI_RE.finditer(body):
@@ -471,6 +616,19 @@ def _pi_table(body: str) -> dict[str, str]:
         v = _strip_tags(m.group(2))
         if k and v and v != "—":
             out[k] = v
+    for m in PI_GRID_RE.finditer(body):
+        k = _strip_tags(m.group(1))
+        v = _strip_tags(m.group(2))
+        if not k or k in _PI_NEVER:
+            continue
+        if k.startswith(_DEED_PREFIX):
+            # the grid folds the deed text INTO the label cell: «الوصف حسب الصك <deed text> رقم الإعلان» → «#id»
+            deed = re.sub(r"\s*رقم الإعلان\s*$", "", k[len(_DEED_PREFIX):]).strip()
+            if deed:
+                out.setdefault("وصف موقع العقار حسب الصك", deed)
+            continue
+        if v and v != "—":
+            out.setdefault(_PI_ALIASES.get(k, k), v)
     return out
 
 
@@ -490,14 +648,22 @@ def _breadcrumb_parts(bc: Optional[dict]) -> dict[str, str]:
     return parts
 
 
+_ALEF = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا"})
+
+
 def _map_type(*candidates: str) -> Optional[str]:
+    # hamza-insensitive: the grid prints «إستراحة» where the map holds «استراحة» (2026-09 redesign)
+    folded = {k.translate(_ALEF): v for k, v in TYPE_MAP_AR.items()}
     for c in candidates:
         if not c:
             continue
-        c = c.strip()
-        if c in TYPE_MAP_AR:
-            return TYPE_MAP_AR[c]
-        for word, eng in TYPE_MAP_AR.items():
+        exact = normalize.map_type_exact(c.strip())      # the shared canonical map first («أرض تجارية» etc.)
+        if exact:
+            return exact
+        c = c.strip().translate(_ALEF)
+        if c in folded:
+            return folded[c]
+        for word, eng in folded.items():
             if word in c:
                 return eng
     return None
@@ -549,7 +715,7 @@ def _images(ld: Optional[dict], body: str) -> list[str]:
 
 
 def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
-    if "هذا الإعلان منتهي" in body or "Page Not Found" in body:
+    if _is_expired_body(body) or "Page Not Found" in body:
         return None, "residential"
     ld, bc = _ld_blocks(body)
     if not ld:
@@ -595,7 +761,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
             # (owner decision 2026-08-22): the source settled it, so write the NULL.
             rent_period = db.AUTHORITATIVE_NULL
         else:
-            rent_period = "monthly" if is_monthly_rental(body, unit, price, title_raw) else "annual"
+            rent_period = rent_period_for(body, unit, price, title_raw)
     area = _float(pi.get("مساحة العقار"))
     # No source per-m² rate → NULL, never price/area (aqar PR#216, scrapers PR#217).
     price_per_meter = None
@@ -654,7 +820,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         area = _float(fs.get("value")) if isinstance(fs, dict) else None
 
     # ── REGA ad-license number: JSON-LD adLicenseNumber first, else the description free-text ──
-    rega_no = _int(ap.get("adLicenseNumber"))
+    rega_no = _int(ap.get("adLicenseNumber")) or _int(pi.get("رقم ترخيص الإعلان"))   # grid label (2026-09 redesign)
     if not rega_no:
         m = re.search(r"ترخيص الإعلان[^0-9٠-٩]{0,4}([0-9٠-٩]{9,12})", ld.get("description") or "")
         if m:
@@ -814,7 +980,7 @@ def main() -> int:
                     continue
                 if own:
                     # Landed on this listing's own /property/<id>, and map_listing only returns a row
-                    # for a page with JSON-LD and no «هذا الإعلان منتهي»/«Page Not Found»: the exact
+                    # for a page with JSON-LD and no expiry banner/«Page Not Found»: the exact
                     # shape _probe_id() calls 'live'.
                     db.mark_direct_alive(row, oracle="aqarcity.property_page.jsonld_not_expired")
                 (com_buf if cat == "commercial" else res_buf).append(row)
@@ -853,6 +1019,9 @@ def main() -> int:
         except Exception:
             pass
 
+        # Armed from listings THIS run fetched and parsed — never from last_verified_alive_at.
+        set_liveness_canaries([r.get("listing_url") for r in (res + com)[:3]])
+
         def _verify_gone(ad_number: str) -> tuple[str, str]:
             pid = re.sub(r"\D", "", ad_number or "")
             if not pid:
@@ -863,10 +1032,18 @@ def main() -> int:
             # used to be mapped to "gone" here — that made an unreadable page indistinguishable
             # from a deleted one, so a Cloudflare shell served at 200 could deactivate a live
             # listing with no source evidence of death whatsoever. It is now held, not killed.
+            # Both kill shapes go through the in-run positive control FIRST. This is strictly more
+            # conservative than what shipped (which killed on 'notfound' with no control at all):
+            # a degraded source now yields UNKNOWN rather than a removal.
+            if status in ("notfound", "expired"):
+                canary_ok, canary_why = _canary_ok(prune_session)
+                if not canary_ok:
+                    return "unknown", f"withheld, source not proven to be answering: {canary_why}"
             if status == "notfound":
-                return "gone", "redirected to /notfoundproperty (control-validated hard 404)"
+                return "gone", ("the source's own not-found: HTTP 404/410 on the listing's own URL "
+                                "or a redirect to /notfoundproperty (canary-gated)")
             if status == "expired":
-                return "gone", "source published «هذا الإعلان منتهي» (own expired banner)"
+                return "gone", "source published its own end-of-ad banner or expiry title suffix"
             if status == "live":
                 return "live", "listing page served with JSON-LD and no expired banner"
             if status == "exists":

@@ -262,6 +262,31 @@ check('db.prune_unseen() records the ALIVE verdicts its oracles obtain',
   'that verifies through this shared path (rather than its own liveness module) is making a ' +
   'tier claim nothing cashes. This is ops_incident #248 exactly.');
 
+// ROUTE 3 (2026-09-28): swept by ANOTHER platform's sweep. aqarmonthly's ads are sa.aqar.fm pages,
+// so aqar's own sweep reads its table (owner: «Aqar Monthly must work like Aqar»); a copy of that
+// sweep under scrapers/aqarmonthly/ is the duplication route 2 already refuses to demand. Cashed
+// only when the other platform's liveness.py — comments and docstrings stripped — names one of this
+// platform's tables AND spreads a stamp into its update payload, AND a workflow (comment lines
+// stripped) runs that module with `--table <that table>`.
+const stripPy = (src: string) => src.replace(/"""[\s\S]*?"""/g, '').replace(/#[^\n]*/g, '');
+const workflowRuns = readdirSync(join(ROOT, '.github', 'workflows'))
+  .filter((f) => /\.ya?ml$/.test(f))
+  .map((f) => readFileSync(join(ROOT, '.github', 'workflows', f), 'utf8')
+    .split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'));
+function sweptByAnother(platform: string): boolean {
+  for (const d of readdirSync(join(ROOT, 'scrapers'), { withFileTypes: true })) {
+    if (!d.isDirectory() || d.name === platform) continue;
+    let src = '';
+    try { src = stripPy(readFileSync(join(ROOT, 'scrapers', d.name, 'liveness.py'), 'utf8')); } catch { continue; }
+    if (!STAMPERS.some((fn) => new RegExp(`\\*\\*${fn}\\(`).test(src))) continue;
+    for (const table of [`${platform}_residential_listings`, `${platform}_commercial_listings`]) {
+      if (!src.includes(`"${table}"`)) continue;
+      if (workflowRuns.some((w) => w.includes(`-m scrapers.${d.name}.liveness`) && w.includes(`--table ${table}`))) return true;
+    }
+  }
+  return false;
+}
+
 for (const r of fromJson.filter((x) => x.strategy !== 'CRAWL_PRESENCE_ONLY')) {
   const sources = [
     join(ROOT, 'scrapers', r.platform, 'liveness.py'),
@@ -277,7 +302,7 @@ for (const r of fromJson.filter((x) => x.strategy !== 'CRAWL_PRESENCE_ONLY')) {
   const wiresSharedOracle = runPy.includes('verify_gone=') && runPy.includes('prune_unseen');
 
   check(`${r.platform} cashes its ${r.strategy} claim in code`,
-    ownModuleStamps || (wiresSharedOracle && sharedPathStamps),
+    ownModuleStamps || (wiresSharedOracle && sharedPathStamps) || sweptByAnother(r.platform),
     `it is registered ${r.strategy} — a claim that something re-fetches its listings' own URLs ` +
     'and records an affirmative answer — and neither route is present: no scrapers/' +
     `${r.platform}/liveness{,_run}.py calling ${STAMPERS.join('() or ')}(), and no ` +

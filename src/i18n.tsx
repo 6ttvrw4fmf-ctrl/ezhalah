@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { I18nManager, Platform } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
+import { EN_TO_AR } from '@/data/propertyTypes';
 
 // Arabic-first localization (PRD §13 decision). The app defaults to Arabic + RTL; an EN/AR toggle
 // in Settings lets the user switch. We use an English-key dictionary: t('Search') looks up the
@@ -1035,6 +1036,18 @@ const AR: Record<string, string> = {
   'Macsaib': 'مكسب العقارية',                         // the site's own Arabic name (macsaib.sa)
   'MAQRAT': 'مقرات',                                  // transliteration — the site names itself «منصة MAQRAT», no Arabic name at the source
   'Arsh': 'عرش العقارية',                    // the site's own Arabic name (arshglobal.com.sa)
+  'SuperOffice': 'سوبر أوفيس',     // the site's own Arabic name (superoffice.sa)
+  'Shomou': 'شموع العقار',         // «مكتب شموع العقار للاستثمار والتطوير العقاري» (shomoalaqar.com.sa footer)
+  'Maktab': 'منصة مكتب',            // the site's own title (maktab.sa)
+  'Sirdab': 'سرداب',               // the site's own Arabic name (marketplace.sirdab.co)
+  'Ashab': 'عشاب العقارية',        // the site's own Arabic name (ashab.sa)
+  'Manafe': 'منافع العقارية',      // the site's own Arabic name (manafe.com.sa)
+  'Wajaf': 'وجف العقارية',         // the site's own Arabic name (wajaf.sa)
+  'AlBukairi': 'البكيري',          // the site's own Arabic name (albukaeri.sa)
+  'Ryadah': 'ريادة العقارية',      // the site's own Arabic name (ryadah.com.sa)
+  'SQCC': 'مجموعة صالح القرشي العقارية', // the site's own Arabic name (sqcc.sa)
+  'Dara': 'دارا للتطوير العقاري',  // the site's own Arabic name (daraa.sa)
+  'Tawia': 'مكتب طوية للعقار',     // the site's own Arabic name (tawia.sa)
   'Manzo': 'مانزو',                          // the site's own Arabic name (manzo.com.sa)
   '8Floor': 'الطابق الثامن',                 // the site's own Arabic name (www.8floor.sa)
   'Holoul': 'حلول',                          // the site's own Arabic name (holoul.io)
@@ -1502,6 +1515,14 @@ const AR: Record<string, string> = {
   'Sorry, no listings currently match your request. Try using the Filter to widen your search.':
     'عذراً، ما لقينا نتائج مطابقة لطلبك حالياً. جرب استخدام الفلتر لتوسيع البحث.',
 };
+
+// A property TYPE the dictionary above does not spell out falls back to the taxonomy's own Arabic
+// label (src/data/propertyTypes.ts EN_TO_AR — the one source of type names). Without this, a clean
+// type added to the taxonomy but not here (Event Hall, Meeting Room, Storage Yard, Self Storage, ATM
+// Site, Hospital, Business Center, Resort, Compound — 12 were missing, night audit 2026-09-28) renders
+// on the card as «نوع غير محدد» for every source that stores the English type. Only fills gaps: an
+// entry above always wins. scripts/verify-card-type-label-covers-the-taxonomy.ts pins it.
+for (const [en, ar] of Object.entries(EN_TO_AR)) if (!(en in AR)) AR[en] = ar;
 
 // Interpolate {placeholders}. Used by both en (key) and ar (translation) paths.
 function fill(template: string, vars?: Record<string, string | number>): string {

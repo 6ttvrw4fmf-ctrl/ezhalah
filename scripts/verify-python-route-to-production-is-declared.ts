@@ -117,6 +117,7 @@ const DECLARED: Record<string, Verdict> = {
   // harness replaces scrapers.common.db in sys.modules BEFORE importing the enricher, so no client is
   // ever constructed and the verdict cannot depend on production being reachable.
   'verify-enrich-ar-stops-before-the-ci-wall.ts': 'offline-safe',
+  'verify-every-site-has-the-full-lifecycle.ts': 'offline-safe',  // 2026-09-28: normal=0, SUPABASE_URL blackholed=0
   'verify-gathern-brackets-its-canary.ts': 'offline-safe',
   'verify-gathern-canary-pool-cannot-deadlock.ts': 'offline-safe',
   'verify-gathern-liveness-trust-gate.ts': 'offline-safe',

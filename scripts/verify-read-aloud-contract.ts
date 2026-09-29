@@ -7,6 +7,7 @@
 //
 //   node --experimental-strip-types scripts/verify-read-aloud-contract.ts   (wired into `npm test`)
 import { readFileSync } from 'node:fs';
+import { windowBetween, windowUpTo } from './lib/sourceWindow.ts';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { pickBestArabicVoice, QUALITY_ENHANCED, type ArabicVoiceCandidate } from '../src/lib/readAloudVoice.ts';
@@ -181,7 +182,23 @@ check('sourceName() (the platform-slug-to-label mapping) lives in ONE place, lis
 // ── CLEANUP: never leaves a dangling utterance playing after the row unmounts (page navigation), or
 //    across a new search on the same screen. ───────────────────────────────────────────────────────
 check('FeedbackRow stops its own speech on unmount (ref-based, mount/unmount only — no redundant stop on every idle transition)', /useEffect\(\(\) => \(\) => \{ if \(speakingRef\.current\) stopReadAloud\(\); \}, \[\]\);/.test(feedbackRow));
-check('starting a new search/turn stops any read-aloud left over from the previous response', /stopReadAloud\(\); \/\/ a new turn starting is "another response"/.test(agent));
+// STRUCTURALLY LOCATED, not located by prose (routine #10, 2026-09-27, ops_incident #727).
+// This read `/stopReadAloud\(\); \/\/ <that line's trailing comment>/` — the COMMENT was the only
+// thing telling this stopReadAloud() from the two in FeedbackRow and the player. Measured that day:
+// rewording that one comment in agent.tsx, with the call untouched, took this file to 98/99 AND made
+// two of its own mutation proofs report themselves BLIND, because the negative control ("the REAL
+// shipped tree is NOT flagged") stopped holding. Prose is not behaviour.
+//
+// The property is «every new turn stops the previous turn's read-aloud», and what makes it TRUE is
+// that the call sits in send()'s UNCONDITIONAL prologue — before the refine intercept and every other
+// branch. So window send() between its own signature and the first `setBusy(true)` and assert the
+// call is in THERE. Strictly stronger than the old pin: it additionally catches the call being moved
+// below a branch (where it would no longer run on every turn), which the text pin could not see.
+// windowBetween() THROWS on a marker that moved, so a refactor is a loud red naming the marker — never
+// a silently widened window (scripts/lib/sourceWindow.ts; AGENTS.md R4).
+check('starting a new search/turn stops any read-aloud left over from the previous response — in send()\'s UNCONDITIONAL prologue, so it runs before every branch',
+  windowBetween(agent, 'const send = async (override?: string) => {', 'setBusy(true);', 'src/app/agent.tsx send() prologue')
+    .includes('stopReadAloud();'));
 
 // ── UI: no fabricated fallback voice/provider on error — the OS/browser's own behavior is the whole
 //    story, per owner instruction ("do not switch to a paid service"). ─────────────────────────────
@@ -440,6 +457,45 @@ mustCatch('the floating player learning to fetch() — a network call on the spe
   breaks('src/components/ReadAloudPlayer.tsx', (src) => `${src}\nasync function warm() { await fetch('/x'); }\n`));
 mustCatch('a paid speech SDK added to package.json',
   breaks('package.json', (src) => src.replace('"expo-speech":', '"elevenlabs": "^1.0.0",\n    "expo-speech":')));
+
+// — THE STRUCTURAL LOCATOR (replaces a comment pin, 2026-09-27): prove BOTH directions —
+//
+// These proofs locate the call STRUCTURALLY too. The first draft of them matched the product's
+// trailing comment to find the line to delete, which reintroduced the very defect this conversion
+// removes: with the comment reworded the main assertion held at 99/99 while proof #1 reported itself
+// BLIND. A proof that depends on prose is no better than an assertion that does.
+const SEND_OPEN = 'const send = async (override?: string) => {';
+/** The `stopReadAloud();` statement inside send()'s prologue, found by POSITION, never by prose. */
+const prologueCall = (src: string): string => {
+  const open = src.indexOf(SEND_OPEN);
+  if (open < 0) throw new Error('send() signature moved — the proof cannot locate its subject');
+  const at = src.indexOf('stopReadAloud();', open);
+  const eol = src.indexOf('\n', at);
+  return src.slice(src.lastIndexOf('\n', at) + 1, eol);   // the whole line, comment and all
+};
+mustCatch('the new-turn stopReadAloud() being deleted from send()',
+  breaks('src/app/agent.tsx', (src) => src.replace(`${prologueCall(src)}\n`, '')));
+mustCatch('the call being MOVED below a branch, where it no longer runs on every turn (the text pin could not see this)',
+  breaks('src/app/agent.tsx', (src) => {
+    const line = prologueCall(src);
+    return src.replace(`${line}\n`, '')
+      .replace('    if (pendingRefineRef.current) {', `${line}\n    if (pendingRefineRef.current) {`);
+  }));
+mustCatch('send() being renamed out from under the window — a moved marker is a loud red, never a silent pass',
+  (() => { try { return breaks('src/app/agent.tsx', (src) =>
+    src.replace(SEND_OPEN, 'const submitTurn = async (override?: string) => {')); }
+    catch { return true; } })());
+// …and the control that this conversion exists for: a COMMENT-ONLY reword no longer moves the verdict
+// at all. Before it, this exact edit produced `98 of 99` plus two self-reported-blind proofs.
+mustCatch('…while a comment-only reword of that same line is NOT flagged (the false RED is gone)',
+  contractProblems(mutate('src/app/agent.tsx', (src) => {
+    const line = prologueCall(src);
+    // windowUpTo, never `line.slice(0, line.indexOf('//'))`: a bare indexOf returns -1 when the
+    // comment is already gone and slice(0, -1) would silently chop the call's last character instead
+    // of failing. R4's own ratchet caught exactly this line when it was first written that way.
+    const code = windowUpTo(line, '//', 'the shipped prologue line');
+    return src.replace(line, `${code}// reworded prose that says the same thing in different words`);
+  })).length === 0);
 
 // — ARABIC ONLY (owner 2026-08-19): no per-message language branch —
 mustCatch('an English language branch reappearing in readAloud.ts',

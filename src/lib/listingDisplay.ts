@@ -191,6 +191,18 @@ export function sourceName(source: string): string {
   if (s.includes('مكسب العقارية') || s.includes('macsaib')) return 'مكسب العقارية';
   if (s.includes('maqrat')) return 'MAQRAT';                           // the site names itself «منصة MAQRAT», Latin only
   if (s.includes('عرش العقارية') || s.includes('arshglobal')) return 'عرش العقارية';
+  if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return 'سوبر أوفيس';
+  if (s.includes('شموع العقار') || s.includes('shomou')) return 'شموع العقار';
+  if (s.includes('منصة مكتب') || s.includes('maktab')) return 'منصة مكتب';
+  if (s.includes('سرداب') || s.includes('sirdab')) return 'سرداب';
+  if (s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'عشاب العقارية';
+  if (s.includes('منافع العقارية') || s.includes('manafe')) return 'منافع العقارية';
+  if (s.includes('وجف العقارية') || s.includes('wajaf')) return 'وجف العقارية';
+  if (s.includes('البكيري العقارية') || s.includes('albukaeri')) return 'البكيري';
+  if (s.includes('ريادة العقارية') || s.includes('ryadah')) return 'ريادة العقارية';
+  if (s.includes('مجموعة صالح القرشي العقارية') || s.includes('sqcc')) return 'مجموعة صالح القرشي العقارية';
+  if (s.includes('دارا للتطوير العقاري') || s.includes('daraa')) return 'دارا للتطوير العقاري';
+  if (s.includes('مكتب طوية للعقار') || s.includes('tawia')) return 'مكتب طوية للعقار';
   if (s.includes('مانزو') || s.includes('manzo')) return 'مانزو';
   if (s.includes('الطابق الثامن') || s.includes('8floor') || s.includes('eightfloor')) return 'الطابق الثامن';
   if (s.includes('حلول') || s.includes('holoul')) return 'حلول';

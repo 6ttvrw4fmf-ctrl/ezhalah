@@ -47,7 +47,7 @@ from scrapers.common.liveness_contract import (
 )
 from scrapers.common.liveness_policies import policy_for
 from scrapers.dealapp.liveness import (
-    classify_dealapp, environment_is_trustworthy, sitemap_candidate_rank,
+    OriginBudget, classify_dealapp, environment_is_trustworthy, from_edge, sitemap_candidate_rank,
 )
 
 BASE = "https://dealapp.sa"
@@ -62,6 +62,10 @@ MIN_INTERVAL = 0.35
 # incident (failure 0.1% -> 66.7%) is what it costs.
 RUN_NAME_CI = "dealapp_liveness"
 RUN_NAME_PROXY = "dealapp_liveness_proxy"
+
+
+_ORIGIN = OriginBudget()
+_DEADLINE = time.monotonic() + 50 * 60   # pacing must never outlast the 60-min job
 
 
 class RequestBudget:
@@ -134,29 +138,96 @@ def _adid(listing_url: str) -> str:
 
 
 def _collect_candidates(client, limit: int) -> list[dict]:
-    """Active rows, never-verified first. Ordering by last_verified_alive_at NULLS FIRST is the
-    point of the column: rows nobody has ever proved alive are exactly the ones to probe first."""
+    """Active rows, least-recently LOOKED AT first (LISTING_LIFECYCLE_ENGINEER.md §4.1d).
+
+    This used to order by last_verified_alive_at NULLS FIRST. A row dealapp answers with a shell
+    never gets that stamp, so it stayed at the head forever: over 2026-09-21..28, 312 rows were
+    probed on all 8 runs and 159 on 7, every one UNKNOWN, and from an ordinary network all 16
+    sampled render the same listing-less page as bogus id 999999999. The run re-read the same
+    unresolvable rows daily and reported "560 of 600 UNKNOWN". last_liveness_probe_at moves on
+    every verdict, so a probed row goes to the back for a full cycle."""
     rows = (client.table(TABLE)
             .select("id, ad_number, listing_url, missing_count, last_verified_alive_at")
             .eq("active", True)
-            .order("last_verified_alive_at", desc=False, nullsfirst=True)
+            .order("last_liveness_probe_at", desc=False, nullsfirst=True)
             .limit(max(limit * 4, limit) if limit else 20000)
             .execute().data or [])
     return [r for r in rows if (r.get("listing_url") or "").strip()]
 
 
+BOGUS_ADID = "999999999"
+
+
+def _canaries(client, s, budget: Optional[RequestBudget]) -> dict:
+    """Positive: the 3 rows most recently proved alive; at least one must still read ALIVE.
+    Negative: an id that cannot exist must NOT read ALIVE. Charged to the request budget."""
+    rows = (client.table(TABLE).select("listing_url, last_verified_alive_at")
+            .eq("active", True).not_.is_("last_verified_alive_at", "null")
+            .order("last_verified_alive_at", desc=True).limit(3).execute().data or [])
+    live = sum(probe_listing(s, r["listing_url"], budget)[0] == ALIVE for r in rows)
+    bogus_alive = probe_listing(s, f"{BASE}/ar/ad-details/{BOGUS_ADID}", budget)[0] == ALIVE
+    return {"live": live, "live_n": len(rows), "live_ok": live > 0, "bogus_alive": bogus_alive}
+
+
+# ── A CDN copy is not the source's answer (2026-09-28) ─────────────────────────────────────────
+# dealapp.sa sits behind CloudFront, which caches the rendered ad page for DAYS and keys it on the
+# path only (a query string is ignored). Measured from one POP: the bare /ar/ad-details/{id} of a
+# live ad came back as dealapp's registration wall (the view-quota page, see liveness.py) with
+# `Age: 130553` (36 h), while /ar/ad-details/{id}/ (a different cache key, so a fresh origin render)
+# carried that ad's schema. CloudFront freezes whichever page the origin gave — which is why retrying
+# the bare URL never recovered (dealapp-fetch-diagnostic retry mode: 0/49 up to 120 s). So: never
+# read an old cached copy as an answer; when the copy we got is stale, ask the next cache key (an
+# edge hit is refunded to the quota). A fresh render is final.
+FRESH_MAX_AGE_S = 3600
+
+
+def _variants(listing_url: str) -> list[str]:
+    base = listing_url.rstrip("/")
+    en = base.replace("/ar/ad-details/", "/en/ad-details/", 1)
+    return [base + "/", en + "/", en]
+
+
+def probe_listing(s: cc.Session, listing_url: str, budget: Optional[RequestBudget] = None
+                  ) -> tuple[str, Optional[int]]:
+    """(verdict, http_status) for one ad: the first variant that is not UNKNOWN, else UNKNOWN."""
+    adid = _adid(listing_url)
+    for url in _variants(listing_url):
+        status, body, final = probe(s, url, budget)
+        if status is None:
+            continue          # a stale CDN copy (or no answer): ask the next cache key
+        # A fresh render is final — every extra key is one more render against dealapp's
+        # per-visitor quota (liveness.OriginBudget). requested_url without the trailing slash: a
+        # slash-stripping redirect must not read as "moved off the ad path" (DEAD).
+        return classify_dealapp(status, body=body, adid=adid, final_url=final,
+                                requested_url=url.rstrip("/")), status
+    return UNKNOWN, None
+
+
 def probe(s: cc.Session, url: str, budget: Optional[RequestBudget] = None
           ) -> tuple[Optional[int], str, str]:
     """(status, body, final_url). An exception is (None, '', '') → UNKNOWN, never a death.
+    A CloudFront copy older than FRESH_MAX_AGE_S is also (None, '', ''): not a current answer.
 
     A retry costs the pool another request, so retries are charged to the budget too.
     """
     for attempt in range(3):
         if budget is not None and not budget.spend():
             return None, "", ""      # out of budget => UNKNOWN, which writes nothing
+        if time.monotonic() > _DEADLINE:
+            return None, "", ""      # out of time => UNKNOWN, which writes nothing
         try:
-            _throttle()
+            # dealapp's anonymous view quota (liveness.py): an unpaced sweep walls itself after
+            # ~10 renders and leaves the wall cached under each ad's URL for days.
+            slot = _ORIGIN.acquire()
             r = s.get(url, timeout=45, allow_redirects=True)
+            if from_edge(r):
+                _ORIGIN.refund(slot)
+            try:
+                age = int((r.headers or {}).get("age") or 0)
+            except (TypeError, ValueError):
+                age = 0
+            if age > FRESH_MAX_AGE_S:
+                return None, "", ""
             return r.status_code, (r.text or ""), str(getattr(r, "url", "") or "")
         except Exception:
             time.sleep(1.0 * (attempt + 1))
@@ -197,20 +268,30 @@ def main() -> int:
         sitemap = harvest_sitemap_ids(s, budget)
         stats["sitemap_ids"] = len(sitemap)
 
+        # Canaries first: one row we proved alive most recently must still read ALIVE, and a bogus
+        # id must NOT. The second is the one that matters — if a page that cannot exist reads
+        # ALIVE, the classifier or the transport is lying and nothing this run sees is written.
+        canary = _canaries(client, s, budget)
+        stats["canary"] = canary
+        if canary["bogus_alive"]:
+            print(f"✗ CANARY: bogus id {BOGUS_ADID} read ALIVE — nothing will be written", flush=True)
+
         cands = _collect_candidates(client, args.limit)
-        # Sitemap-absent first — probe order only, never a verdict.
-        cands.sort(key=lambda r: sitemap_candidate_rank(_adid(r["listing_url"]), sitemap)
-                   if sitemap else 1)
+        # Within the least-recently-probed window, sitemap-PRESENT first. dealapp gives no death
+        # signal on the ad URL (a removed ad renders the same shell as a bogus id, which is
+        # UNKNOWN), so leading with sitemap-absent rows only spent the budget on answers that can
+        # never come. Probe order only, never a verdict; the rotation still reaches every row.
+        cands.sort(key=lambda r: -sitemap_candidate_rank(_adid(r["listing_url"]), sitemap)
+                   if sitemap else 0)
         cands = cands[:args.limit] if args.limit else cands
 
+        writes_ok = args.apply and not canary["bogus_alive"]
         pending: list[tuple[dict, str, int, int]] = []   # (row, action, strikes, http_status)
         for row in cands:
             adid = _adid(row["listing_url"])
             if budget.exhausted:
                 break        # stop cleanly on the boundary; a partial sweep is a normal outcome
-            status, body, final_url = probe(s, row["listing_url"], budget)
-            verdict = classify_dealapp(status, body=body, adid=adid,
-                                       final_url=final_url, requested_url=row["listing_url"])
+            verdict, status = probe_listing(s, row["listing_url"], budget)
             stats["scanned"] += 1
             stats[{ALIVE: "alive", DEAD: "dead", UNKNOWN: "unknown"}[verdict]] += 1
 
@@ -218,7 +299,7 @@ def main() -> int:
                        policy=policy, evidence=EvidenceKind.DIRECT)
             pending.append((row, d.action, d.strikes, status))
 
-            if args.apply and d.action == "reset":
+            if writes_ok and d.action == "reset":
                 # last_liveness_probe_at = "we LOOKED", whatever the verdict. It is what lets
                 # this sweep's own worklist rotate fairly instead of re-reading the rows it can
                 # never resolve (migration 20260924). Never evidence of life on its own.
@@ -228,11 +309,21 @@ def main() -> int:
                 stats["verified"] += 1
 
         # A run that verified almost nothing is being served shells; its deaths are not evidence.
-        trusted = environment_is_trustworthy(stats["alive"], stats["scanned"])
+        trusted = (environment_is_trustworthy(stats["alive"], stats["scanned"])
+                   and canary["live_ok"] and not canary["bogus_alive"])
         if not trusted:
             stats["quarantined"] = True
 
-        if args.apply and trusted:
+        if writes_ok:
+            # "We LOOKED", for every row this run read that no branch below writes: UNKNOWNs, and
+            # strikes/kills the trust gate held back. Never evidence — only the rotation key.
+            looked = [row["id"] for row, action, _s, _st in pending
+                      if action not in ("reset",) and not (trusted and action in ("strike", "deactivate"))]
+            for i in range(0, len(looked), 200):
+                client.table(TABLE).update({"last_liveness_probe_at": now_iso}) \
+                    .in_("id", looked[i:i + 200]).execute()
+
+        if writes_ok and trusted:
             for row, action, strikes, _status in pending:
                 if action == "strike":
                     client.table(TABLE).update({"missing_count": strikes,
@@ -273,7 +364,7 @@ def main() -> int:
                 "verdict": {"strike": "strike", "deactivate": "kill"}.get(action, "unknown"),
                 "missing_count_before": int(row.get("missing_count") or 0),
                 "missing_count_after": strikes,
-                "applied": bool(args.apply and trusted and action in ("strike", "deactivate")),
+                "applied": bool(writes_ok and trusted and action in ("strike", "deactivate")),
             }
             for row, action, strikes, st in pending
             if action != "reset"
@@ -292,8 +383,10 @@ def main() -> int:
                 f"scanned={stats['scanned']} "
                 f"alive={stats['alive']} dead={stats['dead']} unknown={stats['unknown']} "
                 f"verified={stats['verified']} strike={stats['struck']} "
-                f"inactivated={stats['deactivated']} sitemap_ids={stats['sitemap_ids']}"
-                + ("" if trusted else " | QUARANTINED: verified-rate too low, no deactivation written"))
+                f"inactivated={stats['deactivated']} sitemap_ids={stats['sitemap_ids']} "
+                f"canary_live={canary['live']}/{canary['live_n']} "
+                f"canary_bogus={'ALIVE!' if canary['bogus_alive'] else 'not-alive'}"
+                + ("" if trusted else " | QUARANTINED: verified-rate or canary failed, no deactivation written"))
         print(note, flush=True)
         end_run(run_id, ok=True, rows_seen=stats["scanned"],
                 rows_upserted=stats["verified"] + stats["deactivated"],

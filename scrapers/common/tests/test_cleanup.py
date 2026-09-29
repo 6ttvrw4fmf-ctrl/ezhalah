@@ -860,3 +860,154 @@ def test_wasalt_empty_body_self_heal_is_preserved():
     v, why = C.verdict_detail(200, "", dm)
     assert v == "live", "wasalt's empty-body self-heal encoding was broken"
     assert why, "even the encoded case must state itself in the record"
+
+
+# ── handshake-block escape (2026-09-28): aqar 403s chrome124 and serves safari17_0. Before the
+# escape every aqar recheck was inconclusive (runs 02:00 and 11:10 UTC, 2000/2000) and cleanup froze.
+
+class _Resp:
+    def __init__(self, status, text=""): self.status_code = status; self.text = text
+
+
+class _Sess:
+    def __init__(self, answers, log, name): self.answers = answers; self.log = log; self.name = name
+    def get(self, url, **_kw):
+        self.log.append(self.name)
+        a = self.answers.get(self.name)
+        if isinstance(a, Exception):
+            raise a
+        return _Resp(*a)
+
+
+def _routes(monkeypatch, answers):
+    from scrapers.common import http as H
+    log: list[str] = []
+    monkeypatch.setattr(H, "session", lambda: _Sess(answers, log, "chrome124"))
+    monkeypatch.setattr(H, "_route_session", lambda p, _v, fresh=False: _Sess(answers, log, p))
+    C._probe_route.clear()
+    return log
+
+
+AQAR_URL = "https://sa.aqar.fm/ad/123"
+
+
+def test_probe_escapes_handshake_403_and_pins_the_working_profile(monkeypatch):
+    log = _routes(monkeypatch, {"chrome124": (403,), "safari17_0": (200, "<html>live</html>")})
+    assert _REAL_PROBE(AQAR_URL) == (200, "<html>live</html>")
+    assert C._probe_route["sa.aqar.fm"] == "safari17_0"
+    log.clear()
+    assert _REAL_PROBE(AQAR_URL)[0] == 200
+    assert log == ["safari17_0"], "a pinned host must go straight to its working profile"
+
+
+def test_probe_escape_returns_a_real_404_from_the_working_profile(monkeypatch):
+    _routes(monkeypatch, {"chrome124": (403,), "safari17_0": (404,)})
+    assert _REAL_PROBE(AQAR_URL)[0] == 404
+
+
+def test_probe_blocked_on_every_profile_stays_inconclusive(monkeypatch):
+    _routes(monkeypatch, {"chrome124": (403,), "safari17_0": (403,), "firefox133": RuntimeError("x"),
+                          "edge101": (401,)})
+    status, _ = _REAL_PROBE(AQAR_URL)
+    assert status in (None, 403)
+    assert C.verdict(status, "", C._never) == "unknown"
+    assert "sa.aqar.fm" not in C._probe_route
+
+
+def test_probe_does_not_escape_a_non_block_answer(monkeypatch):
+    log = _routes(monkeypatch, {"chrome124": (404,)})
+    assert _REAL_PROBE(AQAR_URL)[0] == 404
+    assert log == ["chrome124"]
+
+
+# ── Known-live controls + the daily fleet run (2026-09-28, owner: 30-day deletion for every site) ──
+
+def _live(i, hours_ago=1):
+    from datetime import datetime, timedelta, timezone
+    seen = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
+    return {"id": 1000 + i, "ad_number": f"L{i}", "listing_url": f"http://x/live{i}",
+            "missing_count": 0, "last_seen_at": seen, "active": True}
+
+
+def _controlled(rows, probe, **pol):
+    c = _install({"testp_listings": rows}, POL(**pol), probe=probe, dead_marker=C._never)
+    C.PLATFORMS["testp"]["controls"] = True
+    return c
+
+
+def test_controls_that_404_mean_a_block_so_nothing_is_deleted():
+    """gathern answered a block with 404 (LISTING_LIVENESS.md §5.4). With every page 404, a 404-only
+    check calls every candidate dead; only the known-live controls reveal the source is lying."""
+    c = _controlled([_cand(1), _cand(2)] + [_live(i) for i in range(5)], probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["aborted"] and s["deleted"] == 0 and c.deleted == {} and s["rechecked"] == 0
+    assert "known-live controls failed: 0/5" in s["abort_reason"]
+
+
+def test_controls_that_answer_live_let_a_real_404_delete():
+    probe = lambda url: (200, "<html>ad</html>") if "live" in url else (404, "")
+    c = _controlled([_cand(1), _cand(2)] + [_live(i) for i in range(5)], probe=probe)
+    s = C.run("testp", force=True)
+    assert not s["aborted"] and s["deleted"] == 2 and sorted(c.deleted["testp_listings"]) == [1, 2]
+
+
+def test_a_block_that_starts_mid_run_is_caught_by_the_closing_controls():
+    calls = {"live": 0}
+    def probe(url):
+        if "live" in url:
+            calls["live"] += 1
+            return (200, "<html>ad</html>") if calls["live"] <= 5 else (404, "")
+        return (404, "")
+    c = _controlled([_cand(1), _cand(2)] + [_live(i) for i in range(5)], probe=probe)
+    s = C.run("testp", force=True)
+    assert s["aborted"] and s["deleted"] == 0 and c.deleted == {}
+    assert s["abort_reason"].startswith("closing known-live controls failed")
+    assert not c.inserted.get("cleanup_deletion_log")
+
+
+def test_too_few_or_stale_controls_fail_closed():
+    probe = lambda url: (200, "<html>ad</html>") if "live" in url else (404, "")
+    few = _controlled([_cand(1)] + [_live(i) for i in range(2)], probe=probe)
+    assert C.run("testp", force=True)["deleted"] == 0 and few.deleted == {}
+    stale = _controlled([_cand(1)] + [_live(i, hours_ago=C.CONTROL_HOURS + 1) for i in range(5)], probe=probe)
+    assert C.run("testp", force=True)["deleted"] == 0 and stale.deleted == {}
+
+
+def test_a_dry_run_whose_controls_fail_is_aborted_so_it_cannot_enable_a_site():
+    probe = lambda url: (404, "")
+    c = _controlled([_cand(1)] + [_live(i) for i in range(5)], probe=probe)
+    s = C.run("testp", force=True, dry_run=True)
+    assert s["aborted"] and s["deleted"] == 0 and c.deleted == {}   # a dry run proves nothing here
+
+
+def test_the_new_sites_are_registered_with_their_measured_check():
+    assert C.PLATFORMS["aqarmonthly"]["dead_marker"] is C._aqar_dead      # aqar's own, never a copy
+    assert C.PLATFORMS["aqarmonthly"]["tables"] == ["aqarmonthly_residential_listings"]
+    for p in ("jazwtn", "mizlaj", "nowaisiry", "raghdan"):
+        reg = C.PLATFORMS[p]
+        assert reg["dead_marker"] is C._never and reg["controls"] is True, p
+        assert reg["tables"] == [f"{p}_residential_listings", f"{p}_commercial_listings"], p
+    # Every 404-only site added after gathern carries controls: 404-only is exactly the check a
+    # block-as-404 fools.
+    for p, reg in C.PLATFORMS.items():
+        if reg.get("dead_marker") is C._never and p not in ("gathern", "testp", "nodeadp"):
+            assert reg.get("controls") is True, p
+
+
+def test_fleet_runs_every_enabled_site_without_its_own_workflow(monkeypatch):
+    client = _Client({"platform_retention_policy": [
+        {"platform": "aqar", "enabled": True}, {"platform": "wasalt", "enabled": True},
+        {"platform": "gathern", "enabled": True}, {"platform": "aqarcity", "enabled": True},
+        {"platform": "jazwtn", "enabled": True}, {"platform": "mizlaj", "enabled": False},
+        {"platform": "unregistered", "enabled": True}]})
+    monkeypatch.setattr(C, "sb", lambda: client)
+    ran = []
+    def fake_run(p, **kw):
+        ran.append((p, kw))
+        if p == "jazwtn":
+            raise RuntimeError("boom")
+        return {"aborted": p == "unregistered"}
+    monkeypatch.setattr(C, "run", fake_run)
+    assert C.run_fleet(dry_run=True) == 2                  # one died, one aborted — both counted
+    assert [p for p, _ in ran] == ["aqarcity", "jazwtn", "unregistered"]
+    assert all(kw == {"dry_run": True} for _, kw in ran)   # never force: each site's policy decides

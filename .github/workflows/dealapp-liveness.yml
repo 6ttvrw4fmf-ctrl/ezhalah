@@ -24,7 +24,12 @@ name: Dealapp liveness
 
 on:
   schedule:
-    - cron: "40 2 * * *"   # daily 02:40 UTC — after the dealapp crawl, before the morning audits
+    # EVERY 2 HOURS (owner decision 2026-09-28: Deal App checked as strongly as Aqar, 48 h window).
+    # Capacity by CADENCE, never by probing harder (LISTING_LIFECYCLE_ENGINEER.md §4.1d): each run
+    # stays paced inside dealapp's per-visitor view quota (liveness.OriginBudget, 9 renders/min,
+    # 50-min stop) and checked 600 ads in run 36492484098. 12 runs/day = ~7,200 ads/day against
+    # ~16.5k active = a ~55 h cycle. Runs never overlap (concurrency group below).
+    - cron: "40 */2 * * *"
   workflow_dispatch:
     inputs:
       apply:

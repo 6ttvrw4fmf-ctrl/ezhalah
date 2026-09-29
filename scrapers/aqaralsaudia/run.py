@@ -57,6 +57,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize
+from scrapers.common.http import retry_smarter_session
 from scrapers.common.arabic_location import to_catalog
 
 REST = "https://aqaralsaudia.com/wp-json/wp/v2"
@@ -463,7 +464,10 @@ def main() -> int:
                    help="If >0, only process this many posts and DON'T upsert (dry run).")
     args = p.parse_args()
 
-    s = session()
+    # Retry smarter (2026-09-27): 3 browser profiles direct, then through the proxy, so a failure
+    # is recorded as "every route tried" rather than "chrome124 once".
+    s, tried = retry_smarter_session(f"{REST}/properties?per_page=1", headers=HEADERS)
+    print(f"AqarAlSaudia: probe {' '.join(tried)}", flush=True)
     run_id = None if args.limit_test else db.begin_run("aqaralsaudia")
     res_rows: list[dict] = []
     com_rows: list[dict] = []
@@ -535,7 +539,7 @@ def main() -> int:
             print(f"  fetch failures: {fail_summary}", flush=True)
         notes = f"pruned={pruned} superseded={superseded} skipped_not_built={skipped_not_built}"
         if fail_summary:
-            notes += f" | fetch failures: {fail_summary}"
+            notes += f" | fetch failures: {fail_summary} | probe {' '.join(tried)}"
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res_rows) + len(com_rows),
                              notes=notes[:300],
                              check_tables=["aqaralsaudia_residential_listings",

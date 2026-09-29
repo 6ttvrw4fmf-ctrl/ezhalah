@@ -1,0 +1,75 @@
+# Daily DIRECT liveness for every site with a measured oracle (scrapers/common/fleet_liveness.py) —
+# the same job aqar gets (owner, 2026-09-28: «every website must be as strong as Aqar»). Each
+# listing's own page is read by its site's own oracle; three "gone" answers in a row hide it, a live
+# answer stamps last_verified_alive_at. Known-live controls open and close every site's run, and a
+# per-site cap stops a broken checker from hiding in bulk. A site outside fleet_liveness.APPLY only
+# decides and reports (shadow) until its shadow run has been read.
+#
+# One matrix job per site: its own runner, its own 120-minute ceiling, its own pace. Triggered daily
+# by pg_cron (job gh-fleet-liveness, migration 20260928212952). pg_cron dispatches with NO inputs,
+# so shadow MUST default to "false"; sites outside APPLY stay shadow regardless.
+name: Fleet liveness (small sites)
+
+on:
+  workflow_dispatch:
+    inputs:
+      shadow:
+        description: "true = decide and report, write nothing (every site)"
+        required: false
+        default: "false"
+      site:
+        description: "Only this site (empty = every site)"
+        required: false
+        default: ""
+
+concurrency:
+  group: fleet-liveness
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      sites: ${{ steps.plan.outputs.sites }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - id: plan
+        env:
+          SITE: ${{ inputs.site }}
+        run: exec python -m scrapers.common.fleet_liveness --plan "$SITE"
+
+  liveness:
+    needs: plan
+    name: Liveness ${{ matrix.site }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        site: ${{ fromJSON(needs.plan.outputs.sites) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Run liveness (${{ matrix.site }})
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SHADOW: ${{ inputs.shadow }}
+          SITE: ${{ matrix.site }}
+        run: |
+          exec python -m scrapers.common.fleet_liveness --site "$SITE" \
+            $([ "$SHADOW" = "true" ] && echo --shadow)

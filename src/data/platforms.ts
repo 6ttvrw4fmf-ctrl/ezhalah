@@ -157,6 +157,30 @@ export const PLATFORMS: Platform[] = [
   { name: 'MAQRAT', domain: 'maqrat.com', brand: 'MAQRAT', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // arsh: 21 land listings measured 2026-09-27 (no prices — «السعر عند الطلب»; owner: include, treat as for sale).
   { name: 'عرش العقارية', domain: 'arshglobal.com.sa', brand: 'Arsh', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // superoffice: 12 available private offices in Riyadh (of 177 offices; 165 booked, 7 meeting rooms skipped) measured 2026-09-27.
+  { name: 'سوبر أوفيس', domain: 'superoffice.sa', brand: 'SuperOffice', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  // shomou: مكتب شموع العقار (Al-Ahsa) — 142 in-date ads of 1,028 listed (835 past their own end date) measured 2026-09-28.
+  { name: 'شموع العقار', domain: 'shomoalaqar.com.sa', brand: 'Shomou', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // maktab: منصة مكتب — 11 offices with in-date REGA ad licences (Riyadh + Tabuk) measured 2026-09-28.
+  { name: 'منصة مكتب', domain: 'maktab.sa', brand: 'Maktab', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // sirdab: 549 warehouses/shops/workshops/factories measured 2026-09-27 (15 storage units skipped).
+  { name: 'سرداب', domain: 'marketplace.sirdab.co', brand: 'Sirdab', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // ashab: 575 listings measured 2026-09-27 (239 single ads + 336 available units of 56 buildings; Buraidah/Qassim).
+  { name: 'عشاب العقارية', domain: 'ashab.sa', brand: 'Ashab', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // manafe: 77 listings measured 2026-09-27 (210 Jeddah buildings; only REGA-licensed, available units).
+  { name: 'منافع العقارية', domain: 'manafe.com.sa', brand: 'Manafe', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // wajaf: 44 Buraidah land/commercial listings measured 2026-09-27 (sold/reserved/let skipped).
+  { name: 'وجف العقارية', domain: 'wajaf.sa', brand: 'Wajaf', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // albukaeri: 28 direct-sale listings measured 2026-09-27 (Eastern Province, Riyadh).
+  { name: 'البكيري العقارية', domain: 'albukaeri.sa', brand: 'AlBukairi', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // ryadah: 18 buildings/compounds offering units measured 2026-09-27 (Khobar/Dammam; every price «عند الاتصال»).
+  { name: 'ريادة العقارية', domain: 'ryadah.com.sa', brand: 'Ryadah', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // sqcc: 31 listings measured 2026-09-27 (Dammam/Eastern Province; auctions excluded).
+  { name: 'مجموعة صالح القرشي العقارية', domain: 'sqcc.sa', brand: 'SQCC', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // daraa: 6 ready Makkah apartment projects measured 2026-09-27 (22 sold, 2 off-plan, 3 under construction skipped).
+  { name: 'دارا للتطوير العقاري', domain: 'daraa.sa', brand: 'Dara', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // tawia: 5 Jubail listings measured 2026-09-27.
+  { name: 'مكتب طوية للعقار', domain: 'tawia.sa', brand: 'Tawia', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // manzo: 1 listing measured 2026-09-27 (Dhahran apartment, 48,000/yr). Owner: include.
   { name: 'مانزو', domain: 'manzo.com.sa', brand: 'Manzo', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
   // eightfloor: 2 Riyadh rentals measured 2026-09-27 (its 9 projects are off-plan — owner: excluded). Bare 8floor.sa has no DNS; www works.

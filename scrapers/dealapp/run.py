@@ -172,9 +172,16 @@ def session() -> cc.Session:
 _ORACLE_ADID = threading.local()
 
 
-def _oracle_session() -> cc.Session:
+class _PacedSession:
+    """The oracle's re-probes spend the same origin budget as the crawl (see _ORIGIN)."""
+
+    def get(self, url: str, **kw: Any) -> Any:
+        return _get(_session(), url, **kw)[0]
+
+
+def _oracle_session() -> Any:
     """Transport seam for the probe. Tests replace this; the shared law is never replaced."""
-    return _session()
+    return _PacedSession()
 
 
 def _signal(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
@@ -734,6 +741,8 @@ def _record_status_200_no_schema(adid: str, requested_url: str, resp: Any) -> No
     has_ng_state_tag = 'id="ng-state"' in body
     if redirected_away:
         bucket = "redirected_away"
+    elif dealapp_liveness.is_registration_wall(body):
+        bucket = "registration_wall"        # dealapp's view quota, not the ad (see liveness.py)
     elif not has_ng_state_tag:
         bucket = "same_url_no_ng_state"
     else:
@@ -751,29 +760,115 @@ def _record_status_200_no_schema(adid: str, requested_url: str, resp: Any) -> No
             })
 
 
+# Every dealapp request in this process spends one budget of ORIGIN renders (see
+# dealapp_liveness.RENDERS_PER_MIN) — the crawl's workers and the prune oracle alike.
+_ORIGIN = dealapp_liveness.OriginBudget()
+# A shard must end in time for prune + end_run; ids it never reached simply stay unseen tonight.
+_DEADLINE = time.monotonic() + 60 * float(os.environ.get("DEALAPP_TIME_BUDGET_MIN", "100"))
+
+# Every ORIGIN render this run got, in completion order: (adid, "ad" | "none" | "wall" | "other").
+# "none" = dealapp's own app hydrated this URL with no listing in it (the not-found page). That is
+# only believable while the origin is rendering ads honestly, so `confirmed_absent()` accepts it
+# only between two renders of real ads — the crawl's own live pages are the canaries.
+_render_lock = threading.Lock()
+_origin_renders: list[tuple[str, str]] = []
+
+
+def _ad_urls(adid: str) -> list[str]:
+    """The ad's own URL, then two spellings dealapp routes to the same ad but CloudFront keys
+    separately — how we get a fresh render when the edge copy is a cached wall or a days-old
+    page without the ad. Tried in order, only when needed."""
+    return [f"{BASE}/ar/ad-details/{adid}", f"{BASE}/ar/ad-details/{adid}/",
+            f"{BASE}/ar//ad-details/{adid}"]
+
+
+def _get(s: Any, url: str, **kw: Any) -> tuple[Any, bool]:
+    """One paced request → (response, came_from_edge)."""
+    kw.setdefault("timeout", 45)
+    kw.setdefault("allow_redirects", True)
+    slot = _ORIGIN.acquire()
+    r = s.get(url, **kw)
+    edge = dealapp_liveness.from_edge(r)
+    if edge:
+        _ORIGIN.refund(slot)
+    return r, edge
+
+
+def confirmed_absent() -> dict[str, str]:
+    """adid → evidence, for ids whose fresh origin render was the no-listing page with a live ad
+    rendered by this runner immediately before AND after it (walls break the bracket)."""
+    with _render_lock:
+        log = list(_origin_renders)
+    prev = [None] * len(log)
+    last = None
+    for i, (_, kind) in enumerate(log):
+        prev[i] = last
+        if kind != "none":
+            last = kind
+    out: dict[str, str] = {}
+    nxt = None
+    for i in range(len(log) - 1, -1, -1):
+        adid, kind = log[i]
+        if kind == "none" and prev[i] == "ad" and nxt == "ad":
+            out[adid] = ("fresh origin render: dealapp's own page with no listing in it, "
+                         "between two renders of live ads on the same runner")
+        if kind != "none":
+            nxt = kind
+    return out
+
+
 def fetch_one(adid: str) -> Optional[tuple[str, str]]:
+    if time.monotonic() > _DEADLINE:
+        _record_fetch_failure("not_reached_time_budget")
+        return None
     s = _session()
-    url = f"{BASE}/ar/ad-details/{adid}"
+    urls = _ad_urls(adid)
+    url = urls.pop(0)
     last_skeleton_html: Optional[str] = None
     last_status: Any = None
     last_resp: Any = None
-    for attempt in range(3):
+    for attempt in range(4):
         try:
-            r = s.get(url, timeout=45, allow_redirects=True)
+            r, edge = _get(s, url)
         except Exception as e:
             last_status = f"exception:{type(e).__name__}"
             time.sleep(1.0 * (attempt + 1))
             continue
         last_status = r.status_code
         last_resp = r
-        if r.status_code == 200 and "real-estate-listing" in r.text:
-            if has_priced_schema(r.text):
-                return r.text, adid
-            # Skeleton hit: keep the response as a fallback and retry for a fully-hydrated one.
-            last_skeleton_html = r.text
+        body = r.text or ""
+        wall = r.status_code == 200 and dealapp_liveness.is_registration_wall(body)
+        has_ad = r.status_code == 200 and "real-estate-listing" in body
+        if not edge and r.status_code == 200:
+            kind = ("wall" if wall else "ad" if has_ad
+                    else "none" if 'id="ng-state"' in body else "other")
+            with _render_lock:
+                _origin_renders.append((adid, kind))
+        if wall:
+            # A cached wall hides this ad for days: ask the origin through another spelling. A
+            # fresh wall means we out-ran the quota after all: sit out a window, same URL again.
+            if edge and urls:
+                url = urls.pop(0)
+            elif not edge:
+                _ORIGIN.back_off()
+            continue
+        if has_ad:
+            if has_priced_schema(body):
+                return body, adid
+            # Skeleton hit: keep the response as a fallback and retry for a fully-hydrated one
+            # (from the origin — the edge would only hand the same skeleton back).
+            last_skeleton_html = body
+            if edge and urls:
+                url = urls.pop(0)
+                continue
         if r.status_code in (404, 410):
             _record_fetch_failure("not_found_404_410")
             return None
+        if r.status_code == 200 and not has_ad:
+            if edge and urls:
+                url = urls.pop(0)        # an edge copy without the ad may be days old: ask the origin
+                continue
+            break                        # the origin itself rendered no ad here: that IS the answer
         time.sleep(0.8 * (attempt + 1))
     # Exhausted retries without ever seeing a priced schema. Fall back to the last skeleton
     # response we did get — map_listing's existing `_int(offers.get("price"))` already yields
@@ -1148,15 +1243,32 @@ def main() -> int:
         # serving us real listings (see the oracle above). The canaries are ads this run already
         # parsed, so a shelled environment yields zero removals rather than many.
         set_liveness_canaries([(r["ad_number"] or "")[2:] for r in (res + com)[:3]])
+        # This run already rendered every id it owns, fresh, between live ads: that render is the
+        # removal evidence (confirmed_absent). Anything it could not settle goes to the oracle.
+        absent = confirmed_absent()
+        # Printed in full so a removal the coverage guard is still holding back stays auditable
+        # (and actionable) after the run: the ids plus the evidence rule that selected them.
+        print(f"Deal App confirmed absent ({len(absent)}, fresh no-listing render between two "
+              f"live-ad renders): {' '.join(sorted(absent, key=int))}", flush=True)
+
+        def _verify_gone(ad_number: str):
+            m = re.search(r"\d+", ad_number or "")
+            why = absent.get(str(int(m.group()))) if m else None
+            if why:
+                return "gone", why
+            if time.monotonic() > _DEADLINE + 600:   # re-probes are paced too; end_run must still land
+                return "unknown", "time budget spent before this row could be re-probed"
+            return _probe.verify_gone(ad_number)
+
         pruned = 0
         for tbl, rows_seen in (("dealapp_residential_listings", res),
                                ("dealapp_commercial_listings", com)):
             seen_set = {r["ad_number"] for r in rows_seen}
-            n = (db.prune_unseen(tbl, seen_set, source=SOURCE, verify_gone=_probe.verify_gone,
+            n = (db.prune_unseen(tbl, seen_set, source=SOURCE, verify_gone=_verify_gone,
                                  shards=args.shards, shard=args.shard)
                  if args.shards > 1
                  else db.prune_unseen(tbl, seen_set, source=SOURCE,
-                                      verify_gone=_probe.verify_gone))
+                                      verify_gone=_verify_gone))
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
@@ -1174,7 +1286,7 @@ def main() -> int:
         # rows_upserted gives the hit rate, and the buckets say whether the misses were
         # dealapp's app reporting the ids gone or our fetches never rendering a live page.
         healthy = db.end_run(run_id, ok=True, rows_seen=seen_n, rows_upserted=seen_n,
-                              notes=f"sold={sold_ct} pruned={pruned} attempted={len(ids)}"
+                              notes=f"sold={sold_ct} pruned={pruned} attempted={len(ids)} absent={len(absent)}"
                                     f"{_fetch_fail_summary()}",
                               check_tables=["dealapp_residential_listings", "dealapp_commercial_listings"])
         if not healthy:

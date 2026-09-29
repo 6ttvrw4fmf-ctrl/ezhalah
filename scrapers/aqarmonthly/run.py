@@ -53,6 +53,12 @@ MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 # apartments/studios; 104 chalet; 105/107 rest-house/farm stays; 106 caravan/camp. Default Apartment.
 CATEGORY_TYPE = {101: "Apartment", 102: "Apartment", 103: "Apartment",
                  104: "Chalet", 105: "Rest House", 106: "Camp", 107: "Rest House"}
+# 108 is Aqar's own «قاعة للحجز» (event/meeting halls; the site's category name, measured 2026-09-28).
+# Owner rule 2026-09-28: a commercial space we cannot place goes in مرافق خدمية under the source's word
+# («قاعة» = Event Hall), MONTHLY, and PRICE ON REQUEST — a hall is booked by the hour or night (ad
+# 6834468: «السعر للساعه 200 ريال»), so Aqar's 30-day booking calculator is not a monthly rent anyone
+# publishes. The price is stored NULL (authoritatively, so an older calculated figure is cleared).
+HALL_CATEGORY = 108
 
 # ── polite per-host throttle (spaces request STARTS, like common/http) ──────────────────────────
 _last = [0.0]
@@ -71,33 +77,126 @@ def _throttle() -> None:
 
 _local = threading.local()
 
+# ── Retry smarter on a BLOCK (2026-09-28, Scraping Engineer) ──────────────────────────────────────
+# aqarmonthly-sync run 36384691494: all 16 shards discovered 0 ids ("page stream failed mid-flight")
+# after nine straight green days — the same site-wide aqar wall that took aqar-sweep to 0 pages
+# earlier that day (run 36360844470, fixed in common/http.py by #5055). _gql was pinned to ONE
+# fingerprint (chrome124) on ONE route, swallowed every failure silently, and so could neither get
+# past a handshake block nor say what the host answered. Now: a request that does not come back as
+# a JSON object (403 page, challenge HTML, refused connection) walks the other browser profiles
+# DIRECT, then — only when the workflow sets SCRAPE_PROXY_FALLBACK_URL — every profile through the
+# residential proxy. The first leg that answers JSON is pinned for every thread for the rest of the
+# process. When no leg answers EXHAUST_AFTER escapes in a row the host is marked exhausted and later
+# calls fail fast (None, False) exactly as before, so a real ban cannot become a probe storm or a
+# proxy bill. The caller's UNKNOWN-coverage path (no prune, ok=False) is unchanged.
+FALLBACK_PROFILES = ("chrome124", "safari17_0", "firefox133", "edge101")
+EXHAUST_AFTER = 3
+_route: list[tuple[str, bool]] = [("chrome124", False)]   # the pinned (profile, via_proxy) leg
+_route_lock = threading.Lock()
+_escape = {"failures": 0, "exhausted": False}
+
+
+def _proxy_fallback() -> dict | None:
+    purl = os.environ.get("SCRAPE_PROXY_FALLBACK_URL", "").strip()
+    return {"http": purl, "https": purl} if purl else None
+
+
+def _new_session(profile: str, via_proxy: bool) -> cc.Session:
+    s = cc.Session(impersonate=profile, proxies=_proxy_fallback() if via_proxy else None)
+    # impersonate OWNS the User-Agent — never set one here
+    s.headers.update({"Content-Type": "application/json", "Origin": "https://sa.aqar.fm",
+                      "Accept": "application/json"})
+    return s
+
 
 def _sess() -> cc.Session:
-    s = getattr(_local, "s", None)
-    if s is None:
-        s = cc.Session(impersonate="chrome124")
-        s.headers.update({"Content-Type": "application/json", "Origin": "https://sa.aqar.fm",
-                          "Accept": "application/json"})
-        _local.s = s
-    return s
+    leg = _route[0]
+    if getattr(_local, "leg", None) != leg:
+        _local.s = _new_session(*leg)
+        _local.leg = leg
+    return _local.s
+
+
+def _post(s: cc.Session, body: dict) -> tuple[dict | None, str]:
+    """(json_object, outcome). json_object is None unless the host answered a JSON object."""
+    try:
+        r = s.post(GQL, json=body, timeout=30)
+    except Exception as e:                     # noqa: BLE001 — transport error, recorded by name
+        return None, type(e).__name__
+    try:
+        d = r.json()
+    except Exception:                          # noqa: BLE001 — a block page is HTML, not JSON
+        return None, f"HTTP {r.status_code} non-JSON"
+    if not isinstance(d, dict):
+        return None, f"HTTP {r.status_code} non-object"
+    return d, f"HTTP {r.status_code}"
+
+
+def _escape_block(body: dict, reason: str, used: tuple[str, bool]) -> dict | None:
+    """Try every other leg with a fresh session; pin the first one that answers JSON."""
+    with _route_lock:   # one thread probes; the others then reuse its verdict
+        if _escape["exhausted"]:
+            return None
+        cur = _route[0]
+        if cur != used:
+            # Another thread already found a working route while we waited — use it.
+            _throttle()
+            return _post(_new_session(*cur), body)[0]
+        tried = [f"{'proxy' if cur[1] else 'direct'}/{cur[0]}:{reason}"]
+        legs = [(p, False) for p in FALLBACK_PROFILES]
+        if _proxy_fallback() is not None:
+            legs += [(p, True) for p in FALLBACK_PROFILES]
+        for leg in legs:
+            if leg == cur:
+                continue
+            _throttle()
+            d, outcome = _post(_new_session(*leg), body)
+            tried.append(f"{'proxy' if leg[1] else 'direct'}/{leg[0]}:{outcome}")
+            if d is not None:
+                _route[0] = leg
+                _escape["failures"] = 0
+                print(f"   ↻ aqar graphql blocked, escaped via {tried[-1]} "
+                      f"(tried {', '.join(tried)}) — pinned for this run", flush=True)
+                return d
+        _escape["failures"] += 1
+        final = _escape["failures"] >= EXHAUST_AFTER
+        if final:
+            _escape["exhausted"] = True
+        print(f"   ✗ aqar graphql BLOCKED on every route (tried {', '.join(tried)}"
+              f"{'' if _proxy_fallback() else '; proxy fallback not enabled'})"
+              + (f" — {EXHAUST_AFTER} in a row, failing fast for the rest of this run" if final else ""),
+              flush=True)
+        return None
 
 
 def _gql(query: str, variables: dict, tries: int = 3):
     """Returns (data, gql_errored). Retries ONLY transient failures (network error / no response).
     A valid JSON response that carries GraphQL `errors` (e.g. "dates already reserved", INVALID_INPUT)
     is a deterministic business error — return immediately so the caller can move on (NOT retry it;
-    retrying booked-date errors is what made the crawl crawl)."""
+    retrying booked-date errors is what made the crawl crawl).
+
+    When every try on the pinned route fails, the other browser profiles and then the residential
+    proxy are tried once (see _escape_block) before giving up with (None, False)."""
+    body = {"query": query, "variables": variables}
+    outcome = "no attempt"
+    used = _route[0]
     for i in range(tries):
+        if _escape["exhausted"]:
+            return None, False
         _throttle()
-        try:
-            r = _sess().post(GQL, json={"query": query, "variables": variables}, timeout=30)
-            d = r.json()
+        used = _route[0]
+        d, outcome = _post(_sess(), body)
+        if d is not None:
             # Return PARTIAL data even on errors: when only the price field errors ("dates reserved"),
             # the response still carries Listing.get, so the caller keeps the detail and just retries
             # the price on the next window. Business errors are NOT retried (deterministic).
+            with _route_lock:
+                _escape["failures"] = 0
             return d.get("data"), bool(d.get("errors"))
-        except Exception:
-            time.sleep(0.6 * (i + 1))        # transient (network) → back off and retry
+        time.sleep(0.6 * (i + 1))            # transient (network/block) → back off and retry
+    d = _escape_block(body, outcome, used)
+    if d is not None:
+        return d.get("data"), bool(d.get("errors"))
     return None, False
 
 
@@ -282,11 +381,20 @@ def map_listing(g: dict, price: dict) -> dict | None:
     uri = g.get("uri") or ""
     if not uri:
         return None
+    # Out of scope, not "type unknown" (2026-09-28, run 36385996203): Aqar's DailyRenting vertical
+    # began serving category 108 — an event hall, a meeting room and a pallet warehouse on the first
+    # day. This is the FURNISHED RESIDENTIAL monthly product (the table is *_residential_listings), so
+    # a category with no residential mapping is not written at all. Writing it with property_type
+    # NULL is what tripped mon_check_run_field_ranges and failed 13 of 16 shards. Never default a
+    # type (source is truth) and never invent a commercial one here (taxonomy is an owner decision).
+    # A MISSING category stays what it always was (type unknown → NULL); only a category the source
+    # names and we have no residential mapping for is out of scope.
+    hall = g.get("category") == HALL_CATEGORY
+    if g.get("category") is not None and g.get("category") not in CATEGORY_TYPE and not hall:
+        return None
     place = uri.rsplit("-", 1)[0].replace("-", " ")  # drop trailing -id, dashes → spaces
     city = N.map_city(place)
     region = N.region_for_city(city) if city else None
-    dm = re.search(r"حي\s+(\S+(?:\s+\S+){0,2})", place)
-    district = dm.group(1) if dm else None
 
     monthly = price.get("discounted_price") or price.get("total_price")
     try:
@@ -295,7 +403,7 @@ def map_listing(g: dict, price: dict) -> dict | None:
         return None
     if monthly <= 0:
         return None
-    price_annual_val = round(monthly * 12)
+    price_annual_val = None if hall else round(monthly * 12)
     area_m2_val = N.to_int(g.get("area"))
 
     imgs = ["https://images.aqar.fm/" + k for k in (g.get("imgs") or []) if k][:30]
@@ -319,11 +427,11 @@ def map_listing(g: dict, price: dict) -> dict | None:
         # An UNKNOWN category id must not default to Apartment (that fabricates a type). None →
         # normalize maps it to the honest «غير معروف» sentinel and the novel-type alarm quarantines
         # the new id for review. (audit item 7, owner rule 2026-07-27.)
-        "property_type":    CATEGORY_TYPE.get(g.get("category")),
+        "property_type":    "Event Hall" if hall else CATEGORY_TYPE.get(g.get("category")),
         "transaction_type": "Rent",
         "rent_period":      "monthly",
         "source":           "Aqar Monthly",
-        "price_annual":     price_annual_val,  # app shows price_annual / 12 = the monthly figure
+        "price_annual":     db.AUTHORITATIVE_NULL if hall else price_annual_val,  # app shows price_annual / 12
         # PRICE = SOURCE evidence (owner invariant 2026-08-04, alert_event 523). Previously every
         # aqarmonthly row was written with NO price_evidence at all — the sibling scrapers
         # (dealapp, wasalt) already record this; aqarmonthly was the one gap.
@@ -334,6 +442,7 @@ def map_listing(g: dict, price: dict) -> dict | None:
             kind="monthly",
             unit="total",
             origin="api",
+            authoritative_absent=hall,
         ),
         "area_m2":          area_m2_val,
         # "beds" is a furnished/short-stay field (this is a daily-rental vertical) — conventionally
@@ -346,7 +455,16 @@ def map_listing(g: dict, price: dict) -> dict | None:
         # "Other" sentinel — the additive resolve_slug()-derived columns already cover most rows.
         "city":             city,
         "region":           region,
-        "neighborhood":     district,
+        # THE CARD'S OWN DISTRICT LINE. ResultCard shows the RAW scraped district whenever it is
+        # already Arabic (owner 2026-07-06, src/data/remote.ts: `l.district = /[ء-ي]/.test(rawDistrict)
+        # ? rawDistrict : …`), so this column — not the catalog-canonical index value — is what a user
+        # reads. It used to be its own naive slug parse, `re.search(r"حي\s+(\S+(?:\s+\S+){0,2})")`,
+        # which swallows up to 3 words after «حي» and therefore glued the city and the word «منطقة»
+        # onto the district: 1,352 of 1,801 active rows rendered as «الفرسان الدمام الدمام» or «الرمال
+        # الرياض منطقة» while district_ar (and the search index built from it) correctly said «حي
+        # الفرسان» / «حي الرمال». One parse, one answer: this is resolve_slug()'s district, which
+        # strips the trailing catalog city by name, plus the address fallback. Unresolved stays None.
+        "neighborhood":     district_ar_val,
         "title":            _redact((g.get("content") or "").split("\n")[0][:120]),
         "description":      _redact(g.get("content")),
         "photo_urls":       imgs,

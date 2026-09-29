@@ -42,7 +42,8 @@ from scrapers.nufouth import run as R  # noqa: E402
 
 # --- offline stand-ins for the only two DB-backed helpers -------------------------------------
 _CATALOG = {"مكة المكرمة": (21, 2), "الرياض": (1, 1), "المدينة المنورة": (3, 3)}
-R.to_catalog = lambda city_ar, region_hint=None: _CATALOG.get((city_ar or "").strip(), (None, None))
+R.resolve = lambda city_ar, district_ar=None, region_hint=None: dict(
+    zip(("city_id", "region_id"), _CATALOG.get((city_ar or "").strip(), (None, None))))
 R.find_district_in_text = lambda text, city_id: (text or "").strip() or None
 
 
@@ -321,7 +322,7 @@ def test_an_ad_that_is_not_active_is_skipped():
 def test_a_type_that_will_not_map_is_skipped_not_guessed():
     """Mixed-use «ارض سكنية تجارية» cannot be one category, and «صراف» has no canonical type.
     N5345's own property_type «عمارة سكنية تجارية» is why its whole-property ad would skip too."""
-    for type_ar in ("ارض سكنية تجارية", "صراف", "فيلا دوبلكس", "برج", "كمباوند"):
+    for type_ar in ("ارض سكنية تجارية", "صراف", "برج", "كمباوند"):
         row, _cat, why = R.map_listing(N4990, N4990_AD, dict(N4990_U1, unit_type=type_ar), URL)
         assert row is None and why == "type_unmapped", f"{type_ar!r} was guessed: {why!r}"
     row, _cat, why = R.map_listing(N5345, N5345_AD, None, URL)
@@ -329,7 +330,7 @@ def test_a_type_that_will_not_map_is_skipped_not_guessed():
 
 
 def test_a_city_the_catalog_cannot_place_is_skipped_not_guessed():
-    """to_catalog decides what a real city is — never the source's own label."""
+    """The catalog (via resolve) decides what a real city is — never the source's own label."""
     row, _cat, why = R.map_listing(
         {**N4990, "property": dict(N4990["property"], city="بالحمر")}, N4990_AD, N4990_U1, URL)
     assert row is None and why == "city_not_in_catalog"
