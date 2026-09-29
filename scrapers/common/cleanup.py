@@ -517,7 +517,8 @@ def _bounded_candidates(client, tables, pol, cutoff, safe_cap):
     return cands[:safe_cap]
 
 
-def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_cap: int | None = None) -> dict:
+def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_cap: int | None = None,
+        restore_only: bool = False) -> dict:
     """bounded_cap: manual one-time escape from the anomaly/fraction ABORT-EVERYTHING behaviour,
     for a backlog already proven (by a fresh source-truth audit) to be genuine attrition rather
     than a scraper regression — e.g. a platform whose deletion-eligible population has grown past
@@ -552,7 +553,7 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
 
     try:
         health_ok, health_reason = (True, None)
-        if not force and not pol["enabled"]:
+        if not (force or restore_only) and not pol["enabled"]:
             _abort("policy disabled (enabled=false)")
         elif not tables:
             _abort("no tables registered for platform (default-deny)")
@@ -784,6 +785,14 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                         _abort(f"closing {why} {frozen} row(s) judged 'dead' were discarded; "
                                f"{stats['reactivated']} reactivation(s) kept.")
 
+                # RESTORE-ONLY (2026-09-29): bring back the rows this same re-check proved LIVE and
+                # delete nothing. The deletion switch refuses "on" while the latest dry run finds a
+                # live ad among the hidden, and a real run would also delete, so without this the
+                # only way to restore them was deleting without the switch. It runs every guard a
+                # real run does (health gate, aggregate gates, controls, freeze); it only drops the
+                # delete. Needs no enabled policy: restoring is the safe direction.
+                if restore_only:
+                    to_delete, log_rows = {}, []
                 if not dry_run:
                     for t, ids in to_reactivate.items():   # self-heal a wrongly-inactive live listing
                         for i in range(0, len(ids), _WRITE_CHUNK):
@@ -803,6 +812,8 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                             stats["deleted"] += len(chunk)
                 else:
                     stats["deleted"] = sum(len(v) for v in to_delete.values())
+                if restore_only:
+                    stats["note"] = "restore-only: live rows brought back, nothing deleted"
 
         client.table("cleanup_runs").insert({k: stats[k] for k in
             ("platform", "dry_run", "candidates", "rechecked", "deleted", "reactivated", "skipped", "aborted", "abort_reason", "note")}).execute()
@@ -895,6 +906,8 @@ def main() -> int:
                      help="Every enabled site without its own cleanup workflow (the daily fleet run).")
     ap.add_argument("--dry-run", action="store_true", help="Probe + classify + report; delete nothing.")
     ap.add_argument("--force", action="store_true", help="Run even if policy.enabled=false (all safety guards still apply).")
+    ap.add_argument("--restore-only", action="store_true",
+                    help="Re-check the hidden cohort and bring back the rows found LIVE; delete nothing.")
     ap.add_argument("--bounded-cap", type=int, default=None, metavar="N",
                      help="Manual one-time escape from the anomaly/fraction ABORT-EVERYTHING behaviour for a "
                           "backlog already proven genuine by a fresh source-truth audit. Never lets the work-set "
@@ -902,10 +915,11 @@ def main() -> int:
                           "by the scheduled cron path; explicit invocation only.")
     args = ap.parse_args()
     if args.all_enabled:
-        if args.force or args.bounded_cap is not None:
-            ap.error("--all-enabled honours every site's policy: no --force, no --bounded-cap")
+        if args.force or args.restore_only or args.bounded_cap is not None:
+            ap.error("--all-enabled honours every site's policy: no --force, --restore-only or --bounded-cap")
         return 1 if run_fleet(dry_run=args.dry_run) and not args.dry_run else 0
-    stats = run(args.platform, dry_run=args.dry_run, force=args.force, bounded_cap=args.bounded_cap)
+    stats = run(args.platform, dry_run=args.dry_run, force=args.force, bounded_cap=args.bounded_cap,
+                restore_only=args.restore_only)
     return 1 if stats["aborted"] and not args.dry_run else 0
 
 
