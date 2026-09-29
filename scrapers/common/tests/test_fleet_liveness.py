@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import types
+
 import pytest
 
 import scrapers.common.fleet_liveness as F
@@ -209,3 +211,23 @@ def test_every_site_that_writes_is_declared_daily_direct_and_nothing_else_writes
     for p in F.APPLY:
         assert LP.strategy_for(p) == LP.DIRECT_REVISIT, p
         assert LP.policy_for(p).max_verification_age_hours == 48 and LP.policy_for(p).grace == 3, p
+
+
+def test_pace_is_a_rate_not_a_pause_added_to_every_read(site, monkeypatch):
+    """At most one read per PACE_S. A read slower than PACE_S waits for nothing; a fast one waits only
+    the rest of its second (2026-09-29: rakez's 1.42 s/read was 0.42 s of reading + 1 s of sleep)."""
+    clock = {"t": 0.0}
+    slept = []
+    monkeypatch.setattr(F, "time", types.SimpleNamespace(
+        monotonic=lambda: clock["t"],
+        sleep=lambda s: (slept.append(round(s, 3)), clock.__setitem__("t", clock["t"] + s))))
+    durations = iter([2.0, 0.25] + [0.0] * 100)
+
+    def answers(ad, n):
+        if n > 5:      # the 5 opening controls are not paced
+            clock["t"] += next(durations)
+        return "live"
+    site(_controls() + [_row(1), _row(2), _row(3)], answers)
+    monkeypatch.setattr(F, "PACE_S", 1.0)
+    F.run_site("testsite", shadow=True)
+    assert slept[:3] == [0.0, 0.0, 0.75], slept

@@ -73,7 +73,7 @@ SITES: dict[str, str] = {
 # list makes them DIRECT_REVISIT). Everything else only decides.
 APPLY: frozenset[str] = frozenset(FLEET_DAILY_DIRECT)
 
-PACE_S = 1.0            # one read a second per site
+PACE_S = 1.0            # at most one read a second per site
 BUDGET_S = 95 * 60      # per site per run, inside the job's 120-minute ceiling
 CONTROL_HOURS = 48
 KILL_FLOOR, KILL_FRAC = 3, 0.10
@@ -175,10 +175,14 @@ def run_site(site: str, *, shadow: bool) -> dict:
                               order=order, limit=st["active"])
             work.sort(key=lambda r: (-(r.get("missing_count") or 0), r.get("last_liveness_probe_at") or ""))
             alive, looked, dead_side = [], [], []
+            last = -math.inf
             for r in work:
                 if time.monotonic() - started > BUDGET_S:
                     break
-                time.sleep(PACE_S)
+                # PACE_S is a RATE (at most one read per PACE_S), not a pause added to each read:
+                # sleeping a full second after a 1.5 s read halved how much of a site fits the budget.
+                time.sleep(max(0.0, last + PACE_S - time.monotonic()))
+                last = time.monotonic()
                 v, why = read(oracle, r["ad_number"])
                 st["probed"] += 1
                 st[v] += 1
