@@ -60,6 +60,9 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Owner approved 2026-09-28 («yes if they are removed»): closed/deleted aqar pages strike and
+          # hide under the 3-strike / 48h grace. 6/6 sampled soft-closed pages read «محذوفة»/«مغلق» live.
+          AQAR_SOFT_CLOSE_ARMED: "1"
         run: exec python -m scrapers.aqar.liveness --table ${{ matrix.table }} --shards 16 --shard ${{ matrix.shard }}
 
   # Aqar Monthly (owner, 2026-09-28: «Aqar Monthly must work like Aqar»). Its ads ARE sa.aqar.fm
@@ -86,4 +89,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Owner approved 2026-09-28 («yes if they are removed»): closed/deleted aqar pages strike and
+          # hide under the 3-strike / 48h grace. 6/6 sampled soft-closed pages read «محذوفة»/«مغلق» live.
+          AQAR_SOFT_CLOSE_ARMED: "1"
         run: exec python -m scrapers.aqar.liveness --table aqarmonthly_residential_listings --shards 1 --shard 0
