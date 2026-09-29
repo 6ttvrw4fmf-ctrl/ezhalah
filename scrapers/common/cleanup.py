@@ -146,6 +146,25 @@ PLATFORMS: dict[str, dict] = {
     "raghdan":   {"tables": ["raghdan_residential_listings", "raghdan_commercial_listings"], "dead_marker": _never, "controls": True},
 }
 
+# ── A redirect lands on ANOTHER ad (2026-09-29, Lifecycle Engineer) ─────────────────────────────
+# On these hosts a live ad is served AT its own stored URL (measured 2026-09-29 from a home IP: 2/2
+# live ads per site answered 200 with no redirect; their hidden ads 404). jazwtn is WordPress, and
+# WordPress answers a slug that no longer exists by guessing the nearest post and 301-ing to it
+# (`x-redirect-by: WordPress`). jazwtn rows 630165 and 630610 (posts removed in August) redirect to
+# rows 630615 and 630613 — separate ads we already list, crawled beside them on 2026-06-22. The
+# probe followed the redirect, read the OTHER ad's 200 as this one's, and the 2026-09-28 dry run
+# (cleanup_runs 208) counted them "live": a real run would have brought two dead ads back as
+# duplicates linking to someone else's listing. So here a redirect is not followed: the 3xx is the
+# answer, and verdict() reads it UNKNOWN (LISTING_LIVENESS.md §1: an unresolved redirect) — never
+# deleted, never brought back. jazwtn's own oracle already said this (`_signal`: path_changed →
+# no opinion); the cleanup was the one reader that did not. NOT aqar/aqarmonthly: their live ads
+# redirect to a canonical path on every read.
+_NO_REDIRECT_HOSTS = frozenset({"jazwtn.sa", "mizlaj.com.sa", "alnowaisiry.com", "raghdan.sa"})
+
+
+def _follows_redirects(url: str) -> bool:
+    return urlsplit(url).netloc.removeprefix("www.") not in _NO_REDIRECT_HOSTS
+
 # Sites whose cleanup has its own daily workflow (aqar-/gathern-/wasalt-cleanup.yml). Every OTHER
 # enabled site runs in the one daily fleet run (fleet-cleanup.yml → run_fleet()).
 DEDICATED_WORKFLOW = ("aqar", "gathern", "wasalt")
@@ -269,7 +288,7 @@ def _probe(url: str) -> tuple[int | None, str]:
         if pinned is not None:
             s = http._route_session(pinned, False)
     try:
-        r = s.get(url, timeout=25, allow_redirects=True, proxies=proxies)
+        r = s.get(url, timeout=25, allow_redirects=_follows_redirects(url), proxies=proxies)
         status, body = r.status_code, (r.text or "")
     except Exception:
         status, body = None, ""
@@ -298,7 +317,8 @@ def _probe_escape(url: str, status: int | None, body: str) -> tuple[int | None, 
         if profile == _probe_route.get(host, "chrome124"):
             continue
         try:
-            r = http._route_session(profile, False, fresh=True).get(url, timeout=25, allow_redirects=True)
+            r = http._route_session(profile, False, fresh=True).get(
+                url, timeout=25, allow_redirects=_follows_redirects(url))
         except Exception:
             continue
         if r.status_code in http.BLOCK_STATUSES:
@@ -335,6 +355,8 @@ def verdict_detail(status: int | None, body: str, dead_marker) -> tuple[str, str
         return "unknown", "no answer from the source (network error / proxy failure)"
     if status in (404, 410):
         return "dead", f"source returned HTTP {status} for this listing's own URL"
+    if 300 <= status < 400:
+        return "unknown", f"HTTP {status}: the source sent this URL to another page (not followed)"
     if status != 200:
         # 403 / 429 / 5xx / unfollowed redirect → about US, never about the listing.
         return "unknown", f"HTTP {status} is about our access or the source's health, not the listing"

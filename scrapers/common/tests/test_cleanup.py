@@ -920,6 +920,33 @@ def test_probe_does_not_escape_a_non_block_answer(monkeypatch):
     assert log == ["chrome124"]
 
 
+# ── WordPress guess-redirect (2026-09-29): jazwtn 630165's removed slug 301s to ANOTHER ad (630615).
+# Following it read that ad's 200 as this one's → "live" → a dead ad brought back as a duplicate.
+
+class _WpSess:
+    """A removed WordPress slug: 301 to a sibling post; following the redirect lands on its live 200."""
+    def get(self, url, allow_redirects=True, **_kw):
+        return _Resp(200, "<html>another ad</html>") if allow_redirects else _Resp(301, "")
+
+
+def test_a_redirect_to_another_ad_is_never_read_as_this_ad_alive(monkeypatch):
+    from scrapers.common import http as H
+    monkeypatch.setattr(H, "session", lambda: _WpSess())
+    monkeypatch.setattr(H, "_route_session", lambda p, _v, fresh=False: _WpSess())
+    C._probe_route.clear()
+    for p, host in (("jazwtn", "jazwtn.sa"), ("mizlaj", "mizlaj.com.sa"),
+                    ("nowaisiry", "alnowaisiry.com"), ("raghdan", "raghdan.sa")):
+        status, body = _REAL_PROBE(f"https://{host}/removed-slug/")
+        assert C.verdict(status, body, C.PLATFORMS[p]["dead_marker"]) == "unknown", p  # never live/dead
+    # aqar/aqarmonthly live ads redirect to their canonical path on every read: still followed.
+    assert _REAL_PROBE(AQAR_URL)[0] == 200
+
+
+def test_a_live_ad_at_its_own_url_still_reads_live_on_a_no_redirect_host(monkeypatch):
+    _routes(monkeypatch, {"chrome124": (200, "<html>ad</html>")})
+    assert C.verdict(*_REAL_PROBE("https://jazwtn.sa/projects/x/"), C._never) == "live"
+
+
 # ── Known-live controls + the daily fleet run (2026-09-28, owner: 30-day deletion for every site) ──
 
 def _live(i, hours_ago=1):
