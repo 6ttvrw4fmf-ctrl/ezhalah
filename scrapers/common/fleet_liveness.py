@@ -11,6 +11,8 @@ PER SITE, EVERY RUN (one matrix job per site, its own run label fleet_liveness:<
      rows first, then the longest since we last looked, so a run cut short reads the rows that
      matter first. One read per PACE_S; a site stops reading at BUDGET_S and says how much of its
      active set it covered, so a site too big for aqar's window is visible, never quietly partial.
+     A row its own crawl proved alive DIRECTLY in the last FRESH_HOURS, with no strike, is covered
+     already and not read twice.
   2. Opening controls: MIN_CANARIES ads its crawl saw most recently must come back 'live' through the
      site's own oracle, or the site is skipped this run (liveness_trust.canary_environment_ok).
   3. Each ad is read by THE SITE'S OWN measured oracle — the same `verify_gone` its scraper hands
@@ -76,6 +78,12 @@ APPLY: frozenset[str] = frozenset(FLEET_DAILY_DIRECT)
 PACE_S = 1.0            # one read a second per site
 BUDGET_S = 95 * 60      # per site per run, inside the job's 120-minute ceiling
 CONTROL_HOURS = 48
+# A row its own crawl already read DIRECTLY within FRESH_HOURS (last_verified_alive_at — only the
+# liveness contract writes it) and that carries no strike was checked today: reading it again adds
+# requests, not evidence («cheapest proof first», LIFECYCLE_ENGINEER.md). It counts as covered, so a
+# big site whose crawl opens every ad (dwelleo: 11k detail records a day) is read only where the
+# crawl did not reach — struck rows, and rows it has not proven alive since yesterday.
+FRESH_HOURS = 24
 KILL_FLOOR, KILL_FRAC = 3, 0.10
 PAGE = 1000             # PostgREST's max rows per request
 _VERDICT = {"gone": DEAD, "live": ALIVE}
@@ -140,8 +148,19 @@ def controls(client, tables) -> list[dict]:
 
 
 def controls_ok(ctl, oracle) -> tuple[bool, str]:
-    alive = sum(read(oracle, r["ad_number"])[0] == ALIVE for r in ctl)
-    return canary_environment_ok(alive, len(ctl)), f"controls {alive}/{len(ctl)} live"
+    reads = [read(oracle, r["ad_number"]) for r in ctl]
+    alive = sum(v == ALIVE for v, _ in reads)
+    # The first two misses, in the oracle's own words: a quarantine must say WHY (block, timeout,
+    # redesign) or the next engineer re-runs it blind.
+    miss = "; ".join([f"{r['ad_number']}: {why[:120]}" for r, (v, why) in zip(ctl, reads) if v != ALIVE][:2])
+    return (canary_environment_ok(alive, len(ctl)),
+            f"controls {alive}/{len(ctl)} live" + (f" ({miss})" if miss else ""))
+
+
+def _fresh(r: dict, since: datetime) -> bool:
+    """Directly proven alive since `since` and not under a strike (see FRESH_HOURS)."""
+    v = r.get("last_verified_alive_at")
+    return not r.get("missing_count") and bool(v) and datetime.fromisoformat(v) >= since
 
 
 def _update(client, table: str, ids: list, patch: dict) -> None:
@@ -158,7 +177,8 @@ def run_site(site: str, *, shadow: bool) -> dict:
     started = time.monotonic()
     run_id = begin_run(f"fleet_liveness:{site}")
     st = {"site": site, "shadow": shadow, "active": 0, "probed": 0, ALIVE: 0, DEAD: 0, UNKNOWN: 0,
-          "verified": 0, "struck": 0, "hidden": 0, "would_hide": [], "quarantined": None, "covered": 0.0}
+          "verified": 0, "struck": 0, "hidden": 0, "would_hide": [], "quarantined": None, "covered": 0.0,
+          "fresh": 0}
     try:
         tables = tables_for(client, site)
         st["active"] = sum(tables.values())
@@ -171,8 +191,11 @@ def run_site(site: str, *, shadow: bool) -> dict:
             order = [("missing_count", True), ("last_liveness_probe_at", False)]
             work = []
             for t in tables:
-                work += _rows(client, t, "id, ad_number, listing_url, missing_count, last_liveness_probe_at",
-                              order=order, limit=st["active"])
+                work += _rows(client, t, "id, ad_number, listing_url, missing_count, last_liveness_probe_at, "
+                              "last_verified_alive_at", order=order, limit=st["active"])
+            since = datetime.now(timezone.utc) - timedelta(hours=FRESH_HOURS)
+            st["fresh"] = sum(_fresh(r, since) for r in work)
+            work = [r for r in work if not _fresh(r, since)]
             work.sort(key=lambda r: (-(r.get("missing_count") or 0), r.get("last_liveness_probe_at") or ""))
             alive, looked, dead_side = [], [], []
             for r in work:
@@ -189,7 +212,8 @@ def run_site(site: str, *, shadow: bool) -> dict:
                     dead_side.append((r, d, why))
                 else:
                     looked.append(r)
-            st["covered"] = round(100.0 * st["probed"] / st["active"], 1) if st["active"] else 100.0
+            done = st["probed"] + st["fresh"]
+            st["covered"] = round(100.0 * done / st["active"], 1) if st["active"] else 100.0
             kills = [x for x in dead_side if x[1].action == "deactivate"]
             st["would_hide"] = [f"{r['_table']}:{r['id']} {r.get('listing_url')} — {why}" for r, _, why in kills]
             ok, why = controls_ok(ctl, oracle)
@@ -222,7 +246,7 @@ def run_site(site: str, *, shadow: bool) -> dict:
                             st["struck"] += 1
                         client.table(r["_table"]).update(patch).eq("id", r["id"]).execute()
         note = (f"{'SHADOW' if shadow else 'APPLY'} active={st['active']} probed={st['probed']} "
-                f"covered={st['covered']}% alive={st[ALIVE]} dead={st[DEAD]} unknown={st[UNKNOWN]} "
+                f"covered={st['covered']}% fresh={st['fresh']} alive={st[ALIVE]} dead={st[DEAD]} unknown={st[UNKNOWN]} "
                 f"verified={st['verified']} struck={st['struck']} hidden={st['hidden']} "
                 f"would_hide={len(st['would_hide'])}"
                 + (f" | QUARANTINED: {st['quarantined']}" if st["quarantined"] else ""))
