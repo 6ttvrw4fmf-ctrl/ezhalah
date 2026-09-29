@@ -18,14 +18,10 @@ MODES:
   pilot  (default) — CLASSIFY ONLY. Never marks inactive, never deletes. Refreshes last_seen_at
                      (+resets missing_count) for confirmed-live rows only. Samples the oldest-last_seen
                      N active rows and records HEAD⇄GET agreement in wasalt_liveness_runs. (safe recon.)
-  enforce          — the real lifecycle. Sweeps ALL active rows in a shard (keyset by id). Confirmed
-                     LIVE  → reset missing_count=0 + refresh last_seen_at (recovery + freshness).
-                     Confirmed DEAD → missing_count += 1; flip active=false ONLY when it reaches the
-                     grace threshold (default 3) — i.e. 3 consecutive sweeps BOTH HEAD-and-GET-dead.
-                     FAILED/transient → row left completely untouched (no strike).
-                     COLLAPSE GUARD: if >max_dead_frac (default 30%) of a shard's verdicts come back
-                     dead, the whole shard is treated as a broken crawl — NOTHING is struck or killed
-                     (proxy-wide 404 storms can't cascade). Mirrors prune_unseen()'s guard.
+  enforce          — DIRECT_REVISIT, aqar's mechanism (see run_enforce): every active row's own page,
+                     never-verified / longest-unverified first; live → last_verified_alive_at, dead →
+                     one direct strike, the 3rd hides it; known-live controls open and close the run
+                     and a collapse guard (>30% dead) stops it. --report-only writes only its run row.
 
   A listing therefore needs THREE things before it can go inactive: a definitive GET-confirmed 404
   (not just a HEAD), three sweeps in a row, and a non-collapsed run each time. No guessing; the safe
@@ -34,8 +30,8 @@ MODES:
 
 Usage:
   python -m scrapers.wasalt.liveness --mode pilot   --limit 800
-  python -m scrapers.wasalt.liveness --mode enforce --shards 8 --shard 0
-  python -m scrapers.wasalt.liveness --mode enforce --limit 2000   # bounded proof run
+  python -m scrapers.wasalt.liveness --mode enforce --shards 8 --shard 0 --max-seconds 3000
+  python -m scrapers.wasalt.liveness --mode enforce --limit 200 --report-only   # shadow
 """
 from __future__ import annotations
 
@@ -61,7 +57,8 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db  # noqa: E402
-from scrapers.common.liveness_contract import direct_alive_patch
+from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN, EvidenceKind, decide, direct_alive_patch
+from scrapers.common.liveness_policies import policy_for
 from scrapers.common.shard_partition import shard_worklist
 
 BASE = "https://wasalt.sa"
@@ -313,37 +310,6 @@ def sample(limit: int):
     return out[:limit]
 
 
-def sweep_rows(shards: int, shard: int, limit: int):
-    """ENFORCE row source: EVERY active Wasalt row (both tables), keyset-paginated by id within this
-    shard's contiguous id-window. Keyset (not offset) so flipping rows active=false mid-sweep can't
-    shift the window and skip rows, and it can't hit the deep-offset statement timeout as the table
-    grows. `limit` (0 = all) bounds the total for a bounded proof run."""
-    out: list[tuple[str, int, str, int]] = []
-    for tbl in TABLES:
-        maxid = db._execute(db.sb().table(tbl).select("id").order("id", desc=True).limit(1),
-                            what=f"{tbl}.maxid").data
-        max_id = (maxid[0]["id"] if maxid else 0)
-        bucket = (max_id // max(1, shards)) + 1
-        lo, hi = shard * bucket, shard * bucket + bucket  # [lo, hi)
-        last = lo - 1
-        while True:
-            if limit and len(out) >= limit:
-                return out[:limit]
-            page = db._execute(
-                db.sb().table(tbl).select("id, listing_url, missing_count")
-                .eq("active", True).gt("id", last).lt("id", hi).order("id", desc=False).limit(1000),
-                what=f"{tbl}.sweep",
-            ).data or []
-            if not page:
-                break
-            for x in page:
-                last = x["id"]
-                url = (x.get("listing_url") or "").strip()
-                if url:
-                    out.append((tbl, x["id"], url, int(x.get("missing_count") or 0)))
-    return out[:limit] if limit else out
-
-
 def _flush_detail(rows: list[dict]) -> None:
     """Per-row evidence for every listing the confirm step decided on, into the existing
     `wasalt_liveness_pilot_detail` table (head/get status + verdict + bytes).
@@ -505,89 +471,183 @@ def run_pilot(args) -> int:
     return 0
 
 
+def revisit_rows(shards: int, shard: int, limit: int) -> list[tuple[str, int, str, int]]:
+    """ENFORCE worklist, in aqar's order: this shard's active rows, never-verified first, then the
+    longest since their last direct ALIVE, across both tables. A run cut short by its budget has read
+    the rows that matter most, and the next run starts where it stopped. Shards are id windows, so
+    parallel jobs never read the same row. The list is built before anything is written."""
+    rows: list[dict] = []
+    for tbl in TABLES:
+        maxid = db._execute(db.sb().table(tbl).select("id").order("id", desc=True).limit(1),
+                            what=f"{tbl}.maxid").data
+        bucket = ((maxid[0]["id"] if maxid else 0) // max(1, shards)) + 1
+        lo, hi = shard * bucket, shard * bucket + bucket
+        got: list[dict] = []
+        while len(got) < limit:
+            n = min(1000, limit - len(got))
+            page = db._execute(
+                db.sb().table(tbl).select("id, listing_url, missing_count, last_verified_alive_at")
+                .eq("active", True).gte("id", lo).lt("id", hi)
+                .order("last_verified_alive_at", desc=False, nullsfirst=True).order("id", desc=False)
+                .range(len(got), len(got) + n - 1),
+                what=f"{tbl}.revisit",
+            ).data or []
+            got += [dict(x, _tbl=tbl) for x in page]
+            if len(page) < n:
+                break
+        rows += got
+    rows.sort(key=lambda x: (x.get("last_verified_alive_at") or "", x["id"]))
+    return [(x["_tbl"], x["id"], x["listing_url"].strip(), int(x.get("missing_count") or 0))
+            for x in rows if (x.get("listing_url") or "").strip()][:limit]
+
+
+def revisit_controls(n: int, hours: int = 48) -> list[tuple[str, int, str, int]]:
+    """Known-live controls: the newest rows the enumeration saw in the last `hours`."""
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    out: list[tuple[str, int, str, int]] = []
+    for tbl in TABLES:
+        for x in db._execute(
+                db.sb().table(tbl).select("id, listing_url, missing_count")
+                .eq("active", True).gte("last_seen_at", since)
+                .order("id", desc=True).limit(n // len(TABLES) + 1),
+                what=f"{tbl}.revisit_control").data or []:
+            if (x.get("listing_url") or "").strip():
+                out.append((tbl, x["id"], x["listing_url"].strip(), int(x.get("missing_count") or 0)))
+    return out[:n]
+
+
+def _probe_at(tbl: str, ids: list[int], now_iso: str) -> None:
+    """We LOOKED (an UNKNOWN read). Not evidence of anything."""
+    for i in range(0, len(ids), 200):
+        db._execute(db.sb().table(tbl).update({"last_liveness_probe_at": now_iso}).in_("id", ids[i:i + 200]),
+                    what=f"{tbl}.revisit_looked")
+
+
+KILL_EVIDENCE_MAX_AGE_S = 50 * 60
+
+
 def run_enforce(args) -> int:
+    """DIRECT_REVISIT: aqar's mechanism for wasalt (owner 2026-09-28, «every website as strong as
+    Aqar»). Each active row's OWN page is read by check_hybrid (the real browser when
+    WASALT_BROWSER=1, as enum-strike) and the verdict goes through liveness_contract.decide():
+      live    → strikes cleared + last_verified_alive_at      (the only thing that makes a row green)
+      dead    → one DIRECT strike; the grace-th strike hides it
+      failed  → UNKNOWN: last_liveness_probe_at only, never a strike
+    GUARDS. Opening controls (known-live rows) must read live, else NOTHING is read. Hides wait for
+    the end and are written only if the closing controls read live too and the collapse guard held
+    (dead ≤ max_dead_frac of decided reads; tripping it also stops the run). Evidence, stamps and
+    strikes are written every _CONFIRM_FLUSH_EVERY rows and the run stops at --max-seconds, so a
+    cancelled job keeps what it read. --report-only writes nothing but its run row."""
     started = time.time()
-    grace = args.grace
-    rows = sweep_rows(args.shards, args.shard, args.limit)
-    # Bandwidth stagger (owner 2026-07-07): instead of spending metered-proxy HEAD/GETs on ALL ~58k
-    # active rows EVERY day, spread them across `stagger_mod` days by id — each row is checked once every
-    # ~stagger_mod days, cutting daily proxy bandwidth ~stagger_mod×. Row SELECTION from the DB is
-    # unchanged (Supabase, not proxied); only the subset we spend proxy requests on shrinks. The 3-strike
-    # grace + collapse guard are untouched, so accuracy (never false-kill a live listing) is preserved —
-    # only the time to confirm a genuinely-dead listing lengthens to ~grace×stagger_mod days.
-    if args.stagger_mod and args.stagger_mod > 1:
-        idx = (args.stagger_idx if args.stagger_idx >= 0
-               else datetime.now(timezone.utc).toordinal() % args.stagger_mod)
-        rows = [r for r in rows if r[1] % args.stagger_mod == idx]
-        print(f"STAGGER: mod={args.stagger_mod} idx={idx} → {len(rows)} rows this shard today "
-              f"(each active row checked every ~{args.stagger_mod}d)", flush=True)
-    print(f"ENFORCE: {len(rows)} active Wasalt rows (shard {args.shard}/{args.shards}"
-          f"{', limit ' + str(args.limit) if args.limit else ''}); grace={grace} workers={args.workers}",
-          flush=True)
     now_iso = datetime.now(timezone.utc).isoformat()
-    checked = live = dead = failed = 0
-    total_bytes = 0
-    alive_ids: dict[str, list[int]] = {t: [] for t in TABLES}
-    dead_rows: list[tuple[str, int, int]] = []  # (tbl, id, cur_missing) — confirmed dead this run
+    policy = policy_for("wasalt")
+    write = not args.report_only
+    rows = revisit_rows(args.shards, args.shard, args.limit or 10**9)
+    control = revisit_controls(args.control_n)
+    n = defaultdict(int)
+    print(f"ENFORCE (direct revisit): {len(rows)} rows, shard {args.shard}/{args.shards}, "
+          f"controls={len(control)}, grace={policy.grace}{' [REPORT-ONLY]' if not write else ''}",
+          flush=True)
 
-    for tbl, lid, cur, verdict, used_get, nbytes, _hc, _gc in _pmap(check_hybrid, rows, args.workers):
-            checked += 1
-            total_bytes += nbytes
-            if verdict == "live":
-                live += 1
-                alive_ids[tbl].append(lid)
-            elif verdict == "dead":
-                dead += 1
-                dead_rows.append((tbl, lid, cur))
-            else:
-                failed += 1
-            if checked % 100 == 0:
-                el = max(1e-6, time.time() - started)
-                print(f"  [{checked}] live={live} dead={dead} failed={failed} "
-                      f"({checked / el:.1f}/s, {total_bytes / 1e6:.1f}MB)", flush=True)
+    def controls(tag: str) -> bool:
+        c, alive = defaultdict(int), defaultdict(list)
+        for tbl, lid, _cur, v, _g, nbytes, _hc, _gc in _pmap(check_hybrid, control, args.workers):
+            c[v] += 1
+            n["bytes"] += nbytes
+            if v == "live":
+                alive[tbl].append(lid)
+        if write:   # a block cannot fabricate a live page (LISTING_LIVENESS.md §5.4)
+            for tbl, ids in alive.items():
+                _flush_alive(tbl, ids, now_iso)
+        ok = control_ok(c["live"], c["dead"], c["failed"], len(control), args.control_min_live)
+        print(f"  {tag} controls live={c['live']}/{len(control)} dead={c['dead']} failed={c['failed']}"
+              f" → {'ok' if ok else 'UNHEALTHY'}", flush=True)
+        return ok
 
-    # Confirmed-live → reset missing_count + refresh last_seen_at (recovery + freshness). Always safe.
-    for tbl, ids in alive_ids.items():
-        _flush_alive(tbl, ids, now_iso)
-
-    # COLLAPSE GUARD: an abnormally high dead fraction = broken crawl (proxy-wide block). Strike NOTHING.
-    verdicts = live + dead  # exclude 'failed' (transient) from the denominator
-    collapsed = verdicts >= 20 and dead > args.max_dead_frac * verdicts
-    struck = killed = 0
-    if collapsed:
-        print(f"⚠ COLLAPSE GUARD tripped: dead={dead}/{verdicts} > {int(args.max_dead_frac*100)}% "
-              f"— treating as a broken crawl, NO strikes applied this run.", flush=True)
+    stop = ""
+    kills: list[tuple[str, int, int, float]] = []   # (tbl, id, strikes, read at)
+    if not controls("opening"):
+        stop = "opening controls failed: nothing read"
     else:
-        # Group dead rows by (table, current missing_count) so each distinct increment is one batched UPDATE.
-        by_cur = defaultdict(list)
-        for tbl, lid, cur in dead_rows:
-            by_cur[(tbl, cur)].append(lid)
-        for (tbl, cur), ids in by_cur.items():
-            new_missing = cur + 1
-            payload = {"missing_count": new_missing}
-            if new_missing >= grace:
-                payload["active"] = False  # 3rd consecutive GET-confirmed-dead sweep → hide it
-            for i in range(0, len(ids), 200):
-                db._execute(db.sb().table(tbl).update(payload).in_("id", ids[i:i + 200]),
-                            what=f"{tbl}.strike")
-            if new_missing >= grace:
-                killed += len(ids)
+        deadline = started + args.max_seconds if args.max_seconds > 0 else None
+        detail: list[dict] = []
+        alive: dict = defaultdict(list)
+        looked: dict = defaultdict(list)
+        struck: dict = defaultdict(list)    # (tbl, strikes) → ids
+
+        def flush() -> None:
+            if write:
+                _flush_detail(detail)       # evidence first
+                for tbl, ids in alive.items():
+                    _flush_alive(tbl, ids, now_iso)
+                for tbl, ids in looked.items():
+                    _probe_at(tbl, ids, now_iso)
+                for (tbl, k), ids in struck.items():
+                    for i in range(0, len(ids), 200):
+                        db._execute(db.sb().table(tbl).update(
+                            {"missing_count": k, "last_liveness_probe_at": now_iso}).in_("id", ids[i:i + 200]),
+                            what=f"{tbl}.revisit_strike")
+            for d in (alive, looked, struck):
+                d.clear()
+            detail.clear()
+
+        for tbl, lid, cur, v, used_get, nbytes, hc, gc in _imap(check_hybrid, rows, args.workers):
+            n["checked"] += 1
+            n[v] += 1
+            n["bytes"] += nbytes
+            detail.append({"tbl": tbl, "listing_id": lid, "head_status": hc, "get_status": gc,
+                           "get_verdict": v, "nbytes": nbytes,
+                           "has_property_details": (v == "live") if used_get else None})
+            d = decide({"live": ALIVE, "dead": DEAD}.get(v, UNKNOWN), strikes=cur, policy=policy,
+                       evidence=EvidenceKind.DIRECT)
+            if d.action == "reset":
+                alive[tbl].append(lid)
+            elif d.action == "strike":
+                struck[(tbl, d.strikes)].append(lid)
+                n["struck"] += 1
+            elif d.action == "deactivate":
+                kills.append((tbl, lid, d.strikes, time.time()))
             else:
-                struck += len(ids)
+                looked[tbl].append(lid)
+            decided = n["live"] + n["dead"]
+            if decided >= 20 and n["dead"] > args.max_dead_frac * decided:
+                stop = f"COLLAPSE GUARD: dead={n['dead']}/{decided} > {args.max_dead_frac:.0%}"
+                break
+            if len(detail) >= _CONFIRM_FLUSH_EVERY:
+                flush()
+            if deadline is not None and time.time() >= deadline:
+                n["budget_stopped"] = 1
+                break
+        flush()
+        if kills and not stop and not controls("closing"):
+            stop = "closing controls failed"
+        if stop:
+            print(f"⚠ {stop} — no hide written", flush=True)
+        elif write:
+            # A hide is audited against a GONE probe from the hour before it
+            # (mon_detect_prune_kill_without_source_verdict); an older read waits for the next run.
+            for tbl, lid, k, at in kills:
+                if time.time() - at > KILL_EVIDENCE_MAX_AGE_S:
+                    continue
+                db._execute(db.sb().table(tbl).update(
+                    {"active": False, "missing_count": k, "last_liveness_probe_at": now_iso})
+                    .eq("id", lid).eq("active", True), what=f"{tbl}.revisit_kill")
+                n["killed"] += 1
 
     runtime = round(time.time() - started, 1)
-    avg_kb = (total_bytes / checked / 1024) if checked else 0.0
-    notes = (f"mode=enforce shard={args.shard}/{args.shards} grace={grace} "
-             f"struck={struck} killed={killed} collapsed={collapsed} "
-             f"runtime_s={runtime} avg_kb_per_check={avg_kb:.1f}")
+    per = n["checked"] or 1
+    notes = (f"mode=enforce shard={args.shard}/{args.shards} report_only={not write} "
+             f"struck={n['struck']} killed={n['killed']} would_kill={len(kills)} "
+             f"budget_stopped={bool(n['budget_stopped'])} stop={stop or '-'} runtime_s={runtime} "
+             f"s_per_check={runtime / per:.2f} kb_per_check={n['bytes'] / per / 1024:.0f}")
     db._execute(db.sb().table("wasalt_liveness_runs").insert({
         "started_at": now_iso, "finished_at": datetime.now(timezone.utc).isoformat(),
         "shard": f"enforce:{args.shard}/{args.shards}", "mode": "enforce",
-        "checked": checked, "live": live, "dead": dead, "failed": failed, "skipped": int(collapsed),
-        "bytes_downloaded": total_bytes, "notes": notes}), what="wasalt_liveness_runs.insert")
-    print(f"\n✓ Wasalt liveness enforce: checked={checked} live={live} dead={dead} failed={failed} "
-          f"struck(→missing_count+1)={struck} killed(→inactive)={killed} collapsed={collapsed} "
-          f"runtime_s={runtime}", flush=True)
+        "checked": n["checked"], "live": n["live"], "dead": n["dead"], "failed": n["failed"],
+        "skipped": int(bool(stop)), "bytes_downloaded": n["bytes"], "notes": notes}),
+        what="wasalt_liveness_runs.insert")
+    print(f"\n✓ Wasalt direct revisit: checked={n['checked']} live={n['live']} dead={n['dead']} "
+          f"failed={n['failed']} | {notes}", flush=True)
     return 0
 
 
@@ -1199,11 +1259,8 @@ def main() -> int:
     ap.add_argument("--shard", type=int, default=0, help="ENFORCE: which 0-indexed bucket this job handles.")
     ap.add_argument("--max-dead-frac", type=float, default=0.30,
                     help="ENFORCE collapse guard: skip ALL strikes if dead fraction exceeds this.")
-    ap.add_argument("--stagger-mod", type=int, default=1,
-                    help="ENFORCE bandwidth stagger: check only rows where id %% N == today's index, so "
-                         "each active row is checked every ~N days (1 = every row every run). Cuts proxy GB ~N×.")
-    ap.add_argument("--stagger-idx", type=int, default=-1,
-                    help="ENFORCE: which stagger bucket to check today (default -1 = auto from UTC ordinal date).")
+    ap.add_argument("--report-only", action="store_true",
+                    help="ENFORCE: read and report, write nothing but the run row (shadow).")
     ap.add_argument("--enum-min-rows", type=int, default=40000,
                     help="ENUM-STRIKE: a scrape_runs row must have rows_seen ≥ this to count as a full "
                          "enumeration (distinguishes it from the small 3-page sweep runs).")
