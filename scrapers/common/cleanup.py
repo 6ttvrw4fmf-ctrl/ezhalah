@@ -730,6 +730,13 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                         v, why = oracle_verdict(oracle, r.get("ad_number"))
                         if v == "unknown":
                             inconclusive += 1
+                        # The oracle answers per ad, not per row: a copy retired when its ad changed
+                        # category (retire_superseded_siblings) reads live because its SIBLING is.
+                        # Reviving it would show one ad as two cards.
+                        elif v == "live" and any(
+                                client.table(o).select("id").eq("ad_number", r.get("ad_number"))
+                                .eq("active", True).limit(1).execute().data for o in tables if o != t):
+                            v, why = "skip", f"{why} — its ad is live in a sibling table; this copy stays retired"
                     elif pol["require_source_recheck"]:
                         if not url:
                             stats["skipped"] += 1

@@ -63,6 +63,16 @@ def test_controls_that_do_not_read_live_through_the_oracle_delete_nothing(monkey
     assert c.deleted == {}
 
 
+def test_a_retired_sibling_copy_is_never_revived_by_its_live_twin(monkeypatch):
+    twin = dict(_live_control(7), ad_number="A1")                 # the same ad, live in the other table
+    c = _oracle_site(monkeypatch, {"orp_listings": [_cand(1)] + CONTROLS, "orp_other": [twin]},
+                     {"A1": ("live", "status=publish"), **CONTROLS_LIVE})
+    C.PLATFORMS["orp"]["tables"] = ["orp_listings", "orp_other"]
+    s = C.run("orp", force=True)
+    assert s["reactivated"] == 0 and s["skipped"] == 1 and c.deleted == {}
+    assert not c.updated.get("orp_listings")
+
+
 def test_every_oracle_site_has_the_daily_checks_oracle():
     real = {p for p, r in C.PLATFORMS.items() if r.get("oracle")}
     assert {"aqargate", "eaqartabuk", "hajer", "souq24"} <= real
