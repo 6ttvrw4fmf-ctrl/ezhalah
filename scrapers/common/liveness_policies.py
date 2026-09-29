@@ -590,8 +590,10 @@ POLICIES: dict[str, _P] = {
         _pol("goldendeal", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the Nuzul tenant's own API record GET goldendeal.nzl-backend.com/api/public/properties/"
         "<id>: HTTP 404 carrying «No query results» is GONE; a 200 whose data.id is this id is "
-        "LIVE only while availability_status is available, otherwise GONE (the office's own «مباع» "
-        "/ «مؤجر» / «غير متاح» badge, served in place); another record, an unparseable body and "
+        "LIVE only while availability_status is available AND published_on_website is not 0, "
+        "otherwise GONE (the office's own «مباع» / «مؤجر» / «غير متاح» badge, served in place; or "
+        "the ad taken off the website while still «available» — GDL52019/52111/53568, 2026-09-28; "
+        "_withdrawn() is the crawl's gate too); another record, an unparseable body and "
         "401/403/429/5xx are UNKNOWN. The WEB page cannot be the oracle (an unknown id renders a "
         "200 «Property Not Found» shell; a retired id renders the full listing). Removals are "
         "canary-gated on an id THIS run mapped echoing itself (memoised, fails CLOSED) and run "
@@ -612,7 +614,8 @@ POLICIES: dict[str, _P] = {
         _pol("yameen", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the same Nuzul engine as goldendeal (scrapers/goldendeal/run.py::verify_gone_for on tenant "
         "4561, host meteen.nzl-backend.com): a 404 «No query results» is GONE; a 200 for THIS id is "
-        "LIVE only while availability_status is available, otherwise GONE (12 rented + 2 "
+        "LIVE only while the engine's _withdrawn() is empty (available AND published_on_website "
+        "not 0), otherwise GONE (12 rented + 2 "
         "unavailable of 27 are served in place); another record and 401/403/429/5xx are UNKNOWN; "
         "canary-gated (fails CLOSED), complete enumeration only.",
         "Measured 2026-09-23: live 3/3 → 200 available; rented 3/3 → 200 status rented; "
@@ -1212,9 +1215,10 @@ POLICIES: dict[str, _P] = {
         "the same Nuzul engine as goldendeal/yameen (scrapers/goldendeal/run.py::verify_gone_for on "
         "tenant maqamco, host maqamco.nzl-backend.com), wired exactly as yameen wires it: "
         "prune_unseen(..., verify_gone=verify_gone_for(TENANT, make_canary(TENANT, control))). A 404 "
-        "is GONE; a 200 for THIS id is LIVE only while availability_status is available, otherwise "
-        "GONE; another record and 401/403/429/5xx are UNKNOWN; canary-gated (fails CLOSED), complete "
-        "enumeration only. The feed itself states availability for every record (130 = 50 available, "
+        "is GONE; a 200 for THIS id is LIVE only while availability_status is available and "
+        "published_on_website is not 0, otherwise GONE; another record and 401/403/429/5xx are "
+        "UNKNOWN; canary-gated (fails CLOSED), complete enumeration only. The feed itself states "
+        "availability for every record (130 = 50 available, "
         "59 sold, 10 unavailable, 7 reserved, 4 rented, measured 2026-09-26).",
         "The oracle's semantics are the engine's, measured on yameen 2026-09-23; the canary gate means "
         "maqam prunes nothing unless its own control answers correctly on the first crawl."),
