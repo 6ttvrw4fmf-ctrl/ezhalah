@@ -703,9 +703,12 @@ def _signal(status, body, _moved) -> Optional[str]:
 
 def _make_verify_gone(control: Optional[dict]):
     url_for = stored_listing_url((RES_TABLE, COM_TABLE))
+    # ONE session for every read of this run: session() per read paid a fresh TLS handshake per
+    # listing, which is what kept tuba's 4,345 ads from fitting the daily direct check's budget.
+    s = session()
 
     def probe(ad_number: str, canary=None):
-        return LivenessProbe(platform=SLUG, signal=_signal, session=session,
+        return LivenessProbe(platform=SLUG, signal=_signal, session=lambda: s,
                              url_for=url_for, canary=canary).verify_gone(ad_number)
 
     def canary() -> tuple[bool, str]:
