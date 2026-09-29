@@ -201,7 +201,7 @@ or rewrite another engineer's work, and never start a big change in another engi
    - **d. Prove the FULL CHAIN like a real user:** original website → scraper saved it → it's in the
      database → it's searchable on ezhalah-app.vercel.app → the card's price, size, location and rent
      period match the original exactly (check the real page with `source-reread.yml`) → clicking the
-     card opens that exact original listing.
+     card opens that exact original listing. Search and click with `e2e/engineers/customer-cards.mjs`.
    - **e. Close it:** resolve its alert and incident, then release the lock.
 6. **Down on their side?** Only if the crawl, after step 5a on 2+ browser profiles AND the proxy, shows
    one of these: a suspended or closed page, a domain that no longer exists, connection refused, or every

@@ -211,7 +211,8 @@ district».
    - **Every mistake becomes a permanent known answer.**
 7. **Fix everything wrong** (see "How you fix").
 8. **Test it like a real customer** (owner's supreme rule: live means tested like a real user). In a
-   real browser with a phone-size screen, on https://ezhalah-app.vercel.app:
+   real browser with a phone-size screen, on https://ezhalah-app.vercel.app (search, card list and
+   click-through: `e2e/engineers/customer-cards.mjs`, see `e2e/engineers/README.md`):
    - **a. 5 new listings, found with the normal filter.** Search the way a customer would: city,
      district, deal, rent period, type, and a price and size range around its real values. Each must
      appear, and its card must show the website's own values. Clicking it must open that exact

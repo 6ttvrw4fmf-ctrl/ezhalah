@@ -269,7 +269,8 @@ Recompute every Sunday, and the day a website is added:
 5. **Prove it on the live site, like a real customer** (owner's supreme rule: live means tested like
    a real user). Every night, in a real browser with a phone-size screen, on
    https://ezhalah-app.vercel.app. The browser launch that works in the cloud is in
-   `docs/ops/SCRAPING_ENGINEER.md` ("How you reach things"). Three checks:
+   `docs/ops/SCRAPING_ENGINEER.md` ("How you reach things"). Three checks (search, cards and clicks:
+   `e2e/engineers/customer-cards.mjs --mobile --open 2`; its `ref` values are the spot check's `ids`):
    - **a. Click like a customer (owner, 2026-09-27: «if the user clicks on it and it's not available,
      it got removed»).**
      - Run 10 normal-filter searches, weighted toward the most-seen websites and cities.
