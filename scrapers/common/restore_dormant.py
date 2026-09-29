@@ -22,7 +22,7 @@ junior engineer's §5.3 content check is what catches that, and it can set the p
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Optional
 
 
@@ -57,13 +57,13 @@ def main() -> None:
         if not is_back(run, since):
             print(f"still down: {p['platform']} (latest run {run and run['id']}, ok={run and run['ok']})")
             continue
-        now = datetime.now(timezone.utc)
-        note = (f"ACTIVE again {now.date()} (auto, small-sources-sync): scrape_runs #{run['id']} ended ok "
-                f"with {run['rows_upserted']} listings. " + (p["notes"] or ""))
+        # The engineer's guarded switch (migration 20260927201138): only dormant <-> active, never a
+        # retired site, and the evidence lands as a dated line in notes.
         _execute(
-            sb().table("platform_registry")
-            .update({"status": "active", "notes": note, "updated_at": now.isoformat()})
-            .eq("platform", p["platform"]).eq("status", "dormant"),
+            sb().rpc("set_platform_status", {
+                "p_platform": p["platform"], "p_status": "active",
+                "p_evidence": f"auto, small-sources-sync: scrape_runs #{run['id']} ended ok with "
+                              f"{run['rows_upserted']} listings"}),
             what=f"{p['platform']} dormant -> active",
         )
         print(f"::notice::{p['platform']} is back: dormant -> active (scrape_runs #{run['id']}, "
