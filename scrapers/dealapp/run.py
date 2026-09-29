@@ -1246,6 +1246,10 @@ def main() -> int:
         # This run already rendered every id it owns, fresh, between live ads: that render is the
         # removal evidence (confirmed_absent). Anything it could not settle goes to the oracle.
         absent = confirmed_absent()
+        # Printed in full so a removal the coverage guard is still holding back stays auditable
+        # (and actionable) after the run: the ids plus the evidence rule that selected them.
+        print(f"Deal App confirmed absent ({len(absent)}, fresh no-listing render between two "
+              f"live-ad renders): {' '.join(sorted(absent, key=int))}", flush=True)
 
         def _verify_gone(ad_number: str):
             m = re.search(r"\d+", ad_number or "")
@@ -1282,7 +1286,7 @@ def main() -> int:
         # rows_upserted gives the hit rate, and the buckets say whether the misses were
         # dealapp's app reporting the ids gone or our fetches never rendering a live page.
         healthy = db.end_run(run_id, ok=True, rows_seen=seen_n, rows_upserted=seen_n,
-                              notes=f"sold={sold_ct} pruned={pruned} attempted={len(ids)}"
+                              notes=f"sold={sold_ct} pruned={pruned} attempted={len(ids)} absent={len(absent)}"
                                     f"{_fetch_fail_summary()}",
                               check_tables=["dealapp_residential_listings", "dealapp_commercial_listings"])
         if not healthy:
