@@ -20,7 +20,17 @@ SOURCE SHAPE (probed live before any code):
     strip of OTHER compounds as recommendations. That is this source's death signal — a 200, not a
     404 — and the recommendation cards carry their own bedrooms/bathrooms/sqm/price, so they are
     exactly the neighbour-contamination shape. They cannot leak here because a UNIT is only read
-    from a block carrying `cin-unit-card__title`, which recommendation cards never have.
+    from an <article> whose class is `cin-unit-card`, which recommendation cards never have.
+  · ONE CARD, ONE UNIT, READ INSIDE ITS OWN <article>. Measured 2026-09-28 over the 130 sitemap
+    compounds: of 270 unit cards, 68 have no `cin-unit-card__subtitle` and 9 have neither a price
+    nor a `data-cin-contact-unit` id. A page-wide regex that REQUIRED a subtitle matched 0 units on
+    14 compounds (canary-vista 5 cards, mena-house-compound 2, hada-villas, sulimania-villas …),
+    and on 16 more it stitched one card's fields onto the next card's id: 14 published units
+    carried a neighbour's type («Studio» for an Apartment) or bedrooms/area (olaris CIN800: 1 bed
+    75 m² instead of 2 beds 97 m²). Every field is now optional and read within its own card; a
+    card without the source's own unit id has no identity and is skipped.
+  · REMOVAL: prune_unseen after a COMPLETE crawl only (sitemap read, every compound page a 200),
+    with a per-unit oracle on the row's stored listing_url — see _unit_signal.
   · LANGUAGE: this source is ENGLISH. Under the no-English-leaks rule a district is only written
     when an English name maps to a catalogued Arabic district of the SAME city with certainty;
     otherwise district_ar stays NULL and the card shows «الحي غير محدد». The raw English is kept
@@ -41,6 +51,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://compoundin.com"
 SOURCE = "CompoundIn"
@@ -101,13 +112,27 @@ def _norm_dist(name: Optional[str]) -> Optional[str]:
     n = re.sub(r"\s+", " ", n).strip()
     return n or None
 
-_UNIT_RE = re.compile(
-    r'cin-unit-card__title">([^<]*)<'          # 1 unit type
-    r'.*?cin-unit-card__subtitle">([^<]*)<'    # 2 unit subtitle
-    r'.*?cin-compound-card__specs">(.*?)</p>'  # 3 specs blob
-    r'.*?cin-compound-card__amount-value">([^<]*)<'  # 4 price
-    r'.*?data-cin-contact-unit="(\d+)"',       # 5 unit id
-    re.S)
+_CARD_RE = re.compile(r'<article\b[^>]*\bcin-unit-card\b[^>]*>(.*?)</article>', re.S)
+_CARD_FIELDS = {
+    "type": r'cin-unit-card__title">([^<]*)<',
+    "subtitle": r'cin-unit-card__subtitle">([^<]*)<',
+    "specs": r'cin-compound-card__specs">(.*?)</p>',
+    "price": r'cin-compound-card__amount-value">([^<]*)<',
+    "uid": r'data-cin-contact-unit="(\d+)"',
+    "chips": r'cin-unit-card__amenities">([^<]*)<',
+}
+
+
+def unit_cards(page_html: str) -> list[dict[str, Optional[str]]]:
+    """Every unit card's fields, each read INSIDE its own <article> — a field a card omits is None,
+    never borrowed from the next card (see the module header)."""
+    out = []
+    for card in _CARD_RE.findall(page_html):
+        found = {k: re.search(pat, card, re.S) for k, pat in _CARD_FIELDS.items()}
+        out.append({k: (m.group(1) if m else None) for k, m in found.items()})
+    return out
+
+
 _BED_RE = re.compile(r"(\d+)\s*Bedroom", re.I)
 _BATH_RE = re.compile(r"(\d+)\s*Bathroom", re.I)
 _SQM_RE = re.compile(r"([\d,\.]+)\s*sqm", re.I)
@@ -194,15 +219,6 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
     if cm:
         compound_name = plain(cm.group(1))
 
-    # PER-UNIT amenity chips. The old code searched the WHOLE page with one un-anchored regex, so
-    # every unit on a compound was stamped with unit #1's amenities. The chips appear once per unit
-    # card in document order, so they pair with _UNIT_RE's matches BY POSITION — and only when the
-    # two counts agree. If they ever disagree the page layout has changed, and the honest response
-    # is to write no amenities at all rather than risk attaching them to the wrong unit.
-    units = _UNIT_RE.findall(page_html)
-    chips = re.findall(r'cin-unit-card__amenities">([^<]*)<', page_html)
-    unit_chips = chips if len(chips) == len(units) else [None] * len(units)
-
     # Compound-level facilities, published as schema.org LocationFeatureSpecification. These are
     # genuinely shared by every unit in the compound, so they may be written onto each unit row.
     # Only «Air Conditioning» has a column on the platform tables — Gym/Pool/CCTV/Playground have
@@ -214,15 +230,16 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
     postal = pcm.group(1) if pcm else None
 
     rows: list[dict] = []
-    for idx, (utype, subtitle, specs, price, uid) in enumerate(units):
-        spec = plain(specs)
+    for card in unit_cards(page_html):
+        utype, subtitle, uid, chip = card["type"], card["subtitle"], card["uid"], card["chips"]
+        spec = plain(card["specs"])
         type_ar = _TYPE_EN_AR.get(plain(utype).lower())
-        if not type_ar:
-            continue
+        if not type_ar or not uid:
+            continue            # no mappable type, or no source unit id to be this row's identity
         property_type = normalize.map_type_exact(type_ar)
         if not property_type:
             continue
-        amount = _int(price)
+        amount = _int(card["price"])
         rows.append({
             "ad_number": f"{PREFIX}{uid}",
             "listing_url": url,
@@ -246,14 +263,13 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
             "photo_urls": photos(page_html),
             "zip_code": postal,
             "additional_info": {k: v for k, v in {
-                "type_en": plain(utype), "unit_subtitle": plain(subtitle),
+                "type_en": plain(utype), "unit_subtitle": plain(subtitle) or None,
                 "compound": compound_name, "unit_id": uid,
-                "amenities_en": plain(unit_chips[idx]) if unit_chips[idx] else None,
+                "amenities_en": plain(chip) or None,
                 "compound_facilities_en": ", ".join(sorted(ld_features)) or None,
             }.items() if v is not None},
         })
 
-        chip = unit_chips[idx]
         if chip:
             # «Furnished · Kitchen · Living Room» — the unit's OWN statement about itself.
             for col, val in normalize.amenities_from_text(chip).items():
@@ -286,6 +302,35 @@ def photos(page_html: str) -> Optional[list[str]]:
     return (full + [u for u in urls if u not in full])[:20] or None
 
 
+# ── removal oracle ──────────────────────────────────────────────────────────────────────────────
+# Absence from the crawl only SELECTS candidates; the row's own compound page decides, under the
+# shared law. A delisted compound answers HTTP 200 with «This compound is no longer listed» in its
+# <h1> (CIN703/CIN704, ayanna-olaya-compound, 2026-09-28: gone from the sitemap, page delisted, rows
+# still active since 09-22) → GONE for every unit it had. A listed page carrying this unit's own
+# `data-cin-contact-unit` card → LIVE. Anything else — including a listed page without this unit,
+# which has not been measured — is no opinion, so the row holds.
+_AD_RE = re.compile(rf"^{PREFIX}(\d+)$")
+
+
+def _unit_signal(uid: str):
+    def signal(status, body, _moved):
+        if status != 200:
+            return None
+        if is_delisted(body):
+            return "gone"
+        return "live" if any(c["uid"] == uid for c in unit_cards(body)) else None
+    return signal
+
+
+def _verify_gone(ad_number: str) -> tuple[str, str]:
+    m = _AD_RE.match(ad_number)
+    if not m:
+        return "unknown", f"{ad_number!r} is not a {PREFIX}<unit id> ad number"
+    return LivenessProbe(platform="compoundin", signal=_unit_signal(m.group(1)), session=session,
+                         url_for=stored_listing_url(("compoundin_residential_listings",))
+                         ).verify_gone(ad_number)
+
+
 def fetch_compounds(s: cc.Session, limit: int = 0) -> list[str]:
     r = s.get(f"{BASE}/sitemap.xml", timeout=40)
     if r.status_code != 200:
@@ -311,14 +356,17 @@ def main() -> int:
             raise RuntimeError("sitemap returned no /rent/show/ urls")
         print(f"{SOURCE}: {len(urls)} compounds discovered", flush=True)
         skipped: dict[str, int] = {}
+        complete = True         # every compound page answered 200 — the only crawl that may prune
         for i, u in enumerate(urls, 1):
             try:
                 r = s.get(u, timeout=45)
             except Exception:
                 skipped["unreachable"] = skipped.get("unreachable", 0) + 1
+                complete = False
                 continue
             if r.status_code != 200:
                 skipped[f"http_{r.status_code}"] = skipped.get(f"http_{r.status_code}", 0) + 1
+                complete = False
                 continue
             rows, why = map_units(u, r.text)
             if not rows:
@@ -341,7 +389,16 @@ def main() -> int:
         # Compounds are residential by definition on this source; nothing is written commercial.
         if res:
             db.upsert_compoundin_residential_batch(res)
+        # PRUNE — only after a COMPLETE crawl, and only with the source's own verdict per row.
+        # prune_unseen's own breakers (0 seen, >30% vanished, <80% re-seen, 3 strikes) sit on top.
+        pruned = 0
+        if args.type == "all" and complete:
+            pruned = db.prune_unseen("compoundin_residential_listings", {r["ad_number"] for r in res},
+                                     source=SOURCE, verify_gone=_verify_gone)
+            if pruned < 0:
+                print("  ⚠ prune guard tripped — kept existing active rows")
         healthy = db.end_run(run_id, ok=True, rows_seen=len(urls), rows_upserted=len(res),
+                             notes=f"pruned={pruned} complete={complete}",
                              check_tables=["compoundin_residential_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard", flush=True)
