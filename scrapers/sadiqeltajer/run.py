@@ -94,6 +94,12 @@ def photos(page_html: str) -> Optional[list[str]]:
 _CODE_RE = re.compile(r"كود\s*الاعلان\s*:?\s*([\d٠-٩]+)")
 # The header span: from the ad code up to the area, which always closes it («… 480 م² اللوكيشن»).
 _HEADER_RE = re.compile(r"كود\s*الاعلان\s*:?\s*[\d٠-٩]+(.{0,200}?)([\d٠-٩][\d٠-٩,\.]*)\s*م²")
+# The PRICE span ends at the area OR, on an ad that states no area, at «اللوكيشن». Keyed on the area
+# alone, all 81 area-less ads stored NULL although 60 print a price («… دبلكس بحي الرابية 38,000
+# ريال ( للإيجار ) اللوكيشن …», SDQ7896 — 2026-09-28). With an area the span is unchanged: the area
+# always comes before «اللوكيشن», and the lazy match stops at whichever comes first.
+_PRICE_SPAN_RE = re.compile(
+    r"كود\s*الاعلان\s*:?\s*[\d٠-٩]+(.{0,300}?)(?:[\d٠-٩][\d٠-٩,\.]*\s*م²|اللوكيشن)")
 _SOUM = re.compile(r"على\s*السوم|على\s*السـوم")
 
 
@@ -129,7 +135,7 @@ _PER_METRE = re.compile(r"للمتر|لل?متر\s*المربع|/\s*م²|/\s*م�
 def parse_price(text: str) -> tuple[Optional[int], Optional[int]]:
     """(price_total, price_per_meter). «على السوم» (by offer) is an ABSENCE — never a number, and
     never the «الدخل السنوي» rental income the description states further down."""
-    m = _HEADER_RE.search(text)
+    m = _PRICE_SPAN_RE.search(text)
     if not m:
         return None, None
     head = m.group(1)
