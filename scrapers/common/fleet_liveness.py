@@ -41,24 +41,22 @@ from datetime import datetime, timedelta, timezone
 
 from scrapers.common.db import begin_run, end_run, sb
 from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN, EvidenceKind, decide, verification_patch
-from scrapers.common.liveness_policies import policy_for
+from scrapers.common.liveness_policies import FLEET_DAILY_DIRECT, policy_for
 from scrapers.common.liveness_trust import MIN_CANARIES, canary_environment_ok
 
 # platform → its scraper's own measured oracle, exactly what it hands to db.prune_unseen():
 #   "module:attr"      a verify_gone(ad_number) -> (verdict, reason)
 #   "module:factory()" a factory that takes a positive-control row and returns that callable
 #                      (`_make_verify_gone(control)`, the canary-gated shape 30 scrapers share)
-# The first four were re-measured from GitHub Actions on 2026-09-28 (lifecycle-spot-check.yml:
-# hidden ads 404, live ads 200, 5/5 controls). Every other site starts in shadow.
+# A site starts in shadow and joins APPLY only after its shadow run was read.
 SITES: dict[str, str] = {
     **{p: f"scrapers.{p}.run:_probe.verify_gone" for p in (
-        "aldarim", "aqaralriyadh", "eastabha", "hajer", "jazwtn", "mizlaj", "muktamel", "nowaisiry",
-        "souq24")},
+        "aldarim", "aqaralriyadh", "hajer", "jazwtn", "souq24")},
     **{p: f"scrapers.{p}.run:_verify_gone" for p in (
         "akariyoun", "aljassim", "almotmkenah", "alshawaf", "aqaralsaudia", "aqargate", "bossbih",
-        "daryusuf", "eaqartabuk", "ebriza", "eilmalriyada", "hasaad", "masar", "moftah", "mustqr",
-        "nufouth", "raghdan", "rakez", "sakani", "sanadak", "snam", "suwar")},
-    **{p: f"scrapers.{p}.run:verify_gone" for p in ("alrifai", "wadod")},
+        "daryusuf", "eaqartabuk", "ebriza", "eilmalriyada", "hasaad", "moftah", "nufouth", "raghdan",
+        "rakez", "sakani", "sanadak", "snam", "suwar")},
+    **{p: f"scrapers.{p}.run:verify_gone" for p in ("wadod",)},
     **{p: f"scrapers.{p}.run:_make_verify_gone()" for p in (
         "abaad", "albdah", "alsaedan", "azure", "dwelleo", "ego", "expattrusted", "flow",
         "gomenassat", "hazim", "ialqarawi", "ibaax", "justsa", "livingcompound", "marksa",
@@ -66,8 +64,14 @@ SITES: dict[str, str] = {
         "sakan", "sodasyat", "sokok", "sukna", "tamyaz", "tuba", "villassa")},
 }
 
-# Sites whose shadow run was read and found right. Everything else only decides.
-APPLY: frozenset[str] = frozenset()
+# NOT here, and why (shadow run 36490769167, 2026-09-28): mizlaj, nowaisiry, eastabha and muktamel —
+# their oracles have no "live" answer by design (a 200 is UNKNOWN), so no control can ever pass and
+# nothing could be verified; alrifai — its "live" needs the crawl's own catalogue of that run;
+# mustqr — its API refuses GitHub Actions egress; masar — one listing, and the control gate needs five.
+
+# Sites whose shadow run was read and found right (liveness_policies.FLEET_DAILY_DIRECT — the same
+# list makes them DIRECT_REVISIT). Everything else only decides.
+APPLY: frozenset[str] = frozenset(FLEET_DAILY_DIRECT)
 
 PACE_S = 1.0            # one read a second per site
 BUDGET_S = 95 * 60      # per site per run, inside the job's 120-minute ceiling
@@ -237,11 +241,15 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Daily DIRECT liveness for every site with a measured oracle")
     ap.add_argument("--site", action="append", choices=sorted(SITES), help="default: every site")
     ap.add_argument("--shadow", action="store_true", help="decide and report, write nothing")
-    ap.add_argument("--list", action="store_true", help="print the sites as a JSON array and exit")
+    ap.add_argument("--plan", nargs="?", const="", default=None, metavar="SITE",
+                    help="write the matrix (SITE, or every site) as sites=<json> to $GITHUB_OUTPUT and exit")
     a = ap.parse_args()
-    if a.list:
+    if a.plan is not None:
         import json
-        print(json.dumps(sorted(SITES)))
+        import os
+        sites = [a.plan] if a.plan else sorted(SITES)
+        with open(os.environ.get("GITHUB_OUTPUT", "/dev/stdout"), "a", encoding="utf-8") as f:
+            f.write(f"sites={json.dumps(sites)}\n")
         return 0
     failed = 0
     for site in a.site or sorted(SITES):

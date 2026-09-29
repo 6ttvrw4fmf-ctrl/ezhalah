@@ -201,3 +201,11 @@ def test_every_active_row_is_read_every_run_like_aqar(site):
     site(rows, lambda ad, n: seen.append(ad) or "live")
     F.run_site("testsite", shadow=True)
     assert {f"A{i}" for i in range(1, 60)} <= set(seen[5:]), "aqar's window: every live row, daily"
+
+
+def test_every_site_that_writes_is_declared_daily_direct_and_nothing_else_writes():
+    from scrapers.common import liveness_policies as LP
+    assert F.APPLY == frozenset(LP.FLEET_DAILY_DIRECT) and F.APPLY <= set(F.SITES)
+    for p in F.APPLY:
+        assert LP.strategy_for(p) == LP.DIRECT_REVISIT, p
+        assert LP.policy_for(p).max_verification_age_hours == 48 and LP.policy_for(p).grace == 3, p

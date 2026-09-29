@@ -43,9 +43,7 @@ jobs:
       - id: plan
         env:
           SITE: ${{ inputs.site }}
-        run: |
-          if [ -n "$SITE" ]; then echo "sites=[\"$SITE\"]" >> "$GITHUB_OUTPUT"
-          else echo "sites=$(python -m scrapers.common.fleet_liveness --list)" >> "$GITHUB_OUTPUT"; fi
+        run: exec python -m scrapers.common.fleet_liveness --plan "$SITE"
 
   liveness:
     needs: plan
