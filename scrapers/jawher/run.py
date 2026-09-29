@@ -196,8 +196,10 @@ def type_ar_for(d: dict[str, Any]) -> Optional[str]:
     return label
 
 
-def property_type_for(d: dict[str, Any]) -> Optional[str]:
-    return normalize.map_type_exact(type_ar_for(d), _TYPE_OVERRIDES)
+def property_type_for(d: dict[str, Any], overrides: Optional[dict[str, str]] = None) -> Optional[str]:
+    """`overrides`: a tenant's own exact-label decisions, layered over the platform's (october maps
+    «كشك»/«صراف آلي», which stay ask-first skips for every other tenant)."""
+    return normalize.map_type_exact(type_ar_for(d), {**_TYPE_OVERRIDES, **(overrides or {})})
 
 
 def rent_price_fields(d: dict[str, Any]) -> tuple[Optional[str], Any, str, Any]:
@@ -253,7 +255,8 @@ def _title(d: dict[str, Any], type_ar: str, district_raw: Optional[str]) -> Opti
     return f"{type_ar} {deal}" + (f" في {district_raw}" if district_raw else "")
 
 
-def nuzul_fields(d: dict[str, Any]) -> tuple[Optional[dict[str, Any]], str, str]:
+def nuzul_fields(d: dict[str, Any], type_overrides: Optional[dict[str, str]] = None,
+                 ) -> tuple[Optional[dict[str, Any]], str, str]:
     """(fields, category, skip_reason) for one Nuzul property record — everything except the
     tenant's identity (ad_number / listing_url / source) and its transaction_type write.
     fields is None exactly when skip_reason is set. Never guesses; every skip is tallied."""
@@ -272,7 +275,7 @@ def nuzul_fields(d: dict[str, Any]) -> tuple[Optional[dict[str, Any]], str, str]
     if d.get("is_wafi_ad"):
         return None, "residential", "off_plan_wafi"
     type_ar = type_ar_for(d)
-    property_type = property_type_for(d)
+    property_type = property_type_for(d, type_overrides)
     if not property_type:
         return None, "residential", "type_unmapped"
     category = normalize.category_for_type(property_type).lower()

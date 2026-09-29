@@ -3,14 +3,18 @@
 SOURCE SHAPE (measured live 2026-09-24):
   · A custom Laravel-style site (assets under /public, photos on dashboard.sodasyat.sa),
     server-rendered, no JS needed; plain curl_cffi chrome answers 200 everywhere.
-  · CATALOGUE = /search — one page, no pager markup; prints its own counter «11 نتيجه» and 11
+  · CATALOGUE = /search — prints its own counter «11 نتيجه» (2026-09-24: one page, 11
     distinct card links https://sodasyat.sa/single/<id> (2702, 2721-2722, 2725, 2727-2732, 2734).
     8 of the 11 map; 2729 and 2727 are OFF-PLAN villas («المشروع تحت الإنشاء … بيع على الخارطة»)
     and 2734 is a Wafi PROJECT («سدنة تاون هاوس … تابع لنظام وافي» — نظام وافي is the Saudi
     off-plan sales programme; its specs are the project's 4,891 m² plot, not a unit) → skip
     off_plan, tallied — never shown as available units.
     The counter is the completeness check: counter ≠ links → the enumeration is not complete and
-    the run never prunes (bossbih pattern).
+    the run never prunes (bossbih pattern). It PAGES at 12 cards, newest first: on 2026-09-28 the
+    counter read «18 نتيجه», /search held the newest 12 (2729-2741) and only /search?page=2 held
+    the older 6 (2702-2728). Reading page 1 alone, the 09-28 run saw 12 ids, withheld prune and
+    never refreshed 2702/2721 again; so list_catalogue() follows ?page=N until the union reaches
+    the counter.
   · DETAIL = /single/<id>, keyed by the site's numeric id (ad_number SDS<id>). Its <h1> is
     «اعلان رقم : 7200906376» — a 10-digit REGA advertisement-licence number (7xxxxxxxxx; 10/11
     are 72…, 2725 is 7100307318 — the same shape masar/aalbarrak print under «رقم ترخيص
@@ -128,6 +132,29 @@ def catalogue(page_html: str) -> tuple[list[str], Optional[int], dict[str, list[
         if link:
             cards[link.group(1)] = [x for x in (_strip(v) for v in re.findall(r"<span>(.*?)</span>", item, re.S)) if x]
     return ids, (normalize.to_int(m.group(1)) if m else None), cards
+
+
+def list_catalogue(s: cc.Session) -> tuple[list[str], Optional[int], dict[str, list[str]]]:
+    """catalogue() over /search, /search?page=2, … until the union reaches the site's own counter,
+    a page adds nothing new, or a page does not answer 200 (the result is then short, and the
+    counter check in main() withholds prune)."""
+    ids: dict[str, None] = {}
+    cards: dict[str, list[str]] = {}
+    counter = None
+    for page in range(1, 51):
+        status, _url, body = fetch(s, f"{BASE}/search" + (f"?page={page}" if page > 1 else ""))
+        if status != 200:
+            break
+        got, c, cs = catalogue(body)
+        counter = c if c is not None else counter
+        new = [i for i in got if i not in ids]
+        if not new:
+            break
+        ids.update(dict.fromkeys(new))
+        cards.update(cs)
+        if counter is not None and len(ids) >= counter:
+            break
+    return list(ids), counter, cards
 
 
 def parse_detail(page_html: str) -> dict[str, Any]:
@@ -333,10 +360,9 @@ def main() -> int:
     skipped: dict[str, int] = {}
     ids: list[str] = []
     try:
-        status, _url, body = fetch(s, f"{BASE}/search")
-        ids, counter, cards = catalogue(body) if status == 200 else ([], None, {})
+        ids, counter, cards = list_catalogue(s)
         if not ids:
-            raise RuntimeError(f"/search answered HTTP {status} with no listing links")
+            raise RuntimeError(f"/search yielded no listing links (counter {counter})")
         if args.limit:
             ids = ids[:args.limit]
         print(f"{SOURCE}: {len(ids)} listings discovered (site counter {counter})", flush=True)

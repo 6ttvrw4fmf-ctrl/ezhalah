@@ -25,7 +25,11 @@ class _Table:
         self._rows = sink.rows
     def select(self, *a, **k): return self
     def eq(self, col, val): self._filters[col] = val; return self
-    def order(self, *a, **k): return self
+    def in_(self, col, vals): self._filters[col] = tuple(vals); return self
+    def is_(self, *a, **k): return self
+    @property
+    def not_(self): return self
+    def order(self, col, *a, **k): self.sink.orders.append(col); return self
     def limit(self, n): return self
     def update(self, payload): self._payload = payload; return self
     def execute(self):
@@ -37,7 +41,7 @@ class _Table:
 
 class _Client:
     def __init__(self, rows):
-        self.rows, self.writes = rows, []
+        self.rows, self.writes, self.orders = rows, [], []
     def table(self, name): return _Table(self, name)
 
 
@@ -46,13 +50,23 @@ def _row(i, strikes=0):
             "missing_count": strikes, "last_verified_alive_at": None}
 
 
+HEALTHY = {"live": 1, "live_n": 1, "live_ok": True, "bogus_alive": False}
+LOOKED = {"last_liveness_probe_at"}
+
+
+def _evidence(client):
+    """Every write that says something about the listing — i.e. anything beyond "we looked"."""
+    return [(i, p) for i, p in client.writes if set(p) - LOOKED]
+
+
 @pytest.fixture()
 def wire(monkeypatch):
     """Neutralise all I/O; return a helper that runs main() against scripted probe responses."""
     run_name: list[str] = []
 
-    def run(rows, responses, argv, sitemap=frozenset()):
+    def run(rows, responses, argv, sitemap=frozenset(), canary=HEALTHY):
         client = _Client(rows)
+        monkeypatch.setattr(R, "_canaries", lambda c, s, budget=None: dict(canary))
         monkeypatch.setattr(R, "sb", lambda: client)
         monkeypatch.setattr(R, "begin_run", lambda name: (run_name.append(name), 1)[1])
         monkeypatch.setattr(R, "end_run", lambda *a, **k: None)
@@ -63,7 +77,8 @@ def wire(monkeypatch):
         def _probe(s, url, budget=None):
             if budget is not None and not budget.spend():
                 return None, "", ""
-            return responses[url]
+            # Scripted per AD, whichever cache-key variant probe_listing() asks for.
+            return responses[url.rstrip("/").replace("/en/", "/ar/")]
         monkeypatch.setattr(R, "probe", _probe)
         monkeypatch.setattr("sys.argv", ["liveness_run", *argv])
         R.main()
@@ -77,7 +92,9 @@ def test_unknown_writes_absolutely_nothing(wire):
     rows = [_row(1, strikes=2)]                      # already one strike from the grace window
     responses = {REQ.format(1): (200, "<html>ng-state, no schema</html>", REQ.format(1))}
     client = wire(rows, responses, ["--limit", "10", "--apply"])
-    assert client.writes == [], "an unreadable 200 must not strike, verify, or deactivate"
+    assert _evidence(client) == [], "an unreadable 200 must not strike, verify, or deactivate"
+    assert [set(p) for _i, p in client.writes] == [LOOKED], \
+        "it must still record that we LOOKED, or it sits at the head of the queue forever"
 
 
 @pytest.mark.parametrize("status", [None, 403, 429, 500, 503])
@@ -85,7 +102,7 @@ def test_failed_and_blocked_reads_write_nothing(wire, status):
     rows = [_row(1, strikes=2)]
     responses = {REQ.format(1): (status, "", REQ.format(1))}
     client = wire(rows, responses, ["--limit", "10", "--apply"])
-    assert client.writes == []
+    assert _evidence(client) == []
 
 
 def test_alive_stamps_verification_and_clears_strikes(wire):
@@ -145,7 +162,7 @@ def test_sitemap_absence_alone_never_deactivates(wire):
     rows = [_row(i, strikes=2) for i in range(1, 41)]
     responses = {REQ.format(i): (200, "<html>shell</html>", REQ.format(i)) for i in range(1, 41)}
     client = wire(rows, responses, ["--limit", "40", "--apply"], sitemap=frozenset())
-    assert client.writes == []
+    assert _evidence(client) == []
 
 
 # ── The bounded proxy experiment ───────────────────────────────────────────────────────────────
@@ -206,3 +223,108 @@ def test_running_out_of_budget_reads_as_UNKNOWN_never_as_death():
     b = R.RequestBudget(1)
     b.spend()
     assert R.probe(object(), "https://dealapp.sa/ar/ad-details/1", b) == (None, "", "")
+
+
+# ── The rotation, the probe order, and the canaries (2026-09-28) ────────────────────────────────
+# 2026-09-21..28: 312 rows were probed on all 8 runs, 159 on 7 — every one UNKNOWN. The worklist was
+# ordered by last_verified_alive_at, which a shell never moves, so the head could never clear.
+
+def test_the_worklist_rotates_on_last_liveness_probe_at(wire):
+    client = wire([_row(1)], {REQ.format(1): (200, "<html>shell</html>", REQ.format(1))},
+                  ["--limit", "1", "--apply"])
+    assert client.orders and client.orders[0] == "last_liveness_probe_at", \
+        "ordering on a column UNKNOWN never moves re-reads the same unresolvable rows every run"
+
+
+def test_sitemap_present_rows_are_probed_first(wire):
+    rows = [_row(1), _row(2)]                         # 1 is absent from the sitemap, 2 is present
+    seen: list[str] = []
+    responses = {REQ.format(i): (200, SCHEMA.format(i), REQ.format(i)) for i in (1, 2)}
+    orig = dict(responses)
+
+    class _Spy(dict):
+        def __getitem__(self, k):
+            seen.append(k)
+            return orig[k]
+    wire(rows, _Spy(responses), ["--limit", "1"], sitemap=frozenset({"2"}))
+    assert seen == [REQ.format(2)]
+
+
+# ── CloudFront (2026-09-28): a days-old cached shell was being read as the source's answer ──────
+
+class _Resp:
+    def __init__(self, status, text, url, age=None):
+        self.status_code, self.text, self.url = status, text, url
+        self.headers = {} if age is None else {"age": str(age)}
+
+
+class _Sess:
+    def __init__(self, by_url):
+        self.by_url, self.asked = by_url, []
+    def get(self, url, **k):
+        self.asked.append(url)
+        return self.by_url[url]
+
+
+def test_an_old_cached_copy_is_not_an_answer(monkeypatch):
+    monkeypatch.setattr(R, "_ORIGIN", R.OriginBudget(per_min=10_000))
+    u = REQ.format(5) + "/"
+    stale = _Sess({u: _Resp(200, SCHEMA.format(5), u, age=130553)})
+    assert R.probe(stale, u) == (None, "", ""), "a 36-hour-old CDN copy says nothing about now"
+    fresh = _Sess({u: _Resp(200, SCHEMA.format(5), u, age=40)})
+    assert R.probe(fresh, u)[0] == 200
+
+
+def test_a_stale_copy_on_one_cache_key_falls_through_to_a_fresh_render(monkeypatch):
+    monkeypatch.setattr(R, "_ORIGIN", R.OriginBudget(per_min=10_000))
+    slash, en = REQ.format(5) + "/", "https://dealapp.sa/en/ad-details/5/"
+    sess = _Sess({slash: _Resp(200, "<html>wall</html>", slash, age=130553),
+                  en: _Resp(200, SCHEMA.format(5), en)})
+    assert R.probe_listing(sess, REQ.format(5)) == (R.ALIVE, 200)
+    assert sess.asked == [slash, en], "the bare URL is the stale cache key — never ask it"
+
+
+def test_a_fresh_shell_is_final_and_unknown_never_dead(monkeypatch):
+    monkeypatch.setattr(R, "_ORIGIN", R.OriginBudget(per_min=10_000))
+    keys = [REQ.format(9) + "/", "https://dealapp.sa/en/ad-details/9/", "https://dealapp.sa/en/ad-details/9"]
+    sess = _Sess({k: _Resp(200, "<html>shell</html>", k) for k in keys})
+    assert R.probe_listing(sess, REQ.format(9))[0] == R.UNKNOWN
+    assert sess.asked == keys[:1], "a FRESH render is final — another key is another quota render"
+
+
+def test_a_slash_stripping_redirect_is_not_read_as_moved_off_the_ad(monkeypatch):
+    monkeypatch.setattr(R, "_ORIGIN", R.OriginBudget(per_min=10_000))
+    slash = REQ.format(5) + "/"
+    sess = _Sess({slash: _Resp(200, SCHEMA.format(5), REQ.format(5))})   # served at the bare URL
+    assert R.probe_listing(sess, REQ.format(5))[0] == R.ALIVE
+
+
+def test_a_bogus_id_reading_alive_blocks_every_write(wire):
+    rows = [_row(i, strikes=2) for i in range(1, 41)]
+    responses = {REQ.format(i): (200, SCHEMA.format(i), REQ.format(i)) for i in range(1, 41)}
+    client = wire(rows, responses, ["--limit", "40", "--apply"],
+                  canary={**HEALTHY, "bogus_alive": True})
+    assert client.writes == [], "a page that cannot exist read ALIVE — nothing this run saw is evidence"
+
+
+def test_a_failed_live_canary_quarantines_deaths_but_keeps_verifications(wire):
+    alive = {i: _row(i) for i in range(1, 36)}
+    dead = {i: _row(i, strikes=2) for i in range(36, 41)}
+    responses = {REQ.format(i): (200, SCHEMA.format(i), REQ.format(i)) for i in alive}
+    responses.update({REQ.format(i): (404, "", REQ.format(i)) for i in dead})
+    client = wire([*alive.values(), *dead.values()], responses, ["--limit", "40", "--apply"],
+                  canary={**HEALTHY, "live": 0, "live_ok": False})
+    assert not [p for _i, p in client.writes if p.get("active") is False]
+    assert len([p for _i, p in client.writes if "last_verified_alive_at" in p]) == 35
+
+
+def test_canaries_probe_a_recent_alive_row_and_the_bogus_id(monkeypatch):
+    urls: list[str] = []
+    recent = [{"listing_url": REQ.format(7), "last_verified_alive_at": "2026-09-28"}]
+    monkeypatch.setattr(R, "probe", lambda s, url, budget=None: (
+        urls.append(url), (200, SCHEMA.format(7), url) if "/7" in url else
+        (200, "<html>shell</html>", url))[1])
+    c = R._canaries(_Client(recent), object(), None)
+    assert urls[0] == REQ.format(7) + "/" and REQ.format(R.BOGUS_ADID) + "/" in urls
+    assert c == {"live": 1, "live_n": 1, "live_ok": True, "bogus_alive": False}
+
