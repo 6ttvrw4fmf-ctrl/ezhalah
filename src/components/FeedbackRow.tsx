@@ -8,6 +8,8 @@
 // not one listing). UI-only: no search/cards/ranking.
 import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import Animated, { Easing, useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import { useReducedMotion } from '@/lib/useReducedMotion';
 import * as Clipboard from 'expo-clipboard';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '@/theme/tokens';
@@ -31,6 +33,7 @@ export default function FeedbackRow({
 }) {
   const { t, isRTL } = useI18n();
   const [rating, setRating] = useState<FeedbackRating | null>(() => getListingFeedback(feedbackKey));
+  const reducedMotion = useReducedMotion();
   const [copied, setCopied] = useState(false);
   // Free, on-device TTS only (owner P0, 2026-08-18) — see src/lib/readAloud.ts. `speaking` mirrors
   // the ONE shared "who is talking right now" id, so tapping a DIFFERENT response's 🔊 flips this
@@ -106,8 +109,14 @@ export default function FeedbackRow({
   return (
     <View style={[fb.container, { alignItems: isRTL ? 'flex-end' : 'flex-start' }]}>
       <View style={[fb.row, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-        <FbButton icon={rating === 'up' ? 'thumbs-up' : 'thumbs-up-outline'} active={rating === 'up'} onPress={() => vote('up')} label={t('Helpful')} />
-        <FbButton icon={rating === 'down' ? 'thumbs-down' : 'thumbs-down-outline'} active={rating === 'down'} onPress={() => vote('down')} label={t('Not helpful')} />
+        {/* Reserve the pair's space so share/read-aloud never jump as the thumbs merge. */}
+        <View style={fb.thumbs}>
+          {(['up', 'down'] as const).map((direction, index) => (
+            <ThumbVote key={direction} direction={direction} index={index} rating={rating}
+              rtl={isRTL} reducedMotion={reducedMotion} onPress={() => vote(direction)}
+              label={t(direction === 'up' ? 'Helpful' : 'Not helpful')} />
+          ))}
+        </View>
         <FbButton icon={copied ? 'checkmark' : 'share-outline'} active={copied} onPress={onShare} label={t('Share')} />
         {/* THE SAME PREDICATE speakReadAloud() USES, not a second one that agrees most of the time.
             `readAloudSegments?.length` counted SEGMENTS; speaking needs a speakable UNIT, and
@@ -129,10 +138,46 @@ export default function FeedbackRow({
   );
 }
 
-function FbButton({ icon, active, onPress, label }: { icon: any; active: boolean; onPress: () => void; label: string }) {
+const ThumbMotionView = Platform.OS === 'web' ? View : Animated.View;
+
+// Both thumbs converge on the same point; only the chosen one remains interactive.
+// Clearing that choice reverses the motion without moving the rest of the toolbar.
+function ThumbVote({ direction, index, rating, rtl, reducedMotion, onPress, label }: {
+  direction: FeedbackRating; index: number; rating: FeedbackRating | null;
+  rtl: boolean; reducedMotion: boolean; onPress: () => void; label: string;
+}) {
+  const hidden = rating !== null && rating !== direction;
+  const start = (rtl ? 1 - index : index) * 32;
+  const offset = rating ? 16 - start : 0;
+  const motion = useAnimatedStyle(() => ({
+    transform: [{ translateX: withTiming(offset, { duration: reducedMotion ? 0 : 140, easing: Easing.bezier(0.23, 1, 0.32, 1) }) }],
+    opacity: withTiming(hidden ? 0 : 1, { duration: reducedMotion ? 0 : 140 }),
+  }), [offset, hidden, reducedMotion]);
+  const webMotion = Platform.OS === 'web' ? {
+    transform: [{ translateX: offset }], opacity: hidden ? 0 : 1,
+    transitionProperty: 'transform, opacity', transitionDuration: reducedMotion ? '0ms' : '140ms',
+    transitionTimingFunction: 'cubic-bezier(0.23, 1, 0.32, 1)',
+  } as any : null;
+  return (
+    <ThumbMotionView
+      pointerEvents={hidden ? 'none' : 'auto'}
+      accessibilityElementsHidden={hidden}
+      importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
+      aria-hidden={hidden}
+      style={[fb.thumbSlot, { left: start, zIndex: rating === direction ? 1 : 0 }, Platform.OS === 'web' ? webMotion : motion]}
+    >
+      <FbButton icon={rating === direction ? `thumbs-${direction}` : `thumbs-${direction}-outline`}
+        active={rating === direction} disabled={hidden} onPress={onPress} label={label} />
+    </ThumbMotionView>
+  );
+}
+
+function FbButton({ icon, active, onPress, label, disabled = false }: { icon: any; active: boolean; onPress: () => void; label: string; disabled?: boolean }) {
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled}
+      accessibilityState={{ selected: active, disabled }}
       hitSlop={4}
       accessibilityRole="button"
       accessibilityLabel={label}
@@ -147,6 +192,8 @@ const fb = StyleSheet.create({
   // Thin row below the more-results message.
   container: { width: '100%', paddingHorizontal: 4, paddingTop: 6 },
   row: { alignItems: 'center', gap: 2 },
+  thumbs: { width: 62, height: 30 },
+  thumbSlot: { position: 'absolute', top: 0 },
   // Small icon button (~30px target). Active = light green wash + accent icon (set inline).
   btn: { padding: 7, borderRadius: 9, ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
   btnHover: { backgroundColor: colors.surface2 },

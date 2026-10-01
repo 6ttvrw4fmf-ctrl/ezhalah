@@ -873,7 +873,9 @@ migration-drift-guard rule in `AGENTS.md`).
 
 ## 20. Permanent rules (the non-negotiables)
 
-- **Search loader viewport (owner 2026-10-01):** keep the complete logo/name roster in a bounded, manually scrollable area. Never auto-scroll the thread to follow the searching loader, including delayed scroll callbacks. Logo frames keep the same responsive sizes as property cards; highlights must not scale or translate them.
+- **Response feedback (owner 2026-10-01):** selecting either thumb merges the pair into one selected thumb; tapping it again restores both choices. Keep share/read-aloud stationary, mirror the layout for Arabic/English, and skip motion when reduced motion is enabled. Feedback storage and response scope remain unchanged.
+
+**Search loader viewport (owner 2026-10-01):** keep the complete logo/name roster in a bounded, manually scrollable area. Never auto-scroll the thread to follow the searching loader, including delayed scroll callbacks. Logo frames keep the same responsive sizes as property cards; highlights must not scale or translate them.
 
 
 - **First-100 diversity — five dimensions, in this priority order (owner PERMANENT rule, 2026-09-14).** The first «عرض المزيد» batch (up to 100 shown) must feel curated, not dumped, across the five dimensions below. This applies to Buy searches, Rent searches, and combined searches. Every engineer changing the order code (`src/lib/platformDiversity.ts::orderByScope` and its caller in `src/data/remote.ts`) is expected to read this rule first.
