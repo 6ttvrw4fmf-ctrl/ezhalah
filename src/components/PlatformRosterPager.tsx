@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { PLATFORM_LOGO_BREAKPOINT } from '@/lib/responsive';
-import { loaderPageLayout, LOADER_PAGE_MS, nextUnseenPage } from '@/lib/loaderPages';
+import { loaderPageLayout, LOADER_PAGE_MS, loaderSlotIndices } from '@/lib/loaderPages';
 
 /** No vertical scrolling. Resizing starts a fresh complete pass at the new page size. */
 export default function PlatformRosterPager<T>({ items, renderItem, rtl, onPresented }: {
@@ -13,36 +13,37 @@ export default function PlatformRosterPager<T>({ items, renderItem, rtl, onPrese
   const [width, setWidth] = useState(0);
   const layout = loaderPageLayout(width, height, wide);
   return <View onLayout={e => setWidth(e.nativeEvent.layout.width)} style={styles.container}>
-    {width > 0 && <Pages key={`${layout.pageSize}:${layout.rowHeight}`} items={items} renderItem={renderItem}
+    {width > 0 && <Slots key={`${layout.pageSize}:${layout.rowHeight}`} items={items} renderItem={renderItem}
       rtl={rtl} onPresented={onPresented} layout={layout} />}
   </View>;
 }
-function Pages<T>({ items, renderItem, rtl, onPresented, layout }: {
+function Slots<T>({ items, renderItem, rtl, onPresented, layout }: {
   items: T[]; renderItem: (item: T) => ReactNode; rtl: boolean;
   onPresented: (complete: boolean) => void; layout: ReturnType<typeof loaderPageLayout>;
 }) {
-  const [page, setPage] = useState(0);
-  const seen = useRef(new Set<number>());
+  const [replacements, setReplacements] = useState(0);
   const callback = useRef(onPresented);
   callback.current = onPresented;
-  const total = Math.ceil(items.length / layout.pageSize);
-  useLayoutEffect(() => { callback.current(total === 0); }, [total]);
+  const slots = Math.min(items.length, layout.pageSize);
+  const remaining = items.length - slots;
+  useLayoutEffect(() => { callback.current(slots === 0); }, [slots]);
   useEffect(() => {
-    if (total === 0 || seen.current.size === total) return;
-    // Count visible dwell so results cannot replace an unseen page.
+    if (slots === 0) return;
+    // Hold the first and last sets long enough to read; replace one tile at a time
+    // between them. A full grid stays visible, including the final partial set.
+    const settled = replacements >= remaining;
+    const delay = replacements === 0 || settled ? LOADER_PAGE_MS : LOADER_PAGE_MS / slots;
     const timer = setTimeout(() => {
-      seen.current.add(page);
-      const next = nextUnseenPage(seen.current, page, total);
-      if (next === null) callback.current(true);
-      else setPage(next);
-    }, LOADER_PAGE_MS);
+      if (settled) callback.current(true);
+      else setReplacements(n => n + 1);
+    }, delay);
     return () => clearTimeout(timer);
-  }, [page, total]);
+  }, [replacements, remaining, slots]);
   return (
     <View style={[styles.grid, { height: layout.rows * layout.rowHeight, flexDirection: rtl ? 'row-reverse' : 'row' }]}>
-      {items.slice(page * layout.pageSize, (page + 1) * layout.pageSize).map((item, i) =>
-        <View key={`${page}:${i}`} style={{ width: `${100 / layout.columns}%`, height: layout.rowHeight, paddingHorizontal: 2 }}>
-          {renderItem(item)}
+      {loaderSlotIndices(items.length, slots, replacements).map(index =>
+        <View key={index} style={{ width: `${100 / layout.columns}%`, height: layout.rowHeight, paddingHorizontal: 2 }}>
+          {renderItem(items[index])}
         </View>)}
     </View>
   );
