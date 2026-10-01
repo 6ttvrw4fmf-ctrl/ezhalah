@@ -155,22 +155,12 @@ chat, which renders results inline. (Deliberate; single search engine — see §
 **Card data is locked. Display scraped values verbatim; change presentation only with owner approval.** Fix data
 problems via backend mapping only (see §16), never by editing the card.
 
-**Compact layout (owner 2026-10-01):** use a proportionate compact photo beside the main details on every screen, with tightly wrapped amenities and inline additional-information pairs below. Keep source attribution in a compact footer. Avoid tall separate columns and large empty areas. Hide the prose description/bio (including the Gathern title-as-description fallback) in this compact view. Keep amenities and additional information, all other values and display conditions, existing expanders and source-link actions. Never alter stored data or price formatting. Shared platform-logo dimensions remain unchanged.
+**Photo-first layout (owner approved and requested deployment 2026-10-01):** two cards across when the result container is wider than 580 px, one on phones. Keep the matched list, order, rank and source-link action unchanged. The large full-width photo has a permanent “اضغط هنا 👆” / “Click here 👆” label and source domain; clicking anywhere on it opens the existing original-listing destination. Put source attribution, type/deal, title, exact price, location, stats and optional rating/RNPL/evidence in a compact body. Use tightly wrapped amenities and inline additional-information pairs, with **all values visible immediately, no feature or additional-info expander**. Hide the prose description/bio (including Gathern's title-as-description fallback), as previously approved. Avoid empty fixed-height content panels and a separate large source footer. Shared platform-logo artwork and relative sizing remain consistent; scale every card logo uniformly within the compact source row. Never alter stored data, source conditions or price formatting.
 
-**Three sections:**
-- **Photo:** compact thumbnail with graceful multi-URL fallback → "no photo" placeholder; rank badge
-  (`#N`); bottom source strip `SOURCE · host` with an open-in-new icon.
-- **MIDDLE (info):** type + deal line (`{cleanType} for Sale/Rent`); title
-  (`district, city` or `city`); city + "Saudi Arabia" + optional region chip (from URL); **price**
-  (`tPrice`); optional **RNPL banner** (EJARI×ريلز, or أقساط/Aqsat for Al Hoshan) with "from SAR X/mo";
-  description/bio hidden in the compact view (owner 2026-10-01); a stats row
-  (beds, baths, area m², property type, added-date — each drops out gracefully when absent).
-- **Below the summary:** tightly wrapped amenities, additional information, then a "Hosted on {platform}" badge + hint in the footer; the amenity list
-  (parking, maid room, elevator, master bedrooms, kitchen, halls, balcony, laundry, private entrance,
-  A/C, fiber, water, electricity, sanitation) with "+N More Features" expander (6 visible);
-  **Wasalt-only "Additional Information" panel** (usage/age/facade/street/plan no./land no., first 4 +
-  "See more"). **Aqar rows have `additional_info = null` → the panel is hidden and the Aqar card is
-  unchanged.**
+**Card sections:**
+- **Photo:** full-width image with graceful multi-URL fallback → “no photo” placeholder; rank badge and explicit source-link action.
+- **Details:** existing type/deal, location and region, exact price and price qualifiers, optional RNPL/rating, stats and Advanced-Filter evidence. Source identity remains visible.
+- **Amenities and additional information:** all existing valid entries wrap naturally, without truncating values or requiring expansion. Existing empty-state conditions remain unchanged.
 
 **Card behaviors:** cards pop in staggered (`PopIn`). English-UI place names get client-side
 transliteration for display only (Arabic UI passes through). `listed` date is cleaned to `DD/MM/YYYY`

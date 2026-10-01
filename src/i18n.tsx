@@ -914,6 +914,7 @@ const AR: Record<string, string> = {
   'Clicking this property will take you to sa.aqar.fm': 'الضغط على هذا الإعلان سيأخذك إلى sa.aqar.fm',
   // Source-aware variants — the brand name varies (AQAR/Wasalt), so the localized string carries
   // the {name} / {host} placeholder. The English value is the FALLBACK if a key is missing.
+  'Click here 👆':                     'اضغط هنا 👆',
   'Hosted on {name}':                  'مستضاف على {name}',
   // Source BRAND names — must localize in Arabic too (rule: Arabic UI = everything Arabic except
   // numbers/domains). The card translates the source name through t() before display, so an Arabic

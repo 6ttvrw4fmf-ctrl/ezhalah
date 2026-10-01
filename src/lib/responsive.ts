@@ -29,7 +29,7 @@
 export const DOCK_BREAKPOINT = 900;
 /** Width of that docked column. */
 export const DOCK_WIDTH = 300;
-/** A result card switches from the stacked/compact row to the wide desktop layout at/above this. */
+/** Photo-first result cards use the larger desktop photo at/above this viewport width. */
 export const CARD_WIDE_BREAKPOINT = 820;
 
 export type ViewportGate = {
@@ -78,3 +78,6 @@ export const SHARE_LABEL_BREAKPOINT = 380;
 
 /** Platform logos and their loader rows use the larger laptop size at this width. */
 export const PLATFORM_LOGO_BREAKPOINT = 720;
+
+/** Minimum available width for two photo-first result cards. */
+export const CARD_GRID_BREAKPOINT = 580;
