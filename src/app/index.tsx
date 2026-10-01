@@ -1131,7 +1131,7 @@ export default function Home() {
       <ScrollView
         ref={scrollRef}
         style={{ flex: 1, zIndex: 1 }}
-        contentContainerStyle={[s.scroll, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 28 }]}
+        contentContainerStyle={[s.scroll, { paddingTop: insets.top + 8, paddingBottom: 16 }]}
         keyboardShouldPersistTaps="handled"
       >
         <RNAnimated.View style={[s.col, entranceStyle]}>
@@ -2088,11 +2088,8 @@ export default function Home() {
                 block below, so the user knows which period their price/size answers apply to BEFORE
                 they type them. */}
 
-            <Tappable style={s.searchBtn} onPress={onSearch} dip={0.025}>
-              <Text style={s.searchBtnText}>{t('Search')}</Text>
-            </Tappable>
-            {/* Scroll target: each selection brings this (just below Search) into view so the user is
-                carried down through the form without scrolling. (user request.) */}
+            {/* Keep the existing selection scroll target at the end of the form. Search stays in
+                the action bar below the scroll area, so this anchor never moves it off-screen. */}
             <View ref={withAnchor(endAnchorRef)} style={{ height: 1 }} />
           </View>
 
@@ -2104,6 +2101,16 @@ export default function Home() {
               The AI Agent page still shows its own version of this block to guests. */}
         </RNAnimated.View>
       </ScrollView>
+
+      {/* A normal flex sibling reserves its own space: always visible, without covering fields. */}
+      <View testID="home-search-dock" style={[s.searchDock, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+        <View style={s.col}>
+          <Tappable testID="home-search-button" style={s.searchBtn} onPress={onSearch} dip={0.025}>
+            <Ionicons name="search" size={20} color="#fff" />
+            <Text style={s.searchBtnText}>{t('Search')}</Text>
+          </Tappable>
+        </View>
+      </View>
 
       {/* Drawer overlays the home content (dimmed behind) instead of replacing it. */}
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
@@ -2164,16 +2171,16 @@ const s = StyleSheet.create({
   topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
-  hero: { alignItems: 'center', marginTop: 12, marginHorizontal: 4 },
+  hero: { alignItems: 'center', marginTop: 8, marginHorizontal: 4 },
   // The Filter / AI Agent control, centered in the hero flow between the tagline and the card.
-  modeWrap: { alignSelf: 'center', marginTop: 20 },
+  modeWrap: { alignSelf: 'center', marginTop: 12 },
   heroTitle: { fontSize: 31, fontWeight: '700', color: colors.primary, letterSpacing: -0.6, textAlign: 'center', lineHeight: 34 },
   heroSub: { fontSize: 13.5, fontWeight: '600', color: colors.dark, textAlign: 'center', marginTop: 5, lineHeight: 20 },
   heroTagline: { fontSize: 12.5, fontWeight: '700', color: colors.primary, textAlign: 'center', marginTop: 8, fontStyle: 'italic' },
   // Small inline hint under the Rent Monthly/Yearly toggle — explains the period the user picked.
   rentHint: { fontSize: 11.5, color: colors.muted, marginTop: 6, paddingHorizontal: 4, lineHeight: 16 },
 
-  card: { marginTop: 22, backgroundColor: colors.surface, borderRadius: radius.sheet, borderWidth: 1, borderColor: colors.fieldLine, padding: space.card, ...cardShadow },
+  card: { marginTop: 14, backgroundColor: colors.surface, borderRadius: radius.sheet, borderWidth: 1, borderColor: colors.fieldLine, padding: space.card, ...cardShadow },
   // "مسح الكل" (Clear All) — only rendered when hasActiveFilters(query), so an already-empty filter
   // never shows a clear control with nothing to clear (mirrors the location field's own per-field
   // clear icon, which is likewise conditional on query.location.length > 0).
@@ -2269,7 +2276,8 @@ const s = StyleSheet.create({
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   wrapCell: { flexGrow: 1, flexBasis: '30%', minWidth: 90, flex: 0 },
 
-  searchBtn: { marginTop: 11, height: 51, borderRadius: radius.field, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
+  searchDock: { flexShrink: 0, zIndex: 2, alignItems: 'center', paddingHorizontal: space.screenSide, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.fieldLine, backgroundColor: colors.surface },
+  searchBtn: { height: 51, flexDirection: 'row', gap: 8, borderRadius: radius.field, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
   searchBtnText: { color: '#fff', fontSize: 15.5, fontWeight: '600' },
 
   startHead: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 9, marginHorizontal: 2 },

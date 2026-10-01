@@ -110,9 +110,9 @@ The single search state is `query` (a `SearchQuery` in the store). Every control
    - **Price (SAR)** — From/To range boxes, always shown. **HARD filter.**
 7. **Rent period** — segmented `Monthly / Yearly`, shown only when Deal = Rent. Maps to
    `query.rentPeriod` (`'monthly'`/`'annual'`, default `annual`). Hidden for Buy.
-8. **Search** button → `onSearch()`.
+8. **Search** button → the existing `onSearch()`, in a persistent bottom action bar outside the form's ScrollView (owner, 2026-10-01). It is visible on first opening on phones and laptops and while scrolling. Reserve its own layout space and bottom safe-area padding so it does not cover inputs; keep normal readable text sizes instead of zooming out the page. The filter controls and their order are unchanged.
 
-Below the card: a 6-cell grid of rotating example-prompt chips that route to the AI agent.
+The old example-prompt grid below the card was removed at the owner's request on 2026-08-16; the AI Agent keeps its own onboarding prompts.
 
 ### 4.2 Canonical filter engine (owner decision 2026-07-06)
 
