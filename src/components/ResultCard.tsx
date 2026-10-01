@@ -182,7 +182,7 @@ export function ResultCard({
     // checkable if a rendered card can be identified in the DOM; matching strips to rows by position
     // is unsound, because a row that earns no chip renders no strip and silently shifts the rest.
     // Rendering-only: no style, no behaviour, and web-only `testID` becomes `data-testid`.
-    <View testID={`card-listing-${listing.id}`} style={card.wrap}>
+    <View testID={`card-listing-${listing.id}`} style={[card.wrap, { direction: wDir }]}>
       <View style={card.summaryRow}>
       {/* Compact photo beside the property summary. */}
       <Pressable onPress={onOpen} style={[card.photoCol, horizontal ? card.photoColWide : card.photoColMobile]}>
