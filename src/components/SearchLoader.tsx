@@ -147,7 +147,7 @@ function PlatformPill({
   item: LoaderPlatform; index: number; total: number; rtl: boolean; reduced: boolean; name: string;
 }) {
   const wide = useAtLeast(PLATFORM_LOGO_BREAKPOINT);
-  const pillOverride = wide ? { gap: 8 } : { gap: 4 };
+  const pillOverride = wide ? { height: 'auto' as const, gap: 8 } : { height: 'auto' as const, gap: 4 };
   const nameOverride = wide ? { fontSize: 12, lineHeight: 15 } : { fontSize: 11, lineHeight: 14 };
   const h = useSharedValue(0);
   // LITERAL hex, not the colors.* token (owner theme contract: interpolateColor parses actual color
@@ -393,6 +393,6 @@ const s = StyleSheet.create({
   // rowGlow) plus the name warming from muted to primary — transforms/shadow/color only, so the wave
   // still causes ZERO layout shift.
   // Name below its equal-size logo frame. No truncation and no moving/scaling highlight.
-  pill: { alignItems: 'center', paddingHorizontal: 2 },
+  pill: { alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 2 },
   pillName: { fontWeight: '600', color: colors.body, alignSelf: 'stretch' },
 });
