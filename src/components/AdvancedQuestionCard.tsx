@@ -581,7 +581,7 @@ const s = StyleSheet.create({
   // flexGrow/flexShrink 1, bare RN does not), so state it here rather than inherit either.
   scroll: { flexShrink: 1 },
   body: { paddingHorizontal: space.card, paddingTop: 12, paddingBottom: 12 },
-  qt: { fontFamily: font.family.bold, fontSize: 20, color: colors.dark, lineHeight: 28, paddingHorizontal: 2 },
+  qt: { fontFamily: font.family.bold, fontSize: 20, color: colors.ink, lineHeight: 28, paddingHorizontal: 2 },
   desc: { fontFamily: font.family.regular, fontSize: 12.5, color: colors.muted, paddingHorizontal: 2, paddingTop: 5 },
   unknownNote: { fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, opacity: 0.85, paddingHorizontal: 2, paddingTop: 3 },
 
