@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { colors, radius, cardShadow } from '@/theme/tokens';
+import { colors, radius } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
 import { derivedTotalEquation } from '@/data/listings';
 import { useI18n, t as tr, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
@@ -16,7 +16,7 @@ import { afEvidence, type ActiveAf } from '@/lib/afEvidence';
 
 const IS_WEB = Platform.OS === 'web';
 
-// Feature key → (icon, EN label key) — the 2-column grid on the right side of the residential card.
+// Feature key → (icon, EN label key) — the wrapping amenities row on the listing card.
 // The label is run through t() so it localizes to Arabic. Order matters: most useful features first.
 const FEATURE_META: Array<{ key: keyof NonNullable<Listing['features']>; icon: any; label: string }> = [
   { key: 'parking',          icon: 'car-outline',           label: 'Parking' },
@@ -68,8 +68,7 @@ export function PopIn({ index, style, children }: { index: number; style?: any; 
   );
 }
 
-// Compact listing card: a thumbnail beside the main details, with source/features below on
-// phones and alongside on wide screens. The owner hides prose in this compact view; all other
+// Compact listing card: a balanced photo/details row, with tightly wrapped amenities below. The owner hides prose in this compact view; all other
 // content, formatting and interactions stay unchanged.
 export function ResultCard({
   listing,
@@ -150,7 +149,7 @@ export function ResultCard({
     locale,
     TYPE_UNRESOLVED_AR,
   );
-  // desktop 3-column layout. Goes through useAtLeast so the FIRST client render reproduces the
+  // Responsive thumbnail sizing. Goes through useAtLeast so the FIRST client render reproduces the
   // server's answer (no window ⇒ compact); comparing the width inline here was the second half of
   // the React #418 P0 of 2026-08-21 — it differs only in style attributes, but React compares those
   // during hydration too, which is why the live page logged two errors and not one.
@@ -183,8 +182,8 @@ export function ResultCard({
     // checkable if a rendered card can be identified in the DOM; matching strips to rows by position
     // is unsound, because a row that earns no chip renders no strip and silently shifts the rest.
     // Rendering-only: no style, no behaviour, and web-only `testID` becomes `data-testid`.
-    <View testID={`card-listing-${listing.id}`} style={[card.wrap, { flexDirection: horizontal ? 'row' : 'column' }]}>
-      <View style={[card.summaryRow, horizontal && card.summaryRowWide, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+    <View testID={`card-listing-${listing.id}`} style={card.wrap}>
+      <View style={card.summaryRow}>
       {/* Compact photo beside the property summary. */}
       <Pressable onPress={onOpen} style={[card.photoCol, horizontal ? card.photoColWide : card.photoColMobile]}>
         <ListingPhoto photos={(listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []))} style={card.photo} t={t} />
@@ -194,7 +193,7 @@ export function ResultCard({
           </View>
         ) : null}
         {/* user request: removed the white "AQAR" pill that floated over the photo's top-right.
-            Source attribution still appears in the bottom strip and in the right-side panel. */}
+            Source attribution still appears in the bottom strip and in the footer. */}
         {listing.source_url ? (
           <View style={card.sourceStrip} pointerEvents="none">
             <Text style={card.sourceText} numberOfLines={1}>{t(sourceName(listing.source)).toUpperCase()} · {sourceHost(listing.source)}</Text>
@@ -338,17 +337,8 @@ export function ResultCard({
 
       </View>
 
-      {/* ─── features panel (full-width below info on mobile) ─ */}
-      <View style={[card.rightCol, horizontal ? card.rightColSide : card.rightColBottom]}>
-        <View style={card.hostHead}>
-          <SourceBadge source={listing.source} />
-          <View style={{ flex: 1 }}>
-            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: t(sourceName(listing.source)) })}</Text>
-            <Text style={card.hostHint} numberOfLines={2}>
-              {t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })}
-            </Text>
-          </View>
-        </View>
+      {/* Amenities and additional information share the full card width. */}
+      <View style={card.rightCol}>
         {visible.length > 0 ? (
           <View style={card.featGrid}>
             {visible.map((f) => (
@@ -373,6 +363,15 @@ export function ResultCard({
             Ad source / Plan number / Land number, etc. Aqar rows have additional_info = null and
             the panel is hidden (Aqar's card stays exactly as it was). (user request 2026-06.) */}
         <AdditionalInformationPanel listing={listing} t={t} locale={locale} />
+        <View style={card.hostHead}>
+          <SourceBadge source={listing.source} />
+          <View style={{ flex: 1 }}>
+            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: t(sourceName(listing.source)) })}</Text>
+            <Text style={card.hostHint} numberOfLines={2}>
+              {t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })}
+            </Text>
+          </View>
+        </View>
       </View>
     </View>
   );
@@ -1095,19 +1094,18 @@ function Stat({ icon, big, small }: { icon: any; big: string; small: string }) {
   );
 }
 
-// Compact summary row with amenities alongside on desktop and below on phones.
+// One continuous compact card; no tall side column or oversized photo banner.
 const card = StyleSheet.create({
   wrap: {
     backgroundColor: colors.surface, borderRadius: 10, borderWidth: 1, borderColor: colors.fieldLine,
-    overflow: 'hidden', ...cardShadow,
-    alignItems: 'stretch', // flexDirection set inline (row desktop / column mobile)
+    overflow: 'hidden',
+    alignItems: 'stretch',
   },
   // Compact summary keeps the existing photo and every detail, without a full-width hero.
-  summaryRow: { minWidth: 0, alignItems: 'flex-start' },
-  summaryRowWide: { flex: 1 },
+  summaryRow: { flexDirection: 'row', minWidth: 0, alignItems: 'flex-start' },
   photoCol: { position: 'relative', backgroundColor: colors.tint, overflow: 'hidden' },
-  photoColWide: { width: 128, height: 108 },
-  photoColMobile: { width: '25%', minWidth: 72, maxWidth: 96, height: 96 },
+  photoColWide: { width: 176, height: 132 },
+  photoColMobile: { width: '32%', minWidth: 104, maxWidth: 160, height: 128 },
   photo: { width: '100%', height: '100%' },
   photoFallback: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surface2 },
   photoFallbackText: { fontSize: 11, color: colors.muted, fontWeight: '600' },
@@ -1131,11 +1129,11 @@ const card = StyleSheet.create({
   midCol: { flex: 1, minWidth: 0, paddingHorizontal: 8, paddingVertical: 6, gap: 3 },
   typeRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   typeLabel: { fontSize: 11.5, color: colors.muted, fontWeight: '500' },
-  title: { fontSize: 15, fontWeight: '800', color: colors.dark, letterSpacing: -0.3 },
+  title: { fontSize: 14, fontWeight: '700', color: colors.dark, letterSpacing: -0.3 },
   // Owner 2026-10-01: omit the bio from compact cards; details remain on the source page.
   desc: { display: 'none' },
   locRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
-  locText: { fontSize: 12, color: colors.primary, fontWeight: '500' },
+  locText: { fontSize: 11, color: colors.primary, fontWeight: '500' },
   // Small region pill (e.g. "North Riyadh") next to the city line — light green, compact.
   regionChip: {
     flexDirection: 'row', alignItems: 'center', gap: 3,
@@ -1192,11 +1190,9 @@ const card = StyleSheet.create({
   statBig: { fontSize: 12.5, fontWeight: '700', color: colors.dark, lineHeight: 15 },
   statSmall: { fontSize: 10, color: colors.muted, lineHeight: 12 },
 
-  // RIGHT: features
-  rightCol: { paddingHorizontal: 8, paddingVertical: 6, gap: 4 },
-  rightColSide: { width: 220, borderLeftWidth: 1, borderLeftColor: colors.fieldLine },     // desktop: side column
-  rightColBottom: { width: '100%', borderTopWidth: 1, borderTopColor: colors.fieldLine },  // mobile: below info
-  hostHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  // Full-width amenities and compact source footer.
+  rightCol: { paddingHorizontal: 8, paddingBottom: 6, paddingTop: 4, gap: 3 },
+  hostHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3, paddingTop: 4, borderTopWidth: 1, borderTopColor: colors.fieldLine },
   thercBadge: { borderRadius: 8, backgroundColor: '#1f5f8b', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   aoujBadge: { borderRadius: 8, backgroundColor: '#8b5a1f', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   abralosolBadge: { borderRadius: 8, backgroundColor: '#3f6b4a', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
@@ -1228,8 +1224,8 @@ const card = StyleSheet.create({
   badgeText: { color: '#fff', fontWeight: '800', fontSize: 11, lineHeight: 13, textAlign: 'center' },
   hostedOn: { fontSize: 12, fontWeight: '700', color: colors.dark },
   hostHint: { fontSize: 10, color: colors.muted, lineHeight: 13 },
-  featGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-  featCell: { width: '50%', flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 2 },
+  featGrid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, rowGap: 2 },
+  featCell: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2, maxWidth: '100%' },
   featText: { fontSize: 11.5, color: colors.dark, fontWeight: '500', flexShrink: 1 },
   noFeat: { fontSize: 11, color: colors.muted, fontStyle: 'italic' },
   moreBtn: {
@@ -1238,26 +1234,19 @@ const card = StyleSheet.create({
   },
   moreText: { fontSize: 11.5, fontWeight: '600', color: colors.primary },
   // Wasalt "Additional Information" panel — sits BELOW the features grid, with a soft separator
-  // line so it reads as its own section. Two-column responsive grid matching the live Wasalt page.
+  // line so it reads as its own section. Each label/value pair wraps as one group.
   addlPanel: {
-    marginTop: 4, paddingTop: 6,
-    borderTopWidth: 1, borderTopColor: colors.fieldLine,
+    marginTop: 0, paddingTop: 3,
   },
-  addlTitle: { fontSize: 12.5, fontWeight: '700', color: colors.ink, marginBottom: 3 },
-  addlGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  addlTitle: { fontSize: 11.5, fontWeight: '700', color: colors.ink, marginBottom: 3 },
+  addlGrid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 16, rowGap: 2 },
   addlCell: {
-    width: '50%', paddingVertical: 2, paddingRight: 6, gap: 1,
+    maxWidth: '100%', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', paddingVertical: 2, columnGap: 5, rowGap: 1,
   },
-  // writingDirection is REQUIRED here, not decorative: with no explicit direction, RN Web isolates
-  // each Text run (unicode-bidi:isolate) and lets the BROWSER pick its direction from the run's own
-  // content — an Arabic label auto-resolves rtl, but a bare-digit value (e.g. street_width="15",
-  // parcel_number="190") has no strong bidi character and auto-resolves ltr. Two 50%-width RTL cells
-  // then each right-align their label but LEFT-align their value, so every value slides to the far
-  // side of its own cell — on a 2-cell row the neighbor's label ends up sitting right next to the
-  // WRONG value (measured live: أملاك الأحساء's «عرض الشارع» / «رقم القطعة» pair, amlakalahsa is the
-  // first source to show two numeric additional_info fields side by side, which is what exposed it).
+  // Keep explicit direction on source labels and values: bare numeric values must remain
+  // aligned with their own Arabic label when the inline groups wrap.
   addlLabel: { fontSize: 10.5, color: colors.muted, fontWeight: '500', writingDirection: 'rtl' },
-  addlValue: { fontSize: 11.5, color: colors.ink, fontWeight: '600', writingDirection: 'rtl' },
+  addlValue: { flexShrink: 1, fontSize: 11.5, color: colors.ink, fontWeight: '600', writingDirection: 'rtl' },
   addlMoreBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
     paddingVertical: 6, marginTop: 4,
