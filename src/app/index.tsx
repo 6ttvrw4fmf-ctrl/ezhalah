@@ -1618,7 +1618,7 @@ export default function Home() {
                   testID="district-input"
                   editable={!!citySelected}
                   style={s.flInput}
-                  placeholder={citySelected ? t('Choose a neighborhood') : t('Select a city first')}
+                  placeholder={citySelected ? '' : t('Select a city first')}
                   placeholderTextColor={colors.muted}
                   value={districtText}
                   autoCorrect={false}

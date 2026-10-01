@@ -622,7 +622,6 @@ const AR: Record<string, string> = {
   'For Sale': 'للبيع',
   'City': 'المدينة',
   'Choose a city': 'اختر المدينة',
-  'Choose a neighborhood': 'اختر الحي',
   'Search with these filters': 'بحث بهذه الخيارات',
   'Region': 'الإقليم',
   'Neighborhood': 'الحي',
