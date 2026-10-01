@@ -444,6 +444,12 @@ export default function AdvancedQuestionCard({
         <Reanimated.View style={enterA}>
           <Text style={s.qt} testID="af-question-title">{t(titleKey)}</Text>
           {descriptionKey ? <Text style={s.desc}>{t(descriptionKey)}</Text> : null}
+          <View testID="af-source-note" style={[s.sourceNote, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+            <Ionicons name="information-circle-outline" size={16} color={colors.primary} />
+            <Text style={[s.note, { textAlign: isRTL ? 'right' : 'left' }]}>
+              {t('Your search options and counts use published listing details; unmentioned features may still be available, so check the original listing.')}
+            </Text>
+          </View>
           {/* R7.1.3 — the unknown-count caption. UNKNOWN STAYS VISIBLE: these listings are still
               fully eligible (no option's count includes them, and Skip keeps them all), so the user
               is told they exist rather than being left to infer that every listing stated the fact.
@@ -466,14 +472,6 @@ export default function AdvancedQuestionCard({
                 first={i === 0} onPress={() => pick(o.key)} />
             ))}
           </View>
-          {/* One tiny availability line instead of database language (owner 2026-08-16): the numbers
-              come from what we actually know about the current listings — say that plainly, once. */}
-          {/* Owner 2026-08-29, two quiet truths: (1) an ad that doesn't mention a feature is not
-              saying "no" — the user must never read missing data as a negative answer; (2) the
-              options and counts belong to THIS search's current results and follow the narrowing.
-              Neither line excuses a wrong number — counts still come from backend truth. */}
-          <Text style={s.note}>{t('Some listings do not mention this detail, so the options reflect what the listings actually state')}</Text>
-          <Text style={s.noteSub}>{t('Options and counts are based on your current search results and update as you narrow down')}</Text>
         </Reanimated.View>
       </ScrollView>
       {/* PINNED action row — outside the ScrollView on purpose (see s.foot). */}
@@ -547,7 +545,7 @@ const s = StyleSheet.create({
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.scrim },
   card: {
     width: '100%', maxWidth: 380, maxHeight: '100%', backgroundColor: colors.paper,
-    borderRadius: radius.sheet, overflow: 'hidden', borderLeftWidth: 6, borderLeftColor: colors.dark, ...cardShadow,
+    borderRadius: radius.sheet, overflow: 'hidden', borderWidth: 1, borderColor: colors.fieldLine, ...cardShadow,
   },
   // The committed-selection pills, in the overlay ABOVE the card: same tinted-chip idiom as the
   // transcript row they are no longer hidden behind, sized to the card so they read as one column.
@@ -582,8 +580,8 @@ const s = StyleSheet.create({
   // screen. RN and react-native-web disagree on the default (RNW's ScrollView already ships
   // flexGrow/flexShrink 1, bare RN does not), so state it here rather than inherit either.
   scroll: { flexShrink: 1 },
-  body: { paddingHorizontal: space.card, paddingTop: space.base, paddingBottom: 16 },
-  qt: { fontFamily: font.family.bold, fontSize: 19, color: colors.ink, lineHeight: 27, paddingHorizontal: 2, paddingTop: 8 },
+  body: { paddingHorizontal: space.card, paddingTop: 12, paddingBottom: 12 },
+  qt: { fontFamily: font.family.bold, fontSize: 19, color: colors.ink, lineHeight: 27, paddingHorizontal: 2 },
   desc: { fontFamily: font.family.regular, fontSize: 12.5, color: colors.muted, paddingHorizontal: 2, paddingTop: 5 },
   unknownNote: { fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, opacity: 0.85, paddingHorizontal: 2, paddingTop: 3 },
 
@@ -598,14 +596,14 @@ const s = StyleSheet.create({
 
   // Options: soft rounded stand-alone rows with breathing room (no dense bordered table) — the
   // Claude-question feel. Selection fills the row with the brand tint + primary border.
-  list: { marginTop: 14, gap: 8 },
+  list: { marginTop: 12, gap: 8 },
   row: {
-    backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.fieldLine,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine,
     borderRadius: radius.field,
   },
   rowFirst: {},
   rowOn: { backgroundColor: colors.tint, borderColor: colors.primary },
-  rowPress: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingVertical: 14, paddingHorizontal: 14 },
+  rowPress: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, minHeight: 48, paddingVertical: 11, paddingHorizontal: 12 },
   rowLead: { flexDirection: 'row', alignItems: 'center', gap: 11, flexShrink: 1 },
   checkSlot: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
   checkRing: { position: 'absolute', width: 19, height: 19, borderRadius: radius.pill, borderWidth: 1.5, borderColor: colors.pickLine },
@@ -615,8 +613,8 @@ const s = StyleSheet.create({
   countPill: { backgroundColor: colors.tint, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 2, minWidth: 34, alignItems: 'center' },
   countText: { fontFamily: font.family.bold, fontSize: 12.5, color: colors.primary, fontVariant: ['tabular-nums'] },
 
-  note: { marginTop: 12, marginHorizontal: 2, fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, lineHeight: 16 },
-  noteSub: { marginTop: 4, marginHorizontal: 2, fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, lineHeight: 16 },
+  sourceNote: { direction: 'ltr', marginTop: 10, gap: 7, alignItems: 'flex-start', padding: 10, borderRadius: 12, backgroundColor: colors.tint },
+  note: { flex: 1, fontFamily: font.family.regular, fontSize: 11.5, color: colors.primary, lineHeight: 17 },
 
   // PINNED footer (defect 2026-08-23). It used to be the last child INSIDE the body ScrollView, so a
   // question with many options pushed «متابعة / رجوع / تخطي / عرض النتائج» past the bottom of the

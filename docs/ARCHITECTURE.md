@@ -110,7 +110,7 @@ The single search state is `query` (a `SearchQuery` in the store). Every control
    - **Price (SAR)** — From/To range boxes, always shown. **HARD filter.**
 7. **Rent period** — segmented `Monthly / Yearly`, shown only when Deal = Rent. Maps to
    `query.rentPeriod` (`'monthly'`/`'annual'`, default `annual`). Hidden for Buy.
-8. **Search** button → the existing `onSearch()`, in a persistent bottom action bar outside the form's ScrollView (owner, 2026-10-01). It is visible on first opening on phones and laptops and while scrolling. Reserve its own layout space and bottom safe-area padding so it does not cover inputs; keep normal readable text sizes instead of zooming out the page. The filter controls and their order are unchanged.
+8. **Search** actions → the existing `onSearch()`. Owner revision (2026-10-01): remove the persistent bottom bar because it crowds location selection. Keep a compact Search action in the form immediately after City/District, and a second «بحث بهذه الخيارات» action after the detailed filters. Both scroll naturally with the form and never overlap suggestions. Compact the hero spacing and deal/category/period tiles; keep readable inputs, explicit City/District labels and placeholders, and the district's optional label. Preserve every filter control, callback and validation rule.
 
 The old example-prompt grid below the card was removed at the owner's request on 2026-08-16; the AI Agent keeps its own onboarding prompts.
 

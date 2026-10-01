@@ -458,10 +458,8 @@ const AR: Record<string, string> = {
   'Let’s begin': 'يلا نبدأ',
   // 'Continue' reuses the existing auth-flow key ('متابعة') — not redeclared here.
   'Continue · {count} results': 'متابعة · {count} نتيجة',
-  // AF data-availability notes (owner 2026-08-29): unknown is never «no», and the numbers belong to
-  // the CURRENT result set. Professional, calm, never legal/technical language.
-  'Some listings do not mention this detail, so the options reflect what the listings actually state': 'بعض الإعلانات لا تذكر هذه المعلومة، لذلك تعتمد الخيارات على البيانات المتوفرة في الإعلانات.',
-  'Options and counts are based on your current search results and update as you narrow down': 'الخيارات والأعداد مبنية على نتائج بحثك الحالية وتُحدَّث مع تضييق البحث.',
+  // Owner 2026-10-01: one source-data notice above the options; unknown still never means «no».
+  'Your search options and counts use published listing details; unmentioned features may still be available, so check the original listing.': 'خيارات بحثك وأعدادها مبنية على بيانات الإعلانات المنشورة؛ غياب المعلومة لا ينفي توفرها، فتأكد من الإعلان الأصلي.',
   'Based on: {labels}': 'بناءً على: {labels}',
   'Without: {label}': 'بدون: {label}',
 
@@ -623,6 +621,9 @@ const AR: Record<string, string> = {
   'Platform': 'المنصة',
   'For Sale': 'للبيع',
   'City': 'المدينة',
+  'Choose a city': 'اختر المدينة',
+  'Choose a neighborhood': 'اختر الحي',
+  'Search with these filters': 'بحث بهذه الخيارات',
   'Region': 'الإقليم',
   'Neighborhood': 'الحي',
   'Districts': 'الأحياء',
