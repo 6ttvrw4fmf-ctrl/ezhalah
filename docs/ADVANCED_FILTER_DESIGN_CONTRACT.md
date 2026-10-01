@@ -43,7 +43,7 @@ visual and behavioural below is owned by the shared component.
 
 ## 2. Card layout — identical for every question
 
-**Owner visual revision, 2026-10-01:** use one short source-data sentence in a subtle information strip immediately below the question/description and above the options: «خيارات بحثك وأعدادها مبنية على بيانات الإعلانات المنشورة؛ غياب المعلومة لا ينفي توفرها، فتأكد من الإعلان الأصلي.» It replaces the two footer notes, keeping both current-search scope and missing-is-not-no semantics while directing users to the original listing. Use a thin neutral card border and compact option rows with at least 48 px height. Preserve the existing count, unknown-count caption, selection, progress, committed pills and pinned action behavior.
+**Owner visual revision, 2026-10-01:** use one short source-data sentence in a subtle information strip immediately below the question/description and above the options: «خيارات بحثك وأعدادها مبنية على بيانات الإعلانات المنشورة؛ غياب المعلومة لا ينفي توفرها، فتأكد من الإعلان الأصلي.» It replaces the two footer notes, keeping both current-search scope and missing-is-not-no semantics while directing users to the original listing. Use a thin neutral card border and compact option rows with at least 48 px height. The stronger visual revision uses a solid dark-green brand header, a prominent question, and green-filled selected options with white labels/checkmarks; count pills remain legible in both themes. Preserve the existing count, unknown-count caption, selection, progress, committed pills and pinned action behavior.
 
 ```
 ┌───────────────────────────────────────────┐

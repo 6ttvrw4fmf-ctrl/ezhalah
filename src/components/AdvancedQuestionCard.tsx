@@ -114,13 +114,13 @@ function Shell({ children, onClose, countChip, pills }: {
       <Reveal style={s.card}>
         <View style={s.bar}>
           <View style={s.titleWrap}>
-            <Ionicons name="sparkles" size={16} color={colors.primary} />
+            <Ionicons name="sparkles" size={18} color={colors.onFill} />
             <Text style={s.barTitle} numberOfLines={1}>{t('Ezhalah AI Agent')}</Text>
           </View>
           <View style={s.barSide}>
             {countChip != null ? <View testID="af-count-chip"><AnimatedCount value={countChip} /></View> : null}
             <Pressable onPress={onClose} style={s.xBtn} hitSlop={6}>
-              <Ionicons name="close" size={18} color={colors.muted} />
+              <Ionicons name="close" size={18} color={colors.onFill} />
             </Pressable>
           </View>
         </View>
@@ -279,7 +279,7 @@ function OptionRow({ option, selected, selection, first, onPress }: {
         <View style={s.rowLead}>
           <View style={s.checkSlot}>
             <Reanimated.View style={checkA}>
-              <Ionicons name="checkmark-circle" size={21} color={colors.primary} />
+              <Ionicons name="checkmark-circle" size={21} color={colors.onFill} />
             </Reanimated.View>
             {/* Empty affordance keeps the checkbox/radio distinction: multi = rounded square, single = circle. */}
             {!selected ? <View style={[s.checkRing, selection === 'multi' && s.checkRingSquare]} /> : null}
@@ -555,16 +555,16 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5,
   },
   pillTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
-  bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: space.card, paddingTop: space.card, paddingBottom: 10 },
+  bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: space.card, paddingTop: space.card, paddingBottom: 14, backgroundColor: colors.dark },
   titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 1 },
-  barTitle: { fontFamily: font.family.bold, fontSize: 14, color: colors.dark },
+  barTitle: { fontFamily: font.family.bold, fontSize: 14, color: colors.onFill },
   barSide: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   liveChip: { backgroundColor: colors.tint, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 3 },
   liveChipTx: { fontFamily: font.family.bold, fontSize: 12, color: colors.primary, fontVariant: ['tabular-nums'] },
-  xBtn: { width: 30, height: 30, borderRadius: radius.pill, backgroundColor: colors.segTrack, alignItems: 'center', justifyContent: 'center' },
+  xBtn: { width: 30, height: 30, borderRadius: radius.pill, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
 
-  progRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: space.card, marginBottom: 4 },
-  progTrack: { flex: 1, height: 3, backgroundColor: colors.line, borderRadius: 3, overflow: 'hidden' },
+  progRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: space.card, marginTop: 12, marginBottom: 4 },
+  progTrack: { flex: 1, height: 4, backgroundColor: colors.line, borderRadius: 3, overflow: 'hidden' },
   progFill: { height: '100%', backgroundColor: colors.dark, borderRadius: 3 },
 
   loadingBody: { paddingHorizontal: space.card, paddingVertical: 36, alignItems: 'center', justifyContent: 'center' },
@@ -581,7 +581,7 @@ const s = StyleSheet.create({
   // flexGrow/flexShrink 1, bare RN does not), so state it here rather than inherit either.
   scroll: { flexShrink: 1 },
   body: { paddingHorizontal: space.card, paddingTop: 12, paddingBottom: 12 },
-  qt: { fontFamily: font.family.bold, fontSize: 19, color: colors.ink, lineHeight: 27, paddingHorizontal: 2 },
+  qt: { fontFamily: font.family.bold, fontSize: 20, color: colors.dark, lineHeight: 28, paddingHorizontal: 2 },
   desc: { fontFamily: font.family.regular, fontSize: 12.5, color: colors.muted, paddingHorizontal: 2, paddingTop: 5 },
   unknownNote: { fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, opacity: 0.85, paddingHorizontal: 2, paddingTop: 3 },
 
@@ -602,14 +602,14 @@ const s = StyleSheet.create({
     borderRadius: radius.field,
   },
   rowFirst: {},
-  rowOn: { backgroundColor: colors.tint, borderColor: colors.primary },
+  rowOn: { backgroundColor: colors.selFill, borderColor: colors.selFill },
   rowPress: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, minHeight: 48, paddingVertical: 11, paddingHorizontal: 12 },
   rowLead: { flexDirection: 'row', alignItems: 'center', gap: 11, flexShrink: 1 },
   checkSlot: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
   checkRing: { position: 'absolute', width: 19, height: 19, borderRadius: radius.pill, borderWidth: 1.5, borderColor: colors.pickLine },
   checkRingSquare: { borderRadius: 6 },
   label: { fontFamily: font.family.medium, fontSize: 15, color: colors.ink, flexShrink: 1 },
-  labelOn: { fontFamily: font.family.bold, color: colors.dark },
+  labelOn: { fontFamily: font.family.bold, color: colors.onFill },
   countPill: { backgroundColor: colors.tint, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 2, minWidth: 34, alignItems: 'center' },
   countText: { fontFamily: font.family.bold, fontSize: 12.5, color: colors.primary, fontVariant: ['tabular-nums'] },
 
@@ -629,7 +629,7 @@ const s = StyleSheet.create({
   },
   tapInner: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: 13 },
   primaryBtn: { backgroundColor: colors.selFill, borderRadius: radius.chip, alignSelf: 'stretch' },
-  primaryTxt: { fontFamily: font.family.bold, fontSize: 14.5, color: colors.surface },
+  primaryTxt: { fontFamily: font.family.bold, fontSize: 14.5, color: colors.onFill },
   footRow: { flexDirection: 'row', alignItems: 'stretch', gap: 10 },
   // Real secondary buttons (owner redesign 2026-08-28) — the option rows' surface+fieldLine idiom
   // at the primary's chip radius: one control family, clearly tappable, ≥44pt targets on mobile.
