@@ -16,5 +16,5 @@ for (const [width, height, wide] of [[358, 844, false], [288, 568, false], [1088
 assert(nextUnseenPage(new Set([2]), 2, 4) === 3);
 assert(nextUnseenPage(new Set([2, 3]), 3, 4) === 0);
 assert(nextUnseenPage(new Set([0, 1, 2, 3]), 0, 4) === null);
-assert(LOADER_PAGE_MS === 2000);
-console.log('Loader pagination coverage and navigation tests passed.');
+assert(LOADER_PAGE_MS === 1000);
+console.log('Loader pagination coverage and automatic progression tests passed.');

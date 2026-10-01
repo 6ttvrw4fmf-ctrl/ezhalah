@@ -1,5 +1,5 @@
 /** Presentation only: every page gets a full dwell before results replace the loader. */
-export const LOADER_PAGE_MS = 2000;
+export const LOADER_PAGE_MS = 1000;
 export function loaderPageLayout(width: number, height: number, wide: boolean) {
   const columns = Math.max(1, Math.floor(width / (wide ? 112 : 96)));
   const rowHeight = wide ? 116 : Math.max(84, Math.min(102, (height - 316) / 4));
