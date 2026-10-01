@@ -48,6 +48,7 @@ import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import { ResultCard } from '@/components/ResultCard';
+import { ResultCardGrid } from '@/components/ResultCardGrid';
 import { parseQuery, respond } from '@/data/agent';
 import { fetchListingsForQuery } from '@/data/remote';
 import { buildLocationProbeQuery, replyAfterLocationProbe } from '@/lib/agentLocationProbe';
@@ -3884,9 +3885,9 @@ export default function Agent() {
                       ) : null}
                       {/* All result cards render AT ONCE — the per-card pop-in animation was removed
                           per user request ("remove that, not nice"). The cards just appear, no fade,
-                          no scale, no stagger. Cards stay FULL-WIDTH via alignSelf:stretch even though
-                          the parent clusters text to the right for Arabic. */}
-                      <View style={{ gap: 12, marginTop: 12, alignSelf: 'stretch' }}>
+                          no scale, no stagger. The responsive grid fills the available result width
+                          while keeping the original card order in either language. */}
+                      <ResultCardGrid>
                         {/* Live typed turn: default to 0 visible until startReveal begins the one-by-one
                             drip (prevents a full-grid flash if setDoneTyping flushes a render before
                             setRevealCount(0)). History/replay turns (not typing) show all immediately. */}
@@ -3904,7 +3905,7 @@ export default function Agent() {
                             />
                           </CardIn>
                         ))}
-                      </View>
+                      </ResultCardGrid>
                       {/* MORE-RESULTS message + actions (user 2026-06-27, paging owner 2026-07-08): a NORMAL
                           assistant message shown once the first 10 are on screen and MORE matches exist.
                           Correctness: the RPC filtered the FULL matching set before any cap, so we page it —

@@ -68,8 +68,8 @@ export function PopIn({ index, style, children }: { index: number; style?: any; 
   );
 }
 
-// Compact listing card: a balanced photo/details row, with tightly wrapped amenities below. The owner hides prose in this compact view; all other
-// content, formatting and interactions stay unchanged.
+// Photo-first card approved by the owner: a clear source-link photo, then compact details.
+// Prose stays hidden; every amenity and additional-information value is immediately visible.
 export function ResultCard({
   listing,
   onOpen,
@@ -154,7 +154,6 @@ export function ResultCard({
   // the React #418 P0 of 2026-08-21 — it differs only in style attributes, but React compares those
   // during hydration too, which is why the live page logged two errors and not one.
   const horizontal = useAtLeast(CARD_WIDE_BREAKPOINT);
-  const [expanded, setExpanded] = useState(false);
   const txtAlign = isRTL ? ('right' as const) : ('left' as const);
   const wDir = isRTL ? ('rtl' as const) : ('ltr' as const);
 
@@ -162,9 +161,7 @@ export function ResultCard({
   const allActive = (listing.features
     ? FEATURE_META.filter((m) => Boolean(listing.features?.[m.key]))
     : []);
-  const VISIBLE = 6;
-  const visible = expanded ? allActive : allActive.slice(0, VISIBLE);
-  const overflow = Math.max(0, allActive.length - VISIBLE);
+  const visible = allActive;
   // Land listings (amlakalahsa, etc.) legitimately have zero boolean amenities (no elevator/parking/
   // kitchen on raw land) while still having real street_width/parcel_number in additional_info — that
   // combo was rendering "No additional features listed" directly above a populated "Additional
@@ -174,7 +171,7 @@ export function ResultCard({
   const hasAddlInfo = !!listing.additional_info?.some((r) => r && r.label && r.value);
 
   return (
-    // Keep photo + summary together; source/features remain full-width below on narrow screens.
+    // Keep the linked photo above a content-sized body on every screen.
     // NOTE: the feedback row (thumbs/share) is NOT here — owner 2026-07-09 moved it to render ONCE per
     // results response, below the «تبي أعرض لك المزيد…» message (see agent.tsx + FeedbackRow.tsx).
     // testID carries the listing's own id so a live journey can hold THIS card to THIS listing's
@@ -184,8 +181,8 @@ export function ResultCard({
     // Rendering-only: no style, no behaviour, and web-only `testID` becomes `data-testid`.
     <View testID={`card-listing-${listing.id}`} style={[card.wrap, { direction: wDir }]}>
       <View style={card.summaryRow}>
-      {/* Compact photo beside the property summary. */}
-      <Pressable onPress={onOpen} style={[card.photoCol, horizontal ? card.photoColWide : card.photoColMobile]}>
+      {/* The whole photo keeps the existing source-listing action. */}
+      <Pressable onPress={onOpen} accessibilityRole="link" accessibilityLabel={t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })} style={[card.photoCol, horizontal ? card.photoColWide : card.photoColMobile]}>
         <ListingPhoto photos={(listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []))} style={card.photo} t={t} />
         {rank ? (
           <View style={card.rankBadge} pointerEvents="none">
@@ -193,19 +190,22 @@ export function ResultCard({
           </View>
         ) : null}
         {/* user request: removed the white "AQAR" pill that floated over the photo's top-right.
-            Source attribution still appears in the bottom strip and in the footer. */}
+            Source attribution appears in the photo strip and the compact source row. */}
         {listing.source_url ? (
           <View style={card.sourceStrip} pointerEvents="none">
-            <Text style={card.sourceText} numberOfLines={1}>{t(sourceName(listing.source)).toUpperCase()} · {sourceHost(listing.source)}</Text>
-            <Ionicons name="open-outline" size={11} color="#fff" />
+            <Text style={card.photoAction}>{t('Click here 👆')}</Text>
+            <Text style={card.sourceText}>{sourceHost(listing.source)}</Text>
           </View>
         ) : null}
       </Pressable>
 
       {/* ─── property info ───────────────────────── */}
       <Pressable onPress={onOpen} style={card.midCol}>
-        <View style={card.typeRow}>
-          <Ionicons name="home-outline" size={13} color={colors.muted} />
+        <View style={card.sourceRow}>
+          <View style={card.hostHead}>
+            <View style={card.hostBadge}><View style={card.hostBadgeArt}><SourceBadge source={listing.source} /></View></View>
+            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: t(sourceName(listing.source)) })}</Text>
+          </View>
           <Text style={card.typeLabel}>{typeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
         </View>
         {/* JUNK_LOCATION_TOKENS guard (2026-07-10 location-data-quality audit): city/district can
@@ -214,9 +214,12 @@ export function ResultCard({
             «الموقع غير محدد» instead of an empty title / a bare ", السعودية" — never blank, never
             the raw junk token. A present district with no city (or vice versa) is the normal,
             non-bug case and is untouched. */}
-        <Text style={[card.title, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1}>
+        <View style={card.headline}>
+        <Text style={[card.title, { textAlign: txtAlign, writingDirection: wDir }]}>
           {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
         </Text>
+        <Text style={card.price} numberOfLines={1}>{tPrice(listing.price)}</Text>
+        </View>
         <View style={card.locRow}>
           <Ionicons name="location-outline" size={12} color={colors.primary} />
           <Text style={card.locText}>{place(cityAr) || LOCATION_UNRESOLVED_AR}, {t('Saudi Arabia')}</Text>
@@ -227,7 +230,7 @@ export function ResultCard({
             </View>
           ) : null}
         </View>
-        <Text style={card.price} numberOfLines={1}>{tPrice(listing.price)}</Text>
+
         {/* Source-published «سعر المتر», e.g. «سعر المتر 175 ر.س». Shown ONLY when the source printed
             no total/annual price — i.e. exactly the listings whose price line reads «السعر عند الطلب»
             — so it adds information where there was none and never competes with a real price.
@@ -344,34 +347,18 @@ export function ResultCard({
             {visible.map((f) => (
               <View key={f.key} style={card.featCell}>
                 <Ionicons name={f.icon} size={14} color={colors.primary} />
-                <Text style={card.featText} numberOfLines={1}>{t(f.label)}</Text>
+                <Text style={card.featText}>{t(f.label)}</Text>
               </View>
             ))}
           </View>
         ) : hasAddlInfo ? null : (
           <Text style={card.noFeat}>{t('No additional features listed')}</Text>
         )}
-        {overflow > 0 ? (
-          <Pressable onPress={() => setExpanded((x) => !x)} style={card.moreBtn}>
-            <Text style={card.moreText}>
-              {expanded ? t('Show fewer features') : t('+{n} More Features', { n: overflow })}
-            </Text>
-            <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color={colors.primary} />
-          </Pressable>
-        ) : null}
         {/* Wasalt-only "Additional Information" panel — Property usage / Age / Facade / Street /
             Ad source / Plan number / Land number, etc. Aqar rows have additional_info = null and
             the panel is hidden (Aqar's card stays exactly as it was). (user request 2026-06.) */}
         <AdditionalInformationPanel listing={listing} t={t} locale={locale} />
-        <View style={card.hostHead}>
-          <SourceBadge source={listing.source} />
-          <View style={{ flex: 1 }}>
-            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: t(sourceName(listing.source)) })}</Text>
-            <Text style={card.hostHint} numberOfLines={2}>
-              {t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })}
-            </Text>
-          </View>
-        </View>
+
       </View>
     </View>
   );
@@ -482,30 +469,23 @@ function arAttrValue(label: string, value: string, locale: string): string {
 // where the field hasn't been backfilled yet). Mirrors the on-site Wasalt panel design.
 function AdditionalInformationPanel({ listing, t, locale }: { listing: Listing; t: (k: string, p?: any) => string; locale: string }) {
   const rows = listing.additional_info;
-  const [open, setOpen] = useState(false);
   if (!rows || rows.length === 0) return null;
-  // Defensive cap: even if the scraper later expands the field set, the UI stays tidy.
+  // Preserve the existing valid-row filter; all rows are visible without an expander.
   const all = rows.filter((r) => r && r.label && r.value);
   if (all.length === 0) return null;
-  const visible = open ? all : all.slice(0, 4);
+  const visible = all;
   return (
     <View style={card.addlPanel}>
-      <Text style={card.addlTitle}>{t('Additional Information')}</Text>
       <View style={card.addlGrid}>
         {visible.map((r) => (
           <View key={r.key} style={card.addlCell}>
             {/* The source's own Arabic `key` outranks the placeholder — see attrDisplayLabel. */}
             <Text style={card.addlLabel}>{attrDisplayLabel(t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR)}</Text>
-            <Text style={card.addlValue} numberOfLines={2}>{arAttrValue(r.label, r.value, locale)}</Text>
+            <Text style={card.addlValue}>{arAttrValue(r.label, r.value, locale)}</Text>
           </View>
         ))}
       </View>
-      {all.length > 4 ? (
-        <Pressable onPress={() => setOpen((x) => !x)} style={card.addlMoreBtn}>
-          <Text style={card.addlMoreText}>{open ? t('See less') : t('See more')}</Text>
-          <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={14} color={colors.primary} />
-        </Pressable>
-      ) : null}
+
     </View>
   );
 }
@@ -1086,7 +1066,7 @@ function Stat({ icon, big, small }: { icon: any; big: string; small: string }) {
   return (
     <View style={card.statChip}>
       <Ionicons name={icon} size={14} color={colors.primary} />
-      <View>
+      <View style={card.statWords}>
         <Text style={card.statBig} numberOfLines={1}>{big}</Text>
         <Text style={card.statSmall} numberOfLines={1}>{small}</Text>
       </View>
@@ -1094,18 +1074,18 @@ function Stat({ icon, big, small }: { icon: any; big: string; small: string }) {
   );
 }
 
-// One continuous compact card; no tall side column or oversized photo banner.
+// Approved photo-first layout; content height follows the actual listing details.
 const card = StyleSheet.create({
   wrap: {
     backgroundColor: colors.surface, borderRadius: 10, borderWidth: 1, borderColor: colors.fieldLine,
     overflow: 'hidden',
     alignItems: 'stretch',
   },
-  // Compact summary keeps the existing photo and every detail, without a full-width hero.
-  summaryRow: { flexDirection: 'row', minWidth: 0, alignItems: 'flex-start' },
+  // Full-width photo with compact, naturally wrapping details underneath.
+  summaryRow: { minWidth: 0, alignItems: 'stretch' },
   photoCol: { position: 'relative', backgroundColor: colors.tint, overflow: 'hidden' },
-  photoColWide: { width: '40%', height: 144 },
-  photoColMobile: { width: '40%', minWidth: 112, height: 144 },
+  photoColWide: { width: '100%', height: 235 },
+  photoColMobile: { width: '100%', height: 185 },
   photo: { width: '100%', height: '100%' },
   photoFallback: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surface2 },
   photoFallbackText: { fontSize: 11, color: colors.muted, fontWeight: '600' },
@@ -1120,16 +1100,19 @@ const card = StyleSheet.create({
   },
   platformText: { color: colors.primary, fontSize: 10.5, fontWeight: '700' },
   sourceStrip: {
-    position: 'absolute', bottom: 0, left: 0, right: 0, paddingVertical: 5, paddingHorizontal: 8,
-    backgroundColor: 'rgba(8,32,18,0.62)', flexDirection: 'row', alignItems: 'center', gap: 5,
+    position: 'absolute', bottom: 0, left: 0, right: 0, paddingVertical: 9, paddingHorizontal: 10,
+    backgroundColor: 'rgba(22,52,35,0.93)', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 5,
   },
-  sourceText: { color: '#fff', fontSize: 10, fontWeight: '600', flex: 1 },
+  sourceText: { color: '#fff', fontSize: 10, fontWeight: '500', writingDirection: 'ltr' },
+  photoAction: { color: '#fff', fontSize: 12, fontWeight: '700' },
 
   // MIDDLE: property info
-  midCol: { flex: 1, minWidth: 0, paddingHorizontal: 8, paddingVertical: 6, gap: 3 },
+  midCol: { minWidth: 0, paddingHorizontal: 10, paddingTop: 5, paddingBottom: 2, gap: 3 },
+  sourceRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', columnGap: 8 },
+  headline: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', columnGap: 8, rowGap: 2 },
   typeRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  typeLabel: { fontSize: 11.5, color: colors.muted, fontWeight: '500' },
-  title: { fontSize: 14, fontWeight: '700', color: colors.dark, letterSpacing: -0.3 },
+  typeLabel: { fontSize: 10.5, color: colors.muted, fontWeight: '500', flexShrink: 1 },
+  title: { fontSize: 15, fontWeight: '700', color: colors.ink, letterSpacing: -0.3, flexShrink: 1 },
   // Owner 2026-10-01: omit the bio from compact cards; details remain on the source page.
   desc: { display: 'none' },
   locRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
@@ -1149,11 +1132,11 @@ const card = StyleSheet.create({
     backgroundColor: colors.tint, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3,
   },
   afChipText: { fontSize: 10.5, color: colors.primary, fontWeight: '700' },
-  price: { fontSize: 16.5, fontWeight: '800', color: colors.primary, marginTop: 2 },
+  price: { fontSize: 20, fontWeight: '800', color: colors.primary, maxWidth: '100%', flexShrink: 0 },
   // Guest-rating chip (Gathern) — star + score, with a muted review-count suffix. Sits just under
   // the price; only rendered when the listing actually carries a rating. (Gathern Tier-1.)
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
-  ratingText: { fontSize: 12.5, fontWeight: '700', color: colors.dark },
+  ratingText: { fontSize: 12.5, fontWeight: '700', color: colors.ink },
   ratingCount: { fontSize: 11, fontWeight: '500', color: colors.muted },
 
   // Source-published «سعر المتر» subline, rendered directly under the price line on listings that
@@ -1183,16 +1166,19 @@ const card = StyleSheet.create({
   aqsatBanner: { backgroundColor: colors.aqsatBg, borderColor: colors.aqsatLine },
   aqsatLogo: { width: 104, height: 40 },
   rnplFromLine: { fontSize: 10.5, color: colors.muted, fontWeight: '500' },
-  rnplFromStrong: { color: colors.dark, fontWeight: '700' },
+  rnplFromStrong: { color: colors.ink, fontWeight: '700' },
 
   statsRow: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 8, rowGap: 4, marginTop: 2 },
-  statChip: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  statBig: { fontSize: 12.5, fontWeight: '700', color: colors.dark, lineHeight: 15 },
+  statChip: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: '100%' },
+  statWords: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: 3, flexShrink: 1 },
+  statBig: { fontSize: 12.5, fontWeight: '700', color: colors.ink, lineHeight: 15 },
   statSmall: { fontSize: 10, color: colors.muted, lineHeight: 12 },
 
   // Full-width amenities and compact source footer.
-  rightCol: { paddingHorizontal: 8, paddingBottom: 6, paddingTop: 4, gap: 3 },
-  hostHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3, paddingTop: 4, borderTopWidth: 1, borderTopColor: colors.fieldLine },
+  rightCol: { paddingHorizontal: 10, paddingBottom: 9, paddingTop: 4, gap: 3 },
+  hostHead: { flexDirection: 'row', alignItems: 'center', gap: 3, flexShrink: 1 },
+  hostBadge: { width: 64, height: 32, alignItems: 'center', justifyContent: 'center' },
+  hostBadgeArt: { position: 'absolute', alignItems: 'center', justifyContent: 'center', transform: [{ scale: 0.75 }] },
   thercBadge: { borderRadius: 8, backgroundColor: '#1f5f8b', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   aoujBadge: { borderRadius: 8, backgroundColor: '#8b5a1f', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   abralosolBadge: { borderRadius: 8, backgroundColor: '#3f6b4a', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
@@ -1222,11 +1208,11 @@ const card = StyleSheet.create({
   nowaisiryBadge:{ borderRadius: 8, backgroundColor: '#3a5a2f', alignItems: 'center', justifyContent: 'center' },
   octoberBadge:  { borderRadius: 8, backgroundColor: '#6b3a2f', alignItems: 'center', justifyContent: 'center' },
   badgeText: { color: '#fff', fontWeight: '800', fontSize: 11, lineHeight: 13, textAlign: 'center' },
-  hostedOn: { fontSize: 12, fontWeight: '700', color: colors.dark },
+  hostedOn: { fontSize: 10.5, fontWeight: '500', color: colors.ink, flexShrink: 1 },
   hostHint: { fontSize: 10, color: colors.muted, lineHeight: 13 },
   featGrid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, rowGap: 2 },
   featCell: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2, maxWidth: '100%' },
-  featText: { fontSize: 11.5, color: colors.dark, fontWeight: '500', flexShrink: 1 },
+  featText: { fontSize: 11.5, color: colors.ink, fontWeight: '500', flexShrink: 1 },
   noFeat: { fontSize: 11, color: colors.muted, fontStyle: 'italic' },
   moreBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
@@ -1246,7 +1232,7 @@ const card = StyleSheet.create({
   // Keep explicit direction on source labels and values: bare numeric values must remain
   // aligned with their own Arabic label when the inline groups wrap.
   addlLabel: { fontSize: 10.5, color: colors.muted, fontWeight: '500', writingDirection: 'rtl' },
-  addlValue: { flexShrink: 1, fontSize: 11.5, color: colors.ink, fontWeight: '600', writingDirection: 'rtl' },
+  addlValue: { flexShrink: 1, fontSize: 11, color: colors.ink, fontWeight: '600', writingDirection: 'rtl' },
   addlMoreBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
     paddingVertical: 6, marginTop: 4,
