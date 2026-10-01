@@ -8,7 +8,7 @@
 // not one listing). UI-only: no search/cards/ranking.
 import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native';
-import Animated, { Easing, useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, useAnimatedStyle, withDelay, withTiming } from 'react-native-reanimated';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import * as Clipboard from 'expo-clipboard';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -140,7 +140,7 @@ export default function FeedbackRow({
 
 const ThumbMotionView = Platform.OS === 'web' ? View : Animated.View;
 
-// Both thumbs converge on the same point; only the chosen one remains interactive.
+// Both thumbs stay visible until they touch, then the unselected thumb fades away.
 // Clearing that choice reverses the motion without moving the rest of the toolbar.
 function ThumbVote({ direction, index, rating, rtl, reducedMotion, onPress, label }: {
   direction: FeedbackRating; index: number; rating: FeedbackRating | null;
@@ -150,12 +150,14 @@ function ThumbVote({ direction, index, rating, rtl, reducedMotion, onPress, labe
   const start = (rtl ? 1 - index : index) * 32;
   const offset = rating ? 16 - start : 0;
   const motion = useAnimatedStyle(() => ({
-    transform: [{ translateX: withTiming(offset, { duration: reducedMotion ? 0 : 140, easing: Easing.bezier(0.23, 1, 0.32, 1) }) }],
-    opacity: withTiming(hidden ? 0 : 1, { duration: reducedMotion ? 0 : 140 }),
+    transform: [{ translateX: withTiming(offset, { duration: reducedMotion ? 0 : 180, easing: Easing.bezier(0.23, 1, 0.32, 1) }) }],
+    opacity: withDelay(hidden && !reducedMotion ? 180 : 0,
+      withTiming(hidden ? 0 : 1, { duration: reducedMotion ? 0 : 60 })),
   }), [offset, hidden, reducedMotion]);
   const webMotion = Platform.OS === 'web' ? {
     transform: [{ translateX: offset }], opacity: hidden ? 0 : 1,
-    transitionProperty: 'transform, opacity', transitionDuration: reducedMotion ? '0ms' : '140ms',
+    transitionProperty: 'transform, opacity', transitionDuration: reducedMotion ? '0ms' : '180ms, 60ms',
+    transitionDelay: hidden && !reducedMotion ? '0ms, 180ms' : '0ms',
     transitionTimingFunction: 'cubic-bezier(0.23, 1, 0.32, 1)',
   } as any : null;
   return (
