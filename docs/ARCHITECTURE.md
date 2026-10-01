@@ -873,7 +873,7 @@ migration-drift-guard rule in `AGENTS.md`).
 
 ## 20. Permanent rules (the non-negotiables)
 
-- **Response feedback (owner 2026-10-01):** selecting either thumb merges the pair into one selected thumb; tapping it again restores both choices. Keep share/read-aloud stationary, mirror the layout for Arabic/English, and skip motion when reduced motion is enabled. Feedback storage and response scope remain unchanged.
+- **Response feedback (owner 2026-10-01):** selecting either thumb moves both visible thumbs together until they touch, then fades the unselected thumb, leaving one selected thumb; tapping it again restores both choices. Keep share/read-aloud stationary, mirror the layout for Arabic/English, and skip motion when reduced motion is enabled. Keep the existing top-of-chat confirmation popup. Feedback storage and response scope remain unchanged.
 
 **Search loader viewport (owner 2026-10-01):** keep the complete logo/name roster in a bounded, manually scrollable area. Never auto-scroll the thread to follow the searching loader, including delayed scroll callbacks. Logo frames keep the same responsive sizes as property cards; highlights must not scale or translate them.
 
