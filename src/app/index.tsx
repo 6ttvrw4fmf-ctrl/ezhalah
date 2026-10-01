@@ -1398,7 +1398,7 @@ export default function Home() {
                 ONLY, never regions/districts/landmarks/areas. The label sits ABOVE the field, far-right
                 (RTL) — a static header, not a floating placeholder. (owner UI request 2026-07-18.)
                 The whole box is a tap target — tapping anywhere inside focuses the input. */}
-            <Text style={[s.fieldLabelAbove, { marginTop: 12 }]}>{t('City')}</Text>
+            <Text style={[s.fieldLabelAbove, { marginTop: 12 }]}>{t('Which city?')}</Text>
             <AnimatedPressable style={[s.field, confirmFieldStyle(cityPop, citySel)]} onPress={() => cityRef.current?.focus()}>
               {/* Selected-value identity (2026-08-14): once a city is confirmed the leading glyph is
                   the SAME designed city art the suggestion rows carry (LOC_IMG.city) — the pick
