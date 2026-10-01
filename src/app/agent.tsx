@@ -1516,6 +1516,7 @@ export default function Agent() {
   // REMAINDER of SEARCH_MIN_MS from this moment, so the beat overlaps the real network time instead
   // of following it. (owner 2026-07-09: no artificial delays, results show as soon as ready.)
   const searchingAtRef = useRef<Record<string, number>>({});
+  const loaderPresentedRef = useRef<Record<string, boolean>>({});
   // Flip a chat-turn 'thinking' status into the live searching loader the moment the query is KNOWN
   // (right before runQuery) — the pills + min-beat then overlap the fetch exactly like the
   // filter/refine paths. Without this, chat searches only started their beat AFTER the results were
@@ -1549,6 +1550,10 @@ export default function Agent() {
     searchingAtRef.current[statusId] = since;
     const remaining = SEARCH_MIN_MS - (Date.now() - since);
     if (remaining > 0) await waitRun(run, remaining);
+    // Presentation-only gate: each logo/name page must finish its actual visible dwell.
+    // The search has already completed; this changes only when its results are revealed.
+    while (!run.cancelled && loaderPresentedRef.current[statusId] !== true) await waitRun(run, 100);
+    delete loaderPresentedRef.current[statusId];
     delete searchingAtRef.current[statusId];
     if (run.cancelled) return;
     // Soft completion (owner v4): the loader fades out gently instead of vanishing in a single
@@ -3696,7 +3701,7 @@ export default function Agent() {
                 // The branded slogan + search summary are NOT shown here anymore (owner: keep loading
                 // clean/focused); they still appear in the RESULTS bubble below, unchanged. RTL is
                 // handled inside SearchLoader (the message column is LTR-pinned).
-                return <SearchLoader key={m.id} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} />;
+                return <SearchLoader key={m.id} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} />;
               }
               if (m.role === 'agent') {
                 // Per-message direction: each AI reply renders in its OWN language's direction and
