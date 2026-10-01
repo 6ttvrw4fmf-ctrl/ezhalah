@@ -3679,7 +3679,7 @@ export default function Agent() {
           scrollEventThrottle={64}
         >
           <View style={s.col}>
-            {(() => { const lastId = msgs[msgs.length - 1]?.id; return msgs.map((m) => {
+            {(() => { const lastId = msgs[msgs.length - 1]?.id; const latestResult = msgs.filter(x => x.role === 'results').slice(-1)[0]; return msgs.map((m) => {
               if (m.role === 'user') {
                 // User messages ALWAYS sit on the user side (alignSelf: 'flex-end') regardless of the
                 // message language — the page direction (RTL/LTR) decides which screen edge that is.
@@ -3799,7 +3799,7 @@ export default function Agent() {
                   key={m.id}
                   ref={(n: any) => { msgNodeRef.current[m.id] = n; }}
                   onLayout={(e) => { msgYRef.current[m.id] = e.nativeEvent.layout.y; }}
-                  style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%', display: searchingVisibleRef.current ? 'none' : 'flex' }}
+                  style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%', display: searchingVisibleRef.current || (latestResult?.id !== m.id && latestResult?.typing && !doneTyping[latestResult.id]) ? 'none' : 'flex' }}
                 >
                   {/* 1) BRANDED SLOGAN — sparkle icon + Ezhalah's personality line. The row sizes to its
                       content and is pushed to the correct edge by the parent's alignItems. ENGLISH →
