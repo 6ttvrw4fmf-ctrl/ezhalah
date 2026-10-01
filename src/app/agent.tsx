@@ -1358,9 +1358,16 @@ export default function Agent() {
   // `animated: false` while a saved-chat landing is in flight (owner 2026-08-29: opening a chat must
   // BE at the latest message, never visibly drag the page down to it). Live turns keep the glide.
   const landInstantRef = useRef(false);
-  const toBottom = () => requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: !landInstantRef.current }));
+  // Search-loader layout and delayed landing callbacks must never pull the page down.
+  const searchingVisibleRef = useRef(false);
+  searchingVisibleRef.current = msgs.some((m) => m.role === 'status' && m.phase === 'searching');
+  const toBottom = () => requestAnimationFrame(() => {
+    if (searchingVisibleRef.current) return;
+    scrollRef.current?.scrollToEnd({ animated: !landInstantRef.current });
+  });
   const toTop = () => requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
   const onGrow = () => {
+    if (searchingVisibleRef.current) return;
     if (pinModeRef.current === 'top') toTop();
     else if (pinModeRef.current === 'bottom') toBottom();
   };

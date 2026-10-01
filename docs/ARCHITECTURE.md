@@ -873,6 +873,9 @@ migration-drift-guard rule in `AGENTS.md`).
 
 ## 20. Permanent rules (the non-negotiables)
 
+- **Search loader viewport (owner 2026-10-01):** keep the complete logo/name roster in a bounded, manually scrollable area. Never auto-scroll the thread to follow the searching loader, including delayed scroll callbacks. Logo frames keep the same responsive sizes as property cards; highlights must not scale or translate them.
+
+
 - **First-100 diversity — five dimensions, in this priority order (owner PERMANENT rule, 2026-09-14).** The first «عرض المزيد» batch (up to 100 shown) must feel curated, not dumped, across the five dimensions below. This applies to Buy searches, Rent searches, and combined searches. Every engineer changing the order code (`src/lib/platformDiversity.ts::orderByScope` and its caller in `src/data/remote.ts`) is expected to read this rule first.
   1. **Platform** — a platform with many matches must NEVER crowd out a platform with fewer real matches. Round-robin `platform` is the outermost diversity key (pinned since 2026-07-13). No two same-platform listings back-to-back when other platforms have a match to contribute.
   2. **Deal (buy vs rent)** — only active when the user asked for BOTH buy AND rent. When on, buy and rent alternate right after platform so the answer visibly carries each. A single-deal search is unchanged (never spread by deal artificially).
