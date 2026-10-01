@@ -152,18 +152,20 @@ chat, which renders results inline. (Deliberate; single search engine — see §
 
 ## 5. Frontend — the Property Card (`src/components/ResultCard.tsx`) — SOURCE OF TRUTH
 
-**The card is locked. Never modify what it shows. It displays scraped values verbatim.** Fix data
+**Card data is locked. Display scraped values verbatim; change presentation only with owner approval.** Fix data
 problems via backend mapping only (see §16), never by editing the card.
 
-**Layout — three sections (side-by-side on web ≥ 820px, stacked on phone):**
-- **LEFT (photo):** hero photo with graceful multi-URL fallback → "no photo" placeholder; rank badge
+**Compact layout (owner 2026-10-01):** use a proportionate compact photo beside the main details on every screen, with tightly wrapped amenities and inline additional-information pairs below. Keep source attribution in a compact footer. Avoid tall separate columns and large empty areas. Hide the prose description/bio (including the Gathern title-as-description fallback) in this compact view. Keep amenities and additional information, all other values and display conditions, existing expanders and source-link actions. Never alter stored data or price formatting. Shared platform-logo dimensions remain unchanged.
+
+**Three sections:**
+- **Photo:** compact thumbnail with graceful multi-URL fallback → "no photo" placeholder; rank badge
   (`#N`); bottom source strip `SOURCE · host` with an open-in-new icon.
 - **MIDDLE (info):** type + deal line (`{cleanType} for Sale/Rent`); title
   (`district, city` or `city`); city + "Saudi Arabia" + optional region chip (from URL); **price**
   (`tPrice`); optional **RNPL banner** (EJARI×ريلز, or أقساط/Aqsat for Al Hoshan) with "from SAR X/mo";
-  Arabic description **only if the source text is real Arabic** (never translated/invented); a stats row
+  description/bio hidden in the compact view (owner 2026-10-01); a stats row
   (beds, baths, area m², property type, added-date — each drops out gracefully when absent).
-- **RIGHT (features / attribution):** "Hosted on {platform}" badge + hint; a 2-column features grid
+- **Below the summary:** tightly wrapped amenities, additional information, then a "Hosted on {platform}" badge + hint in the footer; the amenity list
   (parking, maid room, elevator, master bedrooms, kitchen, halls, balcony, laundry, private entrance,
   A/C, fiber, water, electricity, sanitation) with "+N More Features" expander (6 visible);
   **Wasalt-only "Additional Information" panel** (usage/age/facade/street/plan no./land no., first 4 +
