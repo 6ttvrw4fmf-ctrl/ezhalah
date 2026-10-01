@@ -1104,8 +1104,8 @@ const card = StyleSheet.create({
   // Compact summary keeps the existing photo and every detail, without a full-width hero.
   summaryRow: { flexDirection: 'row', minWidth: 0, alignItems: 'flex-start' },
   photoCol: { position: 'relative', backgroundColor: colors.tint, overflow: 'hidden' },
-  photoColWide: { width: 176, height: 132 },
-  photoColMobile: { width: '32%', minWidth: 104, maxWidth: 160, height: 128 },
+  photoColWide: { width: '40%', height: 144 },
+  photoColMobile: { width: '40%', minWidth: 112, height: 144 },
   photo: { width: '100%', height: '100%' },
   photoFallback: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surface2 },
   photoFallbackText: { fontSize: 11, color: colors.muted, fontWeight: '600' },
