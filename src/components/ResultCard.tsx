@@ -68,16 +68,9 @@ export function PopIn({ index, style, children }: { index: number; style?: any; 
   );
 }
 
-// Listing card. Two shapes:
-//  • "compact" (phone / default): a small horizontal row — image left, details right.
-//  • "grid" (web): a bigger vertical card — image on top, details below — that tiles across the
-//    screen in a wrap grid so the user barely scrolls. (user request.)
-// The rich residential card — design locked by the user. Three sections side-by-side on web:
-//   LEFT  : photo with rank badge + platform badge + source URL strip
-//   MIDDLE: type label, city/district title, price, RNPL pill, stat row (beds/baths/area/type/date)
-//   RIGHT : "Hosted on AQAR" panel + 2-column features grid + "+N More Features" expander
-// On phones the three stack vertically. Land/Camp/Building (no beds) gracefully drops the beds chip.
-// Aqar-only for now; other platforms can plug into the same shape once their scrapers land.
+// Compact listing card: a thumbnail beside the main details, with source/features below on
+// phones and alongside on wide screens. The owner hides prose in this compact view; all other
+// content, formatting and interactions stay unchanged.
 export function ResultCard({
   listing,
   onOpen,
@@ -182,9 +175,7 @@ export function ResultCard({
   const hasAddlInfo = !!listing.additional_info?.some((r) => r && r.label && r.value);
 
   return (
-    // Desktop (≥820px): 3 columns side-by-side. Mobile/narrow: STACK vertically (photo on top, then
-    // info, then features) — the row layout crammed all 3 columns into a phone width and broke badly.
-    // (user-reported: "look how it looks like in the phone, it's horrible".)
+    // Keep photo + summary together; source/features remain full-width below on narrow screens.
     // NOTE: the feedback row (thumbs/share) is NOT here — owner 2026-07-09 moved it to render ONCE per
     // results response, below the «تبي أعرض لك المزيد…» message (see agent.tsx + FeedbackRow.tsx).
     // testID carries the listing's own id so a live journey can hold THIS card to THIS listing's
@@ -193,7 +184,8 @@ export function ResultCard({
     // is unsound, because a row that earns no chip renders no strip and silently shifts the rest.
     // Rendering-only: no style, no behaviour, and web-only `testID` becomes `data-testid`.
     <View testID={`card-listing-${listing.id}`} style={[card.wrap, { flexDirection: horizontal ? 'row' : 'column' }]}>
-      {/* ─── photo block (full-width banner on mobile) ───── */}
+      <View style={[card.summaryRow, horizontal && card.summaryRowWide, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+      {/* Compact photo beside the property summary. */}
       <Pressable onPress={onOpen} style={[card.photoCol, horizontal ? card.photoColWide : card.photoColMobile]}>
         <ListingPhoto photos={(listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []))} style={card.photo} t={t} />
         {rank ? (
@@ -212,7 +204,7 @@ export function ResultCard({
       </Pressable>
 
       {/* ─── property info ───────────────────────── */}
-      <Pressable onPress={onOpen} style={[card.midCol, horizontal && card.midColFlex]}>
+      <Pressable onPress={onOpen} style={card.midCol}>
         <View style={card.typeRow}>
           <Ionicons name="home-outline" size={13} color={colors.muted} />
           <Text style={card.typeLabel}>{typeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
@@ -343,6 +335,8 @@ export function ResultCard({
           </View>
         ) : null}
       </Pressable>
+
+      </View>
 
       {/* ─── features panel (full-width below info on mobile) ─ */}
       <View style={[card.rightCol, horizontal ? card.rightColSide : card.rightColBottom]}>
@@ -1101,17 +1095,19 @@ function Stat({ icon, big, small }: { icon: any; big: string; small: string }) {
   );
 }
 
-// New rich residential card — three side-by-side sections on desktop, stacked on phone.
+// Compact summary row with amenities alongside on desktop and below on phones.
 const card = StyleSheet.create({
   wrap: {
-    backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.fieldLine,
+    backgroundColor: colors.surface, borderRadius: 10, borderWidth: 1, borderColor: colors.fieldLine,
     overflow: 'hidden', ...cardShadow,
     alignItems: 'stretch', // flexDirection set inline (row desktop / column mobile)
   },
-  // photo column — fixed-size on desktop, full-width banner on mobile
+  // Compact summary keeps the existing photo and every detail, without a full-width hero.
+  summaryRow: { minWidth: 0, alignItems: 'flex-start' },
+  summaryRowWide: { flex: 1 },
   photoCol: { position: 'relative', backgroundColor: colors.tint, overflow: 'hidden' },
-  photoColWide: { width: 240, height: 200 },
-  photoColMobile: { width: '100%', height: 200 },
+  photoColWide: { width: 128, height: 108 },
+  photoColMobile: { width: '25%', minWidth: 72, maxWidth: 96, height: 96 },
   photo: { width: '100%', height: '100%' },
   photoFallback: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surface2 },
   photoFallbackText: { fontSize: 11, color: colors.muted, fontWeight: '600' },
@@ -1132,12 +1128,12 @@ const card = StyleSheet.create({
   sourceText: { color: '#fff', fontSize: 10, fontWeight: '600', flex: 1 },
 
   // MIDDLE: property info
-  midCol: { paddingHorizontal: 14, paddingVertical: 12, gap: 6 },
-  midColFlex: { flex: 1.5 }, // desktop only — in the mobile column stack, flex would collapse it
+  midCol: { flex: 1, minWidth: 0, paddingHorizontal: 8, paddingVertical: 6, gap: 3 },
   typeRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   typeLabel: { fontSize: 11.5, color: colors.muted, fontWeight: '500' },
-  title: { fontSize: 18, fontWeight: '800', color: colors.dark, letterSpacing: -0.3 },
-  desc: { fontSize: 13, color: colors.muted, lineHeight: 19, marginTop: 8 },
+  title: { fontSize: 15, fontWeight: '800', color: colors.dark, letterSpacing: -0.3 },
+  // Owner 2026-10-01: omit the bio from compact cards; details remain on the source page.
+  desc: { display: 'none' },
   locRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
   locText: { fontSize: 12, color: colors.primary, fontWeight: '500' },
   // Small region pill (e.g. "North Riyadh") next to the city line — light green, compact.
@@ -1191,16 +1187,16 @@ const card = StyleSheet.create({
   rnplFromLine: { fontSize: 10.5, color: colors.muted, fontWeight: '500' },
   rnplFromStrong: { color: colors.dark, fontWeight: '700' },
 
-  statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 4 },
+  statsRow: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 8, rowGap: 4, marginTop: 2 },
   statChip: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   statBig: { fontSize: 12.5, fontWeight: '700', color: colors.dark, lineHeight: 15 },
   statSmall: { fontSize: 10, color: colors.muted, lineHeight: 12 },
 
   // RIGHT: features
-  rightCol: { paddingHorizontal: 14, paddingVertical: 12, gap: 9 },
-  rightColSide: { width: 240, borderLeftWidth: 1, borderLeftColor: colors.fieldLine },     // desktop: side column
+  rightCol: { paddingHorizontal: 8, paddingVertical: 6, gap: 4 },
+  rightColSide: { width: 220, borderLeftWidth: 1, borderLeftColor: colors.fieldLine },     // desktop: side column
   rightColBottom: { width: '100%', borderTopWidth: 1, borderTopColor: colors.fieldLine },  // mobile: below info
-  hostHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  hostHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   thercBadge: { borderRadius: 8, backgroundColor: '#1f5f8b', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   aoujBadge: { borderRadius: 8, backgroundColor: '#8b5a1f', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   abralosolBadge: { borderRadius: 8, backgroundColor: '#3f6b4a', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
@@ -1233,7 +1229,7 @@ const card = StyleSheet.create({
   hostedOn: { fontSize: 12, fontWeight: '700', color: colors.dark },
   hostHint: { fontSize: 10, color: colors.muted, lineHeight: 13 },
   featGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-  featCell: { width: '50%', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 },
+  featCell: { width: '50%', flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 2 },
   featText: { fontSize: 11.5, color: colors.dark, fontWeight: '500', flexShrink: 1 },
   noFeat: { fontSize: 11, color: colors.muted, fontStyle: 'italic' },
   moreBtn: {
@@ -1244,13 +1240,13 @@ const card = StyleSheet.create({
   // Wasalt "Additional Information" panel — sits BELOW the features grid, with a soft separator
   // line so it reads as its own section. Two-column responsive grid matching the live Wasalt page.
   addlPanel: {
-    marginTop: 10, paddingTop: 10,
+    marginTop: 4, paddingTop: 6,
     borderTopWidth: 1, borderTopColor: colors.fieldLine,
   },
-  addlTitle: { fontSize: 12.5, fontWeight: '700', color: colors.ink, marginBottom: 6 },
+  addlTitle: { fontSize: 12.5, fontWeight: '700', color: colors.ink, marginBottom: 3 },
   addlGrid: { flexDirection: 'row', flexWrap: 'wrap' },
   addlCell: {
-    width: '50%', paddingVertical: 4, paddingRight: 6, gap: 1,
+    width: '50%', paddingVertical: 2, paddingRight: 6, gap: 1,
   },
   // writingDirection is REQUIRED here, not decorative: with no explicit direction, RN Web isolates
   // each Text run (unicode-bidi:isolate) and lets the BROWSER pick its direction from the run's own
