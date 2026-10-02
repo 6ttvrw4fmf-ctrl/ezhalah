@@ -73,6 +73,9 @@ SITES: dict[str, str] = {
         "gomenassat", "hazim", "ialqarawi", "ibaax", "justsa", "livingcompound", "marksa",
         "ksaaqar", "muhaysini", "nofodh", "qmra", "rakez", "razre", "reinvest", "remaxsa", "rightcompound",
         "sadiqeltajer", "safa",
+        # 2026-10-02: removal oracles written that day (measured on each site's own pages), shadow
+        # until their first run is read.
+        "aqarnajran", "fahadalshahri", "remal", "shmoualshmal", "wslnaa",
         "sakan", "sanadak", "sodasyat", "sokok", "sukna", "tamyaz", "tuba", "villassa")},
 }
 

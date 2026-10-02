@@ -448,12 +448,22 @@ def main() -> int:
     run_id = db.begin_run("fursaghyr") if not is_validation else None
 
     expired = 0
+    unread = 0
     try:
         for it in items:
             # The feed carries no status. A post the source itself calls expired is not kept or
             # refreshed here — it is left to prune_unseen, whose oracle reads the same status.
-            if _verify_gone(f"FG{it.get('id')}", s)[0] == "gone":
+            # FAIL CLOSED (audit 2026-10-02): only a record that READS `publish` is written. Until
+            # now an 'unknown' answer (REST failure, 401/403/5xx, a status nobody measured) was
+            # upserted active on the feed sighting alone — "could not read" written as "available".
+            # Measured 2026-10-02: 10 of 10 feed posts read publish; FG24965 (licence ended that
+            # day) had left the feed and read expired. An unread post is counted, never guessed.
+            verdict = _verify_gone(f"FG{it.get('id')}", s)[0]
+            if verdict == "gone":
                 expired += 1
+                continue
+            if verdict != "live":
+                unread += 1
                 continue
             row, cat = map_listing(it, s)
             if not row:
@@ -496,7 +506,7 @@ def main() -> int:
               + (f", {pruned} stale pruned" if not is_validation else " (validation, no prune)"))
         healthy = True
         if run_id is not None:
-            healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned} expired_in_feed={expired}", check_tables=["fursaghyr_residential_listings", "fursaghyr_commercial_listings"])
+            healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned} expired_in_feed={expired} status_unread_skipped={unread}", check_tables=["fursaghyr_residential_listings", "fursaghyr_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

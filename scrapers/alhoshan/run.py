@@ -215,6 +215,33 @@ def _additional_info(p: dict, specs: dict) -> list[dict[str, Any]]:
     return rows
 
 
+def source_status(p: dict) -> str:
+    """What the record ITSELF says about being on the market: 'live' | 'unpublished' | 'unmeasured'.
+
+    MEASURED 2026-10-02 over the whole feed (34 of 34 items): isPublished=True, moderationStatus=
+    'approved', listingExpiresAt=None on every one. No sold / rented field exists, and the Arabic
+    words «مؤجر» «غير متاح» «محجوز» on a live page come from the site's own dictionary (contract
+    form, app-store labels, payment states) — furniture, never read. The 13 ids missing from the
+    1001-1047 range answer 404.
+
+      isPublished is False → 'unpublished': the record's own flag; main() does not upsert it.
+      isPublished unreadable (absent / not a boolean) → RAISE. "Could not read" is not "available";
+          the run fails and writes nothing.
+      moderationStatus other than 'approved', or an expiry date set → 'unmeasured'. Neither was
+          ever observed, so today's behaviour is kept (the row is upserted) and main() counts it in
+          the run notes. Nobody guesses what an unseen value means.
+    """
+    pub = p.get("isPublished")
+    if not isinstance(pub, bool):
+        raise RuntimeError(f"alhoshan item {p.get('publicId')!r}: isPublished unreadable ({pub!r}) — "
+                           "refusing to upsert on a status that could not be read")
+    if not pub:
+        return "unpublished"
+    if p.get("moderationStatus") != "approved" or p.get("listingExpiresAt") is not None:
+        return "unmeasured"
+    return "live"
+
+
 def map_listing(p: dict, photos: Optional[list[str]] = None) -> tuple[Optional[dict], str]:
     pub = p.get("publicId")
     if not pub:
@@ -333,10 +360,17 @@ def main() -> int:
     res: list[dict] = []
     com: list[dict] = []
     seen = 0
+    status: dict[str, int] = {}   # source_status() tally of every item carrying a publicId
     try:
         page = 1
         while True:
             for p in items:
+                if not p.get("publicId"):
+                    continue
+                st = source_status(p)          # raises when the record's own flag is unreadable
+                status[st] = status.get(st, 0) + 1
+                if st == "unpublished":
+                    continue
                 row, cat = map_listing(p, fetch_media(s, p.get("id")))
                 if not row:
                     continue
@@ -349,7 +383,8 @@ def main() -> int:
             page += 1
             items, meta = fetch_page(s, page)
             if not items:
-                break
+                # The page before said hasNext. A half-read catalogue is not a complete one.
+                raise RuntimeError(f"search page {page} unreadable after hasNext — refusing a partial catalogue")
 
         if args.limit_test:
             print(f"DRY RUN — would upsert {len(res)} residential + {len(com)} commercial")
@@ -383,7 +418,7 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ Al Hoshan: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["alhoshan_residential_listings", "alhoshan_commercial_listings"])
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned} unpublished_skipped={status.get('unpublished', 0)} status_unmeasured={status.get('unmeasured', 0)}", check_tables=["alhoshan_residential_listings", "alhoshan_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1
