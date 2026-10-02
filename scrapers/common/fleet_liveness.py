@@ -64,13 +64,13 @@ SITES: dict[str, str] = {
     **{p: f"scrapers.{p}.run:_verify_gone" for p in (
         "akariyoun", "aljassim", "almotmkenah", "alshawaf", "aqaralsaudia", "aqargate", "bossbih",
         "daryusuf", "eaqartabuk", "ebriza", "eilmalriyada", "hasaad", "moftah", "nufouth", "raghdan",
-        "rakez", "sakani", "sanadak", "snam", "suwar")},
+        "sakani", "snam", "suwar")},
     **{p: f"scrapers.{p}.run:verify_gone" for p in ("wadod",)},
     **{p: f"scrapers.{p}.run:_make_verify_gone()" for p in (
         "abaad", "albdah", "alsaedan", "azure", "dwelleo", "ego", "expattrusted", "flow",
         "gomenassat", "hazim", "ialqarawi", "ibaax", "justsa", "livingcompound", "marksa",
-        "muhaysini", "nofodh", "qmra", "razre", "reinvest", "remaxsa", "rightcompound", "safa",
-        "sakan", "sodasyat", "sokok", "sukna", "tamyaz", "tuba", "villassa")},
+        "muhaysini", "nofodh", "qmra", "rakez", "razre", "reinvest", "remaxsa", "rightcompound", "safa",
+        "sakan", "sanadak", "sodasyat", "sokok", "sukna", "tamyaz", "tuba", "villassa")},
 }
 
 # NOT here, and why (shadow run 36490769167, 2026-09-28): mizlaj, nowaisiry, eastabha and muktamel —

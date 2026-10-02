@@ -1384,6 +1384,10 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     # 2026-09-29: shadow read (runs 36490769167) with controls right, every would-hide re-read gone
     # by its own record AND a second route, and the dead signal seen on a real removed ad.
     "dwelleo", "muhaysini", "nofodh", "nufouth", "reinvest", "sokok", "sukna", "villassa", "wadod",
+    # 2026-10-02: five shadow runs (09-29..10-02) with controls right and 0 unknown; run
+    # 36977747732's would-hides (36, cap 428) re-read from a second network: 20 of 20 print their
+    # own removal banner, 8 of 8 live controls live.
+    "tuba",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
