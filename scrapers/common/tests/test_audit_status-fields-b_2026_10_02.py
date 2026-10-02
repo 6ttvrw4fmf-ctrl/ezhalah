@@ -14,7 +14,9 @@ THE RULE THESE TESTS PIN. Only a value MEASURED to mean "on the market" may be w
 A confirmed gone value keeps its existing handling. Everything else is HELD: not upserted (so never
 re-asserted alive), never declared gone (an unknown is not a NO), and counted in the run's notes.
 For the three crawlers whose prune has no per-listing oracle the held ids stay in the prune's
-seen-set, so absence logic cannot age out a row the source still lists. And an unreadable status
+seen-set, so absence logic cannot age out a row the source still lists — but only in the seen-set of
+the table they belong to: a held residential id must not make the commercial table's seen-set
+non-empty, or prune_unseen's 0-seen circuit breaker is bypassed. And an unreadable status
 source fails closed: nothing is written and the run is marked failed.
 
 Every fixture below is synthetic and minimal — no real ad, name, phone or licence.
@@ -53,6 +55,9 @@ class FakeDb:
 
     def pruned_seen(self) -> set[str]:
         return set().union(*[set(a[1]) for n, a, _ in self.calls if n == "prune_unseen"] or [set()])
+
+    def prune_seen_by_table(self) -> dict[str, set[str]]:
+        return {a[0]: set(a[1]) for n, a, _ in self.calls if n == "prune_unseen"}
 
     def end(self) -> dict:
         return [k for n, _, k in self.calls if n == "end_run"][-1]
@@ -102,6 +107,17 @@ def test_satel_fails_closed_when_no_row_states_a_known_status(fake, monkeypatch)
     assert fake.end()["ok"] is False
 
 
+def test_satel_held_residential_id_never_enters_the_commercial_seen_set(fake, monkeypatch):
+    # No commercial row in the feed → the commercial prune must get an EMPTY seen-set, which is what
+    # trips prune_unseen's "0 scraped → keep everything active" breaker. A held residential id
+    # leaking in would get past it and strike every commercial row on absence alone.
+    assert _run_satel(monkeypatch, [_satel_item("T1", status="Available"),
+                                    _satel_item("T3", status="Sold")]) == 0
+    seen = fake.prune_seen_by_table()
+    assert seen["satel_commercial_listings"] == set()
+    assert seen["satel_residential_listings"] == {"STT1", "STT3"}
+
+
 # ── ramzalqasim ──────────────────────────────────────────────────────────────────────────────────
 def _marker(rid: int, **over) -> dict:
     return {"id": rid, "type": "villa", "status": "sell", "price": "500000.00", "area": 300,
@@ -129,6 +145,15 @@ def test_ramzalqasim_fails_closed_when_the_field_is_gone_from_the_feed(fake, mon
     monkeypatch.setattr(ramz, "fetch_markers", lambda s: [_marker(1), _marker(2)])
     assert ramz.main() == 1 and fake.upserted() == {} and fake.pruned_seen() == set()
     assert fake.end()["ok"] is False
+
+
+def test_ramzalqasim_held_residential_id_never_enters_the_commercial_seen_set(fake, monkeypatch):
+    monkeypatch.setattr(ramz, "fetch_markers", lambda s: [_marker(1, avalible="available"),
+                                                          _marker(3, avalible="in_prograss")])
+    assert ramz.main() == 0
+    seen = fake.prune_seen_by_table()
+    assert seen["ramzalqasim_commercial_listings"] == set()
+    assert seen["ramzalqasim_residential_listings"] == {"RQ1", "RQ3"}
 
 
 # ── mizlaj ───────────────────────────────────────────────────────────────────────────────────────

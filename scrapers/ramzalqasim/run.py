@@ -499,7 +499,9 @@ def main() -> int:
     gone_ct = 0
     seen = 0
     held: dict[str, int] = {}          # unclassified `avalible` → count (not upserted, not pruned)
-    held_ads: set[str] = set()
+    # Held ids are kept PER CATEGORY: each table's prune seen-set gets only its own. A held
+    # residential id in the commercial seen-set would defeat prune_unseen's 0-seen breaker.
+    held_ads: dict[str, set[str]] = {"residential": set(), "commercial": set()}
 
     try:
         for rec in markers:
@@ -511,7 +513,7 @@ def main() -> int:
             aval = str(rec.get("avalible") or "").strip().lower()
             if not gone and aval not in AVAILABLE_AVAL:
                 held[aval or "(blank)"] = held.get(aval or "(blank)", 0) + 1
-                held_ads.add(row["ad_number"])
+                held_ads["commercial" if cat == "commercial" else "residential"].add(row["ad_number"])
                 continue
             (com if cat == "commercial" else res).append(row)
             seen += 1
@@ -558,9 +560,9 @@ def main() -> int:
             if superseded:
                 print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
-            for tbl, rows_seen in (("ramzalqasim_residential_listings", res),
-                                    ("ramzalqasim_commercial_listings", com)):
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen} | held_ads,
+            for tbl, rows_seen, kind in (("ramzalqasim_residential_listings", res, "residential"),
+                                          ("ramzalqasim_commercial_listings", com, "commercial")):
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen} | held_ads[kind],
                                     source="Ramzalqasim")
                 if n < 0:
                     print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")

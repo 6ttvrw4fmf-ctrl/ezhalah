@@ -472,7 +472,9 @@ def main() -> int:
     gone_ct = 0
     seen = 0
     held: dict[str, int] = {}          # unmeasured status → count (not upserted, not pruned)
-    held_ads: set[str] = set()
+    # Held ids are kept PER CATEGORY: each table's prune seen-set gets only its own. A held
+    # residential id in the commercial seen-set would defeat prune_unseen's 0-seen breaker.
+    held_ads: dict[str, set[str]] = {"residential": set(), "commercial": set()}
     try:
         for p in data:
             row, cat, gone = map_listing(p)
@@ -483,7 +485,7 @@ def main() -> int:
             status = (p.get("status") or "").strip()
             if not gone and status.lower() not in AVAILABLE_STATUSES:
                 held[status or "(blank)"] = held.get(status or "(blank)", 0) + 1
-                held_ads.add(row["ad_number"])
+                held_ads["commercial" if cat == "commercial" else "residential"].add(row["ad_number"])
                 continue
             # Full gallery lives ONLY on the detail endpoint (list imageList = featured image
             # only). Active listings get one extra throttled GET (~226/run, no auth, no proxy);
@@ -548,12 +550,13 @@ def main() -> int:
             if superseded:
                 print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
-            for tbl, rows_seen in (("satel_residential_listings", res), ("satel_commercial_listings", com)):
+            for tbl, rows_seen, kind in (("satel_residential_listings", res, "residential"),
+                                         ("satel_commercial_listings", com, "commercial")):
                 if args.type != "all":
                     want = "commercial" if "commercial" in tbl else "residential"
                     if args.type != want:
                         continue
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen} | held_ads, source=SOURCE)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen} | held_ads[kind], source=SOURCE)
                 if n < 0:
                     print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
                 else:
