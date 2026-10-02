@@ -267,6 +267,15 @@ def _verify_gone(ad_number: str, url: Optional[str] = None) -> tuple[str, str]:
     return "unknown", f"no answer after 2 attempts ({last})"
 
 
+def _make_verify_gone(control: Optional[dict]):
+    """The same oracle for a caller with no crawl of its own (the daily direct check,
+    scrapers/common/fleet_liveness.py). A crawl hands the oracle listings it has just parsed as its
+    canaries; here the caller's known-live control row is that canary. Called bare, `_verify_gone`
+    had no canary and withheld every removal, so the daily check could stamp but never strike."""
+    set_liveness_canaries([control.get("listing_url")] if control else [])
+    return _verify_gone
+
+
 def _listing_url_for(ad_number: str) -> Optional[str]:
     """The row's own stored detail URL. Sanadak slugs carry Arabic text, so unlike aqargate/raghdan
     the URL cannot be reconstructed from the ad_number — it has to be read back."""

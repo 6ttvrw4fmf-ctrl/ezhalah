@@ -72,6 +72,12 @@ def walk(s: cc.Session) -> tuple[list[dict], int]:
     return rows, total
 
 
+def source_published_empty(listing: list, declared: int) -> bool:
+    """True only when the walk got an ANSWER that is empty by the source's own count. Anything else
+    (rows present, or a count the walk did not reach) is not an empty source."""
+    return not listing and declared == 0
+
+
 def _f(v: Any) -> Optional[float]:
     try:
         f = float(v)
@@ -208,7 +214,16 @@ def main() -> int:
                     print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:
             print(f"  NOT pruning: {unreadable} unreadable detail(s) or a short walk", flush=True)
+        # The API ANSWERED (a failed fetch raises above) and itself declares total_count=0 with no
+        # results: the source published its own empty catalogue (2026-10-01/02: its one ad came
+        # down). That is an answer, not a blocked crawl, so the run is not demoted to red for it.
+        source_empty = source_published_empty(listing, declared)
+        if source_empty:
+            print("ℹ 0 rows, and the API itself declares total_count=0: the source published an empty "
+                  "catalogue. Reporting healthy rather than red — this is not a blocked crawl.", flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(listing), rows_upserted=len(res) + len(com),
+                             allow_empty=source_empty,
+                             notes="source-published empty (API total_count=0)" if source_empty else None,
                              check_tables=["manzo_residential_listings", "manzo_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()", flush=True)

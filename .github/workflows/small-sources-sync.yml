@@ -176,7 +176,9 @@ jobs:
           #   sakani: 15 API pages + 282 detail records at 1.5 s (measured 740 s dry run).
           - { source: sakani,         cmd: "python -m scrapers.sakani.run --type all", tmo: 45, proxy: true }
           #   API / REST sources whose whole catalogue is one page or a handful of calls:
-          - { source: shatri,         cmd: "python -m scrapers.shatri.run --type all", tmo: 20 }
+          #   shatri: `proxy: true` (2026-10-02, Scraping Engineer) — WP REST answered 403 to the runner IP;
+          #   the scraper probes 3 profiles DIRECT first, so the proxy is spent only when refused.
+          - { source: shatri,         cmd: "python -m scrapers.shatri.run --type all", tmo: 20, proxy: true }
           - { source: almuteb,        cmd: "python -m scrapers.almuteb.run --type all", tmo: 20 }
           - { source: aalbarrak,      cmd: "python -m scrapers.aalbarrak.run --type all", tmo: 20 }
           - { source: aqaralriyadh,   cmd: "python -m scrapers.aqaralriyadh.run --type all", tmo: 20 }
@@ -224,7 +226,10 @@ jobs:
           #   never runs again after its first crawl — verify-every-scraper-has-a-scheduled-workflow.
           - { source: alsaedan,      cmd: "python -m scrapers.alsaedan.run --type all", tmo: 30 }
           - { source: ego,           cmd: "python -m scrapers.ego.run --type all", tmo: 20 }
-          - { source: muhaysini,     cmd: "python -m scrapers.muhaysini.run --type all", tmo: 45 }
+          # muhaysini: 180, not 45 — the catalogue went from ~3,260 to 7,470 listings on 2026-09-30 and each
+          # one costs a detail read (~0.8 s), so the 45-minute job was cancelled two nights running
+          # with nothing recorded.
+          - { source: muhaysini,     cmd: "python -m scrapers.muhaysini.run --type all", tmo: 180 }
           #   nofodh raised 45 -> 90 after its first crawl was CANCELLED on the 45-minute budget:
           #   2,601 listings, each needing its own detail fetch to read the «حالة البيع» state.
           - { source: nofodh,        cmd: "python -m scrapers.nofodh.run --type all", tmo: 90 }
@@ -334,15 +339,18 @@ jobs:
           #                 post states a price, so 15 carry NULL — a SOURCE fact, never inferred.
           #   shmoualshmal   6 posts, all Tabuk. The site publishes NO price at all (it shows
           #                 «اتصل»), so every price column is NULL by design. See each run.py.
-          - { source: alta,         cmd: "python -m scrapers.alta.run --type all", every_n_days: 2 }
-          - { source: shmoualshmal, cmd: "python -m scrapers.shmoualshmal.run --type all", every_n_days: 2 }
+          # Daily since 2026-10-02 (owner: «check them every single day»): alta, shmoualshmal, remal
+          # and amaall ran every 2 days for no bandwidth reason (no proxy, 133 ads between them), and
+          # remal and amaall are now SOURCE_LIST_PRESENCE with a 48 h window a 2-day cadence cannot keep.
+          - { source: alta,         cmd: "python -m scrapers.alta.run --type all" }
+          - { source: shmoualshmal, cmd: "python -m scrapers.shmoualshmal.run --type all" }
           # Two more GREEN-audited additions (owner-instructed 2026-09-06).
           #   remal   87 posts -> 84 listings. class_list carries city/type/offer; images bind by
           #           attachment PARENT because the detail page renders OTHER listings' photos.
           #   amaall  135 posts -> 50 listings, ARABIC ONLY: the site publishes every listing twice
           #           (68 EN + 67 AR), so taking both languages would double every property.
-          - { source: remal,        cmd: "python -m scrapers.remal.run --type all", every_n_days: 2 }
-          - { source: amaall,       cmd: "python -m scrapers.amaall.run --type all", every_n_days: 2 }
+          - { source: remal,        cmd: "python -m scrapers.remal.run --type all" }
+          - { source: amaall,       cmd: "python -m scrapers.amaall.run --type all" }
           # abwbna (owner-instructed 2026-09-06): a DIFFERENT TENANT of the SAME Nuzul SaaS platform
           # aldarim already scrapes (same S3 bucket family, same public JSON API shape). Full crawl +
           # prune, same as aldarim — not a --type flag scraper.
