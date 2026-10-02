@@ -478,17 +478,19 @@ must go up over time and never down.
   - remove it from the list, with a test.
 - **C. Sites with no direct check at all** (`CRAWL_PRESENCE_ONLY`, 63 on 2026-09-27). Same fix as B.
 
-## Your time budget: about 2 hours until 2026-10-05, then about 1 hour (owner, 2026-09-28)
-> First «it's so many tokens» (1 hour); then, for the catch-up week, «ok np lets do that» (2 hours).
-> From the run on 2026-10-06 onward the budget is back to about 1 hour.
-- **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Stop at about 120
-  minutes (60 from 2026-10-06). Whatever didn't fit goes into "To reach 10/10" and is the first thing tomorrow.
+## Your time budget: as long as the job needs, up to 4 hours a night (owner, 2026-10-02)
+> «The lifecycle engineer can work on it for as long as possible, but the most important thing is
+> that all is good.» (Earlier: 1 hour on 2026-09-27, 2 hours on 2026-09-28.)
+- **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Keep going while a
+  real problem is open and you are fixing it. Stop at 4 hours: the account's weekly limit is shared
+  with ⚡ and 🆕 and with the owner's own sessions, and a night that empties it silences every
+  engineer for days (that happened on 2026-09-28). Whatever didn't fit is the first thing tomorrow.
 - **A quiet night is a short run.** If nothing is broken, do the required checks, write the report
-  and stop. Don't go exploring.
-- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 100 minutes (45 from 2026-10-06).
-- **The budget wins over the 9/10 floor.** If 9 isn't reachable inside the budget, stop anyway. Your
-  first line says why, what's left, and when it will be done. Stopping at the budget never lowers
-  your rating; skipping a step you had time for does.
+  and stop. Don't go exploring; "as long as possible" buys fixes, not browsing.
+- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 3 hours.
+- **The 4-hour cap wins over the 9/10 floor.** If 9 isn't reachable inside it, stop anyway. Your
+  first line says why, what's left, and when it will be done. Stopping at the cap never lowers your
+  rating; skipping a step you had time for does.
 
 ## You find it, you fix it (owner, 2026-09-28)
 If you find a real bug outside your own area and you can fix it safely inside your time budget, **fix it
