@@ -4,7 +4,7 @@
 // Arabic regardless of the app's current UI locale — Read Aloud is Arabic-only by product decision,
 // independent of whichever locale the visible screen happens to be in.
 import type { Listing } from '@/data/listings';
-import { translate, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
+import { translate, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, type Locale } from '@/i18n';
 import { arabicOrPlaceholder } from './arabicText';
 
 // #1 (source-accurate, mirrors ResultCard.tsx): the RAW scraped type when it's already Arabic, else
@@ -26,9 +26,19 @@ export function listingLocationAr(listing: Listing): string {
   return listing.district ? `${listing.district}، ${city}` : city;
 }
 
-// Pre-formatted price string, Arabic currency/period suffixes (mirrors ResultCard's `tPrice(listing.price)`).
+// STAY-LENGTH PLATFORMS SHOW NO PRICE, ONLY THIS NOTE (owner rule 2026-10-02): Gathern and Aqar
+// Monthly (Aqar's DailyRenting vertical, the Gathern twin). A stay there is priced by its length —
+// the guest picks the dates on the platform — so one monthly figure misstates it. Display only: the
+// stored price, the monthly-only search and every filter/sort are unchanged.
+export const STAY_LENGTH_PRICE_NOTE = 'Tap to see prices by length of stay';
+export const isStayLengthPriced = (source: string): boolean => /gathern|aqar\s*monthly/i.test(source || '');
+
+// The price line every surface prints (card, Read Aloud, the agent's card summary).
+export function listingPrice(listing: Listing, loc: Locale): string {
+  return isStayLengthPriced(listing.source) ? translate(loc, STAY_LENGTH_PRICE_NOTE) : tPrice(listing.price, loc);
+}
 export function listingPriceAr(listing: Listing): string {
-  return tPrice(listing.price, 'ar');
+  return listingPrice(listing, 'ar');
 }
 
 // Platform display name from the raw scraped `source` slug — MOVED here from ResultCard.tsx

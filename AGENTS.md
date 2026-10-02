@@ -24,6 +24,22 @@ it and then do the four steps, or say plainly that you have not. Back-end-only w
 column, a sync) is not exempt: it is live when its effect shows on a real card. How to drive the
 browser from an agent session: `docs/ops/VERIFYING_PRODUCTION.md`.
 
+# GATHERN + AQAR MONTHLY SHOW NO PRICE — ONLY THE STAY-LENGTH NOTE (owner, 2026-10-02 — permanent)
+
+**Every Gathern and Aqar Monthly listing, today's and every new one we ingest, shows
+«اضغط للاطلاع على الأسعار حسب مدة الإقامة» where the price would be. Never a price.** Their stays are
+priced by length (the guest picks the dates on the platform), so one monthly figure misstates them.
+They stay under «شهري».
+
+- Render every price through `listingPrice()` in `src/lib/listingDisplay.ts` (card, Read Aloud, the
+  agent's card summary). Never print `listing.price` raw for these sources. Their details panel shows
+  no discount / pre-discount / nightly rows.
+- Display only. Scrapers keep storing the source's price (PRICE = SOURCE). Never NULL it: a NULL
+  price turns the row into «السعر عند الطلب», which is found under every rent period, not just «شهري».
+- A new stay-length (nightly / calendar-booked) platform joins `isStayLengthPriced()` only with the
+  owner's approval.
+- Guarded by `scripts/verify-stay-length-platforms-show-a-note-not-a-price.ts`.
+
 # Read this first — canonical rules + token efficiency (owner rule, 2026-08-10, confirmed permanent)
 
 **Reading order before any research task: `AGENTS.md` (this file) → `docs/ARCHITECTURE.md` →
