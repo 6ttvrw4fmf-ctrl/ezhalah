@@ -70,6 +70,19 @@ def page_evidence(body: str) -> dict:
     }
 
 
+def compact(item: dict) -> str:
+    """One readable log block per listing: what we serve, then what the page itself says."""
+    st = {k: v for k, v in (item.get("stored") or {}).items() if v not in (None, "") and k not in (
+        "source_table", "listing_id", "first_seen_at")}
+    pg = item.get("page") or {}
+    ld = json.dumps(pg.get("jsonld") or [], ensure_ascii=False, default=str)[:900]
+    lines = " ¦ ".join((pg.get("evidence_lines") or [])[:25])[:1600]
+    return (f"=== {item['table']}:{item['id']} status={item.get('status')} verdict={item.get('verdict')}\n"
+            f"  url: {item.get('url')}\n  ours: {json.dumps(st, ensure_ascii=False, default=str)}\n"
+            f"  title: {pg.get('title')}\n  meta: {json.dumps(pg.get('meta') or {}, ensure_ascii=False)[:600]}\n"
+            f"  jsonld: {ld}\n  lines: {lines}")
+
+
 def parse_ids(spec: str) -> list[tuple[str, int]]:
     """'table:id,table:id' → [(table, id)]. Anything malformed is refused, never guessed."""
     out = []
@@ -129,6 +142,11 @@ def main() -> int:
             f.write(f"### Source re-read: {len(out)} listing(s)\n\n")
             for it in out:
                 f.write(f"- `{it['table']}:{it['id']}` status={it.get('status')} verdict={it.get('verdict')}\n")
+    # The artifact lives in blob storage that the engineer's own container cannot reach (2026-10-02:
+    # the proxy refuses productionresultssa6.blob.core.windows.net). The job log IS reachable, so
+    # every listing is also printed there, compactly, one block each.
+    for it in out:
+        print(compact(it))
     print(f"re-read {len(out)} listing(s) → reread.json")
     return 0
 
