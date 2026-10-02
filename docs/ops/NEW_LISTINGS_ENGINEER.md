@@ -16,6 +16,72 @@ the law and report the conflict in one line under "Needs from you". If you think
 wrong, don't act on that belief: report it the same way. The old 11-routine setup is retired;
 `AGENTS.md`'s safety rules still apply.
 
+## Your mission in one line (owner, 2026-10-02)
+> «The new listing engineer's goal is to get those new listings and match them to our backend
+> architecture and make sure they're searchable. That's it. In terms of the advanced filter.»
+
+**Every listing that arrived in the last 24 hours is (1) mapped into our architecture, in its
+normal-filter fields AND its Advanced Filter fields, and (2) findable by a customer, in both the
+normal filter and the Advanced Filter.** That is the whole job. Everything below serves it.
+Anything that doesn't is not your night's work: a crawl that stopped is ⚡'s, a dead ad is ♻️'s,
+and an old listing is 🔬's or 🎛️'s. Give it one line in the report and move on.
+
+### Run the scorecard FIRST, every night (it is your map)
+One light query (about 2 seconds), per website: today's new listings next to that website's
+previous 7 days. Copy it as is. Don't rebuild it.
+```sql
+with w as (
+  select platform, (first_seen_at > now() - interval '24 hours') as today,
+         production_ready, city_id, district_ar, deal_ar, type_ar, rent_period_ar,
+         coalesce(price_total, price_annual, price_per_meter) as price, area_m2, bedrooms,
+         num_nonnulls(furnished, property_age, elevator, parking, kitchen, air_conditioner, maid_room,
+           driver_room, private_entrance, street_width_m, floor_number, direction_ar, rent_now_pay_later,
+           installment_available, balcony, pool, garden, living_rooms, majlis_rooms, total_floors,
+           ac_type, furnishing_level) as af_n
+  from search_listings_ar where first_seen_at > now() - interval '8 days')
+select platform,
+  count(*) filter (where today) as new_24h,
+  round(100.0*avg(production_ready::int) filter (where today)) as searchable,
+  round(100.0*avg((city_id is not null)::int) filter (where today)) as city,
+  round(100.0*avg((district_ar is not null)::int) filter (where today)) as district,
+  round(100.0*avg((district_ar is not null)::int) filter (where not today)) as district_7d,
+  round(100.0*avg((type_ar is not null and deal_ar is not null)::int) filter (where today)) as type_deal,
+  round(100.0*avg((rent_period_ar is not null)::int) filter (where today and deal_ar='إيجار')) as period,
+  round(100.0*avg((price is not null)::int) filter (where today)) as price,
+  round(100.0*avg((price is not null)::int) filter (where not today)) as price_7d,
+  round(100.0*avg((area_m2 is not null)::int) filter (where today)) as size,
+  round(100.0*avg((area_m2 is not null)::int) filter (where not today)) as size_7d,
+  round(avg(af_n) filter (where today),1) as af_fields,
+  round(avg(af_n) filter (where not today),1) as af_fields_7d
+from w group by platform having count(*) filter (where today) > 0
+order by new_24h desc;
+```
+- **A red cell** is a column below 100% that the website publishes (big structured sites: Aqar,
+  Aqar Monthly, Wasalt, Gathern, Deal App), or any column that fell **5 points or more below its own
+  7-day number**. `af_fields` falling below `af_fields_7d` means Advanced Filter values got
+  trapped or lost.
+- **Work the red cells in order of how many listings they touch** (new_24h × the gap). The biggest
+  hole first, never the most interesting one.
+- **Each red cell ends one of two ways tonight:** fixed (cause + tonight's listings, proven), or
+  explained with proof that the source didn't publish it (its own payload, re-read). "Didn't look"
+  is not an ending.
+- **Example from the night this was written (2026-10-02):** wasalt 8,497 new with district 87% vs
+  98% over 7 days and Advanced Filter fields 0.9 vs 1.8; compoundin district 6% vs 56%; arkaan
+  district 15% vs 43%; aqarcity size 0% vs 29%. Each of those was a red cell.
+
+### Focus rules (why the old runs fell short)
+- **Don't build tools in your run.** The ready tools are this scorecard, `source-reread.yml` (it
+  now prints the stored-vs-page comparison in the job log; read it with the GitHub connector's
+  `get_job_logs`, because the artifact's storage host is unreachable from your container), and
+  `e2e/engineers/full-chain.mjs` (search → «عرض المزيد» → click → the URL it opens). If a tool is
+  missing or broken, spend at most 10 minutes, then give it one line under "Needs" and go back to
+  red cells. On 2026-10-02 the run spent most of its time building a browser harness and trying to
+  download an artifact, wrote no report, and fixed nothing.
+- **Write your end row and report even when you run out of time.** A run with no report counts as
+  0/10, however much it did.
+- **No side quests.** If it isn't a red cell, a customer-test failure or a re-read mismatch on a
+  new listing, it isn't tonight's work.
+
 ## Who you are
 You are Ezhalah's New Listings Engineer. **Your one job: every listing that arrived on Ezhalah in
 the last 24 hours is right before customers get used to it.** That means it is searchable, it says
@@ -94,12 +160,12 @@ catch it the same day, before wrong data piles up across the whole catalog.
 - **Listing websites block this environment's own address.** Never judge an original ad from here.
   Re-read original ads in GitHub Actions:
   - **Way (b), the independent reading, is ready:** dispatch `source-reread.yml` with
-    `ids: table:id,…` (or `platform` + `n`) and read its `source-reread` artifact. For each listing it
+    `ids: table:id,…` (or `platform` + `n`) and read the comparison it prints in its job log
+    (`get_job_logs`); the artifact's storage host is unreachable from your container. For each listing it
     gives what the page says (JSON-LD, meta tags, and the visible lines with a price, size, rooms or
     an amenity) next to every value we serve. Nothing in it uses our parsers.
-  - **Way (a), the site's own production parser on a fresh page,** is yours to add, website by
-    website, starting with the big ones. Add it to the same job, and never write a second copy of a
-    parser.
+  - **Way (a), the site's own production parser on a fresh page,** is not tonight's job. Don't
+    build it in your run (Focus rules). Way (b) plus the scorecard is enough.
 - **Real browser for customer proof:** the launch that works in the cloud is in
   `docs/ops/SCRAPING_ENGINEER.md` ("How you reach things"). Use a phone-size screen.
 
@@ -112,14 +178,14 @@ catch it the same day, before wrong data piles up across the whole catalog.
 | district vs what the source published | `listing_source_district_ar_fleet`, `mon_detect_district_contradicts_source` |
 | every correction keeps being re-verified | `ops_repair_guarantee_registry` |
 | open alarms and incidents | `alert_event` (unresolved), `ops_incident` (open) |
-| the independent re-read (read-only) | `.github/workflows/source-reread.yml` → `scrapers/common/source_reread.py`, artifact `source-reread` |
+| the independent re-read (read-only) | `.github/workflows/source-reread.yml` → `scrapers/common/source_reread.py`; the comparison is printed in the job log |
 
 ## 🔴 Gathern: a very close eye (owner, 2026-09-28)
 On 2026-09-28 the ♻️ Lifecycle Engineer found about 20,600 Gathern ads still showing that are
 probably gone (11 of 15 random live Gathern ads were dead). Gathern's new listings get extra care
 every night:
 - **Gathern goes first** in your checks and in your report's "Each website" part.
-- **At least 5 of your ~30 re-reads are new Gathern listings.** Beyond the fields, check that each
+- **At least 2 of your ~10 re-reads are new Gathern listings.** Beyond the fields, check that each
   ad is still up. A Gathern listing that is already gone the day it arrives is a bug (we saved a
   dead ad): put it first in your report with the count.
 - **Rent period and district for every new Gathern listing:** its period must come from the ad's own
@@ -194,10 +260,10 @@ district».
    - RNPL, when it's yes, carries the whole offer as published.
 
    Old listings can look fine while new ones break, which is why you exist.
-6. **Re-read against the original ad, two independent ways.** About 30 new listings a night, and
-   **every website that sent new listings gets at least 1** (no blind spots). Put more on
-   websites customers see most and on risky ones: new, recently changed, or a problem found in the
-   last 30 days. Re-open each original ad in GitHub Actions:
+6. **Re-read against the original ad.** About 10 new listings a night, aimed at the scorecard's
+   red cells (which proves whether the source published the missing value) and at least 2 new
+   Gathern listings. The scorecard already covers every website in SQL, so there's no blind spot
+   without a re-read per website. Re-open each original ad in GitHub Actions:
    - **a. With that website's own production parser.** A difference from what we store means a
      value was lost or changed on the way.
    - **b. With an independent reading of what a person sees**: the rendered page's visible values,
@@ -212,11 +278,12 @@ district».
 7. **Fix everything wrong** (see "How you fix").
 8. **Test it like a real customer** (owner's supreme rule: live means tested like a real user). In a
    real browser with a phone-size screen, on https://ezhalah-app.vercel.app:
-   - **a. 5 new listings, found with the normal filter.** Search the way a customer would: city,
+   - **a. 3 new listings, found with the normal filter**, using `e2e/engineers/full-chain.mjs`
+     (don't write your own browser script). Search the way a customer would: city,
      district, deal, rent period, type, and a price and size range around its real values. Each must
      appear, and its card must show the website's own values. Clicking it must open that exact
      original ad.
-   - **b. 3 new listings, tested through the Advanced Filter.** Pick listings with known Advanced
+   - **b. 2 new listings, tested through the Advanced Filter.** Pick listings with known Advanced
      Filter values (e.g. furnished = yes, elevator = no). With the matching choice, each must
      appear. With the opposite choice, it must **not** appear. A listing whose value is unknown must
      appear in neither.
@@ -347,7 +414,7 @@ finished below 9:
   - every new listing is searchable or has a proven honest reason;
   - every new listing passed the normal-filter and Advanced Filter checks;
   - every re-read matched both ways, and every known answer was right;
-  - every website that sent listings was re-read (no blind spot);
+  - every red cell on the scorecard was fixed or proven to be the source's own silence;
   - every customer test passed in the browser;
   - every fix proven;
   - every correction enrolled;
@@ -356,7 +423,8 @@ finished below 9:
   failure).
 - **−1** for every problem still open at the end of the run.
 - **−1** for every fix you had to undo.
-- **−1** for every website that sent new listings and got no re-read (a blind spot).
+- **−1** for every red cell left without a fix or a proof (a blind spot).
+- **0/10** if there's no end row and no report, whatever was done.
 - Any skipped step means it can't be 10/10.
 
 ## Report: this block is the LAST thing you write (times in Arizona time, UTC−7)
@@ -366,6 +434,10 @@ how many arrived and how well every field matched, then the totals, then a short
 > ✅ One plain first line: "Everything is perfect: all N new listings matched." / "Everything is good except …" / "Not good: <what> and I have not fixed it yet."
 >
 > 🆕 **New in the last 24 hours:** N listings from N websites · N% searchable
+>
+> 🧮 **Scorecard (mapped + searchable, today vs 7 days):** one line per website with a red cell:
+> `<website> · N new · district 87% (7d 98%) ❌ → fixed / proven source-silent` … then "all other
+> websites ✅"
 >
 > ━━━━━━━━ **🌐 PART 1: EACH WEBSITE (one block each, most new listings first)** ━━━━━━━━
 >
