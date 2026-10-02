@@ -68,7 +68,7 @@ class _Q:
         return self
 
     def update(self, payload):
-        self.sink["update"] = payload
+        self.sink.setdefault("events", []).append(("update", payload))
         return self
 
     def eq(self, *a):
@@ -83,7 +83,7 @@ class _C:
         return _Q(self.sink, name)
 
     def rpc(self, name, params):
-        self.sink.setdefault("rpc", []).append(params)
+        self.sink.setdefault("events", []).append(("rpc", params))
         return ("rpc", params)
 
 
@@ -98,14 +98,19 @@ def _end_run(monkeypatch, **kw):
         return R()
     monkeypatch.setattr(db, "_execute", execute)
     db.end_run(7, ok=True, rows_seen=2, rows_upserted=2, check_tables=["aqar_residential_listings"], **kw)
-    return sink["rpc"][0]
+    return sink["events"]
 
 
-def test_only_a_caller_that_checked_its_own_prices_asks_the_database_to_skip(monkeypatch):
-    assert _end_run(monkeypatch, price_null_checked_by_caller=True)["p_skip_price_null"] is True
-    # every other scraper's call is byte-for-byte what it was: no new key at all
-    assert "p_skip_price_null" not in _end_run(monkeypatch)
-
+def test_only_a_caller_that_checked_its_own_prices_marks_its_run_before_the_check(monkeypatch):
+    ev = _end_run(monkeypatch, price_null_checked_by_caller=True)
+    kinds = [k for k, _ in ev]
+    first_rpc = kinds.index("rpc")
+    assert ("update", {"notes": db.OWN_PRICE_CHECK_MARK}) in ev[:first_rpc]   # marked BEFORE the check
+    # every other scraper: no marker is ever written before the check, and the call itself is unchanged
+    ev2 = _end_run(monkeypatch)
+    assert ("update", {"notes": db.OWN_PRICE_CHECK_MARK}) not in ev2
+    assert [p for k, p in ev2 if k == "rpc"][0].keys() == {"p_run_id", "p_platform", "p_table", "p_since",
+                                                         "p_placeholder_tokens"}
 
 import importlib  # noqa: E402
 

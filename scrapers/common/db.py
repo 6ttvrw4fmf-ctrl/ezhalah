@@ -1480,6 +1480,11 @@ def retire_superseded_siblings(
     return retired
 
 
+#: Written to a run's notes by a caller that checked its own prices (see end_run); read by
+#: mon_check_run_field_ranges to skip only its windowed null-price check for that one run.
+OWN_PRICE_CHECK_MARK = "own_price_check"
+
+
 def end_run(
     run_id: int,
     *,
@@ -1528,6 +1533,15 @@ def end_run(
             # Monitoring must never fail an already-committed run — the rows are written either
             # way, this only affects whether the run is HONESTLY reported as degraded.
             try:
+                if price_null_checked_by_caller:
+                    # The caller ran the null-price regression check on its OWN rows, telling a
+                    # source-published «no price» from a failed read (scrapers/aqar/price_tally.py).
+                    # This marker on THIS run's own record is what lets mon_check_run_field_ranges
+                    # skip only its windowed version of that one check — which, on a table 95 jobs
+                    # write at once, judges a run on its neighbours' rows. Every other check still
+                    # runs, and a run without the marker (every other scraper) is judged as before.
+                    _execute(sb().table("scrape_runs").update({"notes": OWN_PRICE_CHECK_MARK}).eq("id", run_id),
+                             what="scrape_runs.mark_own_price_check")
                 run_row = _execute(
                     sb().table("scrape_runs").select("platform, started_at").eq("id", run_id),
                     what="scrape_runs.select_for_check",
@@ -1540,14 +1554,6 @@ def end_run(
                         "p_since": run_row["started_at"],
                         "p_placeholder_tokens": list(PLACEHOLDER_TOKENS),
                     }
-                    # The caller ran the null-price regression check on its OWN rows, telling a
-                    # source-published «no price» from a failed read (scrapers/aqar/price_tally.py),
-                    # so the database skips only its windowed version of that one check — which, on
-                    # a table 95 jobs write at once, judges a run on its neighbours' rows. Every
-                    # other check in the function still runs. Sent only when asked, so every other
-                    # scraper's call is unchanged.
-                    if price_null_checked_by_caller:
-                        params["p_skip_price_null"] = True
                     field_bad = _execute(
                         sb().rpc("mon_check_run_field_ranges", params),
                         what="mon_check_run_field_ranges",
