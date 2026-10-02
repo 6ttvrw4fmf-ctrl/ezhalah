@@ -26,14 +26,16 @@ export function listingLocationAr(listing: Listing): string {
   return listing.district ? `${listing.district}، ${city}` : city;
 }
 
-// GATHERN SHOWS NO PRICE, ONLY THIS NOTE (owner rule 2026-10-02). A Gathern stay is priced by its
-// length — the guest picks the dates on Gathern — so one monthly figure misstates it. Display only:
-// the stored price, the monthly-only search and every filter/sort are unchanged.
-export const GATHERN_PRICE_NOTE = 'Tap to see prices by length of stay';
+// STAY-LENGTH PLATFORMS SHOW NO PRICE, ONLY THIS NOTE (owner rule 2026-10-02): Gathern and Aqar
+// Monthly (Aqar's DailyRenting vertical, the Gathern twin). A stay there is priced by its length —
+// the guest picks the dates on the platform — so one monthly figure misstates it. Display only: the
+// stored price, the monthly-only search and every filter/sort are unchanged.
+export const STAY_LENGTH_PRICE_NOTE = 'Tap to see prices by length of stay';
+export const isStayLengthPriced = (source: string): boolean => /gathern|aqar\s*monthly/i.test(source || '');
 
 // The price line every surface prints (card, Read Aloud, the agent's card summary).
 export function listingPrice(listing: Listing, loc: Locale): string {
-  return sourceName(listing.source) === 'Gathern' ? translate(loc, GATHERN_PRICE_NOTE) : tPrice(listing.price, loc);
+  return isStayLengthPriced(listing.source) ? translate(loc, STAY_LENGTH_PRICE_NOTE) : tPrice(listing.price, loc);
 }
 export function listingPriceAr(listing: Listing): string {
   return listingPrice(listing, 'ar');

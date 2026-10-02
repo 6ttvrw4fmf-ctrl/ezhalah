@@ -654,7 +654,7 @@ const AR: Record<string, string> = {
   'Annual Equivalent': 'المعادل السنوي',
   'Calculated from price per m² × area — not published by the source': 'محتسب من سعر المتر × المساحة — غير معلن من المصدر',
   'Price Per m²': 'سعر المتر',
-  'Tap to see prices by length of stay': 'اضغط للاطلاع على الأسعار حسب مدة الإقامة', // Gathern, owner 2026-10-02
+  'Tap to see prices by length of stay': 'اضغط للاطلاع على الأسعار حسب مدة الإقامة', // Gathern + Aqar Monthly, owner 2026-10-02
   // Unit suffix for the source-published «سعر المتر» rate. It is printed NEXT TO the number so the
   // card reads «سعر المتر 750 ريال/م²» — a per-square-metre RATE, never mistakable for a total.
   // (owner 2026-08-09: "display it clearly as ريال/م²".)

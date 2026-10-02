@@ -1,4 +1,5 @@
-// Gathern shows NO price — only «اضغط للاطلاع على الأسعار حسب مدة الإقامة» (owner rule 2026-10-02).
+// Gathern and Aqar Monthly show NO price — only «اضغط للاطلاع على الأسعار حسب مدة الإقامة» (owner rule
+// 2026-10-02; Aqar Monthly added the same day — it is Aqar's DailyRenting vertical, the Gathern twin).
 //
 // A Gathern stay is priced by its length: the guest picks the dates on Gathern, and the page they
 // land on (src/lib/gathernUrl.ts opens it bare, no dates) prices whatever stay they choose. One
@@ -27,8 +28,8 @@ const i18n = await liftSymbols(join(root, 'src/i18n.tsx'), [
 ], ['translate', 'tPrice'], "type Locale = 'ar' | 'en';\nlet _locale: Locale = 'ar';");
 (globalThis as Record<string, unknown>).__i18n = i18n;
 const display = await liftSymbols(join(root, 'src/lib/listingDisplay.ts'), [
-  { header: 'export const GATHERN_PRICE_NOTE', endsWith: /;$/ },
-  { header: 'export function sourceName(' },
+  { header: 'export const STAY_LENGTH_PRICE_NOTE', endsWith: /;$/ },
+  { header: 'export const isStayLengthPriced', endsWith: /;$/ },
   { header: 'export function listingPrice(' },
 ], ['listingPrice'],
   "type Locale = 'ar' | 'en'; type Listing = { source: string; price: string };\n" +
@@ -44,8 +45,10 @@ const problemsFor = (price: PriceFn, rd: (rel: string) => string): string[] => {
   const check = (label: string, ok: boolean) => { if (!ok) out.push(label); };
   const gathern = { source: 'Gathern', price: 'SAR 4,200/mo' };
   const aqar = { source: 'Aqar', price: 'SAR 4,200/mo' };
+  const aqarMonthly = { source: 'Aqar Monthly', price: 'SAR 4,200/mo' };
   check('a Gathern card prints the owner\'s note in Arabic, never the figure', price(gathern, 'ar') === NOTE_AR);
   check('a Gathern card prints no price in English either', price(gathern, 'en') === 'Tap to see prices by length of stay');
+  check('an Aqar Monthly card prints the same note, never the figure', price(aqarMonthly, 'ar') === NOTE_AR && price(aqarMonthly, 'en') === 'Tap to see prices by length of stay');
   check('every other platform still prints its own price', price(aqar, 'ar') === 'ر.س 4,200/شهرياً' && price(aqar, 'en') === 'SAR 4,200/mo');
 
   const card = rd('src/components/ResultCard.tsx');
@@ -73,6 +76,7 @@ const swap = (rel: string, from: string, to: string) => (r: string) => {
 };
 const mustCatch = (what: string, caught: boolean) => { if (!caught) problems.push(`MUTANT SURVIVED: ${what}`); };
 mustCatch('Gathern priced like everyone else', problemsFor((l, loc) => tPrice(l.price, loc), READ).length > 0);
+mustCatch('Aqar Monthly left out of the rule', problemsFor((l, loc) => (/aqar\s*monthly/i.test(l.source) ? tPrice(l.price, loc) : listingPrice(l, loc)), READ).length > 0);
 mustCatch('a different Arabic note', problemsFor((l, loc) => (l.source === 'Gathern' && loc === 'ar' ? 'السعر حسب المدة' : listingPrice(l, loc)), READ).length > 0);
 mustCatch('the card printing the raw price', problemsFor(listingPrice, swap('src/components/ResultCard.tsx', '{listingPrice(listing, locale)}', '{tPrice(listing.price)}')).length > 0);
 mustCatch('Read Aloud speaking the raw price', problemsFor(listingPrice, swap('src/lib/listingDisplay.ts', "return listingPrice(listing, 'ar');", "return tPrice(listing.price, 'ar');")).length > 0);
@@ -80,7 +84,7 @@ mustCatch('the agent restating the hidden figure', problemsFor(listingPrice, swa
 mustCatch('the nightly rate back in the details panel', problemsFor(listingPrice, swap('src/data/remote.ts', "  ['amenities', 'Amenities'],", "  ['nightly_price', 'Nightly rate (SAR)'],\n  ['amenities', 'Amenities'],")).length > 0);
 
 if (problems.length) {
-  console.error('✗ Gathern price note:\n  - ' + problems.join('\n  - '));
+  console.error('✗ stay-length price note (Gathern + Aqar Monthly):\n  - ' + problems.join('\n  - '));
   process.exit(1);
 }
-console.log('✅ Gathern shows «' + NOTE_AR + '» instead of a price on every surface; other platforms unchanged.');
+console.log('✅ Gathern + Aqar Monthly show «' + NOTE_AR + '» instead of a price on every surface; other platforms unchanged.');
