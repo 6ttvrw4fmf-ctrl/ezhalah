@@ -238,6 +238,13 @@ def map_ad(ad: dict, rows: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], 
     if _OFFPLAN_RE.search(title) or _OFFPLAN_RE.search(desc):
         return None, "not_ready_offplan"
 
+    # The ad's OWN REGA ad-licence end date is a gate (fleet law, owner 2026-09-28): 'expired' is never a
+    # listing. 'unknown' (no readable date) is not judged — kept, and counted in main().
+    # Measured 2026-10-02: 64 of 64 ads read print the date (DD/MM/YYYY), all in date; earliest 2026-10-08.
+    licence_end = opt.get("تاريخ انتهاء ترخيص الاعلان")
+    if normalize.ad_expiry_state(licence_end if isinstance(licence_end, str) else None) == "expired":
+        return None, "ad_licence_expired"
+
     # TYPE — the licence's own singular «نوع العقار» (the category name is a plural nav bucket).
     type_ar = opt.get("نوع العقار")
     ptype = normalize.map_type_exact(type_ar)
@@ -427,6 +434,10 @@ def main() -> int:
             row, cat = got
             (com if cat == "commercial" else res).append(row)
 
+        no_end = sum(normalize.ad_expiry_state(r["license_expiry"] if isinstance(r.get("license_expiry"), str) else None)
+                     == "unknown" for r in res + com)
+        if no_end:
+            print(f"  note: {no_end} ad(s) kept with no readable licence end date (not judged)", flush=True)
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)
@@ -460,7 +471,7 @@ def main() -> int:
             print(f"  NOT pruning: {unreadable} unreadable ad(s); index {len(ids)}/{declared}", flush=True)
         # A short index is flagged, not swallowed: it demotes the run (the daryusuf/ebriza rule).
         healthy = db.end_run(run_id, ok=True, rows_seen=len(ids), rows_upserted=len(res) + len(com),
-                             notes=f"index={len(ids)}/{declared}; unreadable={unreadable}; complete={complete}",
+                             notes=f"index={len(ids)}/{declared}; unreadable={unreadable}; complete={complete}; licence_end_unknown={no_end}",
                              degraded=short_index,
                              check_tables=["vmksa_residential_listings", "vmksa_commercial_listings"])
         if not healthy:

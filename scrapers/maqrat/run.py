@@ -160,6 +160,12 @@ def parse_detail(page: str, pid: str) -> dict[str, Any]:
 
 def map_listing(pid: str, card: dict, d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
     kv, title, desc = d["kv"], d["title"], d["description"]
+    # The ad's OWN REGA ad-licence end date is a gate (fleet law, owner 2026-09-28): 'expired' is never a
+    # listing. 'unknown' (no readable date) is not judged — kept, and counted in main().
+    # Measured 2026-10-02: 62 of 62 pages read print the date (YYYY/MM/DD), all in date; MQR78 (ended
+    # 2026/09/30) was no longer on the site's own list. The gate holds if the site ever keeps one up.
+    if normalize.ad_expiry_state(_val(kv, "تاريخ انتهاء رخصة الإعلان")) == "expired":
+        return None, "ad_licence_expired"
     if _OFFPLAN_RE.search(title) or _OFFPLAN_RE.search(desc):
         return None, "not_ready_offplan"
     type_ar = _val(kv, "نوع العقار")
@@ -288,6 +294,9 @@ def main() -> int:
             row, cat = got
             (com if cat == "commercial" else res).append(row)
 
+        no_end = sum(normalize.ad_expiry_state(r.get("license_expiry")) == "unknown" for r in res + com)
+        if no_end:
+            print(f"  note: {no_end} ad(s) kept with no readable licence end date (not judged)", flush=True)
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)
