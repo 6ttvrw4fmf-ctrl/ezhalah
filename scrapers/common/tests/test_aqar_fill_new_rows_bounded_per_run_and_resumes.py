@@ -4,7 +4,7 @@ WHY (2026-10-02). Reading every aqar page (test_aqar_fill_walks_to_the_sources_o
 opens a ~100k-row gap. Written at once that is the 2026-09-21 disk incident (~3 GB in minutes, before
 the disk's at-most-once-per-6 h autoscale could react). So a workflow run — ~108 parallel shards — may
 add at most `--new-budget` new rows IN TOTAL, drawn from one shared pool (aqar_fill_claim, staged in
-sql/proposed/aqar_paced_fill.sql), and the next run must carry on where it stopped. The resume point is
+supabase/migrations/20261002120706_aqar_paced_fill.sql), and the next run must carry on where it stopped. The resume point is
 what we already hold, so the ads a run wrote are never re-sent as "new", and held ads are only re-read
 once their capture is 6 days old (otherwise a 12-hourly fill rewrites the table twice a day).
 

@@ -10,8 +10,7 @@ scheduled by pg_cron through trigger_gh_workflow(), which dispatches with NO inp
   3. that exact input-less command, run for a town with no commercial ads at all, finishes GREEN —
      95 towns are scheduled and many publish nothing, which would otherwise redden every run.
 
-The schedule is staged in sql/proposed/aqar_paced_fill.sql until the owner applies and mirrors it into
-supabase/migrations/; the test reads whichever home holds it.
+The schedule lives in supabase/migrations/20261002120706_aqar_paced_fill.sql (applied 2026-10-02).
 
     python -m pytest scrapers/common/tests/test_aqar_commercial_fill_is_scheduled.py -q
 """
@@ -51,7 +50,7 @@ def _hours(workflow: str, sql: str) -> list[int]:
 
 def test_commercial_fill_is_scheduled_paced_and_green_on_an_empty_town(monkeypatch):
     homes = sorted((ROOT / "supabase/migrations").glob("*aqar_paced_fill*.sql")) \
-        or [ROOT / "sql/proposed/aqar_paced_fill.sql"]
+        or [ROOT / "supabase/migrations/20261002120706_aqar_paced_fill.sql"]
     sql = homes[-1].read_text(encoding="utf-8")
 
     com, res = _hours("aqar-commercial-fill.yml", sql), _hours("aqar-deep-fill.yml", sql)

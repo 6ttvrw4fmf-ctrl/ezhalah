@@ -1,8 +1,7 @@
 -- aqar paced fill: one shared NEW-row budget per workflow run, and both aqar fills on a 6-hour rota.
 --
--- STAGED, NOT APPLIED (2026-10-02). The owner applies and mirrors it into supabase/migrations/.
--- The code that calls aqar_fill_claim() FAILS CLOSED while this is unapplied: a fill run then writes
--- no NEW rows at all (it still re-reads held ads), so merge order is safe either way.
+-- The code that calls aqar_fill_claim() FAILS CLOSED without it: a fill run then writes no NEW rows
+-- at all (it still re-reads held ads).
 --
 -- WHY. The aqar deep fill stopped at 150 pages per (type × deal × city) slice while aqar paginates to
 -- ceil(numberOfItems / 20) — measured 2026-10-02: Riyadh apartments for rent 22,415 ads (1,121 pages),

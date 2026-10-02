@@ -6,7 +6,7 @@
 # adds at most `new_budget` NEW rows in total — one pool shared by all shards through the DB function
 # aqar_fill_claim, keyed on FILL_RUN_KEY below — and the next run resumes from what is already held
 # (scrapers/aqar/paced_fill.py). Held ads are re-read for PRICE = SOURCE once their capture is
-# `refresh_after_days` old. Scheduled by pg_cron (gh-aqar-deep-fill, sql/proposed/aqar_paced_fill.sql),
+# `refresh_after_days` old. Scheduled by pg_cron (gh-aqar-deep-fill, supabase/migrations/20261002120706_aqar_paced_fill.sql),
 # which dispatches with NO inputs, so the defaults below ARE the schedule's behaviour.
 # One GitHub machine per shard = own IP.
 # SHARDING: the 7 heaviest cities (Riyadh, Jeddah, …) are split into 3 type-group jobs each, so
