@@ -30,6 +30,7 @@ Field map (Satel item → our schema):
   status "Rented out"          → active=false + post-upsert missing_count=3 pin (leased units
                                  stay in the API feed forever, so the seen-based prune can never
                                  catch them; see GONE_STATUSES + _pin_sold_inactive)
+  status "Available"           → active=true. Any OTHER status is held (AVAILABLE_STATUSES).
 
 PDPL: the Satel API returns NO advertiser/agent name or phone — but we still defensively redact
 any phone-like token from title/description and never store contact fields.
@@ -100,10 +101,16 @@ COMMERCIAL_TYPES = {"Office", "Showroom", "Shop", "Warehouse"}
 # Source `status` values that mean the unit is GONE from the market. Satel keeps leased units in
 # the API feed with status "Rented out" instead of removing them, so the seen-based prune can
 # never deactivate them. Live-DB audit (2026-07-09) shows exactly two distinct statuses across
-# both Satel tables: 'Available' and 'Rented out'. Gate ONLY on the confirmed gone-value,
-# compared case-insensitively on the trimmed string; ANY unknown/new status stays ACTIVE
-# (neutrality rule: never over-hide a listing on a value we haven't confirmed means off-market).
+# both Satel tables: 'Available' and 'Rented out'. Re-measured on the live feed 2026-10-02:
+# Available 66 · Rented out 167 · nothing else (postStatus is «Published» on all 233 — furniture).
+# Compared case-insensitively on the trimmed string.
 GONE_STATUSES = {"rented out"}
+# ALLOWLIST (crawler audit 2026-10-02). The old rule was a denylist of one: any status that was not
+# "Rented out" — Sold, Reserved, a blank, a renamed value — was upserted ACTIVE. A status this
+# crawler has never measured is neither: the row is HELD (not written, so never re-asserted alive;
+# kept in the prune's seen-set, so never aged out on a value we cannot read) and counted in the
+# run notes for a human to classify.
+AVAILABLE_STATUSES = {"available"}
 
 # Phone / WhatsApp patterns to REDACT from any free text (PDPL).
 _PHONE_RE = re.compile(
@@ -464,12 +471,19 @@ def main() -> int:
     sold_com: list[str] = []
     gone_ct = 0
     seen = 0
+    held: dict[str, int] = {}          # unmeasured status → count (not upserted, not pruned)
+    held_ads: set[str] = set()
     try:
         for p in data:
             row, cat, gone = map_listing(p)
             if not row:
                 continue
             if args.type != "all" and cat != args.type:
+                continue
+            status = (p.get("status") or "").strip()
+            if not gone and status.lower() not in AVAILABLE_STATUSES:
+                held[status or "(blank)"] = held.get(status or "(blank)", 0) + 1
+                held_ads.add(row["ad_number"])
                 continue
             # Full gallery lives ONLY on the detail endpoint (list imageList = featured image
             # only). Active listings get one extra throttled GET (~226/run, no auth, no proxy);
@@ -489,6 +503,11 @@ def main() -> int:
                 break
 
         print(f"Mapped {len(res)} residential + {len(com)} commercial ({gone_ct} rented out)")
+        if held:
+            print(f"  held, status not a measured value (not upserted, not pruned): {held}")
+            if not (res or com):
+                # fail closed: the status field is unreadable on the whole feed → write nothing.
+                raise RuntimeError(f"no row carries a known status — status field unreadable: {held}")
 
         if args.dry:
             for r in (res + com)[:8]:
@@ -534,7 +553,7 @@ def main() -> int:
                     want = "commercial" if "commercial" in tbl else "residential"
                     if args.type != want:
                         continue
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen} | held_ads, source=SOURCE)
                 if n < 0:
                     print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
                 else:
@@ -548,7 +567,7 @@ def main() -> int:
         healthy = True
         if run_id:
             healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
-                       notes=f"rented_out={gone_ct} pruned={pruned}", check_tables=["satel_residential_listings", "satel_commercial_listings"])
+                       notes=f"rented_out={gone_ct} pruned={pruned}" + (f" held_unknown_status={held}" if held else ""), check_tables=["satel_residential_listings", "satel_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1
