@@ -1132,9 +1132,8 @@ const ADDL_FIELDS: Array<[string, string]> = [
   //    NO other platform's panel can change). Order = display priority within the Gathern panel.
   ['unit_type_ar', 'Sub-type'],                          // شقة / استديو / غرفة
   ['furnished', 'Furnished'],                            // boolean true → "Yes"/"نعم"
-  ['discount_label', 'Discount'],                        // "خصم 20%" (Arabic, shown as-is)
-  ['monthly_price_before_discount', 'Monthly before discount (SAR)'],
-  ['nightly_price', 'Nightly rate (SAR)'],
+  // No discount / pre-discount monthly / nightly rows: Gathern shows NO price, only the stay-length
+  // note (owner rule 2026-10-02, src/lib/listingDisplay.ts::listingPrice).
   ['amenities', 'Amenities'],                            // real Arabic labels only (see gate below)
   ['suitability', 'Suitable for'],                       // Gathern detail page: عوائل و عزاب (families / singles)
   ['guest_capacity', 'Guest capacity'],                  // int → "4"
@@ -1146,7 +1145,7 @@ const ADDL_FIELDS: Array<[string, string]> = [
 // source is Gathern, so a future/other platform that happened to store one of these keys would NOT get
 // a new field — guaranteeing every non-Gathern card stays byte-identical. (Gathern Tier-1.)
 const GATHERN_ONLY_ADDL_KEYS = new Set<string>([
-  'unit_type_ar', 'furnished', 'discount_label', 'monthly_price_before_discount', 'nightly_price', 'amenities', 'suitability',
+  'unit_type_ar', 'furnished', 'amenities', 'suitability',
   'guest_capacity', 'check_in', 'check_out', 'house_rules',
 ]);
 function buildAdditionalInfo(raw: any, source?: string): Array<{ key: string; label: string; value: string }> | null {
