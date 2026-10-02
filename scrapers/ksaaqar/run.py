@@ -580,8 +580,9 @@ def ad_number(post: dict) -> str:
 
 def _retire_abroad(table: str, abroad: dict[str, str]) -> list[str]:
     """Retire the stored, active rows of ads whose OWN title places them abroad. Skipping them is not
-    enough: ksaaqar has no prune, so 11 rows filed before the skip existed (Cairo, Dubai, Marrakech,
-    Aqaba, Aswan — 2026-09-28) stayed searchable. Same evidenced pin as eastabha's country gate. The
+    enough: the removal step below hides only an ad whose own page is gone, and these pages still
+    render, so 11 rows filed before the skip existed (Cairo, Dubai, Marrakech, Aqaba, Aswan —
+    2026-09-28) would heal and stay searchable. Same evidenced pin as eastabha's country gate. The
     note carries only the place word, never the title: one of these titles is a phone number."""
     if not abroad:
         return []

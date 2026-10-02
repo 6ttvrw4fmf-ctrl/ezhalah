@@ -1,9 +1,10 @@
 """KSA Aqar: an ad whose own title places it abroad is not only skipped — its STORED row is retired,
 with an evidence row naming the place word.
 
-THE GAP THIS PINS (2026-09-28). PR #5205 made the scraper skip abroad ads, but ksaaqar has no prune,
-so the 11 rows stored before the skip (Cairo, Dubai, Marrakech, Aqaba, Aswan…) stayed active and
-searchable as Riyadh / Makkah / Abha listings. The run now pins them through the shared evidenced pin,
+THE GAP THIS PINS (2026-09-28). PR #5205 made the scraper skip abroad ads, but nothing retired the 11
+rows stored before the skip (Cairo, Dubai, Marrakech, Aqaba, Aswan…): they stayed active and
+searchable as Riyadh / Makkah / Abha listings. The removal step (#5608) cannot either — it hides only
+an ad whose own page is gone, and these pages still render. The run now pins them through the shared evidenced pin,
 as eastabha's country gate does. The evidence note carries the place word only — one of these
 titles is a phone number («… في الأردن للبيع هاتف 00962…»), and the ledger must not copy it.
 
