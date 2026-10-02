@@ -19,7 +19,7 @@ _END_LABEL = re.compile(r"(?:إنتهاء|انتهاء)\s*(?:الإعلان|رخ
 # Frozen 2026-09-28. Each READS an ad-licence end date and does not (yet) refuse an expired ad at map
 # time. abaad and aqarcity use it in their liveness oracles; the rest only capture it. Shrink only.
 UNGATED_BASELINE = frozenset({
-    "abaad", "aqaratikom", "aqarcity", "mizlaj", "reinvest", "sadin", "sakani",
+    "abaad", "aqaratikom", "aqarcity", "maqrat", "mizlaj", "nafithh", "reinvest", "sadin", "sakani",
     "souq24", "sukna", "villassa",
 })
 T = datetime.date(2026, 9, 28)

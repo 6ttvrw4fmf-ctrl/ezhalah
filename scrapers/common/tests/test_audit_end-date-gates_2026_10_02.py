@@ -3,11 +3,10 @@
 Fleet law (normalize.ad_expiry_state, owner 2026-09-28): 'expired' is never a listing; 'unknown' (the
 source states no readable date) is not judged. Measured live 2026-10-02 before any code changed:
   albukaeri  1 of 31 pages prints a licence block; its «تاريخ النهاية» was 2026-08-15 and the row was active.
-  maqrat     62 of 62 pages read print «تاريخ انتهاء رخصة الإعلان», all in date — stored, never gated.
-  nafithh    30 of 30 pages print it, all in date — stored, never gated.
   vmksa      64 of 64 ads read print «تاريخ انتهاء ترخيص الاعلان», all in date — stored, never gated.
   shomou     the gate judged the article's FIRST <time>; an ad that fills «سنة بناء العقار» renders that as
              a <time> BEFORE its end date (nid 4884: build 2025-09-30, end 2022-01-01).
+maqrat and nafithh read the same kind of date but are NOT changed here: open PR #5103 already gates them.
 Every fixture is synthetic (no real ad, name, phone or licence). Dates are 2020 / 2099 so no clock is needed.
 """
 import json
@@ -16,8 +15,6 @@ from pathlib import Path
 import pytest
 
 import scrapers.albukaeri.run as A
-import scrapers.maqrat.run as M
-import scrapers.nafithh.run as F
 import scrapers.shomou.run as S
 import scrapers.vmksa.run as V
 from scrapers.common.tests.test_ad_end_date_is_a_gate import _calls_the_gate
@@ -27,15 +24,15 @@ EXPIRED = "ad_licence_expired"
 
 @pytest.fixture(autouse=True)
 def _no_db(monkeypatch):
-    for mod in (A, M, F, S, V):
+    for mod in (A, S, V):
         monkeypatch.setattr(mod, "to_catalog", lambda c, region_hint=None: (1, 1) if c else (None, None))
         monkeypatch.setattr(mod, "find_district_in_text", lambda t, cid: None)
     monkeypatch.setattr(S, "resolve_district", lambda t: None)
 
 
-def test_each_of_the_five_crawlers_calls_the_gate():
+def test_each_of_the_three_crawlers_calls_the_gate():
     # the shared ratchet's label regex does not see albukaeri («تاريخ النهاية») or vmksa («ترخيص الاعلان»)
-    for site in ("albukaeri", "maqrat", "nafithh", "shomou", "vmksa"):
+    for site in ("albukaeri", "shomou", "vmksa"):
         src = (Path(A.__file__).resolve().parents[1] / site / "run.py").read_text(encoding="utf-8")
         assert _calls_the_gate(src), site
 
@@ -64,38 +61,6 @@ def test_albukaeri_in_date_and_no_licence_block_are_both_kept():
 def test_albukaeri_a_printed_end_date_it_cannot_read_fails_closed():
     with pytest.raises(ValueError):                            # main() counts it unreadable: no upsert, no prune
         _bkr("15/01/2020")
-
-
-# ── maqrat ───────────────────────────────────────────────────────────────────────────────────────
-def _mqr(end):
-    kv = {"نوع العقار": "شقة", "سعر الوحدة": "500,000", "المدينة": "الرياض", "تاريخ انتهاء رخصة الإعلان": end}
-    page = "<title>شقة للبيع - منصة</title>" + "".join(
-        f'<span class="pd-overview-label">{k}</span><span class="pd-overview-value">{v}</span>' for k, v in kv.items())
-    return M.map_listing("1", {"deal": "للبيع"}, M.parse_detail(page, "1"))
-
-
-def test_maqrat_gates_on_the_licence_end_date():
-    assert _mqr("2020/01/15") == (None, EXPIRED)
-    for kept in ("2099/12/31", "غير محدد"):                    # in date · unstated is not judged
-        got, why = _mqr(kept)
-        assert why == "" and got[0]["active"] is True, kept
-
-
-# ── nafithh ──────────────────────────────────────────────────────────────────────────────────────
-def _nfh(end):
-    kv = {"غرض الإعلان": "بيع", "نوع العقار": "عمارة", "سعر الوحدة": "900000", "المدينة": "جدة"}
-    if end:
-        kv["تاريخ انتهاء رخصة الإعلان"] = end
-    page = "<title>معرض نافذة - عقار</title>" + "".join(
-        f'<div class="lableShow">{k}</div> <div class="showData" itemprop="x">{v}</div>' for k, v in kv.items())
-    return F.map_listing("1", F.parse_detail(page))
-
-
-def test_nafithh_gates_on_the_licence_end_date():
-    assert _nfh("15/01/2020") == (None, EXPIRED)
-    for kept in ("31/12/2099", None):
-        got, why = _nfh(kept)
-        assert why == "" and got[0]["active"] is True, kept
 
 
 # ── vmksa ────────────────────────────────────────────────────────────────────────────────────────
