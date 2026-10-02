@@ -23,6 +23,13 @@ index numbers («1», «0») whose option nothing names. Only the text labels ar
 NULL (unknown), and every raw value is kept in additional_info.source_params.
 PHOTOS: gallery `property_images`, else the listing's own cover `title_image` (5 of 11 have no gallery).
 
+AVAILABILITY (measured 2026-10-02, list AND all 11 by-slug records): status True on 18 of 18,
+request_status «approved» on 18 of 18, state null on 18 of 18 — the 7 demo rows included, so none of
+them tells a live ad from a dead one, and the site's own pages apply no status test of their own
+(they render whatever the API returns). No other value has ever been seen, so one is KEPT and
+COUNTED in the run log, never guessed to mean unavailable. The ad licence's own end date
+(`adv_license_expire_date`, ISO, 11 of 11 in 2027) goes through the fleet's ad-end-date gate.
+
 PDPL: the licence names the advertiser and his mobile, the deed number; the detail carries
 `customer` / `publisher` / `client_address` / `brokerage_contracts`. None is stored.
 """
@@ -57,6 +64,7 @@ _YES = {"متوفر", "متوفرة", "نعم", "خاص", "مؤثث", "true"}
 _NO = {"غير متوفر", "غير متوفرة", "لا", "لا يوجد", "غير مؤثث"}
 _BOOL_PARAMS = {"المصعد": "elevator", "مواقف خاصة": "parking", "غرفة سائق": "driver_room",
                 "المدخل": "private_entrance", "الأثاث": "furnished", "غرفة غسيل": "laundry_room"}
+_STATUS_MEASURED = {"status": True, "request_status": "approved", "state": None}
 _NEVER_STORE = {"advertiserName", "advertiserMobile", "deedNumber", "locationDescription"}
 
 
@@ -102,6 +110,8 @@ def map_listing(x: dict, d: dict) -> tuple[Optional[tuple[dict, str]], str]:
         return None, "no_rega_licence_demo_row"
     if x.get("listing_type") != "rent":
         return None, f"deal_unstated_{x.get('listing_type')}"
+    if normalize.ad_expiry_state(x.get("adv_license_expire_date") or d.get("adv_license_expire_date")) == "expired":
+        return None, "ad_licence_expired"
     comp = ((d.get("rega_license_data") or {}).get("compliance") or {})
     cat = x.get("category") or {}
     type_ar = comp.get("propertyType") or _CATEGORY_AR.get((cat.get("nameEn") or "").strip().lower())
@@ -193,6 +203,7 @@ def main() -> int:
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
+    kept: dict[str, int] = {}
     unreadable = 0
     try:
         for x in listings:
@@ -211,9 +222,16 @@ def main() -> int:
                 continue
             row, cat = got
             (com if cat == "commercial" else res).append(row)
+            for field, measured in _STATUS_MEASURED.items():
+                value = d.get(field, x.get(field))
+                if value != measured:
+                    kept[f"{field}_{value}"] = kept.get(f"{field}_{value}", 0) + 1
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)
+        if kept:
+            print("  kept, status value never measured (not guessed): "
+                  + ", ".join(f"{k}x{v}" for k, v in sorted(kept.items())), flush=True)
         if dry:
             print(f"DRY: {len(res)} residential + {len(com)} commercial ({unreadable} unreadable)")
             for row in res + com:

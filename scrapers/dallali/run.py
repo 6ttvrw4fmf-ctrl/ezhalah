@@ -22,6 +22,13 @@ RENT PERIOD: the page renders «/ سنة» for every rent (a UI constant, no per
 shared owner rule decides (normalize.rent_period_from_ad): the ad's own text tied to its price first,
 then a monthly-looking price (≤ 10,000), else the page's yearly.
 
+AVAILABILITY IS THE STOREFRONT'S OWN RULE (measured 2026-10-02). Its bundle (assets/index-*.js) hides
+a listing with `e.is_active ? !!e.expires_at && new Date(e.expires_at) <= now : true` and queries
+`expires_at.is.null,expires_at.gt.<now>`; expired() below is that test. Feed today: is_active true on
+7 of 7, expires_at null on 7 of 7 (the record's other timestamps are ISO). The REGA licence's own
+endDate is dd/mm/yyyy (creationDate «02/09/2026» on the ad created 2026-09-02; «04/08/2027» on 7 of
+7) and goes through the fleet's ad-end-date gate.
+
 PDPL: the licence names the responsible employee and his mobile, a phone number, the advertiser, the
 advertiser id and the deed number — none is stored.
 """
@@ -31,6 +38,7 @@ import argparse
 import json
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -95,9 +103,29 @@ def _num(v: Any) -> Optional[float]:
         return None
 
 
+def expired(x: dict) -> str:
+    """Why the listing's own dates say it is over — '' when they do not."""
+    raw = x.get("expires_at")
+    if raw:
+        try:
+            end = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            return "status_unreadable"
+        if (end if end.tzinfo else end.replace(tzinfo=timezone.utc)) <= datetime.now(timezone.utc):
+            return "expired_at_source"
+    if normalize.ad_expiry_state((x.get("rega_display_data") or {}).get("endDate")) == "expired":
+        return "ad_licence_expired"
+    return ""
+
+
 def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
-    if not x.get("is_active"):
+    if x.get("is_active") is False:
         return None, "inactive"
+    if x.get("is_active") is not True:
+        return None, "status_unreadable"    # not read ≠ available and ≠ dead: main() does not prune
+    why = expired(x)
+    if why:
+        return None, why
     rega = x.get("rega_display_data") or {}
     unit = x.get("unit") or {}
     loc = rega.get("location") or {}
@@ -227,7 +255,7 @@ def main() -> int:
             res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com}, source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
-        complete = len(listings) >= declared > 0
+        complete = len(listings) >= declared > 0 and "status_unreadable" not in skipped
         for tbl, rr in (("dallali_residential_listings", res), ("dallali_commercial_listings", com)):
             if rr and complete:
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
@@ -236,7 +264,8 @@ def main() -> int:
                 elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:
-            print("  NOT pruning: the walk fell short of the declared total", flush=True)
+            print("  NOT pruning: the walk fell short of the declared total, or a listing's status was unreadable",
+                  flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(listings), rows_upserted=len(res) + len(com),
                              check_tables=["dallali_residential_listings", "dallali_commercial_listings"])
         if not healthy:
