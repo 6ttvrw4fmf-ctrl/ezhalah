@@ -1,13 +1,19 @@
 """Owner, 2026-10-02: «just because you didn't see something doesn't mean it's dead … check the ad's
 own page to confirm; if it is removed, remove it». remal, shmoualshmal and wslnaa had NO removal step
 (none called prune_unseen), so an ad the office deleted stayed active for good. Each now re-reads a
-missing ad's OWN page/record and hides it only on a hard 404 there, under a known-live control.
+missing ad's OWN page/record and hides it only on that page's own removal answer, under a known-live
+control.
 
-Measured live 2026-10-02 (no site has a removed cohort yet: every active row is in today's list):
+Measured live 2026-10-02:
   remal         12/12 live ads: 200 + `<body class="… single-estate postid-N">`; never-existed: 404
   shmoualshmal   6/6  live ads: 200 + `<body class="… single-property postid-N">`; never-existed: 404
-  wslnaa        59/59 records: 200, active, not deleted, «available»; never-existed slug: 404 tRPC
-                NOT_FOUND on properties.bySlug (its PAGE answers 200 for anything, so it is not read)
+                status «للبيع» 6/6, label «متاحة» 6/6: no sold/rented term exists, so nothing is
+                filtered — any other value is COUNTED every run (log + run notes)
+  wslnaa        properties.list: 83 records = 59 «available» + 24 «rented» (all active, not deleted).
+                0/24 rented are in the sitemap; 10/10 probed on properties.bySlug answer 200 +
+                «rented», never 404; 0/59 live carry it. Never-existed slug: 404 tRPC NOT_FOUND.
+                «sold» (0 records) is stamped by the same branch of the site's own page code as
+                «rented». Its PAGE answers 200 for anything, so it is not read.
 All fixtures are synthetic."""
 import json
 import sys
@@ -62,20 +68,33 @@ def test_wslnaa_the_records_own_not_found_is_gone_and_an_open_offer_is_live():
     assert WS._signal(200, _rec(), False) == "live"
 
 
+def test_wslnaa_a_record_that_says_rented_or_sold_is_gone_though_it_answers_200():
+    # the site's real removal path: a rented unit leaves the sitemap and its record keeps answering
+    assert WS._signal(200, _rec(status="rented"), False) == "gone"
+    assert WS._signal(200, _rec(status="sold"), False) == "gone"
+    assert HL.decide(200, _rec(status="rented"), False, WS._signal)[0] == "gone"
+    assert WS.map_listing({"id": 1, "active": True, "status": "rented"})[0] is None  # never written
+
+
 def test_wslnaa_unmeasured_or_unreadable_answers_are_unknown_never_gone():
     assert WS._signal(404, "<html>Not Found</html>", False) is None       # a gateway's 404
     assert WS._signal(404, _err(message='No "query"-procedure on path'), False) is None
     assert WS._signal(404, _err(path="properties.list"), False) is None
     # values no record carried on the day of measurement: held, never hidden, never called live
-    for over in ({"status": "rented"}, {"active": False}, {"deletedAt": "2026-10-01T00:00:00Z"}):
+    for over in ({"status": "reserved"}, {"status": "archived"}, {"status": None}, {"active": False},
+                 {"deletedAt": "2026-10-01T00:00:00Z"}, {"status": "rented", "active": False},
+                 {"status": "rented", "deletedAt": "2026-10-01T00:00:00Z"}):
         assert WS._signal(200, _rec(**over), False) is None, over
+    assert WS._signal(200, _rec(status="rented"), True) is None           # another record's answer
+    assert HL.decide(403, _rec(status="rented"), False, WS._signal) is None   # a block is about us
     assert WS._signal(200, json.dumps([{"result": {"data": {"json": None}}}]), False) is None
     assert WS._signal(200, "<html>app shell</html>", False) is None       # the page, not the record
     assert WS._signal(503, _err(), False) is None and WS._signal(404, _err(), True) is None
     assert WS._signal(403, _rec(), False) is None
 
 
-@pytest.mark.parametrize("R,gone", [(RM, (404, _404)), (SH, (404, _404)), (WS, (404, _err()))])
+@pytest.mark.parametrize("R,gone", [(RM, (404, _404)), (SH, (404, _404)), (WS, (404, _err())),
+                                    (WS, (200, _rec(status="rented")))])
 def test_a_removal_is_believed_only_beside_a_known_live_control(monkeypatch, R, gone):
     live = (200, _rec()) if R is WS else (200, _wp(dict(WP)[R]))
     monkeypatch.setattr(R, "session", lambda: object())
@@ -182,3 +201,50 @@ def test_wslnaa_an_unread_record_makes_the_walk_incomplete_and_a_404_does_not():
         assert WS.fetch_one(_S(200, {"not": "a tRPC batch"}), "a-1") is None and len(WS.INCOMPLETE) == 2
     finally:
         WS.INCOMPLETE.clear()
+
+
+_TAX = {"property_status": {1: "للبيع", 2: "للإيجار", 3: "تم البيع"},
+        "property_label": {8: "متاحة", 9: "مباعة"}, "property_type": {5: "أرض"}}
+
+
+def _post(i, status, label):
+    return {"id": i, "slug": f"a-{i}", "link": f"https://x/property/a-{i}/", "property_type": [5],
+            "property_status": status, "property_label": label}
+
+
+def test_shmoualshmal_counts_a_status_or_label_it_never_measured():
+    assert SH.unmeasured_terms(_post(1, [1], [8]), _TAX) == []
+    assert SH.unmeasured_terms(_post(1, [2], [8]), _TAX) == []
+    assert SH.unmeasured_terms(_post(2, [3], [9]), _TAX) == ["status «تم البيع»", "label «مباعة»"]
+    assert SH.unmeasured_terms(_post(3, [], []), _TAX) == ["status missing", "label missing"]
+    # a term whose name could not be read is counted, not passed as measured
+    assert SH.unmeasured_terms(_post(4, [77], [8]), _TAX) == ["status id 77 (name not read)"]
+
+
+def test_shmoualshmal_run_prints_and_records_an_unmeasured_status(monkeypatch, capsys):
+    """A «تم البيع» post is still written as before (the value was never measured, so it is not
+    guessed at) — but the run says so, in its log and in its notes."""
+    written, notes = [], []
+    monkeypatch.setattr(sys, "argv", ["run.py"])
+    monkeypatch.setattr(SH, "session", lambda: object())
+    monkeypatch.setattr(SH, "stored_listing_url", lambda tables: (lambda ad: None))
+    monkeypatch.setattr(SH, "fetch_taxonomies", lambda s: _TAX)
+    monkeypatch.setattr(SH, "fetch_images", lambda s, posts: {})
+    monkeypatch.setattr(SH, "fetch_listings",
+                        lambda s: [_post(1, [1], [8]), _post(2, [3], [9]), _post(3, [3], [8])])
+    monkeypatch.setattr(SH.db, "begin_run", lambda *a, **k: "run")
+    monkeypatch.setattr(SH.db, "end_run", lambda *a, **k: notes.append(k.get("notes")) or True)
+    monkeypatch.setattr(SH.db, "upsert_shmoualshmal_residential_batch", written.extend)
+    monkeypatch.setattr(SH.db, "upsert_shmoualshmal_commercial_batch", written.extend)
+    monkeypatch.setattr(SH.db, "retire_superseded_siblings", lambda **k: 0)
+    monkeypatch.setattr(SH.db, "prune_unseen", lambda *a, **k: 0)
+    assert SH.main() == 0
+    out = capsys.readouterr().out
+    assert "status «تم البيع»×2" in out and "label «مباعة»×1" in out, out
+    assert "status «تم البيع»×2" in notes[0] and "label «مباعة»×1" in notes[0], notes
+    assert len(written) == 3 and all(r["active"] for r in written), "what is written must not change"
+
+    # a run with only measured values still prints the line, so its absence is never ambiguous
+    monkeypatch.setattr(SH, "fetch_listings", lambda s: [_post(1, [1], [8])])
+    assert SH.main() == 0
+    assert "never measured (counted, written as before): none" in capsys.readouterr().out

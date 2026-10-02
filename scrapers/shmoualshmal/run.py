@@ -226,7 +226,8 @@ INCOMPLETE: list[str] = []
 # `<body class="… single-property postid-<their own id>">`. So only a 404/410 on the ad's OWN url
 # is a removal, only that body class is life, and a redirect, a block or any other 200 is UNKNOWN.
 # (The site's status terms today are «للبيع» x6 and «للإيجار» x0, its labels «متاحة» x6 and «تجاري»
-# x0: it publishes no sold/rented value, so there is nothing of that kind to filter on.)
+# x0: it publishes no sold/rented value, so there is nothing of that kind to filter on. Any other
+# value is counted every run — see MEASURED_TERMS.)
 _OWN_PAGE = re.compile(r"<body[^>]*\bsingle-property postid-\d+")
 RES_TABLE, COM_TABLE = "shmoualshmal_residential_listings", "shmoualshmal_commercial_listings"
 
@@ -307,6 +308,31 @@ def fetch_listings(s: cc.Session) -> list[dict]:
     # ponytail: a catalogue of exactly 100/200 posts also lands here (page N+1 answers HTTP 400) and
     # skips that run's prune; compare X-WP-Total instead if the site ever grows to that.
     INCOMPLETE.append(LAST_FETCH_NOTE)
+    return out
+
+
+# The only status / label values a post carried when this was measured (2026-10-02): status «للبيع»
+# on 6 of 6 posts («للإيجار» is the site's one other term, on 0), label «متاحة» on 6 of 6. The site
+# has no sold/rented term yet, so there is nothing to filter on — but map_listing reads the status by
+# SUBSTRING, so a future «تم البيع» / «تم الإيجار» post would still be written as an active Buy / Rent
+# listing. What is written is NOT changed here (an unmeasured value is not guessed at); every value
+# outside this list is COUNTED on every run, in the log and in the run's notes, so it cannot arrive
+# silently.
+MEASURED_TERMS = {"property_status": ("للبيع", "للإيجار"), "property_label": ("متاحة",)}
+
+
+def unmeasured_terms(p: dict, tax: dict[str, dict[int, str]]) -> list[str]:
+    """This post's own status / label values that were never measured on this site."""
+    out: list[str] = []
+    for key, known in MEASURED_TERMS.items():
+        word = key.removeprefix("property_")
+        ids = p.get(key) or []
+        if not ids:
+            out.append(f"{word} missing")
+        for i in ids:
+            name = (tax.get(key) or {}).get(i)
+            if name not in known:
+                out.append(f"{word} «{name}»" if name else f"{word} id {i} (name not read)")
     return out
 
 
@@ -423,7 +449,10 @@ def main() -> int:
               f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}")
 
         unmapped: dict[str, int] = {}
+        unmeasured: dict[str, int] = {}
         for p in posts:
+            for k in unmeasured_terms(p, tax):
+                unmeasured[k] = unmeasured.get(k, 0) + 1
             row, cat = map_listing(p, tax, images)
             if not row:
                 names = tax.get('property_type') or {}
@@ -435,6 +464,7 @@ def main() -> int:
             if args.type != "all" and cat != args.type:
                 continue
             (com if cat == "commercial" else res).append(row)
+        tally = ", ".join(f"{k}×{v}" for k, v in sorted(unmeasured.items(), key=lambda x: -x[1]))
 
         if res:
             db.upsert_shmoualshmal_residential_batch(res)
@@ -476,7 +506,7 @@ def main() -> int:
             # that looks successful but wrote nothing real. Fail CI on a demotion rather than
             # reporting a silent success (the same check awal makes).
             healthy = db.end_run(run_id, ok=True, rows_seen=n, rows_upserted=n,
-                                 notes=f"pruned={pruned}",
+                                 notes=f"pruned={pruned} unmeasured_status_or_label=[{tally}]"[:300],
                                  check_tables=["shmoualshmal_residential_listings",
                                                "shmoualshmal_commercial_listings"])
             if not healthy:
@@ -489,6 +519,8 @@ def main() -> int:
             # platform quietly shrinks and nobody knows why.
             print(f"  skipped (no canonical type, not guessed): "
                   + ", ".join(f"{k}×{v}" for k, v in sorted(unmapped.items(), key=lambda x: -x[1])))
+        # Printed EVERY run, empty or not: see MEASURED_TERMS.
+        print(f"  status/label values never measured (counted, written as before): {tally or 'none'}")
         return 0
     except Exception as e:
         if run_id:

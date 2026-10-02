@@ -173,23 +173,35 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
 # Why a walk may not be the whole catalogue. Non-empty → no prune this run.
 INCOMPLETE: list[str] = []
 
-# ── REMOVAL (measured 2026-10-02). Until then this crawler had NO removal step at all: a listing
-# the office deleted stayed active here for good.
+# ── REMOVAL (measured 2026-10-02). Until then this crawler had NO removal step at all: a unit the
+# office rented out or deleted stayed active here for good.
 #
 # The PAGE cannot answer: /properties/<anything> is the app shell, HTTP 200 even for a slug that
-# never existed. The listing's own RECORD can: properties.bySlug answers a slug that never existed
-# (and a wrong id) with HTTP 404 and tRPC's {"message":"NOT_FOUND","path":"properties.bySlug"},
-# and 59 of 59 sitemap slugs with 200 and a record that is active, not deleted and «available».
-# No listing has left this site since onboarding (58 active rows = today's 58 mapped records, none
-# inactive) and no record carries any other status, active=false or a deletedAt, so those values
-# are UNMEASURED: a 200 record that is not an open offer is UNKNOWN here (held and counted by
-# prune_unseen, never hidden), exactly like a block, a 5xx or a body that is not that JSON.
+# never existed. The listing's own RECORD can (properties.bySlug), and it has TWO removal answers:
+#   · RENTED — the path this site actually uses. Its own properties.list serves 83 records: 59
+#     «available» and 24 «rented» (every one active=true, deletedAt=null, updated 2026-06-14 to
+#     2026-08-16). 0 of the 24 are in the sitemap (59 slugs, all 59 «available»), and 10 of 10
+#     probed answer HTTP 200 with status «rented» — never a 404. 0 of 59 live records carry it, so
+#     it is not furniture. Its own page stamps such a record «تم التأجير» (PropertyDetail.tsx:351).
+#   · NOT_FOUND — a slug that never existed (and a wrong id) answers HTTP 404 with tRPC's
+#     {"message":"NOT_FOUND","path":"properties.bySlug"}.
+# «sold»: 0 records carry it today. It is read as a removal on the site's OWN page code, not on a
+# measured record: that same line stamps `status==="rented"||status==="sold"` («تم البيع»), and its
+# list filter calls the pair «تم التأجير / البيع» (unavailable). The app defines exactly four
+# statuses: available, reserved, rented, sold.
+# UNMEASURED, so UNKNOWN (held and counted by prune_unseen, never hidden — exactly like a block, a
+# 5xx or a body that is not that JSON): «reserved», any other status, active=false and a non-null
+# deletedAt, each on 0 of 83 records.
 RES_TABLE, COM_TABLE = "wslnaa_residential_listings", "wslnaa_commercial_listings"
 
 
 def _record_url(slug: str) -> str:
     payload = json.dumps({"0": {"json": {"slug": slug}}}, ensure_ascii=False, separators=(",", ":"))
     return f"{BASE}/api/trpc/properties.bySlug?{urlencode({'batch': 1, 'input': payload})}"
+
+
+# What the record's own `status` says. Anything not named here is UNKNOWN.
+_STATUS_SAYS = {"available": "live", "rented": "gone", "sold": "gone"}
 
 
 def _signal(status, body, moved) -> Optional[str]:
@@ -203,15 +215,17 @@ def _signal(status, body, moved) -> Optional[str]:
             said = (err["message"], err["data"]["path"])
             return "gone" if said == ("NOT_FOUND", "properties.bySlug") else None
         p = got["result"]["data"]["json"]
-        offered = p["active"] and not p.get("deletedAt") and str(p["status"]).lower() == "available"
-        return "live" if offered else None
+        if not p["active"] or p.get("deletedAt"):
+            return None
+        return _STATUS_SAYS.get(str(p["status"]).lower())
     except (ValueError, KeyError, IndexError, TypeError, AttributeError):
         return None
 
 
 def _make_verify_gone(control: Optional[dict]):
-    """The removal oracle for db.prune_unseen. A NOT_FOUND is believed only while a known-live
-    listing from this run (`control`) still reads live through the same session."""
+    """The removal oracle for db.prune_unseen. A «rented»/«sold» record or a NOT_FOUND is believed
+    only while a known-live listing from this run (`control`) still reads live through the same
+    session."""
     stored = stored_listing_url((RES_TABLE, COM_TABLE))
     s = session()
 
@@ -319,8 +333,9 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
         # REMOVAL. A listing missing from this run is only a CANDIDATE: at three misses its own
-        # record is re-read, and it is hidden only on that record's NOT_FOUND (_signal). A record
-        # still on offer heals the row. No prune on a partial walk or a single-vertical run.
+        # record is re-read, and it is hidden only when that record says «rented»/«sold» or answers
+        # NOT_FOUND (_signal). A record still on offer heals the row. No prune on a partial walk or
+        # a single-vertical run.
         pruned = 0
         if INCOMPLETE:
             print(f"  ⚠ walk incomplete — no prune: {'; '.join(INCOMPLETE)[:300]}")
