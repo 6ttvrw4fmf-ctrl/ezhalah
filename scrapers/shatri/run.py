@@ -62,6 +62,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import city_ar_for, find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 
@@ -96,10 +97,13 @@ _CURRENCY_RE = re.compile(r"ريـ?ال|ر\.س|SAR|﷼|sar", re.I)
 _PAUSE = 0.6
 
 
+HEADERS = {"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"}
+
+
 def session() -> cc.Session:
     # impersonate owns the User-Agent — never set one here.
     s = cc.Session(impersonate="chrome")
-    s.headers.update({"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"})
+    s.headers.update(HEADERS)
     return s
 
 
@@ -364,7 +368,11 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
-    s = session()
+    # 2026-10-02: the WP REST answered HTTP 403 to the runner's datacenter IP on the pinned
+    # chrome profile (09-28..10-01 served 200). Probe 3 profiles DIRECT, then through the
+    # residential proxy (`proxy: true` → WASALT_PROXY_URL), and keep the session that is served.
+    s, tried = retry_smarter_session(f"{BASE}/wp-json/wp/v2/property_type?per_page=1", headers=HEADERS)
+    print(f"{SOURCE}: probe {' '.join(tried)}", flush=True)
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run("shatri")
     res: list[dict] = []
