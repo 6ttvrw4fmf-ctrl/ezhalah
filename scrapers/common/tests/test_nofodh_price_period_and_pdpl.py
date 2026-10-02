@@ -659,3 +659,20 @@ def test_the_law_still_refuses_a_death_this_signal_would_allow():
         assert read_is_unbelievable(status, "whatever")
     # An empty body cannot manufacture a life either.
     assert decide(200, "", False, lambda *a: "live") is None
+
+
+def test_the_crawl_stamps_its_own_open_offer_page_and_nothing_else(monkeypatch):
+    """2026-09-29: the crawl opens every /listings/<id> page, the oracle's exact read, and threw the
+    answer away — 0 of 2,556 rows ever verified, and the daily direct check reached 54% re-reading
+    them. An open offer stamps; a sold page and a blocked page do not."""
+    stamped = []
+    monkeypatch.setattr(nofodh.db, "mark_direct_alive",
+                        lambda row, *, oracle: stamped.append((row["ad_number"], oracle)) or row)
+    monkeypatch.setattr(nofodh, "session", lambda: object())
+    pages = {"1": (APARTMENT_FOR_RENT, 200), "2": (BLOCK_SOLD, 200),
+             "3": (None, nofodh.WAF_CHALLENGE_STATUS)}
+    monkeypatch.setattr(nofodh, "fetch_listing", lambda s, lid, pace=0.0: pages[lid])
+    res, com, _skipped, _unknown, blocked = nofodh.crawl(object(), ["1", "2", "3"], workers=1, pace=0)
+    rows = res + com
+    assert len(rows) == 1 and blocked == 1
+    assert stamped == [(rows[0]["ad_number"], "nofodh.listing_page.status_open")]
