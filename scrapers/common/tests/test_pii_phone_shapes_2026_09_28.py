@@ -116,5 +116,9 @@ def test_the_coordinate_guard_is_carried_byte_for_byte_by_the_db_floor_and_both_
     sql = files[-1].read_text(encoding="utf-8")
     for legacy in (r"(\+?966|00966)\s*5\d[\d\s\-]{6,}", r"(0?5\d{8}|\y920\d{5,8}\y)"):
         assert f"'{guard}{legacy}'" in sql, f"_redact_pii_sql legacy layer lost the guard: {legacy}"
+    # the monitors are patched in place by the migration that introduced the guard (a later floor-only
+    # migration does not repeat them), so look for that patch in any migration
     mon = (r"(\+?966|00966|\y0)5[0-9]{8}", r"\y920[0-9]{5,8}\y")
-    assert f"{guard}{mon[0]}|{guard}{mon[1]}|" in sql, "the PII monitors do not carry the coordinate guard"
+    patch = f"{guard}{mon[0]}|{guard}{mon[1]}|"
+    assert any(patch in f.read_text(encoding="utf-8") for f in _MIGRATIONS.glob("*.sql")), (
+        "no migration gives the PII monitors the coordinate guard")
