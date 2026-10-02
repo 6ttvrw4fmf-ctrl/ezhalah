@@ -232,10 +232,16 @@ Recompute every Sunday, and the day a website is added:
   backlog, biggest site first:** close the hole in the crawler, prove it with a test, then add the
   name to `SOURCE_LIST_DAILY` with a registry reseed. Never add a name without closing its hole.
 - **The holes that leave dead ads up today, fix these first:**
-  - ten sites have **no removal step at all** (their crawler never calls `prune_unseen`):
-    sadiqeltajer (1,540 ads, 24 unseen for 3+ days), ksaaqar (1,346, 10 unseen), remal, wslnaa,
-    gudai, aqarnajran, safera, fahadalshahri, shmoualshmal, alhumaidan. `mark_stale_listings_inactive`
-    is report-only, so nothing hides them.
+  - eight sites have **no removal step at all** (their crawler never calls `prune_unseen`):
+    remal, wslnaa, gudai, aqarnajran, safera, fahadalshahri, shmoualshmal, alhumaidan.
+    `mark_stale_listings_inactive` is report-only, so nothing hides them. **The pattern to copy is
+    sadiqeltajer and ksaaqar (fixed 2026-10-02):** measure what a removed ad's OWN page answers
+    (open the ads the crawl stopped seeing AND as many live ones; a word on both is furniture), write
+    that as `_signal`, wrap it in `_make_verify_gone(control)`, hand it to `prune_unseen`, skip the
+    prune on a partial walk, and add the site to `fleet_liveness.SITES` in shadow. What they found:
+    sadiqeltajer keeps a closed ad's page and swaps its call button for «غير متاح» (23 of 24 unseen
+    ads were really gone); ksaaqar 404s (1 of 14 unseen ads was gone, 13 were still up and stay up).
+    **«Unseen is not dead» (owner, 2026-10-02): only the ad's own page removes it.**
   - abralosol (2,788), arkaan (1,818), aqaratikom: the row is written as active even when the ad's
     own page answered 404/410 in that same run.
   - eastabha: the sold filter reads only the first status term (2 sold ads active on 2026-10-02).
