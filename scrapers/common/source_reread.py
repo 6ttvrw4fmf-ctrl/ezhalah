@@ -70,6 +70,24 @@ def page_evidence(body: str) -> dict:
     }
 
 
+_LOG_FIELDS = ("city_ar", "district_ar", "deal_ar", "type_ar", "rent_period_ar", "price_total", "price_annual",
+               "area_m2", "bedrooms", "bathrooms")
+
+
+def log_lines(item: dict, n_evidence: int = 15) -> list[str]:
+    """The comparison as plain log lines. The reread.json artifact cannot be downloaded from a cloud
+    agent session (its blob host is refused by the egress proxy, measured 2026-10-02), so the
+    stored-vs-page facts must also be readable from the job log itself."""
+    st = item.get("stored") or {}
+    page = item.get("page") or {}
+    out = [f"== {item.get('table')}:{item.get('id')} status={item.get('status')} verdict={item.get('verdict')}",
+           f"   url: {item.get('url')}",
+           "   stored: " + " | ".join(f"{k}={st.get(k)}" for k in _LOG_FIELDS if st.get(k) is not None),
+           f"   page title: {page.get('title')}"]
+    out += [f"   page: {x[:200]}" for x in (page.get("evidence_lines") or [])[:n_evidence]]
+    return out
+
+
 def parse_ids(spec: str) -> list[tuple[str, int]]:
     """'table:id,table:id' → [(table, id)]. Anything malformed is refused, never guessed."""
     out = []
@@ -129,6 +147,8 @@ def main() -> int:
             f.write(f"### Source re-read: {len(out)} listing(s)\n\n")
             for it in out:
                 f.write(f"- `{it['table']}:{it['id']}` status={it.get('status')} verdict={it.get('verdict')}\n")
+    for it in out:
+        print("\n".join(log_lines(it)), flush=True)
     print(f"re-read {len(out)} listing(s) → reread.json")
     return 0
 
