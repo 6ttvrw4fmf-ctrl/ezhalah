@@ -67,6 +67,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://www.remalre.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -185,12 +186,57 @@ def _fetch_page(s: cc.Session, page: int, attempts: int = LIST_FETCH_ATTEMPTS):
     return None, last_note
 
 
+# Why a REST walk may not be the whole catalogue. Non-empty → no prune this run.
+INCOMPLETE: list[str] = []
+
+# ── REMOVAL (measured 2026-10-02). Until then this crawler had NO removal step at all: a post the
+# office deleted or unpublished stayed active here for good.
+#
+# No ad has left this site since onboarding (84 active rows = the 84 mapped posts of today's list,
+# none inactive), so there is no removed cohort to measure. What the site does answer: a slug that
+# never existed is a hard 404 (body class «error404»), under the estate path and at the root, and
+# so is a wrong post id; 12 of 12 random live ads answer 200 on their own path with
+# `<body class="… single-estate postid-<their own id>">`. So only a 404/410 on the ad's OWN url is
+# a removal, only that body class is life, and a redirect, a block or any other 200 is UNKNOWN.
+_OWN_PAGE = re.compile(r"<body[^>]*\bsingle-estate postid-\d+")
+RES_TABLE, COM_TABLE = "remal_residential_listings", "remal_commercial_listings"
+
+
+def _signal(status, body, moved) -> Optional[str]:
+    """'live' | 'gone' | None — only what this ad's own URL affirmatively answers."""
+    if moved:
+        return None
+    if status in (404, 410):
+        return "gone"
+    return "live" if status == 200 and _OWN_PAGE.search(body) else None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for db.prune_unseen. A 404 is believed only while a known-live ad from
+    this run (`control`) still reads live through the same session."""
+    url_for = stored_listing_url((RES_TABLE, COM_TABLE))
+    s = session()
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform="remal", signal=_signal, session=lambda: s,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def fetch_listings(s: cc.Session) -> list[dict]:
     """Every estate post. An unparseable body ends enumeration and records WHY — a timeout, a 403
     and a genuinely empty source are three different incidents and must not read alike. Each page
     retries a transient transport failure or 5xx/429 first — see `_fetch_page()`."""
     global LAST_FETCH_NOTE
     LAST_FETCH_NOTE = "no pages attempted"
+    INCOMPLETE.clear()
     out: list[dict] = []
     for page in range(1, 30):
         r, fail_note = _fetch_page(s, page)
@@ -207,7 +253,10 @@ def fetch_listings(s: cc.Session) -> list[dict]:
             break
         out.extend(x for x in batch if isinstance(x, dict))
         if len(batch) < 100:
-            break
+            return out                  # a short page is the walk's only clean end
+    # ponytail: a catalogue of exactly 100/200 posts also lands here (page N+1 answers HTTP 400) and
+    # skips that run's prune; compare X-WP-Total instead if the site ever grows to that.
+    INCOMPLETE.append(LAST_FETCH_NOTE)
     return out
 
 
@@ -387,8 +436,32 @@ def main() -> int:
                       f"{str(r['city']):10s} {str(r['area_m2']):>7} px={r['price_total']} "
                       f"imgs={len(r['photo_urls'])}")
         else:
+            # An ad whose category flipped this run is superseded in the table it left; prune
+            # cannot clean that up (its own page is still live). See db.retire_superseded_siblings.
+            superseded = db.retire_superseded_siblings(
+                res_table=RES_TABLE, com_table=COM_TABLE,
+                res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com},
+                source=SOURCE)
+            if superseded:
+                print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+            # REMOVAL. A post missing from this run's list is only a CANDIDATE: at three misses its
+            # own page is re-read, and it is hidden only on a 404 (_signal). A page that still
+            # renders heals the row. No prune on a partial walk or a single-vertical run.
+            pruned = 0
+            if INCOMPLETE:
+                print(f"  ⚠ REST walk incomplete — no prune: {'; '.join(INCOMPLETE)}")
+            elif args.type == "all":
+                verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+                for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                    k = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                        verify_gone=verify_gone)
+                    if k < 0:
+                        print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                    else:
+                        pruned += k
             n = len(res) + len(com)
             healthy = db.end_run(run_id, ok=True, rows_seen=n, rows_upserted=n,
+                                 notes=f"pruned={pruned}",
                                  check_tables=["remal_residential_listings",
                                                "remal_commercial_listings"])
             if not healthy:

@@ -32,6 +32,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlencode
 
 from curl_cffi import requests as cc
 
@@ -39,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://wslnaa.com"
 SOURCE = "Waslna"
@@ -168,7 +170,70 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
     return row, category, ""
 
 
+# Why a walk may not be the whole catalogue. Non-empty → no prune this run.
+INCOMPLETE: list[str] = []
+
+# ── REMOVAL (measured 2026-10-02). Until then this crawler had NO removal step at all: a listing
+# the office deleted stayed active here for good.
+#
+# The PAGE cannot answer: /properties/<anything> is the app shell, HTTP 200 even for a slug that
+# never existed. The listing's own RECORD can: properties.bySlug answers a slug that never existed
+# (and a wrong id) with HTTP 404 and tRPC's {"message":"NOT_FOUND","path":"properties.bySlug"},
+# and 59 of 59 sitemap slugs with 200 and a record that is active, not deleted and «available».
+# No listing has left this site since onboarding (58 active rows = today's 58 mapped records, none
+# inactive) and no record carries any other status, active=false or a deletedAt, so those values
+# are UNMEASURED: a 200 record that is not an open offer is UNKNOWN here (held and counted by
+# prune_unseen, never hidden), exactly like a block, a 5xx or a body that is not that JSON.
+RES_TABLE, COM_TABLE = "wslnaa_residential_listings", "wslnaa_commercial_listings"
+
+
+def _record_url(slug: str) -> str:
+    payload = json.dumps({"0": {"json": {"slug": slug}}}, ensure_ascii=False, separators=(",", ":"))
+    return f"{BASE}/api/trpc/properties.bySlug?{urlencode({'batch': 1, 'input': payload})}"
+
+
+def _signal(status, body, moved) -> Optional[str]:
+    """'live' | 'gone' | None — only what this listing's own record affirmatively answers."""
+    if moved or status not in (200, 404):
+        return None
+    try:
+        got = json.loads(body)[0]
+        if status == 404:
+            err = got["error"]["json"]
+            said = (err["message"], err["data"]["path"])
+            return "gone" if said == ("NOT_FOUND", "properties.bySlug") else None
+        p = got["result"]["data"]["json"]
+        offered = p["active"] and not p.get("deletedAt") and str(p["status"]).lower() == "available"
+        return "live" if offered else None
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+        return None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for db.prune_unseen. A NOT_FOUND is believed only while a known-live
+    listing from this run (`control`) still reads live through the same session."""
+    stored = stored_listing_url((RES_TABLE, COM_TABLE))
+    s = session()
+
+    def url_for(ad_number: str) -> Optional[str]:
+        slug = (stored(ad_number) or "").rstrip("/").rsplit("/", 1)[-1]
+        return _record_url(slug) if slug else None
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform="wslnaa", signal=_signal, session=lambda: s,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def fetch_slugs(s: cc.Session, limit: int = 0) -> list[str]:
+    INCOMPLETE.clear()
     r = s.get(f"{BASE}/sitemap.xml", timeout=40)
     if r.status_code != 200:
         return []
@@ -182,10 +247,13 @@ def fetch_one(s: cc.Session, slug: str) -> Optional[dict]:
     payload = json.dumps({"0": {"json": {"slug": slug}}}, ensure_ascii=False, separators=(",", ":"))
     r = s.get(f"{BASE}/api/trpc/properties.bySlug", params={"batch": 1, "input": payload}, timeout=40)
     if r.status_code != 200:
+        if r.status_code != 404:        # a 404 is the record's own answer; anything else is unread
+            INCOMPLETE.append(f"{slug}: HTTP {r.status_code}")
         return None
     try:
         p = r.json()[0]["result"]["data"]["json"]
     except (ValueError, KeyError, IndexError, TypeError):
+        INCOMPLETE.append(f"{slug}: record was not readable JSON")
         return None
     # The tRPC payload OMITS `slug` for the building-level combination offers (numeric slugs
     # 540001, 570001-570005 — "الجزء السكني بالكامل", "3 فتحات تجارية متجاورة", …). `listing_url`
@@ -250,7 +318,23 @@ def main() -> int:
             source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+        # REMOVAL. A listing missing from this run is only a CANDIDATE: at three misses its own
+        # record is re-read, and it is hidden only on that record's NOT_FOUND (_signal). A record
+        # still on offer heals the row. No prune on a partial walk or a single-vertical run.
+        pruned = 0
+        if INCOMPLETE:
+            print(f"  ⚠ walk incomplete — no prune: {'; '.join(INCOMPLETE)[:300]}")
+        elif args.type == "all":
+            verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+            for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                k = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=verify_gone)
+                if k < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += k
         healthy = db.end_run(run_id, ok=True, rows_seen=len(slugs), rows_upserted=len(res) + len(com),
+                             notes=f"pruned={pruned}",
                              check_tables=["wslnaa_residential_listings",
                                            "wslnaa_commercial_listings"])
         if not healthy:
