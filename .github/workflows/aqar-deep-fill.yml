@@ -1,6 +1,14 @@
-# Aqar deep-fill — bulk loads ALL listings for every city in parallel, FAST.
+# Aqar deep-fill — reads EVERY page of every (type × deal × city) slice, PACED.
 #
-# Goes DEEP: up to 150 pages per (type × deal × city). One GitHub machine per shard = own IP.
+# Goes to the SOURCE'S OWN last page, ceil(numberOfItems / 20) (2026-10-02). The old fixed 150-page cap
+# left Riyadh apartments-for-rent at 4,888 of 22,413 ads and Jeddah apartments-for-sale at 5,238 of
+# 25,048. Writing that gap in one go would fill the DB disk (2026-09-21), so every RUN of this workflow
+# adds at most `new_budget` NEW rows in total — one pool shared by all shards through the DB function
+# aqar_fill_claim, keyed on FILL_RUN_KEY below — and the next run resumes from what is already held
+# (scrapers/aqar/paced_fill.py). Held ads are re-read for PRICE = SOURCE once their capture is
+# `refresh_after_days` old. Scheduled by pg_cron (gh-aqar-deep-fill, sql/proposed/aqar_paced_fill.sql),
+# which dispatches with NO inputs, so the defaults below ARE the schedule's behaviour.
+# One GitHub machine per shard = own IP.
 # SHARDING: the 7 heaviest cities (Riyadh, Jeddah, …) are split into 3 type-group jobs each, so
 # no single machine has to scrape all 10 of a big city's types (that used to take 2h+ and hit the
 # timeout). Small towns stay one job. The slowest single shard now sets the wall-clock — minutes,
@@ -18,13 +26,21 @@ on:
         required: false
         default: ""
       pages:
-        description: "Max pages per slice (default 150)"
+        description: "Max pages per slice (0 = every page the source has — the default)"
         required: false
-        default: "150"
+        default: "0"
       limit:
-        description: "Max listings per slice (default 5000)"
+        description: "Max listings per slice (0 = no cap — the default)"
         required: false
-        default: "5000"
+        default: "0"
+      new_budget:
+        description: "Max NEW rows this whole run may add, shared by all shards (default 25000)"
+        required: false
+        default: "25000"
+      refresh_after_days:
+        description: "Re-read a held ad once its last capture is this many days old (default 6)"
+        required: false
+        default: "6"
       start_page:
         description: "FIRST page per slice (inclusive) — batched deep scraping, e.g. 26 = pages 26..(pages)"
         required: false
@@ -38,9 +54,14 @@ on:
         required: false
         default: "0.10"
       max_parallel:
-        description: "Max concurrent city/shard jobs (lower = gentler on DB; default 20, use 1-2 for all-Saudi serial batches)"
+        description: "Max concurrent city/shard jobs (lower = gentler on DB; default 10, use 1-2 for all-Saudi serial batches)"
         required: false
-        default: "20"
+        default: "10"
+
+# Two runs must never overlap: each run's new-row budget is only a bound if runs do not stack.
+concurrency:
+  group: aqar-deep-fill
+  cancel-in-progress: false
 
 jobs:
   # Build the shard matrix. Heavy cities → 3 type-group shards each; everything else → 1 shard (all
@@ -89,7 +110,7 @@ jobs:
     timeout-minutes: 150
     strategy:
       fail-fast: false
-      max-parallel: ${{ fromJSON(github.event.inputs.max_parallel || '20') }}
+      max-parallel: ${{ fromJSON(github.event.inputs.max_parallel || '10') }}
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
@@ -110,10 +131,14 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_WORKERS: ${{ github.event.inputs.workers || '16' }}
           SCRAPE_MIN_INTERVAL: ${{ github.event.inputs.min_interval || '0.10' }}
+          # ONE key per workflow run: every shard draws new rows from the same budget row.
+          FILL_RUN_KEY: aqar-deep-fill:${{ github.run_id }}
         run: |
           exec python -m scrapers.aqar.run_residential \
             --city ${{ matrix.city }} \
             --types "${{ matrix.types }}" \
             --start-page ${{ github.event.inputs.start_page || 1 }} \
-            --pages ${{ github.event.inputs.pages || 150 }} \
-            --limit ${{ github.event.inputs.limit || 5000 }}
+            --pages ${{ github.event.inputs.pages || 0 }} \
+            --limit ${{ github.event.inputs.limit || 0 }} \
+            --new-budget ${{ github.event.inputs.new_budget || 25000 }} \
+            --refresh-after-days ${{ github.event.inputs.refresh_after_days || 6 }}
