@@ -17,6 +17,16 @@
 // there three complete-crawl misses are the removal rule (docs/ops/LISTING_LIVENESS.md §4) and
 // mon_detect_unknown_treated_as_dead() already grades those hides per table.
 //
+// TWO THINGS THE FIRST VERSION OF THIS BARRIER LET THROUGH (review, 2026-10-02), both pinned now:
+//   * a clause ADDED beside the required ones could accept any verdict: an extra lookup on the
+//     probe ledger with verdict = 'UNKNOWN', or on aqar's with verdict = 'strike', passed. Every
+//     lookup on a ledger must now carry that ledger's one allowed verdict, and nothing else.
+//   * an old GONE row verified a hide made after a newer reading said the ad was alive. Measured:
+//     one dealapp ad (probe ledger rows 56546 and 57870): GONE 02:35 UTC, hidden 11:30, LIVE 16:13
+//     the same day, active again; any re-hide in the next 96 h would have read as verified by the
+//     02:35 row. Every lookup must now reject a row older than the listing's newest alive reading
+//     (the last_verified_alive_at stamp, or a LIVE probe row probed at or before the hide).
+//
 // OFFLINE and deterministic: it reads the newest committed migration that defines the function, so
 // it runs on every PR. Production agreeing with that file is the migration-drift guards' job.
 //
@@ -46,10 +56,10 @@ function definitionOf(sql: string): string {
   return next < 0 ? rest : rest.slice(0, next + 1);
 }
 
-/** Every `exists (select 1 from public.<ledger> …)` clause, to its balanced closing parenthesis. */
-function clausesOn(def: string, ledger: string): string[] {
+/** Every match of `head`, extended to the balanced closing parenthesis of its first `(`. */
+function balanced(def: string, head: RegExp): string[] {
   const out: string[] = [];
-  for (const m of def.matchAll(new RegExp(`(not )?exists \\(select 1 from public\\.${ledger}\\b`, 'g'))) {
+  for (const m of def.matchAll(head)) {
     let depth = 0;
     for (let i = def.indexOf('(', m.index!); i < def.length; i++) {
       if (def[i] === '(') depth++;
@@ -58,18 +68,28 @@ function clausesOn(def: string, ledger: string): string[] {
   }
   return out;
 }
+/** Every `exists (select 1 from public.<ledger> …)` clause. */
+const clausesOn = (def: string, ledger: string): string[] =>
+  balanced(def, new RegExp(`(not )?exists \\(select 1 from public\\.${ledger}\\b`, 'g'));
 
+// The ONE verdict each ledger may verify a hide with. It applies to EVERY lookup on that ledger, not
+// only the required ones: UNKNOWN, LIVE, strike, an unapplied kill are readings, never proof of gone.
+const KILL = /a\.verdict = 'kill' and a\.applied\s+and /;
+const ALLOWED: Record<string, RegExp> = {
+  ops_stale_inactivation_probe: /p\.verdict = '(GONE|SUPERSEDED)'\s+and /,
+  aqar_liveness_detail: KILL,
+  dealapp_liveness_detail: KILL,
+  gathern_liveness_detail: /g\.verdict in \('kill', 'dead_confirmed'\) and g\.applied\s+and /,
+};
 const LEDGERS: Array<[ledger: string, key: RegExp, verdict: RegExp, why: string]> = [
   ['ops_stale_inactivation_probe', /p\.listing_id = x\.id/, /p\.verdict = 'GONE'/,
     'fleet_liveness, wasalt and the bulk ledgers key their GONE row on listing_id'],
   ['ops_stale_inactivation_probe', /p\.ad_number = x\.ad_number/, /p\.verdict = 'GONE'/,
     'prune_unseen(verify_gone) and the sold pins write ad_number only'],
-  ['aqar_liveness_detail', /a\.listing_id = x\.id/, /a\.verdict = 'kill' and a\.applied/,
-    'aqar kills are recorded nowhere else'],
-  ['gathern_liveness_detail', /g\.listing_id = x\.id/, /g\.verdict in \('kill', 'dead_confirmed'\) and g\.applied/,
+  ['aqar_liveness_detail', /a\.listing_id = x\.id/, KILL, 'aqar kills are recorded nowhere else'],
+  ['gathern_liveness_detail', /g\.listing_id = x\.id/, ALLOWED.gathern_liveness_detail,
     'gathern kills are recorded nowhere else'],
-  ['dealapp_liveness_detail', /a\.listing_id = x\.id/, /a\.verdict = 'kill' and a\.applied/,
-    'dealapp liveness kills are recorded nowhere else'],
+  ['dealapp_liveness_detail', /a\.listing_id = x\.id/, KILL, 'dealapp liveness kills are recorded nowhere else'],
 ];
 const ABSENCE_GATE = /case when s\.absence_tier then '[^']*' else '' end/g;
 
@@ -80,6 +100,12 @@ const ABSENCE_GATE = /case when s\.absence_tier then '[^']*' else '' end/g;
 const WINDOW = /between x\.deactivated_at - interval '([^']+)'\s+and x\.deactivated_at \+ interval '([^']+)'/;
 const MAX_BEFORE_MIN = 96 * 60;
 const MAX_AFTER_MIN = 15;
+// A later alive reading overrides an older gone one: `alive_at` is the listing's newest alive
+// reading (its stamp, or a LIVE probe row at or before the hide), and every ledger lookup must end
+// by refusing a row older than it — the bare value, with nothing subtracted from it.
+const NOT_OLDER_THAN_ALIVE = /\b[a-z]\.(probed_at|run_at) >= v\.alive_at\)$/;
+const ALIVE_AT = /coalesce\(greatest\(x\.last_verified_alive_at,[\s\S]*?\), '-infinity'\) as alive_at/;
+const LIVE_LOOKUP = /\(select max\(l\.probed_at\) from public\.ops_stale_inactivation_probe l\b/g;
 const minutes = (lit: string): number => {
   const m = /^(\d+) (hours?|minutes?)$/.exec(lit.trim());
   return m ? Number(m[1]) * (m[2].startsWith('hour') ? 60 : 1) : Infinity;
@@ -101,7 +127,22 @@ function violations(def: string): string[] {
           `${MAX_AFTER_MIN} min after deactivated_at — an old row, or one written long after, would ` +
           'verify a hide it never described');
       }
+      if ((c.match(/verdict/g) ?? []).length !== 1 || !ALLOWED[ledger].test(c) || /\bor\b/.test(c)) {
+        out.push(`a ${ledger} lookup accepts a verdict other than the one that ledger may verify a ` +
+          `hide with (${ALLOWED[ledger].source}) — an UNKNOWN, a strike or an unapplied kill would verify a hide`);
+      }
+      if (!NOT_OLDER_THAN_ALIVE.test(c)) {
+        out.push(`a ${ledger} lookup accepts a row older than the listing's newest alive reading ` +
+          '(no ">= v.alive_at") — a GONE row from before the ad was read alive would verify a later hide');
+      }
     }
+  }
+  const aliveAt = ALIVE_AT.exec(def)?.[0] ?? '';
+  if (!aliveAt) out.push('alive_at does not start from x.last_verified_alive_at — a direct ALIVE stamp no longer overrides an older GONE row');
+  for (const key of ['l.listing_id = x.id', 'l.ad_number = x.ad_number']) {
+    const read = balanced(aliveAt, LIVE_LOOKUP).some((c) => c.includes(key) && c.includes('l.source_table = %1$L')
+      && c.includes("l.verdict = 'LIVE'") && c.includes('l.probed_at <= x.deactivated_at'));
+    if (!read) out.push(`alive_at does not read the newest LIVE probe row at or before the hide by ${key}`);
   }
   if (/missing_count/.test(def.replace(ABSENCE_GATE, ''))) {
     out.push('missing_count is read outside the absence-tier gate — the strike counter is proof again');
@@ -152,32 +193,74 @@ mustCatch('the 2026-09-06 definition, where missing_count >= 3 alone verifies a 
 // migration does, so the same mutations are replayed on the real definition whenever it is clean:
 // a proof that only ever ran on a fixture proves the predicate, not its coverage of the real text.
 const window = (a: string, col: string) =>
-  `and ${a}.${col} between x.deactivated_at - interval '96 hours' and x.deactivated_at + interval '15 minutes')`;
+  `and ${a}.${col} between x.deactivated_at - interval '96 hours' and x.deactivated_at + interval '15 minutes'
+                        and ${a}.${col} >= v.alive_at)`;
 const FIXTURE = `create or replace function public.${FN}(p_since interval)
  returns table(unverified bigint, deduplicated bigint) as $function$
   select exists (select 1 from public.ops_liveness_registry g where g.platform = t.platform
                    and g.strategy in ('SOURCE_LIST_PRESENCE', 'CRAWL_PRESENCE_ONLY')) as absence_tier
   select exists (select 1 from public.%I y where y.listing_url = x.listing_url and y.active) as twin
+   cross join lateral (
+     select coalesce(greatest(x.last_verified_alive_at,
+              (select max(l.probed_at) from public.ops_stale_inactivation_probe l
+                where l.source_table = %1$L and l.listing_id = x.id
+                  and l.verdict = 'LIVE' and l.probed_at <= x.deactivated_at),
+              (select max(l.probed_at) from public.ops_stale_inactivation_probe l
+                where l.source_table = %1$L and l.ad_number = x.ad_number
+                  and l.verdict = 'LIVE' and l.probed_at <= x.deactivated_at)), '-infinity') as alive_at
+   ) v
    where x.active = false
      and not exists (select 1 from public.ops_adjudicated_listing j where j.tbl = %1$L and j.listing_id = x.id)
      and not exists (select 1 from public.ops_stale_inactivation_probe p
-                      where p.source_table = %1$L and p.listing_id = x.id and p.verdict = 'GONE' ${window('p', 'probed_at')}
+                      where p.source_table = %1$L and p.listing_id = x.id and p.verdict = 'GONE'
+                        ${window('p', 'probed_at')}
      and not exists (select 1 from public.ops_stale_inactivation_probe p
-                      where p.source_table = %1$L and p.ad_number = x.ad_number and p.verdict = 'GONE' ${window('p', 'probed_at')}
+                      where p.source_table = %1$L and p.ad_number = x.ad_number and p.verdict = 'GONE'
+                        ${window('p', 'probed_at')}
      and not exists (select 1 from public.aqar_liveness_detail a
                       where a.source_table = %1$L and a.listing_id = x.id
-                        and a.verdict = 'kill' and a.applied ${window('a', 'run_at')}
+                        and a.verdict = 'kill' and a.applied
+                        ${window('a', 'run_at')}
      and not exists (select 1 from public.dealapp_liveness_detail a
                       where a.source_table = %1$L and a.listing_id = x.id
-                        and a.verdict = 'kill' and a.applied ${window('a', 'run_at')}
+                        and a.verdict = 'kill' and a.applied
+                        ${window('a', 'run_at')}
      and not exists (select 1 from public.gathern_liveness_detail g
-                      where g.listing_id = x.id and g.verdict in ('kill', 'dead_confirmed') and g.applied ${window('g', 'run_at')}
+                      where g.listing_id = x.id and g.verdict in ('kill', 'dead_confirmed') and g.applied
+                        ${window('g', 'run_at')}
   case when s.absence_tier then 'and coalesce(x.missing_count,0) < 3' else '' end
 $function$;`;
 check('the fixture itself is compliant (the predicate is satisfiable)', violations(FIXTURE).length === 0,
   violations(FIXTURE).join(' | '));
 
+// An extra lookup, complete in every other respect, placed beside the required ones.
+const ADJUDICATED = 'and not exists (select 1 from public.ops_adjudicated_listing j';
+const added = (clause: string) => (s: string) => s.replace(ADJUDICATED, () => `${clause}\n     ${ADJUDICATED}`);
 const mutants: Array<[what: string, mutate: (s: string) => string]> = [
+  ['an UNKNOWN probe row ADDED as evidence beside the GONE lookups',
+    added(`and not exists (select 1 from public.ops_stale_inactivation_probe p
+                      where p.source_table = %1$L and p.ad_number = x.ad_number and p.verdict = 'UNKNOWN'
+                        ${window('p', 'probed_at')}`)],
+  ['an aqar strike row ADDED as evidence beside the kill lookup',
+    added(`and not exists (select 1 from public.aqar_liveness_detail a
+                      where a.source_table = %1$L and a.listing_id = x.id
+                        and a.verdict = 'strike' and a.applied
+                        ${window('a', 'run_at')}`)],
+  ['GONE widened with "or UNKNOWN" inside a required lookup',
+    (s) => s.replace("p.ad_number = x.ad_number and p.verdict = 'GONE'",
+      "p.ad_number = x.ad_number and (p.verdict = 'GONE' or p.verdict = 'UNKNOWN')")],
+  ['the later-alive rule removed, so a GONE row from before the ad was read alive verifies a re-hide',
+    (s) => s.replaceAll(/\s+and [a-z]\.(probed_at|run_at) >= v\.alive_at/g, '')],
+  ['the later-alive rule removed from the aqar kill lookup alone',
+    (s) => s.replace(/\s+and a\.run_at >= v\.alive_at/, '')],
+  ['the alive reading aged by a month, so it overrides nothing recent',
+    (s) => s.replaceAll('>= v.alive_at', ">= v.alive_at - interval '30 days'")],
+  ['the alive stamp no longer read, so a direct_alive_patch reactivation overrides nothing',
+    (s) => s.replace('greatest(x.last_verified_alive_at,', 'greatest(null::timestamptz,')],
+  ['LIVE probe rows read by listing_id only, losing every sold-pin "source relisted" row',
+    (s) => s.replace("l.ad_number = x.ad_number", "l.listing_id = x.id")],
+  ['an UNKNOWN probe row counted as an alive reading',
+    (s) => s.replaceAll("l.verdict = 'LIVE'", "l.verdict <> 'GONE'")],
   ['the absence-tier gate removed, so the counter excuses every platform again',
     (s) => s.replace(ABSENCE_GATE, "'and coalesce(x.missing_count,0) < 3'")],
   ['a DIRECT strategy added to the absence tier',
