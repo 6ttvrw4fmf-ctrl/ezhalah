@@ -782,6 +782,9 @@ _DEADLINE = time.monotonic() + 60 * float(os.environ.get("DEALAPP_TIME_BUDGET_MI
 # only between two renders of real ads — the crawl's own live pages are the canaries.
 _render_lock = threading.Lock()
 _origin_renders: list[tuple[str, str]] = []
+# adids whose accepted page was a CURRENT read (see fetch_one) — the only ones main() may stamp.
+_MAX_EDGE_AGE_S = 24 * 3600
+_fresh_reads: set[str] = set()
 
 
 def _ad_urls(adid: str) -> list[str]:
@@ -864,6 +867,11 @@ def fetch_one(adid: str) -> Optional[tuple[str, str]]:
             continue
         if has_ad:
             if has_priced_schema(body):
+                # An origin render, or an edge copy under a day old, is a current read of this ad.
+                # CloudFront keeps a page for days, and a days-old copy must not certify «alive now».
+                if not edge or int(getattr(r, "headers", {}).get("age") or 0) <= _MAX_EDGE_AGE_S:
+                    with _render_lock:
+                        _fresh_reads.add(adid)
                 return body, adid
             # Skeleton hit: keep the response as a fallback and retry for a fully-hydrated one
             # (from the origin — the edge would only hand the same skeleton back).
@@ -1187,6 +1195,13 @@ def main() -> int:
                     continue
                 if args.type != "all" and cat != args.type:
                     continue
+                # The row was built from a CURRENT read of THIS ad's own page (fetch_one), which
+                # rendered its own id-scoped listing schema still on offer: a direct read we
+                # already paid for. Until 2026-10-02 it was recorded as last_seen_at only, so half
+                # the catalogue read «never visited directly» while being opened every night.
+                if (not sold and adid in _fresh_reads
+                        and dealapp_liveness.listing_schema_present(html, adid)):
+                    db.mark_direct_alive(row, oracle="dealapp.ad_details_page.own_listing_schema")
                 (com_buf if cat == "commercial" else res_buf).append(row)
                 (com if cat == "commercial" else res).append(row)
                 if sold:
