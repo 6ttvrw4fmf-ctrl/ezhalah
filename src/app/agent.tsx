@@ -48,6 +48,7 @@ import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import { ResultCard } from '@/components/ResultCard';
+import { ResultCardGrid } from '@/components/ResultCardGrid';
 import { parseQuery, respond } from '@/data/agent';
 import { fetchListingsForQuery } from '@/data/remote';
 import { buildLocationProbeQuery, replyAfterLocationProbe } from '@/lib/agentLocationProbe';
@@ -653,6 +654,7 @@ export default function Agent() {
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [typed, setTyped] = useState('');
+  const [loaderBottomInset, setLoaderBottomInset] = useState<number>();
   // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): a search that arrived via Normal Filter's
   // «بحث» (the `?filter=` param — see the effect below, the ONE place this flips true) shows its
   // results with no composer at all; free-text follow-up chat exists ONLY on a conversation that
@@ -1358,9 +1360,16 @@ export default function Agent() {
   // `animated: false` while a saved-chat landing is in flight (owner 2026-08-29: opening a chat must
   // BE at the latest message, never visibly drag the page down to it). Live turns keep the glide.
   const landInstantRef = useRef(false);
-  const toBottom = () => requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: !landInstantRef.current }));
+  // Search-loader layout and delayed landing callbacks must never pull the page down.
+  const searchingVisibleRef = useRef(false);
+  searchingVisibleRef.current = msgs.some((m) => m.role === 'status' && m.phase === 'searching');
+  const toBottom = () => requestAnimationFrame(() => {
+    if (searchingVisibleRef.current) return;
+    scrollRef.current?.scrollToEnd({ animated: !landInstantRef.current });
+  });
   const toTop = () => requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
   const onGrow = () => {
+    if (searchingVisibleRef.current) return;
     if (pinModeRef.current === 'top') toTop();
     else if (pinModeRef.current === 'bottom') toBottom();
   };
@@ -1509,6 +1518,7 @@ export default function Agent() {
   // REMAINDER of SEARCH_MIN_MS from this moment, so the beat overlaps the real network time instead
   // of following it. (owner 2026-07-09: no artificial delays, results show as soon as ready.)
   const searchingAtRef = useRef<Record<string, number>>({});
+  const loaderPresentedRef = useRef<Record<string, boolean>>({});
   // Flip a chat-turn 'thinking' status into the live searching loader the moment the query is KNOWN
   // (right before runQuery) — the pills + min-beat then overlap the fetch exactly like the
   // filter/refine paths. Without this, chat searches only started their beat AFTER the results were
@@ -1542,6 +1552,10 @@ export default function Agent() {
     searchingAtRef.current[statusId] = since;
     const remaining = SEARCH_MIN_MS - (Date.now() - since);
     if (remaining > 0) await waitRun(run, remaining);
+    // Presentation-only gate: each logo/name page must finish its actual visible dwell.
+    // The search has already completed; this changes only when its results are revealed.
+    while (!run.cancelled && loaderPresentedRef.current[statusId] !== true) await waitRun(run, 100);
+    delete loaderPresentedRef.current[statusId];
     delete searchingAtRef.current[statusId];
     if (run.cancelled) return;
     // Soft completion (owner v4): the loader fades out gently instead of vanishing in a single
@@ -3667,7 +3681,7 @@ export default function Agent() {
           scrollEventThrottle={64}
         >
           <View style={s.col}>
-            {(() => { const lastId = msgs[msgs.length - 1]?.id; return msgs.map((m) => {
+            {(() => { const lastId = msgs[msgs.length - 1]?.id; const latestResult = msgs.filter(x => x.role === 'results').slice(-1)[0]; return msgs.map((m) => {
               if (m.role === 'user') {
                 // User messages ALWAYS sit on the user side (alignSelf: 'flex-end') regardless of the
                 // message language — the page direction (RTL/LTR) decides which screen edge that is.
@@ -3689,7 +3703,7 @@ export default function Agent() {
                 // The branded slogan + search summary are NOT shown here anymore (owner: keep loading
                 // clean/focused); they still appear in the RESULTS bubble below, unchanged. RTL is
                 // handled inside SearchLoader (the message column is LTR-pinned).
-                return <SearchLoader key={m.id} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} />;
+                return <SearchLoader key={m.id} bottomInset={loaderBottomInset} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} />;
               }
               if (m.role === 'agent') {
                 // Per-message direction: each AI reply renders in its OWN language's direction and
@@ -3787,7 +3801,7 @@ export default function Agent() {
                   key={m.id}
                   ref={(n: any) => { msgNodeRef.current[m.id] = n; }}
                   onLayout={(e) => { msgYRef.current[m.id] = e.nativeEvent.layout.y; }}
-                  style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%' }}
+                  style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%', display: searchingVisibleRef.current || (latestResult?.id !== m.id && latestResult?.typing && !doneTyping[latestResult.id]) ? 'none' : 'flex' }}
                 >
                   {/* 1) BRANDED SLOGAN — sparkle icon + Ezhalah's personality line. The row sizes to its
                       content and is pushed to the correct edge by the parent's alignItems. ENGLISH →
@@ -3872,9 +3886,9 @@ export default function Agent() {
                       ) : null}
                       {/* All result cards render AT ONCE — the per-card pop-in animation was removed
                           per user request ("remove that, not nice"). The cards just appear, no fade,
-                          no scale, no stagger. Cards stay FULL-WIDTH via alignSelf:stretch even though
-                          the parent clusters text to the right for Arabic. */}
-                      <View style={{ gap: 12, marginTop: 12, alignSelf: 'stretch' }}>
+                          no scale, no stagger. The responsive grid fills the available result width
+                          while keeping the original card order in either language. */}
+                      <ResultCardGrid>
                         {/* Live typed turn: default to 0 visible until startReveal begins the one-by-one
                             drip (prevents a full-grid flash if setDoneTyping flushes a render before
                             setRevealCount(0)). History/replay turns (not typing) show all immediately. */}
@@ -3892,7 +3906,7 @@ export default function Agent() {
                             />
                           </CardIn>
                         ))}
-                      </View>
+                      </ResultCardGrid>
                       {/* MORE-RESULTS message + actions (user 2026-06-27, paging owner 2026-07-08): a NORMAL
                           assistant message shown once the first 10 are on screen and MORE matches exist.
                           Correctness: the RPC filtered the FULL matching set before any cap, so we page it —
@@ -4209,7 +4223,7 @@ export default function Agent() {
             (see the `completed` branches below). The real "start over" action is the hamburger, top
             left, not a button inside the composer. The saved transcript stays readable; Back / reopen
             restore this same state from `completed`. */}
-        <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
+        <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]} testID="agent-footer" onLayout={e => setLoaderBottomInset(Math.ceil(e.nativeEvent.layout.height))}>
           <View style={[s.col, s.composerCol]}>
             {/* FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11; tightened 2026-09-12): the free-text
                 composer never shows for a Filter-origin conversation — the disclaimer below stays

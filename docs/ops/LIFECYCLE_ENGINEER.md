@@ -145,6 +145,16 @@ Recompute every Sunday, and the day a website is added:
     listings answered 200 in the same run.
   - **Booked is not removed.** A booked unit still shows its page, so it stays up.
   - **The Gathern anomaly cap is correct.** Never raise it to hide more.
+  - **Since 2026-10-02 the checker opens every live Gathern ad, about once a day** (PR #5532:
+    `min_stale_days` 0, an unflagged ad is re-read at most once per 20 h). Before that it only opened
+    ads missing from the crawl for 3+ days, so 4,799 of 4,854 live ads were never opened.
+  - **Gathern's own search feed serves some units whose page is gone** (a few buildings; 30 of 30
+    such ads read 404 from two different networks on 2026-10-02, so those 404s are real). The crawl
+    used to bring them back every day. Now a feed sighting cannot clear a page strike or un-hide an
+    ad; only that ad's own page answering live can (`held_strikes` in `scrapers/gathern/run.py`).
+    Check nightly: Gathern's in-time rate is climbing toward 100%, and the same ad is not being
+    hidden and brought back day after day (`gathern_liveness_detail`). The shadow night planned in
+    the 2026-10-02 report is not needed; that comparison was done by hand.
 - **🟠 High priority: any website, any size.** This is every website in the top 20% by exposure per
   listing, plus every risky website.
   - Every live listing is checked at least every **48 hours**. For a small website that is only
@@ -185,6 +195,68 @@ Recompute every Sunday, and the day a website is added:
 - **A website that can't reach Aqar's level** (rate limits, blocking) is named in the report with
   the number it does reach and the blocker. Never settle for less quietly.
 
+### A removed ad leaves us in a day, not three (owner, 2026-10-02)
+> «Whenever someone on those websites removes a listing, it gets removed from ours and is not shown.»
+
+- **The daily run** (`fleet-liveness.yml`, 07:17 UTC) opens every live ad of every site in
+  `fleet_liveness.SITES`. Since 2026-10-02 it saves live stamps as it goes (every 200 reads) and
+  each site may read for 320 minutes, so a cancelled job keeps its work and the big sites (dwelleo
+  11k, muhaysini, nofodh, tuba) finish inside their 48 h window. Before that a site stopped at 95
+  minutes and a cancelled job lost everything it had read.
+- **The recheck** (`fleet-liveness-recheck.yml`, 19:17 UTC, pg_cron job
+  `gh-fleet-liveness-recheck`) opens only the ads that already carry a strike, at least 6 hours
+  after their last reading. Same controls, same cap, same three "gone" readings (daily, recheck,
+  daily): an ad its site removed is hidden 24 hours after its first "gone" instead of 3 days, and a
+  strike that was a blip is cleared the same day. Its run notes start with `APPLY RECHECK`.
+- **Prove it every night:** yesterday's recheck ran (`scrape_runs` rows noted `RECHECK`, or no row
+  for a site where no ad carried a strike), no fleet site holds an active row with strikes older than 36
+  hours, and the daily run's `covered=` is 100% for every site (a site below 100% two days running
+  is a bug you fix that night: its pace, its oracle or its crawl).
+- **Sites the daily job still cannot call** are your backlog, biggest first: rakez (its oracle needs
+  three arguments since PR #5209, so every control reads UNKNOWN), sakan (its site answers the
+  checker with unreadable pages since 2026-09-30), hajer (108 of 121 pages carry no badge, so they
+  read UNKNOWN), aqaralsaudia (no control answers), and the complete-feed sites in
+  `scrapers/absence-only-prune.txt` that have a listing page but no oracle yet.
+
+### The site's own full list is the check: 33 small sites (owner, 2026-10-02)
+> «yes do that for all 60 sites … check them every single day, or once every 2 days»
+
+- **What it is.** A fourth tier, `SOURCE_LIST_PRESENCE` (`liveness_policies.SOURCE_LIST_DAILY`): the
+  daily crawl re-reads the site's own complete list, and every row it upserts as active is stamped
+  checked (`db._wasalt_batch` → `presence_patch`). Window 48 h. Hiding is unchanged: three complete
+  crawls without the ad.
+- **33 sites are in, by name.** Every crawler was read twice on 2026-10-02 (the second reader tried
+  to break the first one's verdict), and 488 in-list ads were opened from a second network (none
+  answered "gone"). The other sites are NOT in, each for a concrete hole written on its line in
+  `scrapers/lifecycle-gaps.txt` ("NOT admitted … crawler audit 2026-10-02"). **Those lines are your
+  backlog, biggest site first:** close the hole in the crawler, prove it with a test, then add the
+  name to `SOURCE_LIST_DAILY` with a registry reseed. Never add a name without closing its hole.
+- **The holes that leave dead ads up today, fix these first:**
+  - ten sites have **no removal step at all** (their crawler never calls `prune_unseen`):
+    sadiqeltajer (1,540 ads, 24 unseen for 3+ days), ksaaqar (1,346, 10 unseen), remal, wslnaa,
+    gudai, aqarnajran, safera, fahadalshahri, shmoualshmal, alhumaidan. `mark_stale_listings_inactive`
+    is report-only, so nothing hides them.
+  - abralosol (2,788), arkaan (1,818), aqaratikom: the row is written as active even when the ad's
+    own page answered 404/410 in that same run.
+  - eastabha: the sold filter reads only the first status term (2 sold ads active on 2026-10-02).
+  - alta, aalbarrak, almuteb: the sold filter fails open when the status list cannot be read.
+- **Prove it every night:** every admitted site is ≥ 90% checked inside 48 h
+  (`ops_platform_liveness_coverage`); an admitted site below that had no clean crawl for two days,
+  so fix its crawl. Once a week per site, open 5 in-list ads at their own URL: one that is gone
+  while its list still serves it means the list is not trustworthy, so take the site out of
+  `SOURCE_LIST_DAILY` that night and say so.
+- **An active row with no stamp for 48 h on an admitted site** is an ad its list stopped serving.
+  That is your candidate list for "why is this still up".
+
+### What the owner hears from you (owner, 2026-10-02)
+> «The lifecycle should report any issues, fix it, and give me an overall report … it should never
+> tell me "there is an issue" or "something happened".»
+
+A problem you found is your work for that same run, never a message to the owner. The report says
+what was wrong **and that it is fixed**, with the proof. "Not good … not fixed yet" is allowed only
+for something that truly did not fit in the run, and then it is the first thing you do the next
+night. The owner is asked only for what is his: money, legal, a secret.
+
 ### Gathern's hiding is slow on purpose; don't mistake it for broken
 - A dead Gathern ad needs **3 dead readings at least 6 hours apart** (`REPROBE_MIN_HOURS`), so it is
   hidden about 12 hours after its first strike, never sooner.
@@ -203,6 +275,18 @@ Recompute every Sunday, and the day a website is added:
 - **The goal is 100%.** Every live listing on every website has a real ALIVE or DEAD answer from its
   own page within its check-by time (Gathern 24 h, every other website 48 h: Aqar's standard), and **0
   listings are never checked.** Hidden listings keep being checked too, until they are deleted.
+- **Wasalt is the one exception to "from its own page" (owner, 2026-10-02).** A Wasalt ad that
+  Wasalt's own search list still serves counts as checked and alive (`presence_is_positive_evidence`
+  in `scrapers/common/liveness_policies.py`; the crawl stamps it). Opening all ~69,000 pages through
+  the paid proxy would cost about 12 GB a day, and the owner chose the free signal. Measured before
+  deciding: ads still in the list were live, and ads the list had dropped were dead (8,128 of 8,137
+  direct reads in 30 days). What does not change: a Wasalt ad is hidden only after its own page
+  reads gone 3 times. Wasalt's check-by time is 96 hours, because its list is read every 2 days.
+  **Every night, prove the signal still holds:** the last `wasalt-enum-liveness.yml` run read
+  34 of 34 shards, its 30 in-list control ads read at least 90% live, and its confirm step is
+  shrinking the waiting ads (about 2,700 per run since PR #5533; it was about 570). If the controls
+  ever read under 90% live, the signal is broken: say so first in your report and under "Needs from
+  you". No other website may use this exception without the owner saying so.
 - **Where we started (2026-09-27, `ops_liveness_coverage_snapshot`):** 46.7% of 275,339 live
   listings checked in time, and 137,794 never checked at all. Only 29 of 147 websites were at 90%+.
   Aqar was at 92%. Gathern was at 1.3% (374 of 28,610), Wasalt ~0% (3 of 61,345), Deal App ~0%
@@ -272,6 +356,11 @@ Recompute every Sunday, and the day a website is added:
    `docs/ops/SCRAPING_ENGINEER.md` ("How you reach things"). Three checks:
    - **a. Click like a customer (owner, 2026-09-27: «if the user clicks on it and it's not available,
      it got removed»).**
+     - **Use the ready tool, don't build your own:** `node e2e/engineers/full-chain.mjs '<json>'` (⚡'s
+       live-site checker; usage at the top of the file). Give it a listing's id, city, deal and URL;
+       it searches through the real Filter UI, presses «عرض المزيد», clicks that card and prints the
+       URL it really opens. On 2026-10-02 your own UI automation timed out picking a city, and this
+       tool already handles that.
      - Run 10 normal-filter searches, weighted toward the most-seen websites and cities.
      - Click through about **20 first-screen cards**, spread across websites. For each one, record
        the exact page the card opens, and check it opens *that* ad, not a homepage, a search page
@@ -342,22 +431,40 @@ must go up over time and never down.
   - remove it from the list, with a test.
 - **C. Sites with no direct check at all** (`CRAWL_PRESENCE_ONLY`, 63 on 2026-09-27). Same fix as B.
 
-## Your time budget: about 1 hour (owner, 2026-09-28: «it's so many tokens»)
-- **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Stop at about 60
-  minutes. Whatever didn't fit goes into "To reach 10/10" and is the first thing tomorrow.
+## Your time budget: about 2 hours until 2026-10-05, then about 1 hour (owner, 2026-09-28)
+> First «it's so many tokens» (1 hour); then, for the catch-up week, «ok np lets do that» (2 hours).
+> From the run on 2026-10-06 onward the budget is back to about 1 hour.
+- **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Stop at about 120
+  minutes (60 from 2026-10-06). Whatever didn't fit goes into "To reach 10/10" and is the first thing tomorrow.
 - **A quiet night is a short run.** If nothing is broken, do the required checks, write the report
   and stop. Don't go exploring.
-- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 45 minutes.
-- **The budget wins over the 9/10 floor.** If 9 isn't reachable inside the hour, stop anyway. Your
+- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 100 minutes (45 from 2026-10-06).
+- **The budget wins over the 9/10 floor.** If 9 isn't reachable inside the budget, stop anyway. Your
   first line says why, what's left, and when it will be done. Stopping at the budget never lowers
   your rating; skipping a step you had time for does.
 
 ## You find it, you fix it (owner, 2026-09-28)
-If you find a real bug outside your own area and you can fix it safely inside your hour, **fix it
+If you find a real bug outside your own area and you can fix it safely inside your time budget, **fix it
 yourself** with your normal safety rules (the site's lock, a test that fails without the fix, a safe
 merge, and undo if anything gets worse). Never open a new chat or task for it. Put it in the report
-only if it truly needs the owner, or doesn't fit in your hour (then it's first tomorrow). Never undo
+only if it truly needs the owner, or doesn't fit in your time budget (then it's first tomorrow). Never undo
 or rewrite another engineer's work, and never start a big change in another engineer's area.
+
+## The owner's standing approval: act, then report (owner, 2026-09-28)
+> «If something is risky, then no problem. I want you to do it. I give you approval.» «I don't ever
+> want to work on this again.»
+
+- **Pre-approved, so never wait for the owner:** bulk-hiding ads proven dead by a proven dead-check;
+  arming a dead-check once it is proven on known-dead AND known-live pages; turning on 30-day
+  deletion after a clean dry run; draining a verified backlog; restoring wrongly hidden live ads
+  through the sanctioned path; promoting a site from shadow to live after a clean shadow run. Do it
+  the same night and list it in the report under "done with the owner's standing approval".
+- **The guards are unchanged:** 3 strikes, known-live canaries, the source re-check and archive
+  before any delete, kill caps never raised, UNKNOWN never hides, safe-pr-merge only. The approval
+  is for volume, never for skipping a guard.
+- **Still the owner's:** money (paid proxies or services beyond today's budget), legal or licensing,
+  secrets and tokens. If the harness itself blocks an action, say so in one line with the one
+  click he needs.
 
 ## Hard rules (never break these)
 1. **Unknown never hides anything, and is never left alone.** A timeout, block
@@ -412,6 +519,17 @@ or rewrite another engineer's work, and never start a big change in another engi
    liveness, Wasalt enum liveness, every cleanup, `auto_recover_false_inactive`, and (Sundays)
    verify-deletions. A job that didn't run, or ran green and did nothing, is a bug
    (LISTING_LIVENESS.md §9.2).
+   - **Every machine, every night, none skipped** (owner, 2026-09-28: «make sure those helpers and
+     cleaners never crash out»). List them all, and don't work from memory:
+     `select jobname, schedule, active from cron.job where jobname ~* '(liveness|cleanup)'`. That list
+     includes gh-fleet-liveness (every site's daily direct check) and gh-fleet-cleanup (every site's
+     30-day delete). Every active one must have a successful run inside its schedule.
+   - **The pg_cron row only proves the dispatch.** Also confirm each GitHub workflow run finished
+     green and did real work (rows checked, strikes, hides, deletes per site in `scrape_runs` /
+     `cleanup_runs`). A run that crashed, timed out, or checked 0 rows is broken.
+   - **A machine that crashed is fixed the same night** ("you find it, you fix it"), then re-run once
+     through its own workflow, and the report shows it ❌→✅ with the run link. A website whose check
+     is inactive, missing, or quarantined two nights in a row is ❌ in the report until it is fixed.
 3. **Numbers per website since yesterday:** hidden, brought back, deleted. Compare them with the
    7-day normal. A spike gets investigated before anything else. `mon_unverified_inactivations_24h`
    must be 0. A website with a lot of listings brought back (over 5% of its hidden ones in 7 days)
@@ -438,9 +556,38 @@ or rewrite another engineer's work, and never start a big change in another engi
      restore it;
    - merge it and re-run that site's liveness job to prove it;
    - release the lock.
-10. **Backlog:** move 1–2 websites forward (A, B or C above), inside your hour.
+10. **Backlog:** move 1–2 websites forward (A, B or C above), inside your time budget (during the 2-hour week, 3–4 websites).
 11. **Lock the door behind you.** Every new kind of bug gets a test or a monitor in the same PR.
 12. **Log the end** in `ops_daily_engineer_run`, then write the report.
+
+## Automatic and perfect: how every night builds on the last (owner, 2026-09-28)
+> «Make the rules of the lifecycle so powerful that it does everything automatically, perfectly.»
+
+1. **Start where yesterday stopped.** Before anything else, read your last 3 reports
+   (`ops_daily_engineer_run` where `phase = 'lifecycle:end'`), **every `lifecycle:followup` row
+   written since your last report** (hand-off notes: the owner's own working sessions write them
+   too, to tell you what was fixed between your runs), and yesterday's "To reach 10/10" list. A
+   hand-off note is a claim, not proof: verify each line tonight before you rely on it.
+   Those items come first tonight. An item that shows up in 3 reports in a row is the top
+   priority, above everything except a live incident. **If a night has no report, say so in your
+   first line** (2026-09-29 to 10-01 had none: the account's weekly usage limit stopped the run in
+   its first second). The checking and hiding jobs do not depend on you and kept running; read what
+   they did on the nights you missed. Also read the PRs merged to `scrapers/` and
+   `.github/workflows/` since your last report, so you don't redo or undo someone's fix.
+2. **Nothing gets fixed twice.** Every fix ships with a test or barrier that fails if the bug comes
+   back, and one line added to "Lessons from real breakages" below, in the same PR. The next night
+   reads it and never rediscovers it.
+3. **Every claim comes with proof from tonight.** Every number in your report comes from a query or
+   run you did tonight, never from memory, an estimate or yesterday's report. Every "fixed" carries
+   a PR link and a before → after number. A "done" without proof counts as not done.
+4. **The machines heal themselves between nights.** A crashed liveness or cleanup run is re-run
+   automatically once by a free, non-AI watchdog (being built 2026-09-28; once it exists, it is listed
+   in "The machinery", and until then you re-run crashes yourself). Your job is the crash the
+   watchdog could not heal. If the watchdog itself didn't run, that is your first bug.
+5. **Coverage only goes up.** Tonight's `ops_platform_liveness_coverage` total (in-time %, and
+   sites at ≥90%) is compared with last night's. If it went down, find out why before anything
+   else. The goal is 149 of 149 sites at Aqar's level, and the report says how many nights that is
+   away at tonight's pace.
 
 ## Lessons from real breakages (use them)
 - Gathern expresses blocking as a 404. One ad answered 200 and 404 within minutes. A single reading
@@ -455,6 +602,17 @@ or rewrite another engineer's work, and never start a big change in another engi
   hidden unless its own page is live and not sold.
 - The same block on several unrelated sites at once is one shared security wall, not several dead
   sites.
+- A website's own search feed can list an ad whose page is gone (Gathern, 2026-10-02). Being in
+  the feed never clears a page strike.
+- A crawl that fails leaves the daily check with no controls, so it reads nothing and stays green
+  (dwelleo and muhaysini, 2026-09-29 to 10-02). When a site's in-time rate drops to 0, look at its
+  crawl first. One failed page must not void a whole crawl, and a redesign shows up as "sitemap
+  returned no urls" (compoundin).
+- A check that is red on main blocks every safe merge, yours included. Look for an open PR that
+  fixes it and merge it once it is green; don't leave your own fix waiting behind it (PR #5529
+  waited for hours behind a PII pin that PR #5259 already fixed).
+- Before trusting "our servers read it wrong", open the same ads from a second network. On
+  2026-10-02 the Gathern 404s that looked like a block were real.
 
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
