@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://sadiq-eltajer.sa"
 SOURCE = "Sadiq Eltajer"
@@ -469,8 +470,61 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
     return row, category, ""
 
 
+# Why a walk of the sitemap may not be the whole catalogue. Non-empty → no prune this run.
+INCOMPLETE: list[str] = []
+
+# ── REMOVAL (measured 2026-10-02). Until then this crawler had NO removal step at all: an ad the
+# office closed stayed active here for good (24 active rows the sitemap had dropped 3+ days before).
+#
+# This office does not delete a closed ad. It drops it from the sitemap and KEEPS the page, which
+# still renders the full ad and its «كود الاعلان» — so "200 with the code" is not proof of life.
+# What changes is the contact block: 10 of 10 dropped ads say «غير متاح» where the call and WhatsApp
+# buttons were, and 12 of 12 live ads carry the call button and no «غير متاح». («منتهي» is on every
+# page, live or not: furniture.) A slug that never existed answers 200 with a 3,892-byte shell that
+# says «غير موجود» and has no ad code. Anything else, including 404 and every block, is UNKNOWN.
+_UNAVAILABLE = "غير متاح"
+_CALL_BUTTON = "call-btn"
+_NOT_FOUND = "غير موجود"
+RES_TABLE, COM_TABLE = "sadiqeltajer_residential_listings", "sadiqeltajer_commercial_listings"
+
+
+def _signal(status, body, moved) -> Optional[str]:
+    """'live' | 'gone' | None — only what this page affirmatively says about ITSELF."""
+    if status != 200 or moved:
+        return None
+    i = body.find(_SIMILAR)                       # never read a neighbour's card as this ad's own
+    own = body[:i] if i > 0 else body
+    offered = _CALL_BUTTON in own
+    has_code = bool(ad_code(own_section(body) or ""))
+    if offered and has_code and _UNAVAILABLE not in own:
+        return "live"
+    if not offered and (_UNAVAILABLE in own or (_NOT_FOUND in own and not has_code)):
+        return "gone"
+    return None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for db.prune_unseen and for the daily direct check. A removal is believed
+    only while a known-live ad from this run (`control`) still reads live through the same session."""
+    url_for = stored_listing_url((RES_TABLE, COM_TABLE))
+    s = session()
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform="sadiqeltajer", signal=_signal, session=lambda: s,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def fetch_catalogue(s: cc.Session, limit: int = 0) -> list[str]:
     """Every /ads/ URL from the sitemap — the source's own enumeration of its catalogue."""
+    INCOMPLETE.clear()
     seen: set[str] = set()
     roots = [f"{BASE}/sitemap_index.xml", f"{BASE}/sitemap.xml"]
     for root in roots:
@@ -485,10 +539,13 @@ def fetch_catalogue(s: cc.Session, limit: int = 0) -> list[str]:
         for sub in [l for l in locs if l.endswith(".xml")][:20]:
             try:
                 rs = s.get(sub, timeout=40)
-            except Exception:
+            except Exception as e:
+                INCOMPLETE.append(f"{sub} raised {type(e).__name__}")
                 continue
             if rs.status_code == 200:
                 seen |= {l for l in re.findall(r"<loc>([^<]+)</loc>", rs.text) if "/ads/" in l}
+            else:
+                INCOMPLETE.append(f"{sub} answered HTTP {rs.status_code}")
         if seen:
             break
     out = sorted(seen)
@@ -571,9 +628,25 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
+        # REMOVAL. An ad missing from this run's sitemap walk is only a CANDIDATE: at three misses
+        # its own page is re-read, and it is hidden only if that page says so (_signal). A page that
+        # still offers the ad heals the row. No prune on a partial walk or a single-vertical run.
+        pruned = 0
+        if INCOMPLETE:
+            print(f"  ⚠ sitemap walk incomplete — no prune: {'; '.join(INCOMPLETE)}")
+        elif args.type == "all":
+            verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+            for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                k = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=verify_gone)
+                if k < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += k
+
         n = len(res) + len(com)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(urls), rows_upserted=n,
-                             notes=f"skipped: {skip_notes or 'none'}"[:300],
+                             notes=f"pruned={pruned} skipped: {skip_notes or 'none'}"[:300],
                              check_tables=["sadiqeltajer_residential_listings",
                                            "sadiqeltajer_commercial_listings"])
         if not healthy:

@@ -207,9 +207,13 @@ POLICIES: dict[str, _P] = {
         "validated live 2026-09-19, /ads/this-slug-never-existed-zzz99 answered HTTP **200** with "
         "3,892 bytes and no «كود الاعلان», while a real ad answered 200 with 233,232 bytes and the "
         "code present. A policy keyed on 404 would therefore NEVER retire anything here and sold "
-        "listings would stay up forever. So: 200 WITH «كود الاعلان» is LIVE; 200 WITHOUT it is "
-        "GONE; a 404, any 401/403/408/429/5xx, a transport failure and an unlookupable row are all "
-        "UNKNOWN and hold the strike without deactivating.",
+        "listings would stay up forever. CORRECTED 2026-10-02, measured on 24 ads the sitemap had "
+        "dropped: the office KEEPS a closed ad's page, code and all, and replaces its call button "
+        "with «غير متاح» (10 of 10 dropped ads; 0 of 12 live ads; «منتهي» is on every page). So, "
+        "reading only the ad's own part of the page: the call button AND the code AND no «غير متاح» "
+        "is LIVE; no call button with «غير متاح», or the «غير موجود» shell without a code, is GONE; "
+        "a 404, any 401/403/408/429/5xx, a transport failure, an unlookupable row and every other "
+        "200 are UNKNOWN and hold the strike without deactivating.",
         "Absence from the crawl only SELECTS candidates; the direct confirm above decides. The "
         "asymmetry with ksaaqar is the point — the death signal was measured per platform, not "
         "assumed from the sibling."),
