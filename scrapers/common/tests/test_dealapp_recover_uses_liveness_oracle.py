@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+import types
 
 from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN
 
@@ -77,8 +78,14 @@ def _load(monkeypatch, store, verdicts):
 
     monkeypatch.setattr(rec, "sb", lambda: _C())
     monkeypatch.setattr(rec.liveness_run, "_session", lambda *a, **k: object())
-    monkeypatch.setattr(rec.liveness_run, "probe_listing",
-                        lambda s, url, budget=None: (verdicts[url], 200))
+
+    def probe_listing(s, url, budget=None):
+        # The page the oracle read: dealapp's own app rendered it (ng-state), with no listing in it.
+        # recover counts an UNKNOWN as "checked" only for such a page, never for a refusal.
+        s.last = types.SimpleNamespace(text='<script id="ng-state"></script>', headers={})
+        return verdicts[url], 200
+
+    monkeypatch.setattr(rec.liveness_run, "probe_listing", probe_listing)
     return rec
 
 
@@ -93,7 +100,9 @@ def test_only_an_oracle_ALIVE_row_comes_back(monkeypatch):
     store = {RES: [_row(i + 1, u) for i, u in enumerate(urls)], COM: [], "ops_adjudicated_listing": []}
     rec = _load(monkeypatch, store, urls)
     st = rec.recover_table(RES, 0, 1)
-    assert st == {"checked": 3, "recovered": 1, "sold": 1, "unknown": 1}
+    # The four counts this test is about; the run now also reports the rows it did NOT check.
+    assert {k: st[k] for k in ("checked", "recovered", "sold", "unknown")} == {
+        "checked": 3, "recovered": 1, "sold": 1, "unknown": 1}
     by_id = {r["id"]: r for r in store[RES]}
     assert by_id[1]["active"] is True
     assert by_id[1]["last_verified_alive_at"]          # proven alive, stamped through the contract
