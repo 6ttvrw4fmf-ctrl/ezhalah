@@ -33,6 +33,7 @@ from urllib.parse import urlsplit
 
 from scrapers.common import http
 from scrapers.common.db import begin_run, end_run, sb
+from scrapers.common.liveness_contract import ALIVE, DEAD
 from scrapers.common.liveness_trust import MIN_CANARIES, canary_environment_ok
 from scrapers.aqar.liveness import DEAD_MARKERS as AQAR_DEAD_MARKERS, looks_closed as _aqar_looks_closed
 
@@ -138,13 +139,25 @@ PLATFORMS: dict[str, dict] = {
     #   raghdan    hidden 10/10 → 404, live 10/10 → 200  (run 36482496559)
     # NOT registered, same measurement: their hidden ads answer 200 (soft-close, redirect, or a
     # "withdrawn" page), so a 404-only check would call a dead ad live and bring it back — mustqr,
-    # aqargate, aqaratikom, souq24, abeea, hajer, ramzalqasim, fursaghyr, eaqartabuk, aldarim,
-    # eastabha, erapulse. sanadak and dealapp serve a 200 shell for a removed ad.
+    # aqaratikom, abeea, ramzalqasim, fursaghyr, aldarim, eastabha, erapulse (aqargate, eaqartabuk,
+    # hajer and souq24 are re-checked by their own oracle instead: PLATFORMS.update below). sanadak
+    # and dealapp serve a 200 shell for a removed ad.
     "jazwtn":    {"tables": ["jazwtn_residential_listings", "jazwtn_commercial_listings"], "dead_marker": _never, "controls": True},
     "mizlaj":    {"tables": ["mizlaj_residential_listings", "mizlaj_commercial_listings"], "dead_marker": _never, "controls": True},
     "nowaisiry": {"tables": ["nowaisiry_residential_listings", "nowaisiry_commercial_listings"], "dead_marker": _never, "controls": True},
     "raghdan":   {"tables": ["raghdan_residential_listings", "raghdan_commercial_listings"], "dead_marker": _never, "controls": True},
 }
+
+# Soft-dead sites re-checked by their own oracle (see _site_oracle), measured 2026-09-29 through the
+# shipped oracle, hidden ads vs live ads: aqargate 16/16 gone, 12/12 live (WordPress `expired` / REST
+# 404 rest_post_invalid_id; the page is an identical SPA shell) · souq24 8/8 gone, 7/7 live (a removed
+# ad redirects to the home page) · hajer 3/4 gone + 1 unknown, 0/6 live read gone (its own sold/rented
+# badge; a page with no badge is UNKNOWN) · eaqartabuk: its API's rh_not_public / rh_not_found codes,
+# control-validated 2026-09-26 (unreachable from outside Saudi-routed egress; proven again from CI).
+PLATFORMS.update({
+    p: {"tables": [f"{p}_residential_listings", f"{p}_commercial_listings"], "oracle": True, "controls": True}
+    for p in ("aqargate", "eaqartabuk", "hajer", "souq24")
+})
 
 # Sites whose cleanup has its own daily workflow (aqar-/gathern-/wasalt-cleanup.yml). Every OTHER
 # enabled site runs in the one daily fleet run (fleet-cleanup.yml → run_fleet()).
@@ -388,7 +401,32 @@ def verdict(status: int | None, body: str, dead_marker) -> str:
     return verdict_detail(status, body, dead_marker)[0]
 
 
-def _controls_fail(client, tables, dead_marker) -> str | None:
+# ── A site whose dead ad still answers 200 is re-checked by ITS OWN oracle (2026-09-29) ─────────────
+# On mustqr, aqargate, souq24, hajer, eaqartabuk, aldarim … a removed ad's listing_url still answers
+# 200 (an SPA shell, a redirect to the home page, a page with a sold badge), so a body marker on that
+# URL cannot tell dead from live, and a 404-only check would call every dead ad live and bring it
+# back. Each of those sites already has a measured oracle — the verify_gone its scraper hands to
+# prune_unseen and fleet_liveness reads every day — that asks the source's own record.
+# PLATFORMS[site]["oracle"] = True re-checks with exactly that oracle (fleet_liveness.SITES[site]), so
+# hiding, the daily check and deletion are ONE decision, never copies: the aqar rule (_aqar_dead
+# reuses aqar liveness's own looks_closed). Three-valued: 'live' reactivates, 'gone' deletes, anything
+# else skips. A factory oracle is armed with the site's freshest known-live ad, as the daily job does.
+def _site_oracle(client, platform: str, tables):
+    if not PLATFORMS.get(platform, {}).get("oracle"):
+        return None
+    from scrapers.common.fleet_liveness import SITES, controls, oracle_for  # lazy: imports the scraper
+    spec = SITES[platform]
+    ctl = controls(client, tables) if spec.endswith("()") else []
+    return oracle_for(spec, ctl[0] if ctl else None)
+
+
+def oracle_verdict(oracle, ad_number: str | None) -> tuple[str, str]:
+    from scrapers.common.fleet_liveness import read
+    v, why = read(oracle, ad_number or "")
+    return {ALIVE: "live", DEAD: "dead"}.get(v, "unknown"), f"the site's own oracle: {why}"
+
+
+def _controls_fail(client, tables, dead_marker, oracle=None) -> str | None:
     """None when the site's known-live controls came back LIVE through this run's own probe and
     verdict, else why not. The controls are the ads its crawl saw most recently (CONTROL_HOURS), so a
     control that reads dead means the source is not answering us truthfully — a block dressed as a
@@ -397,13 +435,16 @@ def _controls_fail(client, tables, dead_marker) -> str | None:
     since = (datetime.now(timezone.utc) - _hours(CONTROL_HOURS)).isoformat()
     rows = []
     for t in tables:
-        rows += (client.table(t).select("id, listing_url, last_seen_at").eq("active", True)
+        rows += (client.table(t).select("id, ad_number, listing_url, last_seen_at").eq("active", True)
                  .gte("last_seen_at", since).order("last_seen_at", desc=True)
                  .limit(MIN_CANARIES).execute().data or [])
-    urls = [u for u in ((r.get("listing_url") or "").strip() for r in
-                        sorted(rows, key=lambda r: r.get("last_seen_at") or "", reverse=True)) if u]
-    urls = urls[:MIN_CANARIES]
-    alive = sum(verdict(*_probe(u), dead_marker) == "live" for u in urls)
+    rows = sorted(rows, key=lambda r: r.get("last_seen_at") or "", reverse=True)
+    if oracle is not None:
+        urls = [r.get("ad_number") for r in rows if r.get("ad_number")][:MIN_CANARIES]
+        alive = sum(oracle_verdict(oracle, a)[0] == "live" for a in urls)
+    else:
+        urls = [u for u in ((r.get("listing_url") or "").strip() for r in rows) if u][:MIN_CANARIES]
+        alive = sum(verdict(*_probe(u), dead_marker) == "live" for u in urls)
     if canary_environment_ok(alive, len(urls)):
         return None
     return (f"known-live controls failed: {alive}/{len(urls)} of this site's ads seen by its crawl in "
@@ -558,7 +599,7 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
             _abort("policy disabled (enabled=false)")
         elif not tables:
             _abort("no tables registered for platform (default-deny)")
-        elif pol["require_source_recheck"] and dead_marker is None:
+        elif pol["require_source_recheck"] and dead_marker is None and not (reg or {}).get("oracle"):
             _abort("require_source_recheck but no dead-check registered — cannot verify, refusing to delete")
         else:
             # Platform-health precondition — NOT bypassed by --force. force exists to override
@@ -687,9 +728,10 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                     cands.extend((t, r) for r in rows)
                 cands = cands[: pol["max_delete_per_run"]]     # hard cap across ALL tables
 
+            oracle = _site_oracle(client, platform, tables) if cands else None
             # Opening controls, before a single candidate is re-checked (see _controls_fail).
             if cands and (reg or {}).get("controls"):
-                why = _controls_fail(client, tables, dead_marker)
+                why = _controls_fail(client, tables, dead_marker, oracle)
                 if why:
                     _abort(why)
                     cands = None
@@ -706,7 +748,20 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                 now = datetime.now(timezone.utc)
                 for t, r in cands:
                     url = (r.get("listing_url") or "").strip()
-                    if pol["require_source_recheck"]:
+                    if pol["require_source_recheck"] and oracle is not None:
+                        status = None
+                        stats["rechecked"] += 1
+                        v, why = oracle_verdict(oracle, r.get("ad_number"))
+                        if v == "unknown":
+                            inconclusive += 1
+                        # The oracle answers per ad, not per row: a copy retired when its ad changed
+                        # category (retire_superseded_siblings) reads live because its SIBLING is.
+                        # Reviving it would show one ad as two cards.
+                        elif v == "live" and any(
+                                client.table(o).select("id").eq("ad_number", r.get("ad_number"))
+                                .eq("active", True).limit(1).execute().data for o in tables if o != t):
+                            v, why = "skip", f"{why} — its ad is live in a sibling table; this copy stays retired"
+                    elif pol["require_source_recheck"]:
                         if not url:
                             stats["skipped"] += 1
                             continue
@@ -779,7 +834,7 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                 # re-checks, or a block that began mid-run would have written this run's 404s
                 # (liveness_trust: a canary must bracket the run). Reactivations are kept, as above.
                 if to_delete and not stats["aborted"] and (reg or {}).get("controls"):
-                    why = _controls_fail(client, tables, dead_marker)
+                    why = _controls_fail(client, tables, dead_marker, oracle)
                     if why:
                         frozen = sum(len(v) for v in to_delete.values())
                         to_delete, log_rows = {}, []
