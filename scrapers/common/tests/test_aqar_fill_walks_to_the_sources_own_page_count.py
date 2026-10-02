@@ -4,7 +4,9 @@ WHY (coverage audit 2026-09-28, re-measured 2026-10-02). aqar paginates every sl
 ceil(numberOfItems / 20): Riyadh apartments-for-rent published 22,415 ads on 1,121 pages, Jeddah
 apartments-for-sale 25,048 on 1,253. The weekly fill stopped at page 150, so we held 4,888 and 5,238 of
 them; 8 of 8 sampled ads from pages 400-1100 opened live and priced. The walk must end at the SOURCE'S
-own last page — not at a constant, and not past it (aqar keeps answering 200 there).
+own last page — not at a constant, and not past it (aqar keeps answering 200 there). Nor short of it:
+aqar's ordering reshuffles between requests (one full walk of a 157-page slice returned 18% repeats),
+so a mid-walk page made only of ads already seen must not end the walk.
 
 The test runs the workflow's own command line the way pg_cron dispatches it (no inputs, so every
 `${{ github.event.inputs.X || D }}` is D) and drives the real discover() over a fake 201-page slice.
@@ -31,6 +33,7 @@ import scrapers.aqar.discover as D  # noqa: E402
 ROOT = Path(__file__).resolve().parents[3]
 N_ITEMS = 4013                       # -> 201 pages: deeper than the old 150, last page holds 13 ads
 LAST = -(-N_ITEMS // 20)
+RESHUFFLED = 120                     # this page repeats page 119's ads: a reshuffle, not the end
 
 
 def _scheduled_arg(workflow: str, flag: str) -> int:
@@ -51,7 +54,8 @@ def test_scheduled_fill_reads_every_page_the_source_publishes_and_stops_there(mo
             # Past the last page aqar still answers 200 with a full page (a fallback feed), so only
             # the source's own count can end the walk in the right place.
             n = 20 if page != LAST else N_ITEMS - 20 * (LAST - 1)
-            links = "".join(f'<a href="/شقق-للإيجار/الرياض/حي-{page}-{6000000 + page * 100 + i}">x</a>'
+            src = page - 1 if page == RESHUFFLED else page
+            links = "".join(f'<a href="/شقق-للإيجار/الرياض/حي-{src}-{6000000 + src * 100 + i}">x</a>'
                             for i in range(n))
             self.text = ('<script type="application/ld+json">{"mainEntity":{"@type":"ItemList",'
                          f'"numberOfItems":{N_ITEMS}}}}}</script>' + links)
@@ -68,4 +72,4 @@ def test_scheduled_fill_reads_every_page_the_source_publishes_and_stops_there(mo
         fetched.clear()
         urls = list(D.discover("apartment", "rent", "riyadh", max_pages=pages, max_listings=limit))
         assert fetched == list(range(1, LAST + 1)), (wf, fetched[:3], fetched[-3:], len(fetched))
-        assert len(urls) == N_ITEMS, (wf, len(urls))
+        assert len(urls) == N_ITEMS - 20, (wf, len(urls))   # all but the reshuffled page's 20

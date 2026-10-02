@@ -320,10 +320,12 @@ def discover(
         # Cheap-and-effective: collect every href that looks like a listing URL.
         # We don't need a full HTML parser for this — a regex is enough.
         page_links: list[str] = []
+        n_links = 0
         for m in re.finditer(r'href="([^"]+)"', html):
             href = m.group(1)
             if not LISTING_RE.search(href):
                 continue
+            n_links += 1
             full = urljoin(BASE, href).split("?")[0].split("#")[0]
             if full in seen or full in page_links:
                 continue
@@ -362,5 +364,10 @@ def discover(
         # Exhausted: once a page yields no NEW listings, the city has no more depth in this
         # slice. Stop instead of hammering empty pages all the way to max_pages — this is what
         # lets us safely set --pages very high (e.g. 150) and let each city stop where it ends.
-        if new_on_page == 0:
+        # EXCEPT when the source published its own count: aqar's ordering is unstable between page
+        # requests (2026-10-02: one full walk of Jeddah land-for-sale, 157 pages, returned 3,121 links
+        # but 2,546 distinct ads; a second walk a minute later shared only 2,210 of them), so a page
+        # made only of ads already seen is a reshuffle, not the end. Then only an EMPTY page, or the
+        # source's own last page, ends the walk.
+        if new_on_page == 0 and (n_items is None or n_links == 0):
             break
