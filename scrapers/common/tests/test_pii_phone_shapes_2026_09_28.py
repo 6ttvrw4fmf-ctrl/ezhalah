@@ -27,6 +27,8 @@ _MIGRATIONS = Path(__file__).resolve().parents[3] / "supabase" / "migrations"
     "+971 50 123 4567",                  # + any country code
     "0020 1001234567",                   # 00 + country code, one separator
     "الافق ٠٠٥٦٤٠٠١٢٣٤ - x",             # ٠٠ prefix, Arabic-Indic digits
+    "السعر قابل للتفاوض للتواصل : 00 44 33 0502",   # groups reversed by RTL (aqar, aqarcity)
+    "للتواصل : ٠٠ ٤٤ ٣٣ ٠٥٠٢",           # the same, Arabic-Indic digits
 ])
 def test_every_contact_shape_is_redacted(text):
     out = redact_pii(text)
@@ -42,6 +44,9 @@ def test_every_contact_shape_is_redacted(text):
     "ترخيص 7100306688",
     "السعر 1,250,000 ريال", "بسعر ٥٠٠٠٠٠ ريال", "المساحة ٥٠٠ م", "رقم القطعه 1234 مخطط 5678",
     "رقم المخطط : 002345 0802 0801 مخطط", "المخطط 002345-0815-0801 الارض",   # plan numbers, not 00…
+    "رقم المخطط 00 12 34 0802 0801", "تاريخ 00 12 12 2025",   # 00 + pairs, but not …05dd
+    "رقم الطلب 0044330502",                                   # same digits, no group separators
+    "كود 0044 33 0502", "كود 00 4433 0502", "كود 00 44 330502",   # one separator missing: not the measured shape
     "https://maps.google.com/?q=28.366812,45.966123456789", "?q=26.39,44.00123456789",  # coordinates
 ])
 def test_regulatory_numbers_prices_and_areas_survive(text):

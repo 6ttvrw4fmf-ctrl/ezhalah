@@ -65,6 +65,10 @@ _PHONE_RE = re.compile(
 # one separator, then ONE unbroken run of 8-11 digits. Neither 966 nor 00 may follow «<digit>.»:
 # «?q=28.36,45.9661…» and «44.0012345678» are map coordinates, and the spaced «002673 0802 0801» is
 # a plan number (all measured on live rows) — none is a phone.
+# A mobile whose digit groups a right-to-left renderer reversed: «0502 33 44 00» stored as
+# «00 44 33 0502» (aqar + aqarcity «للتواصل : 00 44 33 0502», 6 live rows, 2026-10-02). Only that
+# exact shape — «00», two, two, then «05» + two, every group split by one separator — so a plan
+# number («002673 0802 0801») or a date can never match.
 _D = r"[0-9٠-٩]"
 _SEP = r"[\s.\-]?"
 _NOT_A_DECIMAL = r"(?<![0-9٠-٩][.,٫])"
@@ -75,6 +79,7 @@ _PHONE_SHAPES_RE = re.compile(
     + r"|\+[\s.\-]*[1-9١-٩](?:" + _SEP + _D + r"){7,14}"
     + r"|" + _NOT_A_DECIMAL + r"(?:00|٠٠)[1-9١-٩]" + _D + r"{0,2}" + _SEP + _D + r"{8,11}"
     + r"|[0٠]" + _SEP + r"[5٥](?:" + _SEP + _D + r"){8}"
+    + r"|(?:00|٠٠)[\s.\-]" + _D + r"{2}[\s.\-]" + _D + r"{2}[\s.\-][0٠][5٥]" + _D + r"{2}"
     + r"|٥[٠-٩]{8}"
     + r"|[0٠]" + _SEP + r"[1١][1-7١-٧](?:" + _SEP + _D + r"){7}"
     + r")(?![0-9٠-٩])"
