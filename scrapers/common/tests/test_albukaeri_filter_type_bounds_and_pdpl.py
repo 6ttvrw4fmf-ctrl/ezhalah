@@ -135,8 +135,11 @@ _LICENCE = """<section><h2 class="prop-card-title">بيانات رخصة الإ�
 
 def test_the_ad_licence_block_is_stored_with_its_end_date():
     page = _page().replace("<h2>عقارات مشابهة</h2>", _LICENCE + "<h2>عقارات مشابهة</h2>")   # as live: before the rail
+    # this ad's own end date (2026-08-15) has passed: read, and gated — no longer a listing (audit 2026-10-02)
+    assert R.map_page(R.parse_page("6a4f82d6306e73ab4e053c58", page), "شقة سكنية") == (None, "ad_licence_expired")
+    page = page.replace("Sat Aug 15 2026", "Thu Dec 31 2099")
     row = R.map_page(R.parse_page("6a4f82d6306e73ab4e053c58", page), "شقة سكنية")[0][0]
-    assert row["license_number"] == "7201032695" and row["license_expiry"] == "2026-08-15"
+    assert row["license_number"] == "7201032695" and row["license_expiry"] == "2099-12-31"
 
 
 def test_a_page_without_the_block_claims_no_licence():

@@ -84,6 +84,11 @@ _WS = re.compile(r"\s+")
 # The authoritative per-post status terms, measured 2026-09-26 against every title (18/18 agree):
 # 90 appears on all 17 «للبيع» posts, 89 on the single «للإيجار» post.
 _STATUS_DEAL = {"90": "Buy", "89": "Rent"}
+# Re-measured 2026-10-02: still 90 ×17 / 89 ×1, the site's own search form offers exactly those two
+# («للبيع», «للإيجار»), and every page prints its post's status ONCE, in this span (18 of 18 agree with
+# the term). No third term exists, so nobody knows what one would mean: a post carrying one is KEPT
+# and COUNTED with the word its own page prints — never guessed to be sold.
+_OWN_STATUS = re.compile(r'<span class="status[^"]*"[^>]*>(.*?)</span>', re.S)
 
 _TYPE_LINK = re.compile(r'href="[^"]*/property_type/[^/"]+/?"[^>]*>([^<]{1,40})<')
 _STATUS_LINK = re.compile(r'href="[^"]*/property_status/[^/"]+/?"[^>]*>([^<]{1,40})<')
@@ -324,6 +329,7 @@ def main() -> int:
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
+    kept: dict[str, int] = {}
     try:
         for rec in rows:
             tid = _term_id(rec, "property_type")
@@ -354,10 +360,17 @@ def main() -> int:
                 continue
             row, cat = map_listing(rec, ptype_ar, deal, parse_detail(page))
             (com if cat == "commercial" else res).append(row)
+            if not by_term:
+                m = _OWN_STATUS.search(page)
+                k = f"status_term_{sid}_{_clean(m.group(1)) if m else None}"
+                kept[k] = kept.get(k, 0) + 1
 
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)
+        if kept:
+            print("  kept, status value never measured (not guessed): "
+                  + ", ".join(f"{k}x{v}" for k, v in sorted(kept.items())), flush=True)
         if dry:
             print(f"DRY: {len(res)} residential + {len(com)} commercial")
             for row in (res[:3] + com[:2]):
