@@ -341,7 +341,14 @@ def fetch_lands(s: cc.Session) -> list[dict]:
 
 def map_listing(p: dict) -> tuple[Optional[dict], str]:
     """Combine the REST `lands` post into a canonical row. Returns (row, category)."""
-    if (p.get("status") or "publish") != "publish":
+    # FAIL CLOSED (audit 2026-10-02): a post with NO status used to be read as "publish". The
+    # publish state is the only availability this source states (measured: 17 of 17 posts carry
+    # status=publish, X-WP-Total 17, no sold/reserved word in any title or text; the 5 dead rows
+    # were deleted posts answering 404). A missing status is unreadable, not available.
+    if not p.get("status"):
+        raise RuntimeError(f"lands post {p.get('id')!r} carries no status — refusing to upsert on a "
+                           "publish state that could not be read")
+    if p["status"] != "publish":
         return None, "residential"
     title_raw = _clean((p.get("title") or {}).get("rendered", ""))
     content = _clean((p.get("content") or {}).get("rendered", ""))

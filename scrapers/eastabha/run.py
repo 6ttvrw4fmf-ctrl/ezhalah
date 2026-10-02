@@ -375,6 +375,15 @@ def fetch_taxonomies(get) -> dict[str, dict[int, str]]:
                 break
             page += 1
         out[tax] = d
+    # FAIL CLOSED (audit 2026-10-02). The soft `break` above also covered the two taxonomies that
+    # decide whether an ad is on the market, so one failed request left the map empty and "could
+    # not read the status" was written as "available". Measured that day on 249 posts by emptying
+    # each map: property_status → all 42 sold/rented posts mapped active; property_action_category
+    # → 7 auctions (their own status «مزاد منتهي») mapped active. The run fails and writes nothing.
+    for tax in AVAILABILITY_TAXONOMIES:
+        if not out.get(tax):
+            raise RuntimeError(f"{tax} taxonomy could not be read — refusing to upsert: without it "
+                               "sold / rented / auction posts would be written active")
     return out
 
 
@@ -391,6 +400,10 @@ def fetch_list(get) -> list[dict]:
         out += r.json() or []
         page += 1
     return out
+
+
+# The taxonomies map_listing reads to decide an ad is OFF the market (sold / rented / auction).
+AVAILABILITY_TAXONOMIES = ("property_status", "property_action_category")
 
 
 def _names(p: dict, tax: str, taxd: dict[str, dict[int, str]]) -> list[str]:
@@ -605,6 +618,14 @@ NOT_SAUDI = "not_saudi"   # map_listing's reason when the ad's own city/region i
 
 def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured_src: Optional[str]):
     """Return (row, category, gone) or (None, None, False) if it must be skipped (auction / unmappable)."""
+    # FAIL CLOSED: _names() silently drops a term id the map cannot name, so a half-read map (or a
+    # term created mid-crawl) would hide the very term that says sold / rented / auction. Measured
+    # 2026-10-02: 0 unnamed ids across 249 posts, so this never fires on a complete read.
+    for tax in AVAILABILITY_TAXONOMIES:
+        unnamed = [i for i in (p.get(tax) or []) if i not in taxd.get(tax, {})]
+        if unnamed:
+            raise RuntimeError(f"post {p.get('id')!r} carries {tax} id(s) {unnamed} the taxonomy map "
+                               "cannot name — its status is unreadable, refusing to upsert")
     actions = _names(p, "property_action_category", taxd)
     if any(any(a in name for a in ACTION_AUCTION) for name in actions):
         return None, None, False  # SKIP auctions entirely
@@ -811,11 +832,8 @@ def main() -> int:
     get = http.get
     small = args.limit > 0
 
-    taxd = fetch_taxonomies(get)
-    print(f"taxonomies: " + ", ".join(f"{k}={len(v)}" for k, v in taxd.items()))
-    listings = fetch_list(get)
-    print(f"East Abha: {len(listings)} listings from REST")
-
+    # begin_run() BEFORE the first source call, and the reads INSIDE the try: an unreadable status
+    # taxonomy must leave a failed scrape_runs row, not a bare traceback and no row at all.
     run_id = None if small else db.begin_run("eastabha")
     res: list[dict] = []
     com: list[dict] = []
@@ -826,6 +844,10 @@ def main() -> int:
     not_saudi: list[str] = []
     seen = 0
     try:
+        taxd = fetch_taxonomies(get)
+        print(f"taxonomies: " + ", ".join(f"{k}={len(v)}" for k, v in taxd.items()))
+        listings = fetch_list(get)
+        print(f"East Abha: {len(listings)} listings from REST")
         for p in listings:
             pid = p.get("id")
             if not pid:
