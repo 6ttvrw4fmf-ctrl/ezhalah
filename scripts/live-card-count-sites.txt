@@ -52,3 +52,4 @@ e2e/guardian/journeys.mjs | count-is-not-judged-against-a-total | uses the count
 scripts/verify-af-offer-click-lands.ts | no-card-count | `card-listing-11678443` is the FIXTURE id of the card that intercepted 11 of 24 taps; nothing here counts cards.
 scripts/verify-listing-ids-draw-from-one-sequence.ts | no-card-count | names the `card-listing-${listing.id}` DOM identity as one of the three places the listing-id sequence surfaces; it is a SQL/id-space check with no browser.
 scripts/lib/afContractCoverage.ts | no-card-count | a rule→barrier coverage ledger; the prefix appears inside an evidence string describing how verify-af-card-evidence-live joins a strip to its row.
+e2e/engineers/full-chain.mjs | count-is-not-judged-against-a-total | the Scraping Engineer's full-chain check looks for ONE card-listing-<id>; revealAll() scrolls until the revealed count stops changing (settling only), and the count is never compared to the search total.
