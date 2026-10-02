@@ -312,6 +312,11 @@ def main() -> int:
         cards, cat_of, city_text = enumerate_catalogue(s)
         if not cards:
             raise RuntimeError("no product cards on the store front or its category pages")
+        # The ribbon is the ONLY status this source publishes. Boxes found but not one readable ribbon
+        # = the status source itself is unreadable (markup change): abort RED like the guard above,
+        # never a green run that writes nothing and leaves the active rows frozen without an alarm.
+        if not any((c["ribbon"] or "").strip() for c in cards.values()):
+            raise RuntimeError("no catalogue card carries a readable ribbon - status source unreadable")
         print(f"{SOURCE}: {len(cards)} products on the catalogue pages "
               f"({sum(c['ribbon'] == SOLD for c in cards.values())} marked {SOLD})", flush=True)
         # EVERY card resolves to its page — a prune candidate is never a row mapped this run, and 28 of

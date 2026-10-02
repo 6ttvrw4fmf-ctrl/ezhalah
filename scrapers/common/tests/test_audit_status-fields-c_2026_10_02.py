@@ -99,6 +99,29 @@ def test_fkralemar_main_writes_only_readable_live_cards_and_names_the_rest(monke
     assert "unmeasured_ribbon_kept_active[محجوز]x1" in notes
 
 
+@pytest.mark.parametrize("ribbon_html", ["", _ribbon(""), _ribbon("<span>للبيع</span>")])
+def test_fkralemar_main_aborts_red_when_no_card_has_a_readable_ribbon(monkeypatch, ribbon_html):
+    """Boxes are found but the whole status source is unreadable: the run must end RED (exit 1,
+    ok=False) so the silent-death alarm fires — not green with 0 rows and the active rows frozen."""
+    calls: dict = {"batches": [], "prunes": []}
+    boxes = (_box(A, "flat-a", ribbon_html, "شقه 3 غرف ( 101م )", 500001)
+             + _box(B, "flat-b", ribbon_html, "شقه 4 غرف ( 102م )", 500002))
+    pages = {F.STORE: TILE + boxes, F.BASE + "/offers/district-one": CAT_META + boxes}
+    monkeypatch.setattr(F, "session", lambda: object())
+    monkeypatch.setattr(F, "fetch", lambda s, url: pages[url])      # a product-page fetch would KeyError
+    monkeypatch.setattr(F.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(F, "db", types.SimpleNamespace(
+        begin_run=lambda slug: 3,
+        _wasalt_batch=lambda table, rows: calls["batches"].append(table),
+        retire_superseded_siblings=lambda **kw: 0,
+        prune_unseen=lambda table, seen, source=None, verify_gone=None: calls["prunes"].append(table) or 0,
+        end_run=lambda run_id, **kw: calls.update(end=kw) or True))
+    monkeypatch.setattr(sys, "argv", ["run"])
+    assert F.main() == 1
+    assert calls["end"]["ok"] is False and "status source unreadable" in calls["end"]["notes"]
+    assert calls["batches"] == [] and calls["prunes"] == []
+
+
 # ── eydah ─────────────────────────────────────────────────────────────────────────────────────────
 def _offer_page(availability) -> dict:
     offers = {"@type": "Offer", "price": 100000, "priceCurrency": "SAR"}
