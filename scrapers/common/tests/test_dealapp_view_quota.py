@@ -22,9 +22,9 @@ _NOT_FOUND = '<title>ديل</title><script id="ng-state" type="application/json"
 
 
 class _Resp:
-    def __init__(self, text, url, cache="Miss from cloudfront", status=200):
+    def __init__(self, text, url, cache="Miss from cloudfront", status=200, age=None):
         self.text, self.url, self.status_code = text, url, status
-        self.headers = {"x-cache": cache}
+        self.headers = {"x-cache": cache, **({"age": str(age)} if age is not None else {})}
 
 
 class _Session:
@@ -101,3 +101,47 @@ def test_a_shard_interleaves_its_off_sitemap_tail_so_every_dead_ad_gets_live_nei
     assert sorted(ids) == sorted(known + tail)              # the whole own slice, nothing dropped
     last_known = max(i for i, x in enumerate(ids) if x in set(known))
     assert sum(1 for x in ids[:last_known] if x in set(tail)) > 50   # the tail is not one end block
+
+
+def test_the_crawl_stamps_verified_alive_only_for_this_ads_own_schema_on_offer(monkeypatch):
+    """The crawl opens every ad's own page; that read is the direct check. A page carrying another
+    ad's schema, or this ad marked sold, certifies nothing."""
+    import sys
+    from unittest.mock import MagicMock
+    pages = {"6": 'x real-estate-listing-schema-6 x',        # own schema, but a days-old edge copy
+             "7": 'x real-estate-listing-schema-7 x',        # own schema, on offer
+             "8": 'x real-estate-listing-schema-99 x',       # another ad's schema
+             "9": 'x real-estate-listing-schema-9 x'}        # own schema, sold
+    got: list[dict] = []
+    monkeypatch.setattr(sys, "argv", ["run.py"])
+    monkeypatch.setattr(run, "session", lambda: MagicMock())
+    monkeypatch.setattr(run, "enumerate_ids", lambda s, cap: list(pages))
+    monkeypatch.setattr(run, "fetch_one", lambda adid: (pages[adid], adid))
+    monkeypatch.setattr(run, "_fresh_reads", {"7", "8", "9"})
+    monkeypatch.setattr(run, "map_listing",
+                        lambda html, adid: ({"ad_number": f"DA{adid}"}, "residential", adid == "9"))
+    monkeypatch.setattr(run, "_pin_sold_inactive", lambda *a, **k: None)
+    monkeypatch.setattr(run.db, "begin_run", lambda platform: 1)
+    monkeypatch.setattr(run.db, "prune_unseen", lambda tbl, seen, source, **_kw: 0)
+    monkeypatch.setattr(run.db, "retire_superseded_siblings", lambda **kw: 0)
+    monkeypatch.setattr(run.db, "upsert_dealapp_residential_batch", lambda rows: got.extend(rows))
+    monkeypatch.setattr(run.db, "upsert_dealapp_commercial_batch", lambda rows: None)
+    monkeypatch.setattr(run.db, "end_run", lambda run_id, **kw: True)
+
+    run.main()
+
+    stamped = {r["ad_number"] for r in got if r.get(run.db._DIRECT_ALIVE_KEY)}
+    assert {r["ad_number"] for r in got} == {"DA6", "DA7", "DA8", "DA9"}
+    assert stamped == {"DA7"}
+
+
+def test_only_a_current_read_counts_a_days_old_edge_copy_does_not(monkeypatch):
+    run._fresh_reads.clear()
+    assert _fetch(monkeypatch, [lambda u: _Resp(_PRICED, u)])[0]                       # origin render
+    assert "7" in run._fresh_reads
+    run._fresh_reads.clear()
+    assert _fetch(monkeypatch, [lambda u: _Resp(_PRICED, u, cache="Hit from cloudfront", age=3600)])[0]
+    assert "7" in run._fresh_reads                                                     # hour-old copy
+    run._fresh_reads.clear()
+    assert _fetch(monkeypatch, [lambda u: _Resp(_PRICED, u, cache="Hit from cloudfront", age=200000)])[0]
+    assert "7" not in run._fresh_reads                                                 # 2-day-old copy
