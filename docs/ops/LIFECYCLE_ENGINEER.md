@@ -356,6 +356,11 @@ night. The owner is asked only for what is his: money, legal, a secret.
    `docs/ops/SCRAPING_ENGINEER.md` ("How you reach things"). Three checks:
    - **a. Click like a customer (owner, 2026-09-27: «if the user clicks on it and it's not available,
      it got removed»).**
+     - **Use the ready tool, don't build your own:** `node e2e/engineers/full-chain.mjs '<json>'` (⚡'s
+       live-site checker; usage at the top of the file). Give it a listing's id, city, deal and URL;
+       it searches through the real Filter UI, presses «عرض المزيد», clicks that card and prints the
+       URL it really opens. On 2026-10-02 your own UI automation timed out picking a city, and this
+       tool already handles that.
      - Run 10 normal-filter searches, weighted toward the most-seen websites and cities.
      - Click through about **20 first-screen cards**, spread across websites. For each one, record
        the exact page the card opens, and check it opens *that* ad, not a homepage, a search page
