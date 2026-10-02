@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import types
+
 import pytest
 
 import scrapers.common.fleet_liveness as F
@@ -246,6 +248,24 @@ def test_a_quarantine_says_why_the_controls_failed(site):
     site([_row(1)] + _controls(), lambda ad, n: "unknown")
     st = F.run_site("testsite", shadow=True)
     assert "test says unknown" in st["quarantined"]
+def test_pace_is_a_rate_not_a_pause_added_to_every_read(site, monkeypatch):
+    """At most one read per PACE_S. A read slower than PACE_S waits for nothing; a fast one waits only
+    the rest of its second (2026-09-29: rakez's 1.42 s/read was 0.42 s of reading + 1 s of sleep)."""
+    clock = {"t": 0.0}
+    slept = []
+    monkeypatch.setattr(F, "time", types.SimpleNamespace(
+        monotonic=lambda: clock["t"],
+        sleep=lambda s: (slept.append(round(s, 3)), clock.__setitem__("t", clock["t"] + s))))
+    durations = iter([2.0, 0.25] + [0.0] * 100)
+
+    def answers(ad, n):
+        if n > 5:      # the 5 opening controls are not paced
+            clock["t"] += next(durations)
+        return "live"
+    site(_controls() + [_row(1), _row(2), _row(3)], answers)
+    monkeypatch.setattr(F, "PACE_S", 1.0)
+    F.run_site("testsite", shadow=True)
+    assert slept[:3] == [0.0, 0.0, 0.75], slept
 
 
 def test_a_run_cut_short_keeps_the_live_stamps_it_already_earned(site, monkeypatch):

@@ -85,7 +85,7 @@ SITES: dict[str, str] = {
 # list makes them DIRECT_REVISIT). Everything else only decides.
 APPLY: frozenset[str] = frozenset(FLEET_DAILY_DIRECT)
 
-PACE_S = 1.0            # one read a second per site
+PACE_S = 1.0            # at most one read a second per site
 # Per site per run, inside the job's 350-minute ceiling. It was 95 minutes: dwelleo (11,137 ads at
 # ~1.6 s a read) covered 30% a day and nofodh 57%, so neither could ever meet its 48 h window.
 BUDGET_S = 320 * 60
@@ -240,6 +240,7 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
                 work = [r for r in work if (r.get("missing_count") or 0) > 0
                         and (r.get("last_liveness_probe_at") or "") < rested]
             alive, looked, dead_side = [], [], []
+            last = -math.inf
 
             def flush() -> None:
                 # A live answer and "we looked" need no closing control (a block cannot fabricate a
@@ -261,7 +262,10 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
             for r in work:
                 if time.monotonic() - started > BUDGET_S:
                     break
-                time.sleep(PACE_S)
+                # PACE_S is a RATE (at most one read per PACE_S), not a pause added to each read:
+                # sleeping a full second after a 1.5 s read halved how much of a site fits the budget.
+                time.sleep(max(0.0, last + PACE_S - time.monotonic()))
+                last = time.monotonic()
                 v, why = read(oracle, r["ad_number"])
                 st["probed"] += 1
                 st[v] += 1
