@@ -35,6 +35,10 @@ on:
         description: "PILOT ONLY: skip the 4.5h enum and run the strike step against the LAST completed enum (must be <36h old, else the coverage guard refuses). For repeatable pilots."
         type: boolean
         default: false
+      confirm_only:
+        description: "with skip_enum: page-confirm only the rows already at 3 strikes; strike nothing (an extra drain between enumerations never counts one enumeration twice)"
+        type: boolean
+        default: false
       repair_clock_bug_backlog:
         description: "ONE-TIME (ops_incident, routine #11, 2026-09-24): run --mode repair-clock-bug-backlog instead of the normal enum+strike, to resolve the confirm-eligible backlog the rollup clock bug produced. Structurally cannot deactivate a listing — see run_repair_clock_bug_backlog()'s docstring. Leave false for every ordinary run."
         type: boolean
@@ -253,6 +257,7 @@ jobs:
             --workers 1 \
             --confirm-limit ${{ inputs.confirm_limit || '3000' }} \
             --max-seconds 19800 \
+            ${{ inputs.confirm_only && '--confirm-only' || '' }} \
             ${{ inputs.dry_run && '--dry-run' || '' }}
 
   repair:

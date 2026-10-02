@@ -71,6 +71,11 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SHADOW: ${{ inputs.shadow }}
           SITE: ${{ matrix.site }}
+          # Only sites whose crawl already rides the Saudi residential proxy when the runner's IP is
+          # walled (small-sources-sync `proxy: true`) get it, and their session() tries DIRECT first.
+          # ialqarawi: its known-live controls read 0/5 in 31 s at 2026-09-29 01:19 — the same fast
+          # refusal as the HTTP 202 wall its crawl meets from the runner on alternate days.
+          WASALT_PROXY_URL: ${{ contains(fromJSON('["ialqarawi"]'), matrix.site) && secrets.WASALT_PROXY_URL || '' }}
         run: |
           exec python -m scrapers.common.fleet_liveness --site "$SITE" \
             $([ "$SHADOW" = "true" ] && echo --shadow)

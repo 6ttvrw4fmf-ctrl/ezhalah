@@ -169,18 +169,27 @@ def _session() -> cc.Session:
     return cc.Session(impersonate="chrome124", timeout=30)
 
 
-def _get(s: cc.Session, url: str, tries: int = 3) -> Optional[str]:
+def _fetch(s: cc.Session, url: str, tries: int = 3) -> tuple[Optional[int], Optional[str]]:
+    """(status, body). The status survives, so a page that said 404/410 (gone) is told apart from
+    one we could not read (None — UNKNOWN, LISTING_LIVENESS.md §1)."""
     for attempt in range(tries):
         try:
             r = s.get(url)
             if r.status_code == 200:
-                return r.text
-            if r.status_code == 404:
-                return None
+                return 200, r.text
+            if r.status_code in GONE_STATUSES:
+                return r.status_code, None
         except Exception:
             pass
         time.sleep(1.5 * (attempt + 1))
-    return None
+    return None, None
+
+
+GONE_STATUSES = (404, 410)
+
+
+def _get(s: cc.Session, url: str, tries: int = 3) -> Optional[str]:
+    return _fetch(s, url, tries)[1]
 
 
 # ── index row parsing ───────────────────────────────────────────────────────────────────────────
@@ -258,8 +267,11 @@ def _parse_index(rec: dict) -> dict:
 
 # ── detail page ─────────────────────────────────────────────────────────────────────────────────
 def _detail(s: cc.Session, nid: str) -> dict:
-    """{title, blocks, description, photo_urls, label} from /{nid}. Empty dict if unfetchable."""
-    page = _get(s, f"{BASE}/{nid}")
+    """{title, blocks, description, photo_urls, label} from /{nid}. Empty dict if unfetchable;
+    {"gone": status} when the ad's own page answered 404/410."""
+    status, page = _fetch(s, f"{BASE}/{nid}")
+    if status in GONE_STATUSES:
+        return {"gone": status}
     if not page:
         return {}
     art = _ARTICLE.search(page)
@@ -526,7 +538,7 @@ def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[di
     com: list[dict] = []
     seen: set[str] = set()
     stats = {"rows": 0, "skipped_no_deal": 0, "skipped_no_type": 0, "no_price": 0,
-             "per_sqm": 0, "unlabelled_price": 0, "detail_failed": 0, "pages": 0}
+             "per_sqm": 0, "unlabelled_price": 0, "detail_failed": 0, "detail_gone": 0, "pages": 0}
 
     for page in range(MAX_PAGES):
         html = _get(s, f"{BASE}/node?page={page}")
@@ -542,6 +554,13 @@ def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[di
             fresh += 1
             ix = _parse_index(rec)
             detail = _detail(s, ix["nid"]) if want_detail else {}
+            if detail.get("gone"):
+                # Its OWN page said gone in this very run: never write it active from the index row
+                # (crawler audit 2026-10-02). Left out of the seen set, prune_unseen's 3-strike guard
+                # ages it out; one reading hides nothing.
+                stats["detail_gone"] += 1
+                time.sleep(DETAIL_PAUSE)
+                continue
             if want_detail:
                 if not detail:
                     stats["detail_failed"] += 1

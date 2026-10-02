@@ -254,6 +254,25 @@ Recompute every Sunday, and the day a website is added:
 - **An active row with no stamp for 48 h on an admitted site** is an ad its list stopped serving.
   That is your candidate list for "why is this still up".
 
+### One PR per run, landed once, and always a report (learned 2026-10-02)
+On 2026-10-02 the owner asked for an extra run to judge you by. The work was good: the hand-off was
+followed in order, every fix was measured and mutation-tested, and you found two things nobody had
+(1,932 dealapp ads hidden by hand with no page reading; 3,841 wasalt ads waiting at 3 strikes). But
+**nothing landed and no report was written for over an hour**, because the run opened nine PRs:
+
+- **All of a run's fixes go on ONE branch and ONE PR** (one commit per fix, each with its test).
+  Branch protection requires a PR to be up to date, so every merge to `main` sends every other open
+  PR back through CI; with nine PRs and saturated runners, that never converges.
+- **If several green PRs are waiting (yours or a helper's), make a train:** merge those branches,
+  unchanged, into one branch off `main`, open one PR, and land it with a **merge commit** so each
+  PR is recorded as merged by its own commits. Resolve only textual conflicts (two lists that both
+  grew); leave out any branch that conflicts in logic and say so.
+- **Never press update-branch on more than one PR at a time.** Updating all of them re-queues every
+  check for all of them.
+- **The report is written when your time budget ends, whether or not CI has finished.** List what
+  is merged, and separately what is "built, tested, waiting for CI" with its PR number. A run that
+  ends with no report is the worst outcome: the owner cannot tell good work from none.
+
 ### What the owner hears from you (owner, 2026-10-02)
 > «The lifecycle should report any issues, fix it, and give me an overall report … it should never
 > tell me "there is an issue" or "something happened".»
@@ -617,6 +636,14 @@ or rewrite another engineer's work, and never start a big change in another engi
 - A check that is red on main blocks every safe merge, yours included. Look for an open PR that
   fixes it and merge it once it is green; don't leave your own fix waiting behind it (PR #5529
   waited for hours behind a PII pin that PR #5259 already fixed).
+- A checker's own DB-retry helper must retry what `db._execute` retries. aqar liveness retried only
+  57014, so one dropped HTTP/2 connection killed a whole shard (2026-09-30, 2026-10-02).
+- A recovery job must read pages with the same oracle the hiding job uses. dealapp-recover read
+  100% UNKNOWN for five weeks (its own fetch got shells), so it could never bring a live ad back.
+- A hand-written hide that also sets `missing_count = 3` is invisible to
+  `mon_unverified_inactivations_24h` and to `auto_recover_false_inactive()`. Dealapp, 2026-10-02
+  11:30 UTC: 1,932 ads hidden in one statement with no page reading. Group each night's hides by
+  exact `deactivated_at`; a big batch no liveness run reports is a bug.
 - Before trusting "our servers read it wrong", open the same ads from a second network. On
   2026-10-02 the Gathern 404s that looked like a block were real.
 
