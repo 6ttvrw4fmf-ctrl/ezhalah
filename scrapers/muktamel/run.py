@@ -418,9 +418,12 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
 # THE MEASURED SIGNAL. muktamel expresses removal as a REDIRECT, not a status: across all four
 # 2026-09-21 shard runs `redirect_404` fired 84-98 times per shard while `dead_404` (a bare 404/410
 # status) fired ZERO times. The module docstring records the same fact from the 2026-09-03
-# re-verification — "or redirect to /404". A listing URL here is `/real-estates/<id>` with no slug,
-# so the path cannot change for any benign reason; 404/410 is kept as well because it costs nothing
-# and the shipped fetch path already treats it as terminal.
+# re-verification — "or redirect to /404". A redirect is NOT by itself a removal: since 2026-09-28
+# an assigned id 302s to its own `/real-estates/<id>/<arabic-slug>` (measured on 32320, 34000,
+# 31999, 25816), and only a removed or unassigned id 302s to `/404` (id 1, 999999) — which then
+# answers 200, so the status alone cannot see it. `_landed_on_404` is that one fact, shared by the
+# probe and its canary. 404/410 is kept as well because it costs nothing and the shipped fetch path
+# already treats it as terminal.
 #
 # `not_available_or_zero_price` is deliberately NOT a kill. The docstring's measured dead shape is
 # the CONJUNCTION (`isAvailable === false` AND `price === null`), while `fetch_one`'s skip gate is a
@@ -435,20 +438,28 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
 # already resets `missing_count` to 0 and sets `active = true`. Self-heal exists for platforms whose
 # discovery index is incomplete (the aqarcity sitemap window); muktamel has no index to be missing
 # from. Returning an unmeasured 'live' would instead risk making a genuinely removed row immortal.
-def _liveness_signal(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
-    """muktamel's affirmative removal signal, and nothing else. None == no opinion."""
+def _landed_on_404(landed: str) -> bool:
+    """True only when the read ended on muktamel's `/404` page — its one measured removal redirect.
+    A landing on this id's own slugged URL is the listing; anywhere else is no opinion, never gone."""
+    return http_liveness._path_of(landed) == "/404"
+
+
+def _liveness_signal(status: Optional[int], body: str, landed_on_404: bool) -> Optional[str]:
+    """muktamel's affirmative removal signal, and nothing else. None == no opinion.
+    The third argument is `_landed_on_404`, NOT the shared law's "the path changed" (see _MuktamelProbe)."""
     if status in (404, 410):
         return "gone"
-    if path_changed:
-        # The slugless canonical URL redirected: the site sent this id to /404.
+    if landed_on_404:
         return "gone"
     return None
 
 
-# IN-RUN POSITIVE CONTROL (LISTING_LIVENESS.md §5.4). The signal above rests on "a path change means
-# /404". If the site ever started canonicalising `/real-estates/<id>` to a slugged URL, that premise
-# would invert and every probe would read as a removal — so before any kill, re-fetch an id THIS RUN
-# just confirmed live and require that it does NOT read as gone. A source that cannot testify
+# IN-RUN POSITIVE CONTROL (LISTING_LIVENESS.md §5.4). The signal above rests on "a redirect to /404
+# means removed". When the site began canonicalising `/real-estates/<id>` to a slugged URL
+# (2026-09-28), an oracle that read ANY path change as /404 saw every live id as gone — and this
+# control is what caught it: 1,975 removals withheld over 10 days, zero live rows killed. So before
+# any kill, re-fetch an id THIS RUN just confirmed live and require that it does NOT read as gone.
+# A source that cannot testify
 # correctly about a listing we know is alive is not allowed to testify against any other.
 # Fails CLOSED: no control id (validation run, empty crawl) means no removal.
 #
@@ -479,15 +490,26 @@ def _canary() -> tuple[bool, str]:
                 except Exception:  # noqa: BLE001 — an unreachable control proves nothing either way
                     continue
                 landed = str(getattr(r, "url", url) or url)
-                if _liveness_signal(r.status_code, r.text or "",
-                                    landed.rstrip("/") != url.rstrip("/")) != "gone":
+                if _liveness_signal(r.status_code, r.text or "", _landed_on_404(landed)) != "gone":
                     ok, why = True, f"control id {listing_id} still reads live"
                     break
         _canary_state["verdict"], _canary_state["reason"] = ok, why
         return ok, why
 
 
-_probe = http_liveness.LivenessProbe(
+class _MuktamelProbe(http_liveness.LivenessProbe):
+    """The shared direct read, except its third value is `_landed_on_404` instead of "the path
+    changed" — on muktamel every live id's path changes (it gains a slug). The law is untouched."""
+
+    def fetch(self, url: str) -> tuple[Optional[int], str, bool]:
+        try:
+            r = self.session().get(url, timeout=self.timeout, allow_redirects=True)
+            return r.status_code, (r.text or ""), _landed_on_404(str(getattr(r, "url", url) or url))
+        except Exception:  # noqa: BLE001 — an unreachable source is never proof of death
+            return None, "", False
+
+
+_probe = _MuktamelProbe(
     platform="muktamel",
     signal=_liveness_signal,
     session=_session,
