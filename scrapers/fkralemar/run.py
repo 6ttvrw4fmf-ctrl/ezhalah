@@ -38,6 +38,13 @@ SOURCE SHAPE (measured live 2026-09-24, before any code):
     «مباع» → gone; 404 with that title → gone; 200 carrying the id → live; else no opinion.
     The probe's URL map is built from EVERY card of this run's catalogue (a prune candidate is never
     a mapped row); an id on no catalogue page stays unknown without a fetch.
+  · RIBBON VOCABULARY (re-measured live 2026-10-02): 48 cards on the three catalogue pages, 38 unique
+    products, the ribbon is «للبيع» (10) or «مباع» (28) and nothing else; 13/13 product pages (10
+    live, 3 sold) state availability InStock and print no ribbon, so the page still cannot tell a
+    sold flat from a live one. The ribbon is OPTIONAL on Site123 (the card wrapper carries
+    data-has-ribbon): a card with no readable ribbon publishes no status and is not written
+    (`ribbon_unreadable`), instead of borrowing the next card's ribbon, title and price. A ribbon
+    word never measured keeps the old behaviour (written active) and is named in the run notes.
 """
 from __future__ import annotations
 
@@ -68,6 +75,7 @@ STORE = f"{BASE}/offers"
 _PAUSE = 0.8
 
 SOLD = "مباع"
+FOR_SALE = "للبيع"
 NOT_FOUND_TITLE = "لم يتم العثور على الصفحة"
 _LEAD_TYPE = {"شقه": "Apartment", "شقة": "Apartment", "فيلا": "Villa", "فله": "Villa", "عمارة": "Building",
               "عماره": "Building", "ارض": "Residential Land", "أرض": "Residential Land"}
@@ -76,6 +84,7 @@ CARD_RE = re.compile(
     r'e-commerce-product-box[^>]*data-unique-id="([0-9a-f]+)".*?href="(/offers/[^"]+)"'
     r'.*?product-ribbon-banner[^>]*>\s*([^<]*?)\s*<'
     r'.*?product-title"><a[^>]*>\s*([^<]*?)\s*<.*?data-type="price">([^<]*)<', re.S)
+BOX_RE = re.compile(r'e-commerce-product-box[^>]*data-unique-id="([0-9a-f]+)"')
 CATEGORY_RE = re.compile(r'class="e-c-box"[^>]*>.*?<a href="(/offers/[^"]+)" class="image-container[^"]*">'
                          r'.*?aria-label="([^"]+)"', re.S)
 # «( المساحة : 124م )», «مساحة ٢٣١ م .» (no «ال», Arabic-Indic digits), or the title's «( 140م )».
@@ -98,13 +107,42 @@ def fetch(s: cc.Session, url: str) -> str:
     return r.text
 
 
-def parse_cards(page_html: str) -> list[dict[str, str]]:
+def parse_cards(page_html: str) -> list[dict[str, Any]]:
     """Every product card on a catalogue page. Refuses a page that hides cards behind pagination."""
     left = re.search(r'data-pagination-products-left="([^"]*)"', page_html)
     if left and left.group(1) not in ("", "0"):
         raise RuntimeError(f"catalogue page hides {left.group(1)} more products behind pagination")
-    return [{"uid": uid, "href": ihtml.unescape(href), "ribbon": ribbon, "title": ihtml.unescape(title),
-             "price_raw": price} for uid, href, ribbon, title, price in CARD_RE.findall(page_html)]
+    # ONE BOX = ONE CARD. CARD_RE is lazy over the whole page, so a box with no ribbon used to be
+    # completed with the NEXT box's ribbon, title and price (and that next card vanished). Each box
+    # is now matched inside its own bounds; one that cannot be read keeps ribbon None.
+    boxes = list(BOX_RE.finditer(page_html))
+    cards: list[dict[str, Any]] = []
+    for i, box in enumerate(boxes):
+        end = boxes[i + 1].start() if i + 1 < len(boxes) else len(page_html)
+        m = CARD_RE.match(page_html, box.start(), end)
+        if m:
+            uid, href, ribbon, title, price = m.groups()
+            cards.append({"uid": uid, "href": ihtml.unescape(href), "ribbon": ribbon,
+                          "title": ihtml.unescape(title), "price_raw": price})
+        else:
+            href = re.search(r'href="(/offers/[^"]+)"', page_html[box.end():end])
+            cards.append({"uid": box.group(1), "href": ihtml.unescape(href.group(1)) if href else "",
+                          "ribbon": None, "title": "", "price_raw": ""})
+    return cards
+
+
+def ribbon_gate(ribbon: Optional[str]) -> tuple[bool, Optional[str]]:
+    """(may be written, tally key). The card ribbon is the ONLY status this source publishes.
+    «للبيع» → written. «مباع» → not written. No readable ribbon → not written (fail closed: the
+    status could not be read). Any other word was never measured: today's behaviour is kept (written
+    active — an unknown word is not a sale) and the word is counted in the run notes."""
+    if ribbon == FOR_SALE:
+        return True, None
+    if ribbon == SOLD:
+        return False, "sold"
+    if not (ribbon or "").strip():
+        return False, "ribbon_unreadable"
+    return True, f"unmeasured_ribbon_kept_active[{ribbon.strip()}]"
 
 
 def parse_categories(store_html: str) -> list[tuple[str, str]]:
@@ -158,8 +196,9 @@ def map_listing(card: dict[str, str], product: dict[str, Any], category_name: Op
     """One catalogue card + its product page → (row, category, skip_reason)."""
     if not card.get("uid"):
         return None, "residential", "no_id"
-    if card.get("ribbon") == SOLD:
-        return None, "residential", "sold"
+    ok, note = ribbon_gate(card.get("ribbon"))
+    if not ok:
+        return None, "residential", str(note)
     title = card["title"]
     lead = title.split()[0] if title.split() else ""
     ptype = _LEAD_TYPE.get(lead)
@@ -278,12 +317,14 @@ def main() -> int:
         # EVERY card resolves to its page — a prune candidate is never a row mapped this run, and 28 of
         # 38 products are «مباع» cards whose only status is the ribbon; a map of mapped rows only would
         # answer "unknown" for all of them and no sold product could ever be retired.
-        url_by_ad = {f"{PREFIX}{u}": BASE + c["href"] for u, c in cards.items()}
+        url_by_ad = {f"{PREFIX}{u}": BASE + c["href"] for u, c in cards.items() if c["href"]}
         ribbon_by_uid = {u: c["ribbon"] for u, c in cards.items()}
         todo = list(cards.values())[:args.limit] if args.limit else list(cards.values())
         for card in todo:
-            if card["ribbon"] == SOLD:
-                skipped["sold"] = skipped.get("sold", 0) + 1
+            ok, note = ribbon_gate(card["ribbon"])
+            if note:
+                skipped[note] = skipped.get(note, 0) + 1
+            if not ok:
                 continue
             time.sleep(_PAUSE)
             product = parse_product(fetch(s, BASE + card["href"]))
