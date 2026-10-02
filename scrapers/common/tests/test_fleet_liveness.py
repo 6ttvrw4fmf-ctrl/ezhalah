@@ -163,10 +163,19 @@ def test_struck_rows_are_read_first_across_both_tables(site):
     assert seen[5] == "A40", "after the 5 opening controls, the struck row is the first one read"
 
 def test_every_site_resolves_to_its_scrapers_own_oracle():
+    import inspect
     for site, spec in F.SITES.items():
         assert spec.startswith(f"scrapers.{site}.run:"), site
         assert callable(F.oracle_for(spec, None)), site
-        assert callable(F.oracle_for(spec, {"ad_number": "X1", "listing_url": "https://x/1"})), site
+        oracle = F.oracle_for(spec, {"ad_number": "X1", "listing_url": "https://x/1"})
+        assert callable(oracle), site
+        # read() calls oracle(ad_number). An oracle needing more (rakez's _verify_gone took the
+        # crawl's project records from #5209) raises TypeError on every read: every row UNKNOWN,
+        # every control fails, the site is silently never checked.
+        try:
+            inspect.signature(oracle).bind("X1")
+        except TypeError as e:
+            raise AssertionError(f"{site}: {spec} cannot be called as oracle(ad_number): {e}") from e
 
 
 def test_a_factory_oracle_is_built_from_the_sites_freshest_control(monkeypatch):

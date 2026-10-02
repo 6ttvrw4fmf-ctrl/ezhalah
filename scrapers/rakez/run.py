@@ -525,6 +525,39 @@ def _verify_gone(ad_number: str, en_projects: dict[int, dict],
     return "unknown", f"REST {r.status_code}"
 
 
+class _LazyBridge(dict):
+    """`bridge` for _verify_gone outside the crawl: a project's Arabic twin, resolved on first use."""
+
+    def __init__(self, s: cc.Session, ar_projects: dict[int, dict]) -> None:
+        super().__init__()
+        self.s, self.ar = s, ar_projects
+
+    def get(self, en_id, default=None):
+        if en_id not in self:
+            ar_id = arabic_project_id(self.s, en_id)
+            self[en_id] = self.ar.get(ar_id) if ar_id else None
+        return super().get(en_id, default)
+
+
+def _make_verify_gone(control: Optional[dict] = None):
+    """The same _verify_gone the crawl hands prune_unseen, for fleet_liveness's daily direct check
+    (which calls oracle(ad_number) and runs its own known-live controls, so `control` is unused).
+    The source's project records are read once, on the first call; an empty read raises on every
+    call, which fleet_liveness reads as UNKNOWN — never as a death."""
+    ctx: dict = {}
+
+    def verify(ad_number: str) -> tuple[str, str]:
+        if not ctx:
+            s = session()
+            en, ar = fetch_projects(s), fetch_projects(s, lang="ar")
+            ctx.update(en=en, bridge=_LazyBridge(s, ar), ok=bool(en and ar))
+        if not ctx["ok"]:
+            raise RuntimeError("REST returned no projects — nothing can be judged")
+        return _verify_gone(ad_number, ctx["en"], ctx["bridge"])
+
+    return verify
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--limit-test", type=int, default=0,
