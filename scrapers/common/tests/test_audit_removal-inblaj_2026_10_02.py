@@ -11,9 +11,13 @@ while that site's live ads answer 200 with their own listing:
     safera          9/9  pages 200 + «نظرة عامة»;      4/4 → 404
     alhumaidan      3/3  pages 200 + «تفاصيل العقار», all titled «تم الإيجار»/«تم البيع»; 4/4 → 404
     aqarnajran     14/14 posts 200 + the «البند / التفاصيل» table; 3/3 → 404
-    fahadalshahri  26/26 products 200 + <body class="… single-product …">; 3/3 → 404
+    fahadalshahri  26/26 products 200 + <body class="… single-product …"> + the product's own
+                   <div id="product-N" class="… instock …"> (outofstock: 0/26); 3/3 → 404
 Furniture found and NOT used: «غير متوفر» (all 26 fahadalshahri pages), is_purchasable=false (a live
 product with no price), «مؤجر» (a building sold with its tenants).
+A page that says something nobody measured — an out-of-stock product block, a title carrying
+«محجوز» / «مباع» / «تم التأجير» (0 of 24 inblaj pages) — reads UNKNOWN: never gone, and never
+'live', because a live verdict stamps the row verified-alive.
 
 THE RULE THESE TESTS PIN. A missing ad is only a candidate; it is hidden only when its own page
 says so and a known-live ad of the same run still reads live; nothing is pruned on a walk that
@@ -44,7 +48,9 @@ def _inblaj_page(title: str = "شقة للإيجار", block: str = "تفاصي�
 
 
 ANJ_PAGE = "<html><body><table><tr><th>البند</th><th>التفاصيل</th></tr></table></body></html>"
-FAS_PAGE = '<html><body class="rtl single single-product postid-1"><p>غير متوفر</p></body></html>'
+FAS_PAGE = ('<html><body class="rtl single single-product postid-1">'
+            '<div id="product-1" class="single-product-page product type-product instock">'
+            '<p>غير متوفر</p></div></body></html>')
 NOT_FOUND = '<html><body class="error404">الصفحة غير موجودة</body></html>'
 
 
@@ -69,9 +75,12 @@ def test_inblaj_anything_unclear_is_unknown_never_gone(slug, block):
     assert sig(200, _inblaj_page(block=block), True) is None      # landed on a different page
     for status in (301, 403, 429, 500, 503, None):
         assert sig(status, _inblaj_page("شقة تم البيع", block), False) is None, status
-    # words nobody measured on these tenants are not a verdict («مؤجر» describes a tenanted building)
-    for title in ("عمارة مؤجرة للبيع", "شقة محجوز", "أرض مباع", "شقة تم التأجير"):
-        assert sig(200, _inblaj_page(title, block), False) == "live", title
+    # «مؤجر» is measured furniture (a building sold with its tenants): still an offered ad
+    assert sig(200, _inblaj_page("عمارة مؤجرة للبيع", block), False) == "live"
+    # words nobody measured on these tenants are not a verdict either way: not gone, and not a
+    # certificate of life that would stamp the ad verified-alive
+    for title in ("شقة محجوز", "أرض مباع", "شقة تم التأجير"):
+        assert sig(200, _inblaj_page(title, block), False) is None, title
 
 
 def test_inblaj_a_tenant_nobody_measured_has_no_marker():
@@ -90,7 +99,12 @@ def test_aqarnajran_a_404_is_gone_and_a_post_that_renders_its_table_is_live():
 def test_fahadalshahri_a_404_is_gone_a_product_page_is_live_and_a_403_is_the_fingerprint():
     assert FAS._signal(404, NOT_FOUND, False) == "gone"
     assert FAS._signal(200, FAS_PAGE, False) == "live"      # «غير متوفر» is on every live page
-    assert FAS._signal(200, FAS_PAGE.replace("single-product", "single-product outofstock"), False) == "live"
+    # the product's OWN block decides: out of stock (unmeasured here) or no block at all is
+    # UNKNOWN — never gone, and never a certificate of life that would stamp it verified-alive
+    assert FAS._signal(200, FAS_PAGE.replace("type-product instock", "type-product outofstock"), False) is None
+    assert FAS._signal(200, FAS_PAGE.replace(' id="product-1"', ""), False) is None
+    assert FAS._signal(200, FAS_PAGE.replace("<p>", '<div class="product instock"><p>')
+                       .replace("type-product instock", "type-product outofstock"), False) is None  # a related card
     assert FAS._signal(200, '<html><body class="rtl">single-product</body></html>', False) is None
     assert FAS._signal(200, FAS_PAGE, True) is None
     for status in (403, 429, 503, None):

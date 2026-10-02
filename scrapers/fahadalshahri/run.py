@@ -210,14 +210,20 @@ INCOMPLETE: list[str] = []
 # There is no dead cohort to measure on: all 5 active rows were re-seen that day. What the product's
 # OWN url answers through the bare session: 26 of 26 catalogue products → 200 whose <body> carries
 # the «single-product» class; a slug that never existed, a real slug with a mangled tail and a wrong
-# ?p= id → 404 (3 of 3) with no such class. So a hard 404/410 is GONE, a 200 product page is LIVE,
-# and everything else — a 403 above all (the fingerprint, see the header) — is UNKNOWN.
+# ?p= id → 404 (3 of 3) with no such class. Each of the 26 pages carries exactly one
+# <div id="product-N" class="…"> — the product's own block — and its class list says «instock» on
+# 26 of 26, «outofstock» on 0. So a hard 404/410 is GONE, a 200 product page whose own block says
+# «instock» is LIVE, and everything else — a 403 above all (the fingerprint, see the header) — is
+# UNKNOWN.
 #
 # FURNITURE, not signals: «غير متوفر» is in the markup of all 26 live pages, and is_purchasable is
 # false on a live villa that simply prints no price. is_in_stock was true on 26 of 26, so what an
 # out-of-stock record means HERE is unmeasured: such a product is kept exactly as before and COUNTED
-# in the run notes, never guessed into "sold".
+# in the run notes, never guessed into "sold" — and its page is never certified LIVE either (a
+# 'live' verdict would stamp it verified-alive): it reads UNKNOWN, so it stays active, keeps its
+# strike and leaves an evidence row.
 _PRODUCT_PAGE_RE = re.compile(r'<body[^>]*class="[^"]*\bsingle-product\b')
+_PRODUCT_BLOCK_RE = re.compile(r'<div[^>]*\bid="product-\d+"[^>]*\bclass="([^"]*)"')
 RES_TABLE, COM_TABLE = "fahadalshahri_residential_listings", "fahadalshahri_commercial_listings"
 
 
@@ -225,9 +231,10 @@ def _signal(status, body, moved) -> Optional[str]:
     """'live' | 'gone' | None — only what this product's own URL affirmatively answers."""
     if status in (404, 410):
         return "gone"
-    if status != 200 or moved:
+    if status != 200 or moved or not _PRODUCT_PAGE_RE.search(body):
         return None
-    return "live" if _PRODUCT_PAGE_RE.search(body) else None
+    block = _PRODUCT_BLOCK_RE.search(body)
+    return "live" if block and "instock" in block.group(1).split() else None
 
 
 def _make_verify_gone(control: Optional[dict]):

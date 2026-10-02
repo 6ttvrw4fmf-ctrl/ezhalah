@@ -488,7 +488,8 @@ def skip_note(skipped: dict[str, int]) -> Optional[str]:
 _LIVE_MARKER = {"gudai": "تفاصيل العقار", "alhumaidan": "تفاصيل العقار", "safera": "نظرة عامة"}
 
 # Title words that MAY mean a closed ad but were on no page of any tenant on 2026-10-02, so nothing
-# is filtered on them: the ad is kept exactly as before and COUNTED in the run notes. («مؤجر» is
+# is filtered on them: the ad is kept exactly as before and COUNTED in the run notes, and the
+# prune-time oracle reads its page UNKNOWN — never gone, never verified-alive. («مؤجر» is
 # deliberately absent — alhumaidan's own «عمارة للبيع» describes a building sold WITH its tenants.)
 _UNMEASURED_STATUS_RE = re.compile(r"تم\s*الت[أا]جير|مباع|محجوز")
 
@@ -502,7 +503,11 @@ def _signal(status, body, moved, *, marker: str) -> Optional[str]:
     title = parse_title(body)
     if not title or marker not in visible_text(body):
         return None
-    return "gone" if _TRANSACTED_RE.search(title) else "live"
+    if _TRANSACTED_RE.search(title):
+        return "gone"
+    # An unmeasured status word is neither a removal nor a certificate of life: a 'live' verdict
+    # would stamp the ad verified-alive. UNKNOWN keeps it active, with its strike and an evidence row.
+    return None if _UNMEASURED_STATUS_RE.search(title) else "live"
 
 
 def _make_verify_gone(slug: str, control: Optional[dict], s: Optional[cc.Session] = None):
