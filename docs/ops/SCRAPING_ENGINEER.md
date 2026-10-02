@@ -111,7 +111,8 @@ These cost your first runs a lot of time. Use them instead of working them out a
 - **Some websites have no page per listing** (tamyaz links to its homepage plus a `#section`).
   Compare links without the part after `#`.
 - **Compare with the real ad, not just our copy.** The cloud can't open listing websites, so
-  dispatch `source-reread.yml` with `ids: table:id,…` and read its `source-reread` artifact. It shows
+  dispatch `source-reread.yml` with `ids: table:id,…` and read its job log with `get_job_logs` (the
+  artifact's download host is blocked from the cloud; the log prints the same comparison). It shows
   what the page itself says next to what we store.
 
 ## Your time: fixing comes first, not the clock (owner, 2026-10-02 — replaces the 1-hour budget of 2026-09-28)
