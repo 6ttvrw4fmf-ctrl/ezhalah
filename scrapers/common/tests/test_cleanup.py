@@ -1011,3 +1011,44 @@ def test_fleet_runs_every_enabled_site_without_its_own_workflow(monkeypatch):
     assert C.run_fleet(dry_run=True) == 2                  # one died, one aborted — both counted
     assert [p for p, _ in ran] == ["aqarcity", "jazwtn", "unregistered"]
     assert all(kw == {"dry_run": True} for _, kw in ran)   # never force: each site's policy decides
+
+
+def test_statement_timeout_on_a_delete_chunk_splits_and_finishes_it():
+    # aqar 2026-10-02: a 50-row delete hit 57014; 850 logged rows were left undeleted.
+    deleted, calls = [], []
+
+    class _D:
+        def __init__(self, ids): self.ids = ids
+        def execute(self):
+            calls.append(len(self.ids))
+            if len(self.ids) > 10:
+                raise Exception({"code": "57014", "message": "canceling statement due to statement timeout"})
+            deleted.extend(self.ids)
+
+    class _T:
+        def delete(self): return self
+        def in_(self, col, ids): return _D(ids)
+
+    class _Cl:
+        def table(self, t): return _T()
+
+    stats = {"deleted": 0}
+    C._delete_chunk(_Cl(), "aqar_residential_listings", list(range(50)), stats)
+    assert sorted(deleted) == list(range(50)) and stats["deleted"] == 50
+
+
+def test_any_other_delete_error_still_raises():
+    import pytest
+
+    class _T:
+        def delete(self): return self
+        def in_(self, col, ids): return self
+        def execute(self): raise Exception({"code": "42501", "message": "permission denied"})
+
+    class _Cl:
+        def table(self, t): return _T()
+
+    stats = {"deleted": 0}
+    with pytest.raises(Exception):
+        C._delete_chunk(_Cl(), "t", [1, 2, 3], stats)
+    assert stats["deleted"] == 0
