@@ -108,7 +108,7 @@ nufouth        | 2026-09-28 | daily direct check on (fleet_liveness, 2026-09-29)
 october        | 2026-09-28 | no per-listing oracle (CRAWL_PRESENCE_ONLY): nothing reads a listing's own page yet, so neither a daily direct check nor a deletion check is possible
 opensooq       | 2026-09-28 | no per-listing oracle (CRAWL_PRESENCE_ONLY): nothing reads a listing's own page yet, so neither a daily direct check nor a deletion check is possible
 qmra           | 2026-09-28 | daily direct check on (fleet_liveness); 30-day deletion not registered yet: its own oracle is not wired into cleanup.PLATFORMS and a 404-only check is unmeasured here
-rakez          | 2026-09-28 | daily direct check in shadow (fleet_liveness): its shadow run has not been read yet
+rakez          | 2026-10-02 | daily direct check in shadow (fleet_liveness): its oracle needed the crawl's project records, so every control read UNKNOWN from 2026-09-29; it reads them itself since 2026-10-02 and its next shadow run has not been read yet
 ramzalqasim    | 2026-09-28 | no per-listing oracle (CRAWL_PRESENCE_ONLY): nothing reads a listing's own page yet, so neither a daily direct check nor a deletion check is possible; hidden ads answer 200 (lifecycle-spot-check 2026-09-28), so a 404-only deletion check would revive dead ads
 rawaf          | 2026-09-28 | no per-listing oracle (CRAWL_PRESENCE_ONLY): nothing reads a listing's own page yet, so neither a daily direct check nor a deletion check is possible
 rawasidark     | 2026-09-28 | no per-listing oracle (CRAWL_PRESENCE_ONLY): nothing reads a listing's own page yet, so neither a daily direct check nor a deletion check is possible
@@ -123,8 +123,8 @@ sadiqeltajer   | 2026-09-28 | no per-listing oracle (CRAWL_PRESENCE_ONLY): nothi
 safa           | 2026-09-28 | daily direct check on (fleet_liveness); 30-day deletion not registered yet: its own oracle is not wired into cleanup.PLATFORMS and a 404-only check is unmeasured here
 safera         | 2026-09-28 | no per-listing oracle (CRAWL_PRESENCE_ONLY): nothing reads a listing's own page yet, so neither a daily direct check nor a deletion check is possible
 sakan          | 2026-09-28 | daily direct check in shadow (fleet_liveness): its shadow run has not been read yet
-sakani         | 2026-09-28 | daily direct check in shadow: its known-live controls answered 0/5 from GitHub Actions (2026-09-28)
-sanadak        | 2026-09-28 | daily direct check in shadow (fleet_liveness); a removed ad serves a 200 shell, so no 404-only deletion check
+sakani         | 2026-10-02 | daily direct check in shadow (fleet_liveness): controls right and ~270 of 287 read live daily, but a removed ad answers 403, which is never a death — it needs a measured removal signal before it can strike
+sanadak        | 2026-10-02 | daily direct check in shadow (fleet_liveness): the job called its oracle with no canary, so every removal was withheld; it supplies one since 2026-10-02 and its next shadow run has not been read yet; a removed ad serves a 200 shell, so no 404-only deletion check
 satel          | 2026-09-28 | no per-listing oracle (CRAWL_PRESENCE_ONLY): nothing reads a listing's own page yet, so neither a daily direct check nor a deletion check is possible
 senan          | 2026-09-28 | its oracle is built inside its crawl run (needs that run's state), so the daily direct job cannot call it yet; no deletion check registered
 shatri         | 2026-09-28 | its oracle is built inside its crawl run (needs that run's state), so the daily direct job cannot call it yet; no deletion check registered
@@ -144,7 +144,7 @@ tamyaz         | 2026-09-28 | daily direct check on (fleet_liveness); 30-day del
 tawia          | 2026-09-28 | no per-listing oracle (CRAWL_PRESENCE_ONLY): nothing reads a listing's own page yet, so neither a daily direct check nor a deletion check is possible
 therc          | 2026-09-28 | no per-listing oracle (CRAWL_PRESENCE_ONLY): nothing reads a listing's own page yet, so neither a daily direct check nor a deletion check is possible
 thousand       | 2026-09-28 | its oracle is built inside its crawl run (needs that run's state), so the daily direct job cannot call it yet; no deletion check registered
-tuba           | 2026-09-28 | daily direct check in shadow (fleet_liveness): its shadow run has not been read yet
+tuba           | 2026-10-02 | daily direct check on (fleet_liveness); 30-day deletion not registered yet: its own oracle is not wired into cleanup.PLATFORMS, and a removed ad keeps answering 200, so a 404-only deletion check would revive dead ads
 villassa       | 2026-09-28 | daily direct check on (fleet_liveness, 2026-09-29); 30-day deletion not registered yet: its own oracle is not wired into cleanup.PLATFORMS and a 404-only check is unmeasured here; its public page is a 200 SPA shell for any id, so a 404-only deletion check would revive dead ads
 vmksa          | 2026-09-28 | no per-listing oracle (CRAWL_PRESENCE_ONLY): nothing reads a listing's own page yet, so neither a daily direct check nor a deletion check is possible
 wadod          | 2026-09-28 | daily direct check on (fleet_liveness, 2026-09-29); 30-day deletion not registered yet: its own oracle is not wired into cleanup.PLATFORMS and a 404-only check is unmeasured here
