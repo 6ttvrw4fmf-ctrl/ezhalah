@@ -18,8 +18,10 @@ This job NEVER sets active=false on anything — recovery is strictly additive.
 
 WHAT IT REPORTS (2026-10-02). `checked` counts ONLY rows dealapp gave a fresh page for. A row the
 run ran out of time for (`not_reached`), was walled on (`wall`) or got no fresh copy of
-(`no_answer`) is counted under that name instead, and a run with hidden rows and checked=0 ends
-ok=false with a non-zero exit. Before this, run 57878 wrote «unknown=3548 of checked=3548»: its
+(`no_answer`: a stale copy, an error, a 403/429/401/5xx refusal, a 200 that is not dealapp's app)
+is counted under that name instead, and a run with hidden rows and checked=0 ends ok=false with a
+non-zero exit. An ad hidden in both tables is read once and brings back one row.
+Before this, run 57878 wrote «unknown=3548 of checked=3548»: its
 log shows about 945 rows rendered (100 every 11 minutes, the 9-a-minute pace, for 105 minutes) and
 the other ~2,600 "checked" in two seconds after the time was up, never asked at all. The 945 were
 the newest-hidden batch in id order; read again from a home IP, 11 of 11 of those rows that
@@ -157,10 +159,13 @@ def probe_verdict(session, row: dict) -> str:
     """One of OUTCOMES for one inactive row, read through the dealapp liveness oracle.
 
       live / sold   the oracle's ALIVE / DEAD.
-      unknown       a FRESH page that is neither: in practice dealapp's «no such ad» page, the one
-                    it renders for a made-up id (HTTP 200, 118,640 bytes, the home-page title).
+      unknown       a FRESH page dealapp's own app rendered (HTTP 200, its `ng-state` block) that
+                    is neither: in practice its «no such ad» page, the one it renders for a made-up
+                    id (118,640 bytes, the home-page title; 14 of 14 measured carried `ng-state`).
       wall          a fresh page, but the registration wall — about our quota, not about the ad.
-      no_answer     asked, and every cache key gave a stale CDN copy or an error.
+      no_answer     asked, and nothing came back that is about the ad: every cache key gave a stale
+                    CDN copy or an error, or the reply was a refusal (403 / 429 / 401 / 5xx) or an
+                    HTTP 200 that is not dealapp's app at all (an empty body, a block page).
       not_reached   the run's time was up; nothing was asked.
 
     WHY NOT fetch_one + _classify (until 2026-10-02). That path fetched the way the crawl does,
@@ -182,13 +187,17 @@ def probe_verdict(session, row: dict) -> str:
         return "live"
     if verdict == DEAD:
         return "sold"   # gone or sold: stays inactive either way
-    if status is None:
+    # Everything below is the oracle's UNKNOWN. It counts as checked ONLY when dealapp's own app
+    # rendered the page. A run blocked on every ad (403 on each) used to report «unknown=3 of
+    # checked=3» and finish green: a refusal is our access failing, not an answer about the ad.
+    if status != 200:
         return "no_answer"
-    if is_registration_wall(getattr(tap.last, "text", "") or ""):
+    body = getattr(tap.last, "text", "") or ""
+    if is_registration_wall(body):
         if not from_edge(tap.last):
             liveness_run._ORIGIN.back_off()   # a fresh wall: we out-ran the quota, sit out a window
         return "wall"
-    return "unknown"
+    return "unknown" if "ng-state" in body else "no_answer"
 
 
 def recover(tables: list[str], limit: int, workers: int) -> dict:
@@ -205,7 +214,25 @@ def recover(tables: list[str], limit: int, workers: int) -> dict:
     def listed(row: dict) -> bool:
         return liveness_run._adid(_url(row)) in sitemap
 
-    work = [(t, r) for t in tables for r in _inactive_rows(t, limit)]
+    # ONE ROW PER AD PER RUN. An ad hidden in BOTH tables is two of our rows on one source URL, so
+    # its page reading ALIVE would bring back two cards for one ad. `_protected` cannot see that:
+    # it asks whether the sibling is live NOW, and both lists are read before anything is written
+    # (when each table ran on its own, residential was written first and the commercial list then
+    # found its sibling live). So the first row in table order is read — residential — and the
+    # other is left alone: once the first is back, `_protected` finds its sibling live and keeps
+    # it hidden on every later run.
+    work, seen, twice = [], set(), 0
+    for t in tables:
+        for r in _inactive_rows(t, limit):
+            ad = liveness_run._adid(_url(r))
+            if ad and ad in seen:
+                twice += 1
+                continue
+            seen.add(ad)
+            work.append((t, r))
+    if twice:
+        print(f"   ⛔ {twice} row(s) not read: the same ad is hidden in an earlier table too, and "
+              f"one page cannot bring back two cards", flush=True)
     work.sort(key=lambda tr: tr[1].get("deactivated_at") or "", reverse=True)
     work.sort(key=lambda tr: not listed(tr[1]))   # stable: newest-hidden order kept inside each
     # ponytail: no rotation — UNKNOWN writes nothing, so a sitemap-absent row past the day's budget
@@ -213,7 +240,7 @@ def recover(tables: list[str], limit: int, workers: int) -> dict:
 
     stats = dict.fromkeys(("checked", "recovered") + OUTCOMES[1:], 0)
     stats.update(hidden=len(work), in_sitemap=sum(listed(r) for _t, r in work),
-                 sitemap_ids=len(sitemap))
+                 sitemap_ids=len(sitemap), same_ad_twice=twice)
     lock = threading.Lock()
     to_reactivate: dict[str, list[int]] = {}
     asked = 0

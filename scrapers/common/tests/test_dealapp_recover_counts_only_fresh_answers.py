@@ -32,10 +32,12 @@ STALE = {"x-cache": "Hit from cloudfront", "age": "184390"}     # a two-day-old 
 LISTING = '<title>ad</title><script id="real-estate-listing-schema-{}"></script>'
 NO_AD = '<title>home</title><script id="ng-state"></script>'    # what a made-up id renders
 WALL = "<title>صفحة التسجيل</title>"
+BLOCK = "<html>The request could not be satisfied</html>"       # an edge/API refusal, not dealapp's app
 
 
 class _Dealapp:
-    """dealapp, scripted per ad: whichever cache key is asked, that ad's page comes back."""
+    """dealapp, scripted per ad: whichever cache key is asked, that ad's page comes back.
+    pages[adid] = (body, headers) for an HTTP 200, or (body, headers, status)."""
 
     def __init__(self, pages):
         self.pages, self.asked = pages, []
@@ -43,8 +45,9 @@ class _Dealapp:
     def get(self, url, **_k):
         adid = liveness_run._adid(url)
         self.asked.append(adid)
-        text, headers = self.pages[adid]
-        return types.SimpleNamespace(status_code=200, text=text.format(adid), url=url, headers=headers)
+        text, headers, *status = self.pages[adid]
+        return types.SimpleNamespace(status_code=status[0] if status else 200, text=text.format(adid),
+                                     url=url, headers=headers)
 
 
 def _row(i, hidden_at="2026-10-02T11:30:46+00:00"):
@@ -102,10 +105,38 @@ def test_ads_dealapp_still_lists_are_read_first_then_newest_hidden(rig):
     assert (st["hidden"], st["in_sitemap"], st["checked"]) == (4, 2, 4)
 
 
+def test_one_blocked_reply_is_not_checked_and_one_real_page_is(rig):
+    store = {RES: [_row(1), _row(2), _row(3)]}
+    rig(store, {"1": (BLOCK, FRESH, 403), "2": (NO_AD, FRESH), "3": ("", FRESH)})
+    st = rec.recover_table(RES, 0, 1)
+    assert (st["checked"], st["unknown"], st["no_answer"]) == (1, 1, 2)
+    assert all(r["active"] is False for r in store[RES])
+
+
+def test_an_ad_hidden_in_both_tables_comes_back_as_one_card(rig):
+    """One source URL, two of our rows: its page reading ALIVE cannot prove both. Residential is
+    read first (as before the two tables became one worklist) and the other row stays hidden."""
+    twin = {**_row(9), "ad_number": "DA1", "listing_url": _row(1)["listing_url"]}
+    store = {RES: [_row(1)], COM: [twin, _row(2)]}
+    dealapp, _ = rig(store, {"1": (LISTING, FRESH), "2": (LISTING, FRESH)}, sitemap=frozenset({"1"}))
+    st = rec.recover([RES, COM], 0, 1)
+    assert [r["active"] for r in store[RES] + store[COM]] == [True, False, True]
+    assert st["recovered"] == 2 and st["same_ad_twice"] == 1
+    assert dealapp.asked.count("1") == 1, "the same page was read twice for one ad"
+    # The next run finds the residential row live, so the sibling guard keeps the twin hidden.
+    assert rec.recover([RES, COM], 0, 1)["recovered"] == 0 and store[COM][0]["active"] is False
+
+
 @pytest.mark.parametrize("pages, minutes, code, said", [
     ({}, "-1", 1, "not_reached=2"),                                       # out of time before any read
     ({"1": (WALL, FRESH), "2": (WALL, FRESH)}, "105", 1, "wall=2"),         # walled on every ad
     ({"1": (LISTING, STALE), "2": (LISTING, STALE)}, "105", 1, "no_answer=2"),   # only stale CDN copies
+    # Blocked on every ad: a fresh reply that is not dealapp's page says nothing about the ad.
+    ({"1": (BLOCK, FRESH, 403), "2": (BLOCK, FRESH, 403)}, "105", 1,
+     "unknown=0 of checked=0 | not checked: wall=0 no_answer=2"),
+    ({"1": (BLOCK, FRESH, 429), "2": (BLOCK, FRESH, 401)}, "105", 1, "no_answer=2"),
+    ({"1": (NO_AD, FRESH, 503), "2": (NO_AD, FRESH, 403)}, "105", 1, "no_answer=2"),   # the app, refusing
+    ({"1": ("", FRESH), "2": (BLOCK, FRESH)}, "105", 1, "no_answer=2"),     # HTTP 200, but not the app
     ({"1": (NO_AD, FRESH), "2": (NO_AD, FRESH)}, "105", 0, "unknown=2 of checked=2"),   # read, not there
 ])
 def test_a_run_with_no_fresh_page_fails_and_says_why(rig, monkeypatch, pages, minutes, code, said):

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+import types
 
 from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN
 
@@ -77,8 +78,14 @@ def _load(monkeypatch, store, verdicts):
 
     monkeypatch.setattr(rec, "sb", lambda: _C())
     monkeypatch.setattr(rec.liveness_run, "_session", lambda *a, **k: object())
-    monkeypatch.setattr(rec.liveness_run, "probe_listing",
-                        lambda s, url, budget=None: (verdicts[url], 200))
+
+    def probe_listing(s, url, budget=None):
+        # The page the oracle read: dealapp's own app rendered it (ng-state), with no listing in it.
+        # recover counts an UNKNOWN as "checked" only for such a page, never for a refusal.
+        s.last = types.SimpleNamespace(text='<script id="ng-state"></script>', headers={})
+        return verdicts[url], 200
+
+    monkeypatch.setattr(rec.liveness_run, "probe_listing", probe_listing)
     return rec
 
 
