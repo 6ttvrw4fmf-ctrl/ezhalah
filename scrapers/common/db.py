@@ -1491,6 +1491,7 @@ def end_run(
     floor: int = 0,
     degraded: bool = False,
     check_tables: Optional[list[str]] = None,
+    price_null_checked_by_caller: bool = False,
 ) -> bool:
     """Finalize a scrape_runs row. Returns the EFFECTIVE ok actually written.
 
@@ -1532,14 +1533,23 @@ def end_run(
                     what="scrape_runs.select_for_check",
                 ).data[0]
                 for tbl in check_tables:
+                    params = {
+                        "p_run_id": run_id,
+                        "p_platform": run_row["platform"],
+                        "p_table": tbl,
+                        "p_since": run_row["started_at"],
+                        "p_placeholder_tokens": list(PLACEHOLDER_TOKENS),
+                    }
+                    # The caller ran the null-price regression check on its OWN rows, telling a
+                    # source-published «no price» from a failed read (scrapers/aqar/price_tally.py),
+                    # so the database skips only its windowed version of that one check — which, on
+                    # a table 95 jobs write at once, judges a run on its neighbours' rows. Every
+                    # other check in the function still runs. Sent only when asked, so every other
+                    # scraper's call is unchanged.
+                    if price_null_checked_by_caller:
+                        params["p_skip_price_null"] = True
                     field_bad = _execute(
-                        sb().rpc("mon_check_run_field_ranges", {
-                            "p_run_id": run_id,
-                            "p_platform": run_row["platform"],
-                            "p_table": tbl,
-                            "p_since": run_row["started_at"],
-                            "p_placeholder_tokens": list(PLACEHOLDER_TOKENS),
-                        }),
+                        sb().rpc("mon_check_run_field_ranges", params),
                         what="mon_check_run_field_ranges",
                     ).data
                     if field_bad:
