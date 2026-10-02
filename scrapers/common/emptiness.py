@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Iterable, Optional
 
 # aqar.fm's own empty-state copy, rendered next to its search icon:
 #   «لا توجد نتائج / جرّب إزالة بعض الفلاتر أو تصفّح كل الفئات»
@@ -76,6 +76,8 @@ class SliceOutcome:
     #: distinct from "blocked" and from "empty": we reached the source fine, and it simply has no
     #: such city page. See discover()'s city-scope guard.
     city_filter_ignored: bool = False
+    #: the source's own ad count for the slice (aqar's numberOfItems), when the page publishes it.
+    source_items: Optional[int] = None
 
     def note_page(self, html: str, new_listings: int) -> None:
         self.pages_fetched += 1

@@ -5,7 +5,8 @@
 # per-site cap stops a broken checker from hiding in bulk. A site outside fleet_liveness.APPLY only
 # decides and reports (shadow) until its shadow run has been read.
 #
-# One matrix job per site: its own runner, its own 120-minute ceiling, its own pace. Triggered daily
+# One matrix job per site: its own runner, its own 350-minute ceiling (GitHub's limit is 360; the
+# reader stops itself at fleet_liveness.BUDGET_S), its own pace. Triggered daily
 # by pg_cron (job gh-fleet-liveness, migration 20260928212952). pg_cron dispatches with NO inputs,
 # so shadow MUST default to "false"; sites outside APPLY stay shadow regardless.
 name: Fleet liveness (small sites)
@@ -49,7 +50,7 @@ jobs:
     needs: plan
     name: Liveness ${{ matrix.site }}
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 350
     strategy:
       fail-fast: false
       max-parallel: 8

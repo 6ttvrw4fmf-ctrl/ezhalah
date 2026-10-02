@@ -526,6 +526,30 @@ _probe = http_liveness.LivenessProbe(
 )
 
 
+def held_strikes(rows: list[dict]) -> dict[str, tuple[int, bool]]:
+    """Feed rows whose OWN PAGE is under strike and still does not answer live: {ad: (strikes, active)}.
+
+    Gathern's search feed keeps serving some units whose gathern.co page is 404 (2026-10-02: 30 of 30
+    units the sweep read 404 were 404 from a home connection too, clustered in a few buildings). The
+    crawl's upsert used to reset every feed row to active / 0 strikes, so a unit hidden after three
+    page 404s was back in search at the next crawl, every day. Now a struck row is re-read here: its
+    page answers live → it is dropped from this map and the normal upsert revives it; anything else →
+    it keeps its strikes and its hidden state, and only the page check can clear them."""
+    held: dict[str, tuple[int, bool]] = {}
+    for i in range(0, len(rows), 200):
+        ads = [r["ad_number"] for r in rows[i:i + 200]]
+        res = (db.sb().table("gathern_residential_listings").select("ad_number, missing_count, active")
+               .in_("ad_number", ads).gt("missing_count", 0).execute())
+        for x in (res.data if res else None) or []:
+            held[x["ad_number"]] = (int(x["missing_count"]), bool(x["active"]))
+    url = {r["ad_number"]: r.get("listing_url") or "" for r in rows}
+    for ad in list(held):
+        status, body, _ = _probe.fetch(url[ad])
+        if body and _oracle_signal(status, body, False) == "live":
+            del held[ad]
+    return held
+
+
 def fetch_detail(s: cc.Session, listing_url: str) -> dict:
     """Fetch a Gathern unit's detail page → {description, suitability} (VERBATIM source text, phones
     redacted per PDPL). Returns {} on 404/block/parse-fail — never raises, never fabricates."""
@@ -1187,8 +1211,11 @@ def main() -> int:
     run_id = None if args.limit else db.begin_run("gathern")
     try:
         if rows:
+            held = held_strikes(rows)
+            if held:
+                print(f"  {len(held)} feed unit(s) stay under their page strikes (page not live)", flush=True)
             for i in range(0, len(rows), 200):
-                db.upsert_gathern_residential_batch(rows[i:i + 200])
+                db.upsert_gathern_residential_batch(rows[i:i + 200], strikes=held)
 
         # ── validation run (--limit): upsert first N, NO prune, print samples ──
         if args.limit:

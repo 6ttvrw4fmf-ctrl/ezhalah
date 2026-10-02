@@ -13,6 +13,8 @@ PER SITE, EVERY RUN (one matrix job per site, its own run label fleet_liveness:<
      active set it covered, so a site too big for aqar's window is visible, never quietly partial.
      A row its own crawl proved alive DIRECTLY in the last FRESH_HOURS, with no strike, is covered
      already and not read twice.
+     Live stamps and "we looked" are written every FLUSH reads, so a job that is cancelled or cut
+     short keeps what it read and the next run starts where it stopped.
   2. Opening controls: MIN_CANARIES ads its crawl saw most recently must come back 'live' through the
      site's own oracle, or the site is skipped this run (liveness_trust.canary_environment_ok).
   3. Each ad is read by THE SITE'S OWN measured oracle — the same `verify_gone` its scraper hands
@@ -24,6 +26,13 @@ PER SITE, EVERY RUN (one matrix job per site, its own run label fleet_liveness:<
      hide is written (ALIVE stamps stand: a block cannot fabricate a live page, §5.4).
   5. Every hide first writes its evidence row (ops_stale_inactivation_probe, verdict GONE, the
      oracle's own reason) so mon_detect_prune_kill_without_source_verdict can account for it.
+
+RECHECK (--struck-only, fleet-liveness-recheck.yml, 12 hours after each daily run). An ad the source
+removed needs three 'gone' readings; read once a day that is three days on our site. The recheck
+re-reads ONLY the rows already carrying a strike, each no sooner than REPROBE_MIN_HOURS after its
+last reading (gathern's rule: three separate checks, never back-to-back), under the same controls
+and cap — daily, recheck, daily: a removed ad is hidden 24 hours after its first 'gone', and a
+strike that was a blip is cleared the same day. A site with no struck row is not touched.
 
 SHADOW FIRST. A site outside APPLY decides everything and writes nothing (LIFECYCLE_ENGINEER.md,
 protection 2). A site joins APPLY only after its shadow run was read: controls right, would-hides
@@ -57,13 +66,13 @@ SITES: dict[str, str] = {
     **{p: f"scrapers.{p}.run:_verify_gone" for p in (
         "akariyoun", "aljassim", "almotmkenah", "alshawaf", "aqaralsaudia", "aqargate", "bossbih",
         "daryusuf", "eaqartabuk", "ebriza", "eilmalriyada", "hasaad", "moftah", "nufouth", "raghdan",
-        "rakez", "sakani", "sanadak", "snam", "suwar")},
+        "sakani", "snam", "suwar")},
     **{p: f"scrapers.{p}.run:verify_gone" for p in ("wadod",)},
     **{p: f"scrapers.{p}.run:_make_verify_gone()" for p in (
         "abaad", "albdah", "alsaedan", "azure", "dwelleo", "ego", "expattrusted", "flow",
         "gomenassat", "hazim", "ialqarawi", "ibaax", "justsa", "livingcompound", "marksa",
-        "muhaysini", "nofodh", "qmra", "razre", "reinvest", "remaxsa", "rightcompound", "safa",
-        "sakan", "sodasyat", "sokok", "sukna", "tamyaz", "tuba", "villassa")},
+        "muhaysini", "nofodh", "qmra", "rakez", "razre", "reinvest", "remaxsa", "rightcompound", "safa",
+        "sakan", "sanadak", "sodasyat", "sokok", "sukna", "tamyaz", "tuba", "villassa")},
 }
 
 # NOT here, and why (shadow run 36490769167, 2026-09-28): mizlaj, nowaisiry, eastabha and muktamel —
@@ -76,15 +85,23 @@ SITES: dict[str, str] = {
 APPLY: frozenset[str] = frozenset(FLEET_DAILY_DIRECT)
 
 PACE_S = 1.0            # one read a second per site
-BUDGET_S = 95 * 60      # per site per run, inside the job's 120-minute ceiling
+# Per site per run, inside the job's 350-minute ceiling. It was 95 minutes: dwelleo (11,137 ads at
+# ~1.6 s a read) covered 30% a day and nofodh 57%, so neither could ever meet its 48 h window.
+BUDGET_S = 320 * 60
+FLUSH = 200             # reads between writes of what is already known (live stamps, "we looked")
 CONTROL_HOURS = 48
 # A row its own crawl already read DIRECTLY within FRESH_HOURS (last_verified_alive_at — only the
 # liveness contract writes it) and that carries no strike was checked today: reading it again adds
 # requests, not evidence («cheapest proof first», LIFECYCLE_ENGINEER.md). It counts as covered, so a
 # big site whose crawl opens every ad (dwelleo: 11k detail records a day) is read only where the
 # crawl did not reach — struck rows, and rows it has not proven alive since yesterday.
-FRESH_HOURS = 24
+# 12, not 24 (2026-10-02 merge): this job runs daily and stamps what it reads, so a 24 h window let
+# a row it stamped yesterday skip today's read: a removed ad would then be found a day late and the
+# row's proof would reach the 48 h edge. Only tonight's crawl proof (crawls run before 07:17 UTC)
+# counts; the daily read still reaches every other row.
+FRESH_HOURS = 12
 KILL_FLOOR, KILL_FRAC = 3, 0.10
+REPROBE_MIN_HOURS = 6   # a struck row's next reading waits at least this long (gathern/liveness.py)
 PAGE = 1000             # PostgREST's max rows per request
 _VERDICT = {"gone": DEAD, "live": ALIVE}
 
@@ -122,6 +139,12 @@ def tables_for(client, site: str) -> dict[str, int]:
     return out
 
 
+def struck(client, site: str) -> int:
+    """How many of the site's active rows carry a strike — what a recheck has to read."""
+    return sum(client.table(t).select("id", count="exact").eq("active", True).gt("missing_count", 0)
+               .limit(1).execute().count or 0 for t in tables_for(client, site))
+
+
 def _rows(client, table: str, cols: str, *, order: list[tuple[str, bool]], limit: int, since=None) -> list[dict]:
     out: list[dict] = []
     while len(out) < limit:
@@ -144,6 +167,18 @@ def controls(client, tables) -> list[dict]:
     for t in tables:
         ctl += _rows(client, t, "ad_number, listing_url, last_seen_at", order=[("last_seen_at", True)],
                      limit=MIN_CANARIES, since=since)
+    if len(ctl) < MIN_CANARIES:
+        # The site's crawl has not seen MIN_CANARIES ads in CONTROL_HOURS (its crawl is failing —
+        # dwelleo and muhaysini, 2026-09-29..10-02). Without this the run had 0/0 controls,
+        # quarantined itself, and its whole active set went unchecked for days while the job read
+        # green. Fall back to the ads the crawl saw MOST recently, however long ago. Still crawl
+        # evidence, never last_verified_alive_at (that pool is self-referential); a stale control
+        # that is really gone only fails the gate, so this can quarantine more runs, never fewer.
+        have = {r["ad_number"] for r in ctl}
+        for t in tables:
+            ctl += [r for r in _rows(client, t, "ad_number, listing_url, last_seen_at",
+                                     order=[("last_seen_at", True)], limit=MIN_CANARIES)
+                    if r["ad_number"] not in have]
     return sorted(ctl, key=lambda r: r.get("last_seen_at") or "", reverse=True)[:MIN_CANARIES]
 
 
@@ -168,10 +203,12 @@ def _update(client, table: str, ids: list, patch: dict) -> None:
         client.table(table).update(patch).in_("id", ids[i:i + 200]).execute()
 
 
-def run_site(site: str, *, shadow: bool) -> dict:
+def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
     spec = SITES[site]
     shadow = shadow or site not in APPLY
     client = sb()
+    if struck_only and not struck(client, site):
+        return {"site": site, "skipped": "no struck row"}
     policy = policy_for(site)
     now = datetime.now(timezone.utc).isoformat()
     started = time.monotonic()
@@ -197,7 +234,29 @@ def run_site(site: str, *, shadow: bool) -> dict:
             st["fresh"] = sum(_fresh(r, since) for r in work)
             work = [r for r in work if not _fresh(r, since)]
             work.sort(key=lambda r: (-(r.get("missing_count") or 0), r.get("last_liveness_probe_at") or ""))
+            if struck_only:
+                rested = (datetime.now(timezone.utc) - timedelta(hours=REPROBE_MIN_HOURS)).isoformat()
+                work = [r for r in work if (r.get("missing_count") or 0) > 0
+                        and (r.get("last_liveness_probe_at") or "") < rested]
             alive, looked, dead_side = [], [], []
+
+            def flush() -> None:
+                # A live answer and "we looked" need no closing control (a block cannot fabricate a
+                # live page, §5.4), so they are written as the run goes: on 2026-10-02 six jobs were
+                # cancelled mid-run and every read they had made (dwelleo: 37 minutes) was lost.
+                if shadow:
+                    return
+                for t in tables:
+                    ids = [r["id"] for r, _ in alive if r["_table"] == t]
+                    if ids:
+                        stamp = verification_patch(alive[0][1], now_iso=now)
+                        _update(client, t, ids, {"missing_count": 0, "last_liveness_probe_at": now, **stamp})
+                    _update(client, t, [r["id"] for r in looked if r["_table"] == t],
+                            {"last_liveness_probe_at": now})
+                st["verified"] += len(alive)
+                alive.clear()
+                looked.clear()
+
             for r in work:
                 if time.monotonic() - started > BUDGET_S:
                     break
@@ -212,8 +271,11 @@ def run_site(site: str, *, shadow: bool) -> dict:
                     dead_side.append((r, d, why))
                 else:
                     looked.append(r)
-            done = st["probed"] + st["fresh"]
-            st["covered"] = round(100.0 * done / st["active"], 1) if st["active"] else 100.0
+                if len(alive) + len(looked) >= FLUSH:
+                    flush()
+            due = len(work) if struck_only else st["active"]
+            done = st["probed"] + (0 if struck_only else st["fresh"])
+            st["covered"] = round(100.0 * done / due, 1) if due else 100.0
             kills = [x for x in dead_side if x[1].action == "deactivate"]
             st["would_hide"] = [f"{r['_table']}:{r['id']} {r.get('listing_url')} — {why}" for r, _, why in kills]
             ok, why = controls_ok(ctl, oracle)
@@ -221,20 +283,16 @@ def run_site(site: str, *, shadow: bool) -> dict:
                 st["quarantined"] = f"closing {why}: no strike or hide written"
             elif len(kills) > kill_cap(st["active"]):
                 st["quarantined"] = f"{len(kills)} hides > cap {kill_cap(st['active'])}: no strike or hide written"
+            if st["quarantined"]:
+                looked += [r for r, _, _ in dead_side]
+            flush()
             if not shadow:
-                for t in tables:
-                    ids = [r["id"] for r, _ in alive if r["_table"] == t]
-                    if ids:
-                        stamp = verification_patch(alive[0][1], now_iso=now)
-                        _update(client, t, ids, {"missing_count": 0, "last_liveness_probe_at": now, **stamp})
-                    looked_ids = [r["id"] for r in looked if r["_table"] == t]
-                    if st["quarantined"]:
-                        looked_ids += [r["id"] for r, _, _ in dead_side if r["_table"] == t]
-                    _update(client, t, looked_ids, {"last_liveness_probe_at": now})
-                st["verified"] = len(alive)
                 if not st["quarantined"]:
+                    # Stamped when the run ENDS, never earlier than the read: REPROBE_MIN_HOURS
+                    # then holds even for a site whose run lasted hours.
+                    done = datetime.now(timezone.utc).isoformat()
                     for r, d, why in dead_side:
-                        patch = {"missing_count": d.strikes, "last_liveness_probe_at": now}
+                        patch = {"missing_count": d.strikes, "last_liveness_probe_at": done}
                         if d.action == "deactivate":
                             client.table("ops_stale_inactivation_probe").insert({
                                 "source_table": r["_table"], "listing_id": r["id"], "ad_number": r["ad_number"],
@@ -245,7 +303,7 @@ def run_site(site: str, *, shadow: bool) -> dict:
                         else:
                             st["struck"] += 1
                         client.table(r["_table"]).update(patch).eq("id", r["id"]).execute()
-        note = (f"{'SHADOW' if shadow else 'APPLY'} active={st['active']} probed={st['probed']} "
+        note = (f"{'SHADOW' if shadow else 'APPLY'}{' RECHECK' if struck_only else ''} active={st['active']} probed={st['probed']} "
                 f"covered={st['covered']}% fresh={st['fresh']} alive={st[ALIVE]} dead={st[DEAD]} unknown={st[UNKNOWN]} "
                 f"verified={st['verified']} struck={st['struck']} hidden={st['hidden']} "
                 f"would_hide={len(st['would_hide'])}"
@@ -265,6 +323,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Daily DIRECT liveness for every site with a measured oracle")
     ap.add_argument("--site", action="append", choices=sorted(SITES), help="default: every site")
     ap.add_argument("--shadow", action="store_true", help="decide and report, write nothing")
+    ap.add_argument("--struck-only", action="store_true",
+                    help="re-read only the rows already carrying a strike (the recheck between daily runs)")
     ap.add_argument("--plan", nargs="?", const="", default=None, metavar="SITE",
                     help="write the matrix (SITE, or every site) as sites=<json> to $GITHUB_OUTPUT and exit")
     a = ap.parse_args()
@@ -278,7 +338,7 @@ def main() -> int:
     failed = 0
     for site in a.site or sorted(SITES):
         try:
-            run_site(site, shadow=a.shadow)
+            run_site(site, shadow=a.shadow, struck_only=a.struck_only)
         except Exception as e:  # noqa: BLE001 — one site failing never stops the rest
             print(f"✗ {site}: {e}", flush=True)
             failed += 1

@@ -525,6 +525,45 @@ def _verify_gone(ad_number: str, en_projects: dict[int, dict],
     return "unknown", f"REST {r.status_code}"
 
 
+class _LazyBridge(dict):
+    """project id → its Arabic record, bridged the first time a unit asks. The crawl bridges every
+    project its units reference up front; the daily direct check only meets the projects of the rows
+    it reads."""
+
+    def __init__(self, s: cc.Session, ar_projects: dict[int, dict]):
+        super().__init__()
+        self._s, self._ar = s, ar_projects
+
+    def get(self, en_id, default=None):
+        if en_id not in self:
+            ar_id = arabic_project_id(self._s, en_id)
+            self[en_id] = self._ar.get(ar_id) if ar_id else None
+        return self[en_id]
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for a caller with no crawl of its own (the daily direct check,
+    scrapers/common/fleet_liveness.py). Since `_verify_gone` judges a unit by its project's terms it
+    needs the project records; called with the ad number alone it raised, so every control read
+    UNKNOWN and the site went unchecked from 2026-09-29. The records are read on the first call (never
+    at import or construction), and if they cannot be read whole every answer is UNKNOWN."""
+    state: dict = {}
+
+    def verify(ad_number: str) -> tuple[str, str]:
+        if not state:
+            s = session()
+            INCOMPLETE.clear()
+            en, ar = fetch_projects(s), fetch_projects(s, lang="ar")
+            state["why"] = (f"project records unreadable ({'; '.join(INCOMPLETE) or 'none returned'})"
+                            if INCOMPLETE or not en or not ar else "")
+            state["en"], state["bridge"] = en, _LazyBridge(s, ar)
+        if state["why"]:
+            return "unknown", state["why"]
+        return _verify_gone(ad_number, state["en"], state["bridge"])
+
+    return verify
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--limit-test", type=int, default=0,
