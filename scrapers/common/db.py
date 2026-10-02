@@ -22,7 +22,7 @@ from typing import Any, Callable, Optional
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
-from scrapers.common.liveness_contract import direct_alive_patch
+from scrapers.common.liveness_contract import LivenessPolicy, direct_alive_patch, presence_patch
 from scrapers.common.pii import is_free_text, redact_capture, redact_pii
 from scrapers.common.placeholder_tokens import PLACEHOLDER_TOKENS, is_placeholder
 
@@ -864,7 +864,8 @@ def _apply_direct_alive(r: dict[str, Any], *, now_iso: str, table: str) -> None:
 
 
 def _wasalt_batch(table: str, rows: list[dict[str, Any]],
-                  strikes: Optional[dict[str, tuple[int, bool]]] = None) -> None:
+                  strikes: Optional[dict[str, tuple[int, bool]]] = None,
+                  presence: Optional[LivenessPolicy] = None) -> None:
     if not rows:
         return
     now = datetime.now(timezone.utc).isoformat()
@@ -897,6 +898,10 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]],
         # after the marker was set, and the stamp must be judged against the row's FINAL state.
         # Also strips the transient key, which must never reach PostgREST.
         _apply_direct_alive(r, now_iso=now, table=table)
+        if presence is not None and r.get("active") is True:
+            # Being served by the source's own feed is proof of life ONLY for a platform whose
+            # registered policy declares it (presence_patch returns {} for every other policy).
+            r.update(presence_patch(presence, now_iso=now))
         seen[r["ad_number"]] = r
     # SOURCE IS TRUTH across a BATCH, not just a row (owner rule 2026-08-09, see
     # `_unknown_must_not_overwrite_known`). That guard drops a None/unread key from each row so a
@@ -917,15 +922,21 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]],
         _execute(sb().table(table).upsert(grp, on_conflict="ad_number"), what=table)
 
 
+def _wasalt_policy() -> LivenessPolicy:
+    """Wasalt's registered policy (imported lazily: the registry is not needed to import db)."""
+    from scrapers.common.liveness_policies import POLICIES
+    return POLICIES["wasalt"]["policy"]
+
+
 def upsert_wasalt_residential_batch(rows: list[dict[str, Any]]) -> None:
     """Upsert a WHOLE PAGE of Wasalt residential rows in one request — ~32× fewer round-trips than
     row-by-row, the single biggest speedup for the Wasalt scrape."""
-    _wasalt_batch("wasalt_residential_listings", rows)
+    _wasalt_batch("wasalt_residential_listings", rows, presence=_wasalt_policy())
 
 
 def upsert_wasalt_commercial_batch(rows: list[dict[str, Any]]) -> None:
     """Same batched upsert pattern, into the separate Wasalt commercial table."""
-    _wasalt_batch("wasalt_commercial_listings", rows)
+    _wasalt_batch("wasalt_commercial_listings", rows, presence=_wasalt_policy())
 
 
 def _ad_shard(ad_number: Optional[str], shards: int) -> Optional[int]:
