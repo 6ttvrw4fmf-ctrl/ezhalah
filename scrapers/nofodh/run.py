@@ -946,6 +946,9 @@ def crawl(s: cc.Session, ids: list[str], workers: int = 3,
                 if detail and len(examples.setdefault(key, [])) < 5:
                     examples[key].append(f"{PREFIX}{listing_id}: {detail}")
                 continue
+            # A row exists only when THIS listing's own page printed «للبيع»/«للإيجار» — the oracle's
+            # exact "live" read of the same URL, so the daily direct check need not repeat it.
+            db.mark_direct_alive(row, oracle="nofodh.listing_page.status_open")
             (com if cat == "commercial" else res).append(row)
     for key, shown in sorted(examples.items()):
         print(f"  {key} e.g. " + "; ".join(shown))
