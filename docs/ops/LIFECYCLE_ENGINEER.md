@@ -195,6 +195,38 @@ Recompute every Sunday, and the day a website is added:
 - **A website that can't reach Aqar's level** (rate limits, blocking) is named in the report with
   the number it does reach and the blocker. Never settle for less quietly.
 
+### A removed ad leaves us in a day, not three (owner, 2026-10-02)
+> «Whenever someone on those websites removes a listing, it gets removed from ours and is not shown.»
+
+- **The daily run** (`fleet-liveness.yml`, 07:17 UTC) opens every live ad of every site in
+  `fleet_liveness.SITES`. Since 2026-10-02 it saves live stamps as it goes (every 200 reads) and
+  each site may read for 320 minutes, so a cancelled job keeps its work and the big sites (dwelleo
+  11k, muhaysini, nofodh, tuba) finish inside their 48 h window. Before that a site stopped at 95
+  minutes and a cancelled job lost everything it had read.
+- **The recheck** (`fleet-liveness-recheck.yml`, 19:17 UTC, pg_cron job
+  `gh-fleet-liveness-recheck`) opens only the ads that already carry a strike, at least 6 hours
+  after their last reading. Same controls, same cap, same three "gone" readings (daily, recheck,
+  daily): an ad its site removed is hidden 24 hours after its first "gone" instead of 3 days, and a
+  strike that was a blip is cleared the same day. Its run notes start with `APPLY RECHECK`.
+- **Prove it every night:** yesterday's recheck ran (`scrape_runs` rows noted `RECHECK`, or no row
+  for a site where no ad carried a strike), no fleet site holds an active row with strikes older than 36
+  hours, and the daily run's `covered=` is 100% for every site (a site below 100% two days running
+  is a bug you fix that night: its pace, its oracle or its crawl).
+- **Sites the daily job still cannot call** are your backlog, biggest first: rakez (its oracle needs
+  three arguments since PR #5209, so every control reads UNKNOWN), sakan (its site answers the
+  checker with unreadable pages since 2026-09-30), hajer (108 of 121 pages carry no badge, so they
+  read UNKNOWN), aqaralsaudia (no control answers), and the complete-feed sites in
+  `scrapers/absence-only-prune.txt` that have a listing page but no oracle yet.
+
+### What the owner hears from you (owner, 2026-10-02)
+> «The lifecycle should report any issues, fix it, and give me an overall report … it should never
+> tell me "there is an issue" or "something happened".»
+
+A problem you found is your work for that same run, never a message to the owner. The report says
+what was wrong **and that it is fixed**, with the proof. "Not good … not fixed yet" is allowed only
+for something that truly did not fit in the run, and then it is the first thing you do the next
+night. The owner is asked only for what is his: money, legal, a secret.
+
 ### Gathern's hiding is slow on purpose; don't mistake it for broken
 - A dead Gathern ad needs **3 dead readings at least 6 hours apart** (`REPROBE_MIN_HOURS`), so it is
   hidden about 12 hours after its first strike, never sooner.
