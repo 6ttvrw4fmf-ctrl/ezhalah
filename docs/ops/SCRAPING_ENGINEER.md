@@ -99,7 +99,7 @@ These cost your first runs a lot of time. Use them instead of working them out a
 ## Testing on the live site (what your first runs learned)
 - **Save your browser test in the repo and reuse it.** The first time, commit it in your PR in the
   folder described by `e2e/engineers/README.md` (e.g. as full-chain.mjs). Every run after that uses it
-  instead of building a new one, because rebuilding it each night eats your hour.
+  instead of building a new one, because rebuilding it each night wastes the run.
 - **Buy/Rent chips start on Buy.** For rent only, tap «إيجار», then tap «شراء» to turn Buy off.
   Commercial listings need the «تجاري» chip, then the right group.
 - **A rental with no stated period never shows in rent searches** (owner rule). Pick test listings
@@ -111,24 +111,30 @@ These cost your first runs a lot of time. Use them instead of working them out a
 - **Some websites have no page per listing** (tamyaz links to its homepage plus a `#section`).
   Compare links without the part after `#`.
 - **Compare with the real ad, not just our copy.** The cloud can't open listing websites, so
-  dispatch `source-reread.yml` with `ids: table:id,…` and read its `source-reread` artifact. It shows
+  dispatch `source-reread.yml` with `ids: table:id,…` and read its job log with `get_job_logs` (the
+  artifact's download host is blocked from the cloud; the log prints the same comparison). It shows
   what the page itself says next to what we store.
 
-## Your time budget: about 1 hour (owner, 2026-09-28: «it's so many tokens»)
-- **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Stop at about 60
-  minutes. Whatever didn't fit goes into "To reach 10/10" and is the first thing tomorrow.
-- **A quiet night is a short run.** If nothing is broken, do the required checks, write the report
-  and stop. Don't go exploring.
-- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 45 minutes.
-- **The budget wins over the 9/10 floor.** If 9 isn't reachable inside the hour, stop anyway. Your
-  first line says why, what's left, and when it will be done. Stopping at the budget never lowers
-  your rating; skipping a step you had time for does.
+## Your time: fixing comes first, not the clock (owner, 2026-10-02 — replaces the 1-hour budget of 2026-09-28)
+The owner, 2026-10-02: «I don't care if you take 3 hours. Just fix it.» On 2026-10-02 the 1-hour
+budget let manzo go unfixed «for tomorrow» even though the fix was small. That is not allowed any more.
+- **Every broken site gets fixed in the same run, however long it takes**, unless one of the
+  legitimate blockers applies: another run holds the site's lock, the cause is at the source (down on
+  their side), it needs the owner, or you have used the 3 tries for that site. "Out of time" is never
+  a reason to leave a fixable site broken.
+- **Work in this order:** 1) anything broken, 2) anything new, 3) the required checks.
+- **Still don't waste tokens.** A quiet night is a short run: if nothing is broken, do the required
+  checks, write the report and stop. Don't go exploring and don't rebuild tools that already exist.
+  The time goes to fixing, not to extras.
+- **Waiting for a crawl is allowed.** If a fix needs a re-crawl to prove it, wait for it and then do
+  the full chain in the same run. Only a crawl that takes hours longer (e.g. dwelleo's ~4 h walk) may
+  be left for tomorrow's first check, and the report says so.
 
 ## You find it, you fix it (owner, 2026-09-28)
-If you find a real bug outside your own area and you can fix it safely inside your hour, **fix it
+If you find a real bug outside your own area and you can fix it safely, **fix it
 yourself** with your normal safety rules (the site's lock, a test that fails without the fix, a safe
 merge, and undo if anything gets worse). Never open a new chat or task for it. Put it in the report
-only if it truly needs the owner, or doesn't fit in your hour (then it's first tomorrow). Never undo
+only if it truly needs the owner. Never undo
 or rewrite another engineer's work, and never start a big change in another engineer's area.
 
 ## Hard rules (never break these)
@@ -233,6 +239,17 @@ or rewrite another engineer's work, and never start a big change in another engi
 - Old values frozen while the row count looks fine = the scraper broke silently. Check fresh values,
   not just counts.
 - The database sync does nothing without its lock. Check what it returns; never assume it ran.
+- One failed page must not throw a whole crawl away. dwelleo lost four nights in a row to a single
+  HTTP 500 on one of ~650 pages (2026-09-29 to 10-02): retry the page at the end, and if it still
+  fails mark the crawl incomplete (no prune) and keep the rest.
+- "Sitemap returned no urls" usually means the site changed its layout, not that it is empty
+  (compoundin moved to a sitemap index and new addresses on 2026-10-02). Open the sitemap first.
+- A crawl that suddenly hits its time limit may just have more to read (muhaysini's catalogue went
+  from ~3,260 to 7,470 ads). Compare the catalogue size before blaming the site.
+- A failed crawl also blinds the Lifecycle Engineer: with no fresh ads to use as controls, that
+  site's daily check reads nothing. A crawl failing two nights running is urgent for both of you.
+- "The source reports more than we hold" is not yet a gap. Open the extra ads' own pages first:
+  Gathern's extra units were app-only pages that answer 404 on the website (2026-09-28).
 
 ## Rating (must be earned)
 - **10/10** = every active site passed the searchable check; every site fixed, restored or new tonight

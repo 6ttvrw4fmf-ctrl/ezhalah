@@ -139,6 +139,12 @@ UNFLAGGED_SHARE = 0.2
 # A flagged row's next reading waits at least this long, so its three strikes are three separate
 # checks spread over ~16h (runs every 4h -> T, T+8h, T+16h), never three back-to-back runs.
 REPROBE_MIN_HOURS = 6
+# An UNFLAGGED row is read again at most once per this many hours. With the schedule probing every
+# active row (min_stale_days 0, owner 2026-10-02: «fix gathern daily checks» — every site on Aqar's
+# lifecycle standard), this is what makes the rotation a DAILY direct check of each listing instead
+# of re-reading the same few thousand rows every hour: it keeps every row inside the 48h window
+# Aqar meets, and spares Gathern's tight global detail-page budget.
+DAILY_REPROBE_HOURS = 20
 
 
 def is_spike(kill_count: int, baseline: Optional[int], factor: float = DRAIN_SPIKE_FACTOR) -> bool:
@@ -443,7 +449,7 @@ def _collect_stale(client, cutoff_iso: str, limit: int) -> list[dict]:
     missing_count then oldest reading first, each no sooner than REPROBE_MIN_HOURS after its last
     reading; UNFLAGGED_SHARE of the run is kept for the rotation (compose_worklist).
     """
-    base = lambda: (client.table(TABLE).select("id, ad_number, listing_url, missing_count")  # noqa: E731
+    base = lambda: (client.table(TABLE).select("id, ad_number, listing_url, missing_count, last_liveness_probe_at")  # noqa: E731
                     .eq("source", SOURCE).eq("active", True).lt("last_seen_at", cutoff_iso))
     reprobe_before = (datetime.now(timezone.utc)
                       - timedelta(hours=REPROBE_MIN_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -455,7 +461,21 @@ def _collect_stale(client, cutoff_iso: str, limit: int) -> list[dict]:
     unflagged = _paged(lambda: base().or_("missing_count.is.null,missing_count.lte.0")
                        .order("last_liveness_probe_at", desc=False, nullsfirst=True)
                        .order("last_seen_at", desc=False).order("id", desc=False), limit)
+    # A row read within DAILY_REPROBE_HOURS sorts to the END of the rotation (oldest reading first),
+    # so dropping it here never skips an older row — it only stops a re-read before its day is up.
+    daily_before = datetime.now(timezone.utc) - timedelta(hours=DAILY_REPROBE_HOURS)
+    unflagged = [r for r in unflagged if not _read_since(r.get("last_liveness_probe_at"), daily_before)]
     return compose_worklist(flagged, unflagged, limit)
+
+
+def _read_since(ts: Optional[str], since: datetime) -> bool:
+    """True iff the row's last reading (ISO timestamp) is at or after `since`. NULL = never read."""
+    if not ts:
+        return False
+    try:
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")) >= since
+    except ValueError:
+        return False  # an unreadable stamp is treated as never read — it gets probed, never skipped
 
 
 def _paged(make_query, limit: int, page: int = 1000) -> list[dict]:

@@ -7,9 +7,8 @@
 // • The COMPLETE supported roster renders — every platform pill, never a 3–4 sample (Buy still hides
 //   rent-only Gathern; a user platform-filter shows only those; a website down on its side is
 //   hidden, owner 2026-09-26).
-// • Pills reveal GRADUALLY (fade + slight upward motion, ~75ms stagger → the set lands in ~1.5–2.5s),
-//   then a calm highlight travels pill to pill: soft background/border emphasis + a gentle glow +
-//   ~2% scale. NO checkmarks, NO ticks, NO checklist feel, no bouncing, no flash.
+// • All names and logos fade in place inside fixed, automatically advancing pages.
+//   Highlights never translate or scale logos (owner 2026-10-01: no downward pull).
 // • The headline is minimal and ROTATES (~2.4s) through short Arabic status lines with smooth
 //   cross-fades — no sentence ever sits static, no hard cuts.
 // • The host starts this the INSTANT Search is pressed ('searching' from t=0 for guaranteed
@@ -21,6 +20,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { PlatformLogo } from './platform-logo';
+import PlatformRosterPager from './PlatformRosterPager';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { PLATFORM_LOGO_BREAKPOINT } from '@/lib/responsive';
 import Animated, {
@@ -87,11 +87,11 @@ const SEARCH_TITLES = [
 // can execute them — see lib/searchLoaderTiming.ts and
 // scripts/verify-search-loader-shows-every-platform.ts.
 
-// Fade (+ slight upward motion) a child into place after `delay`. Reduced motion → fade only.
+// Fade in place: opacity never shifts the viewport or changes logo size.
 function Appear({
-  children, delay = 0, reduced, distance = 5, style,
+  children, delay = 0, reduced, style,
 }: {
-  children: React.ReactNode; delay?: number; reduced: boolean; distance?: number; style?: any;
+  children: React.ReactNode; delay?: number; reduced: boolean; style?: any;
 }) {
   const v = useSharedValue(0);
   useEffect(() => {
@@ -100,7 +100,6 @@ function Appear({
   }, [v, delay, reduced]);
   const a = useAnimatedStyle(() => ({
     opacity: v.value,
-    transform: reduced ? [] : [{ translateY: (1 - v.value) * distance }],
   }));
   return <Animated.View style={[style, a]}>{children}</Animated.View>;
 }
@@ -138,7 +137,7 @@ function Dots({ reduced }: { reduced: boolean }) {
 // own background). The name always renders — no logo-only compact mode (owner: "put the name also,
 // because we need to include the name of each website" — reverses the 2026-09-12 mobile compact
 // tile). The highlight itself survives as a SHADOW-ONLY glow (no fill under it) plus the name text
-// warming from muted to primary and a ~2% logo pop — the same vocabulary ui.tsx's own selection glow
+// warming from muted to primary — the same vocabulary ui.tsx's own selection glow
 // already uses (text-color interpolation + boxShadow/shadow*), just with the fill dropped so nothing
 // ever reads as a box. Several pills are lit at once (highlight duration > step). NO checkmarks /
 // status icons (owner: never a checklist).
@@ -148,8 +147,8 @@ function PlatformPill({
   item: LoaderPlatform; index: number; total: number; rtl: boolean; reduced: boolean; name: string;
 }) {
   const wide = useAtLeast(PLATFORM_LOGO_BREAKPOINT);
-  const pillOverride = wide ? { height: 56, gap: 9, paddingHorizontal: 4 } : { height: 44 };
-  const nameOverride = wide ? { fontSize: 14, maxWidth: 220 } : null;
+  const pillOverride = wide ? { height: 'auto' as const, gap: 8 } : { height: 'auto' as const, gap: 4 };
+  const nameOverride = wide ? { fontSize: 12, lineHeight: 15 } : { fontSize: 11, lineHeight: 14 };
   const h = useSharedValue(0);
   // LITERAL hex, not the colors.* token (owner theme contract: interpolateColor parses actual color
   // values — colors.* resolves to var(--ez-*) on web, which it cannot parse). Same pattern the
@@ -184,7 +183,7 @@ function PlatformPill({
   const rowGlow = useAnimatedStyle(() => {
     const g = h.value;
     return {
-      transform: reduced ? [] : [{ scale: 1 + g * 0.02 }],
+      // Logos keep their exact size throughout the highlight.
       // Soft green glow — SHADOW ONLY, no fill/border, so the highlight reads as ambient light under
       // the logo+name, never a filled box. Same rgba/blur curve ui.tsx's own selection glow uses.
       ...(IS_WEB
@@ -197,11 +196,10 @@ function PlatformPill({
   }));
   return (
     <Appear delay={index * (reduced ? 25 : PILL_STAGGER)} reduced={reduced}>
-      <Animated.View style={[s.pill, pillOverride, { flexDirection: rtl ? 'row-reverse' : 'row' }, rowGlow]}>
+      <Animated.View style={[s.pill, pillOverride, rowGlow]}>
         <PlatformLogo source={item.logo} />
         <Animated.Text
-          style={[s.pillName, nameOverride, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }, nameGlow]}
-          numberOfLines={1}
+          style={[s.pillName, nameOverride, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: 'center' }, nameGlow]}
         >
           {name}
         </Animated.Text>
@@ -282,7 +280,6 @@ function PhaseTitle({
   }, [pulse, reduced]);
   const a = useAnimatedStyle(() => ({
     opacity: v.value * pulse.value,
-    transform: reduced ? [] : [{ translateY: (1 - v.value) * 5 }],
   }));
   return (
     <Animated.Text style={[s.title, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }, a]}>
@@ -292,11 +289,13 @@ function PhaseTitle({
 }
 
 export default function SearchLoader({
-  phase, query, resultSources, exiting = false,
+  phase, query, resultSources, exiting = false, onPresented, bottomInset,
 }: {
   phase: 'thinking' | 'searching';
+  bottomInset?: number;
   query?: SearchQuery | null;
   resultSources?: string[];
+  onPresented?: (complete: boolean) => void;
   exiting?: boolean; // host sets this just before morphing to results → soft fade-out, no hard cut
 }) {
   const { t, isRTL } = useI18n();
@@ -347,6 +346,10 @@ export default function SearchLoader({
     return picked;
   }, [query, resultSources]);
 
+  useEffect(() => {
+    if (phase === 'searching' && platforms.length === 0) onPresented?.(true);
+  }, [phase, platforms.length, onPresented]);
+
   // Soft completion (owner v4): fade the whole block out gently before the results morph in —
   // the loader must never vanish in a single frame.
   const exit = useSharedValue(1);
@@ -355,7 +358,7 @@ export default function SearchLoader({
   }, [exiting, reduced, exit]);
   const exitStyle = useAnimatedStyle(() => ({
     opacity: exit.value,
-    transform: reduced ? [] : [{ translateY: (1 - exit.value) * -4 }],
+
   }));
 
   return (
@@ -371,11 +374,8 @@ export default function SearchLoader({
           box (owner 2026-09-12: "remove those boxes... put the name also" — supersedes the same-day
           logo-only mobile compact tile; the name always renders now, on every viewport). */}
       {phase === 'searching' && platforms.length > 0 ? (
-        <View style={[s.strip, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
-          {platforms.map((p, i) => (
-            <PlatformPill key={p.name} item={p} index={i} total={platforms.length} rtl={rtl} reduced={reduced} name={t(p.i18nKey)} />
-          ))}
-        </View>
+        <PlatformRosterPager bottomInset={bottomInset} items={platforms} rtl={rtl} onPresented={onPresented ?? (() => {})}
+          renderItem={p => <PlatformPill item={p} index={0} total={1} rtl={rtl} reduced={reduced} name={t(p.i18nKey)} />} />
       ) : null}
     </Animated.View>
   );
@@ -393,10 +393,7 @@ const s = StyleSheet.create({
   // nothing ever reads as "a box" or "a photo." The highlight is a shadow-only glow (PlatformPill's
   // rowGlow) plus the name warming from muted to primary — transforms/shadow/color only, so the wave
   // still causes ZERO layout shift.
-  // rowGap 6 (was 9): mobile owner 2026-09-13 "I don't want the user to scroll down to see all of
-  // them" — tighter row spacing shaves ~3-4 rows worth of empty vertical space without touching the
-  // pill's own "perfect on iPhone" size. Horizontal gap stays 9 so pills-per-row is unaffected.
-  strip: { flexWrap: 'wrap', alignSelf: 'stretch', gap: 9, rowGap: 6 },
+  // Name below its equal-size logo frame. No truncation and no moving/scaling highlight.
   pill: { alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 2 },
-  pillName: { fontSize: 12.5, fontWeight: '600', color: colors.body, maxWidth: 150 },
+  pillName: { fontWeight: '600', color: colors.body, alignSelf: 'stretch' },
 });

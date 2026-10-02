@@ -43,6 +43,8 @@ visual and behavioural below is owned by the shared component.
 
 ## 2. Card layout — identical for every question
 
+**Owner visual revision, 2026-10-01:** use one short source-data sentence in a subtle information strip immediately below the question/description and above the options: «خيارات بحثك وأعدادها مبنية على بيانات الإعلانات المنشورة؛ غياب المعلومة لا ينفي توفرها، فتأكد من الإعلان الأصلي.» It replaces the two footer notes, keeping both current-search scope and missing-is-not-no semantics while directing users to the original listing. Use a thin neutral card border and compact option rows with at least 48 px height. The refined conversational revision uses a quiet header with a green brand mark, a prominent question, and tinted selected rows with a green check and border. Continue stays solid green with a direction-aware arrow. Press feedback starts immediately (120 ms), question content fades/slides 6 px over 180 ms, and the pinned footer does not fade or translate between questions. Reduced motion removes movement. The existing callbacks execute immediately without waiting for animation; counts and search timing are unchanged. Preserve the existing count, unknown-count caption, selection, progress, committed pills and pinned action behavior.
+
 ```
 ┌───────────────────────────────────────────┐
 │  ✦  Ezhalah AI Agent                    ✕  │  Shell top-bar (fixed)

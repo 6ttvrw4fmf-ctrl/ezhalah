@@ -27,6 +27,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.aqar import discover as D
+from scrapers.aqar.paced_fill import PacedFill, run_key
 from scrapers.aqar.enrich_residential import enrich_residential
 from scrapers.common import db
 from scrapers.common.emptiness import SliceOutcome, emptiness_is_source_published, run_may_allow_empty
@@ -40,9 +41,9 @@ WORKERS = int(os.environ.get("SCRAPE_WORKERS", "6"))
 
 
 def scrape_slice(type_key: str, deal_key: str, city_key: str, *, max_pages: int, start_page: int = 1,
-                 max_listings: int) -> tuple[int, int, Optional[SliceOutcome]]:
+                 max_listings: int, fill: Optional[PacedFill] = None) -> tuple[int, int, Optional[SliceOutcome]]:
     print(f"\n── {type_key.upper():<10} {deal_key.upper():<4} {city_key.upper():<8} "
-          f"(pages {start_page}–{max_pages}, limit≤{max_listings}, workers={WORKERS})")
+          f"(pages {start_page}–{max_pages or 'last'}, limit≤{max_listings or 'none'}, workers={WORKERS})")
     # Discovery is cheap (paginated search HTML) — collect the listing URLs first, then enrich them
     # in parallel. Discover is a generator with its own throttle, so this part stays polite too.
     outcome = SliceOutcome()
@@ -61,6 +62,13 @@ def scrape_slice(type_key: str, deal_key: str, city_key: str, *, max_pages: int,
                       f"pages_fetched={outcome.pages_fetched}, empty_state={outcome.source_empty_state})"))
 
     seen = len(urls)
+    if fill is not None and fill.active:
+        # Every discovered ad counts as seen (rows_seen is what the stall detector measures), but only
+        # new ads inside the run's budget and held ads due a refresh are enriched — see paced_fill.py.
+        fill.note_walk(outcome, start_page, max_pages)
+        urls = fill.select(urls)
+        print(f"   paced fill: {seen} on the source's pages → enriching {len(urls)} {fill.stats}")
+    total = len(urls)
     counter = {"done": 0, "upserted": 0}
     lock = threading.Lock()
 
@@ -70,20 +78,20 @@ def scrape_slice(type_key: str, deal_key: str, city_key: str, *, max_pages: int,
         if not row:
             with lock:
                 counter["done"] += 1
-                print(f"   [{counter['done']}/{seen}] ✗ skipped — {url[-50:]}")
+                print(f"   [{counter['done']}/{total}] ✗ skipped — {url[-50:]}")
             return
         try:
             db.upsert_aqar_residential(row)
             with lock:
                 counter["done"] += 1
                 counter["upserted"] += 1
-                print(f"   [{counter['done']}/{seen}] ✓ ad={row['ad_number']} | {row.get('property_type')} | "
+                print(f"   [{counter['done']}/{total}] ✓ ad={row['ad_number']} | {row.get('property_type')} | "
                       f"{row.get('city')} | price_y={row.get('price_annual')} price_t={row.get('price_total')} "
                       f"area={row.get('area_m2')}m² beds={row.get('bedrooms')}")
         except Exception as e:
             with lock:
                 counter["done"] += 1
-                print(f"   [{counter['done']}/{seen}] ✗ upsert failed: {str(e)[:120]}")
+                print(f"   [{counter['done']}/{total}] ✗ upsert failed: {str(e)[:120]}")
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         list(pool.map(work, enumerate(urls)))
@@ -96,18 +104,27 @@ def main() -> int:
     p.add_argument("--type",  default="apartment", choices=sorted({k[0] for k in D.CATEGORIES}))
     p.add_argument("--deal",  default="rent",      choices=sorted({k[1] for k in D.CATEGORIES}))
     p.add_argument("--city",  default="riyadh",    choices=sorted(D.CITY_AR.keys()))
-    p.add_argument("--pages", type=int, default=1, help="LAST paginated search page per slice (inclusive)")
+    p.add_argument("--pages", type=int, default=1,
+                   help="LAST paginated search page per slice (inclusive); 0 = every page the source has")
     p.add_argument("--start-page", type=int, default=1, help="FIRST page per slice (inclusive) — for batched deep scraping, e.g. --start-page 26 --pages 50 = pages 26–50")
-    p.add_argument("--limit", type=int, default=10, help="max listings per slice")
+    p.add_argument("--limit", type=int, default=10, help="max listings per slice (0 = no cap)")
     p.add_argument("--all-residential", action="store_true",
                    help="ignore --type/--deal; sweep all 10 residential types × rent+buy")
     p.add_argument("--types", default="",
                    help="comma-separated subset of residential types to sweep (× rent+buy), e.g. "
                         "'apartment,villa'. Use 'all' for every type. Lets the deep-fill SHARD a big "
                         "city across machines by type so no single job does all 10 types.")
+    p.add_argument("--new-budget", type=int, default=-1,
+                   help="max NEW rows this whole workflow run may add, shared by every shard through "
+                        "aqar_fill_claim (FILL_RUN_KEY names the run); -1 = unlimited (the sweeps)")
+    p.add_argument("--refresh-after-days", type=int, default=0,
+                   help="re-enrich an already-held active ad only once its last capture is this many days "
+                        "old; 0 = re-enrich every ad found (the sweeps)")
     args = p.parse_args()
 
     run_id = db.begin_run("aqar_residential")
+    fill = PacedFill("aqar_residential_listings", new_budget=args.new_budget,
+                     refresh_after_days=args.refresh_after_days, key=run_key("aqar_residential"))
     total_seen = 0
     total_upserted = 0
 
@@ -127,13 +144,13 @@ def main() -> int:
                 for d in ("rent", "buy"):
                     if (t, d) not in D.CATEGORIES:
                         continue
-                    s, u, o = scrape_slice(t, d, args.city, max_pages=args.pages, start_page=args.start_page, max_listings=args.limit)
+                    s, u, o = scrape_slice(t, d, args.city, max_pages=args.pages, start_page=args.start_page, max_listings=args.limit, fill=fill)
                     total_seen += s
                     total_upserted += u
                     if o is not None:
                         outcomes.append(o)
         else:
-            s, u, o = scrape_slice(args.type, args.deal, args.city, max_pages=args.pages, start_page=args.start_page, max_listings=args.limit)
+            s, u, o = scrape_slice(args.type, args.deal, args.city, max_pages=args.pages, start_page=args.start_page, max_listings=args.limit, fill=fill)
             total_seen, total_upserted = s, u
             if o is not None:
                 outcomes.append(o)
@@ -177,6 +194,8 @@ def main() -> int:
                   f"slug for this city is wrong, and the city is getting no coverage. Fix CITY_AR.",
                   flush=True)
             notes = ((notes + " | ") if notes else "") + f"city_filter_ignored={n_ignored}"
+        if fill.notes():
+            notes = ((notes + " | ") if notes else "") + fill.notes()
         healthy = db.end_run(run_id, ok=ok, rows_seen=total_seen, rows_upserted=total_upserted, notes=notes,
                              allow_empty=allow_empty, check_tables=["aqar_residential_listings"])
 

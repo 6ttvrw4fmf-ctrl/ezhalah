@@ -49,6 +49,27 @@ def judge(side: str, verdict: str) -> str:
     return "wrong" if verdict == DEAD else "right"
 
 
+def pick_controls(client, tables, rng) -> list[dict]:
+    """Known-live controls: ads the crawl saw in the last 24h, else the ones it saw most recently."""
+    day_ago = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    ctl = []
+    for t in tables:
+        rows = (client.table(t).select(COLS).eq("active", True).gte("last_seen_at", day_ago)
+                .filter("listing_url", "not.is", "null").limit(50).execute().data or [])
+        ctl += [dict(r, table=t) for r in rows]
+    if len(ctl) < CANARIES:
+        # The crawl saw too few ads in 24h (its crawl is failing — dwelleo/muhaysini 2026-10-02):
+        # use the ads it saw most recently instead of voiding the check. A stale control that is
+        # really gone still fails the gate, so this can only void more runs, never fewer.
+        for t in tables:
+            rows = (client.table(t).select(COLS).eq("active", True).lt("last_seen_at", day_ago)
+                    .filter("listing_url", "not.is", "null").order("last_seen_at", desc=True)
+                    .limit(CANARIES).execute().data or [])
+            ctl += [dict(r, table=t) for r in rows]
+    ctl = rng.sample(ctl, min(CANARIES, len(ctl)))
+    return ctl
+
+
 def summarize(platform: str, method: str, canary: dict, results: list[dict]) -> dict:
     out = {"platform": platform, "method": method, "canaries": canary, "trusted": canary["ok"]}
     for side in ("hidden", "live"):
@@ -143,13 +164,7 @@ def main() -> int:
 
     # Controls first: listings the crawl saw in the last 24 hours must come back alive, or the
     # environment (a block, a proxy failure) is lying and the run is void.
-    day_ago = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-    ctl = []
-    for t in tables:
-        rows = (client.table(t).select(COLS).eq("active", True).gte("last_seen_at", day_ago)
-                .filter("listing_url", "not.is", "null").limit(50).execute().data or [])
-        ctl += [dict(r, table=t) for r in rows]
-    ctl = rng.sample(ctl, min(CANARIES, len(ctl)))
+    ctl = pick_controls(client, tables, rng)
     ctl_alive = sum(open_ad(r["listing_url"], dead_marker, oracle, r["ad_number"]) == ALIVE for r in ctl)
     canary = {"probed": len(ctl), "alive": ctl_alive, "ok": canary_environment_ok(ctl_alive, len(ctl))}
 

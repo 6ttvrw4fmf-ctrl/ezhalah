@@ -110,9 +110,9 @@ The single search state is `query` (a `SearchQuery` in the store). Every control
    - **Price (SAR)** — From/To range boxes, always shown. **HARD filter.**
 7. **Rent period** — segmented `Monthly / Yearly`, shown only when Deal = Rent. Maps to
    `query.rentPeriod` (`'monthly'`/`'annual'`, default `annual`). Hidden for Buy.
-8. **Search** button → `onSearch()`.
+8. **Search** actions → the existing `onSearch()`. Owner revision (2026-10-01): remove the persistent bottom bar because it crowds location selection. Keep a compact Search action in the form immediately after City/District, and a second «بحث بهذه الخيارات» action after the detailed filters. Both scroll naturally with the form and never overlap suggestions. Compact the hero spacing and deal/category/period tiles; keep readable inputs, explicit City/District labels and placeholders, and the district's optional label. Preserve every filter control, callback and validation rule.
 
-Below the card: a 6-cell grid of rotating example-prompt chips that route to the AI agent.
+The old example-prompt grid below the card was removed at the owner's request on 2026-08-16; the AI Agent keeps its own onboarding prompts.
 
 ### 4.2 Canonical filter engine (owner decision 2026-07-06)
 
@@ -152,23 +152,15 @@ chat, which renders results inline. (Deliberate; single search engine — see §
 
 ## 5. Frontend — the Property Card (`src/components/ResultCard.tsx`) — SOURCE OF TRUTH
 
-**The card is locked. Never modify what it shows. It displays scraped values verbatim.** Fix data
+**Card data is locked. Display scraped values verbatim; change presentation only with owner approval.** Fix data
 problems via backend mapping only (see §16), never by editing the card.
 
-**Layout — three sections (side-by-side on web ≥ 820px, stacked on phone):**
-- **LEFT (photo):** hero photo with graceful multi-URL fallback → "no photo" placeholder; rank badge
-  (`#N`); bottom source strip `SOURCE · host` with an open-in-new icon.
-- **MIDDLE (info):** type + deal line (`{cleanType} for Sale/Rent`); title
-  (`district, city` or `city`); city + "Saudi Arabia" + optional region chip (from URL); **price**
-  (`tPrice`); optional **RNPL banner** (EJARI×ريلز, or أقساط/Aqsat for Al Hoshan) with "from SAR X/mo";
-  Arabic description **only if the source text is real Arabic** (never translated/invented); a stats row
-  (beds, baths, area m², property type, added-date — each drops out gracefully when absent).
-- **RIGHT (features / attribution):** "Hosted on {platform}" badge + hint; a 2-column features grid
-  (parking, maid room, elevator, master bedrooms, kitchen, halls, balcony, laundry, private entrance,
-  A/C, fiber, water, electricity, sanitation) with "+N More Features" expander (6 visible);
-  **Wasalt-only "Additional Information" panel** (usage/age/facade/street/plan no./land no., first 4 +
-  "See more"). **Aqar rows have `additional_info = null` → the panel is hidden and the Aqar card is
-  unchanged.**
+**Photo-first layout (owner approved and requested deployment 2026-10-01):** one continuous vertical column on laptops and phones (owner scrolling revision, 2026-10-01). Center the feed at a maximum width of 640 px, filling narrower screens, with 12 px between cards; never stretch cards to fill a laptop or put adjacent results side by side. Keep the matched list, order, rank and source-link action unchanged. The large full-width photo has a permanent “اضغط هنا 👆” / “Click here 👆” label and source domain; clicking anywhere on it opens the existing original-listing destination. Put source attribution, type/deal, title, exact price, location, stats and optional rating/RNPL/evidence in a compact body. Use tightly wrapped amenities and inline additional-information pairs, with **all values visible immediately, no feature or additional-info expander**. Hide the prose description/bio (including Gathern's title-as-description fallback), as previously approved. Avoid empty fixed-height content panels and a separate large source footer. Shared platform-logo artwork and relative sizing remain consistent; scale every card logo uniformly within the compact source row. Never alter stored data, source conditions or price formatting.
+
+**Card sections:**
+- **Photo:** full-width image with graceful multi-URL fallback → “no photo” placeholder; rank badge and explicit source-link action.
+- **Details:** existing type/deal, location and region, exact price and price qualifiers, optional RNPL/rating, stats and Advanced-Filter evidence. Source identity remains visible.
+- **Amenities and additional information:** all existing valid entries wrap naturally, without truncating values or requiring expansion. Existing empty-state conditions remain unchanged.
 
 **Card behaviors:** cards pop in staggered (`PopIn`). English-UI place names get client-side
 transliteration for display only (Arabic UI passes through). `listed` date is cleaned to `DD/MM/YYYY`
@@ -872,6 +864,11 @@ migration-drift-guard rule in `AGENTS.md`).
 ---
 
 ## 20. Permanent rules (the non-negotiables)
+
+- **Response feedback (owner 2026-10-01):** selecting either thumb moves both visible thumbs together until they touch, then fades the unselected thumb, leaving one selected thumb; tapping it again restores both choices. Keep share/read-aloud stationary, mirror the layout for Arabic/English, and skip motion when reduced motion is enabled. Keep the existing top-of-chat confirmation popup. Feedback storage and response scope remain unchanged.
+
+**Search loader viewport (owner 2026-10-01, approved named-grid preview):** keep every name beneath its equal-size logo frame in a responsive, fixed-height grid. Replace one logo/name tile at a time with a gentle fade, without arrows, page counters, or swipe navigation (owner continuous-animation revision, 2026-10-01). Keep every occupied slot filled through the last partial batch; use the measured space below the loader heading and above the footer for as many complete rows as fit, without a four-row cap (owner revision, 2026-10-01). Measure the actual footer height rather than reserving a guessed inset, and distribute spare vertical space between the rows so the last row ends just above the footer; do not leave the unused fraction of a row as a blank band (owner follow-up, 2026-10-01). Equal logo frames and visible names remain unchanged. Hold the first and last sets for one second, distributing the intermediate tile updates over the remaining eight seconds so the full cycle stays at ten seconds on every screen size; complete the entire roster cycle before revealing results, even when this exceeds the existing minimum loading beat. Names stay visible on phones. Previous result bubbles are visually hidden during the searching presentation and until the new results introduction finishes typing so stale counts cannot read as the new answer; their data is retained. Never auto-scroll the thread to follow the loader, including delayed scroll callbacks. Logo frames retain the responsive sizing used by property cards; highlights must not scale or translate them.
+
 
 - **First-100 diversity — five dimensions, in this priority order (owner PERMANENT rule, 2026-09-14).** The first «عرض المزيد» batch (up to 100 shown) must feel curated, not dumped, across the five dimensions below. This applies to Buy searches, Rent searches, and combined searches. Every engineer changing the order code (`src/lib/platformDiversity.ts::orderByScope` and its caller in `src/data/remote.ts`) is expected to read this rule first.
   1. **Platform** — a platform with many matches must NEVER crowd out a platform with fewer real matches. Round-robin `platform` is the outermost diversity key (pinned since 2026-07-13). No two same-platform listings back-to-back when other platforms have a match to contribute.
