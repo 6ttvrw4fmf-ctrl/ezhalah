@@ -4223,7 +4223,7 @@ export default function Agent() {
             (see the `completed` branches below). The real "start over" action is the hamburger, top
             left, not a button inside the composer. The saved transcript stays readable; Back / reopen
             restore this same state from `completed`. */}
-        <View testID="agent-footer" onLayout={e => setLoaderBottomInset(Math.ceil(e.nativeEvent.layout.height))} style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
+        <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]} testID="agent-footer" onLayout={e => setLoaderBottomInset(Math.ceil(e.nativeEvent.layout.height))}>
           <View style={[s.col, s.composerCol]}>
             {/* FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11; tightened 2026-09-12): the free-text
                 composer never shows for a Filter-origin conversation — the disclaimer below stays
