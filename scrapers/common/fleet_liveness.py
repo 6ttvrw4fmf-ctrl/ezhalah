@@ -71,7 +71,8 @@ SITES: dict[str, str] = {
     **{p: f"scrapers.{p}.run:_make_verify_gone()" for p in (
         "abaad", "albdah", "alsaedan", "azure", "dwelleo", "ego", "expattrusted", "flow",
         "gomenassat", "hazim", "ialqarawi", "ibaax", "justsa", "livingcompound", "marksa",
-        "muhaysini", "nofodh", "qmra", "rakez", "razre", "reinvest", "remaxsa", "rightcompound", "safa",
+        "ksaaqar", "muhaysini", "nofodh", "qmra", "rakez", "razre", "reinvest", "remaxsa", "rightcompound",
+        "sadiqeltajer", "safa",
         "sakan", "sanadak", "sodasyat", "sokok", "sukna", "tamyaz", "tuba", "villassa")},
 }
 
