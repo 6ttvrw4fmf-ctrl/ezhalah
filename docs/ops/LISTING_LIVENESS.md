@@ -97,8 +97,13 @@ added to remove: it puts a confident, recent-looking timestamp on inventory nobo
 `scripts/verify-liveness-registry-mirror.ts` fails on any hand-written stamp under `scrapers/`.
 
 `presence_patch()` exists for the one case where a platform's source presence is *explicitly
-defined* as positive evidence. No platform declares that today, and `LivenessPolicy` raises if
-`absence_is_candidate_only` is disabled.
+defined* as positive evidence. **Wasalt is the only platform that declares it (owner decision,
+2026-10-02):** a row Wasalt's own search results serve is stamped verified-alive by the crawl. The
+measurement behind the decision is in `liveness_policies.py`, and every enum-strike run re-tests it
+with 30 directly-read in-feed controls (flips abort under 90% live). It changes what counts as
+*verified*, never what counts as *dead*: removal still needs a DIRECT gone reading, and
+`LivenessPolicy` raises if `absence_is_candidate_only` is disabled. No other platform may declare
+it without an owner decision recorded here.
 
 ## 4. Every production-searchable platform must declare a strategy
 

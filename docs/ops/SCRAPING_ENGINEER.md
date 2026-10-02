@@ -233,6 +233,17 @@ or rewrite another engineer's work, and never start a big change in another engi
 - Old values frozen while the row count looks fine = the scraper broke silently. Check fresh values,
   not just counts.
 - The database sync does nothing without its lock. Check what it returns; never assume it ran.
+- One failed page must not throw a whole crawl away. dwelleo lost four nights in a row to a single
+  HTTP 500 on one of ~650 pages (2026-09-29 to 10-02): retry the page at the end, and if it still
+  fails mark the crawl incomplete (no prune) and keep the rest.
+- "Sitemap returned no urls" usually means the site changed its layout, not that it is empty
+  (compoundin moved to a sitemap index and new addresses on 2026-10-02). Open the sitemap first.
+- A crawl that suddenly hits its time limit may just have more to read (muhaysini's catalogue went
+  from ~3,260 to 7,470 ads). Compare the catalogue size before blaming the site.
+- A failed crawl also blinds the Lifecycle Engineer: with no fresh ads to use as controls, that
+  site's daily check reads nothing. A crawl failing two nights running is urgent for both of you.
+- "The source reports more than we hold" is not yet a gap. Open the extra ads' own pages first:
+  Gathern's extra units were app-only pages that answer 404 on the website (2026-09-28).
 
 ## Rating (must be earned)
 - **10/10** = every active site passed the searchable check; every site fixed, restored or new tonight

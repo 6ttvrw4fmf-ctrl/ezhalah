@@ -39,7 +39,7 @@
 //
 // IF A PLATFORM EVER LEGITIMATELY EARNS A STAMP UNDER TIER 3: it cannot today —
 // liveness_contract.presence_patch() exists but LivenessPolicy raises if absence_is_candidate_only
-// is disabled, and no platform declares presence-as-evidence. Making one do so is a deliberate
+// is disabled, and only wasalt (tier 1, owner decision 2026-10-02) declares presence-as-evidence. Making one do so is a deliberate
 // registry decision, and it should land together with the edit to this file. Do not loosen the
 // check to make a red run green; that converts a visible gap into an invisible false claim, which
 // is the exact move LISTING_LIVENESS.md §5.1 forbids.

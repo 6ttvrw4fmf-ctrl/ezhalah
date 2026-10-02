@@ -104,10 +104,20 @@ POLICIES: dict[str, _P] = {
         "19.5 days and ~1,260 dead rows stayed searchable (measured 2026-08-30).",
     ),
     "wasalt": _P(
-        _pol("wasalt", 3, 96), DIRECT_REVISIT,
+        # presence_is_positive_evidence=True — OWNER DECISION 2026-10-02, the only platform that
+        # declares it. A row Wasalt's own search results serve is stamped verified-alive
+        # (presence_patch, in db.upsert_wasalt_*_batch). Measured before deciding: of rows read
+        # directly in the last 30 days, in-feed rows were live (51/51 in one run, and every run's 30
+        # in-feed controls) and rows the feed had dropped were dead (8,128 of 8,137). The claim is
+        # re-tested on every enum-strike run: 30 in-feed controls are read directly and the run
+        # aborts its flips under 90% live. Reading all ~69k pages directly would cost ~12 GB/day of
+        # paid proxy. Removal is unchanged: a row leaves search only on a DIRECT 404 (3 strikes).
+        LivenessPolicy(platform="wasalt", grace=3, max_verification_age_hours=96,
+                       presence_is_positive_evidence=True), DIRECT_REVISIT,
         "404 (shares aqar's marker set)",
         "Requires the Saudi residential proxy (WASALT_PROXY_URL); datacenter IPs get HTTP 403, "
-        "which is UNKNOWN and must never be read as death.",
+        "which is UNKNOWN and must never be read as death. Feed presence is positive evidence "
+        "(owner 2026-10-02); the direct read is spent on rows the feed dropped and on controls.",
     ),
     "aqarmonthly": _P(
         _pol("aqarmonthly", 3, 48), DIRECT_REVISIT,
