@@ -96,6 +96,30 @@ These cost your first runs a lot of time. Use them instead of working them out a
 - **GitHub job logs:** `curl` to a log download fails here (CONNECT 403 on the redirect). Use the
   GitHub connector's `get_job_logs` with `tail_lines`.
 
+## Lessons from 2026-10-02 (read before you start; each one cost hours that day)
+- **The browser test exists: `e2e/engineers/full-chain.mjs`.** Use it, don't rebuild it. Give it the
+  `search_listings_ar.listing_id`, city, district, deal, source URL and price, e.g.
+  `node e2e/engineers/full-chain.mjs '{"id":13105192,"city":"جدة","district":"الفيصلية","deal":"buy","url":"<listing_url>","price":"1,299,000","pages":20}'`
+  (rent: add `"deal":"rent","period":"سنوي"`; commercial: `"category":"تجاري"`). Exit 0 = the card was
+  found, shows the price, and opens the exact source URL. About 1 minute per site.
+- **`source-reread.yml` prints its comparison in the JOB LOG** (`get_job_logs`); the artifact cannot be
+  downloaded from the cloud. Pages drawn by JavaScript (aqar, remax, muhaysini) show no price there;
+  for aqar, the crawl log's `price_y=AUTHORITATIVE_NULL` means the source itself said «no price».
+- **Take the site lock FIRST, before writing any code.** If another engineer holds it, they are
+  probably fixing the same site: wait, then check `main` for their fix before shipping yours
+  (2026-10-02: #5535 fixed dwelleo, compoundin and muhaysini while a duplicate fix sat in CI).
+- **Re-run long sites early.** `small-sources-sync` is one queue: a dwelleo walk (~3–4 h) or muhaysini
+  (~1.7 h) blocks every later dispatch, and GitHub runners can queue jobs for another hour on busy
+  days. Dispatch all your re-runs in ONE comma-list run, as soon as the fixes are merged.
+- **The Supabase tool asks a human to confirm any SQL containing `DROP`** and times out after 60 s
+  with nobody there to click; it never reaches the database. Design function changes without `DROP`
+  (same signature, needle-edit the live body; see migration `20261002201402`).
+- **A red run is not always a broken site.** Read its notes first: `source-published empty` and
+  `own_price_check` (aqar's own-row price check) are healthy; an empty source (manzo, alhumaidan) is
+  the source's truth, not a bug to fix.
+- **Rotation, last full-chain check (oldest first next time):** alajlan, alrifai, aqargate, remaxsa,
+  tuba, shatri, compoundin, awal, muhaysini, dwelleo: all 2026-10-02.
+
 ## Testing on the live site (what your first runs learned)
 - **Save your browser test in the repo and reuse it.** The first time, commit it in your PR in the
   folder described by `e2e/engineers/README.md` (e.g. as full-chain.mjs). Every run after that uses it
