@@ -34,6 +34,7 @@ deleted /property/ post. A 200 without the «تفاصيل العقار» block i
 from __future__ import annotations
 
 import argparse
+import functools
 import html as ihtml
 import re
 import sys
@@ -48,6 +49,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
@@ -468,6 +470,61 @@ def skip_note(skipped: dict[str, int]) -> Optional[str]:
     return ("skipped: " + body)[:300]
 
 
+# ── REMOVAL (measured 2026-10-02). Until then this module never called prune_unseen: an ad the
+# office deleted, or re-titled «تم البيع», stayed active here for good.
+#
+# No tenant has a row our crawl stopped seeing (21 active rows, every one re-seen that day), so there
+# is no dead cohort to measure a removal on. What each host answers on the ad's OWN /property/ url:
+#   gudai       12 of 12 catalogue pages: 200 with «تفاصيل العقار»
+#   safera       9 of 9  catalogue pages: 200 with «نظرة عامة» (and no «تفاصيل العقار»)
+#   alhumaidan   3 of 3  catalogue pages: 200 with «تفاصيل العقار», all titled «تم الإيجار»/«تم البيع»
+#   every host: a slug that never existed, a real slug with a mangled tail and two wrong ids → 404
+#               (4 of 4), on a page that carries neither block.
+# So a hard 404/410 is GONE, and a 200 carrying THIS tenant's block is LIVE — unless its own title
+# says the deal is done (_TRANSACTED_RE, the rule that already keeps such an ad out of the crawl:
+# 3 of 3 transacted pages, 0 of 21 offered ones), which is GONE: reading it live would re-stamp an
+# ad map_listing refuses to write. Every other answer is UNKNOWN. A tenant with no marker measured
+# here gets no removal at all.
+_LIVE_MARKER = {"gudai": "تفاصيل العقار", "alhumaidan": "تفاصيل العقار", "safera": "نظرة عامة"}
+
+# Title words that MAY mean a closed ad but were on no page of any tenant on 2026-10-02, so nothing
+# is filtered on them: the ad is kept exactly as before and COUNTED in the run notes. («مؤجر» is
+# deliberately absent — alhumaidan's own «عمارة للبيع» describes a building sold WITH its tenants.)
+_UNMEASURED_STATUS_RE = re.compile(r"تم\s*الت[أا]جير|مباع|محجوز")
+
+
+def _signal(status, body, moved, *, marker: str) -> Optional[str]:
+    """'live' | 'gone' | None — only what this ad's own URL affirmatively answers."""
+    if status in (404, 410):
+        return "gone"
+    if status != 200 or moved:
+        return None
+    title = parse_title(body)
+    if not title or marker not in visible_text(body):
+        return None
+    return "gone" if _TRANSACTED_RE.search(title) else "live"
+
+
+def _make_verify_gone(slug: str, control: Optional[dict], s: Optional[cc.Session] = None):
+    """The removal oracle for db.prune_unseen. A removal is believed only while a known-live ad from
+    this run (`control`) still reads live through the same session."""
+    signal = functools.partial(_signal, marker=_LIVE_MARKER[slug])
+    url_for = stored_listing_url((f"{slug}_residential_listings", f"{slug}_commercial_listings"))
+    s = s or session()
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform=slug, signal=signal, session=lambda: s,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def run_platform(*, slug: str, base: str, source: str, prefix: str) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
@@ -525,6 +582,27 @@ def run_platform(*, slug: str, base: str, source: str, prefix: str) -> int:
             source=source)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
+        # REMOVAL. An ad this walk did not write is only a CANDIDATE: at three misses its own URL is
+        # re-read, and it is hidden only on that page's own answer (_signal); a page that still
+        # offers the ad heals the row. No prune when a page of this walk could not be read (anything
+        # but 200/404/410), on a single-vertical run, or for a tenant with no measured marker.
+        pruned = 0
+        unread = sorted(k for k in skipped if k == "unreachable"
+                        or (k.startswith("http_") and k not in ("http_404", "http_410")))
+        if unread:
+            print(f"  ⚠ walk incomplete ({', '.join(unread)}) — no prune")
+        elif args.type == "all" and slug in _LIVE_MARKER:
+            verify_gone = _make_verify_gone(slug, (res + com)[0] if (res or com) else None, s)
+            for tbl, rows in ((f"{slug}_residential_listings", res),
+                              (f"{slug}_commercial_listings", com)):
+                k = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=source,
+                                    verify_gone=verify_gone)
+                if k < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += k
+        unmeasured = sum(1 for r in res + com if _UNMEASURED_STATUS_RE.search(r["title"]))
         n = len(res) + len(com)
         # PERSIST THE SKIP BREAKDOWN — it is the only thing separating an honest empty run from a
         # parser that quietly dropped everything, and printing it to stdout threw it away.
@@ -534,7 +612,10 @@ def run_platform(*, slug: str, base: str, source: str, prefix: str) -> int:
         # database, which is what every dashboard and every later investigation actually reads, it was
         # indistinguishable from a broken parser, and it cost a full investigation to tell apart.
         # `ok` deliberately stays True: a site whose whole catalogue is sold out is healthy, not failing.
-        note = skip_note(skipped)
+        note = "; ".join(x for x in (
+            f"pruned={pruned}" if pruned else None,
+            f"kept_active_unmeasured_status_word_in_titlex{unmeasured}" if unmeasured else None,
+            skip_note(skipped)) if x)[:300] or None
         healthy = db.end_run(run_id, ok=True, rows_seen=len(urls), rows_upserted=n,
                              notes=note,
                              check_tables=[f"{slug}_residential_listings",

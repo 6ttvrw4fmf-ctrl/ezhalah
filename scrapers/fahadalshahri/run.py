@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://fahadalshahri.com"
 SOURCE = "Fahad Alshahri"
@@ -200,14 +201,65 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
     return row, category, ""
 
 
+# Why a Store API walk may not be the whole catalogue. Non-empty → no prune this run.
+INCOMPLETE: list[str] = []
+
+# ── REMOVAL (measured 2026-10-02). Until then this crawler had NO removal step at all: a deleted
+# product stayed active here for good.
+#
+# There is no dead cohort to measure on: all 5 active rows were re-seen that day. What the product's
+# OWN url answers through the bare session: 26 of 26 catalogue products → 200 whose <body> carries
+# the «single-product» class; a slug that never existed, a real slug with a mangled tail and a wrong
+# ?p= id → 404 (3 of 3) with no such class. So a hard 404/410 is GONE, a 200 product page is LIVE,
+# and everything else — a 403 above all (the fingerprint, see the header) — is UNKNOWN.
+#
+# FURNITURE, not signals: «غير متوفر» is in the markup of all 26 live pages, and is_purchasable is
+# false on a live villa that simply prints no price. is_in_stock was true on 26 of 26, so what an
+# out-of-stock record means HERE is unmeasured: such a product is kept exactly as before and COUNTED
+# in the run notes, never guessed into "sold".
+_PRODUCT_PAGE_RE = re.compile(r'<body[^>]*class="[^"]*\bsingle-product\b')
+RES_TABLE, COM_TABLE = "fahadalshahri_residential_listings", "fahadalshahri_commercial_listings"
+
+
+def _signal(status, body, moved) -> Optional[str]:
+    """'live' | 'gone' | None — only what this product's own URL affirmatively answers."""
+    if status in (404, 410):
+        return "gone"
+    if status != 200 or moved:
+        return None
+    return "live" if _PRODUCT_PAGE_RE.search(body) else None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for db.prune_unseen. A 404 is believed only while a known-live ad from
+    this run (`control`) still reads live through the same session."""
+    url_for = stored_listing_url((RES_TABLE, COM_TABLE))
+    s = session()
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform="fahadalshahri", signal=_signal, session=lambda: s,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def fetch_products(s: cc.Session, limit: int = 0) -> list[dict]:
+    INCOMPLETE.clear()
     out: list[dict] = []
     page = 1
+    total = None        # the source's own count of its catalogue (x-wp-total: 26 on 2026-10-02)
     while True:
         r = s.get(f"{BASE}/wp-json/wc/store/products",
                   params={"per_page": 100, "page": page}, timeout=45)
         if r.status_code != 200:
             break
+        total = r.headers.get("x-wp-total")
         batch = r.json()
         if not batch:
             break
@@ -217,6 +269,8 @@ def fetch_products(s: cc.Session, limit: int = 0) -> list[dict]:
         if len(batch) < 100:
             break
         page += 1
+    if str(len(out)) != str(total):     # a missing header is "cannot tell", never "complete"
+        INCOMPLETE.append(f"read {len(out)} products, x-wp-total says {total}")
     return out
 
 
@@ -238,6 +292,7 @@ def main() -> int:
             raise RuntimeError("store api returned no products")
         print(f"{SOURCE}: {len(prods)} products discovered", flush=True)
         skipped: dict[str, int] = {}
+        unmeasured: dict[str, int] = {}
         for p in prods:
             row, cat, why = map_listing(p)
             if not row:
@@ -245,6 +300,9 @@ def main() -> int:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
+            if p.get("is_in_stock") is not True:    # unmeasured here: kept as before, and counted
+                k = f"kept_active_is_in_stock={p.get('is_in_stock')}"
+                unmeasured[k] = unmeasured.get(k, 0) + 1
             (com if cat == "commercial" else res).append(row)
         if skipped:
             print("  skipped (not guessed): "
@@ -268,7 +326,27 @@ def main() -> int:
             source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
+        # REMOVAL. An ad missing from this run is only a CANDIDATE: at three misses its own URL is
+        # re-read, and it is hidden only on a 404 (_signal). An ad that still renders heals the row
+        # — including one the crawler skips on purpose, which is not gone. No prune on a partial
+        # walk or a single-vertical run (--limit never gets here: it is a dry run).
+        pruned = 0
+        if INCOMPLETE:
+            print(f"  ⚠ Store API walk incomplete — no prune: {'; '.join(INCOMPLETE)}")
+        elif args.type == "all":
+            verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+            for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                k = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=verify_gone)
+                if k < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += k
+        tally = ", ".join(f"{k}x{v}" for k, v in sorted({**skipped, **unmeasured}.items(),
+                                                        key=lambda x: -x[1]))
         healthy = db.end_run(run_id, ok=True, rows_seen=len(prods), rows_upserted=len(res) + len(com),
+                             notes=f"pruned={pruned} skipped: {tally or 'none'}"[:300],
                              check_tables=["fahadalshahri_residential_listings",
                                            "fahadalshahri_commercial_listings"])
         if not healthy:
