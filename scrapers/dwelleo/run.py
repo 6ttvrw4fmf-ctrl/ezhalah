@@ -200,6 +200,7 @@ _SUB_MONTHLY_RE = re.compile(
 
 
 _CATALOGUE_ATTEMPTS = 6
+_MAX_DEFERRED_PAGES = 10   # more failing pages than this is an outage, not a blip
 
 
 def session() -> cc.Session:
@@ -227,83 +228,56 @@ def _get_json(s: cc.Session, url: str, *, params: Optional[dict] = None,
     return status, data
 
 
-_MAX_CONSECUTIVE_PAGE_FAILS = 5
-_MAX_FAILED_PAGE_SHARE = 0.05
-
-
-def _catalogue_page(s: cc.Session, page: int) -> tuple[Optional[int], Optional[dict]]:
-    # 6 tries (~22 s of backoff), not 3 (~9 s): the catalogue API throws short bursts of HTTP 500
-    # on a random page (381 on 09-25, 119 on 09-28) while the same page serves minutes later.
-    status, payload = _get_json(s, API, params={"page": page}, attempts=_CATALOGUE_ATTEMPTS)
-    data = (payload or {}).get("data") if isinstance(payload, dict) else None
-    return status, (data if isinstance(data, dict) else None)
-
-
 def fetch_catalogue(s: cc.Session, limit: int = 0) -> tuple[dict[int, dict], int, bool]:
     """Walk ?page=1..total_pages. Returns ({id: list item}, site_total, complete) where `complete`
-    is True only when EVERY page 1..total_pages answered with rows (never True under --limit).
+    is True only when every page up to total_pages was read with rows on it (an early empty page or
+    a page that never answered → False; never True under --limit).
 
-    A page still failing after its retries no longer kills the whole ~4 h walk (it did on four
-    nights running, 2026-09-28..10-02, each time on a different page: 119, 120, 87, 88, 102). It is
-    set aside, retried once more after the walk, and if it still fails the walk is INCOMPLETE —
-    which turns the prune off, so a page we could not read never reads as listings that are gone.
-    A source that is really down still raises: page 1 failing, 5 failed pages in a row, or more than
-    5% of the pages failing."""
+    A page that still fails after its retries is set aside and read again once the walk is done,
+    instead of throwing the whole run away: one HTTP 500 on one of ~650 pages lost four whole
+    crawls in a row (2026-09-29 … 10-02, pages 120 / 87 / 88 / 102, each fine minutes later), which
+    also left the site with no fresh rows for the daily liveness check. Page 1 failing, or more
+    than _MAX_DEFERRED_PAGES failing, still raises — that is the source being down."""
     items: dict[int, dict] = {}
-    total, page, complete, total_pages = 0, 1, True, 1
-    failed: list[int] = []
-    consecutive = 0
+    total, page, total_pages, complete = 0, 1, 0, True
+    deferred: list[int] = []
 
-    def take(data: dict) -> list:
+    def read(pg_no: int) -> Optional[list]:
         nonlocal total, total_pages
+        # 6 tries (~22 s of backoff), not 3 (~9 s): the catalogue API throws short bursts of HTTP 500.
+        status, payload = _get_json(s, API, params={"page": pg_no}, attempts=_CATALOGUE_ATTEMPTS)
+        data = (payload or {}).get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict):
+            read.status = status
+            return None
         pg, rows = data.get("pagination") or {}, data.get("properties") or []
         total = int(pg.get("total") or total or 0)
-        total_pages = int(pg.get("total_pages") or total_pages or page)
+        total_pages = int(pg.get("total_pages") or total_pages or pg_no)
         for it in rows:
             if isinstance(it, dict) and it.get("id") is not None:
                 items[int(it["id"])] = it
         return rows
 
     while True:
-        status, data = _catalogue_page(s, page)
-        if data is None:
-            if page == 1:
-                raise RuntimeError(f"catalogue page {page} answered HTTP {status} with no data")
-            failed.append(page)
-            consecutive += 1
-            print(f"  ⚠ catalogue page {page} answered HTTP {status} with no data — set aside", flush=True)
-            if consecutive >= _MAX_CONSECUTIVE_PAGE_FAILS:
-                raise RuntimeError(f"catalogue pages {failed[-consecutive]}..{page} all failed "
-                                   f"(last HTTP {status}) — the source is not answering")
-            if page >= total_pages:
-                break
-            page += 1
-            time.sleep(_PAUSE)
-            continue
-        consecutive = 0
-        rows = take(data)
-        if limit and len(items) >= limit:
+        rows = read(page)
+        if rows is None:
+            if page == 1 or len(deferred) >= _MAX_DEFERRED_PAGES:
+                raise RuntimeError(f"catalogue page {page} answered HTTP {read.status} with no data")
+            deferred.append(page)
+        elif limit and len(items) >= limit:
             return dict(list(items.items())[:limit]), total, False
-        if not rows or page >= total_pages:
+        elif not rows:
             complete = page >= total_pages      # an early empty page is an INCOMPLETE walk
+            break
+        if page >= total_pages:
             break
         page += 1
         time.sleep(_PAUSE)
-
-    still: list[int] = []
-    for p in failed:                       # one more pass: the bursts pass within minutes
-        time.sleep(_PAUSE * 4)
-        status, data = _catalogue_page(s, p)
-        if data is None:
-            still.append(p)
-        else:
-            take(data)
-    if still:
-        complete = False
-        print(f"  ⚠ {len(still)} catalogue page(s) never answered: {still[:20]}", flush=True)
-        if len(still) > _MAX_FAILED_PAGE_SHARE * max(total_pages, 1):
-            raise RuntimeError(f"{len(still)} of {total_pages} catalogue pages never answered "
-                               f"(e.g. {still[:5]}) — too many to call this a crawl")
+    for pg_no in deferred:                      # second chance, minutes after the burst
+        if read(pg_no) is None:
+            print(f"  ⚠ catalogue page {pg_no} never answered (HTTP {read.status}) — walk incomplete, "
+                  "no prune this run", flush=True)
+            complete = False
     return items, total, complete
 
 

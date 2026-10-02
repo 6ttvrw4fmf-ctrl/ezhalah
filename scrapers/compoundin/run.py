@@ -50,7 +50,6 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
-from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
@@ -59,12 +58,9 @@ SOURCE = "CompoundIn"
 PREFIX = "CIN"
 
 
-HEADERS = {"Accept": "text/html,application/xhtml+xml", "Accept-Language": "en,ar;q=0.7"}
-
-
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome124")
-    s.headers.update(HEADERS)
+    s.headers.update({"Accept": "text/html,application/xhtml+xml", "Accept-Language": "en,ar;q=0.7"})
     return s
 
 
@@ -201,6 +197,9 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
     if is_delisted(page_html):
         return [], "delisted"
     city_en, district_en = compound_location(page_html)
+    um = re.search(r"/compounds/([a-z\-]+)/[^/]+/?$", url)
+    if um:      # the page's own address names its city (/compounds/<city>/<slug>, since 2026-10-02)
+        city_en = um.group(1).replace("-", " ")
     if not city_en:
         return [], "no_city"
     city_ar = _CITY_EN_AR.get(city_en.strip().lower())
@@ -335,14 +334,24 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
                          ).verify_gone(ad_number)
 
 
+_COMPOUND_URL_RE = re.compile(r"/rent/show/|/compounds/[^/]+/[^/]+/?$")
+
+
 def fetch_compounds(s: cc.Session, limit: int = 0) -> list[str]:
-    """The /rent/show/ compound pages in the sitemap. A non-200 RAISES with its status: it used to
-    return [] and the run said "sitemap returned no /rent/show/ urls", which reads like the source
-    emptied its catalogue when we were simply refused (2026-10-01/02)."""
-    r = s.get(f"{BASE}/sitemap.xml", timeout=40)
-    if r.status_code != 200:
-        raise RuntimeError(f"sitemap.xml answered HTTP {r.status_code} — UNKNOWN, not an empty source")
-    urls = sorted({u for u in re.findall(r"<loc>([^<]+)</loc>", r.text) if "/rent/show/" in u})
+    """Compound page URLs from the sitemap. On 2026-10-02 the site turned /sitemap.xml into an INDEX
+    (child sitemap-compounds.xml) and moved compounds from /rent/show/<id>/<slug> to
+    /compounds/<city>/<slug>; the flat sitemap then held no /rent/show/ url and every crawl failed.
+    Both layouts are read: the top file's own urls, plus every child sitemap it names."""
+    def locs(url: str) -> list[str]:
+        r = s.get(url, timeout=40)
+        return re.findall(r"<loc>([^<]+)</loc>", r.text) if r.status_code == 200 else []
+
+    top = locs(f"{BASE}/sitemap.xml")
+    found = set(top)
+    for child in top:
+        if child.endswith(".xml") and "compound" in child.rsplit("/", 1)[-1]:
+            found |= set(locs(child))   # only the compounds file: area pages share the url shape
+    urls = sorted(u for u in found if _COMPOUND_URL_RE.search(u))
     return urls[:limit] if limit else urls
 
 
@@ -353,18 +362,14 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    # 2026-10-02: two nights red with no sitemap read on the pinned chrome124 profile. Probe 3
-    # profiles DIRECT, then through the residential proxy (`proxy: true` → WASALT_PROXY_URL), and
-    # keep the session that is served; the probe line goes into the log as the evidence.
-    s, tried = retry_smarter_session(f"{BASE}/sitemap.xml", headers=HEADERS)
-    print(f"{SOURCE}: probe {' '.join(tried)}", flush=True)
+    s = session()
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run("compoundin")
     res: list[dict] = []
     try:
         urls = fetch_compounds(s, limit=args.limit)
         if not urls:
-            raise RuntimeError("sitemap returned no /rent/show/ urls")
+            raise RuntimeError("sitemap returned no compound urls")
         print(f"{SOURCE}: {len(urls)} compounds discovered", flush=True)
         skipped: dict[str, int] = {}
         complete = True         # every compound page answered 200 — the only crawl that may prune

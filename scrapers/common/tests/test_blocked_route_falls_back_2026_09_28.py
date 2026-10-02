@@ -109,14 +109,24 @@ def test_dwelleo_catalogue_survives_a_five_try_500_burst(monkeypatch):
     assert sorted(items) == [1, 2] and total == 2 and complete
 
 
-def test_dwelleo_catalogue_page_failing_past_its_retries_is_retried_after_the_walk(monkeypatch):
-    # 2026-10-02: a page still failing after its in-place tries no longer kills the walk (four
-    # nights red, 09-28..10-02, each on a different page). It is retried once after the walk.
+def test_dwelleo_page_failing_past_its_retries_is_read_again_at_the_end(monkeypatch):
+    # 6 failures exhaust the first read of page 2; the second-chance read then gets it
     items, total, complete = _dwelleo_walk(monkeypatch, 6)
-    assert sorted(items) == [1, 2] and total == 2 and complete
+    assert sorted(items) == [1, 2] and complete
 
 
-def test_dwelleo_catalogue_page_that_never_answers_still_raises_on_a_small_site(monkeypatch):
-    # 1 of 2 pages unread is far above the 5% a crawl may lose — the run must still fail.
-    with pytest.raises(RuntimeError, match="catalogue pages never answered"):
-        _dwelleo_walk(monkeypatch, 10**6)
+def test_dwelleo_page_that_never_answers_keeps_the_rest_but_is_incomplete(monkeypatch):
+    # one HTTP 500 page used to throw the whole crawl away (4 nights in a row, 2026-09-29…10-02)
+    items, total, complete = _dwelleo_walk(monkeypatch, 99)
+    assert sorted(items) == [1] and complete is False
+
+
+def test_dwelleo_first_page_failing_still_raises(monkeypatch):
+    m = importlib.import_module("scrapers.dwelleo.run")
+    monkeypatch.setattr(m.time, "sleep", lambda *_: None)
+
+    class _Down:
+        def get(self, url, params=None, timeout=None):
+            return _Resp(500)
+    with pytest.raises(RuntimeError, match="catalogue page 1 answered HTTP 500"):
+        m.fetch_catalogue(_Down())
