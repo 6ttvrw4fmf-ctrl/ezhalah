@@ -18,6 +18,11 @@ STRATEGY tiers, strongest first:
                               owner rule and is recorded as a known gap, not as an approved design.
                               Rows on these platforms are reported as unverified by the staleness
                               monitor rather than being quietly counted as healthy.
+  SOURCE_LIST_PRESENCE        The crawl re-reads the site's OWN COMPLETE list every day, and a row
+                              that list serves is stamped verified-alive (presence_patch). Owner
+                              decision 2026-10-02 — the rule wasalt already has — for small sites
+                              admitted ONE BY ONE (SOURCE_LIST_DAILY below). It changes what counts
+                              as verified, never what counts as dead.
 
 `max_verification_age_hours` is the SLA: an active row not positively verified within it is STALE
 and must surface on monitoring. It is a MONITORING threshold — nothing here ever deactivates a row.
@@ -30,6 +35,7 @@ from scrapers.common.liveness_contract import LivenessPolicy
 DIRECT_REVISIT = "DIRECT_REVISIT"
 CANDIDATE_PLUS_DIRECT = "CANDIDATE_PLUS_DIRECT"
 CRAWL_PRESENCE_ONLY = "CRAWL_PRESENCE_ONLY"
+SOURCE_LIST_PRESENCE = "SOURCE_LIST_PRESENCE"
 
 # REGISTERED IS NOT THE SAME AS SEARCHABLE (2026-09-03, corrected 2026-09-04). abralosol, aouj,
 # arkaan, rawasidark and therc have 4,314 production_ready rows live in search_listings_ar and rows in
@@ -104,10 +110,20 @@ POLICIES: dict[str, _P] = {
         "19.5 days and ~1,260 dead rows stayed searchable (measured 2026-08-30).",
     ),
     "wasalt": _P(
-        _pol("wasalt", 3, 96), DIRECT_REVISIT,
+        # presence_is_positive_evidence=True — OWNER DECISION 2026-10-02, the first platform to
+        # declare it (SOURCE_LIST_DAILY below declares it for the small full-list sites). A row Wasalt's own search results serve is stamped verified-alive
+        # (presence_patch, in db.upsert_wasalt_*_batch). Measured before deciding: of rows read
+        # directly in the last 30 days, in-feed rows were live (51/51 in one run, and every run's 30
+        # in-feed controls) and rows the feed had dropped were dead (8,128 of 8,137). The claim is
+        # re-tested on every enum-strike run: 30 in-feed controls are read directly and the run
+        # aborts its flips under 90% live. Reading all ~69k pages directly would cost ~12 GB/day of
+        # paid proxy. Removal is unchanged: a row leaves search only on a DIRECT 404 (3 strikes).
+        LivenessPolicy(platform="wasalt", grace=3, max_verification_age_hours=96,
+                       presence_is_positive_evidence=True), DIRECT_REVISIT,
         "404 (shares aqar's marker set)",
         "Requires the Saudi residential proxy (WASALT_PROXY_URL); datacenter IPs get HTTP 403, "
-        "which is UNKNOWN and must never be read as death.",
+        "which is UNKNOWN and must never be read as death. Feed presence is positive evidence "
+        "(owner 2026-10-02); the direct read is spent on rows the feed dropped and on controls.",
     ),
     "aqarmonthly": _P(
         _pol("aqarmonthly", 3, 48), DIRECT_REVISIT,
@@ -1371,10 +1387,46 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     "eilmalriyada", "expattrusted", "flow", "gomenassat", "hajer", "hasaad", "hazim", "ialqarawi",
     "ibaax", "jazwtn", "justsa", "livingcompound", "marksa", "moftah", "qmra", "raghdan", "razre",
     "remaxsa", "rightcompound", "safa", "snam", "sodasyat", "souq24", "suwar", "tamyaz",
+    # 2026-09-29: shadow read (runs 36490769167) with controls right, every would-hide re-read gone
+    # by its own record AND a second route, and the dead signal seen on a real removed ad.
+    "dwelleo", "muhaysini", "nofodh", "nufouth", "reinvest", "sokok", "sukna", "villassa", "wadod",
+    # 2026-10-02: five shadow runs (09-29..10-02) with controls right and 0 unknown; run
+    # 36977747732's would-hides (36, cap 428) re-read from a second network: 20 of 20 print their
+    # own removal banner, 8 of 8 live controls live.
+    "tuba",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
                       "Daily direct revisit of every active listing (fleet_liveness.py, 2026-09-28). "
+                      + POLICIES[_p]["note"])
+
+
+# THE SITE'S OWN FULL LIST IS THE CHECK (owner, 2026-10-02: «yes do that for all 60 sites … check
+# them every single day»). The same rule wasalt has, for a small site with no per-listing checker:
+# its crawl re-reads the site's complete list every day, and a row the crawl upserts as ACTIVE is
+# stamped verified-alive (db._wasalt_batch → presence_patch), 48 h window.
+#
+# ADMITTED ONE BY ONE, never by a comprehension over a tier. On 2026-10-02 every crawler was read
+# twice (an auditor, then a second reader told to break the verdict). A site is here only if both
+# found that a row cannot be upserted active unless THIS run observed it at the source, and that the
+# crawler excludes every unavailable state the source publishes. The same day 6 in-list ads per
+# site were opened at their own URL from a second network: 488 reads, none answered "gone".
+# Not admitted, each for a named reason in scrapers/lifecycle-gaps.txt: a row written although its
+# own page failed or answered 404/410 (abralosol, arkaan, aqaratikom), a status or end-date field
+# the crawler ignores, a sold filter that fails open, a catalogue that never changes. A site with
+# an oracle (CANDIDATE_PLUS_DIRECT) is never moved here — it belongs on the daily direct check.
+SOURCE_LIST_DAILY: tuple[str, ...] = (
+    "abwbna", "alajlan", "alkhaas", "alobid", "amaall", "amlakalahsa", "aouj", "arsh", "ashab",
+    "azdad", "bahadhabab", "compoundin", "daraa", "earthapp", "eightfloor", "erapulse", "gudai",
+    "jurash", "macsaib", "maktab", "manafe", "manzo", "mobasher", "nawafeth", "rawaf", "rawasidark",
+    "remal", "ryadah", "sirdab", "superoffice", "tawia", "wajaf", "wslnaa",
+)
+for _p in SOURCE_LIST_DAILY:
+    assert POLICIES[_p]["strategy"] == CRAWL_PRESENCE_ONLY, _p      # never demote an oracle tier
+    POLICIES[_p] = _P(LivenessPolicy(platform=_p, grace=3, max_verification_age_hours=48,
+                                     presence_is_positive_evidence=True),
+                      SOURCE_LIST_PRESENCE, POLICIES[_p]["death_signals"],
+                      "The site's own full list, re-read daily, is the check (owner 2026-10-02). "
                       + POLICIES[_p]["note"])
 
 
