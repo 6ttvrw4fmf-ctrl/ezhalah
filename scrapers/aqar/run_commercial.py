@@ -40,7 +40,7 @@ WORKERS = int(os.environ.get("SCRAPE_WORKERS", "6"))
 def scrape_slice(type_key: str, deal_key: str, city_key: str, *, max_pages: int, start_page: int = 1,
                  max_listings: int, fill: Optional[PacedFill] = None) -> tuple[int, int, Optional[SliceOutcome]]:
     print(f"\n── {type_key.upper():<14} {deal_key.upper():<4} {city_key.upper():<8} "
-          f"(pages {start_page}–{max_pages}, limit≤{max_listings}, workers={WORKERS})")
+          f"(pages {start_page}–{max_pages or 'last'}, limit≤{max_listings or 'none'}, workers={WORKERS})")
     outcome = SliceOutcome()
     try:
         urls = list(D.discover(type_key, deal_key, city_key, max_pages=max_pages, start_page=start_page,

@@ -43,7 +43,7 @@ WORKERS = int(os.environ.get("SCRAPE_WORKERS", "6"))
 def scrape_slice(type_key: str, deal_key: str, city_key: str, *, max_pages: int, start_page: int = 1,
                  max_listings: int, fill: Optional[PacedFill] = None) -> tuple[int, int, Optional[SliceOutcome]]:
     print(f"\n── {type_key.upper():<10} {deal_key.upper():<4} {city_key.upper():<8} "
-          f"(pages {start_page}–{max_pages}, limit≤{max_listings}, workers={WORKERS})")
+          f"(pages {start_page}–{max_pages or 'last'}, limit≤{max_listings or 'none'}, workers={WORKERS})")
     # Discovery is cheap (paginated search HTML) — collect the listing URLs first, then enrich them
     # in parallel. Discover is a generator with its own throttle, so this part stays polite too.
     outcome = SliceOutcome()
