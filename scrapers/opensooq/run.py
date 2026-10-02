@@ -270,6 +270,10 @@ def main() -> int:
                 continue
             seen_keys.add(key)
             (com if cat == "commercial" else res).append(row)
+            if normalize.ad_expiry_state(x.get("expired_at")) == "unknown":
+                # no readable end date (measured 2026-10-02: 5 of 77 live ads carry «قبل 17 ساعة» there):
+                # not proof of anything, so the ad stays — and the run says so instead of staying silent
+                kept["expired_at_not_a_date"] = kept.get("expired_at_not_a_date", 0) + 1
             twin = commercial_twin(x, row)
             if twin:
                 com.append(twin)
@@ -277,7 +281,7 @@ def main() -> int:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)
         if kept:
-            print("  kept, status value never measured (not guessed): "
+            print("  kept, status value never measured or end date unread (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(kept.items())), flush=True)
         if dry:
             print(f"DRY: {len(res)} residential + {len(com)} commercial")

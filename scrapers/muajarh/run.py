@@ -222,6 +222,10 @@ def main() -> int:
                 continue
             row, cat = got
             (com if cat == "commercial" else res).append(row)
+            if normalize.ad_expiry_state(x.get("adv_license_expire_date") or d.get("adv_license_expire_date")) == "unknown":
+                # no readable licence end date (measured 2026-10-02: a readable ISO date on 11 of 11
+                # licensed rows): kept, and counted out loud — never silently taken as «still licensed»
+                kept["adv_license_expire_date_unread"] = kept.get("adv_license_expire_date_unread", 0) + 1
             for field, measured in _STATUS_MEASURED.items():
                 value = d.get(field, x.get(field))
                 if value != measured:
@@ -230,7 +234,7 @@ def main() -> int:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)
         if kept:
-            print("  kept, status value never measured (not guessed): "
+            print("  kept, status value never measured or end date unread (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(kept.items())), flush=True)
         if dry:
             print(f"DRY: {len(res)} residential + {len(com)} commercial ({unreadable} unreadable)")

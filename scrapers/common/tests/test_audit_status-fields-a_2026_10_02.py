@@ -94,6 +94,15 @@ def test_opensooq_an_unreadable_status_is_neither_written_nor_pruned(monkeypatch
     assert fake.upserted == ["OSQ1"] and fake.prunes == 0
 
 
+def test_opensooq_an_end_date_it_cannot_read_is_kept_and_counted(monkeypatch, capsys):
+    # measured 2026-10-02: 5 of 77 live ads carry a relative phrase in expired_at — never a gate, never silent
+    items = [_osq(1), _osq(2, expired_at=None), _osq(3, expired_at="قبل 17 ساعة")]
+    monkeypatch.setattr(OPENSOOQ, "walk", lambda s: (items, len(items)))
+    fake = _run(monkeypatch, OPENSOOQ)
+    assert sorted(fake.upserted) == ["OSQ1", "OSQ2", "OSQ3"] and fake.prunes == 1
+    assert "expired_at_not_a_datex2" in capsys.readouterr().out
+
+
 # ── dallali ─────────────────────────────────────────────────────────────────────────────────────
 def _dll(i="a1", **kw):
     x = {"id": i, "is_active": True, "expires_at": None, "listing_type": "rent", "title": "مكتب", "description": "",
@@ -129,6 +138,16 @@ def test_dallali_an_unreadable_status_is_neither_written_nor_pruned(monkeypatch)
     assert fake.upserted == ["DLLa1"] and fake.prunes == 0
 
 
+def test_dallali_a_licence_end_date_it_cannot_read_is_kept_and_counted(monkeypatch, capsys):
+    rows = [_dll("a1"), _dll("a2"), _dll("a3")]
+    rows[1]["rega_display_data"] = dict(rows[1]["rega_display_data"], endDate=None)
+    rows[2]["rega_display_data"] = dict(rows[2]["rega_display_data"], endDate="1449/02/28")     # Hijri year
+    monkeypatch.setattr(DALLALI, "walk", lambda s: (rows, len(rows)))
+    fake = _run(monkeypatch, DALLALI)
+    assert sorted(fake.upserted) == ["DLLa1", "DLLa2", "DLLa3"]
+    assert "licence_end_date_unreadx2" in capsys.readouterr().out
+
+
 # ── muajarh ─────────────────────────────────────────────────────────────────────────────────────
 def _mjr(i, **kw):
     x = {"id": i, "slug": f"s{i}", "adv_license": "7200000000", "listing_type": "rent", "title": "فيلا",
@@ -149,6 +168,15 @@ def test_muajarh_a_lapsed_licence_is_out_and_an_unseen_status_is_kept_and_counte
     out = capsys.readouterr().out
     assert "ad_licence_expiredx1" in out
     assert "status_Falsex1" in out and "request_status_pendingx1" in out
+
+
+def test_muajarh_a_licence_end_date_it_cannot_read_is_kept_and_counted(monkeypatch, capsys):
+    rows = [_mjr(1), _mjr(2, adv_license_expire_date=None), _mjr(3, adv_license_expire_date="1448-09-13")]
+    monkeypatch.setattr(MUAJARH, "walk", lambda s: (rows, len(rows)))
+    monkeypatch.setattr(MUAJARH, "get_json", lambda s, url: {"data": next(r for r in rows if url.endswith("/" + r["slug"]))})
+    fake = _run(monkeypatch, MUAJARH)
+    assert sorted(fake.upserted) == ["MJR1", "MJR2", "MJR3"]
+    assert "adv_license_expire_date_unreadx2" in capsys.readouterr().out
 
 
 # ── squares ─────────────────────────────────────────────────────────────────────────────────────

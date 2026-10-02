@@ -229,6 +229,7 @@ def main() -> int:
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
+    kept: dict[str, int] = {}
     try:
         for x in listings:
             got, why = map_listing(x)
@@ -237,9 +238,17 @@ def main() -> int:
                 continue
             row, cat = got
             (com if cat == "commercial" else res).append(row)
+            if normalize.ad_expiry_state((x.get("rega_display_data") or {}).get("endDate")) == "unknown":
+                # the licence end date is absent or not a readable date (measured 2026-10-02: readable
+                # dd/mm/yyyy on 7 of 7). The storefront's own rule (is_active, expires_at) passed, so the
+                # listing stays — counted out loud, never silently taken as «still licensed»
+                kept["licence_end_date_unread"] = kept.get("licence_end_date_unread", 0) + 1
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)
+        if kept:
+            print("  kept, end date unread (not guessed): "
+                  + ", ".join(f"{k}x{v}" for k, v in sorted(kept.items())), flush=True)
         if dry:
             print(f"DRY: {len(res)} residential + {len(com)} commercial")
             for row in res + com:
