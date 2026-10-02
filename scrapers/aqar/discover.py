@@ -214,6 +214,23 @@ CITY_AR = {
 # A listing URL is anything that ends with a hyphen + 6+ digit numeric ID.
 LISTING_RE = re.compile(r"-(\d{6,})/?$")
 
+#: aqar's own result count for a slice, from the ItemList JSON-LD it serves on EVERY page of the
+#: slice (measured 2026-10-02 on pages 1, 500, 1100, 1122 of Riyadh apartments-for-rent).
+_ITEMS_RE = re.compile(r'"numberOfItems":(\d+)')
+#: Listings per results page. Measured 2026-10-02: numberOfItems 22,413 -> page 1,121 carries the
+#: last 13 ads and page 1,122 renders aqar's own «لا توجد نتائج», i.e. last page = ceil(n / 20).
+PAGE_SIZE = 20
+#: Only used when the page stops publishing numberOfItems AND the caller asked for every page
+#: (max_pages <= 0). The walk still ends at the first page with nothing new; this is the backstop.
+#: The largest slice measured 2026-10-02 was ~1,250 pages.
+SAFETY_MAX_PAGES = 2500
+
+
+def source_items(html: str) -> Optional[int]:
+    """aqar's own count of ads in this slice, or None when the page does not publish it."""
+    m = _ITEMS_RE.search(html or "")
+    return int(m.group(1)) if m else None
+
 
 #: Below this many listing links a page is simply a small town's short result set — aqar's
 #: nationwide fallback always returns a FULL page (20 on every page measured 2026-08-22), so a
@@ -260,6 +277,11 @@ def discover(
     scraping, e.g. start_page=26, max_pages=50 → pages 26–50), so deeper batches don't
     re-walk pages already covered by an earlier batch.
 
+    max_pages <= 0 means EVERY page: the walk ends at the source's own last page,
+    ceil(numberOfItems / PAGE_SIZE), read off the first page fetched. A positive max_pages is still a
+    cap, and the walk never goes past the source's own last page either way (2026-10-02: the deep
+    fill's fixed 150-page cap left Riyadh apartments-for-rent at 4,888 of 22,413 ads).
+
     Pass `outcome` (a SliceOutcome) to learn WHY a slice produced nothing. Yielding zero URLs is
     ambiguous on its own — a blocked fetch and a genuinely empty city look identical from out here —
     and that ambiguity is what kept the aqar sweep permanently red (see scrapers/common/emptiness.py).
@@ -269,7 +291,11 @@ def discover(
     seen: set[str] = set()
     yielded = 0
 
-    for page in range(start_page, max_pages + 1):
+    cap = max_pages if max_pages > 0 else SAFETY_MAX_PAGES
+    last_page = cap
+    page = start_page - 1
+    while page < last_page:
+        page += 1
         path = f"/{cat_slug}/{city_ar}" + (f"/{page}" if page > 1 else "")
         url = BASE + path
         r = get(url)
@@ -281,6 +307,13 @@ def discover(
                 outcome.note_fetch_failure()
             break
         html = r.text
+        n_items = source_items(html)
+        if n_items is not None:
+            # The source's own page count bounds the walk. Re-read on every page, so an ad
+            # published mid-walk that pushes the slice onto one more page is still read.
+            last_page = min(cap, max(start_page, -(-n_items // PAGE_SIZE)))
+            if outcome is not None and outcome.source_items is None:
+                outcome.source_items = n_items
         # Cheap-and-effective: collect every href that looks like a listing URL.
         # We don't need a full HTML parser for this — a regex is enough.
         page_links: list[str] = []

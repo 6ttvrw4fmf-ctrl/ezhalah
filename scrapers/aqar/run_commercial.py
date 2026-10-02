@@ -20,6 +20,7 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Optional
 
 # Make the scrapers/ folder importable when running with `python -m`.
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,22 +29,31 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.aqar import discover as D
 from scrapers.aqar.enrich_residential import enrich_residential  # generic page enricher (shared)
+from scrapers.aqar.paced_fill import PacedFill, run_key
 from scrapers.common import db
+from scrapers.common.emptiness import SliceOutcome, run_may_allow_empty
 
 
 WORKERS = int(os.environ.get("SCRAPE_WORKERS", "6"))
 
 
-def scrape_slice(type_key: str, deal_key: str, city_key: str, *, max_pages: int, start_page: int = 1, max_listings: int) -> tuple[int, int]:
+def scrape_slice(type_key: str, deal_key: str, city_key: str, *, max_pages: int, start_page: int = 1,
+                 max_listings: int, fill: Optional[PacedFill] = None) -> tuple[int, int, Optional[SliceOutcome]]:
     print(f"\n── {type_key.upper():<14} {deal_key.upper():<4} {city_key.upper():<8} "
           f"(pages {start_page}–{max_pages}, limit≤{max_listings}, workers={WORKERS})")
+    outcome = SliceOutcome()
     try:
-        urls = list(D.discover(type_key, deal_key, city_key, max_pages=max_pages, start_page=start_page, max_listings=max_listings))
+        urls = list(D.discover(type_key, deal_key, city_key, max_pages=max_pages, start_page=start_page,
+                               max_listings=max_listings, outcome=outcome))
     except KeyError:
         print(f"   (no Aqar slug for {type_key}/{deal_key} — skipping)")
-        return 0, 0
+        return 0, 0, None
 
     seen = len(urls)
+    if fill is not None and fill.active:
+        fill.note_walk(outcome, start_page, max_pages)
+        urls = fill.select(urls)
+        print(f"   paced fill: {seen} on the source's pages → enriching {len(urls)} {fill.stats}")
     counter = {"done": 0, "upserted": 0}
     lock = threading.Lock()
 
@@ -71,7 +81,7 @@ def scrape_slice(type_key: str, deal_key: str, city_key: str, *, max_pages: int,
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         list(pool.map(work, enumerate(urls)))
 
-    return seen, counter["upserted"]
+    return seen, counter["upserted"], outcome
 
 
 def main() -> int:
@@ -79,16 +89,25 @@ def main() -> int:
     p.add_argument("--type",  default="shop", choices=sorted(D.COMMERCIAL_TYPES))
     p.add_argument("--deal",  default="rent", choices=["rent", "buy"])
     p.add_argument("--city",  default="riyadh", choices=sorted(D.CITY_AR.keys()))
-    p.add_argument("--pages", type=int, default=1, help="LAST paginated search page per slice (inclusive)")
+    p.add_argument("--pages", type=int, default=1,
+                   help="LAST paginated search page per slice (inclusive); 0 = every page the source has")
     p.add_argument("--start-page", type=int, default=1, help="FIRST page per slice (inclusive) — batched deep scraping, e.g. --start-page 26 --pages 50 = pages 26–50")
-    p.add_argument("--limit", type=int, default=10, help="max listings per slice")
+    p.add_argument("--limit", type=int, default=10, help="max listings per slice (0 = no cap)")
     p.add_argument("--all-commercial", action="store_true",
                    help="ignore --type/--deal; sweep all commercial types × rent+buy")
+    p.add_argument("--new-budget", type=int, default=-1,
+                   help="max NEW rows this whole workflow run may add (shared, see run_residential.py); "
+                        "-1 = unlimited (the sweeps)")
+    p.add_argument("--refresh-after-days", type=int, default=0,
+                   help="re-enrich a held active ad only once its last capture is this old; 0 = always")
     args = p.parse_args()
 
     run_id = db.begin_run("aqar_commercial")
+    fill = PacedFill("aqar_commercial_listings", new_budget=args.new_budget,
+                     refresh_after_days=args.refresh_after_days, key=run_key("aqar_commercial"))
     total_seen = 0
     total_upserted = 0
+    outcomes: list[SliceOutcome] = []
 
     try:
         if args.all_commercial:
@@ -96,12 +115,18 @@ def main() -> int:
                 for d in ("rent", "buy"):
                     if (t, d) not in D.CATEGORIES:
                         continue
-                    s, u = scrape_slice(t, d, args.city, max_pages=args.pages, start_page=args.start_page, max_listings=args.limit)
+                    s, u, o = scrape_slice(t, d, args.city, max_pages=args.pages, start_page=args.start_page,
+                                           max_listings=args.limit, fill=fill)
                     total_seen += s
                     total_upserted += u
+                    if o is not None:
+                        outcomes.append(o)
         else:
-            s, u = scrape_slice(args.type, args.deal, args.city, max_pages=args.pages, start_page=args.start_page, max_listings=args.limit)
+            s, u, o = scrape_slice(args.type, args.deal, args.city, max_pages=args.pages,
+                                   start_page=args.start_page, max_listings=args.limit, fill=fill)
             total_seen, total_upserted = s, u
+            if o is not None:
+                outcomes.append(o)
         ok = True
         notes = None
     except Exception as e:
@@ -116,7 +141,19 @@ def main() -> int:
         # run_residential.py, which used `ok=ok` (a variable, not the `ok=True` literal
         # test_scraper_fleet_end_run_return_captured.py's AST check was matching) and slipped
         # through that pass undetected.
-        healthy = db.end_run(run_id, ok=ok, rows_seen=total_seen, rows_upserted=total_upserted, notes=notes, check_tables=["aqar_commercial_listings"])
+        # Same emptiness rule as run_residential.py: a town with no commercial ads at all is healthy
+        # ONLY when every slice rendered aqar's own «لا توجد نتائج». Needed now that the commercial
+        # fill runs on a schedule over all 95 towns, many of which publish no commercial ads.
+        allow_empty = ok and run_may_allow_empty(outcomes)
+        if allow_empty:
+            notes = ((notes + " | ") if notes else "") + "source-published empty (all slices proven)"
+        n_ignored = sum(1 for o in outcomes if o.city_filter_ignored)
+        if n_ignored:
+            notes = ((notes + " | ") if notes else "") + f"city_filter_ignored={n_ignored}"
+        if fill.notes():
+            notes = ((notes + " | ") if notes else "") + fill.notes()
+        healthy = db.end_run(run_id, ok=ok, rows_seen=total_seen, rows_upserted=total_upserted, notes=notes,
+                             allow_empty=allow_empty, check_tables=["aqar_commercial_listings"])
 
     print(f"\n📊 Done. {total_upserted}/{total_seen} upserted across all slices. (run_id={run_id})")
     if ok and not healthy:
