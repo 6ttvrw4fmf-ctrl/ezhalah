@@ -136,6 +136,18 @@ def controls(client, tables) -> list[dict]:
     for t in tables:
         ctl += _rows(client, t, "ad_number, listing_url, last_seen_at", order=[("last_seen_at", True)],
                      limit=MIN_CANARIES, since=since)
+    if len(ctl) < MIN_CANARIES:
+        # The site's crawl has not seen MIN_CANARIES ads in CONTROL_HOURS (its crawl is failing —
+        # dwelleo and muhaysini, 2026-09-29..10-02). Without this the run had 0/0 controls,
+        # quarantined itself, and its whole active set went unchecked for days while the job read
+        # green. Fall back to the ads the crawl saw MOST recently, however long ago. Still crawl
+        # evidence, never last_verified_alive_at (that pool is self-referential); a stale control
+        # that is really gone only fails the gate, so this can quarantine more runs, never fewer.
+        have = {r["ad_number"] for r in ctl}
+        for t in tables:
+            ctl += [r for r in _rows(client, t, "ad_number, listing_url, last_seen_at",
+                                     order=[("last_seen_at", True)], limit=MIN_CANARIES)
+                    if r["ad_number"] not in have]
     return sorted(ctl, key=lambda r: r.get("last_seen_at") or "", reverse=True)[:MIN_CANARIES]
 
 
