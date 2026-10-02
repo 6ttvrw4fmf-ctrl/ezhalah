@@ -109,6 +109,14 @@ def test_dwelleo_catalogue_survives_a_five_try_500_burst(monkeypatch):
     assert sorted(items) == [1, 2] and total == 2 and complete
 
 
-def test_dwelleo_catalogue_page_still_failing_still_raises(monkeypatch):
-    with pytest.raises(RuntimeError, match="catalogue page 2 answered HTTP 500"):
-        _dwelleo_walk(monkeypatch, 6)
+def test_dwelleo_catalogue_page_failing_past_its_retries_is_retried_after_the_walk(monkeypatch):
+    # 2026-10-02: a page still failing after its in-place tries no longer kills the walk (four
+    # nights red, 09-28..10-02, each on a different page). It is retried once after the walk.
+    items, total, complete = _dwelleo_walk(monkeypatch, 6)
+    assert sorted(items) == [1, 2] and total == 2 and complete
+
+
+def test_dwelleo_catalogue_page_that_never_answers_still_raises_on_a_small_site(monkeypatch):
+    # 1 of 2 pages unread is far above the 5% a crawl may lose — the run must still fail.
+    with pytest.raises(RuntimeError, match="catalogue pages never answered"):
+        _dwelleo_walk(monkeypatch, 10**6)

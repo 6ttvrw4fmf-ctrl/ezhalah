@@ -227,33 +227,83 @@ def _get_json(s: cc.Session, url: str, *, params: Optional[dict] = None,
     return status, data
 
 
+_MAX_CONSECUTIVE_PAGE_FAILS = 5
+_MAX_FAILED_PAGE_SHARE = 0.05
+
+
+def _catalogue_page(s: cc.Session, page: int) -> tuple[Optional[int], Optional[dict]]:
+    # 6 tries (~22 s of backoff), not 3 (~9 s): the catalogue API throws short bursts of HTTP 500
+    # on a random page (381 on 09-25, 119 on 09-28) while the same page serves minutes later.
+    status, payload = _get_json(s, API, params={"page": page}, attempts=_CATALOGUE_ATTEMPTS)
+    data = (payload or {}).get("data") if isinstance(payload, dict) else None
+    return status, (data if isinstance(data, dict) else None)
+
+
 def fetch_catalogue(s: cc.Session, limit: int = 0) -> tuple[dict[int, dict], int, bool]:
     """Walk ?page=1..total_pages. Returns ({id: list item}, site_total, complete) where `complete`
-    is True only when the walk reached total_pages with rows on every page (an early empty page →
-    False; never True under --limit). A page with no data raises."""
+    is True only when EVERY page 1..total_pages answered with rows (never True under --limit).
+
+    A page still failing after its retries no longer kills the whole ~4 h walk (it did on four
+    nights running, 2026-09-28..10-02, each time on a different page: 119, 120, 87, 88, 102). It is
+    set aside, retried once more after the walk, and if it still fails the walk is INCOMPLETE —
+    which turns the prune off, so a page we could not read never reads as listings that are gone.
+    A source that is really down still raises: page 1 failing, 5 failed pages in a row, or more than
+    5% of the pages failing."""
     items: dict[int, dict] = {}
-    total, page, complete = 0, 1, True
-    while True:
-        # 6 tries (~22 s of backoff), not 3 (~9 s): the catalogue API throws short bursts of HTTP 500
-        # on a random page (381 on 09-25, 119 on 09-28) and one burst killed the whole ~4 h walk,
-        # while the same page served minutes later. A page still failing after this still raises.
-        status, payload = _get_json(s, API, params={"page": page}, attempts=_CATALOGUE_ATTEMPTS)
-        data = (payload or {}).get("data") if isinstance(payload, dict) else None
-        if not isinstance(data, dict):
-            raise RuntimeError(f"catalogue page {page} answered HTTP {status} with no data")
+    total, page, complete, total_pages = 0, 1, True, 1
+    failed: list[int] = []
+    consecutive = 0
+
+    def take(data: dict) -> list:
+        nonlocal total, total_pages
         pg, rows = data.get("pagination") or {}, data.get("properties") or []
         total = int(pg.get("total") or total or 0)
+        total_pages = int(pg.get("total_pages") or total_pages or page)
         for it in rows:
             if isinstance(it, dict) and it.get("id") is not None:
                 items[int(it["id"])] = it
+        return rows
+
+    while True:
+        status, data = _catalogue_page(s, page)
+        if data is None:
+            if page == 1:
+                raise RuntimeError(f"catalogue page {page} answered HTTP {status} with no data")
+            failed.append(page)
+            consecutive += 1
+            print(f"  ⚠ catalogue page {page} answered HTTP {status} with no data — set aside", flush=True)
+            if consecutive >= _MAX_CONSECUTIVE_PAGE_FAILS:
+                raise RuntimeError(f"catalogue pages {failed[-consecutive]}..{page} all failed "
+                                   f"(last HTTP {status}) — the source is not answering")
+            if page >= total_pages:
+                break
+            page += 1
+            time.sleep(_PAUSE)
+            continue
+        consecutive = 0
+        rows = take(data)
         if limit and len(items) >= limit:
             return dict(list(items.items())[:limit]), total, False
-        total_pages = int(pg.get("total_pages") or page)
         if not rows or page >= total_pages:
             complete = page >= total_pages      # an early empty page is an INCOMPLETE walk
             break
         page += 1
         time.sleep(_PAUSE)
+
+    still: list[int] = []
+    for p in failed:                       # one more pass: the bursts pass within minutes
+        time.sleep(_PAUSE * 4)
+        status, data = _catalogue_page(s, p)
+        if data is None:
+            still.append(p)
+        else:
+            take(data)
+    if still:
+        complete = False
+        print(f"  ⚠ {len(still)} catalogue page(s) never answered: {still[:20]}", flush=True)
+        if len(still) > _MAX_FAILED_PAGE_SHARE * max(total_pages, 1):
+            raise RuntimeError(f"{len(still)} of {total_pages} catalogue pages never answered "
+                               f"(e.g. {still[:5]}) — too many to call this a crawl")
     return items, total, complete
 
 

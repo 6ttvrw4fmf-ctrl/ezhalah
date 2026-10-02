@@ -228,7 +228,10 @@ jobs:
           #   never runs again after its first crawl — verify-every-scraper-has-a-scheduled-workflow.
           - { source: alsaedan,      cmd: "python -m scrapers.alsaedan.run --type all", tmo: 30 }
           - { source: ego,           cmd: "python -m scrapers.ego.run --type all", tmo: 20 }
-          - { source: muhaysini,     cmd: "python -m scrapers.muhaysini.run --type all", tmo: 45 }
+          #   muhaysini: tmo 45 → 150 (2026-10-02, Scraping Engineer). The site grew from ~3,259 to 7,470
+          #   listings; one detail fetch each runs ~0.76 s, so a full walk is ~95 min and three nights
+          #   in a row (09-30..10-02) were killed at minute 45 with 3,000 of 7,470 done.
+          - { source: muhaysini,     cmd: "python -m scrapers.muhaysini.run --type all", tmo: 150 }
           #   nofodh raised 45 -> 90 after its first crawl was CANCELLED on the 45-minute budget:
           #   2,601 listings, each needing its own detail fetch to read the «حالة البيع» state.
           - { source: nofodh,        cmd: "python -m scrapers.nofodh.run --type all", tmo: 90 }
