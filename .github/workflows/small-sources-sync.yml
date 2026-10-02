@@ -339,15 +339,18 @@ jobs:
           #                 post states a price, so 15 carry NULL — a SOURCE fact, never inferred.
           #   shmoualshmal   6 posts, all Tabuk. The site publishes NO price at all (it shows
           #                 «اتصل»), so every price column is NULL by design. See each run.py.
-          - { source: alta,         cmd: "python -m scrapers.alta.run --type all", every_n_days: 2 }
-          - { source: shmoualshmal, cmd: "python -m scrapers.shmoualshmal.run --type all", every_n_days: 2 }
+          # Daily since 2026-10-02 (owner: «check them every single day»): alta, shmoualshmal, remal
+          # and amaall ran every 2 days for no bandwidth reason (no proxy, 133 ads between them), and
+          # remal and amaall are now SOURCE_LIST_PRESENCE with a 48 h window a 2-day cadence cannot keep.
+          - { source: alta,         cmd: "python -m scrapers.alta.run --type all" }
+          - { source: shmoualshmal, cmd: "python -m scrapers.shmoualshmal.run --type all" }
           # Two more GREEN-audited additions (owner-instructed 2026-09-06).
           #   remal   87 posts -> 84 listings. class_list carries city/type/offer; images bind by
           #           attachment PARENT because the detail page renders OTHER listings' photos.
           #   amaall  135 posts -> 50 listings, ARABIC ONLY: the site publishes every listing twice
           #           (68 EN + 67 AR), so taking both languages would double every property.
-          - { source: remal,        cmd: "python -m scrapers.remal.run --type all", every_n_days: 2 }
-          - { source: amaall,       cmd: "python -m scrapers.amaall.run --type all", every_n_days: 2 }
+          - { source: remal,        cmd: "python -m scrapers.remal.run --type all" }
+          - { source: amaall,       cmd: "python -m scrapers.amaall.run --type all" }
           # abwbna (owner-instructed 2026-09-06): a DIFFERENT TENANT of the SAME Nuzul SaaS platform
           # aldarim already scrapes (same S3 bucket family, same public JSON API shape). Full crawl +
           # prune, same as aldarim — not a --type flag scraper.
