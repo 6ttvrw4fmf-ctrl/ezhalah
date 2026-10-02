@@ -11,11 +11,17 @@ from scrapers.sadiqeltajer import run as SQ
 SIMILAR = SQ._SIMILAR
 
 
+_CALL = '<button class="call-btn dropdown-toggle">اتصال</button>'
+
+
 def _sq(code=True, call=True, unavailable=False, neighbour=""):
-    return (f"<html><body><h1>ارض بحي الروابي</h1>{'كود الاعلان : 5667 300 م²' if code else ''}"
-            f"{'<button class=\"call-btn dropdown-toggle\">اتصال</button>' if call else ''}"
-            f"{'<span>غير متاح</span>' if unavailable else ''}"
-            f"<h2>{SIMILAR}</h2>{neighbour}</body></html>")
+    # Plain concatenation on purpose: the Lifecycle Engineer's container runs Python 3.11, where a
+    # backslash inside an f-string field is a SyntaxError and this whole file was skipped.
+    return ("<html><body><h1>ارض بحي الروابي</h1>"
+            + ("كود الاعلان : 5667 300 م²" if code else "")
+            + (_CALL if call else "")
+            + ("<span>غير متاح</span>" if unavailable else "")
+            + "<h2>" + SIMILAR + "</h2>" + neighbour + "</body></html>")
 
 
 def test_sadiqeltajer_a_dropped_ad_keeps_its_page_and_code_and_is_still_gone():
@@ -27,7 +33,7 @@ def test_sadiqeltajer_a_dropped_ad_keeps_its_page_and_code_and_is_still_gone():
 def test_sadiqeltajer_an_offered_ad_is_live_and_a_neighbours_card_cannot_change_that():
     assert SQ._signal(200, _sq(), False) == "live"
     assert SQ._signal(200, _sq(neighbour="<span>غير متاح</span>"), False) == "live"
-    dropped_beside_live = _sq(call=False, unavailable=True, neighbour='<button class="call-btn">اتصال</button>')
+    dropped_beside_live = _sq(call=False, unavailable=True, neighbour=_CALL)
     assert SQ._signal(200, dropped_beside_live, False) == "gone"
 
 
