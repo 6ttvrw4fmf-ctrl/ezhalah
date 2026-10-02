@@ -40,7 +40,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from scrapers.common.db import begin_run, end_run, sb
+from scrapers.common.db import _TRANSIENT_MARKERS, begin_run, end_run, sb
 from scrapers.common.http import get
 from scrapers.common.liveness_contract import direct_alive_patch
 from scrapers.common.shard_partition import shard_worklist
@@ -90,12 +90,21 @@ def evidence_row(source_table: str, listing_id: int, http_status: Optional[int],
 
 def _run_with_retry(fn, tries: int = 5):
     """Run a DB call, retrying on Postgres statement-timeout (57014) — these come from transient
-    lock contention when the 4h sweep is mid-upsert on the same table. Back off and try again."""
+    lock contention when the 4h sweep is mid-upsert on the same table. Back off and try again.
+
+    Also retries every transport-level transient that `db._execute` already treats as one
+    (`_TRANSIENT_MARKERS`: a terminated HTTP/2 connection, 5xx gateway, PGRST002, …). Before
+    2026-10-02 only 57014 was retried, so one `httpx.RemoteProtocolError: <ConnectionTerminated>`
+    on a single `update ... eq(id)` killed a whole shard mid-sweep (aqar_residential shard 7 on
+    2026-10-02 after 500 reads, aqar_commercial shard 12 on 2026-09-30) and its remaining rows went
+    unchecked for the night. Every call routed here is a select or an idempotent update by id."""
     for i in range(tries):
         try:
             return fn()
         except Exception as e:  # noqa: BLE001
-            if "57014" in str(e) and i < tries - 1:
+            msg = str(e).lower()
+            transient = "57014" in msg or any(m in msg for m in _TRANSIENT_MARKERS)
+            if transient and i < tries - 1:
                 time.sleep(2.0 * (i + 1))
                 continue
             raise
