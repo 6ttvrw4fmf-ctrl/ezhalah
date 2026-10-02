@@ -5,8 +5,8 @@ import { PLATFORM_LOGO_BREAKPOINT } from '@/lib/responsive';
 import { loaderPageLayout, loaderStepDelay, loaderSlotIndices } from '@/lib/loaderPages';
 
 /** No vertical scrolling. Resizing starts a fresh complete pass at the new page size. */
-export default function PlatformRosterPager<T>({ items, renderItem, rtl, onPresented }: {
-  items: T[]; renderItem: (item: T) => ReactNode; rtl: boolean; onPresented: (complete: boolean) => void;
+export default function PlatformRosterPager<T>({ items, renderItem, rtl, onPresented, bottomInset }: {
+  items: T[]; renderItem: (item: T) => ReactNode; rtl: boolean; onPresented: (complete: boolean) => void; bottomInset?: number;
 }) {
   const { height, width: windowWidth } = useWindowDimensions();
   const container = useRef<View>(null);
@@ -20,8 +20,8 @@ export default function PlatformRosterPager<T>({ items, renderItem, rtl, onPrese
   }, [height, windowWidth, measureSpace]);
   const wide = useAtLeast(PLATFORM_LOGO_BREAKPOINT);
   const [width, setWidth] = useState(0);
-  const layout = loaderPageLayout(width, height, wide, top);
-  return <View ref={container} onLayout={e => { setWidth(e.nativeEvent.layout.width); measureSpace(); }} style={styles.container}>
+  const layout = loaderPageLayout(width, height, wide, top, bottomInset);
+  return <View testID="loader-roster" ref={container} onLayout={e => { setWidth(e.nativeEvent.layout.width); measureSpace(); }} style={styles.container}>
     {width > 0 && <Slots key={`${layout.pageSize}:${layout.rowHeight}`} items={items} renderItem={renderItem}
       rtl={rtl} onPresented={onPresented} layout={layout} />}
   </View>;
@@ -49,7 +49,7 @@ function Slots<T>({ items, renderItem, rtl, onPresented, layout }: {
     return () => clearTimeout(timer);
   }, [replacements, remaining, slots, items.length]);
   return (
-    <View style={[styles.grid, { height: layout.rows * layout.rowHeight, flexDirection: rtl ? 'row-reverse' : 'row' }]}>
+    <View style={[styles.grid, { height: layout.gridHeight, flexDirection: rtl ? 'row-reverse' : 'row' }]}>
       {loaderSlotIndices(items.length, slots, replacements).map(index =>
         <View key={index} style={{ width: `${100 / layout.columns}%`, height: layout.rowHeight, paddingHorizontal: 2 }}>
           {renderItem(items[index])}
@@ -59,5 +59,5 @@ function Slots<T>({ items, renderItem, rtl, onPresented, layout }: {
 }
 const styles = StyleSheet.create({
   container: { alignSelf: 'stretch' },
-  grid: { flexWrap: 'wrap', alignContent: 'flex-start' },
+  grid: { flexWrap: 'wrap', alignContent: 'space-between' },
 });
