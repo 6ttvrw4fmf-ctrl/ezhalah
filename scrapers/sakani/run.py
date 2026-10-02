@@ -274,8 +274,9 @@ def fetch_detail(s: cc.Session, uid: str) -> tuple[str, Optional[dict]]:
     if not got:
         return "miss", None
     status, body = got
-    if status == 200 and isinstance(body, dict):
-        return "ok", ((body.get("data") or {}).get("attributes") or {})
+    data = (body.get("data") or {}) if isinstance(body, dict) else {}
+    if status == 200 and str(data.get("id")) == uid:     # someone else's record is not this unit's
+        return "ok", (data.get("attributes") or {})
     if status == 404 and isinstance(body, dict) and "not found" in str(body.get("message", "")).lower():
         return "not_found", None
     return "miss", None
@@ -537,7 +538,12 @@ def _signal(status, body, _moved):
         return "gone" if "not found" in str(j.get("message", "")).lower() else None
     if status != 200:
         return None
-    a = (j.get("data") or {}).get("attributes") or {}
+    return _attrs_verdict((j.get("data") or {}).get("attributes") or {})
+
+
+def _attrs_verdict(a: dict) -> Optional[str]:
+    """A DETAIL record's own attributes → 'live' | 'gone' | None. One rule for the oracle and the
+    crawl's direct-alive stamp."""
     if not a:
         return None
     if (a.get("status") or "") != "published" or a.get("publish") is not True:
@@ -614,6 +620,10 @@ def main() -> int:
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue
+            if detail and _attrs_verdict(detail) == "live":
+                # This unit's own DETAIL record, id-matched, published for rent: the same read the
+                # oracle makes, so the daily direct check need not open it again (zero new requests).
+                db.mark_direct_alive(row, oracle="sakani.detail_api.published_rent")
             if args.type != "all" and cat != args.type:
                 continue
             (com if cat == "commercial" else res).append(row)
