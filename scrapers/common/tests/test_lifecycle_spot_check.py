@@ -2,6 +2,7 @@
 counted as right or wrong, and a run whose controls failed is VOID, never "clean"."""
 import pytest
 
+from scrapers.common import lifecycle_spot_check as S
 from scrapers.common.lifecycle_spot_check import judge, parse_ids, summarize
 from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN
 
@@ -46,3 +47,35 @@ def test_ids_are_parsed_exactly_and_malformed_ones_refused():
     for bad in ("aqar_residential_listings", "aqar_residential_listings:x", ":5"):
         with pytest.raises(ValueError):
             parse_ids(bad)
+
+
+def test_controls_fall_back_to_the_most_recently_crawled_ads_when_the_crawl_is_stale():
+    # dwelleo/muhaysini 2026-10-02: crawl failing for days → 0 controls → every spot check void.
+    import random
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    rows = [{"id": i, "ad_number": str(i), "listing_url": f"https://x/{i}", "active": True,
+             "last_seen_at": (now - timedelta(days=3, hours=i)).isoformat()} for i in range(8)]
+
+    class _Q:
+        def __init__(self): self.f, self.desc, self.n = [], False, None
+        def select(self, *_): return self
+        def eq(self, c, v): self.f.append(lambda r: r.get(c) == v); return self
+        def gte(self, c, v): self.f.append(lambda r: r[c] >= v); return self
+        def lt(self, c, v): self.f.append(lambda r: r[c] < v); return self
+        def filter(self, *_): return self
+        def order(self, c, desc=False): self.desc = (c, desc); return self
+        def limit(self, n): self.n = n; return self
+        def execute(self):
+            out = [r for r in rows if all(f(r) for f in self.f)]
+            if self.desc:
+                out.sort(key=lambda r: r[self.desc[0]], reverse=self.desc[1])
+            return type("R", (), {"data": out[: self.n]})()
+
+    class _Cl:
+        def table(self, t): return _Q()
+
+    ctl = S.pick_controls(_Cl(), ["t_residential_listings"], random.Random(1))
+    assert len(ctl) == S.CANARIES
+    assert {r["id"] for r in ctl} == set(range(S.CANARIES)), "the most recently crawled ads, not older ones"

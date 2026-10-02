@@ -127,6 +127,23 @@ def test_failed_opening_controls_read_and_write_nothing(site):
     assert not [e for e in c.log if e[0] in ("update", "insert")]
 
 
+def test_a_stale_crawl_still_yields_controls_and_the_site_is_checked(site):
+    # dwelleo/muhaysini 2026-10-02: crawl failing for 3-4 days, nothing seen inside CONTROL_HOURS.
+    stale = [_row(100 + k, seen_h=F.CONTROL_HOURS + 30 + k) for k in range(5)]
+    c = site([_row(1, mc=0, seen_h=F.CONTROL_HOURS + 90)] + stale, {})
+    st = F.run_site("testsite", shadow=False)
+    assert st["quarantined"] is None and st["probed"] == 6 and st["verified"] == 6
+    assert _updates(c, 1)[-1]["last_verified_alive_at"]
+
+
+def test_stale_controls_that_are_gone_still_quarantine(site):
+    stale = [_row(100 + k, seen_h=F.CONTROL_HOURS + 30) for k in range(5)]
+    c = site([_row(1, mc=2, seen_h=F.CONTROL_HOURS + 90)] + stale, lambda ad, n: "gone")
+    st = F.run_site("testsite", shadow=False)
+    assert st["quarantined"].startswith("opening") and st["probed"] == 0
+    assert not [e for e in c.log if e[0] in ("update", "insert")]
+
+
 def test_failed_closing_controls_write_no_strike_or_hide_but_keep_live_stamps(site):
     # 5 opening controls live, then every later read (worklist + closing controls) says gone,
     # except A2 which is live.

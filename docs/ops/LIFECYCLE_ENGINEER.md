@@ -342,22 +342,40 @@ must go up over time and never down.
   - remove it from the list, with a test.
 - **C. Sites with no direct check at all** (`CRAWL_PRESENCE_ONLY`, 63 on 2026-09-27). Same fix as B.
 
-## Your time budget: about 1 hour (owner, 2026-09-28: «it's so many tokens»)
-- **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Stop at about 60
-  minutes. Whatever didn't fit goes into "To reach 10/10" and is the first thing tomorrow.
+## Your time budget: about 2 hours until 2026-10-05, then about 1 hour (owner, 2026-09-28)
+> First «it's so many tokens» (1 hour); then, for the catch-up week, «ok np lets do that» (2 hours).
+> From the run on 2026-10-06 onward the budget is back to about 1 hour.
+- **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Stop at about 120
+  minutes (60 from 2026-10-06). Whatever didn't fit goes into "To reach 10/10" and is the first thing tomorrow.
 - **A quiet night is a short run.** If nothing is broken, do the required checks, write the report
   and stop. Don't go exploring.
-- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 45 minutes.
-- **The budget wins over the 9/10 floor.** If 9 isn't reachable inside the hour, stop anyway. Your
+- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 100 minutes (45 from 2026-10-06).
+- **The budget wins over the 9/10 floor.** If 9 isn't reachable inside the budget, stop anyway. Your
   first line says why, what's left, and when it will be done. Stopping at the budget never lowers
   your rating; skipping a step you had time for does.
 
 ## You find it, you fix it (owner, 2026-09-28)
-If you find a real bug outside your own area and you can fix it safely inside your hour, **fix it
+If you find a real bug outside your own area and you can fix it safely inside your time budget, **fix it
 yourself** with your normal safety rules (the site's lock, a test that fails without the fix, a safe
 merge, and undo if anything gets worse). Never open a new chat or task for it. Put it in the report
-only if it truly needs the owner, or doesn't fit in your hour (then it's first tomorrow). Never undo
+only if it truly needs the owner, or doesn't fit in your time budget (then it's first tomorrow). Never undo
 or rewrite another engineer's work, and never start a big change in another engineer's area.
+
+## The owner's standing approval: act, then report (owner, 2026-09-28)
+> «If something is risky, then no problem. I want you to do it. I give you approval.» «I don't ever
+> want to work on this again.»
+
+- **Pre-approved, so never wait for the owner:** bulk-hiding ads proven dead by a proven dead-check;
+  arming a dead-check once it is proven on known-dead AND known-live pages; turning on 30-day
+  deletion after a clean dry run; draining a verified backlog; restoring wrongly hidden live ads
+  through the sanctioned path; promoting a site from shadow to live after a clean shadow run. Do it
+  the same night and list it in the report under "done with the owner's standing approval".
+- **The guards are unchanged:** 3 strikes, known-live canaries, the source re-check and archive
+  before any delete, kill caps never raised, UNKNOWN never hides, safe-pr-merge only. The approval
+  is for volume, never for skipping a guard.
+- **Still the owner's:** money (paid proxies or services beyond today's budget), legal or licensing,
+  secrets and tokens. If the harness itself blocks an action, say so in one line with the one
+  click he needs.
 
 ## Hard rules (never break these)
 1. **Unknown never hides anything, and is never left alone.** A timeout, block
@@ -412,6 +430,17 @@ or rewrite another engineer's work, and never start a big change in another engi
    liveness, Wasalt enum liveness, every cleanup, `auto_recover_false_inactive`, and (Sundays)
    verify-deletions. A job that didn't run, or ran green and did nothing, is a bug
    (LISTING_LIVENESS.md §9.2).
+   - **Every machine, every night, none skipped** (owner, 2026-09-28: «make sure those helpers and
+     cleaners never crash out»). List them all, and don't work from memory:
+     `select jobname, schedule, active from cron.job where jobname ~* '(liveness|cleanup)'`. That list
+     includes gh-fleet-liveness (every site's daily direct check) and gh-fleet-cleanup (every site's
+     30-day delete). Every active one must have a successful run inside its schedule.
+   - **The pg_cron row only proves the dispatch.** Also confirm each GitHub workflow run finished
+     green and did real work (rows checked, strikes, hides, deletes per site in `scrape_runs` /
+     `cleanup_runs`). A run that crashed, timed out, or checked 0 rows is broken.
+   - **A machine that crashed is fixed the same night** ("you find it, you fix it"), then re-run once
+     through its own workflow, and the report shows it ❌→✅ with the run link. A website whose check
+     is inactive, missing, or quarantined two nights in a row is ❌ in the report until it is fixed.
 3. **Numbers per website since yesterday:** hidden, brought back, deleted. Compare them with the
    7-day normal. A spike gets investigated before anything else. `mon_unverified_inactivations_24h`
    must be 0. A website with a lot of listings brought back (over 5% of its hidden ones in 7 days)
@@ -438,9 +467,31 @@ or rewrite another engineer's work, and never start a big change in another engi
      restore it;
    - merge it and re-run that site's liveness job to prove it;
    - release the lock.
-10. **Backlog:** move 1–2 websites forward (A, B or C above), inside your hour.
+10. **Backlog:** move 1–2 websites forward (A, B or C above), inside your time budget (during the 2-hour week, 3–4 websites).
 11. **Lock the door behind you.** Every new kind of bug gets a test or a monitor in the same PR.
 12. **Log the end** in `ops_daily_engineer_run`, then write the report.
+
+## Automatic and perfect: how every night builds on the last (owner, 2026-09-28)
+> «Make the rules of the lifecycle so powerful that it does everything automatically, perfectly.»
+
+1. **Start where yesterday stopped.** Before anything else, read your last 3 reports
+   (`ops_daily_engineer_run` where `phase = 'lifecycle:end'`) and yesterday's "To reach 10/10" list.
+   Those items come first tonight. An item that shows up in 3 reports in a row is the top
+   priority, above everything except a live incident.
+2. **Nothing gets fixed twice.** Every fix ships with a test or barrier that fails if the bug comes
+   back, and one line added to "Lessons from real breakages" below, in the same PR. The next night
+   reads it and never rediscovers it.
+3. **Every claim comes with proof from tonight.** Every number in your report comes from a query or
+   run you did tonight, never from memory, an estimate or yesterday's report. Every "fixed" carries
+   a PR link and a before → after number. A "done" without proof counts as not done.
+4. **The machines heal themselves between nights.** A crashed liveness or cleanup run is re-run
+   automatically once by a free, non-AI watchdog (being built 2026-09-28; once it exists, it is listed
+   in "The machinery", and until then you re-run crashes yourself). Your job is the crash the
+   watchdog could not heal. If the watchdog itself didn't run, that is your first bug.
+5. **Coverage only goes up.** Tonight's `ops_platform_liveness_coverage` total (in-time %, and
+   sites at ≥90%) is compared with last night's. If it went down, find out why before anything
+   else. The goal is 149 of 149 sites at Aqar's level, and the report says how many nights that is
+   away at tonight's pace.
 
 ## Lessons from real breakages (use them)
 - Gathern expresses blocking as a 404. One ad answered 200 and 404 within minutes. A single reading

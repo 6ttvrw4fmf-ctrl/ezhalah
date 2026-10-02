@@ -200,3 +200,21 @@ def test_untrusted_run_writes_no_strike_and_no_kill(monkeypatch):
 def test_plan_kills_refuses_an_untrusted_run_at_any_size():
     for n in (1, 2, 50):
         assert lv.plan_kills([(i, 3) for i in range(n)], 2, 10_000, trusted=False) == []
+
+
+# ── daily direct check of EVERY listing (owner 2026-10-02) ───────────────────────────────────────
+def test_every_unflagged_row_is_read_about_once_a_day_not_every_run():
+    from datetime import datetime, timedelta, timezone
+    iso = lambda h: (datetime.now(timezone.utc) - timedelta(hours=h)).isoformat()  # noqa: E731
+    rows = [_row(1, 0, probe=None), _row(2, 0, probe=iso(2)), _row(3, 0, probe=iso(30)),
+            _row(4, 0, probe=iso(19))]
+    work = lv._collect_stale(_DB(rows), "2999-01-01T00:00:00+00:00", limit=10)
+    # never read and read 30h ago are due; read 2h / 19h ago wait for their day
+    assert sorted(r["id"] for r in work) == [1, 3]
+
+
+def test_the_schedule_probes_every_active_row_not_only_stale_ones():
+    from pathlib import Path
+    yml = (Path(__file__).resolve().parents[3] / ".github" / "workflows" / "gathern-liveness.yml").read_text()
+    assert "inputs.min_stale_days || '0'" in yml
+    assert 'default: "0"' in yml.split("min_stale_days:")[1].split("kill_cap:")[0]
