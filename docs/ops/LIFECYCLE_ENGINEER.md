@@ -497,7 +497,10 @@ or rewrite another engineer's work, and never start a big change in another engi
 > «Make the rules of the lifecycle so powerful that it does everything automatically, perfectly.»
 
 1. **Start where yesterday stopped.** Before anything else, read your last 3 reports
-   (`ops_daily_engineer_run` where `phase = 'lifecycle:end'`) and yesterday's "To reach 10/10" list.
+   (`ops_daily_engineer_run` where `phase = 'lifecycle:end'`), **every `lifecycle:followup` row
+   written since your last report** (hand-off notes: the owner's own working sessions write them
+   too, to tell you what was fixed between your runs), and yesterday's "To reach 10/10" list. A
+   hand-off note is a claim, not proof: verify each line tonight before you rely on it.
    Those items come first tonight. An item that shows up in 3 reports in a row is the top
    priority, above everything except a live incident. **If a night has no report, say so in your
    first line** (2026-09-29 to 10-01 had none: the account's weekly usage limit stopped the run in
