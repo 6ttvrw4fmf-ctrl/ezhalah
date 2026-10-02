@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { PLATFORM_LOGO_BREAKPOINT } from '@/lib/responsive';
@@ -8,11 +8,20 @@ import { loaderPageLayout, loaderStepDelay, loaderSlotIndices } from '@/lib/load
 export default function PlatformRosterPager<T>({ items, renderItem, rtl, onPresented }: {
   items: T[]; renderItem: (item: T) => ReactNode; rtl: boolean; onPresented: (complete: boolean) => void;
 }) {
-  const { height } = useWindowDimensions();
+  const { height, width: windowWidth } = useWindowDimensions();
+  const container = useRef<View>(null);
+  const [top, setTop] = useState(300);
+  const measureSpace = useCallback(() => {
+    container.current?.measureInWindow((_x, y) => setTop(Math.max(0, Math.round(y))));
+  }, []);
+  useEffect(() => {
+    const frame = requestAnimationFrame(measureSpace);
+    return () => cancelAnimationFrame(frame);
+  }, [height, windowWidth, measureSpace]);
   const wide = useAtLeast(PLATFORM_LOGO_BREAKPOINT);
   const [width, setWidth] = useState(0);
-  const layout = loaderPageLayout(width, height, wide);
-  return <View onLayout={e => setWidth(e.nativeEvent.layout.width)} style={styles.container}>
+  const layout = loaderPageLayout(width, height, wide, top);
+  return <View ref={container} onLayout={e => { setWidth(e.nativeEvent.layout.width); measureSpace(); }} style={styles.container}>
     {width > 0 && <Slots key={`${layout.pageSize}:${layout.rowHeight}`} items={items} renderItem={renderItem}
       rtl={rtl} onPresented={onPresented} layout={layout} />}
   </View>;
