@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://aqarnajran.com"
 SOURCE = "Aqar Najran"
@@ -240,15 +241,62 @@ def photos(post: dict) -> Optional[list[str]]:
     return urls[:20] or None
 
 
+# Why a REST walk may not be the whole catalogue. Non-empty → no prune this run.
+INCOMPLETE: list[str] = []
+
+# ── REMOVAL (measured 2026-10-02). Until then this crawler had NO removal step at all: a deleted
+# post stayed active here for good.
+#
+# There is no dead cohort to measure on: all 39 active rows were re-seen that day, and the site's 41
+# posts were last modified 2026-02-03. What the post's OWN url answers: 14 of 14 random catalogue
+# posts → 200 rendering the «البند / التفاصيل» table; a slug that never existed, a real slug with a
+# mangled tail and a wrong ?p= id → 404 (3 of 3) on a page without that table. No sold/rented
+# wording is on any of the 41 records. So a hard 404/410 is GONE, a 200 with the table is LIVE, and
+# everything else — a 200 without the table, every block — is UNKNOWN.
+_TABLE_HEAD_RE = re.compile(r"البند\s+التفاصيل")
+RES_TABLE, COM_TABLE = "aqarnajran_residential_listings", "aqarnajran_commercial_listings"
+
+
+def _signal(status, body, moved) -> Optional[str]:
+    """'live' | 'gone' | None — only what this post's own URL affirmatively answers."""
+    if status in (404, 410):
+        return "gone"
+    if status != 200 or moved:
+        return None
+    return "live" if _TABLE_HEAD_RE.search(body_text(body)) else None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for db.prune_unseen. A 404 is believed only while a known-live ad from
+    this run (`control`) still reads live through the same session."""
+    url_for = stored_listing_url((RES_TABLE, COM_TABLE))
+    s = session()
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform="aqarnajran", signal=_signal, session=lambda: s,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def fetch_posts(s: cc.Session, limit: int = 0) -> list[dict]:
+    INCOMPLETE.clear()
     out: list[dict] = []
     page = 1
+    total = None        # the source's own count of its catalogue (x-wp-total: 41 on 2026-10-02)
     while True:
         r = s.get(f"{BASE}/wp-json/wp/v2/posts",
                   params={"per_page": 50, "page": page,
                           "_fields": "id,link,title,content,date_gmt,modified_gmt"}, timeout=40)
         if r.status_code != 200:
             break
+        total = r.headers.get("x-wp-total")
         batch = r.json()
         if not batch:
             break
@@ -258,6 +306,8 @@ def fetch_posts(s: cc.Session, limit: int = 0) -> list[dict]:
         if len(batch) < 50:
             break
         page += 1
+    if str(len(out)) != str(total):     # a missing header is "cannot tell", never "complete"
+        INCOMPLETE.append(f"read {len(out)} posts, x-wp-total says {total}")
     return out
 
 
@@ -310,7 +360,26 @@ def main() -> int:
             source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
+        # REMOVAL. An ad missing from this run is only a CANDIDATE: at three misses its own URL is
+        # re-read, and it is hidden only on a 404 (_signal). An ad that still renders heals the row
+        # — including one the crawler skips on purpose, which is not gone. No prune on a partial
+        # walk or a single-vertical run (--limit never gets here: it is a dry run).
+        pruned = 0
+        if INCOMPLETE:
+            print(f"  ⚠ REST walk incomplete — no prune: {'; '.join(INCOMPLETE)}")
+        elif args.type == "all":
+            verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+            for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                k = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=verify_gone)
+                if k < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += k
+        skip_notes = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
         healthy = db.end_run(run_id, ok=True, rows_seen=len(posts), rows_upserted=len(res) + len(com),
+                             notes=f"pruned={pruned} skipped: {skip_notes or 'none'}"[:300],
                              check_tables=["aqarnajran_residential_listings",
                                            "aqarnajran_commercial_listings"])
         if not healthy:
