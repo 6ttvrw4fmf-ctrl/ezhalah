@@ -74,6 +74,7 @@ import { primeResultsFound } from '@/data/loaderResultsFound';
 import { screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
+import { listingPrice } from '@/lib/listingDisplay';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard, type ShellPills } from '@/components/AdvancedQuestionCard';
@@ -2847,7 +2848,7 @@ export default function Agent() {
           const cards = (m.result?.listings ?? []).map((l, i) => {
             const locationLabel = l.district && l.city ? `${l.district}, ${l.city}`
               : (l.district || l.city || LOCATION_UNRESOLVED_AR);
-            return `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${locationLabel} — ${l.price}` +
+            return `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${locationLabel} — ${listingPrice(l, 'en')}` +
               `${l.area ? `, ${l.area} m²` : ''}${l.beds ? `, ${l.beds} bed` : ''}, on ${l.source}`;
           });
           const text = cards.length ? `${m.text}\n${cards.join('\n')}` : m.text;

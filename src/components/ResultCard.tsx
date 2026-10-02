@@ -6,12 +6,13 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
 import { derivedTotalEquation } from '@/data/listings';
-import { useI18n, t as tr, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
+import { useI18n, t as tr, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish, attrDisplayLabel, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
+import { isStayLengthPriced, listingPrice } from '@/lib/listingDisplay';
 import { afEvidence, type ActiveAf } from '@/lib/afEvidence';
 
 const IS_WEB = Platform.OS === 'web';
@@ -218,7 +219,7 @@ export function ResultCard({
         <Text style={[card.title, { textAlign: txtAlign, writingDirection: wDir }]}>
           {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
         </Text>
-        <Text style={card.price} numberOfLines={1}>{tPrice(listing.price)}</Text>
+        <Text style={isStayLengthPriced(listing.source) ? card.stayNote : card.price} numberOfLines={isStayLengthPriced(listing.source) ? 2 : 1}>{listingPrice(listing, locale)}</Text>
         </View>
         <View style={card.locRow}>
           <Ionicons name="location-outline" size={12} color={colors.primary} />
@@ -1133,6 +1134,8 @@ const card = StyleSheet.create({
   },
   afChipText: { fontSize: 10.5, color: colors.primary, fontWeight: '700' },
   price: { fontSize: 20, fontWeight: '800', color: colors.primary, maxWidth: '100%', flexShrink: 0 },
+  // Gathern / Aqar Monthly price line is a sentence, not a figure: same colour, sized as a prompt to tap.
+  stayNote: { fontSize: 13, fontWeight: '700', color: colors.primary, maxWidth: '100%', flexShrink: 1 },
   // Guest-rating chip (Gathern) — star + score, with a muted review-count suffix. Sits just under
   // the price; only rendered when the listing actually carries a rating. (Gathern Tier-1.)
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },

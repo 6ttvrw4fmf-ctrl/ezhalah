@@ -46,7 +46,7 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, normalize, sold_pin  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
@@ -574,6 +574,26 @@ _ABROAD_RE = re.compile(
     r"المغرب|مراكش|الأردن|الاردن|تركيا|اسطنبول|إسطنبول)(?![ء-ي])")
 
 
+def ad_number(post: dict) -> str:
+    return f"{PREFIX}{int(hashlib.md5((post.get('slug') or str(post.get('id'))).encode()).hexdigest()[:12], 16)}"
+
+
+def _retire_abroad(table: str, abroad: dict[str, str]) -> list[str]:
+    """Retire the stored, active rows of ads whose OWN title places them abroad. Skipping them is not
+    enough: ksaaqar has no prune, so 11 rows filed before the skip existed (Cairo, Dubai, Marrakech,
+    Aqaba, Aswan — 2026-09-28) stayed searchable. Same evidenced pin as eastabha's country gate. The
+    note carries only the place word, never the title: one of these titles is a phone number."""
+    if not abroad:
+        return []
+    got = db._execute(db.sb().table(table).select("ad_number").in_("ad_number", list(abroad)).eq("active", True),
+                      what=table + ".abroad")
+    stored = sorted({r["ad_number"] for r in (got.data or [])})
+    return sold_pin.pin_source_confirmed_gone(
+        table, stored, oracle="ksaaqar.abroad_gate.title",
+        notes={a: f"outside Saudi Arabia: the ad's own title names «{abroad[a]}». ksaaqar.com still "
+                  f"serves the ad; retired as out of scope, not as sold." for a in stored})
+
+
 # ── map ──────────────────────────────────────────────────────────────────────────────────────────
 def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Optional[dict], str, str]:
     """(row, category, skip_reason) — every skip names its own reason for the run notes."""
@@ -619,7 +639,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         rent_period, price_annual = rent_period_and_annual(price, f"{title} {body} {page_text}")
 
     row: dict[str, Any] = {
-        "ad_number": f"{PREFIX}{int(hashlib.md5((post.get('slug') or str(post.get('id'))).encode()).hexdigest()[:12], 16)}",
+        "ad_number": ad_number(post),
         "listing_url": link,
         "source": SOURCE,
         "active": True,
@@ -689,6 +709,7 @@ def main() -> int:
               f"{' [LIMIT ' + str(args.limit) + ']' if args.limit else ''}", flush=True)
 
         skipped: dict[str, int] = {}
+        abroad: dict[str, str] = {}      # ad_number -> the place word its own title names
         for i, p in enumerate(posts, 1):
             page_html = fetch_detail(s, p["link"])
             if not page_html:
@@ -698,6 +719,8 @@ def main() -> int:
             row, cat, why = map_listing(p, text, page_html)
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1
+                if why == "abroad":
+                    abroad[ad_number(p)] = _ABROAD_RE.search(_clean(p["title"]["rendered"])).group(0)
                 continue
             if args.type != "all" and cat != args.type:
                 continue
@@ -740,6 +763,10 @@ def main() -> int:
             source="KSA Aqar")
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+        retired_abroad = sum(len(_retire_abroad(t, abroad))
+                             for t in ("ksaaqar_residential_listings", "ksaaqar_commercial_listings"))
+        if retired_abroad:
+            print(f"  retired {retired_abroad} stored row(s) placed abroad by their own title")
 
         # REMOVAL. An ad missing from this run is only a CANDIDATE: at three misses its own URL is
         # re-read, and it is hidden only on a 404 (_signal). An ad that still renders heals the row
