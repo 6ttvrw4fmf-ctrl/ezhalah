@@ -1,0 +1,44 @@
+# Recheck between the daily runs of fleet-liveness.yml: re-reads ONLY the listings already carrying a
+# strike, so an ad its site removed is hidden 24 hours after its first "gone" reading instead of
+# three days later (owner, 2026-10-02: «whenever someone removes a listing on those websites, it gets
+# removed from ours»). Same oracle, same known-live controls, same per-site cap, same three readings
+# — only sooner (scrapers/common/fleet_liveness.py, RECHECK). A site with no struck row is not touched.
+#
+# Triggered by pg_cron (job gh-fleet-liveness-recheck, 19:17 UTC): twelve hours after the daily run
+# starts and twelve before the next one, so a row's three readings are daily, recheck, daily. A row
+# read less than 6 hours ago is left for the next run. pg_cron dispatches with NO inputs. Shares the daily run's concurrency group so the two never write at once.
+name: Fleet liveness recheck (struck rows)
+
+on:
+  workflow_dispatch:
+    inputs:
+      shadow:
+        description: "true = decide and report, write nothing"
+        required: false
+        default: "false"
+
+concurrency:
+  group: fleet-liveness
+  cancel-in-progress: false
+
+jobs:
+  recheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Recheck struck rows (every site)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SHADOW: ${{ inputs.shadow }}
+        run: |
+          exec python -m scrapers.common.fleet_liveness --struck-only \
+            $([ "$SHADOW" = "true" ] && echo --shadow)

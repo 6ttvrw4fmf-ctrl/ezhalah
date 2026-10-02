@@ -28,6 +28,7 @@ class _Q:
 
     def select(self, *a, count=None): self.counting = count == "exact"; return self
     def eq(self, col, v): self.f.append(lambda r: r.get(col) == v); return self
+    def gt(self, col, v): self.f.append(lambda r: (r.get(col) or 0) > v); return self
     def gte(self, col, v): self.f.append(lambda r: (r.get(col) or "") >= v); return self
     def in_(self, col, vals): vs = set(vals); self.f.append(lambda r: r.get(col) in vs); return self
     def order(self, col, desc=False, nullsfirst=False): self.orders.append((col, desc)); return self
@@ -124,6 +125,23 @@ def test_unknown_only_records_that_we_looked(site):
 
 def test_failed_opening_controls_read_and_write_nothing(site):
     c = site([_row(1, mc=2)] + _controls(), lambda ad, n: "gone")
+    st = F.run_site("testsite", shadow=False)
+    assert st["quarantined"].startswith("opening") and st["probed"] == 0
+    assert not [e for e in c.log if e[0] in ("update", "insert")]
+
+
+def test_a_stale_crawl_still_yields_controls_and_the_site_is_checked(site):
+    # dwelleo/muhaysini 2026-10-02: crawl failing for 3-4 days, nothing seen inside CONTROL_HOURS.
+    stale = [_row(100 + k, seen_h=F.CONTROL_HOURS + 30 + k) for k in range(5)]
+    c = site([_row(1, mc=0, seen_h=F.CONTROL_HOURS + 90)] + stale, {})
+    st = F.run_site("testsite", shadow=False)
+    assert st["quarantined"] is None and st["probed"] == 6 and st["verified"] == 6
+    assert _updates(c, 1)[-1]["last_verified_alive_at"]
+
+
+def test_stale_controls_that_are_gone_still_quarantine(site):
+    stale = [_row(100 + k, seen_h=F.CONTROL_HOURS + 30) for k in range(5)]
+    c = site([_row(1, mc=2, seen_h=F.CONTROL_HOURS + 90)] + stale, lambda ad, n: "gone")
     st = F.run_site("testsite", shadow=False)
     assert st["quarantined"].startswith("opening") and st["probed"] == 0
     assert not [e for e in c.log if e[0] in ("update", "insert")]
@@ -231,3 +249,68 @@ def test_pace_is_a_rate_not_a_pause_added_to_every_read(site, monkeypatch):
     monkeypatch.setattr(F, "PACE_S", 1.0)
     F.run_site("testsite", shadow=True)
     assert slept[:3] == [0.0, 0.0, 0.75], slept
+
+
+def test_a_run_cut_short_keeps_the_live_stamps_it_already_earned(site, monkeypatch):
+    # 2026-10-02: six jobs were cancelled mid-run; every write waited for the end, so dwelleo lost
+    # 37 minutes of reads and stayed at 0% checked.
+    monkeypatch.setattr(F, "FLUSH", 2)
+
+    def answers(ad, n):
+        if n == 5 + 4:                      # 5 opening controls, then the 4th row: the job is killed
+            raise KeyboardInterrupt
+        return "live"
+    c = site([_row(i, mc=1) for i in range(1, 6)] + _controls(), answers)
+    with pytest.raises(KeyboardInterrupt):
+        F.run_site("testsite", shadow=False)
+    stamped = [i for i in range(1, 6) if any(u.get("last_verified_alive_at") for u in _updates(c, i))]
+    assert len(stamped) == 2, "the reads made before the kill are written, in FLUSH-sized steps"
+
+
+def test_the_reading_budget_fits_inside_the_jobs_own_ceiling():
+    import re
+    from pathlib import Path
+    yml = (Path(__file__).resolve().parents[3] / ".github/workflows/fleet-liveness.yml").read_text()
+    ceiling = int(re.search(r"timeout-minutes: (\d+)", yml).group(1))
+    assert F.BUDGET_S / 60 + 20 <= ceiling <= 360, "the reader must stop itself before GitHub kills it"
+    # dwelleo, the largest site here: every ad inside its 48 h window needs half of it a day.
+    assert F.BUDGET_S / 1.6 >= 11_137
+
+
+def _probed_ago(i, mc, hours):
+    return dict(_row(i, mc=mc), last_liveness_probe_at=(NOW - timedelta(hours=hours)).isoformat())
+
+
+def test_the_recheck_reads_only_rested_struck_rows_and_hides_at_the_third_gone(site):
+    # A removed ad must not wait three daily runs: the recheck gives a struck row its next reading.
+    seen = []
+    rows = [_probed_ago(1, 2, 8), _probed_ago(2, 1, 8), _probed_ago(3, 1, 1), _row(4)] + _controls()
+    c = site(rows, lambda ad, n: seen.append(ad) or ("gone" if ad in ("A1", "A2", "A3") else "live"))
+    st = F.run_site("testsite", shadow=False, struck_only=True)
+    assert sorted(seen[5:-5]) == ["A1", "A2"], "A3 was read an hour ago, A4 carries no strike"
+    assert st["hidden"] == 1 and st["struck"] == 1 and st["covered"] == 100.0
+    assert _updates(c, 1)[-1]["active"] is False and _updates(c, 2)[-1]["missing_count"] == 2
+    assert not _updates(c, 3) and not _updates(c, 4)
+
+
+def test_the_recheck_clears_a_strike_that_was_a_blip(site):
+    c = site([_probed_ago(1, 2, 8)] + _controls(), {})
+    F.run_site("testsite", shadow=False, struck_only=True)
+    assert _updates(c, 1)[-1]["missing_count"] == 0 and _updates(c, 1)[-1]["last_verified_alive_at"]
+
+
+def test_the_recheck_leaves_a_site_with_no_struck_row_alone(site, monkeypatch):
+    c = site([_row(1)] + _controls(), lambda ad, n: pytest.fail("nothing to read"))
+    monkeypatch.setattr(F, "begin_run", lambda name: pytest.fail("no run row for a site left alone"))
+    assert F.run_site("testsite", shadow=False, struck_only=True)["skipped"]
+    assert not c.log
+
+
+def test_the_recheck_is_scheduled_clear_of_the_daily_run_and_shares_its_lock():
+    import re
+    from pathlib import Path
+    wf = Path(__file__).resolve().parents[3] / ".github/workflows"
+    recheck = (wf / "fleet-liveness-recheck.yml").read_text()
+    assert "--struck-only" in recheck
+    group = re.search(r"concurrency:\n  group: (\S+)", (wf / "fleet-liveness.yml").read_text()).group(1)
+    assert f"group: {group}" in recheck, "the daily run and the recheck must never write at once"

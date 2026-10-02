@@ -97,8 +97,20 @@ added to remove: it puts a confident, recent-looking timestamp on inventory nobo
 `scripts/verify-liveness-registry-mirror.ts` fails on any hand-written stamp under `scrapers/`.
 
 `presence_patch()` exists for the one case where a platform's source presence is *explicitly
-defined* as positive evidence. No platform declares that today, and `LivenessPolicy` raises if
-`absence_is_candidate_only` is disabled.
+defined* as positive evidence. **Two owner decisions declare it, both 2026-10-02.** (1) Wasalt: a row
+Wasalt's own search results serve is stamped verified-alive by the crawl. (2) The
+`SOURCE_LIST_PRESENCE` tier («yes do that for all 60 sites … check them every single day»): for a
+small site admitted BY NAME in `liveness_policies.SOURCE_LIST_DAILY`, whose crawl re-reads the site's
+own complete list every day, a row that list serves is stamped verified-alive, 48 h window. A site
+is admitted only after its crawler was read twice (the second reader trying to break the verdict)
+and found unable to upsert an active row it did not observe at the source in that run, or one the
+source marks unavailable; 33 were admitted that day and the rest carry their reason in
+`scrapers/lifecycle-gaps.txt`. A site with an oracle is never moved there. For Wasalt: The
+measurement behind the decision is in `liveness_policies.py`, and every enum-strike run re-tests it
+with 30 directly-read in-feed controls (flips abort under 90% live). It changes what counts as
+*verified*, never what counts as *dead*: removal still needs a DIRECT gone reading, and
+`LivenessPolicy` raises if `absence_is_candidate_only` is disabled. No other platform may declare
+it without an owner decision recorded here.
 
 ## 4. Every production-searchable platform must declare a strategy
 
@@ -111,6 +123,7 @@ directory has no policy.
 |---|---|---|
 | `DIRECT_REVISIT` | we periodically re-fetch each listing's own URL | **yes**, if coverage keeps up |
 | `CANDIDATE_PLUS_DIRECT` | an absence signal picks candidates cheaply; each gets a DIRECT confirm before anything is deactivated | **yes** |
+| `SOURCE_LIST_PRESENCE` | the crawl re-reads the site's own complete list every day; a row that list serves is stamped verified (48 h). Admitted by name, owner decision 2026-10-02 | **yes for "is it still offered"**; removal still needs three complete-crawl misses |
 | `CRAWL_PRESENCE_ONLY` | we only know the ad was in the crawl | **no — recorded as a KNOWN GAP** |
 
 `CRAWL_PRESENCE_ONLY` is not an approved design. It is an honest label on 25 small platforms

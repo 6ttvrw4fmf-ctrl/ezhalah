@@ -39,8 +39,15 @@
 //
 // IF A PLATFORM EVER LEGITIMATELY EARNS A STAMP UNDER TIER 3: it cannot today —
 // liveness_contract.presence_patch() exists but LivenessPolicy raises if absence_is_candidate_only
-// is disabled, and no platform declares presence-as-evidence. Making one do so is a deliberate
-// registry decision, and it should land together with the edit to this file. Do not loosen the
+// is disabled, and presence-as-evidence is declared only by wasalt (tier 1) and by the
+// SOURCE_LIST_PRESENCE tier (owner decision 2026-10-02: for a small site admitted by name, the
+// site's own complete list, re-read daily, is the check). A site that earns stamps that way is
+// MOVED to that tier in all three registry copies; a CRAWL_PRESENCE_ONLY platform still cannot
+// earn one, and check 2 below still fails on any stamp under it. Whether a SOURCE_LIST_PRESENCE
+// site keeps its 48 h promise is graded in production by mon_detect_liveness_verification_sla
+// (a P1 per platform), and whether its claim is cashed in code by verify-liveness-registry-mirror.ts
+// (route 4) — not here, so a site waiting for its first crawl cannot turn main red.
+// Any further such registry decision should land together with an edit to this file. Do not loosen the
 // check to make a red run green; that converts a visible gap into an invisible false claim, which
 // is the exact move LISTING_LIVENESS.md §5.1 forbids.
 //
