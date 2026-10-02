@@ -93,7 +93,9 @@ def test_only_an_oracle_ALIVE_row_comes_back(monkeypatch):
     store = {RES: [_row(i + 1, u) for i, u in enumerate(urls)], COM: [], "ops_adjudicated_listing": []}
     rec = _load(monkeypatch, store, urls)
     st = rec.recover_table(RES, 0, 1)
-    assert st == {"checked": 3, "recovered": 1, "sold": 1, "unknown": 1}
+    # The four counts this test is about; the run now also reports the rows it did NOT check.
+    assert {k: st[k] for k in ("checked", "recovered", "sold", "unknown")} == {
+        "checked": 3, "recovered": 1, "sold": 1, "unknown": 1}
     by_id = {r["id"]: r for r in store[RES]}
     assert by_id[1]["active"] is True
     assert by_id[1]["last_verified_alive_at"]          # proven alive, stamped through the contract

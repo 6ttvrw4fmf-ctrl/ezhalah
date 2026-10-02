@@ -4,6 +4,10 @@
 # (source audit found the age-swept inactive stock to be overwhelmingly live-at-source; the
 # crawler's partial enumeration means auto_recover_false_inactive can't resurrect them).
 #
+# A RED RUN IS MEANT: the step exits 1 (scrape_runs ok=false) when hidden ads were waiting and
+# dealapp gave a fresh page for none of them. The run notes count what was really read:
+# «recovered / sold / unknown of checked», then «wall / no_answer / not_reached» for the rest.
+#
 # Scheduled weekly (Mon 03:00 UTC) via pg_cron → trigger_gh_workflow('dealapp-recover.yml'),
 # same dispatch pattern as every other scraper job. Manual dispatch for the one-time backfill.
 
