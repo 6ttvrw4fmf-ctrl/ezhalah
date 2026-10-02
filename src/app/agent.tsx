@@ -654,6 +654,7 @@ export default function Agent() {
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [typed, setTyped] = useState('');
+  const [loaderBottomInset, setLoaderBottomInset] = useState<number>();
   // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): a search that arrived via Normal Filter's
   // «بحث» (the `?filter=` param — see the effect below, the ONE place this flips true) shows its
   // results with no composer at all; free-text follow-up chat exists ONLY on a conversation that
@@ -3702,7 +3703,7 @@ export default function Agent() {
                 // The branded slogan + search summary are NOT shown here anymore (owner: keep loading
                 // clean/focused); they still appear in the RESULTS bubble below, unchanged. RTL is
                 // handled inside SearchLoader (the message column is LTR-pinned).
-                return <SearchLoader key={m.id} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} />;
+                return <SearchLoader key={m.id} bottomInset={loaderBottomInset} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} />;
               }
               if (m.role === 'agent') {
                 // Per-message direction: each AI reply renders in its OWN language's direction and
@@ -4222,7 +4223,7 @@ export default function Agent() {
             (see the `completed` branches below). The real "start over" action is the hamburger, top
             left, not a button inside the composer. The saved transcript stays readable; Back / reopen
             restore this same state from `completed`. */}
-        <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]}>
+        <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]} testID="agent-footer" onLayout={e => setLoaderBottomInset(Math.ceil(e.nativeEvent.layout.height))}>
           <View style={[s.col, s.composerCol]}>
             {/* FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11; tightened 2026-09-12): the free-text
                 composer never shows for a Filter-origin conversation — the disclaimer below stays

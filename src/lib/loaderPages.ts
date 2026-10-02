@@ -8,13 +8,13 @@ export function loaderStepDelay(total: number, capacity: number, replacements: n
     ? LOADER_PAGE_MS
     : (LOADER_CYCLE_MS - 2 * LOADER_PAGE_MS) / Math.max(1, remaining - 1);
 }
-export function loaderPageLayout(width: number, height: number, wide: boolean, top = 300) {
+export function loaderPageLayout(width: number, height: number, wide: boolean, top = 300, bottomInset = wide ? 64 : 88) {
   const columns = Math.max(1, Math.floor(width / (wide ? 112 : 96)));
   const rowHeight = wide ? 92 : 84;
-  // Fill the actual space below the heading, leaving room for the footer and safe area.
-  const available = Math.max(rowHeight, height - Math.max(0, top) - (wide ? 64 : 88));
+  // Use the measured footer (including safe area) and the thread’s 16px bottom padding.
+  const available = Math.max(rowHeight, height - Math.max(0, top) - bottomInset - 16);
   const rows = Math.max(1, Math.floor(available / rowHeight));
-  return { columns, rows, pageSize: columns * rows, rowHeight };
+  return { columns, rows, pageSize: columns * rows, rowHeight, gridHeight: available };
 }
 /** Replace occupied slots individually; the tail retains earlier logos instead of empty cells. */
 export function loaderSlotIndices(total: number, capacity: number, replacements: number): number[] {

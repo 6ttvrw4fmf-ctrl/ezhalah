@@ -1,7 +1,7 @@
 function assert(value: boolean, message = 'Assertion failed') { if (!value) throw new Error(message); }
 import { loaderPageLayout, loaderSlotIndices, loaderStepDelay, LOADER_CYCLE_MS, LOADER_PAGE_MS } from './loaderPages.ts';
 for (const [width, height, wide] of [[358, 844, false], [288, 568, false], [1088, 800, true]] as const) {
-  const layout = loaderPageLayout(width, height, wide);
+  const layout = loaderPageLayout(width, height, wide, 200, 52);
   for (const total of [0, 1, 11, 150]) {
     const slots = Math.min(total, layout.pageSize);
     const seen = new Set<number>();
@@ -25,3 +25,18 @@ for (const [width, height, wide] of [[358, 844, false], [288, 568, false], [1088
 }
 assert(LOADER_PAGE_MS === 1000);
 console.log('Continuous loader coverage, full slots and single-tile progression passed.');
+
+// Regression: do not strand the unused fraction of a row above a guessed footer.
+for (const [width, height, wide, top, footer] of [
+  [358, 844, false, 220, 52],
+  [288, 568, false, 205, 72],
+  [528, 760, false, 155, 48],
+  [1056, 800, true, 200, 40],
+] as const) {
+  const layout = loaderPageLayout(width, height, wide, top, footer);
+  assert(top + layout.gridHeight + 16 === height - footer, 'grid reaches measured footer with only thread padding');
+  assert(layout.rows * layout.rowHeight <= layout.gridHeight, 'every row fits above the footer');
+  assert((layout.rows + 1) * layout.rowHeight > layout.gridHeight, 'use every complete row that fits');
+}
+assert(loaderPageLayout(358, 844, false, 170, 52).rows === 7, 'measured phone footer recovers another row');
+console.log('Measured footer and full-height loader layout passed.');
