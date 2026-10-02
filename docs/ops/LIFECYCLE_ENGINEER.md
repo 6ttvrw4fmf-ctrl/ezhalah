@@ -218,6 +218,36 @@ Recompute every Sunday, and the day a website is added:
   read UNKNOWN), aqaralsaudia (no control answers), and the complete-feed sites in
   `scrapers/absence-only-prune.txt` that have a listing page but no oracle yet.
 
+### The site's own full list is the check: 33 small sites (owner, 2026-10-02)
+> «yes do that for all 60 sites … check them every single day, or once every 2 days»
+
+- **What it is.** A fourth tier, `SOURCE_LIST_PRESENCE` (`liveness_policies.SOURCE_LIST_DAILY`): the
+  daily crawl re-reads the site's own complete list, and every row it upserts as active is stamped
+  checked (`db._wasalt_batch` → `presence_patch`). Window 48 h. Hiding is unchanged: three complete
+  crawls without the ad.
+- **33 sites are in, by name.** Every crawler was read twice on 2026-10-02 (the second reader tried
+  to break the first one's verdict), and 488 in-list ads were opened from a second network (none
+  answered "gone"). The other sites are NOT in, each for a concrete hole written on its line in
+  `scrapers/lifecycle-gaps.txt` ("NOT admitted … crawler audit 2026-10-02"). **Those lines are your
+  backlog, biggest site first:** close the hole in the crawler, prove it with a test, then add the
+  name to `SOURCE_LIST_DAILY` with a registry reseed. Never add a name without closing its hole.
+- **The holes that leave dead ads up today, fix these first:**
+  - ten sites have **no removal step at all** (their crawler never calls `prune_unseen`):
+    sadiqeltajer (1,540 ads, 24 unseen for 3+ days), ksaaqar (1,346, 10 unseen), remal, wslnaa,
+    gudai, aqarnajran, safera, fahadalshahri, shmoualshmal, alhumaidan. `mark_stale_listings_inactive`
+    is report-only, so nothing hides them.
+  - abralosol (2,788), arkaan (1,818), aqaratikom: the row is written as active even when the ad's
+    own page answered 404/410 in that same run.
+  - eastabha: the sold filter reads only the first status term (2 sold ads active on 2026-10-02).
+  - alta, aalbarrak, almuteb: the sold filter fails open when the status list cannot be read.
+- **Prove it every night:** every admitted site is ≥ 90% checked inside 48 h
+  (`ops_platform_liveness_coverage`); an admitted site below that had no clean crawl for two days,
+  so fix its crawl. Once a week per site, open 5 in-list ads at their own URL: one that is gone
+  while its list still serves it means the list is not trustworthy, so take the site out of
+  `SOURCE_LIST_DAILY` that night and say so.
+- **An active row with no stamp for 48 h on an admitted site** is an ad its list stopped serving.
+  That is your candidate list for "why is this still up".
+
 ### What the owner hears from you (owner, 2026-10-02)
 > «The lifecycle should report any issues, fix it, and give me an overall report … it should never
 > tell me "there is an issue" or "something happened".»
