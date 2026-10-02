@@ -682,10 +682,21 @@ or rewrite another engineer's work, and never start a big change in another engi
   57014, so one dropped HTTP/2 connection killed a whole shard (2026-09-30, 2026-10-02).
 - A recovery job must read pages with the same oracle the hiding job uses. dealapp-recover read
   100% UNKNOWN for five weeks (its own fetch got shells), so it could never bring a live ad back.
-- A hand-written hide that also sets `missing_count = 3` is invisible to
-  `mon_unverified_inactivations_24h` and to `auto_recover_false_inactive()`. Dealapp, 2026-10-02
-  11:30 UTC: 1,932 ads hidden in one statement with no page reading. Group each night's hides by
-  exact `deactivated_at`; a big batch no liveness run reports is a bug.
+- `mon_unverified_inactivations_24h` grades a hide by its ledger row, never by `missing_count`
+  (since 2026-10-02; before that a hide stamped `missing_count = 3` was invisible to it: 66 aqar
+  ads, 01:07 UTC, a sweep shard died before saving its kill rows). A hide is verified when the ad
+  has a row stamped from 96 h before to 15 min after `deactivated_at`, not older than its newest
+  alive reading, in `ops_stale_inactivation_probe` (GONE or SUPERSEDED) or as an applied kill in
+  `aqar_/dealapp_/gathern_liveness_detail`. When the number is not 0, list the rows (add the
+  platform's own `_liveness_detail` table the same way if it has one), then group them by exact
+  `deactivated_at` to find the job:
+  `select x.id, x.ad_number, x.deactivated_at from <table> x where not x.active and
+  x.deactivated_at >= now() - interval '24 hours' and not exists (select 1 from
+  ops_stale_inactivation_probe p where p.source_table = '<table>' and (p.listing_id = x.id or
+  p.ad_number = x.ad_number) and p.verdict in ('GONE','SUPERSEDED') and p.probed_at between
+  x.deactivated_at - interval '96 hours' and x.deactivated_at + interval '15 minutes')`.
+  `auto_recover_false_inactive()` still looks at `missing_count = 0` only. The Dealapp batch of
+  2026-10-02 11:30 UTC was NOT such a case: every ad in it had a GONE row written before the hide.
 - Before trusting "our servers read it wrong", open the same ads from a second network. On
   2026-10-02 the Gathern 404s that looked like a block were real.
 
