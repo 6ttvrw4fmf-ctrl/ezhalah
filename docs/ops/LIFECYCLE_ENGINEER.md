@@ -619,6 +619,12 @@ or rewrite another engineer's work, and never start a big change in another engi
   waited for hours behind a PII pin that PR #5259 already fixed).
 - A checker's own DB-retry helper must retry what `db._execute` retries. aqar liveness retried only
   57014, so one dropped HTTP/2 connection killed a whole shard (2026-09-30, 2026-10-02).
+- A recovery job must read pages with the same oracle the hiding job uses. dealapp-recover read
+  100% UNKNOWN for five weeks (its own fetch got shells), so it could never bring a live ad back.
+- A hand-written hide that also sets `missing_count = 3` is invisible to
+  `mon_unverified_inactivations_24h` and to `auto_recover_false_inactive()`. Dealapp, 2026-10-02
+  11:30 UTC: 1,932 ads hidden in one statement with no page reading. Group each night's hides by
+  exact `deactivated_at`; a big batch no liveness run reports is a bug.
 - Before trusting "our servers read it wrong", open the same ads from a second network. On
   2026-10-02 the Gathern 404s that looked like a block were real.
 

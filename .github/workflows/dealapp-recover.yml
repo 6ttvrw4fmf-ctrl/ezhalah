@@ -48,4 +48,4 @@ jobs:
           exec python -m scrapers.dealapp.recover \
             --table ${{ github.event.inputs.table || 'all' }} \
             --limit ${{ github.event.inputs.limit || '0' }} \
-            --workers 4
+            --workers 2 --minutes 105
