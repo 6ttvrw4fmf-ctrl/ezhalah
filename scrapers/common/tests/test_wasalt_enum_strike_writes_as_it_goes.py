@@ -168,3 +168,13 @@ def test_the_workflow_budget_sits_under_the_job_timeout():
     budget_s = float(re.search(r"--max-seconds\s+(\d+)", strike).group(1))
     assert 0 < budget_s <= timeout_min * 60 - 15 * 60, \
         "the confirm budget must leave room for setup plus one stuck browser check"
+
+
+def test_one_run_can_confirm_a_backlog_of_thousands():
+    """70 min confirmed ~570 rows per run while ~4,000 unseen rows waited (2026-10-02); the budget and
+    the row cap must both allow a multi-thousand-row drain in one run."""
+    wf = (Path(__file__).resolve().parents[3] / ".github/workflows/wasalt-enum-liveness.yml").read_text()
+    strike = wf[wf.index("  strike:"):wf.index("  repair:")]
+    budget_s = float(re.search(r"--max-seconds\s+(\d+)", strike).group(1))
+    limit = int(re.search(r"inputs\.confirm_limit \|\| '(\d+)'", strike).group(1))
+    assert budget_s / 7.3 >= 2500 and limit >= 2500
