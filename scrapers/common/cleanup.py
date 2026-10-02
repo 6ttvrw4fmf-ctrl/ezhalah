@@ -196,6 +196,30 @@ FRAC_GUARD_MIN_ROWS = 500
 # the cheap ones. Keep it well under what makes the slowest archive trigger approach 8 s.
 _WRITE_CHUNK = int(os.environ.get("CLEANUP_WRITE_CHUNK", "50"))
 
+
+def _is_statement_timeout(e: Exception) -> bool:
+    return "57014" in str(e)
+
+
+def _delete_chunk(client, table: str, ids: list, stats: dict) -> None:
+    """Delete `ids` (already source-verified dead and logged), counting what commits.
+
+    A 50-row delete hit the statement timeout mid-run (aqar, 2026-10-02 02:10 UTC: 1,150 of 2,000
+    deleted, the other 850 left logged-but-not-deleted and the run aborted). A delete is idempotent,
+    so on a statement timeout the chunk is split in half and each half retried, down to one row;
+    a single row that still times out raises as before. Any other error raises unchanged.
+    """
+    try:
+        client.table(table).delete().in_("id", ids).execute()
+    except Exception as e:  # noqa: BLE001 — postgrest APIError; re-raised unless it is 57014
+        if not _is_statement_timeout(e) or len(ids) == 1:
+            raise
+        mid = len(ids) // 2
+        _delete_chunk(client, table, ids[:mid], stats)
+        _delete_chunk(client, table, ids[mid:], stats)
+        return
+    stats["deleted"] += len(ids)
+
 _FREEZE_MIN_SAMPLE = 20
 _FREEZE_MAX_INCONCLUSIVE_RATE = 0.30
 
@@ -772,13 +796,12 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                     for t, ids in to_delete.items():
                         for i in range(0, len(ids), _WRITE_CHUNK):
                             chunk = ids[i:i + _WRITE_CHUNK]
-                            client.table(t).delete().in_("id", chunk).execute()
                             # Count per COMMITTED chunk, never in one lump at the end. A statement
                             # timeout mid-loop (57014) leaves some chunks deleted and some not; a
                             # total computed afterwards is never reached, so the failure path would
                             # report deleted=0 over rows that are genuinely gone (run 49535,
                             # 2026-09-20: 1 of 500 deleted, reported as 0).
-                            stats["deleted"] += len(chunk)
+                            _delete_chunk(client, t, chunk, stats)
                 else:
                     stats["deleted"] = sum(len(v) for v in to_delete.values())
 
