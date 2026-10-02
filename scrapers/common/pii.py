@@ -29,11 +29,23 @@ _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 # strict pattern so the surrounding brackets go too.
 _PHONE_LOOSE = re.compile(r"[\(\[\{«]{1,3}\s*0?5[\d\s\.\-]{7,}\s*[\)\]\}»]{1,3}")
 
+# Not inside the fraction of a map coordinate (2026-10-02). The three number branches below have
+# no digit guard, so they cut coordinates: «maps?q=21.5401234569…» became «21.[redacted]91211» and
+# aqargate's «adMapLatitude: 24.72201[redacted]6». Measured on every *_listings text column and
+# capture: 549 cuts sat in the fraction of a TWO-digit number (16-50, Saudi lat/long), up to 6
+# fraction digits in; every phone sat after a 1- or 3-digit one («0.5…», «966.5…», the typo
+# «996.5…»), and those must stay redacted. So: no match may start within the first 8 fraction
+# digits of a number whose whole part is exactly two digits. The SAME text guards these branches
+# in the DB floor (_redact_pii_sql) and both PII monitors; a test pins it.
+_NOT_IN_A_COORDINATE = "".join(
+    r"(?<!(?<![0-9٠-٩])[0-9٠-٩]{2}[.,٫]" + (r"[0-9٠-٩]{%d}" % k if k else "") + ")" for k in range(9)
+)
+
 # Saudi phone numbers + Arabic "واتساب <number>" (union of the strongest per-scraper patterns).
 _PHONE_RE = re.compile(
-    r"(?:\+?966|00966)\s*5\d[\d\s\-]{6,}"   # +966 5X…, 00966 5X…
-    r"|0?5\d{8}"                              # 05XXXXXXXX / 5XXXXXXXX
-    r"|\b920\d{5,8}\b"                        # 920… unified business lines. 5-8 trailing digits:
+    _NOT_IN_A_COORDINATE + r"(?:\+?966|00966)\s*5\d[\d\s\-]{6,}"   # +966 5X…, 00966 5X…
+    r"|" + _NOT_IN_A_COORDINATE + r"0?5\d{8}"                        # 05XXXXXXXX / 5XXXXXXXX
+    r"|" + _NOT_IN_A_COORDINATE + r"\b920\d{5,8}\b"  # 920… unified business lines. 5-8 trailing digits:
                                               # live aqar ad 109347 carried «للتواصل : 92015189»
                                               # (920 + FIVE digits), which the old 9200\d{4,8} /
                                               # 920\d{6} pair matched neither of. (2026-08-09)
