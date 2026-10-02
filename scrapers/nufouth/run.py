@@ -125,7 +125,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
-from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.arabic_location import find_district_in_text, resolve  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 
 BASE = "https://nufouth.com"
@@ -155,12 +155,15 @@ _IMG_SRC_RE = re.compile(r"""src=['"]([^'"]+)['"]""")
 # a ground FLOOR (the bare «دور» already maps to Floor). «عمارة سكنية» is a residential building
 # and «عمارة تجارية» a commercial one, matching Building/Commercial Building's own categories.
 #
+# «فيلا دوبلكس» → Duplex and «مبنى» → Building follow the fleet's existing mappings (sqcc and
+# eilmalriyada key «فيلا دوبلكس» to Duplex; snam, dealapp, souq24, sadin, alsidra and eaqartabuk
+# key «مبنى» to Building) — 2 + 1 units measured 2026-09-28 (N5435, N5440, H253).
+#
 # DELIBERATELY ABSENT — these are genuine ambiguities and are left to SKIP rather than guessed,
 # per the ask-first mapping rule: «ارض سكنية تجارية» and «عمارة سكنية تجارية» (mixed-use: the
-# category must be exactly one and the source does not say which), «فيلا دوبلكس» (Villa or
-# Duplex?), «مجمع تجاري» / «برج» / «مبنى» (complex / tower / bare "building" — no canonical
-# equivalent), «كمباوند» (the canonical Compound is categorised Commercial, which contradicts
-# Saudi usage), «محطة» (mustqr maps the bare word to Gas Station, a judgment its docstring marks
+# category must be exactly one and the source does not say which), «مجمع تجاري» / «برج»
+# (complex / tower — no canonical equivalent), «كمباوند» (the canonical Compound is categorised
+# Commercial, which contradicts Saudi usage), «محطة» (mustqr maps the bare word to Gas Station, a judgment its docstring marks
 # as safe only in ITS brokerage context), and the single-unit trades «صراف» / «بنشر» / «مغسله» /
 # «فيلا مكتبية».
 _TYPE_OVERRIDES = {
@@ -169,6 +172,8 @@ _TYPE_OVERRIDES = {
     "دور أرضي": "Floor",
     "عمارة سكنية": "Building",
     "عمارة تجارية": "Commercial Building",
+    "فيلا دوبلكس": "Duplex",
+    "مبنى": "Building",
 }
 
 # Unit types whose `no_of_rooms` genuinely means BEDROOMS. Everything else keeps the count out of
@@ -196,6 +201,23 @@ _PLURAL_TO_SINGULAR = (("مصاعد", "مصعد"),)
 # scan so it cannot fabricate a True. Nothing is lost: the singular «مدخل خاص» / «مدخل سياره» (the
 # unit's OWN entrance) is untouched, and the other «مداخل …» tokens map to no column at all.
 _SHARED_SPACE_PREFIX = "مداخل"
+
+
+
+# PDPL (2026-09-28): the «-H» office names an owner's asset «<asset> - <owner's full name> [- n] F-H123»
+# (seen on F-, O-, G- and U- codes; 101 active titles carried a private person's full name). A name
+# is never stored, so for every «-H» code the title keeps only the asset and the code; everything
+# between them is dropped (on government «G-H» rows that is «عقار مالية ـ محضر…», no loss that
+# matters). ad_number is hashed from the RAW unit name, so a listing's identity does not change.
+_OWNER_TITLE_RE = re.compile(r"^(.*?)\s+-\s+.*\s([A-Z]-H\d+)\s*$")
+
+
+def _public_title(name: Optional[str]) -> Optional[str]:
+    name = (name or "").strip()
+    if not name:
+        return None
+    m = _OWNER_TITLE_RE.match(name)
+    return f"{m.group(1).strip()} {m.group(2)}" if m else name
 
 
 def _vocab(text: str) -> str:
@@ -361,12 +383,17 @@ def map_listing(msg: dict, ad: dict, unit: Optional[dict],
     city_ar = (prop.get("city") or "").strip() or None          # trailing spaces do occur
     if not city_ar:
         return None, category, "no_city"
-    city_id, region_id = to_catalog(city_ar)
+    district_raw = (prop.get("district") or "").strip() or None
+    # The catalog, not the source's own label, decides what is a real city. The source states no
+    # region, and «الهفوف» / «الدوادمي» / «المجمعة» / «الباحة» / «العيينة» each exist in more than one
+    # region, so to_catalog() alone dropped them. resolve() narrows a twin ONLY when the source's own
+    # district belongs to exactly one of them (حي الشهابية → Eastern الهفوف); otherwise it stays
+    # unplaced and skips — never guessed. Unplaceable → skip.
+    loc = resolve(city_ar, district_ar=district_raw)
+    city_id, region_id = loc["city_id"], loc["region_id"]
     if not city_id:
-        # to_catalog, not the source's own label, decides what is a real city. Unplaceable → skip.
         return None, category, "city_not_in_catalog"
 
-    district_raw = (prop.get("district") or "").strip() or None
     district_ar = find_district_in_text(district_raw, city_id) if district_raw else None
 
     # PRICE. The field READ is chosen by the deal, never by whichever field is non-zero: on a sale
@@ -390,7 +417,7 @@ def map_listing(msg: dict, ad: dict, unit: Optional[dict],
         "listing_url": listing_url,
         "source": SOURCE,
         "active": True,
-        "title": (unit.get("name") if unit else prop.get("name")) or None,
+        "title": _public_title(unit.get("name") if unit else prop.get("name")),
         "description": description,
         **_amenities(msg, unit, description),
         "property_type": property_type,

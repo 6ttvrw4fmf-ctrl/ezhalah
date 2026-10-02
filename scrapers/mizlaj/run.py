@@ -316,6 +316,32 @@ def fetch_detail(s: cc.Session, slug: str) -> Optional[dict]:
     return None
 
 
+# ── availability: the listing page's OWN flags (crawler audit 2026-10-02) ──────────────────────
+# Every /guest/listings/<slug> page carries is_sold / is_reserved / deleted_at in props.listing.
+# Measured on all 34 live pages 2026-10-02: is_sold False ×34, is_reserved False ×34, deleted_at
+# null ×34 — so that triple is the one state known to mean "on the market", and until now none of
+# the three was read: a listing sold or reserved in place kept being upserted ACTIVE. Any other
+# value has never been observed, so it is not declared gone either: the row is simply NOT WRITTEN
+# this run (never re-asserted alive) and counted in the run notes. Its lifecycle stays with
+# prune_unseen + the 404/410 oracle (_probe), which cannot deactivate a page that still answers 200.
+# An unreadable page (no props.listing) is the same: could-not-read is never "available". This
+# also closes the map-data-mode hole where a row whose page fetch FAILED was written from the list
+# record alone. NOT used: listing_status_id (28 ×31, 31 ×2, 35 ×1 — opaque ids, no label published).
+_AVAILABLE_FLAGS = {"is_sold": False, "is_reserved": False, "deleted_at": None}
+
+
+def held_reason(listing: Optional[dict]) -> Optional[str]:
+    """None when the page itself states the measured available state; else why the row is held."""
+    if not isinstance(listing, dict):
+        return "page_unreadable"
+    for key, available in _AVAILABLE_FLAGS.items():
+        if key not in listing:
+            return f"{key}_missing"
+        if listing[key] is not available:
+            return key
+    return None
+
+
 def _approved_rega(listing: dict) -> dict:
     """Best REGA advertisement object: prefer status=='approved', else the first non-empty one.
     We only ever READ property fields from it — NEVER the employee name/phone (PDPL)."""
@@ -609,12 +635,17 @@ def main() -> int:
     res: list[dict] = []
     com: list[dict] = []
     seen = 0
+    held: dict[str, int] = {}          # held_reason → count (not upserted, not declared gone)
     try:
         for md in md_rows:
             slug = md.get("slug")
             if not slug:
                 continue
             listing = fetch_detail(s, slug)
+            why = held_reason(listing)
+            if why:
+                held[why] = held.get(why, 0) + 1
+                continue
             row, cat = map_listing(md, listing)
             if not row:
                 continue
@@ -623,6 +654,11 @@ def main() -> int:
             (com if cat == "commercial" else res).append(row)
             seen += 1
 
+        if held:
+            print(f"  held, page does not state the available flags (not upserted, not guessed): {held}")
+            if not (res or com):
+                # fail closed: not one page states the flags → the status source is unreadable.
+                raise RuntimeError(f"no listing page states is_sold/is_reserved/deleted_at: {held}")
         if res:
             db.upsert_mizlaj_residential_batch(res)
         if com:
@@ -661,7 +697,7 @@ def main() -> int:
             else:
                 pruned += n
         print(f"✓ Mizlaj: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
-        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["mizlaj_residential_listings", "mizlaj_commercial_listings"])
+        healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}" + (f" held={held}" if held else ""), check_tables=["mizlaj_residential_listings", "mizlaj_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

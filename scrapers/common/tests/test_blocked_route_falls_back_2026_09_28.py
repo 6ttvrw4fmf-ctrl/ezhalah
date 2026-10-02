@@ -109,6 +109,24 @@ def test_dwelleo_catalogue_survives_a_five_try_500_burst(monkeypatch):
     assert sorted(items) == [1, 2] and total == 2 and complete
 
 
-def test_dwelleo_catalogue_page_still_failing_still_raises(monkeypatch):
-    with pytest.raises(RuntimeError, match="catalogue page 2 answered HTTP 500"):
-        _dwelleo_walk(monkeypatch, 6)
+def test_dwelleo_page_failing_past_its_retries_is_read_again_at_the_end(monkeypatch):
+    # 6 failures exhaust the first read of page 2; the second-chance read then gets it
+    items, total, complete = _dwelleo_walk(monkeypatch, 6)
+    assert sorted(items) == [1, 2] and complete
+
+
+def test_dwelleo_page_that_never_answers_keeps_the_rest_but_is_incomplete(monkeypatch):
+    # one HTTP 500 page used to throw the whole crawl away (4 nights in a row, 2026-09-29…10-02)
+    items, total, complete = _dwelleo_walk(monkeypatch, 99)
+    assert sorted(items) == [1] and complete is False
+
+
+def test_dwelleo_first_page_failing_still_raises(monkeypatch):
+    m = importlib.import_module("scrapers.dwelleo.run")
+    monkeypatch.setattr(m.time, "sleep", lambda *_: None)
+
+    class _Down:
+        def get(self, url, params=None, timeout=None):
+            return _Resp(500)
+    with pytest.raises(RuntimeError, match="catalogue page 1 answered HTTP 500"):
+        m.fetch_catalogue(_Down())

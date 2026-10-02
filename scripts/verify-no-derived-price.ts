@@ -214,11 +214,12 @@ mustCatch('…and the conditional-tuple return shape (parse_price)',
   derivesAPrice('    return ((ppm * area_m2) if (ppm and area_m2) else None), ppm'));
 mustCatch('…and the mirror order, area × rate, through wrapped operands',
   derivesAPrice('    return float(row["area_m2"]) * float(row["price_per_meter"])'));
-// A real, faithful return from the fleet — october annualizes a stated rent — mutated into the shape.
-const realReturnLine = readFileSync(join(root, 'october/run.py'), 'utf8')
-  .split('\n').find((l) => /return round\(price \* periods\)/.test(l)) ?? '';
-mustCatch('a real october return line mutated into price × area',
-  derivesAPrice(realReturnLine.replace('periods', 'area')));
+// A real, faithful return from the fleet — annualize_rent's weekly limb (price × periods) — mutated
+// into the shape. (Was october's `return round(price * periods)`, gone with its HTML reader 2026-09-28.)
+const realReturnLine = readFileSync(join(root, 'common/normalize.py'), 'utf8')
+  .split('\n').find((l) => /^\s+return price \* 52$/.test(l)) ?? '';
+mustCatch('a real annualize_rent return line mutated into price × area',
+  derivesAPrice(realReturnLine.replace('52', 'area')));
 
 mustCatch('a price assigned out of the DESCRIPTION (the 47 aqar rows that stored a rental income as the sale price)',
   assignsPriceFromProse('    row["price_total"] = _extract_price(description)'));
@@ -242,7 +243,7 @@ mustCatch('…and a reset (`a = b = c = None`) is not mistaken for a derivation'
 mustCatch('…and a COMMENT describing the banned shape is prose, not an offence',
   !derivesAPrice('    x = 1  # never: price_per_meter = price_total / area')
   && !assignsPriceFromProse('    x = 1  # never read price from the description'));
-mustCatch('…and the REAL october return (price × periods — not an area) is NOT flagged',
+mustCatch('…and the REAL annualize_rent return (price × periods — not an area) is NOT flagged',
   realReturnLine !== '' && !derivesAPrice(realReturnLine));
 // The two false positives found 2026-09-21: output and a regex CONSTANT never store a price.
 mustCatch('…and a debug print / f-string naming both price fields is NOT flagged',

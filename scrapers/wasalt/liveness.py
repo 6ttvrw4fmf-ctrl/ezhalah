@@ -50,6 +50,7 @@ import threading
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any
 
@@ -763,7 +764,17 @@ def run_enum_rollup(args) -> int:
     mass-deactivating live inventory — the shards publish under a DIFFERENT platform and are rolled
     up here into the single row the guard already expects. THE GUARD'S CODE IS UNTOUCHED.
     """
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=args.enum_window_hours)).isoformat()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=args.enum_window_hours)
+    # THIS DISPATCH ONLY (2026-09-28). The 36h window alone also sums the PREVIOUS dispatch's shards
+    # whenever two dispatches land <36h apart — a manual dispatch (09-27 21:03 → 09-28 22:02 = 25h),
+    # or the cron's own `*/2` day-of-month wrap (the 31st → the 1st = 24h). Then a slice missing
+    # from this dispatch is backfilled by yesterday's row (rollup_ok sees 67 ≥ 34), rows_seen
+    # doubles into coverage_ok's median (two doubled rows refuse every normal enum after them), and
+    # started_at becomes the previous dispatch's start. The workflow passes its own start as --since.
+    since = getattr(args, "since", "") or ""
+    if since:
+        cutoff = max(cutoff, datetime.fromisoformat(since.replace("Z", "+00:00")))
+    cutoff = cutoff.isoformat()
     runs = db._execute(
         db.sb().table("scrape_runs").select("id, started_at, rows_seen, ok")
         .eq("platform", SHARD_PLATFORM).gte("started_at", cutoff)
@@ -843,8 +854,10 @@ def run_enum_strike(args) -> int:
           f"{' [DRY-RUN]' if args.dry_run else ''}", flush=True)
 
     # 2) STRIKE — descending missing_count so one run can never double-increment a row.
+    # --confirm-only skips it: a second run against the SAME enumeration must not strike again, or
+    # one missed enumeration would count as two (2026-10-02: an extra drain of 3,841 waiting rows).
     struck = {n: 0 for n in range(args.grace)}
-    for mc in range(args.grace - 1, -1, -1):
+    for mc in (() if getattr(args, "confirm_only", False) else range(args.grace - 1, -1, -1)):
         for tbl in TABLES:
             ids = _keyset_ids(tbl, mc=mc, before_iso=enum_start)
             struck[mc] += len(ids)
@@ -878,7 +891,13 @@ def run_enum_strike(args) -> int:
                 cand.append((tbl, x["id"], url, int(x.get("missing_count") or 0)))
         per_table.append(cand)
     take = plan_confirm_budget([len(p) for p in per_table], args.confirm_limit)
-    cohort: list[tuple[str, int, str, int]] = [r for p, k in zip(per_table, take) for r in p[:k]]
+    # ROUND-ROBIN across tables (2026-09-28). --max-seconds stops the loop after ~800 browser
+    # confirms, so a table-by-table list (1,446 residential, THEN 54 commercial) never reaches
+    # commercial while residential has a backlog — the starvation plan_confirm_budget() exists to
+    # prevent, reintroduced by the clock.
+    picked = [p[:k] for p, k in zip(per_table, take)]
+    cohort: list[tuple[str, int, str, int]] = [
+        r for grp in zip_longest(*picked) for r in grp if r is not None]
     if any(len(p) > k for p, k in zip(per_table, take)):
         print("  confirm budget split " +
               ", ".join(f"{t}: {k}/{len(p)}" for t, p, k in zip(TABLES, per_table, take)) +
@@ -1170,6 +1189,9 @@ def main() -> int:
                     help="enum-rollup: how many shard runs MUST have reported before their sum may "
                          "be published as one enumeration. A missing shard is a slice nobody "
                          "enumerated, whose live listings would then all be struck.")
+    ap.add_argument("--since", default="",
+                    help="enum-rollup: count only shard runs started at/after this ISO time — the "
+                         "dispatch's own start, so an earlier dispatch's shards are never summed in.")
     ap.add_argument("--limit", type=int, default=0,
                     help="Cap rows checked (0 = all). pilot defaults to 800 when unset.")
     ap.add_argument("--workers", type=int, default=4, help="Low concurrency; each worker gets its own session.")
@@ -1204,6 +1226,10 @@ def main() -> int:
                     help="ENUM-STRIKE control guard: required live fraction among decided controls.")
     ap.add_argument("--dry-run", action="store_true",
                     help="ENUM-STRIKE: print what would be struck/verified; write NOTHING.")
+    ap.add_argument("--confirm-only", action="store_true",
+                    help="ENUM-STRIKE: skip the strike step and only page-confirm rows already at "
+                         "grace. For an extra drain between enumerations: re-striking against the "
+                         "same enumeration would count one missed enumeration twice.")
     args = ap.parse_args()
     if args.mode == "pilot" and not args.limit:
         args.limit = 800

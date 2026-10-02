@@ -49,6 +49,27 @@ def judge(side: str, verdict: str) -> str:
     return "wrong" if verdict == DEAD else "right"
 
 
+def pick_controls(client, tables, rng) -> list[dict]:
+    """Known-live controls: ads the crawl saw in the last 24h, else the ones it saw most recently."""
+    day_ago = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    ctl = []
+    for t in tables:
+        rows = (client.table(t).select(COLS).eq("active", True).gte("last_seen_at", day_ago)
+                .filter("listing_url", "not.is", "null").limit(50).execute().data or [])
+        ctl += [dict(r, table=t) for r in rows]
+    if len(ctl) < CANARIES:
+        # The crawl saw too few ads in 24h (its crawl is failing — dwelleo/muhaysini 2026-10-02):
+        # use the ads it saw most recently instead of voiding the check. A stale control that is
+        # really gone still fails the gate, so this can only void more runs, never fewer.
+        for t in tables:
+            rows = (client.table(t).select(COLS).eq("active", True).lt("last_seen_at", day_ago)
+                    .filter("listing_url", "not.is", "null").order("last_seen_at", desc=True)
+                    .limit(CANARIES).execute().data or [])
+            ctl += [dict(r, table=t) for r in rows]
+    ctl = rng.sample(ctl, min(CANARIES, len(ctl)))
+    return ctl
+
+
 def summarize(platform: str, method: str, canary: dict, results: list[dict]) -> dict:
     out = {"platform": platform, "method": method, "canaries": canary, "trusted": canary["ok"]}
     for side in ("hidden", "live"):
@@ -116,6 +137,32 @@ def open_ad(url: str, dead_marker) -> str:
     return classify_response(status, body or "", dead_marker=dead_marker)
 
 
+def _reader_for(platform: str):
+    """The site's OWN reader where the generic status judge cannot tell dead from live, else None.
+
+    dealapp serves a 200 shell (and its view-quota wall) for a removed ad AND for a live one read
+    unpaced, so "status-only" read every hidden dealapp ad as live: 30 of 30 on 2026-10-02, a
+    verdict that could not have come out any other way. gathern answers a block with 404 and is
+    read by its checker through its own detail session; a different session read two ads live that
+    the checker had read 404 eight times. The double-check must read a site the way its hiding job
+    does, or the two cannot be compared. Each reader returns ALIVE / DEAD / UNKNOWN."""
+    if platform == "dealapp":
+        from scrapers.dealapp import liveness_run
+        session = liveness_run._session()
+        return lambda url: liveness_run.probe_listing(session, url)[0]
+    if platform == "gathern":
+        from scrapers.gathern import liveness as gl
+        session = gl.proxied_session(False)
+
+        def read(url: str) -> str:
+            status = gl.probe(session, url)
+            if status == 200:
+                return ALIVE
+            return DEAD if gl.looks_dead(status) else UNKNOWN
+        return read
+    return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--platform", required=True)
@@ -130,7 +177,9 @@ def main() -> int:
     rng = random.Random(a.seed)
     reg = PLATFORMS.get(a.platform, {})
     dead_marker = reg.get("dead_marker")
-    method = "registered-marker" if dead_marker else "status-only"
+    site_reader = _reader_for(a.platform)
+    method = "site-reader" if site_reader else "registered-marker" if dead_marker else "status-only"
+    read = site_reader or (lambda url: open_ad(url, dead_marker))
     tables = tables_for(client, a.platform)
     if not tables:
         print(json.dumps({"platform": a.platform, "verdict": "void: no listing tables found"}))
@@ -138,14 +187,8 @@ def main() -> int:
 
     # Controls first: listings the crawl saw in the last 24 hours must come back alive, or the
     # environment (a block, a proxy failure) is lying and the run is void.
-    day_ago = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-    ctl = []
-    for t in tables:
-        rows = (client.table(t).select(COLS).eq("active", True).gte("last_seen_at", day_ago)
-                .filter("listing_url", "not.is", "null").limit(50).execute().data or [])
-        ctl += [dict(r, table=t) for r in rows]
-    ctl = rng.sample(ctl, min(CANARIES, len(ctl)))
-    ctl_alive = sum(open_ad(r["listing_url"], dead_marker) == ALIVE for r in ctl)
+    ctl = pick_controls(client, tables, rng)
+    ctl_alive = sum(read(r["listing_url"]) == ALIVE for r in ctl)
     canary = {"probed": len(ctl), "alive": ctl_alive, "ok": canary_environment_ok(ctl_alive, len(ctl))}
 
     since = (datetime.now(timezone.utc) - timedelta(days=a.hidden_days)).isoformat()
@@ -156,7 +199,7 @@ def main() -> int:
             for r in rows:
                 if not r.get("listing_url"):
                     continue
-                v = open_ad(r["listing_url"], dead_marker)
+                v = read(r["listing_url"])
                 results.append({"side": "live", "table": table, "id": rid, "url": r["listing_url"],
                                 "verdict": v, "judged": judge("live", v)})
     elif canary["ok"]:
@@ -168,7 +211,7 @@ def main() -> int:
             for t in tables:
                 picked += [dict(r, table=t) for r in sample(client, t, active=active, n=per_table, since=win, rng=rng)]
             for r in picked[: a.n]:
-                v = open_ad(r["listing_url"], dead_marker)
+                v = read(r["listing_url"])
                 results.append({"side": side, "table": r["table"], "id": r["id"], "url": r["listing_url"],
                                 "verdict": v, "judged": judge(side, v)})
 

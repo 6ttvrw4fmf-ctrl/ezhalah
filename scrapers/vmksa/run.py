@@ -146,17 +146,33 @@ def list_ids(s: cc.Session) -> tuple[list[int], Optional[int]]:
     """Walk pages 1..lastPage as the page's own pagination object declares them, and union the
     ids. A "stop at the first page with nothing new" rule found 120 of 163 on 2026-09-26: the
     order shifted mid-walk (a page repeated ids from the page before). If the union is still short
-    of the declared total, walk once more — a second pass reads the shifted rows."""
+    of the declared total, walk once more — a second pass reads the shifted rows.
+
+    A page inside 1..lastPage that yields ZERO ids is a throttled shell, not an empty page, and is
+    re-fetched with a pause. CI read 154 of the declared 190 on three straight runs (2026-09-26..28)
+    because such a page was taken as-is: a 2026-09-28 walk got 0 ids from pages 12 and 13 first,
+    then 15 and 10 on a retry. A union still short of the declared total is returned short — the
+    caller then withholds prune and flags the run; it is never read as the whole index."""
     ids: dict[int, None] = {}
     declared = last = None
     for _ in range(2):
         page = 1
         while page <= (last or 1) and page <= 60:
-            h = s.get(f"{BASE}/ar/ads?page={page}", impersonate=IMPERSONATE, timeout=TIMEOUT).text
-            m = re.search(r'"pagination":\{"total":(\d+),"lastPage":(\d+)', flight(h))
-            if m:
-                declared, last = int(m.group(1)), int(m.group(2))
-            ids.update(dict.fromkeys(int(x) for x in re.findall(r"/ads/(\d+)", h)))
+            got: list[int] = []
+            for attempt in range(3):
+                if attempt:
+                    time.sleep(3 * attempt)
+                try:
+                    h = s.get(f"{BASE}/ar/ads?page={page}", impersonate=IMPERSONATE, timeout=TIMEOUT).text
+                except Exception:  # noqa: BLE001
+                    continue
+                m = re.search(r'"pagination":\{"total":(\d+),"lastPage":(\d+)', flight(h))
+                if m:
+                    declared, last = int(m.group(1)), int(m.group(2))
+                got = [int(x) for x in re.findall(r"/ads/(\d+)", h)]
+                if got:
+                    break
+            ids.update(dict.fromkeys(got))
             page += 1
         if declared is not None and len(ids) >= declared:
             break
@@ -221,6 +237,13 @@ def map_ad(ad: dict, rows: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], 
 
     if _OFFPLAN_RE.search(title) or _OFFPLAN_RE.search(desc):
         return None, "not_ready_offplan"
+
+    # The ad's OWN REGA ad-licence end date is a gate (fleet law, owner 2026-09-28): 'expired' is never a
+    # listing. 'unknown' (no readable date) is not judged — kept, and counted in main().
+    # Measured 2026-10-02: 64 of 64 ads read print the date (DD/MM/YYYY), all in date; earliest 2026-10-08.
+    licence_end = opt.get("تاريخ انتهاء ترخيص الاعلان")
+    if normalize.ad_expiry_state(licence_end if isinstance(licence_end, str) else None) == "expired":
+        return None, "ad_licence_expired"
 
     # TYPE — the licence's own singular «نوع العقار» (the category name is a plural nav bucket).
     type_ar = opt.get("نوع العقار")
@@ -384,6 +407,7 @@ def main() -> int:
 
     s = cc.Session()
     ids, declared = list_ids(s)
+    short_index = declared is None or len(ids) < declared   # no declared total read = short
     if a.limit:
         ids = ids[: a.limit]
     print(f"{SOURCE}: {len(ids)} ad id(s) listed (site declares total={declared})", flush=True)
@@ -410,6 +434,10 @@ def main() -> int:
             row, cat = got
             (com if cat == "commercial" else res).append(row)
 
+        no_end = sum(normalize.ad_expiry_state(r["license_expiry"] if isinstance(r.get("license_expiry"), str) else None)
+                     == "unknown" for r in res + com)
+        if no_end:
+            print(f"  note: {no_end} ad(s) kept with no readable licence end date (not judged)", flush=True)
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)
@@ -429,8 +457,9 @@ def main() -> int:
             res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com}, source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
-        # The index is complete only if every listed ad was readable; otherwise do not prune.
-        complete = unreadable == 0 and (declared is None or len(ids) >= declared)
+        # The index is complete only if it reached the site's OWN declared total and every listed
+        # ad was readable; otherwise do not prune. No declared total read = not complete.
+        complete = unreadable == 0 and not short_index and not a.limit
         for tbl, rr in (("vmksa_residential_listings", res), ("vmksa_commercial_listings", com)):
             if rr and complete:
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
@@ -439,8 +468,11 @@ def main() -> int:
                 elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:
-            print(f"  NOT pruning: {unreadable} unreadable ad(s) or short index this run", flush=True)
+            print(f"  NOT pruning: {unreadable} unreadable ad(s); index {len(ids)}/{declared}", flush=True)
+        # A short index is flagged, not swallowed: it demotes the run (the daryusuf/ebriza rule).
         healthy = db.end_run(run_id, ok=True, rows_seen=len(ids), rows_upserted=len(res) + len(com),
+                             notes=f"index={len(ids)}/{declared}; unreadable={unreadable}; complete={complete}; licence_end_unknown={no_end}",
+                             degraded=short_index,
                              check_tables=["vmksa_residential_listings", "vmksa_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()", flush=True)

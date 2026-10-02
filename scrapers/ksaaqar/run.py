@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://ksaaqar.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -179,11 +180,33 @@ _DEAL_RENT = ("للإيجار", "للايجار", "ايجار", "إيجار")
 _DEAL_BUY = ("للبيع", "بيع")
 
 
-def parse_deal(text: str) -> Optional[str]:
-    """Rent/Buy from the listing's OWN «النوع:» field. No field -> None (never defaulted)."""
+# THE DEAL WHEN «النوع» IS ABSENT (81 pages had no such field on 2026-09-28, most of them real
+# ads: «جدة حي الفضيلة فيلا للبيع», «شقة للإيجار في حي الحمراء», «ارض للبيع ف جازان» …). The ad's
+# OWN title then states it, so it is read from there — never from the price, never from a
+# neighbour. Whole words only: the bare «بيع» must
+# never fire inside «الربيع» (a district) nor «المبيعات». Tatweel is stripped first («للبيــــع»). A
+# title stating BOTH deals says neither. «تمليك» is the sale word this source uses («شقق تمليك»),
+# as on alrifai. Wanted/contractor/maintenance ads are not listings, whatever else the title says.
+_TITLE_RENT_RE = re.compile(r"(?<![ء-ي])و?(?:لل|ل|ال)?[إاأ]يجار(?![ء-ي])")
+_TITLE_SALE_RE = re.compile(r"(?<![ء-ي])و?(?:لل|ال)?(?:بيع|تمليك)(?![ء-ي])")
+_NOT_A_LISTING_RE = re.compile(r"مطلوب|مقاول|ترميم|صيان[ةه]")
+
+
+def deal_from_title(title: str) -> Optional[str]:
+    t = (title or "").replace("\u0640", "")
+    if _NOT_A_LISTING_RE.search(t):
+        return None
+    sale, rent = bool(_TITLE_SALE_RE.search(t)), bool(_TITLE_RENT_RE.search(t))
+    return "Buy" if sale and not rent else "Rent" if rent and not sale else None
+
+
+def parse_deal(text: str, title: str = "") -> Optional[str]:
+    """Rent/Buy from the listing's OWN «النوع:» field; when the page has NO such field, from the ad's
+    own title. A field that says something else («مطلوب», «للبدل») is an answer, not an absence, so
+    the title is never consulted over it. Nothing stated -> None (never defaulted)."""
     v = spec(text, "النوع")
     if not v:
-        return None
+        return deal_from_title(title)
     if any(w in v for w in _DEAL_RENT):
         return "Rent"
     if any(w in v for w in _DEAL_BUY):
@@ -338,7 +361,9 @@ _CITIES = (
     "شقراء", "الدوادمي", "عفيف", "القويعية", "الأفلاج", "السليل", "ضرماء",
     "بيش", "صبيا", "أبو عريش", "محايل عسير", "النماص", "بلجرشي", "المذنب", "البكيرية",
 )
-_CITY_FALLBACK_RE = re.compile("|".join(re.escape(c) for c in sorted(_CITIES, key=len, reverse=True)))
+# The name must END where the word ends: «#رياض_الخبراء» (a Qassim town) is not «الخبر».
+_CITY_FALLBACK_RE = re.compile(
+    "(?:" + "|".join(re.escape(c) for c in sorted(_CITIES, key=len, reverse=True)) + ")(?![ء-ي])")
 
 
 def parse_city(text: str, title: str = "") -> Optional[str]:
@@ -393,14 +418,33 @@ _TYPE_AR = {
 # — «شقه ايجار», «ارض للبيع في بيش», «استراحه للايجار» — so it is read as a fallback through the
 # SAME closed map. A word outside that map still yields None and the listing is still skipped: the
 # fallback widens where we look, never what counts as a type.
+#
+# «وحدة علوية» / «وحدة أرضية» (an upper / ground UNIT) map to شقة (Apartment) — the source's OWN
+# breadcrumb files its «وحدة أرضية للبيع في بريدة» ad under «شقق سكنية», and «شقة علوية/أرضية» is
+# Apartment on bossbih/aqalemhajer/ashab. The leftmost match wins, so the unit phrase must be an
+# alternative of its own: without it the alternation reads «أرض» inside «أرضية» — LAND.
 _TITLE_TYPE_RE = re.compile(
-    r"(شقق\s*سكنية|شقه|شقة|شقق|فلل|فيلا|فله|أراضي|اراضي|أرض|ارض|عمائر|عمارة|عماره|"
+    r"(وحد[ةه]\s*(?:علوي[ةه]|[أا]رضي[ةه])|[أا]رض\s*تجاري[ةه]|"
+    r"شقق\s*سكنية|شقه|شقة|شقق|فلل|فيلا|فله|أراضي|اراضي|أرض|ارض|عمائر|عمارة|عماره|"
     r"محلات\s*تجارية|محلات|محل|مكاتب|مكتب|مستودعات|مستودع|استراحات|استراحة|استراحه|"
-    r"مزارع|مزرعة|مزرعه|أدوار|دور|غرف|غرفه|غرفة|شاليهات|شاليه|بيوت|بيت|دبلكس|روف|برج)")
+    r"مزارع|مزرعة|مزرعه|أدوار|دور|غرف|غرفه|غرفة|شاليهات|شاليه|بيوت|بيت|دوبلكس|دبلكسات|دبلكس|"
+    r"فندق|مصنع|روف|برج)")
+_UNIT_RE = re.compile(r"وحد[ةه]\s*(?:علوي[ةه]|[أا]رضي[ةه])")
 
+# LAND IS QUALIFIED BEFORE IT IS BARE: «ارض تجارية للبيع» is Commercial Land, not the bare «ارض»
+# (Residential Land) the old alternation stopped at.
+#
+# Every VALUE here must be a key normalize.map_type_exact() knows — a value it does not know is a
+# silent skip. «شقة» (the commonest title word: 238 titles) and «دبلكس» (mapped to itself) were
+# exactly that until 2026-09-28. «برج» stays unmapped on purpose: on this source it is the start of
+# «برجولات» (pergolas) in contractor ads.
 _TITLE_TYPE_AR = dict(_TYPE_AR, **{
-    "شقه": "شقة", "فله": "فيلا", "عماره": "عمارة", "محل": "محل", "مكتب": "مكتب",
-    "استراحه": "استراحة", "مزرعه": "مزرعة", "غرفه": "غرفة", "دبلكس": "دبلكس",
+    "شقة": "شقة", "شقه": "شقة", "فله": "فيلا", "عماره": "عمارة", "محل": "محل", "مكتب": "مكتب",
+    "أرض تجارية": "أرض تجارية", "ارض تجارية": "أرض تجارية", "ارض تجاريه": "أرض تجارية",
+    "أرض تجاريه": "أرض تجارية",
+    "استراحه": "استراحة", "مزرعه": "مزرعة", "غرفه": "غرفة",
+    "دوبلكس": "دوبلكس", "دبلكس": "دوبلكس", "دبلكسات": "دوبلكس", "فندق": "فندق",
+    "مصنع": "مصنع",
     "روف": "شقة", "برج": "برج",
 })
 
@@ -415,7 +459,8 @@ def parse_type_ar(text: str, title: str = "") -> Optional[str]:
             return hit
     m = _TITLE_TYPE_RE.search(title or "")
     if m:
-        return _TITLE_TYPE_AR.get(re.sub(r"\s+", " ", m.group(1)).strip())
+        word = re.sub(r"\s+", " ", m.group(1)).strip()
+        return "شقة" if _UNIT_RE.fullmatch(word) else _TITLE_TYPE_AR.get(word)
     return None
 
 
@@ -443,8 +488,51 @@ def _get(s: cc.Session, url: str, attempts: int = LIST_ATTEMPTS) -> Optional[Any
     return None
 
 
+# Why a REST walk may not be the whole catalogue. Non-empty → no prune this run.
+INCOMPLETE: list[str] = []
+
+# ── REMOVAL (measured 2026-10-02; the signals are the ones registered on 2026-09-19). Until then
+# this crawler had NO removal step at all: a deleted ad stayed active here for good.
+#
+# ksaaqar hard-404s an ad it no longer serves: of 14 active rows the crawl had stopped seeing, 1
+# answered 404 (as does a slug that never existed) and 13 answered 200 still rendering their spec
+# block — ads the crawler now skips, which are NOT gone and must not be hidden as if they were.
+# 10 of 10 random live ads rendered «النوع». A 200 without it, and every block, is UNKNOWN.
+_SPEC_LABEL = "النوع"
+RES_TABLE, COM_TABLE = "ksaaqar_residential_listings", "ksaaqar_commercial_listings"
+
+
+def _signal(status, body, moved) -> Optional[str]:
+    """'live' | 'gone' | None — only what this ad's own URL affirmatively answers."""
+    if status in (404, 410):
+        return "gone"
+    if status != 200 or moved:
+        return None
+    return "live" if _SPEC_LABEL in _txt(body) else None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for db.prune_unseen and for the daily direct check. A 404 is believed
+    only while a known-live ad from this run (`control`) still reads live through the same session."""
+    url_for = stored_listing_url((RES_TABLE, COM_TABLE))
+    s = session()
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform="ksaaqar", signal=_signal, session=lambda: s,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def fetch_listings(s: cc.Session, limit: int = 0) -> list[dict]:
     """Every ad_post via REST. Pages until a short page, so the catalogue size is the source's."""
+    INCOMPLETE.clear()
     out: list[dict] = []
     for page in range(1, 60):
         r = _get(s, f"{REST}/ad_post?per_page=100&page={page}"
@@ -452,10 +540,14 @@ def fetch_listings(s: cc.Session, limit: int = 0) -> list[dict]:
         if r is None:
             if page == 1:
                 return []
+            # WordPress answers HTTP 400 past the last page; anything else cut the walk short.
+            if not LAST_FETCH_NOTE.startswith("HTTP 400"):
+                INCOMPLETE.append(f"page {page}: {LAST_FETCH_NOTE}")
             break
         try:
             batch = r.json()
         except Exception:
+            INCOMPLETE.append(f"page {page}: body was not JSON")
             break
         if not isinstance(batch, list) or not batch:
             break
@@ -473,28 +565,42 @@ def fetch_detail(s: cc.Session, link: str) -> Optional[str]:
     return r.text if r is not None else None
 
 
+# NOT IN SAUDI ARABIA. This source lets a poster file a Cairo flat or a Sharjah hotel under
+# «عقارات الرياض», so the «الدولة» field cannot vouch for the country. An ad whose OWN title places it
+# abroad is skipped: a Hurghada hotel must never be searchable as a Riyadh listing. Whole words only
+# («مصرحة» is "licensed", not Egypt).
+_ABROAD_RE = re.compile(
+    r"(?<![ء-ي])(?:ب|بال|في|ف)?(?:مصر|القاهر[ةه]|الغردق[ةه]|الامارات|الإمارات|دبي|الشارق[ةه]|"
+    r"المغرب|مراكش|الأردن|الاردن|تركيا|اسطنبول|إسطنبول)(?![ء-ي])")
+
+
 # ── map ──────────────────────────────────────────────────────────────────────────────────────────
-def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Optional[dict], str]:
+def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Optional[dict], str, str]:
+    """(row, category, skip_reason) — every skip names its own reason for the run notes."""
     link = post.get("link")
     if not link or not page_text:
-        return None, "residential"
+        return None, "residential", "empty_page"
 
     title_early = _clean((post.get("title") or {}).get("rendered", ""))
+    if _ABROAD_RE.search(title_early):
+        return None, "residential", "abroad"
     type_ar = parse_type_ar(page_text, title_early)
     if not type_ar:
-        return None, "residential"          # unknown type is SKIPPED, never guessed
+        return None, "residential", "no_type"          # unknown type is SKIPPED, never guessed
     property_type = normalize.map_type_exact(type_ar)
     if not property_type:
-        return None, "residential"
+        return None, "residential", f"type_unmapped:{type_ar}"
     category = normalize.category_for_type(property_type).lower()
 
-    deal = parse_deal(page_text)
+    deal = parse_deal(page_text, title_early)
     if not deal:
-        return None, category               # no stated deal -> UNKNOWN, never defaulted to Buy
+        # no stated deal -> UNKNOWN, never defaulted to Buy. «مطلوب»/«للبدل» are named, not lumped.
+        field = spec(page_text, "النوع")
+        return None, category, f"deal_field:{field[:12]}" if field else "no_deal_stated"
 
     city_ar = parse_city(page_text, title_early)
     if not city_ar:
-        return None, category               # unlocatable rows cannot be searched honestly
+        return None, category, "no_city"               # unlocatable rows cannot be searched honestly
     city = normalize.map_city(city_ar)
     city_id, region_id = to_catalog(city_ar)
 
@@ -559,7 +665,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         "price_published": price is not None,
     }
     row["additional_info"] = {k: v for k, v in extra.items() if v is not None}
-    return row, category
+    return row, category, ""
 
 
 def main() -> int:
@@ -589,10 +695,9 @@ def main() -> int:
                 skipped["detail_unreachable"] = skipped.get("detail_unreachable", 0) + 1
                 continue
             text = _txt(page_html)
-            row, cat = map_listing(p, text, page_html)
+            row, cat, why = map_listing(p, text, page_html)
             if not row:
-                key = parse_type_ar(text) or "no_type_or_deal_or_city"
-                skipped[key] = skipped.get(key, 0) + 1
+                skipped[why] = skipped.get(why, 0) + 1
                 continue
             if args.type != "all" and cat != args.type:
                 continue
@@ -600,11 +705,12 @@ def main() -> int:
             if i % 200 == 0:
                 print(f"   … {i}/{len(posts)} pages read", flush=True)
 
+        # Printed AND written to scrape_runs.notes EVERY run: a listing we refuse to guess at stays
+        # visible, or the platform quietly shrinks and nobody knows why (notes were NULL until
+        # 2026-09-28, while 447 of 1,811 ads were being skipped).
+        skip_notes = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
         if skipped:
-            # Printed EVERY run: a listing we refuse to guess at stays visible, or the platform
-            # quietly shrinks and nobody knows why.
-            print("  skipped (not guessed): "
-                  + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1])))
+            print("  skipped (not guessed): " + skip_notes)
 
         if dry:
             print(f"✓ {SOURCE} VALIDATION: {len(res)} residential + {len(com)} commercial (nothing written)")
@@ -635,8 +741,26 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
+        # REMOVAL. An ad missing from this run is only a CANDIDATE: at three misses its own URL is
+        # re-read, and it is hidden only on a 404 (_signal). An ad that still renders heals the row
+        # — including one the crawler skips on purpose, which is not gone. No prune on a partial
+        # walk or a single-vertical run.
+        pruned = 0
+        if INCOMPLETE:
+            print(f"  ⚠ REST walk incomplete — no prune: {'; '.join(INCOMPLETE)}")
+        elif args.type == "all" and not args.limit:
+            verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+            for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                k = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=verify_gone)
+                if k < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += k
+
         n = len(res) + len(com)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(posts), rows_upserted=n,
+                             notes=f"pruned={pruned} skipped: {skip_notes or 'none'}"[:300],
                              check_tables=["ksaaqar_residential_listings",
                                            "ksaaqar_commercial_listings"])
         if not healthy:

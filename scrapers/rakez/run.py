@@ -58,6 +58,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.http_liveness import decide  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
     _REGION_AR_FOR, find_district_in_text, norm_ar, to_catalog,
 )
@@ -132,6 +133,11 @@ _FLOOR_ORDINALS = {
 }
 
 LAST_FETCH_NOTE = "no pages attempted"
+# Every collection walk that did NOT reach its natural end this run. Non-empty → no prune: a unit
+# missing from a truncated walk is missing from OUR read, not from the source (the walk used to stop
+# at page 199 and break silently on a failed page, and hand prune_unseen the short list).
+INCOMPLETE: list[str] = []
+MAX_PAGES = 1000  # 14,319 units = 144 pages on 2026-09-14; hitting this is reported, never trusted
 
 
 def session() -> cc.Session:
@@ -164,7 +170,8 @@ def _paged(s: cc.Session, path: str, note: str, extra: str = "") -> list[dict]:
     """Every page of a REST collection, with the retry every sibling scraper learned to need."""
     global LAST_FETCH_NOTE
     out: list[dict] = []
-    for page in range(1, 200):
+    fail: Optional[str] = f"{note} still had full pages at the {MAX_PAGES}-page cap"
+    for page in range(1, MAX_PAGES + 1):
         r = None
         last_exc: Optional[Exception] = None
         for attempt in range(3):
@@ -176,24 +183,30 @@ def _paged(s: cc.Session, path: str, note: str, extra: str = "") -> list[dict]:
                 if attempt < 2:
                     time.sleep(3 * (attempt + 1))
         if r is None:
-            LAST_FETCH_NOTE = (f"{note} page {page} raised {type(last_exc).__name__} on all 3 "
-                               f"attempts: {str(last_exc)[:100]}")
+            fail = (f"{note} page {page} raised {type(last_exc).__name__} on all 3 "
+                    f"attempts: {str(last_exc)[:100]}")
             break
         if r.status_code == 400:           # WP answers 400 past the last page
+            fail = None
             break
         if r.status_code != 200:
-            LAST_FETCH_NOTE = f"{note} page {page} returned HTTP {r.status_code}"
+            fail = f"{note} page {page} returned HTTP {r.status_code}"
             break
         try:
             batch = r.json()
         except Exception:
-            LAST_FETCH_NOTE = f"{note} page {page} body was not JSON"
+            fail = f"{note} page {page} body was not JSON"
             break
-        if not isinstance(batch, list) or not batch:
+        if not isinstance(batch, list):
+            fail = f"{note} page {page} was not a list"
             break
         out.extend(x for x in batch if isinstance(x, dict))
-        if len(batch) < PER_PAGE:
+        if len(batch) < PER_PAGE:          # a short (or empty) page is the natural end
+            fail = None
             break
+    if fail:
+        LAST_FETCH_NOTE = fail
+        INCOMPLETE.append(fail)
     return out
 
 
@@ -353,6 +366,29 @@ def _floor_number(raw: Any) -> Optional[int]:
     return _FLOOR_ORDINALS.get(str(raw).strip())
 
 
+def _project_exclusion(en_project: Optional[dict], ar_project: Optional[dict]) -> Optional[str]:
+    """Why the source's own project terms put its units out of our catalogue, or None.
+
+    ONE reading, used by the crawl (map_unit) AND by the removal oracle (_verify_gone). While only
+    the crawl applied it, a unit still «available» inside a «قريبا»/«تم البيع»/off-plan project was
+    skipped by the crawl and then certified LIVE by the oracle — self-healed every run, never retired.
+    """
+    # the project's own status gates the whole project
+    statuses = {_clean(t.get("name")) for t in _terms_of(ar_project, "property-status")}
+    statuses |= {_clean(t.get("name")) for t in _terms_of(en_project, "property-status")}
+    statuses.discard(None)
+    if statuses and not (statuses & PROJECT_STATUS_OK):
+        return f"project status {sorted(statuses)}"
+    # …and so does an off-plan tag, on EITHER language's record. Checked separately from status
+    # because a project can be «متاح» (available to buy) AND «البيع على الخارطة» (not built yet) at
+    # the same time — which is exactly how the 99 got through.
+    offers = {_clean(t.get("name")) for t in _terms_of(ar_project, "offer-group")}
+    offers |= {_clean(t.get("name")) for t in _terms_of(en_project, "offer-group")}
+    if offers & OFFER_GROUP_EXCLUDED:
+        return f"project offer-group {sorted(offers & OFFER_GROUP_EXCLUDED)}"
+    return None
+
+
 def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
              tree: dict[int, dict]) -> tuple[Optional[dict], str]:
     uid = unit.get("id")
@@ -365,18 +401,7 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
     if not isinstance(en_id, int):
         return None, ""
 
-    # the project's own status gates the whole project
-    statuses = {_clean(t.get("name")) for t in _terms_of(ar_project, "property-status")}
-    statuses |= {_clean(t.get("name")) for t in _terms_of(en_project, "property-status")}
-    if statuses and not (statuses & PROJECT_STATUS_OK):
-        return None, ""
-
-    # …and so does an off-plan tag, on EITHER language's record. Checked separately from status
-    # because a project can be «متاح» (available to buy) AND «البيع على الخارطة» (not built yet) at
-    # the same time — which is exactly how the 99 got through.
-    offers = {_clean(t.get("name")) for t in _terms_of(ar_project, "offer-group")}
-    offers |= {_clean(t.get("name")) for t in _terms_of(en_project, "offer-group")}
-    if offers & OFFER_GROUP_EXCLUDED:
+    if _project_exclusion(en_project, ar_project):
         return None, ""
 
     raw_type = next((_clean(t.get("name")) for t in _terms_of(ar_project, "property-type")), None)
@@ -434,9 +459,31 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
     return row, category.lower()
 
 
-def _verify_gone(ad_number: str) -> tuple[str, str]:
-    """Absence NEVER deactivates on its own. A unit is gone when the source says so — either the
-    post is deleted, or its own unit_status has left 'available'. Anything else is UNKNOWN."""
+def _page_gone(path: str) -> tuple[bool, str]:
+    """Read one public rakez page under the shared law: True only on the source's own 404/410 with a
+    body. A REST 401 is about our access, never a death (LISTING_LIVENESS.md §1), so wherever REST
+    says "not public" the verdict rests on the public page instead. Measured 2026-09-28:
+      · /?p=<unit id> — WordPress resolves it for a published unit (200, on to the home page) and
+        answers «Page Not Found - Rakez» 404 for one that is not: RKZ72729/68882/71559/69002 (REST
+        401 rest_forbidden) → 404; three published units → 200.
+      · /ar/project/<id>/ — THE LISTING'S OWN URL: project 59832 (REST 401) → 404 while 28 of its
+        units still say «available»; project 70543 (also REST 401) → 200, so REST alone decides
+        nothing."""
+    try:
+        r = cc.get(f"{SITE}{path}", headers=HEADERS, timeout=30, allow_redirects=True)
+        status, body = r.status_code, r.text or ""
+    except Exception as e:
+        return False, f"raised {type(e).__name__}"
+    said = decide(status, body, False, lambda st, _b, _m: "gone" if st in (404, 410) else None)
+    return bool(said and said[0] == "gone"), f"HTTP {status}"
+
+
+def _verify_gone(ad_number: str, en_projects: dict[int, dict],
+                 bridge: dict[int, Optional[dict]]) -> tuple[str, str]:
+    """Absence NEVER deactivates on its own. A unit is gone when the source says so — the post is
+    deleted or unpublished, its own unit_status has left 'available', or its project's own terms
+    exclude it exactly as the crawl does (`_project_exclusion`, over this run's project records).
+    Anything else is UNKNOWN."""
     uid = ad_number.replace("RKZ", "")
     try:
         r = cc.get(f"{REST}/unit/{uid}", headers=HEADERS, timeout=30)
@@ -450,16 +497,71 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
         if isinstance(body, dict) and body.get("code") == "rest_post_invalid_id":
             return "gone", "REST 404 rest_post_invalid_id — the unit was deleted at source"
         return "unknown", "404 without rest_post_invalid_id"
+    if r.status_code == 401 and isinstance(body, dict) and body.get("code") == "rest_forbidden":
+        gone, how = _page_gone(f"/?p={uid}")
+        return ("gone" if gone else "unknown"), (
+            f"REST 401 rest_forbidden and its public page /?p={uid} answers {how}"
+            + (" — unpublished at source" if gone else ""))
     if r.status_code == 200 and isinstance(body, dict):
         if str(body.get("id")) != str(uid):
             return "unknown", f"id mismatch: asked {uid}, got {body.get('id')}"
         st = _unit_status(body.get("acf") or {})
         if st == INGESTIBLE_UNIT_STATUS:
-            return "live", "REST 200 unit_status=available"
+            pid = (body.get("acf") or {}).get("unit_project")
+            if not isinstance(pid, int):
+                return "unknown", "REST 200 unit_status=available but bound to no project"
+            if pid not in en_projects:
+                gone, how = _page_gone(f"/ar/project/{pid}/")
+                return ("gone" if gone else "unknown"), (
+                    f"REST 200 unit_status=available; project {pid} is not published and the "
+                    f"listing's own page /ar/project/{pid}/ answers {how}")
+            why = _project_exclusion(en_projects[pid], bridge.get(pid))
+            if why:
+                return "gone", f"REST 200 unit_status=available, but its {why} — excluded exactly as the crawl excludes it"
+            return "live", "REST 200 unit_status=available in an included project"
         if st in ("reserved", "sold-out"):
             return "gone", f"REST 200 but unit_status={st} — no longer purchasable"
         return "unknown", f"unrecognised unit_status={st!r}"
     return "unknown", f"REST {r.status_code}"
+
+
+class _LazyBridge(dict):
+    """project id → its Arabic record, bridged the first time a unit asks. The crawl bridges every
+    project its units reference up front; the daily direct check only meets the projects of the rows
+    it reads."""
+
+    def __init__(self, s: cc.Session, ar_projects: dict[int, dict]):
+        super().__init__()
+        self._s, self._ar = s, ar_projects
+
+    def get(self, en_id, default=None):
+        if en_id not in self:
+            ar_id = arabic_project_id(self._s, en_id)
+            self[en_id] = self._ar.get(ar_id) if ar_id else None
+        return self[en_id]
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for a caller with no crawl of its own (the daily direct check,
+    scrapers/common/fleet_liveness.py). Since `_verify_gone` judges a unit by its project's terms it
+    needs the project records; called with the ad number alone it raised, so every control read
+    UNKNOWN and the site went unchecked from 2026-09-29. The records are read on the first call (never
+    at import or construction), and if they cannot be read whole every answer is UNKNOWN."""
+    state: dict = {}
+
+    def verify(ad_number: str) -> tuple[str, str]:
+        if not state:
+            s = session()
+            INCOMPLETE.clear()
+            en, ar = fetch_projects(s), fetch_projects(s, lang="ar")
+            state["why"] = (f"project records unreadable ({'; '.join(INCOMPLETE) or 'none returned'})"
+                            if INCOMPLETE or not en or not ar else "")
+            state["en"], state["bridge"] = en, _LazyBridge(s, ar)
+        if state["why"]:
+            return "unknown", state["why"]
+        return _verify_gone(ad_number, state["en"], state["bridge"])
+
+    return verify
 
 
 def main() -> int:
@@ -469,6 +571,7 @@ def main() -> int:
     args = p.parse_args()
 
     s = session()
+    INCOMPLETE.clear()
     run_id = None if args.limit_test else db.begin_run("rakez")
     res_rows: list[dict] = []
     com_rows: list[dict] = []
@@ -566,8 +669,11 @@ def main() -> int:
         pruned = 0
         for tbl, rows in (("rakez_residential_listings", res_rows),
                           ("rakez_commercial_listings", com_rows)):
+            if INCOMPLETE:
+                print(f"⚠ {tbl}: enumeration incomplete — no prune: {INCOMPLETE}")
+                continue
             n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source="Rakez",
-                                verify_gone=_verify_gone)
+                                verify_gone=lambda ad: _verify_gone(ad, en_projects, bridge))
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped — kept existing active")
             else:
@@ -579,7 +685,9 @@ def main() -> int:
                              rows_upserted=len(res_rows) + len(com_rows),
                              notes=(f"pruned={pruned} superseded={superseded} "
                                     f"not_available={skipped_status} excluded={skipped_project} "
-                                    f"bridged={bridged}/{len(needed)}"),
+                                    f"bridged={bridged}/{len(needed)}"
+                                    + (f" INCOMPLETE: {'; '.join(INCOMPLETE)}" if INCOMPLETE else ""))[:300],
+                             degraded=bool(INCOMPLETE),
                              check_tables=["rakez_residential_listings",
                                            "rakez_commercial_listings"])
         return 0 if healthy else 1

@@ -1131,7 +1131,7 @@ export default function Home() {
       <ScrollView
         ref={scrollRef}
         style={{ flex: 1, zIndex: 1 }}
-        contentContainerStyle={[s.scroll, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 28 }]}
+        contentContainerStyle={[s.scroll, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }]}
         keyboardShouldPersistTaps="handled"
       >
         <RNAnimated.View style={[s.col, entranceStyle]}>
@@ -1208,8 +1208,6 @@ export default function Home() {
           <View style={s.hero}>
             <RNAnimated.Text style={[s.heroTitle, reveal(titleAnim, 20)]}>{t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
             <RNAnimated.Text style={[s.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>
-            {/* Note #1 — tagline below the description. */}
-            <RNAnimated.Text style={[s.heroTagline, reveal(subAnim, 10)]}>{t('Ezhalah, and may your luck be good.')}</RNAnimated.Text>
           </View>
 
           {/* Filter / AI Agent — the hero's focal choice: centered between the headline and the search
@@ -1301,7 +1299,7 @@ export default function Home() {
                 togglePeriodButton does for the period pair. */}
             <View style={s.row}>
               {(['Buy', 'Rent'] as const).map((which) => (
-                <OptionBox
+                <OptionBox compact
                   key={which}
                   label={t(which)}
                   img={DEAL_IMG[which]}
@@ -1359,7 +1357,7 @@ export default function Home() {
               <Reveal style={{ marginTop: 12 }}>
                 <View style={s.row}>
                   {(['annual', 'monthly'] as const).map((which) => (
-                    <OptionBox
+                    <OptionBox compact
                       key={which}
                       label={t(which === 'monthly' ? 'Monthly' : 'Yearly')}
                       img={PERIOD_IMG[which === 'monthly' ? 'Monthly' : 'Yearly']}
@@ -1414,6 +1412,8 @@ export default function Home() {
                 <TextInput
                   ref={cityRef}
                   testID="city-input"
+                  placeholder={t('Choose a city')}
+                  placeholderTextColor={colors.muted}
                   style={s.flInput}
                   value={query.location}
                   autoCorrect={false}
@@ -1596,7 +1596,7 @@ export default function Home() {
                 optional-ness is its own label, not baked into the field placeholder. (owner UI request.) */}
             <View ref={withAnchor(districtAnchorRef)} />
             <Text style={[s.fieldLabelAbove, { marginTop: 12 }]}>
-              {t('Which neighborhood?')}
+              {t('District')}
               {'  '}
               <Text style={s.fieldLabelOptional}>{t('Optional')}</Text>
             </Text>
@@ -1836,13 +1836,18 @@ export default function Home() {
               })()}
             </DropdownReveal>
 
+            <Tappable testID="home-search-button" style={s.searchBtn} onPress={onSearch} dip={0.025}>
+              <Ionicons name="search" size={20} color="#fff" />
+              <Text style={s.searchBtnText}>{t('Search')}</Text>
+            </Tappable>
+
             <View ref={withAnchor(catAnchorRef)} />
             {/* Category — Residential / Commercial (macro) */}
             <View style={s.pick}>
               <FieldLabel>{t('Category')}</FieldLabel>
               <View style={s.row}>
                 {CATEGORIES.map((cat) => (
-                  <OptionBox
+                  <OptionBox compact
                     key={cat}
                     label={t(cat)}
                     img={categoryImg(cat)}
@@ -2088,11 +2093,11 @@ export default function Home() {
                 block below, so the user knows which period their price/size answers apply to BEFORE
                 they type them. */}
 
-            <Tappable style={s.searchBtn} onPress={onSearch} dip={0.025}>
-              <Text style={s.searchBtnText}>{t('Search')}</Text>
+            <Tappable testID="home-filter-search-button" style={s.searchBtn} onPress={onSearch} dip={0.025}>
+              <Ionicons name="search" size={20} color="#fff" />
+              <Text style={s.searchBtnText}>{t('Search with these filters')}</Text>
             </Tappable>
-            {/* Scroll target: each selection brings this (just below Search) into view so the user is
-                carried down through the form without scrolling. (user request.) */}
+            {/* Existing selection scroll target stays beside the final in-form search action. */}
             <View ref={withAnchor(endAnchorRef)} style={{ height: 1 }} />
           </View>
 
@@ -2164,16 +2169,16 @@ const s = StyleSheet.create({
   topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
-  hero: { alignItems: 'center', marginTop: 12, marginHorizontal: 4 },
+  hero: { alignItems: 'center', marginTop: 8, marginHorizontal: 4 },
   // The Filter / AI Agent control, centered in the hero flow between the tagline and the card.
-  modeWrap: { alignSelf: 'center', marginTop: 20 },
-  heroTitle: { fontSize: 31, fontWeight: '700', color: colors.primary, letterSpacing: -0.6, textAlign: 'center', lineHeight: 34 },
-  heroSub: { fontSize: 13.5, fontWeight: '600', color: colors.dark, textAlign: 'center', marginTop: 5, lineHeight: 20 },
+  modeWrap: { alignSelf: 'center', marginTop: 8 },
+  heroTitle: { fontSize: 24, fontWeight: '700', color: colors.primary, letterSpacing: -0.6, textAlign: 'center', lineHeight: 28 },
+  heroSub: { fontSize: 12, fontWeight: '600', color: colors.dark, textAlign: 'center', marginTop: 4, lineHeight: 17 },
   heroTagline: { fontSize: 12.5, fontWeight: '700', color: colors.primary, textAlign: 'center', marginTop: 8, fontStyle: 'italic' },
   // Small inline hint under the Rent Monthly/Yearly toggle — explains the period the user picked.
   rentHint: { fontSize: 11.5, color: colors.muted, marginTop: 6, paddingHorizontal: 4, lineHeight: 16 },
 
-  card: { marginTop: 22, backgroundColor: colors.surface, borderRadius: radius.sheet, borderWidth: 1, borderColor: colors.fieldLine, padding: space.card, ...cardShadow },
+  card: { marginTop: 10, backgroundColor: colors.surface, borderRadius: radius.sheet, borderWidth: 1, borderColor: colors.fieldLine, padding: 12, ...cardShadow },
   // "مسح الكل" (Clear All) — only rendered when hasActiveFilters(query), so an already-empty filter
   // never shows a clear control with nothing to clear (mirrors the location field's own per-field
   // clear icon, which is likewise conditional on query.location.length > 0).
@@ -2189,7 +2194,7 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5,
   },
   afCarryChipTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
-  field: { flexDirection: 'row', alignItems: 'center', gap: 10, height: 52, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, paddingHorizontal: 14, backgroundColor: colors.surface, ...(Platform.OS === 'web' ? { cursor: 'text' as any } : {}) },
+  field: { flexDirection: 'row', alignItems: 'center', gap: 10, height: 46, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, paddingHorizontal: 14, backgroundColor: colors.surface, ...(Platform.OS === 'web' ? { cursor: 'text' as any } : {}) },
   sizeField: { marginTop: 8, height: 46 },
   sizeFieldOn: { borderColor: colors.primary },
   // fontSize 16 (not 14) on the numeric inputs is deliberate: iOS Safari AUTO-ZOOMS the whole page
@@ -2269,7 +2274,7 @@ const s = StyleSheet.create({
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   wrapCell: { flexGrow: 1, flexBasis: '30%', minWidth: 90, flex: 0 },
 
-  searchBtn: { marginTop: 11, height: 51, borderRadius: radius.field, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
+  searchBtn: { marginTop: 12, height: 48, flexDirection: 'row', gap: 8, borderRadius: radius.field, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
   searchBtnText: { color: '#fff', fontSize: 15.5, fontWeight: '600' },
 
   startHead: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 9, marginHorizontal: 2 },

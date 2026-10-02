@@ -65,7 +65,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
-from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common import db, normalize, sold_pin  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 
 # PDPL: never store advertiser contact/identity. The rest of the row is kept.
@@ -108,6 +108,11 @@ DEAL_MAP = {"للإيجار": "Rent", "للبيع": "Buy"}
 # active. Anything else (مباع/sold, or a future status this fleet hasn't seen yet) is inactive by
 # default -- never show a listing whose status we don't recognise as available.
 ACTIVE_STATUSES = {"متاح"}
+# A status that NAMES a removal. Measured: AD202509210004 has read «مباع» since 2025-12-26
+# (source updated_at), and the upsert's active=false for it was undone every morning by
+# auto_recover_false_inactive() (see _pin_sold_inactive). Any OTHER non-«متاح» status stays a plain
+# inactive row — only the source's own sold word is source-confirmed gone evidence.
+SOLD_STATUSES = {"مباع"}
 
 # City: this site has no dedicated column, only free text -- see module docstring for why matching
 # against this exact, source-confirmed name list is extraction, not a guess.
@@ -285,6 +290,21 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
     return row, category
 
 
+def _pin_sold_inactive(table: str, ad_numbers: list[str],
+                       seen_ad_numbers: list[str]) -> None:
+    """Keep source-confirmed SOLD rows inactive through the nightly auto_recover_false_inactive()
+    sweep (pg_cron jobid 30, 05:20 UTC). That job re-activates any active=false row with
+    coalesce(missing_count, 0) = 0 deactivated within 24 h — and the shared batch upsert writes
+    missing_count=0 for every row it touches. So AD202509210004, «مباع» at the source since
+    2025-12-26, was written active=false at ~04:40 and back to active=true at 05:20 every day.
+    The shared law pins missing_count=3 + active=false and records the per-row evidence;
+    seen_ad_numbers records the reversal if the source relists. See scrapers/common/sold_pin.py.
+    """
+    sold_pin.pin_source_confirmed_gone(
+        table, ad_numbers, oracle="azdad.sold_pin.status", seen_ad_numbers=seen_ad_numbers,
+    )
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--limit-test", type=int, default=0,
@@ -295,6 +315,8 @@ def main() -> int:
     run_id = None if args.limit_test else db.begin_run("azdad")
     res_rows: list[dict] = []
     com_rows: list[dict] = []
+    sold_res: list[str] = []
+    sold_com: list[str] = []
     listings = fetch_all(s)
     print(f"Azdad: {len(listings)} rows fetched")
     seen = 0
@@ -304,6 +326,8 @@ def main() -> int:
             if not row:
                 continue
             (com_rows if cat == "commercial" else res_rows).append(row)
+            if (L.get("status") or "") in SOLD_STATUSES:
+                (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
             seen += 1
         if args.limit_test:
             print(f"DRY RUN — would upsert {len(res_rows)} residential + {len(com_rows)} commercial")
@@ -322,6 +346,9 @@ def main() -> int:
         pruned = 0
         seen_res = [r["ad_number"] for r in res_rows]
         seen_com = [r["ad_number"] for r in com_rows]
+        # Right after the upserts (which reset missing_count to 0), before prune — see _pin_sold_inactive.
+        _pin_sold_inactive("azdad_residential_listings", sold_res, seen_res)
+        _pin_sold_inactive("azdad_commercial_listings", sold_com, seen_com)
         # An ad whose category flipped this run is superseded in the table it LEFT. Runs BEFORE
         # prune_unseen: that helper reasons from ABSENCE one table at a time and its circuit
         # breakers protect the orphan rather than age it out, after which verify_gone asks "is

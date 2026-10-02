@@ -30,9 +30,13 @@ on:
       confirm_limit:
         description: "strike step: max rows HEAD/GET-verified this run (pilot uses a small cap)"
         type: string
-        default: "1500"
+        default: "3000"
       skip_enum:
         description: "PILOT ONLY: skip the 4.5h enum and run the strike step against the LAST completed enum (must be <36h old, else the coverage guard refuses). For repeatable pilots."
+        type: boolean
+        default: false
+      confirm_only:
+        description: "with skip_enum: page-confirm only the rows already at 3 strikes; strike nothing (an extra drain between enumerations never counts one enumeration twice)"
         type: boolean
         default: false
       repair_clock_bug_backlog:
@@ -57,8 +61,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # This dispatch's start, before any shard runs. The rollup sums only shard rows started after it:
+  # its 36h window alone also swept in the PREVIOUS dispatch's shards whenever two dispatches landed
+  # <36h apart (see run_enum_rollup()).
+  stamp:
+    if: ${{ !inputs.skip_enum && !inputs.repair_clock_bug_backlog }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      at: ${{ steps.t.outputs.at }}
+    steps:
+      - id: t
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
   enum:
     name: Enum ${{ matrix.slug }} ${{ matrix.deal }}
+    needs: stamp
     # PILOT skip (run strike against the last completed enum) OR the one-time repair dispatch —
     # either way the 4.5h enum has no reason to run.
     if: ${{ !inputs.skip_enum && !inputs.repair_clock_bug_backlog }}
@@ -160,7 +178,7 @@ jobs:
 
   rollup:
     name: Roll the shards up into one enumeration
-    needs: enum
+    needs: [stamp, enum]
     # Only runs when EVERY shard succeeded. `fail-fast: false` lets the other slices finish so the
     # rollup can report exactly which are missing, but a single failed shard still stops publication:
     # a slice nobody enumerated is a slice whose every live listing would be counted "unseen".
@@ -188,6 +206,7 @@ jobs:
           exec python -m scrapers.wasalt.liveness \
             --mode enum-rollup \
             --shards-expected 34 \
+            --since "${{ needs.stamp.outputs.at }}" \
             ${{ inputs.dry_run && '--dry-run' || '' }}
 
   strike:
@@ -198,7 +217,7 @@ jobs:
     # here never bypasses the safety — it only avoids re-running the 4.5h enum for a repeat pilot.
     if: ${{ always() && ((needs.enum.result == 'success' && needs.rollup.result == 'success') || inputs.skip_enum) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -227,15 +246,18 @@ jobs:
           # headless=False is what clears the challenge; the runner has no display, so xvfb-run
           # supplies a virtual one. --workers 1 because Playwright's sync API is thread-bound
           # (liveness.py forces it anyway; passing it keeps the command honest).
-          # --max-seconds 4200 (70 min) sits under timeout-minutes: 90 with room for one stuck
-          # browser check (~9 min hard deadline). A browser confirm is ~5 s, so 1,500 rows need
-          # ~2 h; without the budget run 36350303259 was cancelled at 90:00 with nothing written.
+          # --max-seconds 19800 (330 min) sits under timeout-minutes: 350 with room for setup and
+          # one stuck browser check (~9 min hard deadline). Results are flushed as the run goes, so
+          # a stop loses nothing. 70 min confirmed ~570 rows per run while ~4,000 rows the
+          # enumeration no longer serves waited (2026-10-02: struck=4090, killed=573) — dead ads
+          # stayed visible for a week. 330 min confirms ~2,700 at the measured ~7.3 s per check.
           exec xvfb-run -a python -m scrapers.wasalt.liveness \
             --mode enum-strike \
             --grace 3 \
             --workers 1 \
-            --confirm-limit ${{ inputs.confirm_limit || '1500' }} \
-            --max-seconds 4200 \
+            --confirm-limit ${{ inputs.confirm_limit || '3000' }} \
+            --max-seconds 19800 \
+            ${{ inputs.confirm_only && '--confirm-only' || '' }} \
             ${{ inputs.dry_run && '--dry-run' || '' }}
 
   repair:

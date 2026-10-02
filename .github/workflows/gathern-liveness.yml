@@ -57,8 +57,8 @@ on:
         # oversized limit would mean the automation strikes forever but never removes anything.
         default: "1500"
       min_stale_days:
-        description: "Only probe rows not seen in the feed for this many days"
-        default: "3"
+        description: "Only probe rows not seen in the feed for this many days (0 = every active row, each read about once a day)"
+        default: "0"
       kill_cap:
         # EMPTY by default = the auto cap, max(150, 2% of currently-active). The owner released the
         # 150 hold on 2026-08-17 (DIE #26). Leaving a "150" default here is what silently re-applied
@@ -158,7 +158,7 @@ jobs:
           # and mon_detect_liveness_cap_degraded() reads that marker.
           exec python -m scrapers.gathern.liveness \
             --limit ${{ inputs.limit || '1500' }} \
-            --min-stale-days ${{ inputs.min_stale_days || '3' }} \
+            --min-stale-days ${{ inputs.min_stale_days || '0' }} \
             --grace ${{ inputs.grace || '3' }} \
             --canaries ${{ inputs.canaries || '10' }} \
             ${{ inputs.kill_cap && format('--kill-cap {0}', inputs.kill_cap) || '' }} \

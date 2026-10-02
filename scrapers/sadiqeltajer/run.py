@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://sadiq-eltajer.sa"
 SOURCE = "Sadiq Eltajer"
@@ -315,7 +316,14 @@ def parse_deal(text: str) -> Optional[str]:
 # parentheses and conjunctions — «بيع تجاري عمائر و شقق ( تجارية و سكني )». A capture limited to
 # Arabic letters and spaces matched none of those (18 of 40 sampled pages), so the span is taken
 # whole and normalised, then mapped through a CLOSED map.
-_TYPE_RE = re.compile(r"-->\s*(?:بيع|إيجار|ايجار)\s+(.{1,60}?)\s*كود\s*الاعلان")
+#
+# A FEATURED ad carries the site's «مميز» badge in front of the deal word — «--> مميز بيع فلل كود
+# الاعلان : 8134». Anchoring the deal word directly on «-->» skipped every featured ad on the site
+# (8 on 2026-09-28) as if it had no category at all. The badge is page chrome, not a category.
+_TYPE_RE = re.compile(r"-->\s*(?:مميز\s+)?(?:بيع|إيجار|ايجار)\s+(.{1,60}?)\s*كود\s*الاعلان")
+# Rent ads sometimes restate the deal after the category — «فلل ودبلكسات (ايجار)». That is the
+# same category with the deal repeated, never a different one.
+_DEAL_SUFFIX = re.compile(r"\s*\(\s*(?:ايجار|إيجار|بيع)\s*\)$")
 
 _TYPE_AR = {
     "ارض": "أرض", "أرض": "أرض", "اراضي": "أرض", "أراضي": "أرض",
@@ -325,13 +333,21 @@ _TYPE_AR = {
     "شقق": "شقة", "شقة": "شقة", "عمائر": "عمارة", "عمارة": "عمارة",
     "محلات": "محل", "محل": "محل", "مستودعات": "مستودع", "مستودع": "مستودع",
     "مزارع": "مزرعة", "مزرعة": "مزرعة", "بيوت": "بيت", "بيت": "بيت",
-    "مكاتب": "مكتب", "مكتب": "مكتب", "دور": "دور", "أدوار": "دور",
+    "مكاتب": "مكتب", "مكتب": "مكتب", "دور": "دور", "أدوار": "دور", "ادوار": "دور",
     # the compound families this source actually prints
     "تجاري عمائر و شقق ( تجارية و سكني )": "عمارة",
     "تجاري عمائر و شقق": "عمارة",
     "تجاري محلات و صالات تجارية": "محل",
     "تجاري محلات": "محل",
     "وحدات": "شقة",
+    # Categories the 2026-09-28 coverage audit found skipped as if unknown (count on that day's
+    # sitemap). Each is ONE property type in the source's own words, mapped to a type the shared
+    # map already has — never a new one:
+    "دبلكسات": "دوبلكس",                  # 48 + 1 featured → Duplex
+    "تجاري ارض": "أرض تجارية",           # 63 + 1 featured → Commercial Land
+    "محلات و صالات تجارية": "محل",        # 33 — the RENT spelling of «تجاري محلات و صالات تجارية»
+    "ورش صناعية": "ورشة",                 # 5 → Workshop
+    "تجاري فندق": "فندق",                 # 1 → Hotel
 }
 
 # «مخططات» is a SUBDIVISION PLAN — a whole layout of many plots, not one property with one price.
@@ -339,43 +355,69 @@ _TYPE_AR = {
 # put a plan's headline figure on a card as if it were a single plot (AMBIGUOUS-MAPPING ASK-FIRST).
 _TYPE_SKIP = {"مخططات", "مخطط"}
 
+# MIXED BUCKETS — deliberately NOT mapped (AMBIGUOUS-MAPPING ASK-FIRST). Each holds several
+# property types, and the category alone cannot say which one a given ad is. Measured 2026-09-28:
+#   «دور و شقتين و ادوار» (37): «دور ارضي» (a floor), «دور وشقتين» (a floor + two flats, i.e. a
+#       whole building), «بيت قديم», «مجمع سكني», and ad 5965 whose title says «فله» while its own
+#       description says «دور مع شاليه».
+#   «دورين» (21): «دورين مفصولات» (two separate floors), «فله دورين», «عمارة دورين», «بيت شعبي
+#       دورين», «دور علوي نظام دبلوكس».
+#   «مستودعات و ورش» (25): warehouse OR workshop — and one is a factory («مصنع»).
+#   «تجاري ارض للمستودعات و للورش» (12): commercial OR industrial land.
+#   «بيع تجاري» (9, header «بيع بيع تجاري»): no type at all.
+# Filing any of these under one type would put the wrong type on the card. They are counted by
+# name in the run notes so the owner can decide, and stay out until then.
+
+
+def type_category(text: str) -> Optional[str]:
+    """The source's own header category, normalised, or None when the header has none."""
+    m = _TYPE_RE.search(text)
+    if not m:
+        return None
+    return _DEAL_SUFFIX.sub("", re.sub(r"\s+", " ", m.group(1).strip(" .،-|")))
+
 
 def parse_type_ar(text: str) -> Optional[str]:
     """The source's own category from the header, mapped through a CLOSED map. Anything outside it
     yields None and the listing is skipped — never bucketed into a nearest guess."""
-    m = _TYPE_RE.search(text)
-    if not m:
-        return None
-    raw = re.sub(r"\s+", " ", m.group(1).strip(" .،-|"))
-    if raw in _TYPE_SKIP:
+    raw = type_category(text)
+    if not raw or raw in _TYPE_SKIP:
         return None
     return _TYPE_AR.get(raw)
 
 
-def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str]:
+def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
+    """(row, category, skip_reason). A skipped ad always says WHY, so the run notes can count each
+    reason on its own — a single lumped «no_type_deal_or_city» tally hid which real categories were
+    being dropped (the 2026-09-28 coverage audit)."""
     text = own_section(page_html)
     if not text:
-        return None, "residential"
+        return None, "residential", "empty_page"
 
     code = ad_code(text)
     if not code:
-        return None, "residential"
+        return None, "residential", "no_ad_code"
 
+    raw_type = type_category(text)
+    if not raw_type:
+        return None, "residential", "no_category_header"
+    if raw_type in _TYPE_SKIP:
+        return None, "residential", "subdivision_plan"
     type_ar = parse_type_ar(text)
     if not type_ar:
-        return None, "residential"
+        return None, "residential", f"unmapped:{raw_type}"
     property_type = normalize.map_type_exact(type_ar)
     if not property_type:
-        return None, "residential"
+        return None, "residential", f"type_unmapped:{type_ar}"
     category = normalize.category_for_type(property_type).lower()
 
     deal = parse_deal(text)
     if not deal:
-        return None, category
+        return None, category, "no_deal"
 
     region_ar, city_ar, district_raw = parse_location(text)
     if not city_ar:
-        return None, category
+        return None, category, "no_city"
     city = normalize.map_city(city_ar)
     city_id, region_id = to_catalog(city_ar, region_ar)
     district_ar = find_district_in_text(district_raw, city_id) if (district_raw and city_id) else None
@@ -425,11 +467,64 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str]:
         "price_published": (price_total is not None) or (price_per_meter is not None),
     }
     row["additional_info"] = {k: v for k, v in extra.items() if v is not None}
-    return row, category
+    return row, category, ""
+
+
+# Why a walk of the sitemap may not be the whole catalogue. Non-empty → no prune this run.
+INCOMPLETE: list[str] = []
+
+# ── REMOVAL (measured 2026-10-02). Until then this crawler had NO removal step at all: an ad the
+# office closed stayed active here for good (24 active rows the sitemap had dropped 3+ days before).
+#
+# This office does not delete a closed ad. It drops it from the sitemap and KEEPS the page, which
+# still renders the full ad and its «كود الاعلان» — so "200 with the code" is not proof of life.
+# What changes is the contact block: 10 of 10 dropped ads say «غير متاح» where the call and WhatsApp
+# buttons were, and 12 of 12 live ads carry the call button and no «غير متاح». («منتهي» is on every
+# page, live or not: furniture.) A slug that never existed answers 200 with a 3,892-byte shell that
+# says «غير موجود» and has no ad code. Anything else, including 404 and every block, is UNKNOWN.
+_UNAVAILABLE = "غير متاح"
+_CALL_BUTTON = "call-btn"
+_NOT_FOUND = "غير موجود"
+RES_TABLE, COM_TABLE = "sadiqeltajer_residential_listings", "sadiqeltajer_commercial_listings"
+
+
+def _signal(status, body, moved) -> Optional[str]:
+    """'live' | 'gone' | None — only what this page affirmatively says about ITSELF."""
+    if status != 200 or moved:
+        return None
+    i = body.find(_SIMILAR)                       # never read a neighbour's card as this ad's own
+    own = body[:i] if i > 0 else body
+    offered = _CALL_BUTTON in own
+    has_code = bool(ad_code(own_section(body) or ""))
+    if offered and has_code and _UNAVAILABLE not in own:
+        return "live"
+    if not offered and (_UNAVAILABLE in own or (_NOT_FOUND in own and not has_code)):
+        return "gone"
+    return None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for db.prune_unseen and for the daily direct check. A removal is believed
+    only while a known-live ad from this run (`control`) still reads live through the same session."""
+    url_for = stored_listing_url((RES_TABLE, COM_TABLE))
+    s = session()
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform="sadiqeltajer", signal=_signal, session=lambda: s,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
 
 
 def fetch_catalogue(s: cc.Session, limit: int = 0) -> list[str]:
     """Every /ads/ URL from the sitemap — the source's own enumeration of its catalogue."""
+    INCOMPLETE.clear()
     seen: set[str] = set()
     roots = [f"{BASE}/sitemap_index.xml", f"{BASE}/sitemap.xml"]
     for root in roots:
@@ -444,10 +539,13 @@ def fetch_catalogue(s: cc.Session, limit: int = 0) -> list[str]:
         for sub in [l for l in locs if l.endswith(".xml")][:20]:
             try:
                 rs = s.get(sub, timeout=40)
-            except Exception:
+            except Exception as e:
+                INCOMPLETE.append(f"{sub} raised {type(e).__name__}")
                 continue
             if rs.status_code == 200:
                 seen |= {l for l in re.findall(r"<loc>([^<]+)</loc>", rs.text) if "/ads/" in l}
+            else:
+                INCOMPLETE.append(f"{sub} answered HTTP {rs.status_code}")
         if seen:
             break
     out = sorted(seen)
@@ -482,9 +580,9 @@ def main() -> int:
             if r.status_code != 200:
                 skipped[f"http_{r.status_code}"] = skipped.get(f"http_{r.status_code}", 0) + 1
                 continue
-            row, cat = map_listing(u, r.text)
+            row, cat, why = map_listing(u, r.text)
             if not row:
-                skipped["no_type_deal_or_city"] = skipped.get("no_type_deal_or_city", 0) + 1
+                skipped[why] = skipped.get(why, 0) + 1
                 continue
             if args.type != "all" and cat != args.type:
                 continue
@@ -492,9 +590,9 @@ def main() -> int:
             if i % 250 == 0:
                 print(f"   … {i}/{len(urls)}", flush=True)
 
+        skip_notes = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
         if skipped:
-            print("  skipped (not guessed): "
-                  + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1])))
+            print("  skipped (not guessed): " + skip_notes)
 
         if dry:
             print(f"✓ {SOURCE} VALIDATION: {len(res)} residential + {len(com)} commercial (nothing written)")
@@ -530,8 +628,25 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
+        # REMOVAL. An ad missing from this run's sitemap walk is only a CANDIDATE: at three misses
+        # its own page is re-read, and it is hidden only if that page says so (_signal). A page that
+        # still offers the ad heals the row. No prune on a partial walk or a single-vertical run.
+        pruned = 0
+        if INCOMPLETE:
+            print(f"  ⚠ sitemap walk incomplete — no prune: {'; '.join(INCOMPLETE)}")
+        elif args.type == "all":
+            verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+            for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                k = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=verify_gone)
+                if k < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += k
+
         n = len(res) + len(com)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(urls), rows_upserted=n,
+                             notes=f"pruned={pruned} skipped: {skip_notes or 'none'}"[:300],
                              check_tables=["sadiqeltajer_residential_listings",
                                            "sadiqeltajer_commercial_listings"])
         if not healthy:

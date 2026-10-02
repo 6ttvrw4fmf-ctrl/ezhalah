@@ -18,6 +18,11 @@ STRATEGY tiers, strongest first:
                               owner rule and is recorded as a known gap, not as an approved design.
                               Rows on these platforms are reported as unverified by the staleness
                               monitor rather than being quietly counted as healthy.
+  SOURCE_LIST_PRESENCE        The crawl re-reads the site's OWN COMPLETE list every day, and a row
+                              that list serves is stamped verified-alive (presence_patch). Owner
+                              decision 2026-10-02 — the rule wasalt already has — for small sites
+                              admitted ONE BY ONE (SOURCE_LIST_DAILY below). It changes what counts
+                              as verified, never what counts as dead.
 
 `max_verification_age_hours` is the SLA: an active row not positively verified within it is STALE
 and must surface on monitoring. It is a MONITORING threshold — nothing here ever deactivates a row.
@@ -30,6 +35,7 @@ from scrapers.common.liveness_contract import LivenessPolicy
 DIRECT_REVISIT = "DIRECT_REVISIT"
 CANDIDATE_PLUS_DIRECT = "CANDIDATE_PLUS_DIRECT"
 CRAWL_PRESENCE_ONLY = "CRAWL_PRESENCE_ONLY"
+SOURCE_LIST_PRESENCE = "SOURCE_LIST_PRESENCE"
 
 # REGISTERED IS NOT THE SAME AS SEARCHABLE (2026-09-03, corrected 2026-09-04). abralosol, aouj,
 # arkaan, rawasidark and therc have 4,314 production_ready rows live in search_listings_ar and rows in
@@ -104,10 +110,20 @@ POLICIES: dict[str, _P] = {
         "19.5 days and ~1,260 dead rows stayed searchable (measured 2026-08-30).",
     ),
     "wasalt": _P(
-        _pol("wasalt", 3, 96), DIRECT_REVISIT,
+        # presence_is_positive_evidence=True — OWNER DECISION 2026-10-02, the first platform to
+        # declare it (SOURCE_LIST_DAILY below declares it for the small full-list sites). A row Wasalt's own search results serve is stamped verified-alive
+        # (presence_patch, in db.upsert_wasalt_*_batch). Measured before deciding: of rows read
+        # directly in the last 30 days, in-feed rows were live (51/51 in one run, and every run's 30
+        # in-feed controls) and rows the feed had dropped were dead (8,128 of 8,137). The claim is
+        # re-tested on every enum-strike run: 30 in-feed controls are read directly and the run
+        # aborts its flips under 90% live. Reading all ~69k pages directly would cost ~12 GB/day of
+        # paid proxy. Removal is unchanged: a row leaves search only on a DIRECT 404 (3 strikes).
+        LivenessPolicy(platform="wasalt", grace=3, max_verification_age_hours=96,
+                       presence_is_positive_evidence=True), DIRECT_REVISIT,
         "404 (shares aqar's marker set)",
         "Requires the Saudi residential proxy (WASALT_PROXY_URL); datacenter IPs get HTTP 403, "
-        "which is UNKNOWN and must never be read as death.",
+        "which is UNKNOWN and must never be read as death. Feed presence is positive evidence "
+        "(owner 2026-10-02); the direct read is spent on rows the feed dropped and on controls.",
     ),
     "aqarmonthly": _P(
         _pol("aqarmonthly", 3, 48), DIRECT_REVISIT,
@@ -191,9 +207,13 @@ POLICIES: dict[str, _P] = {
         "validated live 2026-09-19, /ads/this-slug-never-existed-zzz99 answered HTTP **200** with "
         "3,892 bytes and no «كود الاعلان», while a real ad answered 200 with 233,232 bytes and the "
         "code present. A policy keyed on 404 would therefore NEVER retire anything here and sold "
-        "listings would stay up forever. So: 200 WITH «كود الاعلان» is LIVE; 200 WITHOUT it is "
-        "GONE; a 404, any 401/403/408/429/5xx, a transport failure and an unlookupable row are all "
-        "UNKNOWN and hold the strike without deactivating.",
+        "listings would stay up forever. CORRECTED 2026-10-02, measured on 24 ads the sitemap had "
+        "dropped: the office KEEPS a closed ad's page, code and all, and replaces its call button "
+        "with «غير متاح» (10 of 10 dropped ads; 0 of 12 live ads; «منتهي» is on every page). So, "
+        "reading only the ad's own part of the page: the call button AND the code AND no «غير متاح» "
+        "is LIVE; no call button with «غير متاح», or the «غير موجود» shell without a code, is GONE; "
+        "a 404, any 401/403/408/429/5xx, a transport failure, an unlookupable row and every other "
+        "200 are UNKNOWN and hold the strike without deactivating.",
         "Absence from the crawl only SELECTS candidates; the direct confirm above decides. The "
         "asymmetry with ksaaqar is the point — the death signal was measured per platform, not "
         "assumed from the sibling."),
@@ -244,9 +264,11 @@ POLICIES: dict[str, _P] = {
         "«This compound is no longer listed» ON A 200 — NOT a 404. Control-validated live "
         "2026-09-19: a delisted compound answers HTTP **200** with that sentence in its <h1> and a "
         "strip of OTHER compounds beneath it, and 62 of the 129 compounds in the sitemap are in "
-        "that state right now. A policy keyed on 404 would never retire anything here. So: 200 "
-        "WITHOUT that sentence AND carrying unit cards is LIVE; 200 WITH it is GONE; a 404, any "
-        "401/403/408/429/5xx, a transport failure and an unlookupable row are UNKNOWN.",
+        "that state right now. A policy keyed on 404 would never retire anything here. So, read on "
+        "the row's stored listing_url: 200 WITH that sentence is GONE; 200 carrying THIS unit's own "
+        "data-cin-contact-unit card is LIVE; a listed page without it (not yet measured), a 404, any "
+        "401/403/408/429/5xx, a transport failure and an unlookupable row are UNKNOWN. Wired into "
+        "prune_unseen 2026-09-28, complete crawls only.",
         "Rows are UNITS, not compounds, so one delisted compound retires every unit that belonged "
         "to it — which is correct: the units went with it."),
     "wslnaa": _P(
@@ -561,6 +583,18 @@ POLICIES: dict[str, _P] = {
         "37993/37767/37614 → 200 available (3/3); the HTML route soft-404s with 200 «Property Not "
         "Found». 46/46 available today. Every row built from its own record carries the "
         "direct-alive stamp."),
+    "october": _P(
+        _pol("october", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the same Nuzul engine as m3tmd (scrapers/jawher/run.py::make_verify_gone on "
+        "www.1october.com.sa): the record's own API detail route — a 404 JSON with a «message» is "
+        "GONE; a 200 for THIS id is LIVE only while availability_status == available, otherwise "
+        "GONE; another record and 401/403/429/5xx are UNKNOWN; canary-gated (fails CLOSED), after a "
+        "complete enumeration only. PLUS a sold pin: a unit the API still lists with a status other "
+        "than available (its own record, fetched this run) is pinned inactive the same run.",
+        "Moved off the HTML list 2026-09-28 (it saw 9 of meta.total 18 and never read the status: "
+        "8 of 12 active rows were rented/sold/reserved). Tier stays CRAWL_PRESENCE_ONLY until the "
+        "ops_liveness_registry row is re-tiered by migration; the scraper stamps no "
+        "last_verified_alive_at of its own meanwhile."),
     "senan": _P(
         _pol("senan", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the same engine as jawher (scrapers/jawher/run.py::make_verify_gone on this tenant's host): "
@@ -576,8 +610,10 @@ POLICIES: dict[str, _P] = {
         _pol("goldendeal", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the Nuzul tenant's own API record GET goldendeal.nzl-backend.com/api/public/properties/"
         "<id>: HTTP 404 carrying «No query results» is GONE; a 200 whose data.id is this id is "
-        "LIVE only while availability_status is available, otherwise GONE (the office's own «مباع» "
-        "/ «مؤجر» / «غير متاح» badge, served in place); another record, an unparseable body and "
+        "LIVE only while availability_status is available AND published_on_website is not 0, "
+        "otherwise GONE (the office's own «مباع» / «مؤجر» / «غير متاح» badge, served in place; or "
+        "the ad taken off the website while still «available» — GDL52019/52111/53568, 2026-09-28; "
+        "_withdrawn() is the crawl's gate too); another record, an unparseable body and "
         "401/403/429/5xx are UNKNOWN. The WEB page cannot be the oracle (an unknown id renders a "
         "200 «Property Not Found» shell; a retired id renders the full listing). Removals are "
         "canary-gated on an id THIS run mapped echoing itself (memoised, fails CLOSED) and run "
@@ -598,7 +634,8 @@ POLICIES: dict[str, _P] = {
         _pol("yameen", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the same Nuzul engine as goldendeal (scrapers/goldendeal/run.py::verify_gone_for on tenant "
         "4561, host meteen.nzl-backend.com): a 404 «No query results» is GONE; a 200 for THIS id is "
-        "LIVE only while availability_status is available, otherwise GONE (12 rented + 2 "
+        "LIVE only while the engine's _withdrawn() is empty (available AND published_on_website "
+        "not 0), otherwise GONE (12 rented + 2 "
         "unavailable of 27 are served in place); another record and 401/403/429/5xx are UNKNOWN; "
         "canary-gated (fails CLOSED), complete enumeration only.",
         "Measured 2026-09-23: live 3/3 → 200 available; rented 3/3 → 200 status rented; "
@@ -996,8 +1033,12 @@ POLICIES: dict[str, _P] = {
         "wp-json unit status: a 404 the API itself attributes to rest_post_invalid_id (the unit was "
         "deleted at source), OR an HTTP 200 whose acf.unit_status has left 'available' for "
         "'reserved'/'sold-out' — on this platform a unit stops being purchasable far more often "
-        "than it is deleted. A bare 404, any 401/403/408/429/5xx, an unparseable body, an id "
-        "mismatch and an unrecognised status are all UNKNOWN and hold the strike without "
+        "than it is deleted. ALSO (2026-09-28): a REST 401 rest_forbidden (unit unpublished) ONLY "
+        "when its public /?p=<id> answers the site's own 404; an available unit whose project is "
+        "unpublished ONLY when the listing's own /ar/project/<id>/ answers 404; and an available "
+        "unit whose project terms exclude it exactly as the crawl does (soon / sold / marketing "
+        "stopped / off-plan). A bare 404, any other 401/403/408/429/5xx, an unparseable body, an "
+        "id mismatch and an unrecognised status are all UNKNOWN and hold the strike without "
         "deactivating.",
         "Absence from the crawl only SELECTS candidates; scrapers/rakez/run.py::_verify_gone gives "
         "each at-grace row a DIRECT confirm before prune_unseen may deactivate it. Measured "
@@ -1194,9 +1235,10 @@ POLICIES: dict[str, _P] = {
         "the same Nuzul engine as goldendeal/yameen (scrapers/goldendeal/run.py::verify_gone_for on "
         "tenant maqamco, host maqamco.nzl-backend.com), wired exactly as yameen wires it: "
         "prune_unseen(..., verify_gone=verify_gone_for(TENANT, make_canary(TENANT, control))). A 404 "
-        "is GONE; a 200 for THIS id is LIVE only while availability_status is available, otherwise "
-        "GONE; another record and 401/403/429/5xx are UNKNOWN; canary-gated (fails CLOSED), complete "
-        "enumeration only. The feed itself states availability for every record (130 = 50 available, "
+        "is GONE; a 200 for THIS id is LIVE only while availability_status is available and "
+        "published_on_website is not 0, otherwise GONE; another record and 401/403/429/5xx are "
+        "UNKNOWN; canary-gated (fails CLOSED), complete enumeration only. The feed itself states "
+        "availability for every record (130 = 50 available, "
         "59 sold, 10 unavailable, 7 reserved, 4 rented, measured 2026-09-26).",
         "The oracle's semantics are the engine's, measured on yameen 2026-09-23; the canary gate means "
         "maqam prunes nothing unless its own control answers correctly on the first crawl."),
@@ -1204,6 +1246,18 @@ POLICIES: dict[str, _P] = {
         _pol("earthapp", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over earthapp.com.sa/api/offer-list-by-area (pagination.total 54 when measured), which the server itself filters to status=active AND an unexpired REGA licence. run.py prunes only when every list page was read.",
         'The detail endpoint adds only GIS features, so it cannot act as a liveness oracle.'),
+    "fursaghyr": _P(
+        _pol("fursaghyr", 3, 168), CRAWL_PRESENCE_ONLY,
+        "the post's own WordPress record, /wp-json/wp/v2/properties/<id>: status `expired`, or a 404 "
+        "rest_post_invalid_id (deleted). Its page answers 200 either way, so the page is never read "
+        "as evidence. `publish` is live; any other status, 401/403/429/5xx or an id mismatch is "
+        "UNKNOWN. Measured 2026-09-28: 11/11 feed posts `publish`, the 8 active rows out of the "
+        "feed since 08-27 all `expired`.",
+        "scrapers/fursaghyr/run.py hands prune_unseen this oracle and the crawl skips a feed item the "
+        "record calls expired. TIER NOT YET PROMOTED: CANDIDATE_PLUS_DIRECT needs the registry "
+        "migration applied and mirrored (AGENTS.md, apply-and-mirror in one change). And on an "
+        "18-row table 8 missing trips prune_unseen's collapse guard BEFORE the oracle is asked, so "
+        "those 8 are not retired by this path."),
     "nawafeth": _P(
         _pol("nawafeth", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over the antiforgery-token POST listing (Home/FilterAdvertisment, 20 ads when measured), walked until hasMoreAds=0. Each ad page states its REGA licence expiry. run.py prunes only on a complete walk with every ad page readable.",
@@ -1315,13 +1369,69 @@ POLICIES: dict[str, _P] = {
         for p in (
             "abralosol", "abwbna", "alhoshan", "alkhaas", "alobid", "alta", "amaall", "amlakalahsa", "aouj", "aqaratikom",
             "arkaan", "awal", "azdad", "bahadhabab", "erapulse",
-            "fursaghyr", "jurash",
-            "october",
+            "jurash",
             "ramzalqasim", "rawasidark", "remal", "sadin", "satel",
             "shmoualshmal", "therc",
         )
     },
 }
+
+# ── Daily DIRECT revisit through each site's OWN oracle (owner, 2026-09-28: «every website must be as
+# strong as Aqar») ──────────────────────────────────────────────────────────────────────────────────
+# scrapers/common/fleet_liveness.py reads EVERY active listing of these sites every day through the
+# verify_gone their own scraper hands to prune_unseen (never a copy): three direct "gone" answers hide
+# a listing, a live answer stamps last_verified_alive_at. That is aqar's mechanism and aqar's window,
+# so they are DIRECT_REVISIT/48h. Each was admitted after a shadow run (GitHub Actions run
+# 36490769167, 2026-09-28; registry migration 20260929000852) with its known-live controls right, 100% of its active listings read, and
+# every listing it would have hidden confirmed gone by a second transport (lifecycle-spot-check.yml).
+# fleet_liveness.APPLY IS this tuple: one list, so the tier and the writes cannot disagree.
+FLEET_DAILY_DIRECT: tuple[str, ...] = (
+    "abaad", "akariyoun", "albdah", "aldarim", "aljassim", "almotmkenah", "alsaedan", "alshawaf",
+    "aqaralriyadh", "aqargate", "azure", "bossbih", "daryusuf", "eaqartabuk", "ebriza", "ego",
+    "eilmalriyada", "expattrusted", "flow", "gomenassat", "hajer", "hasaad", "hazim", "ialqarawi",
+    "ibaax", "jazwtn", "justsa", "livingcompound", "marksa", "moftah", "qmra", "raghdan", "razre",
+    "remaxsa", "rightcompound", "safa", "snam", "sodasyat", "souq24", "suwar", "tamyaz",
+    # 2026-09-29: shadow read (runs 36490769167) with controls right, every would-hide re-read gone
+    # by its own record AND a second route, and the dead signal seen on a real removed ad.
+    "dwelleo", "muhaysini", "nofodh", "nufouth", "reinvest", "sokok", "sukna", "villassa", "wadod",
+    # 2026-10-02: five shadow runs (09-29..10-02) with controls right and 0 unknown; run
+    # 36977747732's would-hides (36, cap 428) re-read from a second network: 20 of 20 print their
+    # own removal banner, 8 of 8 live controls live.
+    "tuba",
+)
+for _p in FLEET_DAILY_DIRECT:
+    POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
+                      "Daily direct revisit of every active listing (fleet_liveness.py, 2026-09-28). "
+                      + POLICIES[_p]["note"])
+
+
+# THE SITE'S OWN FULL LIST IS THE CHECK (owner, 2026-10-02: «yes do that for all 60 sites … check
+# them every single day»). The same rule wasalt has, for a small site with no per-listing checker:
+# its crawl re-reads the site's complete list every day, and a row the crawl upserts as ACTIVE is
+# stamped verified-alive (db._wasalt_batch → presence_patch), 48 h window.
+#
+# ADMITTED ONE BY ONE, never by a comprehension over a tier. On 2026-10-02 every crawler was read
+# twice (an auditor, then a second reader told to break the verdict). A site is here only if both
+# found that a row cannot be upserted active unless THIS run observed it at the source, and that the
+# crawler excludes every unavailable state the source publishes. The same day 6 in-list ads per
+# site were opened at their own URL from a second network: 488 reads, none answered "gone".
+# Not admitted, each for a named reason in scrapers/lifecycle-gaps.txt: a row written although its
+# own page failed or answered 404/410 (abralosol, arkaan, aqaratikom), a status or end-date field
+# the crawler ignores, a sold filter that fails open, a catalogue that never changes. A site with
+# an oracle (CANDIDATE_PLUS_DIRECT) is never moved here — it belongs on the daily direct check.
+SOURCE_LIST_DAILY: tuple[str, ...] = (
+    "abwbna", "alajlan", "alkhaas", "alobid", "amaall", "amlakalahsa", "aouj", "arsh", "ashab",
+    "azdad", "bahadhabab", "compoundin", "daraa", "earthapp", "eightfloor", "erapulse", "gudai",
+    "jurash", "macsaib", "maktab", "manafe", "manzo", "mobasher", "nawafeth", "rawaf", "rawasidark",
+    "remal", "ryadah", "sirdab", "superoffice", "tawia", "wajaf", "wslnaa",
+)
+for _p in SOURCE_LIST_DAILY:
+    assert POLICIES[_p]["strategy"] == CRAWL_PRESENCE_ONLY, _p      # never demote an oracle tier
+    POLICIES[_p] = _P(LivenessPolicy(platform=_p, grace=3, max_verification_age_hours=48,
+                                     presence_is_positive_evidence=True),
+                      SOURCE_LIST_PRESENCE, POLICIES[_p]["death_signals"],
+                      "The site's own full list, re-read daily, is the check (owner 2026-10-02). "
+                      + POLICIES[_p]["note"])
 
 
 def policy_for(platform: str) -> LivenessPolicy:

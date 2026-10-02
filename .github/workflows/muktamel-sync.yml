@@ -18,7 +18,7 @@ on:
         required: false
         default: "24000"
       max_id:
-        description: "Highest listing id to scan"
+        description: "Floor for the top of the scan — the real ceiling is probed from the source each run"
         required: false
         default: "32000"
 

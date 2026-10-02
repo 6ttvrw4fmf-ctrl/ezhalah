@@ -61,6 +61,11 @@ TYPE_MAP = {
     "duplex": "Duplex", "palace": "Villa", "room": "Room", "rest_house": "Rest House",
     "chalet": "Chalet", "farm": "Farm", "land_residential": "Residential Land",
     "land": "Residential Land", "house": "House",
+    # The site's own dictionary: townhouse «تاون هاوس» → the fleet's Villa fold (taxonomy Villa
+    # rawTypes; normalize slug townhouse→Villa). whole_floor «دور كامل» → Floor. AH1039 is filed
+    # whole_floor while its office title says «فيلا دورين»: the structured field wins (the page's
+    # own spec grid and SEO title say «دور كامل»); the title is kept verbatim on the card.
+    "townhouse": "Villa", "whole_floor": "Floor",
     # commercial
     "office": "Office", "shop": "Shop", "showroom": "Showroom", "warehouse": "Warehouse",
     "land_commercial": "Commercial Land", "commercial_building": "Commercial Building",
