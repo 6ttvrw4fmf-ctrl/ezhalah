@@ -229,6 +229,25 @@ def test_every_site_that_writes_is_declared_daily_direct_and_nothing_else_writes
         assert LP.policy_for(p).max_verification_age_hours == 48 and LP.policy_for(p).grace == 3, p
 
 
+def test_a_row_its_crawl_proved_alive_today_is_covered_not_reread(site):
+    # dwelleo, 2026-09-29: its crawl reads every ad's own record daily (11k), the fleet check reached
+    # 30% in its budget re-reading them. A fresh direct proof counts; a strike or a stale proof does not.
+    def v(r, hours):
+        return dict(r, last_verified_alive_at=(NOW - timedelta(hours=hours)).isoformat())
+    rows = [v(_row(1), 2), v(_row(2, mc=1), 2), v(_row(3), F.FRESH_HOURS + 6), _row(4)]
+    seen = []
+    site(rows + _controls(), lambda ad, n: seen.append(ad) or "live")
+    st = F.run_site("testsite", shadow=True)
+    assert "A1" not in seen and {"A2", "A3", "A4"} <= set(seen)
+    assert st["fresh"] >= 1 and st["covered"] == 100.0
+
+
+def test_a_quarantine_says_why_the_controls_failed(site):
+    site([_row(1)] + _controls(), lambda ad, n: "unknown")
+    st = F.run_site("testsite", shadow=True)
+    assert "test says unknown" in st["quarantined"]
+
+
 def test_a_run_cut_short_keeps_the_live_stamps_it_already_earned(site, monkeypatch):
     # 2026-10-02: six jobs were cancelled mid-run; every write waited for the end, so dwelleo lost
     # 37 minutes of reads and stayed at 0% checked.
