@@ -26,8 +26,8 @@ import type { AdvancedOption } from '@/data/advancedFilters';
 // Second tap on the same option within this window = confirm + advance (owner 2026-08-22). Only the
 // SECOND tap acts, so a single tap is never delayed waiting to see whether another one follows.
 const DOUBLE_TAP_MS = 320;
-const PRESS_IN = { duration: 90, easing: Easing.bezier(0.22, 1, 0.36, 1) };
-const RELEASE = { damping: 18, stiffness: 260 };
+const PRESS_IN = { duration: 120, easing: Easing.bezier(0.23, 1, 0.32, 1) };
+const RELEASE = { duration: 300, dampingRatio: 1 };
 
 // ── THE COMMITTED PILLS ARE NOT COVERED BY THE ROUND (owner decision 2026-09-11, ops_incident 155) ───────────
 // «The AF round card must NOT cover the selected-filter pill row. The user's committed Advanced
@@ -114,13 +114,13 @@ function Shell({ children, onClose, countChip, pills }: {
       <Reveal style={s.card}>
         <View style={s.bar}>
           <View style={s.titleWrap}>
-            <Ionicons name="sparkles" size={18} color={colors.onFill} />
+            <View style={s.brandMark}><Ionicons name="sparkles" size={18} color={colors.primary} /></View>
             <Text style={s.barTitle} numberOfLines={1}>{t('Ezhalah AI Agent')}</Text>
           </View>
           <View style={s.barSide}>
             {countChip != null ? <View testID="af-count-chip"><AnimatedCount value={countChip} /></View> : null}
             <Pressable onPress={onClose} style={s.xBtn} hitSlop={6}>
-              <Ionicons name="close" size={18} color={colors.onFill} />
+              <Ionicons name="close" size={18} color={colors.muted} />
             </Pressable>
           </View>
         </View>
@@ -237,15 +237,18 @@ export type AdvancedQuestionCardProps = {
 // Tap silently DROPPED testID before, which is why af-confirm resolved to null in the first scoped
 // production run (2026-08-22).
 function Tap({ children, onPress, style, testID }: { children: React.ReactNode; onPress: () => void; style?: object | object[]; testID?: string }) {
+  const reduced = useReducedMotion();
   const press = useSharedValue(0);
-  const a = useAnimatedStyle(() => ({ transform: [{ scale: 1 - press.value * 0.03 }] }));
+  const a = useAnimatedStyle(() => ({ transform: [{ scale: reduced ? 1 : 1 - press.value * 0.02 }] }));
   return (
     <Reanimated.View style={[style as object, a]}>
       <Pressable
         testID={testID}
+        accessibilityRole="button"
+        pressRetentionOffset={16}
         onPress={onPress}
-        onPressIn={() => { press.value = withTiming(1, PRESS_IN); }}
-        onPressOut={() => { press.value = withSpring(0, RELEASE); }}
+        onPressIn={() => { press.value = reduced ? 0 : withTiming(1, PRESS_IN); }}
+        onPressOut={() => { press.value = reduced ? 0 : withSpring(0, RELEASE); }}
         style={s.tapInner}
       >
         {children}
@@ -256,7 +259,7 @@ function Tap({ children, onPress, style, testID }: { children: React.ReactNode; 
 
 // One row template — identical for single and multi. Soft rounded option row: label + trailing live
 // count pill; a check indicator fades/scales in on selection and the row fills with the brand tint.
-// Tap again deselects. The press itself compresses gently (micro-animation, decoration only).
+// Tap again deselects. Press feedback dims the row without moving its content.
 function OptionRow({ option, selected, selection, first, onPress }: {
   option: AdvancedOption; selected: boolean; selection: 'single' | 'multi'; first: boolean; onPress: () => void;
 }) {
@@ -264,22 +267,24 @@ function OptionRow({ option, selected, selection, first, onPress }: {
   const press = useSharedValue(0);
   const sel = useSharedValue(selected ? 1 : 0);
   useEffect(() => {
-    sel.value = reduced ? (selected ? 1 : 0) : withTiming(selected ? 1 : 0, { duration: 180, easing: Easing.bezier(0.22, 1, 0.36, 1) });
+    sel.value = reduced ? (selected ? 1 : 0) : withTiming(selected ? 1 : 0, { duration: 140, easing: Easing.bezier(0.23, 1, 0.32, 1) });
   }, [selected, reduced, sel]);
-  const rowA = useAnimatedStyle(() => ({ transform: [{ scale: 1 - press.value * 0.02 }] }));
+  const rowA = useAnimatedStyle(() => ({ opacity: reduced ? 1 : 1 - press.value * 0.14 }));
   const checkA = useAnimatedStyle(() => ({ opacity: sel.value, transform: [{ scale: 0.6 + sel.value * 0.4 }] }));
   return (
     <Reanimated.View style={[s.row, first && s.rowFirst, selected && s.rowOn, rowA]}>
       <Pressable testID={`af-option-${option.key}`}
         style={s.rowPress}
+        accessibilityRole={selection === 'multi' ? 'checkbox' : 'radio'}
+        accessibilityState={{ checked: selected }}
         onPress={onPress}
-        onPressIn={() => { press.value = withTiming(1, PRESS_IN); }}
-        onPressOut={() => { press.value = withSpring(0, RELEASE); }}
+        onPressIn={() => { press.value = reduced ? 0 : withTiming(1, PRESS_IN); }}
+        onPressOut={() => { press.value = reduced ? 0 : withSpring(0, RELEASE); }}
       >
         <View style={s.rowLead}>
           <View style={s.checkSlot}>
             <Reanimated.View style={checkA}>
-              <Ionicons name="checkmark-circle" size={21} color={colors.onFill} />
+              <Ionicons name="checkmark-circle" size={21} color={colors.primary} />
             </Reanimated.View>
             {/* Empty affordance keeps the checkbox/radio distinction: multi = rounded square, single = circle. */}
             {!selected ? <View style={[s.checkRing, selection === 'multi' && s.checkRingSquare]} /> : null}
@@ -318,7 +323,7 @@ export default function AdvancedQuestionCard({
     return options.filter((o) => (seen.has(o.label) ? false : (seen.add(o.label), true)));
   }, [options]);
 
-  // Question-transition: the body fades/rises in whenever the QUESTION changes (keyed on titleKey) —
+  // Question-transition: the body fades/slides in whenever the QUESTION changes (keyed on titleKey) —
   // no hard cuts between steps. Decoration only; reduced motion renders instantly.
   const enter = useSharedValue(reduced ? 1 : 0);
   // THE CARD'S SELECTION MUST REFLECT THE CURRENT QUESTION ONLY (owner 2026-09-04, stale-state fix).
@@ -338,19 +343,19 @@ export default function AdvancedQuestionCard({
     setSel((initialKeys ?? []).filter((k) => onCard.has(k)));
     lastTapRef.current = null;
     enter.value = reduced ? 1 : 0;
-    enter.value = withTiming(1, { duration: 240, easing: Easing.bezier(0.22, 1, 0.36, 1) });
+    enter.value = reduced ? 1 : withTiming(1, { duration: 180, easing: Easing.bezier(0.23, 1, 0.32, 1) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [titleKey, optionKeySig, initialSig]);
-  const enterA = useAnimatedStyle(() => ({ opacity: enter.value, transform: [{ translateY: (1 - enter.value) * 8 }] }));
+  const enterA = useAnimatedStyle(() => ({ opacity: 0.55 + enter.value * 0.45, transform: [{ translateX: reduced ? 0 : (1 - enter.value) * (isRTL ? -6 : 6) }] }));
 
   // Animated progress fill — subtle, shared by every question so single/multi never differ.
   const progress = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(progress, {
       toValue: progressTotal > 0 ? progressCur / progressTotal : 0,
-      duration: 280, useNativeDriver: false,
+      duration: reduced ? 0 : 180, useNativeDriver: false,
     }).start();
-  }, [progressCur, progressTotal, progress]);
+  }, [progressCur, progressTotal, progress, reduced]);
   const fillWidth = progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
 
   // Live footer count for the current tentative selection (empty = the scope total).
@@ -475,7 +480,7 @@ export default function AdvancedQuestionCard({
         </Reanimated.View>
       </ScrollView>
       {/* PINNED action row — outside the ScrollView on purpose (see s.foot). */}
-      <Reanimated.View style={[s.foot, enterA]}>
+      <Reanimated.View style={s.foot}>
         <Tap style={s.primaryBtn} testID="af-confirm" onPress={() => onConfirm(sel)}>
           {/* The primary button COMMITS THIS ANSWER AND ADVANCES ONE QUESTION — for single and multi
               alike (onConfirm → commitGuidedStep without `finish`). It therefore reads «متابعة · N
@@ -486,9 +491,12 @@ export default function AdvancedQuestionCard({
               arity- or ordinal-based «عرض» promise can never be honest here. Since 2026-08-28 the
               footer has NO terminal control at all — a round ends only by walking its questions,
               Back from question 1, or ✕ — so nothing in this footer may ever promise results. */}
-          <Text style={s.primaryTxt}>
-            {count != null ? t('Continue · {count} results', { count: grouped(count) }) : t('Continue')}
-          </Text>
+          <View style={[s.actionLabel, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+            <Text style={s.primaryTxt}>
+              {count != null ? t('Continue · {count} results', { count: grouped(count) }) : t('Continue')}
+            </Text>
+            <Ionicons name={isRTL ? 'arrow-back' : 'arrow-forward'} size={18} color={colors.onFill} />
+          </View>
         </Tap>
         {/* Secondary row — TWO real buttons, not footnote links (owner redesign, 2026-08-28: the
             old text-only رجوع/تخطي/عرض النتائج row read as fine print and was easy to miss). The
@@ -555,15 +563,16 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5,
   },
   pillTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
-  bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: space.card, paddingTop: space.card, paddingBottom: 14, backgroundColor: colors.dark },
-  titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 1 },
-  barTitle: { fontFamily: font.family.bold, fontSize: 14, color: colors.onFill },
+  bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: space.card, paddingTop: space.card, paddingBottom: 10, backgroundColor: colors.paper },
+  titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
+  brandMark: { width: 32, height: 32, borderRadius: 10, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center' },
+  barTitle: { fontFamily: font.family.bold, fontSize: 13, color: colors.ink },
   barSide: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   liveChip: { backgroundColor: colors.tint, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 3 },
   liveChipTx: { fontFamily: font.family.bold, fontSize: 12, color: colors.primary, fontVariant: ['tabular-nums'] },
-  xBtn: { width: 30, height: 30, borderRadius: radius.pill, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
+  xBtn: { width: 30, height: 30, borderRadius: radius.pill, backgroundColor: colors.segTrack, alignItems: 'center', justifyContent: 'center' },
 
-  progRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: space.card, marginTop: 12, marginBottom: 4 },
+  progRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: space.card, marginTop: 0, marginBottom: 4 },
   progTrack: { flex: 1, height: 4, backgroundColor: colors.line, borderRadius: 3, overflow: 'hidden' },
   progFill: { height: '100%', backgroundColor: colors.dark, borderRadius: 3 },
 
@@ -581,7 +590,7 @@ const s = StyleSheet.create({
   // flexGrow/flexShrink 1, bare RN does not), so state it here rather than inherit either.
   scroll: { flexShrink: 1 },
   body: { paddingHorizontal: space.card, paddingTop: 12, paddingBottom: 12 },
-  qt: { fontFamily: font.family.bold, fontSize: 20, color: colors.ink, lineHeight: 28, paddingHorizontal: 2 },
+  qt: { fontFamily: font.family.bold, fontSize: 21, color: colors.ink, lineHeight: 29, paddingHorizontal: 2 },
   desc: { fontFamily: font.family.regular, fontSize: 12.5, color: colors.muted, paddingHorizontal: 2, paddingTop: 5 },
   unknownNote: { fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, opacity: 0.85, paddingHorizontal: 2, paddingTop: 3 },
 
@@ -602,19 +611,19 @@ const s = StyleSheet.create({
     borderRadius: radius.field,
   },
   rowFirst: {},
-  rowOn: { backgroundColor: colors.selFill, borderColor: colors.selFill },
+  rowOn: { backgroundColor: colors.tint, borderColor: colors.primary },
   rowPress: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, minHeight: 48, paddingVertical: 11, paddingHorizontal: 12 },
   rowLead: { flexDirection: 'row', alignItems: 'center', gap: 11, flexShrink: 1 },
   checkSlot: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
   checkRing: { position: 'absolute', width: 19, height: 19, borderRadius: radius.pill, borderWidth: 1.5, borderColor: colors.pickLine },
   checkRingSquare: { borderRadius: 6 },
   label: { fontFamily: font.family.medium, fontSize: 15, color: colors.ink, flexShrink: 1 },
-  labelOn: { fontFamily: font.family.bold, color: colors.onFill },
+  labelOn: { fontFamily: font.family.bold, color: colors.ink },
   countPill: { backgroundColor: colors.tint, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 2, minWidth: 34, alignItems: 'center' },
   countText: { fontFamily: font.family.bold, fontSize: 12.5, color: colors.primary, fontVariant: ['tabular-nums'] },
 
-  sourceNote: { direction: 'ltr', marginTop: 10, gap: 7, alignItems: 'flex-start', padding: 10, borderRadius: 12, backgroundColor: colors.tint },
-  note: { flex: 1, fontFamily: font.family.regular, fontSize: 11.5, color: colors.primary, lineHeight: 17 },
+  sourceNote: { direction: 'ltr', marginTop: 10, gap: 7, alignItems: 'flex-start', padding: 10, borderRadius: 12, backgroundColor: colors.segTrack },
+  note: { flex: 1, fontFamily: font.family.regular, fontSize: 11.5, color: colors.muted, lineHeight: 17 },
 
   // PINNED footer (defect 2026-08-23). It used to be the last child INSIDE the body ScrollView, so a
   // question with many options pushed «متابعة / رجوع / تخطي / عرض النتائج» past the bottom of the
@@ -628,6 +637,7 @@ const s = StyleSheet.create({
     borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.paper,
   },
   tapInner: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: 13 },
+  actionLabel: { direction: 'ltr', alignItems: 'center', justifyContent: 'center', gap: 8 },
   primaryBtn: { backgroundColor: colors.selFill, borderRadius: radius.chip, alignSelf: 'stretch' },
   primaryTxt: { fontFamily: font.family.bold, fontSize: 14.5, color: colors.onFill },
   footRow: { flexDirection: 'row', alignItems: 'stretch', gap: 10 },
