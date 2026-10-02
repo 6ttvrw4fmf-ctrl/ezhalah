@@ -20,6 +20,13 @@ _MIGRATIONS = Path(__file__).resolve().parents[3] / "supabase" / "migrations"
     "واتس اب : 551234567",               # «واتس اب :» then 9 digits
     "للتواصل / ٠١١٤٥٦٧٨٩٠",              # Riyadh landline
     "0555.123.456 للاستفسار",
+    "للتواصل +966-11-500-1234.",         # +966 landline (dwelleo)
+    "Sales +966 13 800 1234 .",          # +966 landline, spaced (rightcompound)
+    "اتصلوا بنا الآن 966115001234",      # bare 966 landline (dwelleo)
+    "الرقم الموحد: +966920001234 مؤسسة",  # +966 unified 920 line
+    "+971 50 123 4567",                  # + any country code
+    "0020 1001234567",                   # 00 + country code, one separator
+    "الافق ٠٠٥٦٤٠٠١٢٣٤ - x",             # ٠٠ prefix, Arabic-Indic digits
 ])
 def test_every_contact_shape_is_redacted(text):
     out = redact_pii(text)
@@ -34,6 +41,8 @@ def test_every_contact_shape_is_redacted(text):
     "سجل تجاري رقم : ١٠١٠١٢٣٤٥٦",        # commercial registration
     "ترخيص 7100306688",
     "السعر 1,250,000 ريال", "بسعر ٥٠٠٠٠٠ ريال", "المساحة ٥٠٠ م", "رقم القطعه 1234 مخطط 5678",
+    "رقم المخطط : 002345 0802 0801 مخطط", "المخطط 002345-0815-0801 الارض",   # plan numbers, not 00…
+    "https://maps.google.com/?q=28.366812,45.966123456789", "?q=26.39,44.00123456789",  # coordinates
 ])
 def test_regulatory_numbers_prices_and_areas_survive(text):
     assert redact_pii(text) == text
@@ -42,6 +51,15 @@ def test_regulatory_numbers_prices_and_areas_survive(text):
 def test_redaction_is_idempotent():
     once = redact_pii("للتواصل ٠٥٥١٢٣٤٥٦٧ أو +966 (0) 58 123 4567 ترخيص ٧٢٠٠٥١٢٣٤٥")
     assert redact_pii(once) == once and "٧٢٠٠٥١٢٣٤٥" in once
+
+
+def test_ksaaqar_international_number_redacts_only_the_phone():
+    """ksaaqar ad KSA123412486002454 (2026-09-28): its real title, with the number swapped for a
+    same-shape fake (00962 + 9 digits) so no real phone lands in git. Only the number may change."""
+    title = "عقارات فلل قصور مصايف مزارع اراضي سكن استثماري في الأردن للبيع هاتف 00962791234567"
+    once = redact_pii(title)
+    assert once == "عقارات فلل قصور مصايف مزارع اراضي سكن استثماري في الأردن للبيع هاتف [redacted]"
+    assert redact_pii(once) == once
 
 
 def test_db_floor_migration_carries_the_identical_pattern():

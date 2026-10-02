@@ -48,6 +48,7 @@ import argparse
 import collections
 import json
 import os
+import random
 import re
 import sys
 import threading
@@ -427,7 +428,16 @@ def enumerate_ids(s: cc.Session, cap_pages: int, shards: int = 1, shard: int = 0
         # budget left for new ids. Re-confirmation is what actually produces the liveness signal
         # (a re-fetched page either re-confirms the row or drops it from the seen set), so it has
         # to come first or the coverage floor stays unreachable and nothing is ever aged out.
-        ids = known_ids + tail + new_ids
+        #
+        # SHUFFLED, not «known then tail» (measured 2026-10-02). Removed ads drop out of the sitemap,
+        # so `tail` is where the dead ones are, and fetching it last put them all in one block at the
+        # end of the run: confirmed_absent() needs a live-ad render AFTER each no-listing render, and
+        # when the shard's own slice filled the cap nothing came after the tail — those shards
+        # confirmed 0–60 removals a night against ~400 dead, and the time budget cut the same tail
+        # every night. Interleaving gives every dead ad live neighbours and spreads the cut evenly.
+        head = known_ids + tail
+        random.shuffle(head)
+        ids = head + new_ids
     else:
         ids = new_ids + known_ids + tail
 
@@ -1246,6 +1256,10 @@ def main() -> int:
         # This run already rendered every id it owns, fresh, between live ads: that render is the
         # removal evidence (confirmed_absent). Anything it could not settle goes to the oracle.
         absent = confirmed_absent()
+        # Printed in full so a removal the coverage guard is still holding back stays auditable
+        # (and actionable) after the run: the ids plus the evidence rule that selected them.
+        print(f"Deal App confirmed absent ({len(absent)}, fresh no-listing render between two "
+              f"live-ad renders): {' '.join(sorted(absent, key=int))}", flush=True)
 
         def _verify_gone(ad_number: str):
             m = re.search(r"\d+", ad_number or "")
@@ -1282,7 +1296,7 @@ def main() -> int:
         # rows_upserted gives the hit rate, and the buckets say whether the misses were
         # dealapp's app reporting the ids gone or our fetches never rendering a live page.
         healthy = db.end_run(run_id, ok=True, rows_seen=seen_n, rows_upserted=seen_n,
-                              notes=f"sold={sold_ct} pruned={pruned} attempted={len(ids)}"
+                              notes=f"sold={sold_ct} pruned={pruned} attempted={len(ids)} absent={len(absent)}"
                                     f"{_fetch_fail_summary()}",
                               check_tables=["dealapp_residential_listings", "dealapp_commercial_listings"])
         if not healthy:

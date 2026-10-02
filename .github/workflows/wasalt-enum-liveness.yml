@@ -30,7 +30,7 @@ on:
       confirm_limit:
         description: "strike step: max rows HEAD/GET-verified this run (pilot uses a small cap)"
         type: string
-        default: "1500"
+        default: "3000"
       skip_enum:
         description: "PILOT ONLY: skip the 4.5h enum and run the strike step against the LAST completed enum (must be <36h old, else the coverage guard refuses). For repeatable pilots."
         type: boolean
@@ -213,7 +213,7 @@ jobs:
     # here never bypasses the safety — it only avoids re-running the 4.5h enum for a repeat pilot.
     if: ${{ always() && ((needs.enum.result == 'success' && needs.rollup.result == 'success') || inputs.skip_enum) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -242,15 +242,17 @@ jobs:
           # headless=False is what clears the challenge; the runner has no display, so xvfb-run
           # supplies a virtual one. --workers 1 because Playwright's sync API is thread-bound
           # (liveness.py forces it anyway; passing it keeps the command honest).
-          # --max-seconds 4200 (70 min) sits under timeout-minutes: 90 with room for one stuck
-          # browser check (~9 min hard deadline). A browser confirm is ~5 s, so 1,500 rows need
-          # ~2 h; without the budget run 36350303259 was cancelled at 90:00 with nothing written.
+          # --max-seconds 19800 (330 min) sits under timeout-minutes: 350 with room for setup and
+          # one stuck browser check (~9 min hard deadline). Results are flushed as the run goes, so
+          # a stop loses nothing. 70 min confirmed ~570 rows per run while ~4,000 rows the
+          # enumeration no longer serves waited (2026-10-02: struck=4090, killed=573) — dead ads
+          # stayed visible for a week. 330 min confirms ~2,700 at the measured ~7.3 s per check.
           exec xvfb-run -a python -m scrapers.wasalt.liveness \
             --mode enum-strike \
             --grace 3 \
             --workers 1 \
-            --confirm-limit ${{ inputs.confirm_limit || '1500' }} \
-            --max-seconds 4200 \
+            --confirm-limit ${{ inputs.confirm_limit || '3000' }} \
+            --max-seconds 19800 \
             ${{ inputs.dry_run && '--dry-run' || '' }}
 
   repair:

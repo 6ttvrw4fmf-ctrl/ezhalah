@@ -29,7 +29,10 @@ const JSON_MIRROR = join(ROOT, 'sql', 'mirrors', 'liveness_registry.json');
 const MIGRATIONS = join(ROOT, 'supabase', 'migrations');
 const SEED_MIGRATION = '20260830191646';
 
-const TIERS = ['DIRECT_REVISIT', 'CANDIDATE_PLUS_DIRECT', 'CRAWL_PRESENCE_ONLY'] as const;
+const TIERS = ['DIRECT_REVISIT', 'CANDIDATE_PLUS_DIRECT', 'SOURCE_LIST_PRESENCE', 'CRAWL_PRESENCE_ONLY'] as const;
+// The tier whose stamps come from the site's own complete list, not from a page read (owner
+// decision 2026-10-02; liveness_policies.SOURCE_LIST_DAILY admits sites one by one).
+const PRESENCE_TIER = 'SOURCE_LIST_PRESENCE';
 
 let failures = 0;
 // Detail is diagnosis, printed only when something is wrong: a passing run that explains at
@@ -73,12 +76,13 @@ print(json.dumps({
               "policy_platform": r["policy"].platform,
               "strategy": r["strategy"],
               "grace": r["policy"].grace,
-              "sla_hours": r["policy"].max_verification_age_hours}
+              "sla_hours": r["policy"].max_verification_age_hours,
+              "presence": r["policy"].presence_is_positive_evidence}
              for k, r in LP.POLICIES.items()],
 }))
 `], { cwd: ROOT, encoding: 'utf8' }).trim().split('\n').pop() as string) as {
   total: number;
-  rows: Array<{ key: string; policy_platform: string; strategy: string; grace: number; sla_hours: number }>;
+  rows: Array<{ key: string; policy_platform: string; strategy: string; grace: number; sla_hours: number; presence: boolean }>;
 };
 
 for (const r of pyRows.rows) {
@@ -91,9 +95,9 @@ for (const r of pyRows.rows) {
 check('every registry entry was read', fromPython.length === pyRows.total,
   `${fromPython.length} rows read, ${pyRows.total} keys in POLICIES — an unread entry would be a ` +
   'platform this barrier cannot see');
-check('every strategy is one of the three declared tiers',
-  fromPython.every((r) => ['DIRECT_REVISIT', 'CANDIDATE_PLUS_DIRECT', 'CRAWL_PRESENCE_ONLY'].includes(r.strategy)),
-  fromPython.filter((r) => !['DIRECT_REVISIT', 'CANDIDATE_PLUS_DIRECT', 'CRAWL_PRESENCE_ONLY'].includes(r.strategy))
+check('every strategy is one of the declared tiers',
+  fromPython.every((r) => (TIERS as readonly string[]).includes(r.strategy)),
+  fromPython.filter((r) => !(TIERS as readonly string[]).includes(r.strategy))
     .map((r) => `${r.platform}=${r.strategy}`).join(', '));
 check('the Python registry is non-empty', fromPython.length > 0, `${fromPython.length} platforms`);
 
@@ -287,7 +291,7 @@ function sweptByAnother(platform: string): boolean {
   return false;
 }
 
-for (const r of fromJson.filter((x) => x.strategy !== 'CRAWL_PRESENCE_ONLY')) {
+for (const r of fromJson.filter((x) => x.strategy !== 'CRAWL_PRESENCE_ONLY' && x.strategy !== PRESENCE_TIER)) {
   const sources = [
     join(ROOT, 'scrapers', r.platform, 'liveness.py'),
     join(ROOT, 'scrapers', r.platform, 'liveness_run.py'),
@@ -309,6 +313,29 @@ for (const r of fromJson.filter((x) => x.strategy !== 'CRAWL_PRESENCE_ONLY')) {
     `verify_gone= handed to prune_unseen in scrapers/${r.platform}/run.py. ` +
     'ops_platform_liveness_coverage would read 0% verified for it no matter what runs.');
 }
+
+// ROUTE 4 (2026-10-02): the SOURCE_LIST_PRESENCE tier. Its claim is not "something re-fetches the
+// listing's own URL" but "the daily crawl of the site's own complete list stamps what that list
+// serves". Cashed only when ALL of these hold, asked of code with comments stripped:
+//   - the platform's registered policy declares presence_is_positive_evidence (read by EXECUTION);
+//   - db._wasalt_batch spreads presence_patch() into the row it upserts;
+//   - the platform's upsert really goes through _wasalt_batch;
+//   - its window is 48 h — a daily list read with one day of slack, never a weekly promise.
+// And the reverse: a policy that declares presence outside this tier is wasalt or a mistake.
+const presenceStampWired = /r\.update\(presence_patch\(/.test(dbPy);
+const declaresPresence = new Set(pyRows.rows.filter((r) => r.presence).map((r) => r.key));
+for (const r of fromJson.filter((x) => x.strategy === PRESENCE_TIER)) {
+  check(`${r.platform} cashes its ${PRESENCE_TIER} claim in code`,
+    presenceStampWired && declaresPresence.has(r.platform)
+      && dbPy.includes(`_wasalt_batch("${r.platform}_`) && r.sla_hours === 48,
+    `it is registered ${PRESENCE_TIER} but its policy does not declare presence_is_positive_evidence, ` +
+    'or db._wasalt_batch no longer stamps through presence_patch(), or its upsert bypasses ' +
+    '_wasalt_batch, or its SLA is not 48h — so nothing would stamp the rows its list serves.');
+}
+const presenceOutsideTier = [...declaresPresence]
+  .filter((p) => p !== 'wasalt' && !fromJson.some((x) => x.platform === p && x.strategy === PRESENCE_TIER));
+check('no platform declares list presence as proof of life outside the SOURCE_LIST_PRESENCE tier (wasalt excepted)',
+  presenceOutsideTier.length === 0, presenceOutsideTier.join(', '));
 
 // And the column stays the contract's to write. A sweep that sets it by hand can stamp a row it
 // never verified — a confident, recent-looking timestamp on inventory nobody checked, which is

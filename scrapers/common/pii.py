@@ -47,12 +47,21 @@ _PHONE_RE = re.compile(
 # landline «٠١١ …» (3) and «واتس اب : 5XXXXXXXX» (6). One pattern, every shape, either digit set;
 # no digit may touch either end, so REGA/FAL licences («٧٢٠٠…», «١١٠٠…»), CR numbers, prices and
 # areas never match. The SAME pattern text runs in the DB floor (_redact_pii_sql) — a test pins it.
+# International prefixes (2026-09-28, ksaaqar «هاتف 00962…»): after 966 any Saudi number
+# (landline «+966-11-500-8910», unified «+966 9200…», toll-free 800), not only a 5 mobile; «+» and
+# any country code, 8-15 digits; «00»/«٠٠» and any other country code only as the code, at most
+# one separator, then ONE unbroken run of 8-11 digits. Neither 966 nor 00 may follow «<digit>.»:
+# «?q=28.36,45.9661…» and «44.0012345678» are map coordinates, and the spaced «002673 0802 0801» is
+# a plan number (all measured on live rows) — none is a phone.
 _D = r"[0-9٠-٩]"
 _SEP = r"[\s.\-]?"
+_NOT_A_DECIMAL = r"(?<![0-9٠-٩][.,٫])"
 _PHONE_SHAPES_RE = re.compile(
     r"واتس\S*(?:\s+اب)?\s*[:\-]?\s*\+?" + _D + r"(?:[\s\-]?" + _D + r"){7,11}"
     + r"|(?<![0-9٠-٩])(?:"
-    + r"(?:\+|00)?(?:966|٩٦٦)[\s.\-]*(?:\([0٠]\))?[\s.\-]*[0٠]?[5٥](?:" + _SEP + _D + r"){8}"
+    + _NOT_A_DECIMAL + r"(?:\+|00|٠٠)?(?:966|٩٦٦)[\s.\-]*(?:\([0٠]\))?[\s.\-]*[0٠]?[1-9١-٩](?:" + _SEP + _D + r"){7,9}"
+    + r"|\+[\s.\-]*[1-9١-٩](?:" + _SEP + _D + r"){7,14}"
+    + r"|" + _NOT_A_DECIMAL + r"(?:00|٠٠)[1-9١-٩]" + _D + r"{0,2}" + _SEP + _D + r"{8,11}"
     + r"|[0٠]" + _SEP + r"[5٥](?:" + _SEP + _D + r"){8}"
     + r"|٥[٠-٩]{8}"
     + r"|[0٠]" + _SEP + r"[1١][1-7١-٧](?:" + _SEP + _D + r"){7}"

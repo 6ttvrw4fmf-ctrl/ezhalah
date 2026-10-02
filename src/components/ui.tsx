@@ -240,7 +240,7 @@ export function Segmented({ options, value, onChange, icons }: { options: string
 }
 
 // Tappable option box (category / type / detail) — selection fades in, press dips slightly.
-export function OptionBox({ label, selected, onPress, style, img }: { label: string; selected: boolean; onPress: () => void; style?: ViewStyle; img?: any }) {
+export function OptionBox({ label, selected, onPress, style, img, compact = false }: { label: string; selected: boolean; onPress: () => void; style?: ViewStyle; img?: any; compact?: boolean }) {
   // Literal palette — same var()-cannot-be-interpolated reason as SegButton above.
   const pal = useThemePalette();
   const p = useSharedValue(selected ? 1 : 0);
@@ -281,9 +281,9 @@ export function OptionBox({ label, selected, onPress, style, img }: { label: str
       onHoverOut={() => { hover.value = withTiming(0, FOCUS_T); }}
       onFocus={() => { focus.value = withTiming(1, FOCUS_T); }}
       onBlur={() => { focus.value = withTiming(0, FOCUS_T); }}
-      style={[s.box, box, style]}
+      style={[s.box, compact && s.boxCompact, box, style]}
     >
-      {img ? <CrossfadeTintIcon source={img} p={p} off={pal.ink} on={pal.onFill} size={s.optIcon} /> : null}
+      {img ? <CrossfadeTintIcon source={img} p={p} off={pal.ink} on={pal.onFill} size={compact ? s.optIconCompact : s.optIcon} /> : null}
       <Animated.Text ref={noTranslateRef} style={[s.boxText, selected && s.boxTextOn, txt, NO_MIDWORD_BREAK]} numberOfLines={2}>{label}</Animated.Text>
     </AnimatedPressable>
   );
@@ -360,6 +360,8 @@ const s = StyleSheet.create({
   // Filter button icon (category / group / type / bedroom) — stacked above the label, tinted ink→white
   // on selection to match the label. Restored 2026-07-05 (render wiring was lost in the git reset; the
   // PNGs + IMG maps in propertyIcons.ts survived). ~24px per UI/UX-skill icon sizing.
+  boxCompact: { minHeight: 48, flexDirection: 'row', gap: 7, paddingVertical: 8 },
+  optIconCompact: { width: 20, height: 20 },
   optIcon: { width: 24, height: 24, marginBottom: 6 },
 
   cta: { backgroundColor: colors.primary, borderRadius: radius.field, paddingVertical: 15, alignItems: 'center' },
