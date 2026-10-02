@@ -25,7 +25,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from scrapers.aqar.discover import LISTING_RE
+from scrapers.aqar.discover import LISTING_RE, PAGE_SIZE
 from scrapers.common import db
 
 
@@ -114,7 +114,7 @@ class PacedFill:
         """Count a slice whose walk ended before the source's own last page (blocked, cut short)."""
         if outcome is None or outcome.source_items is None:
             return
-        want = -(-outcome.source_items // 20)
+        want = -(-outcome.source_items // PAGE_SIZE)
         if max_pages > 0:
             want = min(want, max_pages)
         if outcome.fetch_failed or start_page - 1 + outcome.pages_fetched < want:
