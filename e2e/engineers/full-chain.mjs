@@ -89,8 +89,24 @@ try {
 
   // Every result card carries data-testid="card-listing-<search_listings_ar.listing_id>".
   const card = page.getByTestId(`card-listing-${a.id}`);
+  const all = page.locator('[data-testid^="card-listing-"]');
+  // Results arrive as a cascade revealed on scroll (src/lib/initialReveal.ts): scroll like a user
+  // until the revealed set stops growing before deciding the card is not on this page.
+  const revealAll = async () => {
+    let prev = -1;
+    for (let i = 0; i < 40; i++) {
+      if (await card.count()) return;
+      const now = await all.count();
+      if (now === prev) return;
+      prev = now;
+      await all.last().scrollIntoViewIfNeeded().catch(() => {});
+      await page.mouse.wheel(0, 4000);
+      await page.waitForTimeout(900);
+    }
+  };
   for (let p = 0; p <= (a.pages ?? 12); p++) {
     await page.waitForTimeout(2500);
+    await revealAll();
     if (await card.count()) {
       const text = (await card.first().innerText()).replace(/\s*\n+\s*/g, ' | ');
       await card.first().getByRole('link').first().click();
@@ -103,8 +119,9 @@ try {
       log(`url ${norm(opened) === norm(a.url) ? 'MATCHES' : 'DIFFERS'}${a.price ? `; price ${text.includes(a.price) ? 'shown' : 'NOT shown'} (${a.price})` : ''}`);
       break;
     }
-    const more = page.getByText('عرض المزيد').first();
+    const more = page.getByText('عرض المزيد', { exact: true }).last();
     if (!(await more.count())) { log(`no «عرض المزيد» after ${p} press(es)`); break; }
+    await more.scrollIntoViewIfNeeded();
     await more.click();
   }
   if (!ok) log(`NOT VERIFIED: listing ${a.id} → ${a.url}`);
