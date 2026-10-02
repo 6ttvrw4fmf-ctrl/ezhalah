@@ -141,6 +141,32 @@ def open_ad(url: str, dead_marker, oracle=None, ad_number: str | None = None) ->
     return classify_response(status, body or "", dead_marker=dead_marker)
 
 
+def _reader_for(platform: str):
+    """The site's OWN reader where the generic status judge cannot tell dead from live, else None.
+
+    dealapp serves a 200 shell (and its view-quota wall) for a removed ad AND for a live one read
+    unpaced, so "status-only" read every hidden dealapp ad as live: 30 of 30 on 2026-10-02, a
+    verdict that could not have come out any other way. gathern answers a block with 404 and is
+    read by its checker through its own detail session; a different session read two ads live that
+    the checker had read 404 eight times. The double-check must read a site the way its hiding job
+    does, or the two cannot be compared. Each reader returns ALIVE / DEAD / UNKNOWN."""
+    if platform == "dealapp":
+        from scrapers.dealapp import liveness_run
+        session = liveness_run._session()
+        return lambda url: liveness_run.probe_listing(session, url)[0]
+    if platform == "gathern":
+        from scrapers.gathern import liveness as gl
+        session = gl.proxied_session(False)
+
+        def read(url: str) -> str:
+            status = gl.probe(session, url)
+            if status == 200:
+                return ALIVE
+            return DEAD if gl.looks_dead(status) else UNKNOWN
+        return read
+    return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--platform", required=True)
@@ -159,13 +185,22 @@ def main() -> int:
     if not tables:
         print(json.dumps({"platform": a.platform, "verdict": "void: no listing tables found"}))
         return 1
-    oracle = _site_oracle(client, a.platform, tables)
-    method = "site-oracle" if oracle else "registered-marker" if dead_marker else "status-only"
+    # The site's own reader first (dealapp, gathern: _reader_for), then a fleet site's own oracle
+    # (cleanup._site_oracle), then the generic judge.
+    site_reader = _reader_for(a.platform)
+    oracle = None if site_reader else _site_oracle(client, a.platform, tables)
+    method = ("site-reader" if site_reader else "site-oracle" if oracle
+              else "registered-marker" if dead_marker else "status-only")
+
+    def read(r: dict) -> str:
+        if site_reader:
+            return site_reader(r["listing_url"])
+        return open_ad(r["listing_url"], dead_marker, oracle, r.get("ad_number"))
 
     # Controls first: listings the crawl saw in the last 24 hours must come back alive, or the
     # environment (a block, a proxy failure) is lying and the run is void.
     ctl = pick_controls(client, tables, rng)
-    ctl_alive = sum(open_ad(r["listing_url"], dead_marker, oracle, r["ad_number"]) == ALIVE for r in ctl)
+    ctl_alive = sum(read(r) == ALIVE for r in ctl)
     canary = {"probed": len(ctl), "alive": ctl_alive, "ok": canary_environment_ok(ctl_alive, len(ctl))}
 
     since = (datetime.now(timezone.utc) - timedelta(days=a.hidden_days)).isoformat()
@@ -176,7 +211,7 @@ def main() -> int:
             for r in rows:
                 if not r.get("listing_url"):
                     continue
-                v = open_ad(r["listing_url"], dead_marker, oracle, r["ad_number"])
+                v = read(r)
                 results.append({"side": "live", "table": table, "id": rid, "url": r["listing_url"],
                                 "verdict": v, "judged": judge("live", v)})
     elif canary["ok"]:
@@ -188,7 +223,7 @@ def main() -> int:
             for t in tables:
                 picked += [dict(r, table=t) for r in sample(client, t, active=active, n=per_table, since=win, rng=rng)]
             for r in picked[: a.n]:
-                v = open_ad(r["listing_url"], dead_marker, oracle, r["ad_number"])
+                v = read(r)
                 results.append({"side": side, "table": r["table"], "id": r["id"], "url": r["listing_url"],
                                 "verdict": v, "judged": judge(side, v)})
 

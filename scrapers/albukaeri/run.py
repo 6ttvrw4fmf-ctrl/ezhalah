@@ -118,6 +118,11 @@ def parse_page(pid: str, page: str) -> dict[str, Any]:
     gal = re.search(r"<!-- #gallery -->(.*?)<!-- ##gallery -->", page, re.S)
     og = re.search(r'og:image" content="([^"]+)"', page)
     video = re.search(r'class="prop-hero-video-link"[^>]*href="([^"]+)"', page)
+    lic_end = re.search(r'lr-label">تاريخ النهاية</span><span class="lr-value" data-fmt-date="\w{3} (\w{3} \d{1,2} \d{4})', page)
+    if not lic_end and "تاريخ النهاية</span>" in page:
+        # the page prints a licence end date we cannot read — fail closed (main counts it unreadable:
+        # no upsert, no prune), never "no date, so available"
+        raise ValueError(f"{pid}: licence end date present but unreadable")
     return {
         "id": pid,
         "title": _clean((re.search(r'<h1 class="prop-hero-title">(.*?)</h1>', page, re.S) or [None, ""])[1]),
@@ -136,8 +141,7 @@ def parse_page(pid: str, page: str) -> dict[str, Any]:
         "og_image": og.group(1) if og and "/uploads/" in og.group(1) else None,
         "video": video.group(1) if video else None,
         "licence": _pairs(page, "lr-label", "lr-value"),
-        "licence_end": (re.search(r'lr-label">تاريخ النهاية</span><span class="lr-value" data-fmt-date="\w{3} (\w{3} \d{1,2} \d{4})',
-                                  page) or [None, None])[1],
+        "licence_end": lic_end.group(1) if lic_end else None,
     }
 
 
@@ -168,6 +172,12 @@ def map_page(d: dict[str, Any], type_ar: Optional[str]) -> tuple[Optional[tuple[
     title, desc = d["title"], d["description"]
     if re.search(r"مباع|محجوز|تم البيع|مزاد", title):
         return None, "not_available_or_auction"
+    # The ad's OWN REGA ad-licence end date is a gate (fleet law, owner 2026-09-28). Measured 2026-10-02:
+    # 1 of 31 pages prints a licence block and its «تاريخ النهاية» was 2026-08-15 — 48 days past, still
+    # upserted active. A page with no licence block (30 of 31) states no end date → 'unknown' → kept.
+    licence_end = datetime.strptime(d["licence_end"], "%b %d %Y").date().isoformat() if d.get("licence_end") else None
+    if normalize.ad_expiry_state(licence_end) == "expired":
+        return None, "ad_licence_expired"
     ptype = normalize.map_type_exact(type_ar, overrides=_TYPE_OVERRIDES)
     if not ptype:
         return None, f"type_unmapped_{type_ar or 'none'}"
@@ -212,8 +222,8 @@ def map_page(d: dict[str, Any], type_ar: Optional[str]) -> tuple[Optional[tuple[
     lic = ((d.get("licence") or {}).get("رخصة الإعلان") or "").strip()
     if re.fullmatch(r"7\d{9}", lic):   # a REGA AD licence only
         row["license_number"] = lic
-        if d.get("licence_end"):
-            row["license_expiry"] = datetime.strptime(d["licence_end"], "%b %d %Y").date().isoformat()
+        if licence_end:
+            row["license_expiry"] = licence_end
     if ptype in _DWELLING:   # «الغرف» counts bedrooms only in a dwelling
         row["bedrooms"] = _count(stats.get("الغرف"))
         row["bathrooms"] = _count(stats.get("دورات المياه"))

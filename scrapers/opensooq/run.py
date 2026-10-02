@@ -23,6 +23,14 @@ DUPLICATES: the same office is sometimes posted twice (287292450 / 287291798: sa
 district, price and area). A later id with the identical (licence, district, price, area) is dropped;
 a shared licence ALONE is not a duplicate (one licence covers a Jeddah villa and a Madinah flat).
 
+AVAILABILITY (measured 2026-10-02): every SERP item carries its own `is_active` (True on 77 of 77).
+The ad pages of the two ads the SERP had dropped (284834558, 286273548) are an «Archive Listing» —
+«هذا الإعلان غير متوفر» — whose post says `is_active: false` while its listing_status still says
+"posted": is_active is the availability flag, listing_status is not one. `expired_at` is the ad's own
+end date («29-11-2026», equal to its page's price_valid_until; both dropped ads left the SERP on
+theirs). Within ~2 days of it the SERP prints a relative phrase instead («قبل 17 ساعة», 5 of 77, all
+five pages still live) whose sign is lost — that reads 'unknown' and is kept, never guessed.
+
 PDPL: the item names the member / shop and carries a masked phone number — none is stored.
 """
 from __future__ import annotations
@@ -59,6 +67,7 @@ _MULTI_USE = "الاستخدام المتعدد"
 # and commercial_twin() lists the same ad as Commercial Land too, so it answers both searches
 _LAND_USAGE = {"سكنية": "ارض", "تجارية": "أرض تجارية", "زراعية": "أرض زراعية", _MULTI_USE: "ارض"}
 _PERIOD = {"شهري": "monthly", "سنوي": "annual"}
+_LISTING_STATUS_MEASURED = {"posted", "reposted"}     # 75 + 2 of 77; any other word is kept and counted
 _NEVER_STORE = {"member_id", "member_display_name", "member_user_name", "member_avatar_uri", "shop_name",
                 "shop_logo_uri", "phone_number", "phone_reveal_key", "member_rating_avg", "member_rating_count"}
 
@@ -89,6 +98,17 @@ def walk(s: cc.Session) -> tuple[list[dict], int]:
         if not fresh or page >= int((listings.get("meta") or {}).get("pages") or 1):
             break
     return items, count
+
+
+def unavailable(x: dict, today: Any = None) -> str:
+    """Why the item's OWN fields say it is not on offer — '' when they say it is."""
+    if x.get("is_active") is False:
+        return "inactive_at_source"
+    if x.get("is_active") is not True:
+        return "status_unreadable"      # not read ≠ available and ≠ dead: main() neither upserts nor prunes
+    if normalize.ad_expiry_state(x.get("expired_at"), today) == "expired":
+        return "ad_end_date_expired"
+    return ""
 
 
 def chips(x: dict) -> list[str]:
@@ -230,10 +250,15 @@ def main() -> int:
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
+    kept: dict[str, int] = {}
     seen_keys: set[tuple] = set()
     try:
         for x in sorted(items, key=lambda i: i["id"]):          # oldest id wins a duplicate pair
-            got, why = map_listing(x)
+            why = unavailable(x)
+            got, why = (None, why) if why else map_listing(x)
+            if got and x.get("listing_status") not in _LISTING_STATUS_MEASURED:
+                k = f"listing_status_{x.get('listing_status')}"
+                kept[k] = kept.get(k, 0) + 1
             if not got:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue
@@ -245,12 +270,19 @@ def main() -> int:
                 continue
             seen_keys.add(key)
             (com if cat == "commercial" else res).append(row)
+            if normalize.ad_expiry_state(x.get("expired_at")) == "unknown":
+                # no readable end date (measured 2026-10-02: 5 of 77 live ads carry «قبل 17 ساعة» there):
+                # not proof of anything, so the ad stays — and the run says so instead of staying silent
+                kept["expired_at_not_a_date"] = kept.get("expired_at_not_a_date", 0) + 1
             twin = commercial_twin(x, row)
             if twin:
                 com.append(twin)
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)
+        if kept:
+            print("  kept, status value never measured or end date unread (not guessed): "
+                  + ", ".join(f"{k}x{v}" for k, v in sorted(kept.items())), flush=True)
         if dry:
             print(f"DRY: {len(res)} residential + {len(com)} commercial")
             for row in res + com:
@@ -267,7 +299,7 @@ def main() -> int:
             res_ads={r["ad_number"] for r in res}, com_ads={r["ad_number"] for r in com}, source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
-        complete = len(items) >= declared > 0
+        complete = len(items) >= declared > 0 and "status_unreadable" not in skipped
         for tbl, rr in (("opensooq_residential_listings", res), ("opensooq_commercial_listings", com)):
             if rr and complete:
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
@@ -276,7 +308,8 @@ def main() -> int:
                 elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:
-            print("  NOT pruning: the walk fell short of the declared count", flush=True)
+            print("  NOT pruning: the walk fell short of the declared count, or an item's status was unreadable",
+                  flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(items), rows_upserted=len(res) + len(com),
                              check_tables=["opensooq_residential_listings", "opensooq_commercial_listings"])
         if not healthy:

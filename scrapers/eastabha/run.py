@@ -397,6 +397,20 @@ def _names(p: dict, tax: str, taxd: dict[str, dict[int, str]]) -> list[str]:
     return [taxd[tax][i] for i in (p.get(tax) or []) if i in taxd.get(tax, {})]
 
 
+def listing_status(p: dict, taxd: dict[str, dict[int, str]]) -> tuple[Optional[str], bool]:
+    """(status label to store, gone?) from ALL of the ad's property_status terms.
+
+    A listing can carry several terms. Until 2026-10-02 only the FIRST was read, so an ad tagged
+    e.g. [«للإيجار», «تأجرت»] stayed active: EA35661 and EA34780 were live on Ezhalah while their
+    own status said rented / sold. Any term in GONE_STATUS_AR now decides, and that term is the one
+    stored. No gone term: the first term is stored, exactly as before."""
+    terms = _names(p, "property_status", taxd)
+    gone_terms = [t for t in terms if (t or "").strip() in GONE_STATUS_AR]
+    if gone_terms:
+        return gone_terms[0], True
+    return (terms or [None])[0], False
+
+
 def _lookup_type(raw: str) -> Optional[str]:
     """EXACT-match lookup: Eastabha overrides first, then the shared canonical map. Deliberately
     map_type_exact (NO substring pass) so _derive_type's two-phase scan below keeps its historical
@@ -662,11 +676,9 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
     description = _redact(_clean((p.get("content") or {}).get("rendered", "")))[:4000] or None
 
     features_ar = _names(p, "property_features", taxd)
-    status_ar = (_names(p, "property_status", taxd) or [None])[0]
-
     # ── availability: تأجرت / تم البيع mean off-market (owner decision). Exact trimmed match
     # against GONE_STATUS_AR only; any other/unknown status (incl. "مزاد …") stays active.
-    gone = (status_ar or "").strip() in GONE_STATUS_AR
+    status_ar, gone = listing_status(p, taxd)
 
     # ── rent period: the SOURCE's own signal only — never a default (2026-08-11 audit: every
     # taxonomy-detected rent row was hardcoded 'annual' while the page's own price label said

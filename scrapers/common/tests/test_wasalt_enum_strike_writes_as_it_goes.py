@@ -178,3 +178,26 @@ def test_one_run_can_confirm_a_backlog_of_thousands():
     budget_s = float(re.search(r"--max-seconds\s+(\d+)", strike).group(1))
     limit = int(re.search(r"inputs\.confirm_limit \|\| '(\d+)'", strike).group(1))
     assert budget_s / 7.3 >= 2500 and limit >= 2500
+
+
+def test_confirm_only_strikes_nothing_and_still_confirms(monkeypatch):
+    """An extra drain between enumerations (2026-10-02: 3,841 rows waited at 3 strikes) must not
+    strike again against the same enumeration, or one missed enumeration counts twice."""
+    calls, payloads = _install(monkeypatch, cohort_n=5, verdict_for=lambda i: "dead")
+    strike_calls = []
+    monkeypatch.setattr(liveness, "_keyset_ids",
+                        lambda tbl, mc, before_iso: strike_calls.append(mc) or [1, 2])
+
+    class _ConfirmOnly(_Args):
+        confirm_only = True
+
+    liveness.run_enum_strike(_ConfirmOnly())
+    assert strike_calls == [], "confirm-only struck rows against an enumeration already counted"
+    assert not [p for p in payloads if isinstance(p, dict) and "missing_count" in p
+                and p.get("active") is not False and "last_verified_alive_at" not in p], \
+        "a strike payload was written"
+    assert calls.get(f"{RES}.enum_kill", 0) >= 1, "the waiting cohort was not confirmed"
+
+    strike_calls.clear()
+    liveness.run_enum_strike(_Args())
+    assert strike_calls, "an ordinary run must still strike"

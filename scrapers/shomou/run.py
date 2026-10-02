@@ -70,7 +70,10 @@ PAUSE = 0.4
 _NID_RE = re.compile(r'href="/(?:index\.php/)?(\d+)"')
 _ARTICLE_RE = re.compile(r'<article data-history-node-id="(\d+)".*?</article>', re.S)
 _DIV_RE = re.compile(r'<div( content="[\d.]+")? class="text-right h([12])">(.*?)</div>\s*(?=<div|<span|</div>|<ul)', re.S)
-_END_RE = re.compile(r'<time datetime="([\d-]{10})')
+# The <time> under the «تاريخ إنتهاء الإعلان» LABEL — never the article's first <time>: an ad that fills
+# «سنة بناء العقار» renders that as a <time> too, and it comes first (nid 4884: build 2025-09-30, end
+# 2022-01-01 — the build date was being judged as the end date). No labelled <time> → no end date → 'unknown'.
+_END_RE = re.compile(r'تاريخ\s*[إا]نتهاء\s*الإعلان\s*</div>\s*<div>\s*<time datetime="([\d-]{10})')
 _ALERT_RE = re.compile(r'class="alert alert-info">(.*?)</div>', re.S)
 _IMG_RE = re.compile(r'(?:src|href)="((?:https://shomoalaqar\.com\.sa)?/sites/default/files/(?!2018-12/)[^"]+\.(?:jpe?g|png|webp))"', re.I)
 _DEALS = {"للبيع": "Buy", "للايجار": "Rent", "للإيجار": "Rent"}

@@ -176,6 +176,12 @@ def map_listing(post: dict, tax: dict, photos: list[str]) -> tuple[Optional[dict
     if _AUCTION_RE.search(words):
         return None, "residential", "auction"
 
+    # Same law per post: a status id the fetched map cannot name is an UNREAD status (_names()
+    # drops it silently), so the run stops rather than guess the deal from the title.
+    unread = [i for i in (post.get("property_status") or []) if not tax.get("property_status", {}).get(i)]
+    if unread:
+        raise RuntimeError(f"post {post.get('id')}: property_status id(s) {unread} are not in the "
+                           "fetched taxonomy — status unreadable, refusing to upsert")
     status_ar = _names(post, tax, "property_status")
     types_ar = _names(post, tax, "property_type")
     if any(_CLOSED_RE.search(s) for s in status_ar) or _CLOSED_RE.search(words):
@@ -271,6 +277,14 @@ def fetch_taxonomies(s: cc.Session) -> dict[str, dict[int, str]]:
     for t in TAXONOMIES:
         terms, _ = _json(s, f"{REST}/{t}", per_page=100, _fields="id,name")
         tax[t] = {x["id"]: _strip(x["name"]) for x in (terms or [])}
+    # FAIL CLOSED (audit 2026-10-02). property_status carries the deal AND the source's only
+    # sold/rented flag, here and in the removal oracle (_signal_for). _json answers None for a
+    # non-200 / non-JSON body, which used to leave this map {} silently: a «تم البيع» term then
+    # stopped matching and the deal was taken from the title instead. "Could not read the status"
+    # is not "available" — the run fails, writes nothing, prunes nothing.
+    if not tax["property_status"]:
+        raise RuntimeError("property_status taxonomy could not be read — refusing to upsert: "
+                           "without it a sold/rented post would be written active")
     return tax
 
 
@@ -364,6 +378,11 @@ def main() -> int:
         photos = fetch_photos(s, posts)
         for p in posts:
             row, cat, why = map_listing(p, tax, photos.get(p["id"], []))
+            # Measured 2026-10-02: «للبيع» 5 · «للإيجار» 5 · «تم البيع» 0 · «تم الايجار» 0 — four terms. Any OTHER status
+            # name keeps the treatment it always had and is counted into the notes, never guessed.
+            for n in _names(p, tax, "property_status"):
+                if n not in _DEAL and not _CLOSED_RE.search(n):
+                    skipped[f"status_not_measured:{n}"] = skipped.get(f"status_not_measured:{n}", 0) + 1
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue

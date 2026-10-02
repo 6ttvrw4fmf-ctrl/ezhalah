@@ -216,6 +216,9 @@ def _listing_node(body: str) -> Optional[dict]:
     return None
 
 
+GONE_STATUSES = (404, 410)
+
+
 def fetch_detail(s: cc.Session, pid: str) -> dict[str, Any]:
     """One detail page → {ld, type_text, lat, lng, ad_text}. Empty dict if it did not answer 200."""
     status, body = _get(s, f"{BASE}/property/{pid}")
@@ -474,8 +477,16 @@ def crawl(limit: int = 0, dry_run: bool = False) -> tuple[list[dict], list[dict]
     print(f"Arkaan: {len(items)} listings enumerated from the index", flush=True)
     res: list[dict] = []
     com: list[dict] = []
+    gone = 0
     for i, item in enumerate(items, 1):
         detail = fetch_detail(s, item["id"])
+        # The ad's OWN page said gone (404/410) in this very run: never write it active from the
+        # index card (crawler audit 2026-10-02, scrapers/lifecycle-gaps.txt). Leaving it out of the
+        # seen set lets prune_unseen's 3-strike guard age it out; one reading hides nothing. A 5xx or
+        # no answer is UNKNOWN and keeps the old behaviour (LISTING_LIVENESS.md §1).
+        if detail.get("http_status") in GONE_STATUSES:
+            gone += 1
+            continue
         mapped = map_listing(item, detail)
         if not mapped:
             continue
@@ -483,6 +494,8 @@ def crawl(limit: int = 0, dry_run: bool = False) -> tuple[list[dict], list[dict]
         (com if cat == "commercial" else res).append(row)
         if not dry_run and i % 100 == 0:
             print(f"  …{i}/{len(items)}", flush=True)
+    if gone:
+        print(f"Arkaan: {gone} listing(s) skipped — their own page answered 404/410 this run", flush=True)
     return res, com, len(res) + len(com)
 
 
