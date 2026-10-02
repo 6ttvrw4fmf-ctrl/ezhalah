@@ -863,7 +863,8 @@ def _apply_direct_alive(r: dict[str, Any], *, now_iso: str, table: str) -> None:
         )
 
 
-def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
+def _wasalt_batch(table: str, rows: list[dict[str, Any]],
+                  strikes: Optional[dict[str, tuple[int, bool]]] = None) -> None:
     if not rows:
         return
     now = datetime.now(timezone.utc).isoformat()
@@ -876,8 +877,15 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
         # reappears in the source is live again, so undo any earlier prune. `setdefault` so a
         # scraper that deliberately flags a row inactive (e.g. dealapp's مباع/مؤجر "sold" badge)
         # still wins, and _sanitize_price below can still force a price-typo row inactive.
-        r["missing_count"] = 0
-        r.setdefault("active", True)
+        held = (strikes or {}).get(r["ad_number"])
+        if held:
+            # The listing's OWN PAGE has it under strike (a direct read) and the caller could not
+            # read that page live. A feed sighting is weaker evidence than the page, so it may
+            # refresh the row's data but not clear the strikes or un-hide it (gathern, 2026-10-02).
+            r["missing_count"], r["active"] = held
+        else:
+            r["missing_count"] = 0
+            r.setdefault("active", True)
         _sanitize_price(r)
         _unknown_must_not_overwrite_known(r)
         _redact_user_visible_text(r)
@@ -2209,13 +2217,14 @@ def _preserve_gathern_detail_ai(table: str, rows: list[dict[str, Any]]) -> None:
     _carry_forward_ai(rows, stored, _GATHERN_DETAIL_AI_KEYS)
 
 
-def upsert_gathern_residential_batch(rows: list[dict[str, Any]]) -> None:
+def upsert_gathern_residential_batch(rows: list[dict[str, Any]],
+                                      strikes: Optional[dict[str, tuple[int, bool]]] = None) -> None:
     """Gathern (gathern.co) MONTHLY furnished residential units only (source='Gathern').
 
     Carries the Tier-2 detail fields forward first (see _preserve_gathern_detail_ai) so the crawl's
     full-row upsert doesn't wipe additional_info — same class of bug as the description wipe (PR #210)."""
     _preserve_gathern_detail_ai("gathern_residential_listings", rows)
-    _wasalt_batch("gathern_residential_listings", rows)
+    _wasalt_batch("gathern_residential_listings", rows, strikes=strikes)
 
 
 def upsert_gathern_commercial_batch(rows: list[dict[str, Any]]) -> None:
