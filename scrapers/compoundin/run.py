@@ -197,6 +197,9 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
     if is_delisted(page_html):
         return [], "delisted"
     city_en, district_en = compound_location(page_html)
+    um = re.search(r"/compounds/([a-z\-]+)/[^/]+/?$", url)
+    if um:      # the page's own address names its city (/compounds/<city>/<slug>, since 2026-10-02)
+        city_en = um.group(1).replace("-", " ")
     if not city_en:
         return [], "no_city"
     city_ar = _CITY_EN_AR.get(city_en.strip().lower())
@@ -331,11 +334,24 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
                          ).verify_gone(ad_number)
 
 
+_COMPOUND_URL_RE = re.compile(r"/rent/show/|/compounds/[^/]+/[^/]+/?$")
+
+
 def fetch_compounds(s: cc.Session, limit: int = 0) -> list[str]:
-    r = s.get(f"{BASE}/sitemap.xml", timeout=40)
-    if r.status_code != 200:
-        return []
-    urls = sorted({u for u in re.findall(r"<loc>([^<]+)</loc>", r.text) if "/rent/show/" in u})
+    """Compound page URLs from the sitemap. On 2026-10-02 the site turned /sitemap.xml into an INDEX
+    (child sitemap-compounds.xml) and moved compounds from /rent/show/<id>/<slug> to
+    /compounds/<city>/<slug>; the flat sitemap then held no /rent/show/ url and every crawl failed.
+    Both layouts are read: the top file's own urls, plus every child sitemap it names."""
+    def locs(url: str) -> list[str]:
+        r = s.get(url, timeout=40)
+        return re.findall(r"<loc>([^<]+)</loc>", r.text) if r.status_code == 200 else []
+
+    top = locs(f"{BASE}/sitemap.xml")
+    found = set(top)
+    for child in top:
+        if child.endswith(".xml") and "compound" in child.rsplit("/", 1)[-1]:
+            found |= set(locs(child))   # only the compounds file: area pages share the url shape
+    urls = sorted(u for u in found if _COMPOUND_URL_RE.search(u))
     return urls[:limit] if limit else urls
 
 
@@ -353,7 +369,7 @@ def main() -> int:
     try:
         urls = fetch_compounds(s, limit=args.limit)
         if not urls:
-            raise RuntimeError("sitemap returned no /rent/show/ urls")
+            raise RuntimeError("sitemap returned no compound urls")
         print(f"{SOURCE}: {len(urls)} compounds discovered", flush=True)
         skipped: dict[str, int] = {}
         complete = True         # every compound page answered 200 — the only crawl that may prune
