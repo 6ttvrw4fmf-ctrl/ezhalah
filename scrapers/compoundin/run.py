@@ -50,6 +50,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
@@ -58,9 +59,12 @@ SOURCE = "CompoundIn"
 PREFIX = "CIN"
 
 
+HEADERS = {"Accept": "text/html,application/xhtml+xml", "Accept-Language": "en,ar;q=0.7"}
+
+
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome124")
-    s.headers.update({"Accept": "text/html,application/xhtml+xml", "Accept-Language": "en,ar;q=0.7"})
+    s.headers.update(HEADERS)
     return s
 
 
@@ -332,9 +336,12 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
 
 
 def fetch_compounds(s: cc.Session, limit: int = 0) -> list[str]:
+    """The /rent/show/ compound pages in the sitemap. A non-200 RAISES with its status: it used to
+    return [] and the run said "sitemap returned no /rent/show/ urls", which reads like the source
+    emptied its catalogue when we were simply refused (2026-10-01/02)."""
     r = s.get(f"{BASE}/sitemap.xml", timeout=40)
     if r.status_code != 200:
-        return []
+        raise RuntimeError(f"sitemap.xml answered HTTP {r.status_code} — UNKNOWN, not an empty source")
     urls = sorted({u for u in re.findall(r"<loc>([^<]+)</loc>", r.text) if "/rent/show/" in u})
     return urls[:limit] if limit else urls
 
@@ -346,7 +353,11 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    s = session()
+    # 2026-10-02: two nights red with no sitemap read on the pinned chrome124 profile. Probe 3
+    # profiles DIRECT, then through the residential proxy (`proxy: true` → WASALT_PROXY_URL), and
+    # keep the session that is served; the probe line goes into the log as the evidence.
+    s, tried = retry_smarter_session(f"{BASE}/sitemap.xml", headers=HEADERS)
+    print(f"{SOURCE}: probe {' '.join(tried)}", flush=True)
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run("compoundin")
     res: list[dict] = []

@@ -99,6 +99,7 @@ def test_each_unit_is_read_from_its_own_card_and_a_complete_crawl_prunes_with_th
 
     # 1) Every card's fields come from THAT card; the id-less card has no identity and is skipped.
     monkeypatch.setattr(R, "session", _session({URL: (200, LIVE_PAGE)}))
+    monkeypatch.setattr(R, "retry_smarter_session", lambda *_a, **_k: (R.session(), []))
     assert R.main() == 0
     rows = {r["ad_number"]: r for r in calls["upsert"][0]}
     assert set(rows) == {"CIN800", "CIN265"}, f"units read: {sorted(rows)}"
@@ -113,6 +114,7 @@ def test_each_unit_is_read_from_its_own_card_and_a_complete_crawl_prunes_with_th
     stored = {"CIN703": GONE_URL, "CIN800": URL, "CIN265": URL, "CIN999": URL}
     monkeypatch.setattr(R, "stored_listing_url", lambda _tables: stored.get)
     monkeypatch.setattr(R, "session", _session({URL: (200, LIVE_PAGE), GONE_URL: (200, DELISTED_PAGE)}))
+    monkeypatch.setattr(R, "retry_smarter_session", lambda *_a, **_k: (R.session(), []))
     assert verify_gone("CIN703")[0] == "gone"       # «This compound is no longer listed» on a 200
     assert verify_gone("CIN800")[0] == "live"       # its own card is on the page
     assert verify_gone("CIN999")[0] == "unknown"    # a listed page without it: not measured → hold
@@ -120,4 +122,5 @@ def test_each_unit_is_read_from_its_own_card_and_a_complete_crawl_prunes_with_th
     # 3) An incomplete crawl (one compound page answered 500) never prunes.
     calls["prune"].clear()
     monkeypatch.setattr(R, "session", _session({URL: (200, LIVE_PAGE), GONE_URL: (500, "")}))
+    monkeypatch.setattr(R, "retry_smarter_session", lambda *_a, **_k: (R.session(), []))
     assert R.main() == 0 and calls["prune"] == []

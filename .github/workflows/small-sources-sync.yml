@@ -106,7 +106,9 @@ jobs:
           - { source: fahadalshahri, cmd: "python -m scrapers.fahadalshahri.run --type all", tmo: 20 }
           # compoundin walks 129 compound pages and emits one row per UNIT, so it is the slowest
           # of this batch by page count even though its row count is small.
-          - { source: compoundin,    cmd: "python -m scrapers.compoundin.run --type all", tmo: 45 }
+          #   compoundin: `proxy: true` (2026-10-02, Scraping Engineer) — two nights with no sitemap read on
+          #   the runner IP; the scraper now probes 3 profiles DIRECT, then the proxy, and logs each.
+          - { source: compoundin,    cmd: "python -m scrapers.compoundin.run --type all", tmo: 45, proxy: true }
           # wslnaa makes one tRPC call per slug (59) on top of the sitemap fetch.
           - { source: wslnaa,        cmd: "python -m scrapers.wslnaa.run --type all", tmo: 30 }
           # ── onboarded 2026-09-21: eleven platforms ─────────────────────────────────────────────
@@ -176,7 +178,9 @@ jobs:
           #   sakani: 15 API pages + 282 detail records at 1.5 s (measured 740 s dry run).
           - { source: sakani,         cmd: "python -m scrapers.sakani.run --type all", tmo: 45, proxy: true }
           #   API / REST sources whose whole catalogue is one page or a handful of calls:
-          - { source: shatri,         cmd: "python -m scrapers.shatri.run --type all", tmo: 20 }
+          #   shatri: `proxy: true` (2026-10-02, Scraping Engineer) — WP REST answered 403 to the runner IP;
+          #   the scraper probes 3 profiles DIRECT first, so the proxy is spent only when refused.
+          - { source: shatri,         cmd: "python -m scrapers.shatri.run --type all", tmo: 20, proxy: true }
           - { source: almuteb,        cmd: "python -m scrapers.almuteb.run --type all", tmo: 20 }
           - { source: aalbarrak,      cmd: "python -m scrapers.aalbarrak.run --type all", tmo: 20 }
           - { source: aqaralriyadh,   cmd: "python -m scrapers.aqaralriyadh.run --type all", tmo: 20 }
