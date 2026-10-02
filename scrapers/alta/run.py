@@ -57,6 +57,10 @@ TAXONOMIES = ("property_category", "property_action_category", "property_city",
 # Statuses that mean "no longer on the market". Everything else (including no status at all) is
 # active — absence of a sold marker is not evidence of a sale.
 GONE_STATUSES = ("تم البيع", "تم التأجير", "غير متاح")
+# The ONLY other status this source publishes (measured 2026-10-02: تم البيع 9, تم التأجير 1,
+# غير متاح 2, متاح 6 — four terms, nothing else). A name outside these four is one nobody measured:
+# it keeps the behaviour it always had (active) and is COUNTED in the run notes, never guessed.
+AVAILABLE_STATUS = "متاح"
 # A wanted-ad, not inventory. Matched on the term NAME so a renumbered term still gets caught.
 WANTED_AD = "طلب جاد"
 
@@ -138,6 +142,14 @@ def fetch_taxonomies(s: cc.Session) -> dict[str, dict[int, str]]:
         if isinstance(terms, list):
             out[tax] = {t["id"]: t.get("name") for t in terms
                         if isinstance(t, dict) and isinstance(t.get("id"), int)}
+    # FAIL CLOSED (audit 2026-10-02). property_status is the ONLY place this source says an ad is
+    # sold / rented / unavailable. The soft `continue` above used to cover it too: one failed
+    # request left the map out, every post's status resolved to [], and all 9 sold posts of the 16
+    # mapped that day would have been upserted active=True (measured by dropping the map). "Could
+    # not read the status" is not "available" — the run fails and writes nothing.
+    if not out.get("property_status"):
+        raise RuntimeError("property_status taxonomy could not be read — refusing to upsert: "
+                           "without it every sold/rented post would be written active")
     return out
 
 
@@ -256,6 +268,14 @@ def map_listing(p: dict, tax: dict[str, dict[int, str]],
     district = (terms("property_area") or [None])[0]
 
     statuses = terms("property_status")
+    # Same law per post: a status id the fetched map cannot name (a term past the first 100, or
+    # one added mid-run) is an UNREAD status. terms() would drop it silently and the post would
+    # read as "no status → active", so the run stops instead.
+    unread = [i for i in (p.get("property_status") or [])
+              if not (tax.get("property_status") or {}).get(i)]
+    if unread:
+        raise RuntimeError(f"post {p.get('id')}: property_status id(s) {unread} are not in the "
+                           "fetched taxonomy — status unreadable, refusing to upsert")
     gone = any(g in st for st in statuses for g in GONE_STATUSES)
 
     # ── facts from THIS post's own body only — never the shared page chrome (see docstring) ──
@@ -360,6 +380,7 @@ def main() -> int:
     sold_res: list[str] = []
     sold_com: list[str] = []
     gone_ct = 0
+    status_notes: dict[str, int] = {}
     try:
         tax = fetch_taxonomies(s)
         posts = fetch_listings(s)
@@ -383,6 +404,16 @@ def main() -> int:
                 continue
             if not row["active"]:
                 gone_ct += 1
+            # Visible, never guessed: an ad with NO status term (1 of 17 on 2026-10-02 — its own
+            # page prints no status either) and any status name outside the four measured ones
+            # both stay active, exactly as before, and are tallied into the run notes.
+            sts = row["additional_info"].get("status_ar") or []
+            if not sts:
+                status_notes["no_status_term"] = status_notes.get("no_status_term", 0) + 1
+            for st in sts:
+                if st != AVAILABLE_STATUS and not any(g in st for g in GONE_STATUSES):
+                    k = f"status_not_measured:{st}"
+                    status_notes[k] = status_notes.get(k, 0) + 1
             if args.type != "all" and cat != args.type:
                 continue
             (com if cat == "commercial" else res).append(row)
@@ -412,6 +443,7 @@ def main() -> int:
             # that looks successful but wrote nothing real. Fail CI on a demotion rather than
             # reporting a silent success (the same check awal makes).
             healthy = db.end_run(run_id, ok=True, rows_seen=n, rows_upserted=n,
+                                 notes=", ".join(f"{k}x{v}" for k, v in sorted(status_notes.items()))[:300] or None,
                                  check_tables=["alta_residential_listings",
                                                "alta_commercial_listings"])
             if not healthy:
@@ -420,6 +452,9 @@ def main() -> int:
                 return 1
             print(f"✓ {SOURCE}: {len(res)} residential + {len(com)} commercial upserted "
                   f"({gone_ct} sold/rented)")
+        if status_notes:
+            print("  kept active, status not stated or not measured: "
+                  + ", ".join(f"{k}x{v}" for k, v in sorted(status_notes.items())))
         if unmapped:
             # Printed EVERY run: a category we refuse to guess at must stay visible, or the
             # platform quietly shrinks and nobody knows why.
