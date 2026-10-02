@@ -7,8 +7,7 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withSequence,
-  withSpring,
+  FadeIn,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,7 +15,6 @@ import { usePathname, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, darkColors, radius, space, cardShadow } from '@/theme/tokens';
 import { useTheme } from '@/theme/theme';
-import HeroBackground from '@/components/HeroBackground';
 import AccountMenu from '@/components/AccountMenu';
 import { useApp, type HistoryItem } from '@/store';
 import { sanitizeArabicSearch, isSearchableQuery, filterChats, arabicHintAfterInput, boldSpans } from '@/lib/chatSearch';
@@ -48,14 +46,14 @@ export function useDocked() {
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 // A soft background fade on hover/press (web) so the nav links + profile row don't snap harshly.
-// The active-chat row is deliberately NOT given this — it keeps its instant, clear green highlight.
+// The current chat keeps a distinct neutral selection fill, including while its menu is open.
 const WEB_SMOOTH = Platform.OS === 'web' ? ({ transitionProperty: 'background-color', transitionDuration: '160ms' } as any) : null;
 // A row is "on" for hover (web), keyboard focus, or press — the same three signals «محادثة جديدة»
 // has always used; every other clickable sidebar row now shares them (owner 2026-09-03).
 const isOn = (st: { hovered?: boolean; pressed?: boolean; focused?: boolean }) => !!(st.hovered || st.pressed || st.focused);
 // Drawer slide: a touch slower on the way in so it glides, snappier on the way out.
-const SLIDE_IN = { duration: 320, easing: Easing.bezier(0.22, 1, 0.36, 1) };
-const SLIDE_OUT = { duration: 230, easing: Easing.in(Easing.cubic) };
+const SLIDE_IN = { duration: 220, easing: Easing.bezier(0.22, 1, 0.36, 1) };
+const SLIDE_OUT = { duration: 180, easing: Easing.bezier(0.4, 0, 1, 1) };
 const SLIDE_PX = 360; // a bit wider than the panel so it fully clears the edge
 
 // ── PRESS-HOLD-DRAG REORDER (owner 2026-08-24) ───────────────────────────────────────────────────
@@ -108,12 +106,12 @@ function groupHistory(items: HistoryItem[]): { key: string; items: HistoryItem[]
 export default function Sidebar({ onClose, docked = false }: { onClose: () => void; docked?: boolean }) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  // ACTIVE-CHAT TRUTH (owner 2026-08-29): the green active row means «this is the conversation you
+  // ACTIVE-CHAT TRUTH (owner 2026-08-29): the active row means «this is the conversation you
   // are looking at RIGHT NOW». On the Filter home there is no conversation on screen, so nothing may
   // be highlighted — activeChatId can legitimately still be set (it survives for a return to /agent),
   // but the HIGHLIGHT is a claim about the current screen, and on '/' that claim is false. The four
-  // states are separate by design: current chat (green, /agent only), hovered row, context-menu row
-  // (dark green while its ⋯ menu is open), previously-visited chat (no visual state at all).
+  // states are separate by design: current chat (selected, /agent only), hovered row, context-menu row
+  // (subtle hover while its ⋯ menu is open), previously-visited chat (no visual state at all).
   const pathname = usePathname();
   const onAgentScreen = pathname?.startsWith('/agent') ?? false;
   const { t, isRTL, locale, setLocale } = useI18n();
@@ -166,13 +164,15 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   const [searching, setSearching] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [hadLatin, setHadLatin] = useState(false);
-  // ROW INTERACTION COLOR (owner 2026-08-24): normal rows are light/neutral; the DARK green is the
-  // interaction color. One id covers both surfaces — mouseenter/leave on web, pressIn/Out on touch
-  // — so the pressed state can never stick (out always clears) and the hover style always reverts.
-  // The SELECTED chat keeps its persistent light-green highlight and deliberately does NOT take the
-  // hover fill: current ≠ hovered must stay visually distinct.
+  // Owner 2026-10-01: neutral hover/menu feedback; selected stays distinct and labels keep their color.
   const [hotRowId, setHotRowId] = useState<string | null>(null);
   const reducedMotion = useReducedMotion();
+  useEffect(() => {
+    if (!menu || Platform.OS !== 'web') return;
+    const dismiss = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenu(null); };
+    document.addEventListener('keydown', dismiss);
+    return () => document.removeEventListener('keydown', dismiss);
+  }, [menu]);
   const searchEnter = useSharedValue(1);
   const searchEnterA = useAnimatedStyle(() => ({
     opacity: searchEnter.value,
@@ -182,7 +182,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     setMenu(null);
     setSearching(true);
     searchEnter.value = reducedMotion ? 1 : 0;
-    searchEnter.value = withTiming(1, { duration: 180, easing: Easing.bezier(0.22, 1, 0.36, 1) });
+    if (!reducedMotion) searchEnter.value = withTiming(1, { duration: 180, easing: Easing.bezier(0.22, 1, 0.36, 1) });
   };
   const closeSearch = () => { setSearching(false); setSearchText(''); setHadLatin(false); };
   const onSearchChange = (raw: string) => {
@@ -472,6 +472,8 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   };
 
   const openMenu = (id: string, e: any) => {
+    cancelArmedOpen();
+    setHotRowId(null);
     if (menu?.id === id) { setMenu(null); return; }
     const pageY: number | undefined = e?.nativeEvent?.pageY;
     const node: any = panelRef.current;
@@ -490,8 +492,8 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   // the only motion — smooth on web and native alike.
   const progress = useSharedValue(0);
   useEffect(() => {
-    progress.value = withTiming(1, SLIDE_IN);
-  }, [progress]);
+    progress.value = docked || reducedMotion ? 1 : withTiming(1, SLIDE_IN);
+  }, [progress, docked, reducedMotion]);
 
   // The drawer ALWAYS docks to and slides in from the LEFT edge — even in Arabic — so the menu opens
   // on the same side as the hamburger button (English-style position). Only the panel's POSITION is
@@ -509,7 +511,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   // Animate the drawer back out, then run the follow-up once it has cleared the edge. When docked
   // (persistent web column) there's nothing to animate away — just run the follow-up immediately.
   const animateOut = (after: () => void) => {
-    if (docked) { after(); return; }
+    if (docked || reducedMotion) { after(); return; }
     progress.value = withTiming(0, SLIDE_OUT, (finished) => {
       if (finished) runOnJS(after)();
     });
@@ -517,24 +519,9 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
 
   const close = () => animateOut(onClose);
 
-  // Quick tactile feedback on the New Chat button — a short shake + scale "pop" so the user
-  // unambiguously feels the click landed before the navigation kicks in. (user request.)
-  const ncScale = useSharedValue(1);
-  const newChatAnim = useAnimatedStyle(() => ({
-    transform: [{ scale: ncScale.value }],
-  }));
-
   // New Chat: docked column may be on any screen, so go home explicitly; the overlay only ever
   // opens over Home, where closing is enough.
   const onNewChat = () => {
-    // Tactile feedback: a single soft dip + spring back — a calm "done" acknowledgment. The old
-    // side-to-side shake is gone (owner 2026-08-14: "it shakes… I want an animation that makes me
-    // feel I've done a new chat"). The fresh-page feeling itself lives in the chat area: the old
-    // conversation fades out and the clean chat rises in (agent.tsx fresh effect).
-    ncScale.value = withSequence(
-      withTiming(0.96, { duration: 80 }),
-      withSpring(1, { damping: 8, stiffness: 220 }),
-    );
     // A fresh start means FRESH STATE, not just a cleared highlight. This used to be
     // setActiveChat(null) alone, which left the previous search's whole query (city, type, deal,
     // period, price, beds…) sitting in the shared store for the new chat to inherit. The store owns
@@ -545,10 +532,9 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     // browser does a soft refresh-feel via the home page's own entrance animation on mount.
     // (user request: New Chat → default filter page; transition feel like a refresh.)
     const params = { fresh: String(Date.now()) };
-    // Hold the navigation by one shake-cycle (~240ms) so the user actually SEES the animation play
-    // before the screen swaps. (user request: make it feel like a real click.)
-    if (docked) { setTimeout(() => router.replace({ pathname: '/', params }), 240); return; }
-    setTimeout(() => animateOut(() => { onClose(); setTimeout(() => router.replace({ pathname: '/', params }), 10); }), 240);
+    // Navigation never waits for decorative button feedback.
+    if (docked) { router.replace({ pathname: '/', params }); return; }
+    animateOut(() => { onClose(); router.replace({ pathname: '/', params }); });
   };
 
   // Settings no longer navigates anywhere: the account controls open as a compact panel anchored
@@ -581,6 +567,10 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   // doesn't re-write".)
   const openHistory = (c: HistoryItem) => {
     closeSearch(); // leaving via a result exits search mode; the docked panel stays mounted
+    setMenu(null);
+    setHotRowId(null);
+    // Re-selecting the visible conversation must not restart its restore or scroll position.
+    if (onAgentScreen && activeChatId === c.id) { close(); return; }
     // Search is FREE, always (owner rule 2026-08-15) — reopening a saved search never routes to
     // sign-in. (History rows only exist for signed-in users anyway; the retired gate was dead code.)
     // STRICT allowlist into the shared store the Filter home binds to — agent-only fields
@@ -617,34 +607,32 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     : baseGroups;
   const NavLinks = (
     <View style={s.nav}>
-      {/* Owner 2026-09-03: EVERY clickable sidebar row gives the exact feedback «محادثة جديدة» gives —
-          the whole row fills with colors.hoverRow (dark green in light, muted deep green in dark) and
-          the icon + label flip to white. Children-as-function so the glyph and text flip with the fill. */}
+      {/* Sidebar links share quiet neutral feedback and stable text colors. */}
       {/* Owner 2026-09-11: language is reachable WITHOUT sign-in — Settings' language rows sit behind
           openAccountMenu()/openSignIn() above, but a guest never gets that far. Single tap toggles
           ar<->en directly via the now-bilingual setLocale(); the label names the language a tap
           switches TO, same convention as AccountMenu's two Language rows. */}
       <Pressable testID="sidebar-language-toggle" style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => setLocale(locale === 'ar' ? 'en' : 'ar')}>
         {(st) => (<>
-          <Ionicons name="globe-outline" size={19} color={isOn(st) ? colors.onFill : TC.ink} />
+          <Ionicons name="globe-outline" size={19} color={TC.ink} />
           <Text style={[s.navText, dark && dks.navText, isOn(st) && s.navTextOn]}>{locale === 'ar' ? 'English' : 'العربية'}</Text>
         </>)}
       </Pressable>
       <Pressable testID="sidebar-settings-link" style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => (user ? openAccountMenu() : openSignIn())}>
         {(st) => (<>
-          <Ionicons name="settings-outline" size={19} color={isOn(st) ? colors.onFill : TC.ink} />
+          <Ionicons name="settings-outline" size={19} color={TC.ink} />
           <Text style={[s.navText, dark && dks.navText, isOn(st) && s.navTextOn]}>{t('Settings')}</Text>
         </>)}
       </Pressable>
       <Pressable style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => openInfo('support')}>
         {(st) => (<>
-          <Ionicons name="chatbubble-ellipses-outline" size={19} color={isOn(st) ? colors.onFill : TC.ink} />
+          <Ionicons name="chatbubble-ellipses-outline" size={19} color={TC.ink} />
           <Text style={[s.navText, dark && dks.navText, isOn(st) && s.navTextOn]}>{t('Support')}</Text>
         </>)}
       </Pressable>
       <Pressable style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => openInfo('about')}>
         {(st) => (<>
-          <Ionicons name="information-circle-outline" size={19} color={isOn(st) ? colors.onFill : TC.ink} />
+          <Ionicons name="information-circle-outline" size={19} color={TC.ink} />
           <Text style={[s.navText, dark && dks.navText, isOn(st) && s.navTextOn]}>{t('About Us')}</Text>
         </>)}
       </Pressable>
@@ -671,20 +659,12 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                   accessibilityLabel={t('Search chats')}
                   testID="sidebar-search-btn"
                 >
-                  {(st) => <Ionicons name="search" size={18} color={isOn(st) ? colors.onFill : dark ? '#a9c9b4' : colors.dark} />}
+                  {(st) => <Ionicons name="search" size={18} color={isOn(st) ? colors.ink : dark ? '#a9c9b4' : colors.dark} />}
                 </Pressable>
               )}
             </View>
-            <Animated.View style={newChatAnim}>
-              {/* Owner 2026-08-14: the old white-on-white outline button disappeared into the
-                  sidebar. Solid brand green + white text so it reads as THE primary action, with a
-                  darker hover/press fill (ChatGPT-style affordance). RN-web Pressable exposes
-                  `hovered` in the style function; native ignores it and keeps the press state. */}
-              {/* Owner 2026-08-24 (supersedes 2026-08-14 solid green): LIGHT green default with
-                  dark-green text — the sidebar should feel light; dark green is the INTERACTION
-                  color. Hover/keyboard-focus/press turn the fill dark and the text white, on the
-                  same restrained 160ms web transition. Children-as-function so the icon + label
-                  flip with the fill (a style-only callback can't reach them). */}
+            <View>
+              {/* A clear light New Chat button with quiet hover feedback; no bounce or navigation delay. */}
               <Pressable
                 style={(state) => [
                   s.newChat,
@@ -693,22 +673,21 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                   // `hovered` is react-native-web only; RN's PressableStateCallbackType omits it.
                   ((((state as { hovered?: boolean }).hovered ?? false) || state.pressed || (state as { focused?: boolean }).focused) ?? false) && s.newChatHover,
                 ]}
+                testID="sidebar-new-chat"
+                accessibilityRole="button"
                 onPress={onNewChat}
               >
                 {(state) => {
                   const on = (((state as { hovered?: boolean }).hovered ?? false) || state.pressed || ((state as { focused?: boolean }).focused ?? false));
                   return (
                     <>
-                      {/* Dark appearance lightens only the RESTING glyph; the light-mode contract
-                          (rest = dark green, interaction = white) is untouched and still pinned by
-                          verify-sidebar-light-green-interaction.ts. */}
-                      <Ionicons name="add" size={18} color={dark && !on ? '#cfe0d5' : on ? colors.onFill : colors.dark} />
+                      <Ionicons name="add" size={18} color={dark && !on ? '#cfe0d5' : on ? colors.ink : colors.dark} />
                       <Text style={[s.newChatText, dark && dks.newChatText, on && s.newChatTextOn]}>{t('New Chat')}</Text>
                     </>
                   );
                 }}
               </Pressable>
-            </Animated.View>
+            </View>
 
             {/* Search mode (owner 2026-08-24, rev 2): the field appears ONLY after the top 🔍
                 is tapped — the normal sidebar never shows an input. Same Arabic-only engine,
@@ -768,9 +747,10 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                     {/* Note #8 — chat row layout is IDENTICAL in both languages: icon → title → star → ⋯
                         on the right. `direction: ltr` locks the row so Arabic doesn't auto-flip it.
                         Title still flows with its own text direction inside the bubble. (user request.) */}
-                    {g.items.map((c, idx) => { const ctx = menu?.id === c.id; const hot = ctx || (hotRowId === c.id && !(onAgentScreen && activeChatId === c.id) && editingId !== c.id); return (
+                    {g.items.map((c, idx) => { const ctx = menu?.id === c.id; const hot = !(onAgentScreen && activeChatId === c.id) && (ctx || (hotRowId === c.id && editingId !== c.id)); return (
                       <View
                         key={c.id}
+                        testID={`sidebar-row-${c.id}`}
                         // The OUTER row hosts both gestures (dblclick rename + hold-to-drag) and is
                         // what lifts/moves, so the ⋯ button travels with its row. First row measures
                         // the shared row height the slot math uses. (Merged 2026-08-24 with the
@@ -810,8 +790,11 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                         ) : (
                           <Pressable
                             style={s.histItem}
+                            testID={`sidebar-open-${c.id}`}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: onAgentScreen && activeChatId === c.id }}
                             onPress={() => armOpenRow(c)}
-                            // Touch has no hover: pressIn paints the dark feedback, pressOut ALWAYS
+                            // Touch has no hover: pressIn paints the quiet feedback, pressOut ALWAYS
                             // clears it, so the pressed state can never remain stuck after release.
                             onPressIn={() => { if (Platform.OS !== 'web') setHotRowId(c.id); }}
                             onPressOut={() => { if (Platform.OS !== 'web') setHotRowId((h) => (h === c.id ? null : h)); }}
@@ -821,7 +804,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                             // must never rename, and a double-click must never drag.
                             accessibilityHint={t('Hold to reorder the conversation')}
                           >
-                            <Ionicons name="chatbubble-outline" size={15} color={hot ? colors.surface : '#8a978f'} />
+                            <Ionicons name="chatbubble-outline" size={15} color={TC.muted} />
                             <Text style={[s.histLabel, dark && dks.histLabel, (hot || drag?.id === c.id) && s.histLabelHot]} numberOfLines={1}>
                               {/* Bold the matching text (owner request 2026-09-11) — only while an active
                                   search is actually filtering the list; a normal row never carries the
@@ -844,9 +827,12 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                           hitSlop={6}
                           // @ts-expect-error web-only DOM props on the RNW host node
                           dataSet={{ nodrag: '1' }}
+                          testID={`sidebar-menu-${c.id}`}
+                          accessibilityRole="button"
+                          accessibilityLabel={locale === 'ar' ? 'خيارات المحادثة' : 'Conversation options'}
                           onPress={(e) => openMenu(c.id, e)}
                         >
-                          <Ionicons name="ellipsis-horizontal" size={16} color={hot ? '#cfe0d5' : '#9aa6a0'} />
+                          <Ionicons name="ellipsis-horizontal" size={16} color={TC.muted} />
                         </Pressable>
                       </View>
                     ); })}
@@ -878,7 +864,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                   <Text style={[s.userName, dark && dks.userName, on && s.userTextOn]} numberOfLines={1}>{pickName(user, locale)}</Text>
                   {!!user.sub && <Text style={[s.userSub, dark && dks.userSub, on && s.userSubOn]} numberOfLines={1}>{user.sub}</Text>}
                 </View>
-                <Ionicons name="ellipsis-horizontal" size={15} color={on ? colors.onFill : dark ? darkColors.muted : '#9aa6a0'} />
+                <Ionicons name="ellipsis-horizontal" size={15} color={on ? colors.ink : dark ? darkColors.muted : '#9aa6a0'} />
               </>); }}
             </Pressable>
           </>
@@ -921,8 +907,10 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   // up or down from the tap so the full text is always visible at the top, middle, or bottom.
   const menuOverlay = menu && menuItem ? (
     <>
-      <Pressable style={s.menuScrim} onPress={() => setMenu(null)} />
-      <View
+      <Pressable testID="sidebar-menu-dismiss" style={s.menuScrim} onPress={() => setMenu(null)} />
+      <Animated.View
+        testID="sidebar-chat-menu"
+        entering={reducedMotion ? undefined : FadeIn.duration(140)}
         style={[
           s.rowMenu,
           dark && dks.rowMenu,
@@ -932,23 +920,23 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       >
         <Pressable style={(st) => [s.rowMenuItem, WEB_SMOOTH, isOn(st) && s.rowMenuItemHover]} onPress={() => { const item = history.find((c) => c.id === menu.id); setMenu(null); if (item) beginRename(item); }}>
           {(st) => (<>
-            <Ionicons name="pencil-outline" size={15} color={isOn(st) ? colors.onFill : TC.ink} />
+            <Ionicons name="pencil-outline" size={15} color={TC.ink} />
             <Text style={[s.rowMenuText, dark && dks.rowMenuText, isOn(st) && s.rowMenuTextOn]} numberOfLines={1}>{t('Rename')}</Text>
           </>)}
         </Pressable>
         <Pressable style={(st) => [s.rowMenuItem, WEB_SMOOTH, isOn(st) && s.rowMenuItemHover]} onPress={() => { toggleStar(menu.id); setMenu(null); }}>
           {(st) => (<>
-            <Ionicons name={menuItem.starred ? 'star' : 'star-outline'} size={15} color={menuItem.starred ? GOLD : isOn(st) ? colors.onFill : TC.ink} />
+            <Ionicons name={menuItem.starred ? 'star' : 'star-outline'} size={15} color={menuItem.starred ? GOLD : TC.ink} />
             <Text style={[s.rowMenuText, dark && dks.rowMenuText, isOn(st) && s.rowMenuTextOn]} numberOfLines={1}>{menuItem.starred ? t('Unstar') : t('Star')}</Text>
           </>)}
         </Pressable>
         <Pressable testID="chat-delete-open-confirm" style={(st) => [s.rowMenuItem, WEB_SMOOTH, isOn(st) && s.rowMenuItemHover]} onPress={() => { deleteFiredRef.current = false; setConfirmDeleteId(menu.id); setMenu(null); }}>
           {(st) => (<>
-            <Ionicons name="trash-outline" size={15} color={isOn(st) ? colors.onFill : '#c0392b'} />
-            <Text style={[s.rowMenuText, { color: '#c0392b' }, isOn(st) && s.rowMenuTextOn]} numberOfLines={1}>{t('Delete')}</Text>
+            <Ionicons name="trash-outline" size={15} color="#c0392b" />
+            <Text style={[s.rowMenuText, { color: '#c0392b' }]} numberOfLines={1}>{t('Delete')}</Text>
           </>)}
         </Pressable>
-      </View>
+      </Animated.View>
     </>
   ) : null;
 
@@ -1001,9 +989,6 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       // a sibling stacking context later in the DOM otherwise paints over it). Closed → back to
       // z-auto ordering so the root overlays (Support/About/Auth) keep painting above the sidebar.
       <View ref={panelRef} style={[s.dockPanel, dark && dks.dockPanel, acctOpen && ({ zIndex: 30 } as any), { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, LTR_PIN]}>
-        {/* Dark appearance drops the light pencil-sketch backdrop: the deep green paper IS the
-            dark surface (the sketch and its fade-to-light-paper gradient assume light ground). */}
-        {!dark && <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />}
         {body}
         {dropAnnounce ? (
           <Text accessibilityLiveRegion="polite" style={s.srOnly}>{dropAnnounce}</Text>
@@ -1020,7 +1005,6 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     <View style={s.overlay}>
       <AnimatedPressable style={[s.backdrop, backdropStyle]} onPress={close} />
       <Animated.View ref={panelRef as any} style={[s.panel, dark && dks.panel, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, panelStyle, LTR_PIN]}>
-        {!dark && <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />}
         {body}
         {menuOverlay}
         {deleteConfirmOverlay}
@@ -1038,29 +1022,27 @@ const s = StyleSheet.create({
   // by RTL on both web and native, so the drawer opens from the same side as the menu button.
   overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 50, flexDirection: 'row' },
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(8,18,12,0.42)' },
-  // Base is `paper` (not stark white) so the sketch backdrop reads as part of the same illustration
-  // behind the rest of the app — the panel blends into the image instead of sitting on a flat slab.
+  // Plain themed paper keeps the conversation list quiet and readable.
   // Absolutely pinned to the LEFT edge (not via flex) so the drawer opens on the left in every
   // language — RTL never mirrors it to the right. (user request.)
   panel: { position: 'absolute', top: 0, bottom: 0, left: 0, width: '82%', maxWidth: 310, backgroundColor: colors.paper, paddingHorizontal: 14, ...cardShadow },
   // Docked (website) column: fixed width, a faint trailing hairline (RTL-mirrored on web), no
-  // shadow/backdrop. Paper base so it blends with the sketch background of the adjoining screen.
+  // shadow/backdrop. The plain paper surface stays still while conversations change.
   dockPanel: { width: DOCK_WIDTH, height: '100%', backgroundColor: colors.paper, paddingHorizontal: 14, borderRightWidth: 1, borderRightColor: colors.line },
 
   brandRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 4 },
   // Header search entry (owner 2026-08-24 rev 2): a quiet ~42px circular target at header level —
   // neutral by default, a soft green wash on hover/press. Never a big outlined button.
   searchTopBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', marginLeft: 'auto' },
-  searchTopBtnHover: { backgroundColor: colors.hoverRow },
+  searchTopBtnHover: { backgroundColor: colors.segTrack },
   logo: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   word: { fontSize: 15, fontWeight: '800', letterSpacing: 2, color: colors.ink },
 
-  // Owner 2026-08-24: LIGHT green default (dark-green text) → DARK green with white text only on
-  // hover/focus/press. The dark green is the interaction color, never the resting color.
+  // Branded resting action with a neutral hover state.
   newChat: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: colors.tint, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 13, marginTop: 12, borderWidth: 1, borderColor: colors.tintLine },
-  newChatHover: { backgroundColor: colors.hoverRow, borderColor: colors.hoverRow },
+  newChatHover: { backgroundColor: colors.segTrack, borderColor: colors.line },
   newChatText: { fontSize: 14, fontWeight: '600', color: colors.dark },
-  newChatTextOn: { color: colors.onFill },
+  newChatTextOn: { color: colors.ink },
   // Chat search (owner 2026-08-24). The button mirrors the nav-link language (quiet, discoverable);
   // the input row keeps the exact same footprint so the sidebar never jumps when it morphs.
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingVertical: 6, paddingHorizontal: 10, marginTop: 8, borderWidth: 1, borderColor: colors.primary, backgroundColor: '#ffffff' },
@@ -1077,18 +1059,14 @@ const s = StyleSheet.create({
   groupHeadTarget: { backgroundColor: 'rgba(227, 160, 8, 0.14)', borderRadius: 6 },
   groupTitle: { fontSize: 11, fontWeight: '700', color: '#9aa6a0', textTransform: 'uppercase', letterSpacing: 0.5 },
   histRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 10 },
-  // Interaction color for rows (owner 2026-08-24): dark-green fill with white label on hover/press.
-  // DISTINCT from histRowActive below — the current chat keeps its persistent light-green highlight
-  // and never takes this fill, so hovered vs selected can't be confused.
-  histRowHot: { backgroundColor: colors.hoverRow },
-  // The row being DRAGGED: same dark-card/white-label pair as hover — deterministic regardless of
-  // hover flicker, and opaque so rows it glides over never show through. (A forced-white card here
-  // once made the hovered-white title invisible for the whole drag.)
-  histRowDragging: { backgroundColor: colors.hoverRow },
-  histLabelHot: { color: colors.onFill },
+  // Calm neutral feedback, distinct from the persistent selected row.
+  histRowHot: { backgroundColor: colors.segTrack },
+  // Opaque neutral drag surface keeps the same readable label colors.
+  histRowDragging: { backgroundColor: colors.segTrack },
+  histLabelHot: { color: colors.ink },
   histRowOpen: { backgroundColor: '#f3f5f3' },
-  // The chat the user is currently in — a light green wash so it's obvious which conversation is open.
-  histRowActive: { backgroundColor: '#dcefe1' },
+  // The chat the user is currently in — a neutral fill so it's obvious which conversation is open.
+  histRowActive: { backgroundColor: colors.line },
   histItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 8 },
   histLabel: { flex: 1, fontSize: 13.5, fontWeight: '500', color: colors.ink },
   histLabelMatch: { fontWeight: '800' },
@@ -1115,18 +1093,17 @@ const s = StyleSheet.create({
     shadowColor: '#0b140f', shadowOpacity: 0.22, shadowRadius: 22, shadowOffset: { width: 0, height: 12 }, elevation: 16,
   },
   rowMenuItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 9 },
-  rowMenuItemHover: { backgroundColor: colors.hoverRow },
+  rowMenuItemHover: { backgroundColor: colors.segTrack },
   rowMenuText: { fontSize: 13.5, fontWeight: '600', color: colors.ink },
-  rowMenuTextOn: { color: colors.onFill },
+  rowMenuTextOn: { color: colors.ink },
 
   divider: { height: 1, backgroundColor: colors.fieldLine, marginHorizontal: 2, marginBottom: 16 },
   nav: { gap: 4, marginBottom: 18 },
   navLink: { flexDirection: 'row', alignItems: 'center', gap: 13, paddingVertical: 11, paddingHorizontal: 6, borderRadius: 11 },
-  // The sidebar's ONE interaction fill (owner 2026-09-03): colors.hoverRow — dark green in light,
-  // the muted deep green-gray in dark — on every clickable row, with white text/icons on top.
-  navLinkHover: { backgroundColor: colors.hoverRow },
+  // Other sidebar controls share the quiet hover treatment.
+  navLinkHover: { backgroundColor: colors.segTrack },
   navText: { fontSize: 14.5, fontWeight: '500', color: colors.ink },
-  navTextOn: { color: colors.onFill },
+  navTextOn: { color: colors.ink },
 
   lang: { flexDirection: 'row', alignSelf: 'flex-start', backgroundColor: colors.segTrack, borderRadius: radius.pill, padding: 4, gap: 4, marginBottom: 18 },
   langBtn: { paddingVertical: 8, paddingHorizontal: 22, borderRadius: radius.pill },
@@ -1136,9 +1113,9 @@ const s = StyleSheet.create({
 
   // Vertically center the name/email block against the avatar; tighter gap = closer to the avatar.
   userRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingTop: 12, paddingBottom: 8, paddingHorizontal: 8, borderRadius: 11, borderTopWidth: 1, borderTopColor: '#eef1ef' },
-  userRowHover: { backgroundColor: colors.hoverRow },
-  userTextOn: { color: colors.onFill },
-  userSubOn: { color: 'rgba(255,255,255,0.78)' },
+  userRowHover: { backgroundColor: colors.segTrack },
+  userTextOn: { color: colors.ink },
+  userSubOn: { color: colors.muted },
   userAv: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   userAvText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   // Name + email both ALIGN LEFT (same left edge) and use writingDirection 'auto' so the Arabic name
@@ -1183,7 +1160,7 @@ const dks = StyleSheet.create({
   searchHint: { color: darkColors.muted },
   empty: { color: darkColors.muted },
   groupTitle: { color: darkColors.muted },
-  histRowActive: { backgroundColor: '#1f3a2c' },
+  histRowActive: { backgroundColor: darkColors.line },
   histRowOpen: { backgroundColor: '#1d2620' },
   histLabel: { color: darkColors.ink },
   histInput: { backgroundColor: darkColors.surface, borderColor: darkColors.primary },
