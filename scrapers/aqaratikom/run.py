@@ -466,6 +466,18 @@ def _video(estate: dict) -> Optional[str]:
 
 
 # ── Mapping ────────────────────────────────────────────────────────────────────
+def row_for(ad: dict, status: str, detail: Optional[dict]):
+    """map_listing for one ad of the first pass, or None when its OWN record said gone.
+
+    A terminal 404 on the ad's own record in this very run means it must never be written active
+    from the list summary (crawler audit 2026-10-02, scrapers/lifecycle-gaps.txt). Left out of the
+    seen set, prune_unseen's 3-strike guard ages it out; one reading hides nothing. "missing" (no
+    answer) is UNKNOWN and keeps the summary row, as before."""
+    if status == "gone":
+        return None
+    return map_listing(ad, detail)
+
+
 def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, bool]:
     """Combine the /ad summary with its /ad/<id> detail into a canonical row.
     Returns (row, category, sold) — `sold` feeds the post-upsert inactive pin in main."""
@@ -758,7 +770,7 @@ def main() -> int:
                 detail_stats[status] += 1
                 if status == "missing":
                     missed.append(ad)
-            return map_listing(ad, det)
+            return row_for(ad, status, det)
 
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
             for result in ex.map(work, ads):

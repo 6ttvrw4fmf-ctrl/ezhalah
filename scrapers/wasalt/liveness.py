@@ -854,8 +854,10 @@ def run_enum_strike(args) -> int:
           f"{' [DRY-RUN]' if args.dry_run else ''}", flush=True)
 
     # 2) STRIKE — descending missing_count so one run can never double-increment a row.
+    # --confirm-only skips it: a second run against the SAME enumeration must not strike again, or
+    # one missed enumeration would count as two (2026-10-02: an extra drain of 3,841 waiting rows).
     struck = {n: 0 for n in range(args.grace)}
-    for mc in range(args.grace - 1, -1, -1):
+    for mc in (() if getattr(args, "confirm_only", False) else range(args.grace - 1, -1, -1)):
         for tbl in TABLES:
             ids = _keyset_ids(tbl, mc=mc, before_iso=enum_start)
             struck[mc] += len(ids)
@@ -1224,6 +1226,10 @@ def main() -> int:
                     help="ENUM-STRIKE control guard: required live fraction among decided controls.")
     ap.add_argument("--dry-run", action="store_true",
                     help="ENUM-STRIKE: print what would be struck/verified; write NOTHING.")
+    ap.add_argument("--confirm-only", action="store_true",
+                    help="ENUM-STRIKE: skip the strike step and only page-confirm rows already at "
+                         "grace. For an extra drain between enumerations: re-striking against the "
+                         "same enumeration would count one missed enumeration twice.")
     args = ap.parse_args()
     if args.mode == "pilot" and not args.limit:
         args.limit = 800

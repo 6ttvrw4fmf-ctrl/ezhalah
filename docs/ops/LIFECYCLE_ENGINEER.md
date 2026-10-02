@@ -232,10 +232,16 @@ Recompute every Sunday, and the day a website is added:
   backlog, biggest site first:** close the hole in the crawler, prove it with a test, then add the
   name to `SOURCE_LIST_DAILY` with a registry reseed. Never add a name without closing its hole.
 - **The holes that leave dead ads up today, fix these first:**
-  - ten sites have **no removal step at all** (their crawler never calls `prune_unseen`):
-    sadiqeltajer (1,540 ads, 24 unseen for 3+ days), ksaaqar (1,346, 10 unseen), remal, wslnaa,
-    gudai, aqarnajran, safera, fahadalshahri, shmoualshmal, alhumaidan. `mark_stale_listings_inactive`
-    is report-only, so nothing hides them.
+  - eight sites have **no removal step at all** (their crawler never calls `prune_unseen`):
+    remal, wslnaa, gudai, aqarnajran, safera, fahadalshahri, shmoualshmal, alhumaidan.
+    `mark_stale_listings_inactive` is report-only, so nothing hides them. **The pattern to copy is
+    sadiqeltajer and ksaaqar (fixed 2026-10-02):** measure what a removed ad's OWN page answers
+    (open the ads the crawl stopped seeing AND as many live ones; a word on both is furniture), write
+    that as `_signal`, wrap it in `_make_verify_gone(control)`, hand it to `prune_unseen`, skip the
+    prune on a partial walk, and add the site to `fleet_liveness.SITES` in shadow. What they found:
+    sadiqeltajer keeps a closed ad's page and swaps its call button for «غير متاح» (23 of 24 unseen
+    ads were really gone); ksaaqar 404s (1 of 14 unseen ads was gone, 13 were still up and stay up).
+    **«Unseen is not dead» (owner, 2026-10-02): only the ad's own page removes it.**
   - abralosol (2,788), arkaan (1,818), aqaratikom: the row is written as active even when the ad's
     own page answered 404/410 in that same run.
   - eastabha: the sold filter reads only the first status term (2 sold ads active on 2026-10-02).
@@ -247,6 +253,47 @@ Recompute every Sunday, and the day a website is added:
   `SOURCE_LIST_DAILY` that night and say so.
 - **An active row with no stamp for 48 h on an admitted site** is an ad its list stopped serving.
   That is your candidate list for "why is this still up".
+
+### One PR per run, landed once, and always a report (learned 2026-10-02)
+On 2026-10-02 the owner asked for an extra run to judge you by. The work was good: the hand-off was
+followed in order, every fix was measured and mutation-tested, and you found two things nobody had
+(1,932 dealapp ads hidden by hand with no page reading; 3,841 wasalt ads waiting at 3 strikes). But
+**nothing landed and no report was written for over an hour**, because the run opened nine PRs:
+
+- **All of a run's fixes go on ONE branch and ONE PR** (one commit per fix, each with its test).
+  Branch protection requires a PR to be up to date, so every merge to `main` sends every other open
+  PR back through CI; with nine PRs and saturated runners, that never converges.
+- **If several green PRs are waiting (yours or a helper's), make a train:** merge those branches,
+  unchanged, into one branch off `main`, open one PR, and land it with a **merge commit** so each
+  PR is recorded as merged by its own commits. Resolve only textual conflicts (two lists that both
+  grew); leave out any branch that conflicts in logic and say so.
+- **Never press update-branch on more than one PR at a time.** Updating all of them re-queues every
+  check for all of them.
+- **The report is written when your time budget ends, whether or not CI has finished.** List what
+  is merged, and separately what is "built, tested, waiting for CI" with its PR number. A run that
+  ends with no report is the worst outcome: the owner cannot tell good work from none.
+
+### Four more lessons from the 2026-10-02 extra run (read your own report against the database)
+- **Look for the evidence before you call a hide unevidenced.** You told the owner that 1,932
+  Deal App ads were hidden «by one SQL statement with no page reading». All 1,822 rows of that
+  statement had a `GONE` row in `ops_stale_inactivation_probe` written BEFORE the hide (oracle
+  `dealapp.crawl_fresh_render_no_listing.bracketed.ci`, probed 09-29 → 10-02 02:35 UTC: a fresh
+  render of dealapp's own no-listing page, bracketed by live ads on the same runner), and the 16
+  «proven alive in 48 h» were each read alive first and gone afterwards. The check, every time:
+  `select count(*) filter (where p.probed_at <= x.deactivated_at) from <table> x join
+  ops_stale_inactivation_probe p on p.source_table = '<table>' and p.listing_id = x.id and
+  p.verdict = 'GONE' where x.deactivated_at = '<the batch timestamp>'`. A false alarm in the
+  report costs the owner more than a missed one.
+- **A fix is «fixed» only when its first production run moves the number.** #5616 was counted in
+  «Bugs fixed: 8» while its first run was still going; it finished `recovered=0 sold=0
+  unknown=3548 of checked=3548`. dealapp-recover is still a green job that does nothing (the ads it
+  reads are dealapp's cached wall). In the report use two lists: «fixed, first run proves it» and
+  «built, first run pending», and open the next run by reading those first runs.
+- **Write the report once, then stop.** After the report block the only thing you may write is a
+  `lifecycle:followup` row. On 2026-10-02 the block was written twice, 20 minutes apart.
+- **Your container runs Python 3.11; CI runs 3.13.** A test file that fails to import here was not
+  run by you: say which files, never call the error «unrelated» and move on. (The one such file,
+  from #5608, was rewritten on 2026-10-02 so it imports on 3.11.)
 
 ### What the owner hears from you (owner, 2026-10-02)
 > «The lifecycle should report any issues, fix it, and give me an overall report … it should never
@@ -491,10 +538,28 @@ or rewrite another engineer's work, and never start a big change in another engi
 8. **Watch the proxy bill.** The daily all-listings Wasalt check alone was 60–80% of proxy bandwidth.
    Before any change that would raise proxy use by more than ~20%, stop and put it under "Needs from
    you". That is a money decision.
-9. **No migrations.** Your fixes are code, and code goes through git first. Your only database
-   writes are:
+9. **No migrations, with ONE exception.** Your fixes are code, and code goes through git first.
+   Your only database writes are:
    - turning a site's deletion on or off through `set_platform_retention()` (never a raw `update`);
-   - your own run log (`ops_daily_engineer_run`).
+   - your own run log (`ops_daily_engineer_run`);
+   - **the liveness-registry reseed**, the one migration that moves a site between tiers. Nothing
+     else can promote a site, and the owner pre-approved promotion on 2026-09-28 («promoting a site
+     from shadow to live after a clean shadow run»); on 2026-10-02 you reported that this rule
+     stopped you from doing it. Use it only to: promote a site into `FLEET_DAILY_DIRECT` after its
+     shadow run was read and found right; admit a site to `SOURCE_LIST_DAILY` after its hole is
+     closed and one clean crawl; re-tier a site that gained an oracle to `CANDIDATE_PLUS_DIRECT`.
+     How, in this order:
+     1. edit `scrapers/common/liveness_policies.py` and regenerate `sql/mirrors/liveness_registry.json`;
+     2. write the migration in the exact shape of
+        `supabase/migrations/20261002133111_fleet_daily_direct_revisit_for_tuba.sql` (full upsert of
+        every platform + `delete … where platform not in (…)`), nothing else in the file;
+     3. prove it changes ONLY the sites you are moving: production's registry must equal the mirror
+        on `main` before you start (compare an md5 of `platform|strategy|sla_hours|grace`);
+     4. apply it BEFORE you push the PR (the live barrier compares production's tier to the
+        committed mirror), then mirror the file byte-exact (`md5(array_to_string(statements,''))`);
+     5. run `verify-liveness-registry-mirror.ts` and `verify-liveness-claims-are-earned.ts`.
+   Every other schema, function or detector change is still not yours to apply: put the exact SQL
+   you propose in the report and in a `lifecycle:followup` row, so it is done the same day.
 10. **Safe shipping only.**
     - Work on a fresh branch off `origin/main` and open the PR yourself.
     - Merge only with `NODE_USE_ENV_PROXY=1 node --experimental-strip-types scripts/safe-pr-merge.ts <PR>`
@@ -611,6 +676,14 @@ or rewrite another engineer's work, and never start a big change in another engi
 - A check that is red on main blocks every safe merge, yours included. Look for an open PR that
   fixes it and merge it once it is green; don't leave your own fix waiting behind it (PR #5529
   waited for hours behind a PII pin that PR #5259 already fixed).
+- A checker's own DB-retry helper must retry what `db._execute` retries. aqar liveness retried only
+  57014, so one dropped HTTP/2 connection killed a whole shard (2026-09-30, 2026-10-02).
+- A recovery job must read pages with the same oracle the hiding job uses. dealapp-recover read
+  100% UNKNOWN for five weeks (its own fetch got shells), so it could never bring a live ad back.
+- A hand-written hide that also sets `missing_count = 3` is invisible to
+  `mon_unverified_inactivations_24h` and to `auto_recover_false_inactive()`. Dealapp, 2026-10-02
+  11:30 UTC: 1,932 ads hidden in one statement with no page reading. Group each night's hides by
+  exact `deactivated_at`; a big batch no liveness run reports is a bug.
 - Before trusting "our servers read it wrong", open the same ads from a second network. On
   2026-10-02 the Gathern 404s that looked like a block were real.
 

@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://ksaaqar.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -487,8 +488,51 @@ def _get(s: cc.Session, url: str, attempts: int = LIST_ATTEMPTS) -> Optional[Any
     return None
 
 
+# Why a REST walk may not be the whole catalogue. Non-empty → no prune this run.
+INCOMPLETE: list[str] = []
+
+# ── REMOVAL (measured 2026-10-02; the signals are the ones registered on 2026-09-19). Until then
+# this crawler had NO removal step at all: a deleted ad stayed active here for good.
+#
+# ksaaqar hard-404s an ad it no longer serves: of 14 active rows the crawl had stopped seeing, 1
+# answered 404 (as does a slug that never existed) and 13 answered 200 still rendering their spec
+# block — ads the crawler now skips, which are NOT gone and must not be hidden as if they were.
+# 10 of 10 random live ads rendered «النوع». A 200 without it, and every block, is UNKNOWN.
+_SPEC_LABEL = "النوع"
+RES_TABLE, COM_TABLE = "ksaaqar_residential_listings", "ksaaqar_commercial_listings"
+
+
+def _signal(status, body, moved) -> Optional[str]:
+    """'live' | 'gone' | None — only what this ad's own URL affirmatively answers."""
+    if status in (404, 410):
+        return "gone"
+    if status != 200 or moved:
+        return None
+    return "live" if _SPEC_LABEL in _txt(body) else None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for db.prune_unseen and for the daily direct check. A 404 is believed
+    only while a known-live ad from this run (`control`) still reads live through the same session."""
+    url_for = stored_listing_url((RES_TABLE, COM_TABLE))
+    s = session()
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform="ksaaqar", signal=_signal, session=lambda: s,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def fetch_listings(s: cc.Session, limit: int = 0) -> list[dict]:
     """Every ad_post via REST. Pages until a short page, so the catalogue size is the source's."""
+    INCOMPLETE.clear()
     out: list[dict] = []
     for page in range(1, 60):
         r = _get(s, f"{REST}/ad_post?per_page=100&page={page}"
@@ -496,10 +540,14 @@ def fetch_listings(s: cc.Session, limit: int = 0) -> list[dict]:
         if r is None:
             if page == 1:
                 return []
+            # WordPress answers HTTP 400 past the last page; anything else cut the walk short.
+            if not LAST_FETCH_NOTE.startswith("HTTP 400"):
+                INCOMPLETE.append(f"page {page}: {LAST_FETCH_NOTE}")
             break
         try:
             batch = r.json()
         except Exception:
+            INCOMPLETE.append(f"page {page}: body was not JSON")
             break
         if not isinstance(batch, list) or not batch:
             break
@@ -693,9 +741,26 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
+        # REMOVAL. An ad missing from this run is only a CANDIDATE: at three misses its own URL is
+        # re-read, and it is hidden only on a 404 (_signal). An ad that still renders heals the row
+        # — including one the crawler skips on purpose, which is not gone. No prune on a partial
+        # walk or a single-vertical run.
+        pruned = 0
+        if INCOMPLETE:
+            print(f"  ⚠ REST walk incomplete — no prune: {'; '.join(INCOMPLETE)}")
+        elif args.type == "all" and not args.limit:
+            verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+            for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                k = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=verify_gone)
+                if k < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += k
+
         n = len(res) + len(com)
         healthy = db.end_run(run_id, ok=True, rows_seen=len(posts), rows_upserted=n,
-                             notes=f"skipped: {skip_notes or 'none'}"[:300],
+                             notes=f"pruned={pruned} skipped: {skip_notes or 'none'}"[:300],
                              check_tables=["ksaaqar_residential_listings",
                                            "ksaaqar_commercial_listings"])
         if not healthy:

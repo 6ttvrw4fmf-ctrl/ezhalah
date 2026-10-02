@@ -452,9 +452,24 @@ def _images(body: Optional[str]) -> list[str]:
     return out[:25]
 
 
-def map_listing(p: dict, body: Optional[str]) -> tuple[Optional[dict], str, bool]:
+def sold_state(body: Optional[str], post_id: Any) -> Optional[bool]:
+    """True = sold, False = on offer, None = NOT READ. The sold flag lives only on the ad's own page,
+    as the `is-sold` class of its own listing element (`post-<id>`); the REST feed never carries it.
+
+    Measured 2026-10-02 on 75 detail pages: every page has exactly one such element and it is the
+    ad's own; `is-sold` is on 24 of 24 hidden ads and appears nowhere at all on 51 of 51 live ones.
+    An unfetched page, or one without that element, says nothing — and nothing is never "on offer"."""
+    for cls in CLASS_LIST_RE.findall(body or ""):
+        tokens = cls.split()
+        if not post_id or f"post-{post_id}" in tokens:
+            return "is-sold" in tokens
+    return None
+
+
+def map_listing(p: dict, body: Optional[str]) -> tuple[Optional[dict], str, Optional[bool]]:
     """Combine the REST post `p` with its detail-page `body` (images + sold flag) into a canonical
-    row. Returns (row, category, gone)."""
+    row. Returns (row, category, gone); gone is None when the page's sold flag could not be read —
+    main() must not upsert such a row (see sold_state)."""
     title_raw = _clean((p.get("title") or {}).get("rendered", ""))
     content = _clean((p.get("content") or {}).get("rendered", ""))
     link = p.get("link")
@@ -543,11 +558,8 @@ def map_listing(p: dict, body: Optional[str]) -> tuple[Optional[dict], str, bool
     title = _redact(title_raw) or title_raw
     description = _redact(content)
 
-    # sold detection: the detail page's listing-item element carries an `is-sold` class.
-    gone = False
-    if body:
-        m = CLASS_LIST_RE.search(body)
-        gone = bool(m and "is-sold" in m.group(1))
+    # sold detection: the detail page's own listing-item element carries an `is-sold` class.
+    gone = sold_state(body, p.get("id"))
 
     # deterministic, globally-unique ad number (md5 of slug/id) — stable across runs, upserts on it.
     key = _slug_or_id(p)
@@ -569,7 +581,7 @@ def map_listing(p: dict, body: Optional[str]) -> tuple[Optional[dict], str, bool
         "ad_number": f"AWL{ad_id}",
         "listing_url": link,
         "source": "Awal",
-        "active": not gone,
+        "active": None if gone is None else not gone,   # None = unread; main() never upserts it
         "property_type": property_type,
         "transaction_type": "Rent" if is_rent else "Buy",
         "area_m2": int(round(area)) if area else None,
@@ -638,6 +650,11 @@ def main() -> int:
     sold_com: list[str] = []
     gone_ct = 0
     seen = 0
+    # In the feed, but the ad's own page (the only place the sold flag lives) was not read this run.
+    # Until 2026-10-02 such a row was upserted active=True, which un-hid a pinned SOLD ad on one
+    # failed fetch. Now it is not written at all; it still counts as present for prune, because the
+    # feed did list it and an unread page is our failure, not the ad's absence.
+    unread: dict[str, set[str]] = {"residential": set(), "commercial": set()}
     try:
         diag: dict = {}
         s = negotiate_list_session(diag, proxies=_proxies())
@@ -676,6 +693,9 @@ def main() -> int:
             if gone:
                 gone_ct += 1
             if args.type != "all" and cat != args.type:
+                continue
+            if gone is None:
+                unread[cat].add(row["ad_number"])
                 continue
             (com if cat == "commercial" else res).append(row)
             if gone:
@@ -721,17 +741,19 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
-        for tbl, rows_seen in (("awal_residential_listings", res),
-                               ("awal_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Awal")
+        for tbl, rows_seen, cat in (("awal_residential_listings", res, "residential"),
+                                    ("awal_commercial_listings", com, "commercial")):
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen} | unread[cat], source="Awal")
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:
                 pruned += n
+        n_unread = len(unread["residential"]) + len(unread["commercial"])
         print(f"✓ Awal: {len(res)} residential + {len(com)} commercial upserted, "
-              f"{gone_ct} sold (inactive), {pruned} stale pruned")
+              f"{gone_ct} sold (inactive), {n_unread} sold-flag unread (not written), "
+              f"{pruned} stale pruned")
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen,
-                   notes=f"sold={gone_ct} pruned={pruned}", check_tables=["awal_residential_listings", "awal_commercial_listings"])
+                   notes=f"sold={gone_ct} pruned={pruned} status_unread={n_unread}", check_tables=["awal_residential_listings", "awal_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

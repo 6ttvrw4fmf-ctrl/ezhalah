@@ -207,9 +207,13 @@ POLICIES: dict[str, _P] = {
         "validated live 2026-09-19, /ads/this-slug-never-existed-zzz99 answered HTTP **200** with "
         "3,892 bytes and no «كود الاعلان», while a real ad answered 200 with 233,232 bytes and the "
         "code present. A policy keyed on 404 would therefore NEVER retire anything here and sold "
-        "listings would stay up forever. So: 200 WITH «كود الاعلان» is LIVE; 200 WITHOUT it is "
-        "GONE; a 404, any 401/403/408/429/5xx, a transport failure and an unlookupable row are all "
-        "UNKNOWN and hold the strike without deactivating.",
+        "listings would stay up forever. CORRECTED 2026-10-02, measured on 24 ads the sitemap had "
+        "dropped: the office KEEPS a closed ad's page, code and all, and replaces its call button "
+        "with «غير متاح» (10 of 10 dropped ads; 0 of 12 live ads; «منتهي» is on every page). So, "
+        "reading only the ad's own part of the page: the call button AND the code AND no «غير متاح» "
+        "is LIVE; no call button with «غير متاح», or the «غير موجود» shell without a code, is GONE; "
+        "a 404, any 401/403/408/429/5xx, a transport failure, an unlookupable row and every other "
+        "200 are UNKNOWN and hold the strike without deactivating.",
         "Absence from the crawl only SELECTS candidates; the direct confirm above decides. The "
         "asymmetry with ksaaqar is the point — the death signal was measured per platform, not "
         "assumed from the sibling."),
@@ -1399,6 +1403,27 @@ for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
                       "Daily direct revisit of every active listing (fleet_liveness.py, 2026-09-28). "
                       + POLICIES[_p]["note"])
+
+
+# remal and shmoualshmal gained a prune-time oracle on the ad's OWN url on 2026-10-02 (until then
+# neither crawler removed anything), so "absence only" no longer describes them. Tier unchanged.
+for _p, _sig in (
+    ("remal", "the ad's OWN url answering 404/410. Measured 2026-10-02: a never-existed slug, a "
+              "wrong post id and the REST record all answer 404, while 12 of 12 live ads answer "
+              "200 on their own path with the single-estate postid body class (LIVE). No removed "
+              "ad existed to measure, so nothing but a hard 404/410 is read as gone: a redirect, a "
+              "block, a 5xx and every other 200 are UNKNOWN, and a removal is believed only while "
+              "an in-run known-live control still reads live"),
+    ("shmoualshmal", "the ad's OWN url answering 404/410. Measured 2026-10-02: a never-existed "
+                     "slug, a wrong post id and the REST record all answer 404, while 6 of 6 live "
+                     "ads answer 200 with the single-property postid body class (LIVE). No removed "
+                     "ad existed to measure, so nothing but a hard 404/410 is read as gone: a "
+                     "redirect, a block, a 5xx and every other 200 are UNKNOWN, and a removal is "
+                     "believed only while an in-run known-live control still reads live"),
+):
+    POLICIES[_p] = _P(POLICIES[_p]["policy"], POLICIES[_p]["strategy"], _sig,
+                      "Removal is confirmed on the ad's own url at prune time (2026-10-02); the full "
+                      "feed is re-read each run and absence only selects candidates.")
 
 
 # THE SITE'S OWN FULL LIST IS THE CHECK (owner, 2026-10-02: «yes do that for all 60 sites … check

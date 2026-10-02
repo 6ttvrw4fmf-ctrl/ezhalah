@@ -309,6 +309,7 @@ def main() -> int:
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
+    held: set[str] = set()      # units of a project whose own is_active is not True — see below
     seen_projects = 0
     try:
         for u in urls:
@@ -339,11 +340,25 @@ def main() -> int:
                 if not row["ad_number"].strip(PREFIX):
                     skipped["no_unit_id"] = skipped.get("no_unit_id", 0) + 1
                     continue
+                if proj.get("is_active") is not True:
+                    # The PROJECT's own flag (crawler audit 2026-10-02). Measured on 72 of the 100
+                    # sitemap projects: is_active is true on all 72, so true is the one value known
+                    # to mean "on the market". false / missing has never been observed and nobody
+                    # can say what it means, so the unit is HELD: not written (never re-asserted
+                    # alive), kept in the prune's seen-set (never aged out on an unread value), and
+                    # counted below for a human to classify.
+                    k = f"held_project_is_active_{proj.get('is_active')!r}"
+                    skipped[k] = skipped.get(k, 0) + 1
+                    held.add(row["ad_number"])
+                    continue
                 (com if cat == "commercial" else res).append(row)
 
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)
+        if held and not (res or com):
+            # fail closed: no project states is_active=true → the flag is unreadable → write nothing.
+            raise RuntimeError(f"no project carries is_active=true — status unreadable: {skipped}")
         if dry:
             print(f"DRY: {len(res)} residential + {len(com)} commercial from {seen_projects} projects")
             for row in (res[:3] + com[:1]):
@@ -363,13 +378,14 @@ def main() -> int:
         for tbl, rows in (("wahadat_residential_listings", res),
                           ("wahadat_commercial_listings", com)):
             if rows:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows} | held, source=SOURCE)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
         healthy = db.end_run(run_id, ok=True, rows_seen=seen_projects,
                              rows_upserted=len(res) + len(com),
+                             notes=f"held_project_not_active={len(held)}" if held else None,
                              check_tables=["wahadat_residential_listings", "wahadat_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()", flush=True)

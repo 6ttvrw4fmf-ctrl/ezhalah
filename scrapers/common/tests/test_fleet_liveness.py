@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import types
+
 import pytest
 
 import scrapers.common.fleet_liveness as F
@@ -227,6 +229,43 @@ def test_every_site_that_writes_is_declared_daily_direct_and_nothing_else_writes
     for p in F.APPLY:
         assert LP.strategy_for(p) == LP.DIRECT_REVISIT, p
         assert LP.policy_for(p).max_verification_age_hours == 48 and LP.policy_for(p).grace == 3, p
+
+
+def test_a_row_its_crawl_proved_alive_today_is_covered_not_reread(site):
+    # dwelleo, 2026-09-29: its crawl reads every ad's own record daily (11k), the fleet check reached
+    # 30% in its budget re-reading them. A fresh direct proof counts; a strike or a stale proof does not.
+    def v(r, hours):
+        return dict(r, last_verified_alive_at=(NOW - timedelta(hours=hours)).isoformat())
+    rows = [v(_row(1), 2), v(_row(2, mc=1), 2), v(_row(3), F.FRESH_HOURS + 6), _row(4)]
+    seen = []
+    site(rows + _controls(), lambda ad, n: seen.append(ad) or "live")
+    st = F.run_site("testsite", shadow=True)
+    assert "A1" not in seen and {"A2", "A3", "A4"} <= set(seen)
+    assert st["fresh"] >= 1 and st["covered"] == 100.0
+
+
+def test_a_quarantine_says_why_the_controls_failed(site):
+    site([_row(1)] + _controls(), lambda ad, n: "unknown")
+    st = F.run_site("testsite", shadow=True)
+    assert "test says unknown" in st["quarantined"]
+def test_pace_is_a_rate_not_a_pause_added_to_every_read(site, monkeypatch):
+    """At most one read per PACE_S. A read slower than PACE_S waits for nothing; a fast one waits only
+    the rest of its second (2026-09-29: rakez's 1.42 s/read was 0.42 s of reading + 1 s of sleep)."""
+    clock = {"t": 0.0}
+    slept = []
+    monkeypatch.setattr(F, "time", types.SimpleNamespace(
+        monotonic=lambda: clock["t"],
+        sleep=lambda s: (slept.append(round(s, 3)), clock.__setitem__("t", clock["t"] + s))))
+    durations = iter([2.0, 0.25] + [0.0] * 100)
+
+    def answers(ad, n):
+        if n > 5:      # the 5 opening controls are not paced
+            clock["t"] += next(durations)
+        return "live"
+    site(_controls() + [_row(1), _row(2), _row(3)], answers)
+    monkeypatch.setattr(F, "PACE_S", 1.0)
+    F.run_site("testsite", shadow=True)
+    assert slept[:3] == [0.0, 0.0, 0.75], slept
 
 
 def test_a_run_cut_short_keeps_the_live_stamps_it_already_earned(site, monkeypatch):
