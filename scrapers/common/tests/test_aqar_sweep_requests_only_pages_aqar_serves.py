@@ -44,8 +44,9 @@ sys.modules.setdefault("dotenv", _dotenv_mod)
 import scrapers.aqar.discover as D  # noqa: E402
 from scrapers.common.emptiness import SliceOutcome, run_may_allow_empty  # noqa: E402
 
-# Category slugs aqar answers with a non-200 (measured from CI, see module docstring).
-NOT_SERVED_BY_AQAR = {"شاليه-للبيع"}
+# Category slugs aqar answers with a non-200 (measured from CI, see module docstring). «مزارع-للبيع»
+# (plural) is a 404 in every city (2026-10-02); aqar serves farm-for-sale as «مزرعة-للبيع».
+NOT_SERVED_BY_AQAR = {"شاليه-للبيع", "مزارع-للبيع"}
 
 # aqar's real empty-state page shape (same fixture as test_source_published_emptiness.py).
 _I18N = r'{\"not_found\":\"لا توجد نتائج\"}'
@@ -70,7 +71,8 @@ def _residential_sweep_slices():
 
 
 def test_sweep_never_requests_a_category_aqar_does_not_serve():
-    requested = {D.CATEGORIES[s] for s in _residential_sweep_slices()}
+    commercial = [(t, d) for t in D.COMMERCIAL_TYPES for d in ("rent", "buy") if (t, d) in D.CATEGORIES]
+    requested = {D.CATEGORIES[s] for s in _residential_sweep_slices() + commercial}
     assert not (requested & NOT_SERVED_BY_AQAR), requested & NOT_SERVED_BY_AQAR
 
 

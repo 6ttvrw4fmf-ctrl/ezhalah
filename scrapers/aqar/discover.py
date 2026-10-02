@@ -59,7 +59,10 @@ CATEGORIES = {
     ("health_center",       "rent"): "مستشفيات-ومراكز-صحية-للإيجار",
     ("health_center",       "buy"):  "مستشفيات-ومراكز-صحية-للبيع",
     ("farm",                "rent"): "مزارع-للإيجار",
-    ("farm",                "buy"):  "مزارع-للبيع",
+    # «مزرعة-للبيع», SINGULAR — aqar answers the plural «مزارع-للبيع» with a 404 in every city (measured
+    # 2026-10-02, all 95 + national), so farm-for-sale had never been read: 0 rows ever held, while
+    # aqar publishes 844 (3/3 sampled live, priced, status 0). Rent is still the plural.
+    ("farm",                "buy"):  "مزرعة-للبيع",
     ("commercial_building", "rent"): "مجمعات-للإيجار",
     ("commercial_building", "buy"):  "مجمعات-للبيع",
     # ── Niche commercial categories (Aqar's own menu slugs) ──
