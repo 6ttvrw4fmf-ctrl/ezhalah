@@ -31,6 +31,7 @@ from scrapers.aqar import discover as D
 from scrapers.aqar.enrich_residential import enrich_residential  # generic page enricher (shared)
 from scrapers.aqar.paced_fill import PacedFill, run_key
 from scrapers.common import db
+from scrapers.aqar.price_tally import PriceTally
 from scrapers.common.emptiness import SliceOutcome, run_may_allow_empty
 
 
@@ -38,7 +39,8 @@ WORKERS = int(os.environ.get("SCRAPE_WORKERS", "6"))
 
 
 def scrape_slice(type_key: str, deal_key: str, city_key: str, *, max_pages: int, start_page: int = 1,
-                 max_listings: int, fill: Optional[PacedFill] = None) -> tuple[int, int, Optional[SliceOutcome]]:
+                 max_listings: int, fill: Optional[PacedFill] = None,
+                 tally: Optional[PriceTally] = None) -> tuple[int, int, Optional[SliceOutcome]]:
     print(f"\n── {type_key.upper():<14} {deal_key.upper():<4} {city_key.upper():<8} "
           f"(pages {start_page}–{max_pages or 'last'}, limit≤{max_listings or 'none'}, workers={WORKERS})")
     outcome = SliceOutcome()
@@ -65,8 +67,11 @@ def scrape_slice(type_key: str, deal_key: str, city_key: str, *, max_pages: int,
                 counter["done"] += 1
                 print(f"   [{counter['done']}/{seen}] ✗ skipped — {url[-50:]}")
             return
+        kind = PriceTally.classify(row)      # before the write: the upsert rewrites the row
         try:
             db.upsert_aqar_commercial(row)
+            if tally is not None:
+                tally.add(kind)
             with lock:
                 counter["done"] += 1
                 counter["upserted"] += 1
@@ -105,6 +110,7 @@ def main() -> int:
     run_id = db.begin_run("aqar_commercial")
     fill = PacedFill("aqar_commercial_listings", new_budget=args.new_budget,
                      refresh_after_days=args.refresh_after_days, key=run_key("aqar_commercial"))
+    tally = PriceTally()   # the price-regression check on THIS run's own rows (price_tally.py)
     total_seen = 0
     total_upserted = 0
     outcomes: list[SliceOutcome] = []
@@ -116,14 +122,14 @@ def main() -> int:
                     if (t, d) not in D.CATEGORIES:
                         continue
                     s, u, o = scrape_slice(t, d, args.city, max_pages=args.pages, start_page=args.start_page,
-                                           max_listings=args.limit, fill=fill)
+                                           max_listings=args.limit, fill=fill, tally=tally)
                     total_seen += s
                     total_upserted += u
                     if o is not None:
                         outcomes.append(o)
         else:
             s, u, o = scrape_slice(args.type, args.deal, args.city, max_pages=args.pages,
-                                   start_page=args.start_page, max_listings=args.limit, fill=fill)
+                                   start_page=args.start_page, max_listings=args.limit, fill=fill, tally=tally)
             total_seen, total_upserted = s, u
             if o is not None:
                 outcomes.append(o)
@@ -152,8 +158,15 @@ def main() -> int:
             notes = ((notes + " | ") if notes else "") + f"city_filter_ignored={n_ignored}"
         if fill.notes():
             notes = ((notes + " | ") if notes else "") + fill.notes()
+        price_problems = tally.problems()
+        if tally.notes():
+            notes = ((notes + " | ") if notes else "") + tally.notes()
+        if price_problems:
+            print(f"✗ prices we could not read on this run's own rows: {', '.join(price_problems)}", flush=True)
+            notes = ((notes + " | ") if notes else "") + "price_unread_regression " + ", ".join(price_problems)
         healthy = db.end_run(run_id, ok=ok, rows_seen=total_seen, rows_upserted=total_upserted, notes=notes,
-                             allow_empty=allow_empty, check_tables=["aqar_commercial_listings"])
+                             allow_empty=allow_empty, degraded=bool(price_problems),
+                             price_null_checked_by_caller=True, check_tables=["aqar_commercial_listings"])
 
     print(f"\n📊 Done. {total_upserted}/{total_seen} upserted across all slices. (run_id={run_id})")
     if ok and not healthy:

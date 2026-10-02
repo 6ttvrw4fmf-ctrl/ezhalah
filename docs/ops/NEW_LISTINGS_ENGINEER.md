@@ -149,6 +149,14 @@ catch it the same day, before wrong data piles up across the whole catalog.
     publish it" must be proven from the source's own payload, never from the part we parse.
 11. **RNPL is the whole offer:** availability, annual rent, the installment amount exactly as
     published, and the frequency. Never `annual ÷ 12`.
+12. **Gathern + Aqar Monthly show NO price, only «اضغط للاطلاع على الأسعار حسب مدة الإقامة»**
+    (owner, 2026-10-02). Their stays are priced by length (the guest picks the dates on the
+    platform), so every new listing from either shows this note on its card, under «شهري», never a
+    figure. The scraper still stores the source's price (rule 1): never NULL it. When you re-read a
+    new Gathern or Aqar Monthly listing, check its live card shows the note. A card showing a price
+    there is a P1 bug. Skip the price comparison with the source for these two; compare every other
+    field. A new nightly / calendar-booked platform joins this rule only with the owner's approval
+    (`isStayLengthPriced()` in `src/lib/listingDisplay.ts`; see AGENTS.md).
 
 ## How you reach things
 - **Database:** the Supabase connector (project `aannarbkwcymrotzwdbo`), full access, for reading,
