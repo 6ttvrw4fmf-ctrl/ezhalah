@@ -459,7 +459,7 @@ Things that cost a previous run real time, and are NOT product defects:
    when the period scope includes Monthly (شهري or كلاهما, or combined deal). A "no non-AF key moved
    under a deal/period change" rule must assert that derivation, not equality — asserting equality
    reports a phantom regression on a correct production (`verify-af-scope-change-live.ts`
-   `tablesFollowPeriod`).
+   `tablesFollowPeriod` — that journey was retired 2026-10-03 with the Filter's carried answers; the lesson stands).
 10. **A CANCELLED GitHub job reports neither `success` nor `failure`, and `if: ${{ !cancelled() }}`
    skips every step behind it** (2026-09-03). That step guard exists so a FAILING step cannot hide
    the ones after it, and it does that well — but when the JOB is cancelled (its `timeout-minutes`

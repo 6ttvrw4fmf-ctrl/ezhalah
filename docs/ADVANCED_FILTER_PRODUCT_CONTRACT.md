@@ -334,9 +334,19 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 - **R6.3.1** — A new results turn lands with the narrowed count (e.g. 5,000 → 900).
 - **R6.3.2** — The PREVIOUS turn's action buttons are replaced by a read-only **receipt** of what
   was committed (e.g. "✓ عرض الشارع: ≥20م · عدد الحمامات: ≥3").
-- **R6.3.3** — Committed answers also appear as **removable pills** above the new turn (see §9).
+- **R6.3.3** — Committed answers also appear as **read-only chips** above the new turn, and are
+  listed in that turn's summary under «من الفلتر المتقدم» (see §9). (Owner 2026-10-03: removable
+  pills retired — no chip carries a ✕.)
 - **R6.3.4** — If the new turn still has >25 results AND a useful question remains, the offer
   button appears again — the user may run another round.
+- **R6.3.5** — **The reader stays in place** (owner 2026-10-03). When a round starts its search,
+  earlier turns are DIMMED, never hidden, so the thread keeps its height and nothing collapses
+  under the reader. The view eases down to the user's own answers bubble (the new loader is right
+  under it), and lands on the new turn when its results arrive. It never jumps to the top.
+- **R6.3.6** — **Going back to the Filter always opens a clean form** (owner 2026-10-03). A search
+  is never kept on the Filter screen and there is no «مسح الكل». Signed in, the last search lives
+  in the sidebar history; as a guest it is not saved. No committed AF answer is carried back to
+  the Filter. Enforced by `verify-clear-all-reset.ts` and `verify-af-state-never-leaks-into-filter.ts`.
 
 ### 6.4 Progressive narrowing example (Example E)
 
@@ -359,8 +369,10 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
   (after all normal filters + all previously-committed AF facts).
 - **R7.1.2** — The Continue button ("متابعة · N نتيجة") shows the count for the **current
   tentative selection**, before committing.
-- **R7.1.3** — The unknown-count caption ("X إعلان لم يذكر …") shows how many listings have no
-  value for the field — never rolled into any option's count.
+- **R7.1.3** — The unknown-count caption («😔 X إعلان لم يذكر هذه المعلومة») shows how many listings
+  have no value for the field — never rolled into any option's count. It leads with 😔 (owner
+  2026-10-03). It appears only where a TRUTHFUL count exists (age, furnished, direction today); a
+  question whose count the database cannot yet state shows nothing — never a guess, never 0.
 
 ### 7.2 Multi-select marginal vs combined
 
@@ -472,20 +484,25 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 
 ### 9.1 What pills show
 
-- **R9.1.1** — Every COMMITTED (not skipped) AF answer appears as a removable pill above the
-  newest results turn. The pill's label is the human-readable summary of the answer.
-- **R9.1.2** — Pills are cumulative across all rounds — a pill from Round 1 is still visible and
-  removable after Round 3.
+- **R9.1.1** — Every COMMITTED (not skipped) AF answer is listed in the newest results turn's
+  summary under «من الفلتر المتقدم», one line each, below the ORIGINAL «ملخص البحث» lines (type
+  group, deal and period, city, region — built from the query as it stood BEFORE the first round,
+  never overwritten by an answer). The same answers also appear as chips above the turn. (The separate
+  «بناءً على: …» sentence is gone: the summary says it once.)
+- **R9.1.2** — The list and the chips are cumulative across all rounds — an answer from Round 1 is
+  still shown after Round 3 (the summary is rebuilt from the original query plus ALL committed
+  facets each time).
 
-### 9.2 Removing a pill
+### 9.2 Pills are read-only (owner 2026-10-03: «we should not show any X button on this»)
 
-- **R9.2.1** — Tapping a pill's ✕ removes ONLY that one committed predicate. Every other
-  committed answer stays.
-- **R9.2.2** — The search re-runs without that predicate. The result count may WIDEN. A new
-  results turn lands below with the new count. Nothing above is rewritten.
-- **R9.2.3** — The removed question becomes eligible to be asked again in a future round — it is
-  DROPPED from the `asked` carry. Removing a pill must not permanently "burn" that question.
-- **R9.2.4** — Enforced by `verify-af-cross-round-carry.ts` (the pill-removal + asked-drop check).
+- **R9.2.1** — No pill carries a ✕ or any press handler, in the transcript row or in the round card
+  (where the pills stand above the scrim, per #155). There is no removal path.
+- **R9.2.2** — A committed answer is changed only by going Back inside the round, never from the
+  results. The carried `asked` set therefore only ever grows.
+- **R9.2.3** — *(retired)* The 2026-08 rules that removed a pill and dropped its question from the
+  `asked` carry no longer apply: nothing removes a pill.
+- **R9.2.4** — Enforced by `verify-af-committed-pills-are-never-covered.ts` and
+  `verify-af-cross-round-carry.ts`.
 
 ### 9.3 What pills are NOT
 

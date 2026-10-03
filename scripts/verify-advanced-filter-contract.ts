@@ -414,14 +414,14 @@ check('the results pills are fed by the deduped facet set (one label per committ
   /const dedupedFacets = dedupeFacetsByLabel\(/.test(agentSrc)
   && /facets: dedupedFacets,/.test(agentSrc));
 
-// ── Results summary + removable pills (owner 2026-08-16 §10) ────────────────────────────────────
-// Removal is PURE recomputation — rebuild from the interview's baseQ by re-applying the remaining
-// facets through each question's own apply(), never a hand-written inverse per question id.
-check('removable pills rebuild the query from baseQ via the questions’ own apply()',
-  /removeGuidedFacet/.test(agentSrc)
-  && /for \(const f of remaining\)/.test(agentSrc)
-  && /question\.apply\(q, f\.keys\)/.test(agentSrc)
-  && /buildAfSummary\(guidedPills\.facets\)/.test(agentSrc));
+// ── Results summary + READ-ONLY pills (owner 2026-10-03; supersedes the 2026-08-16 §10 removable pills) ─
+// The turn's summary is the ORIGINAL summary (built from baseQ, the query before the first round) plus
+// every committed answer under «من الفلتر المتقدم», rebuilt from baseQ + ALL facets each time. The
+// chips below the intro stay, but nothing on them removes anything: no ✕, no handler, no rebuild path.
+check('a guided round’s summary is the original summary plus every committed answer',
+  /guidedSearchSummary\(opts\.guided\.baseQ, opts\.guided\.facets\)/.test(agentSrc));
+check('the pills are read-only: removeGuidedFacet is gone and no pill takes a press',
+  !/removeGuidedFacet/.test(agentSrc) && !/<Pressable[^>]*af-pill/.test(agentSrc));
 
 // ── Count RPCs must never receive p_sort_by (bug-hunt 2026-07-30) ────────────────────────────────
 // PostgREST resolves RPCs by exact param-name match; leaking p_sort_by 404s BOTH counts calls the

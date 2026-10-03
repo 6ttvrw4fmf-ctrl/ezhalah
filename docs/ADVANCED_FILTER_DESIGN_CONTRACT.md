@@ -283,10 +283,16 @@ narrowing the market for them, not forcing them to fill another form.» Everythi
   beat plays over the final search: fragments drift inward, copy uses REAL numbers («نراجع N عقار
   ونطلع لك الأنسب» → «لقينا N عقار أقرب لطلبك»), minimum ~1.4 s, dismissed by setTimeout latches
   with a 15 s failsafe + a catch on the search itself. Skip-everything closes with no beat.
-- **Results summary + removable pills.** The guided results turn shows «بناءً على: …» and each
-  committed answer as a removable pill. Removal is PURE recomputation: rebuild from the interview's
-  baseQ by re-applying the remaining facets through each question's own `apply()` — never a
-  hand-written inverse — then re-search immediately (no mining beat on removal).
+- **Results summary + read-only chips** *(amended 2026-10-03, owner: «we should not show any X
+  button on this»)*. The guided results turn's «ملخص البحث» is the ORIGINAL summary (built from the
+  query before the first round) followed by «من الفلتر المتقدم» and one bullet per committed answer,
+  cumulative across rounds. Each answer is also a plain chip — no ✕, no press, in the transcript or
+  in the round card. Nothing removes an answer from the results; it is changed only by Back inside the
+  round. The earlier «بناءً على: …» sentence and removable pills are retired.
+- **The reader stays in place** *(2026-10-03)*. Earlier turns are dimmed while a search loads, never
+  hidden, so the thread keeps its height; the view eases to the user's own answers bubble and lands on
+  the new turn — never to the top. Going back to the Filter always opens a clean form.
+- **The «didn't mention this» line** *(2026-10-03)* leads with 😔: «😔 N إعلان لم يذكر هذه المعلومة».
 
 
 ## Amendment 2026-08-22 (a) — the narrowing gate (owner-approved, supersedes the 8%-90% option band)
