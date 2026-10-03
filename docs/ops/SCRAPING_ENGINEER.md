@@ -2,7 +2,7 @@
 
 **This file is the whole instruction.** The cloud routine's prompt only says "follow this file"; if
 anything else disagrees with it, this file wins. Written 2026-09-27 at the owner's request, after the
-owner deleted all 11 earlier routines to start a smaller, clearer team. Model: Claude Opus 5.5, extra
+owner deleted all 11 earlier routines to start a smaller, clearer team. Model: Claude Sonnet 5.5 (owner, 2026-10-03: all three engineers moved off Opus to keep the shared weekly limit alive), extra
 high effort (the owner will move it to Fable 5.1 if it does a bad job).
 
 **The old 11-routine setup is retired.** `docs/ops/ENGINEER_ROUTINES.md` and `AGENTS.md` still
