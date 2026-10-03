@@ -536,6 +536,13 @@ def main() -> None:
                             killed += 1
                         else:
                             pending_kill += 1
+                        # EVIDENCE BEFORE THE HIDE. The ledger row lands before the row changes, so
+                        # a shard that dies on a later statement leaves no hide without its reason.
+                        # 2026-10-02 01:07 UTC: aqar_residential shard 7 hid 66 rows, then died on
+                        # a dropped connection with those 66 kill rows still buffered — evidence
+                        # written AFTER the hide is evidence written never. Same end state when
+                        # nothing fails; only the order of two writes differs.
+                        _flush_detail()
                         _run_with_retry(lambda u=upd, i=row["id"]:
                                         client.table(table).update(u).eq("id", i).execute())
                 elif r is not None and status == 200:
@@ -612,6 +619,13 @@ def main() -> None:
         pass
     except KeyboardInterrupt:
         print("\nInterrupted — finalizing run row.")
+    finally:
+        # Flush the remaining per-row evidence (transient / unknown / report-only readings; every
+        # applied strike or kill already flushed before its own write). A `finally` so the trail is
+        # durable for a shard that ended on StopIteration, Ctrl-C OR an unhandled exception — the
+        # plain call that used to sit after this block was skipped on the third, which is how the
+        # 66 orphaned hides of 2026-10-02 happened. Best-effort, so it can never mask the error.
+        _flush_detail()
 
     # Flush any remaining batched "alive" refreshes.
     if alive_ids:
@@ -620,10 +634,6 @@ def main() -> None:
                                  "last_liveness_probe_at": now_iso,
                                  **direct_alive_patch(now_iso=now_iso)})
                         .in_("id", ids).execute())
-
-    # Flush the remaining per-row evidence. Runs after the alive flush and before end_run so the
-    # audit trail is durable even for a shard that ended on StopIteration or Ctrl-C.
-    _flush_detail()
 
     notes = (
         f"refreshed={refreshed} killed={killed} "
