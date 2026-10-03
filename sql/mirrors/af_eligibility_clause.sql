@@ -1,4 +1,14 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-10-03 (migration 20261003211448_af_every_question_multi_select_unions):
+--   CHANGED — three lines appended after the p_unit_subtypes line (owner 2026-10-03: «never force the
+--   user to select one thing»): p_furnished_in / p_age_buckets / p_rating_buckets, each the union of
+--   exactly the picked options, absent or empty ⇒ no constraint, NULL in no bucket. Needle-edited on
+--   the live definition (guarded by the previous md5 in the same step), rebuild_af_filter_rpcs()
+--   re-rendered all six templated RPCs; the migration asserted six existing counts unchanged and each
+--   union equal to its parts measured with the old params.
+--   Body below = the previous body plus exactly those lines, PROVEN against production:
+--   Recorded md5 of pg_get_functiondef: 8d9c9312948bd90aaef0001e1701fbe6
+--   (length 10,787; the previous text hashed cbfa562eb5d75efc4180f2d20f64def7, 9,663.)
 -- Re-verified 2026-09-28 (migration 20260928100046_price_on_request_shows_under_every_rent_period):
 --   CHANGED — one line in the rent-period block: `or (s.price_annual is null and p_rent_period in
 --   ('شهري','سنوي','كلاهما'))`. Owner rule 2026-09-28: «For سعر عند الطلب, we put it both monthly and
@@ -306,4 +316,17 @@ AS $function$ select E'
       and (p_rating_min is null or s.rating >= p_rating_min)
       and (p_reviews_min is null or s.reviews_count >= p_reviews_min)
       and (p_unit_subtypes is null or cardinality(p_unit_subtypes) = 0 or s.unit_subtype_ar = any(p_unit_subtypes))
+      -- MULTI-PICK UNIONS (owner 2026-10-03: never force the user to select one thing). Each is the
+      -- union of exactly the picked options; absent or empty means no constraint; NULL is in no bucket.
+      and (p_furnished_in is null or cardinality(p_furnished_in) = 0 or s.furnished = any(p_furnished_in))
+      and (p_age_buckets is null or cardinality(p_age_buckets) = 0 or (s.property_age is not null and (
+            (''new'' = any(p_age_buckets) and s.property_age = 0)
+         or (''1_2'' = any(p_age_buckets) and s.property_age between 1 and 2)
+         or (''3_5'' = any(p_age_buckets) and s.property_age between 3 and 5)
+         or (''6_9'' = any(p_age_buckets) and s.property_age between 6 and 9)
+         or (''10p'' = any(p_age_buckets) and s.property_age >= 10))))
+      and (p_rating_buckets is null or cardinality(p_rating_buckets) = 0 or (s.rating is not null and (
+            (''9.5'' = any(p_rating_buckets) and s.rating >= 9.5)
+         or (''9.0'' = any(p_rating_buckets) and s.rating >= 9.0)
+         or (''9.0_rc10'' = any(p_rating_buckets) and s.rating >= 9.0 and s.reviews_count >= 10))))
 '::text $function$
