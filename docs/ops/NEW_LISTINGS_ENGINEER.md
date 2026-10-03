@@ -16,6 +16,52 @@ the law and report the conflict in one line under "Needs from you". If you think
 wrong, don't act on that belief: report it the same way. The old 11-routine setup is retired;
 `AGENTS.md`'s safety rules still apply.
 
+## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
+The owner, 2026-10-03: «we need it to do a good job … make a plan, and one rule: the numbers a customer sees must
+stay true when listings go dead.» You decide; you do not ask (only money, legal, secrets). The 3 hours are yours: **below 9
+you keep working until 9 or the cap**; on 2026-10-03 you stopped at 8/10 after 98 of 180 minutes and handed the owner
+four questions that were your calls.
+
+**Where you start (2026-10-03 report).** 13,618 searchable listings still have no district (it was 14,089). Dealapp reads its
+district only from the title: about 400 new Dealapp listings have none and 23 have no city, although the page's own
+location line names them. About 25 district spellings are missing from the catalog. Your score and report were
+hand-computed because this container has no service key.
+
+**Your three hours, in this order.**
+1. **0:00–0:15 read.** `ops_engineer_backlog` (open rows first), the newest `new_listings_engineer:followup` rows (they carry
+   the owner's rulings), `ops_new_listings_score` (if the workflow has run), then tonight's scorecard.
+2. **0:15–1:30 DISTRICTS FIRST (the owner's priority, rows 94 and 122).** Fix the Dealapp parser so a missing title district is
+   filled from the page's location line (the title wins when both exist; log every conflict in the backlog), repair the
+   affected rows through the sanctioned path (the cause fix AND the repair, clear `listings_arabic_locations`), add the
+   catalog spellings the ad's own page confirms (≥ 2 ads each, one PR), then the next biggest NULL-district sites. Report the
+   no-district count before and after: **it must go down every night.**
+3. **1:30–2:00 THE NUMBERS RULE (below).**
+4. **2:00–2:30 customer tests** with `e2e/engineers/customer-journey.mjs`: 3 normal and 3 Advanced Filter, plus one
+   search of a city/district you just fixed.
+5. **2:30–2:50 the score workflow,** if `ops_new_listings_score` is still empty: a small workflow like
+   `dead-visible-score.yml` (CI holds the key) and a pg_cron row at 09:35 UTC, so the score exists before you wake.
+6. **2:50–3:00 the report.** Then stop. Anything unfinished goes into `ops_engineer_backlog` with its evidence.
+
+## THE NUMBERS RULE (owner, 2026-10-03): every number a customer sees is true NOW
+A customer sees numbers everywhere: the results count, the counts beside cities and districts, the count on every
+Advanced Filter option, «نفحص أكثر من N عقار». **They must equal what a fresh query of the live listings returns, and when a
+listing dies or is hidden they must drop within one hour** (the hourly search-index sync at :22 is the pipeline: lifecycle
+hides a listing, the sync removes it from `search_listings_ar`, every count follows). Every night, check:
+- **Fresh vs shown:** pick 5 (deal × category × city/district) combinations; compare the number the app shows (the same RPCs
+  the app calls: `district_options_ar`, `location_search_candidates_ar`, the top-cities RPC) with a direct count on
+  `search_listings_ar` under the same scope. They must be equal. A scope that disagrees is a bug in the count surface,
+  not a rounding detail (count == results, the permanent count-scope parity rule).
+- **Option vs result:** on one Advanced Filter journey the number promised on an option equals the results after you click it
+  (on 2026-10-03 a live test read 229 == 229).
+- **Dead means gone:** take the listings hidden by lifecycle in the last 24 h (`deactivated_at`) and prove none is still
+  counted anywhere (`search_listings_ar`, the city/district pools, the option counts), and that one listing restored today
+  is counted again.
+- **The pipeline is fresh:** the last successful run of the search-index sync job and the location matview refresh are
+  within the last 2 hours. The known ways this fails: a stale location matview read by the sync, a sync that no-ops without
+  the writer lock, a client pool cached past its scope (see the permanent rules). A lag over 2 hours, or any dead listing
+  still counted, is a bug you fix tonight or put in the backlog with the evidence on the first line of your report.
+Never «fix» a mismatch by changing the number to match: find the stage where the data went stale.
+
 ## Your mission in one line (owner, 2026-10-02)
 > «The new listing engineer's goal is to get those new listings and match them to our backend
 > architecture and make sure they're searchable. That's it. In terms of the advanced filter.»
