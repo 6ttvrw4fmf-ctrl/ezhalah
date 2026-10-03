@@ -273,7 +273,7 @@ check('the round cap ends the round through the shared terminator, not through t
   /const askedThisRound = steps\.filter\(\(st\) => st\.keys != null && !isScopeQuestionId\(st\.question\.id\)\)\.length;\s*\n\s*if \(askedThisRound >= AF_ROUND_MAX_QUESTIONS\) \{ finishGuided\(token\); return; \}/.test(agent),
   'agent.tsx (presentGuided): the cap must be a presentGuided exit calling finishGuided — never a flag handed to the question card');
 check('a confirm still advances one question (the primary is never terminal)',
-  /const onAgeConfirm = \(keys: string\[\]\) => \{ void commitGuidedStep\(keys\); \}/.test(agent),
+  /const onAgeConfirm = \(keys: string\[\]\) => (?:\{ void commitGuidedStep\(keys\); \}|commitGuidedStep\(keys\);)/.test(agent),
   'agent.tsx: see verify-af-primary-advances-not-shows.ts — «متابعة · N نتيجة» must commit WITHOUT the finish flag');
 check('the question card is never told where it sits in the round',
   !/AF_ROUND_MAX_QUESTIONS/.test(codeOnly(read('src/components/AdvancedQuestionCard.tsx'))),

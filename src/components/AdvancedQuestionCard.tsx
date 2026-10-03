@@ -190,8 +190,9 @@ export type AdvancedQuestionCardProps = {
   progressTotal: number;         // count of ELIGIBLE questions for this scope (not the static array)
   liveCount: (keys: string[]) => Promise<number | null>; // live count for a tentative selection
   initialKeys?: string[];               // answer to restore when the user came BACK to this question
-  onConfirm: (keys: string[]) => void; // commit the selection (empty = no preference) and advance/search
-  onSkip: () => void;                   // skip THIS question
+  // Both may return the commit's promise: the card shows «متابعة» as working until it settles (see `advance`).
+  onConfirm: (keys: string[]) => void | Promise<unknown>; // commit the selection (empty = no preference) and advance/search
+  onSkip: () => void | Promise<unknown>;                   // skip THIS question
   /** Hide «تخطي» on the FIRST question (owner 2026-09-20: "for the first question remove the skip
    *  button … cuz if user clicks skip he wont understand"). Skipping question one leaves the round
    *  with nothing committed and no narrowing to show for itself, which reads as the interview having
@@ -287,6 +288,19 @@ export default function AdvancedQuestionCard({
   const { t, isRTL } = useI18n();
   const [sel, setSel] = useState<string[]>(initialKeys ?? []);
   const [count, setCount] = useState<number | null>(null);
+  // «متابعة» NEVER FEELS STUCK (owner 2026-10-03: «when a user clicks المتابعة, it feels a bit stuck»).
+  // Measured: committing an answer re-ranks the remaining questions against the new scope — one or two
+  // count calls of ~0.7–1.6 s each — and for that whole wait the card showed the OLD question with an
+  // untouched button, so a tap looked ignored. Now the tap answers at once: the button swaps its label
+  // for the loading dots and further taps are ignored until the commit settles (or the next question
+  // arrives, which resets it). The wait itself is shortened by the next-step prefetch in agent.tsx.
+  const [advancing, setAdvancing] = useState(false);
+  useEffect(() => { setAdvancing(false); }, [titleKey, options]);
+  const advance = (commit: () => void | Promise<unknown>) => {
+    if (advancing) return;
+    setAdvancing(true);
+    Promise.resolve(commit()).catch(() => {}).finally(() => setAdvancing(false));
+  };
   const reduced = useReducedMotion();
   // Belt-and-suspenders (owner audit, 2026-08-27): the SAME concept must never render as two chips in
   // one question, even if two upstream option builders (a future data path, or a translation
@@ -402,7 +416,7 @@ export default function AdvancedQuestionCard({
       setSel([key]);
       // The ONE commit path for a double tap: fires once, then returns — the same tap can never
       // fall through to the select branch below and advance a second question.
-      onConfirm([key]);
+      advance(() => onConfirm([key]));
       return;
     }
     lastTapRef.current = { key, at: now };
@@ -463,7 +477,7 @@ export default function AdvancedQuestionCard({
       </ScrollView>
       {/* PINNED action row — outside the ScrollView on purpose (see s.foot). */}
       <Reanimated.View style={s.foot}>
-        <Tap style={s.primaryBtn} testID="af-confirm" onPress={() => onConfirm(sel)}>
+        <Tap style={s.primaryBtn} testID="af-confirm" onPress={() => advance(() => onConfirm(sel))}>
           {/* The primary button COMMITS THIS ANSWER AND ADVANCES ONE QUESTION — for single and multi
               alike (onConfirm → commitGuidedStep without `finish`). It therefore reads «متابعة · N
               نتيجة» for BOTH. Until 2026-08-23 the label branched on arity and a single-select read
@@ -473,12 +487,16 @@ export default function AdvancedQuestionCard({
               arity- or ordinal-based «عرض» promise can never be honest here. Since 2026-08-28 the
               footer has NO terminal control at all — a round ends only by walking its questions,
               Back from question 1, or ✕ — so nothing in this footer may ever promise results. */}
-          <View style={[s.actionLabel, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-            <Text style={s.primaryTxt}>
-              {count != null ? t('Continue · {count} results', { count: grouped(count) }) : t('Continue')}
-            </Text>
-            <Ionicons name={isRTL ? 'arrow-back' : 'arrow-forward'} size={18} color={colors.onFill} />
-          </View>
+          {advancing ? (
+            <View style={s.actionLabel} testID="af-confirm-working"><LoadingDots color={colors.onFill} /></View>
+          ) : (
+            <View style={[s.actionLabel, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
+              <Text style={s.primaryTxt}>
+                {count != null ? t('Continue · {count} results', { count: grouped(count) }) : t('Continue')}
+              </Text>
+              <Ionicons name={isRTL ? 'arrow-back' : 'arrow-forward'} size={18} color={colors.onFill} />
+            </View>
+          )}
         </Tap>
         {/* Secondary row — TWO real buttons, not footnote links (owner redesign, 2026-08-28: the
             old text-only رجوع/تخطي/عرض النتائج row read as fine print and was easy to miss). The
@@ -516,7 +534,7 @@ export default function AdvancedQuestionCard({
                 focused && s.secondaryBtnFocus,
                 pressed && s.secondaryBtnPress,
               ]}
-              testID="af-skip" onPress={onSkip} hitSlop={8} accessibilityRole="button"
+              testID="af-skip" onPress={() => advance(onSkip)} hitSlop={8} accessibilityRole="button"
             >
               <Text style={s.secondaryTxt}>{t('Skip')}</Text>
             </Pressable>
