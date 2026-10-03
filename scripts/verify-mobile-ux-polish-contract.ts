@@ -60,8 +60,8 @@ check('user scroll/touch cancels the landing immediately (their intent wins, no 
   && /const cancelLanding = \(\) => \{/.test(agent));
 
 // ── 3. sidebar row truth ────────────────────────────────────────────────────────────────────────
-check('the ⋯ context row shares the dark-green interaction treatment while its menu is open',
-  /const ctx = menu\?\.id === c\.id; const hot = ctx \|\|/.test(sidebar));
+check('the ⋯ context row uses quiet interaction feedback while the selected row stays stable',
+  /const hot = !\(onAgentScreen && activeChatId === c\.id\) && \(ctx \|\|/.test(sidebar));
 check('the active-chat highlight renders ONLY on the agent screen',
   /const onAgentScreen = pathname\?\.startsWith\('\/agent'\) \?\? false;/.test(sidebar)
   && /onAgentScreen && activeChatId === c\.id &&/.test(sidebar)
@@ -110,9 +110,9 @@ mustCatch('the settle window becoming unbounded (pin never released)',
 mustCatch('the Filter home highlighting an old chat again (route gate removed)',
   !/onAgentScreen && activeChatId === c\.id &&/.test(
     mut(sidebar, 'onAgentScreen && activeChatId === c.id &&', 'activeChatId === c.id &&')));
-mustCatch('the ⋯ context row losing its dark-green state',
-  !/const ctx = menu\?\.id === c\.id; const hot = ctx \|\|/.test(
-    mut(sidebar, 'const ctx = menu?.id === c.id; const hot = ctx ||', 'const hot =')));
+mustCatch('the ⋯ context row losing its quiet interaction state',
+  !/const hot = !\(onAgentScreen && activeChatId === c\.id\) && \(ctx \|\|/.test(
+    mut(sidebar, '&& (ctx || (hotRowId', '&& ((hotRowId')));
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }

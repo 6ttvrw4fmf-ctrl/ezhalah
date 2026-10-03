@@ -297,6 +297,8 @@ section glows while crossing. This deliberately supersedes the 2026-08-24 "drag 
 rule for this one gesture; the ⋯-menu Star stays the tap path. Barrier:
 `scripts/verify-sidebar-drag-star.ts` (pure rules executed + wiring pinned).
 
+**Sidebar presentation (owner 2026-10-01):** use a plain themed paper surface and quiet neutral hover/menu fills with stable text colors and a distinct neutral selected row. Keep the desktop column still when switching chats; the mobile drawer slides in/out briefly and respects reduced motion. New Chat has no spring/bounce or decorative pause before navigation. The conversation action menu fades in briefly, dismisses on Escape/outside press, and must not trigger a pending row-open. Selecting the already-visible chat leaves its saved content and scroll position untouched. Saved titles remain single-line display metadata; opening a saved chat uses the existing transcript restore without replaying search/loading animation. This supersedes the earlier dark-green sidebar interaction styling; account/auth behavior and persistence rules are unchanged.
+
 ### 7.4b Full-conversation persistence (owner 2026-08-25, PERMANENT — «like ChatGPT»)
 
 **A chat is the CONVERSATION, not the query.** Returning to a saved chat renders EXACTLY the
