@@ -74,8 +74,11 @@ const problems = (card: string, agent: string, remote: string): string[] => {
     if (!/const ageHit = settledAgeCounts\.get\(ageKey\);\s*if \(ageHit && Date\.now\(\) - ageHit\.at < COUNT_MEMORY_TTL_MS\) return ageHit\.c;/.test(age))
       out.push('the age counts are not read from memory before the RPC');
     if (!/settledAgeCounts\.set\(ageKey, \{ at: Date\.now\(\), c \}\);/.test(age)) out.push('a learned age answer is not remembered');
-    const failPaths = age.slice(0, age.indexOf('settledAgeCounts.set('));
-    if (/settledAgeCounts\.set/.test(failPaths)) out.push('a failure path writes the age memory');
+    // Exactly one write, and it sits AFTER the last failure return — so no failure path can write it.
+    const writes = age.split('settledAgeCounts.set(').length - 1;
+    const lastFailure = age.lastIndexOf('return null;   // the source answered: nothing');
+    if (writes !== 1 || lastFailure < 0 || age.indexOf('settledAgeCounts.set(') < lastFailure)
+      out.push('the age memory is written somewhere other than after every failure return');
   }
   return out;
 };
