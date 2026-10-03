@@ -81,18 +81,25 @@ export default function AdViewer({ tabs, active, split, hint, onSelect, onCloseT
     // spring settles — or from its own timer if rAF is stalled — never later, never twice.
     runAfterAnimation((done) => motionTo(0).start(done), () => onCloseRef.current(), 450);
   };
-  // ✕ / Escape / last tab closed: pop our history entry (its popstate dismisses), or dismiss directly.
-  const requestClose = () => {
-    if (IS_WEB && window.history.state?.[HISTORY_MARK]) { window.history.back(); return; }
-    dismiss();
+  // ✕ / Escape / last tab closed: close directly and retire our history marker in place. NEVER
+  // history.back() to close: once the user acts inside an ad (Gathern «اختر» → /reserve), the frame's
+  // navigation sits on top of our entry in the joint session history, so back() steps the AD back
+  // instead of closing (measured live 2026-10-03: ✕ undid the booking step and the pane stayed open).
+  const dropMark = () => {
+    if (!IS_WEB) return;
+    try {
+      const st = window.history.state;
+      if (st?.[HISTORY_MARK]) { const { [HISTORY_MARK]: _drop, ...rest } = st; window.history.replaceState(rest, ''); }
+    } catch { /* history unavailable: closing still works */ }
   };
+  const requestClose = () => { dropMark(); dismiss(); };
   const requestCloseRef = useRef(requestClose); requestCloseRef.current = requestClose;
   // Drag-to-close commits along the gesture's own path: finish the slide at the finger's velocity
   // (§5 velocity handoff), popping our history entry silently (closingRef gates the popstate dismiss).
   const dragClose = (velocity: number) => {
     if (closingRef.current) return;
     closingRef.current = true;
-    if (IS_WEB) { try { if (window.history.state?.[HISTORY_MARK]) window.history.back(); } catch {} }
+    dropMark();
     runAfterAnimation(
       (done) => Animated.spring(dragY, { toValue: sheetHRef.current, velocity, ...SPRING }).start(done),
       () => onCloseRef.current(), 400,
