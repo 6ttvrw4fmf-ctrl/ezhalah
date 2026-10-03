@@ -158,7 +158,9 @@ check('one shared per-option floor (MIN_REAL_OPTION_COUNT via meaningful()); the
 // Residential-only), no commercial list carries rnpl/furnished-question on Buy, no NEW cohort
 // carries the fresh-dead 'ac' chip, and mapped types render EXACTLY their COHORT_CHIPS list.
 check('cohortAllows matches the clean type macro and COHORT_CHIPS scopes commercial chips',
-  /q\.category !== \(CLEAN_MACRO\[type\] \?\? 'Residential'\)/.test(cohortSrc)
+  // 2026-10-03: macro equality became reachability (offeredUnder = home macro OR a group on this side lists
+  // the type) so Residential Land, offered under the commercial land group, is gated on that side too.
+  /if \(!q\.category \|\| !offeredUnder\(q\.category, type\)\) return false;/.test(cohortSrc)
   && /export const COHORT_CHIPS/.test(cohortSrc)
   && !/COHORT_CHIPS[\s\S]{0,900}'ac'/.test(cohortSrc.slice(cohortSrc.indexOf('export const COHORT_CHIPS'), cohortSrc.indexOf('export const COHORT_CHIPS') + 1200))
   && /chipAllow\.includes\(d\.key\)/.test(advSrc));
@@ -176,7 +178,7 @@ check('RNPL + amenities + bathrooms are cohort-gated through cohortAllows',
   /RNPL_QUESTION[\s\S]{0,420}cohortAllows\(q, 'rnpl'\)/.test(advSrc)
   && /cohortAllows\(q, 'amenities'\)/.test(advSrc)
   && /cohortAllows\(q, 'bathrooms'\)/.test(advSrc)
-  && /export function cohortAllows[\s\S]{0,900}q\.rentPeriod === 'monthly'\) return \(cfg\.RentMonthly/.test(cohortSrc));
+  && /export function cohortAllows[\s\S]{0,1300}q\.rentPeriod === 'monthly'\) return \(cfg\.RentMonthly/.test(cohortSrc));
 
 // Mixed period ('both', owner 2026-08-19): cohortAllows must require BOTH RentAnnual and RentMonthly
 // membership — union would let a period-specific question fire against the other period's rows.

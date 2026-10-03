@@ -178,7 +178,9 @@ const AR: Record<string, string> = {
   'Industrial & Logistics': 'الصناعة واللوجستيات',
   // Owner's canonical group name (audit item 7a, 2026-07-27) — was «المباني والمرافق التجارية».
   'Commercial Buildings & Facilities': 'المباني والمرافق',
-  'Commercial & Industrial Plots': 'الأراضي التجارية والصناعية',
+  // Owner 2026-10-03: the group now holds every land (أرض سكنية joined as a cross-macro shortcut), so
+  // its name is just «الأراضي» — «it works out good».
+  'Commercial & Industrial Plots': 'الأراضي',
   'Price': 'السعر',
   // Buy+Rent combined multi-select (owner feature 2026-08-20): the two independent price ranges
   // shown together when شراء+إيجار are both selected — never one shared/naive range.
