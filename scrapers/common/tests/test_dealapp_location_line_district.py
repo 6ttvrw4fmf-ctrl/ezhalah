@@ -33,9 +33,9 @@ def test_disagreeing_orders_give_nothing():
     assert _location_line_district_ar(html, "الغاط") is None
 
 
-def test_no_city_no_guess_and_no_english():
+def test_no_city_given_still_reads_the_line_and_never_english():
     html = _page("الغاط, حي المنتزة", "حي المنتزة, الغاط")
-    assert _location_line_district_ar(html, None) is None
+    assert _location_line_district_ar(html, None) == "حي المنتزة"
     assert _location_line_district_ar(_page("Riyadh, Al Malqa", "Al Malqa, Riyadh"), "Riyadh") is None
 
 
@@ -60,3 +60,33 @@ def test_the_sources_own_unspecified_district_is_never_stored():
 def test_real_lines_from_the_reread():
     assert _location_line_district_ar(_page("بقعاء, حي بقعاء القديمة", "حي بقعاء القديمة, بقعاء"), "بقعاء") == "حي بقعاء القديمة"
     assert _location_line_district_ar(_page("ثول, حي بلدة ثول", "حي بلدة ثول, ثول"), "ثول") == "حي بلدة ثول"
+
+
+def test_first_part_may_be_a_village_not_the_city():
+    # real ad 473076: city is أبو عريش but the page prints «العسيله, حي العسيله»
+    html = _page("العسيله, حي العسيله", "حي العسيله, العسيله")
+    assert _location_line_district_ar(html, "ابو عريش") == "حي العسيله"
+
+
+def test_the_sources_doubled_hay_is_collapsed():
+    # real ad 576275: «النعيرية, حي حي الشهداء»
+    html = _page("النعيرية, حي حي الشهداء", "حي حي الشهداء, النعيرية")
+    assert _location_line_district_ar(html, "النعيرية") == "حي الشهداء"
+
+
+def test_two_different_districts_on_one_page_say_nothing_unless_the_city_picks_one():
+    html = _page("مكة المكرمة, حي الشامية الجديد", "حي الشامية الجديد, مكة المكرمة",
+                 "جدة, حي الصفا", "حي الصفا, جدة")
+    assert _location_line_district_ar(html, None) is None
+    assert _location_line_district_ar(html, "مكة المكرمة") == "حي الشامية الجديد"
+
+
+def test_the_page_line_wins_over_the_title_and_the_title_is_the_fallback():
+    from scrapers.dealapp.run import _district_ar
+    schema = {"_breadcrumb": {"itemListElement": [
+        {"position": 1, "name": "الرئيسية"}, {"position": 2, "name": "مكة المكرمة"},
+        {"position": 3, "name": "فيلا للبيع - الشامية - مكة المكرمة"}]}}
+    page = _page("مكة المكرمة, حي الشامية الجديد", "حي الشامية الجديد, مكة المكرمة")
+    assert _district_ar(schema, page, "مكة المكرمة") == "حي الشامية الجديد"      # line first
+    assert _district_ar(schema, _page("فيلا للبيع"), "مكة المكرمة") == "الشامية"   # title fallback
+    assert _district_ar({}, _page("فيلا للبيع"), "مكة المكرمة") is None
