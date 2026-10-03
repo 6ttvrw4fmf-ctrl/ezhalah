@@ -90,3 +90,25 @@ def test_the_page_line_wins_over_the_title_and_the_title_is_the_fallback():
     assert _district_ar(schema, page, "مكة المكرمة") == "حي الشامية الجديد"      # line first
     assert _district_ar(schema, _page("فيلا للبيع"), "مكة المكرمة") == "الشامية"   # title fallback
     assert _district_ar({}, _page("فيلا للبيع"), "مكة المكرمة") is None
+
+
+def test_village_ads_get_a_city_from_the_page_line_when_the_title_has_none():
+    from scrapers.dealapp.run import _city_from_line
+    # real ads 2026-10-03
+    assert _city_from_line(_page("بئر بن هرماس, حي الربوة", "حي الربوة, بئر بن هرماس")) == ("بئر بن هرماس", "Bir Bin Hirmas")
+    assert _city_from_line(_page("طحي, حي غير محدد", "حي غير محدد, طحي")) == ("طحي", "Tuhayy")   # place known even when the district is not
+    assert _city_from_line(_page("فرسان - فرسان, حي الجنوبي", "حي الجنوبي, فرسان - فرسان")) == ("فرسان", "Farasan")
+    assert _city_from_line(_page("القويعية - الرويضة, حي الملك عبدالله", "حي الملك عبدالله, القويعية - الرويضة"))[1] == "Al Quwayiyah"
+
+
+def test_a_village_the_catalog_cannot_place_stays_without_a_city_never_a_guess():
+    from scrapers.dealapp.run import _city_from_line
+    assert _city_from_line(_page("الصقيع, حي الصقيع", "حي الصقيع, الصقيع")) == (None, None)
+    assert _city_from_line(_page("العيينه, حي العيينه", "حي العيينه, العيينه")) == (None, None)   # Diriyah vs Tabuk: not guessed
+    assert _city_from_line(_page("فرسان")) == (None, None)
+
+
+def test_two_different_places_on_one_page_say_nothing():
+    from scrapers.dealapp.run import _city_from_line
+    html = _page("طحي, حي الوسط", "حي الوسط, طحي", "سنام, حي الشرق", "حي الشرق, سنام")
+    assert _city_from_line(html) == (None, None)
