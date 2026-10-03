@@ -914,6 +914,18 @@ def _resolve_city(city_ar: Optional[str]) -> Optional[str]:
     return normalize.map_city(city_ar) or CITY_FALLBACK_AR.get(city_ar) or None
 
 
+def _route_land(property_type: Optional[str], usage: Optional[str]) -> Optional[str]:
+    """Land residential-vs-commercial routing. The usage chip («استخدامات العقار») decides when the
+    page RENDERS one: «تجاري» → Commercial Land, anything else → Residential Land. When the page
+    renders NO usage chip, the listing's own propertyType («ارض تجارية» / «ارض سكنية») stands.
+    It used to fall through to Residential Land on a missing chip, so an ad dealapp itself titles
+    «ارض تجارية» was filed as residential land out of silence (2 of 3,323 new rows, 2026-10-03,
+    🆕 New Listings Engineer)."""
+    if property_type in ("Residential Land", "Commercial Land") and usage:
+        return "Commercial Land" if usage == "تجاري" else "Residential Land"
+    return property_type
+
+
 def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     """Parse one /ad-details page into a canonical row. Returns (row, category, sold) —
     `sold` feeds the post-upsert inactive pin in main (see _pin_sold_inactive)."""
@@ -949,8 +961,7 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     # ── usage chip drives residential/commercial routing (authoritative for land) ──
     usage = _spec_value(html, "استخدامات العقار")
     is_commercial_usage = usage == "تجاري"
-    if property_type in ("Residential Land", "Commercial Land"):
-        property_type = "Commercial Land" if is_commercial_usage else "Residential Land"
+    property_type = _route_land(property_type, usage)
     category = "commercial" if (property_type in COMMERCIAL_TYPES or is_commercial_usage) else "residential"
 
     # ── price ──

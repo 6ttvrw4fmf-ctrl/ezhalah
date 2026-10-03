@@ -31,3 +31,35 @@ def test_gathern_is_read_by_its_checker_session(monkeypatch):
 def test_other_sites_keep_the_generic_judge():
     assert SC._reader_for("aqar") is None
     assert SC._reader_for("wasalt") is None
+
+
+def test_a_daily_direct_site_is_read_by_its_own_oracle(monkeypatch):
+    """sanadak, 2026-10-03: its removed ads answer a 200 app shell, so a status read called 8 of 8
+    hidden ads "live". The double-check must ask the oracle the hiding job asks, by ad_number."""
+    from scrapers.common import fleet_liveness as FL
+    said = {"A1": ("live", "page carries A1"), "A2": ("gone", "shell, no listing"), "A3": ("unknown", "5xx")}
+    seen_controls = []
+
+    def factory(control):
+        seen_controls.append(control)
+        return lambda ad: said[ad]
+    monkeypatch.setitem(FL.SITES, "sanadak", "x:y()")
+    monkeypatch.setattr(FL, "oracle_for", lambda spec, control: factory(control))
+    ctl = {"ad_number": "C", "listing_url": "u"}
+    method, read = SC.pick_reader("sanadak", None, ctl)
+    assert method == "site-oracle"
+    assert seen_controls == [ctl]
+    rows = [{"ad_number": a, "listing_url": "https://sanadak.sa/x"} for a in ("A1", "A2", "A3")]
+    assert [read(r) for r in rows] == [ALIVE, DEAD, UNKNOWN]
+    assert read({"ad_number": None, "listing_url": "u"}) == UNKNOWN
+
+
+def test_reader_order_site_reader_then_oracle_then_marker(monkeypatch):
+    from scrapers.common import fleet_liveness as FL
+    monkeypatch.setattr(SC, "_reader_for", lambda p: (lambda url: ALIVE) if p == "gathern" else None)
+    monkeypatch.setattr(FL, "oracle_for", lambda spec, control: (lambda ad: ("gone", "")))
+    assert SC.pick_reader("gathern", None, None)[0] == "site-reader"
+    assert SC.pick_reader("tuba", "marker", None)[0] == "site-oracle"
+    monkeypatch.delitem(FL.SITES, "tuba")
+    assert SC.pick_reader("tuba", "marker", None)[0] == "registered-marker"
+    assert SC.pick_reader("aqar", None, None)[0] == "status-only"

@@ -43,6 +43,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, normalize
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.http import retry_smarter_session
 
 # PDPL: never store these containers (advertiser / brokerage identity).
 _PII = {"advertiser", "brokerageBadge", "brokerageContract"}
@@ -129,8 +130,12 @@ def _throttle() -> None:
 
 
 def session() -> cc.Session:
-    s = cc.Session(impersonate="chrome124")
-    s.headers.update({"Accept": "application/json", "Content-Type": "application/json"})
+    # 2026-10-03: two runs in a row timed out CONNECTING from the GitHub runner (76 s, 0 rows), so
+    # probe 3 profiles DIRECT, then the residential proxy (`proxy: true` → WASALT_PROXY_URL), and keep
+    # the session the host answers. Never raises: an unserved probe falls back to the old DIRECT session.
+    s, tried = retry_smarter_session(BASE + "/", headers={"Accept": "application/json",
+                                                          "Content-Type": "application/json"})
+    print(f"Al Hoshan: probe {' '.join(tried)}", flush=True)
     return s
 
 

@@ -1203,9 +1203,14 @@ def prune_unseen(
             # Probed and confirmed GONE — a look, and the one that most needs recording: without it
             # a killed row keeps a stale last_seen_at and can outrank never-looked-at rows in the
             # next staleness-ordered worklist (migration 20260924).
+            # deactivated_at is written HERE, not left to trg_set_deactivated_at: 27 platforms'
+            # tables never had that trigger (2026-10-03), so their hides carried no date and were
+            # invisible to the hidden counts, the unverified-hide monitor, auto-recovery and the
+            # 30-day clock. The trigger keeps a value it is given, so both paths agree.
+            _now = datetime.now(timezone.utc).isoformat()
             ads, payload = confirmed_gone, {
                 "missing_count": new_missing, "active": False,
-                "last_liveness_probe_at": datetime.now(timezone.utc).isoformat()}
+                "deactivated_at": _now, "last_liveness_probe_at": _now}
             if not ads:
                 continue
         for i in range(0, len(ads), 200):

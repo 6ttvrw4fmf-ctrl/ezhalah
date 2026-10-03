@@ -61,6 +61,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, stated_city, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 SITE = "https://macsaib.sa"
 API = "https://api.taearif.com/api/v1/tenant-website/macsaib.sa"
@@ -262,7 +263,10 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 2026-10-03: two runs in a row timed out CONNECTING to api.taearif.com from the GitHub runner.
+    # Probe 3 profiles DIRECT, then the residential proxy (`proxy: true` → WASALT_PROXY_URL).
+    s, tried = retry_smarter_session(f"{API}/properties?page=1", headers={"Accept": "application/json"})
+    print(f"{SOURCE}: probe {' '.join(tried)}", flush=True)
     # The run is opened BEFORE the catalogue walk: a walk that fails (2026-10-03: a 40 s connect
     # timeout on page 1) must close a failed run row, not crash with no row at all, which left the
     # ledger showing yesterday's success.
