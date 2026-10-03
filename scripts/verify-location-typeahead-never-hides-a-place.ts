@@ -135,7 +135,7 @@ mustCatch('an ambiguous name that is not held back', behaviour({ ...REAL, cityEx
 mustCatch('a district matcher that ignores the city', behaviour({ ...REAL, districtExtras: (q, cat, _cityId, have, lim) => catalogDistrictExtras(q, cat.map((d) => ({ ...d, cityId: 1 })), 1, have, lim) }));
 mustCatch('a catalog fallback that vanished from matchCitiesByText', wiring(locSrc.replace('catalogCityExtras(query', 'noExtras(query'), idxSrc));
 mustCatch('a borrowed same-named city shown in another scope\'s order', wiring(locSrc.replace('if (borrowed && AMBIGUOUS_CITY_NAMES.has(n)) continue;', ''), idxSrc));
-mustCatch('a city matcher that waits for its own pool', wiring(locSrc.replace('for (const v of CITY_FIELD_POOLS.values())', 'for (const v of [])'), idxSrc));
+mustCatch('a city matcher that waits for its own pool', wiring(locSrc.replaceAll('for (const v of CITY_FIELD_POOLS.values())', 'for (const v of [])'), idxSrc));
 mustCatch('a borrowed city count printed as this scope\'s', wiring(locSrc.replace('listingCount: 0, scopeKnown: false } : s.opt', 'scopeKnown: false } : s.opt'), idxSrc));
 mustCatch('a district matcher that waits for its own pool', wiring(locSrc.replace('k.startsWith(`${cityId}:`)', 'false'), idxSrc));
 mustCatch('an unmeasured district count called empty', wiring(locSrc, idxSrc.replace('opt.scopeKnown === false ? false :', '')));

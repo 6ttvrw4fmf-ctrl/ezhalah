@@ -26,8 +26,8 @@ function wiring(l: string, i: string): string[] {
   if (!/listingCount: 0, scopeKnown: false/.test(prov)) bad.push('provisional city rows keep another scope\'s count');
   if (!/_districtCache\) \{[\s\S]*startsWith\(`\$\{cityId\}:`\)/.test(dist)) bad.push('the district top list does not borrow the city\'s names while its own pool loads');
   if (!/listingCount: 0, scopeKnown: false/.test(dist)) bad.push('provisional district rows keep another scope\'s count');
-  if (!/cityStatus === 'loading' && provisionalOnly\(citySuggestions\) \? 'ready' : cityStatus/.test(i)) bad.push('the city field replaces count-free names with a wait row');
-  if (!/districtStatus === 'loading' && provisionalOnly\(districtSuggestions\) \? 'ready' : districtStatus/.test(i)) bad.push('the district field replaces count-free names with a wait row');
+  if (!/cityStatus === 'loading' && provisionalOnly\(citySuggestions\) \? null/.test(i)) bad.push('the city field replaces count-free names with a wait row');
+  if (!/districtStatus === 'loading' && provisionalOnly\(districtSuggestions\) \? null/.test(i)) bad.push('the district field replaces count-free names with a wait row');
   if (!/rows\.every\(\(r\) => r\.scopeKnown === false\)/.test(i)) bad.push('the wait row is skipped for rows that DO carry another cohort\'s counts (#648)');
   if (!/opt\.scopeKnown === false \? undefined : cohortCountLabel\(opt\.listingCount\),\n\s*\]\.filter\(Boolean\)\.join\(' · '\) \|\| undefined/.test(i)) bad.push('a trending city row prints a count that was not measured');
   return bad;
@@ -51,8 +51,8 @@ mustCatch('a provisional list that offers an ambiguous name', wiring(loc.replace
 mustCatch('provisional city rows that keep another scope\'s count', wiring(loc.replace(/(function provisionalTopCities[\s\S]*?)listingCount: 0, scopeKnown: false/, '$1scopeKnown: false'), idx));
 mustCatch('provisional district rows that keep another scope\'s count', wiring(loc.replace(/(export function topDistrictsForCityId[\s\S]*?)listingCount: 0, scopeKnown: false/, '$1scopeKnown: false'), idx));
 mustCatch('a district top list that waits for its pool', wiring(loc.replace(/(export function topDistrictsForCityId[\s\S]*?)key\.startsWith\(`\$\{cityId\}:`\)/, '$1false'), idx));
-mustCatch('a city field that shows the wait row over names', wiring(loc, idx.replace("cityStatus === 'loading' && provisionalOnly(citySuggestions) ? 'ready' : cityStatus", 'cityStatus')));
-mustCatch('a district field that shows the wait row over names', wiring(loc, idx.replace("districtStatus === 'loading' && provisionalOnly(districtSuggestions) ? 'ready' : districtStatus", 'districtStatus')));
+mustCatch('a city field that shows the wait row over names', wiring(loc, idx.replace("cityStatus === 'loading' && provisionalOnly(citySuggestions) ? null", "false ? null")));
+mustCatch('a district field that shows the wait row over names', wiring(loc, idx.replace("districtStatus === 'loading' && provisionalOnly(districtSuggestions) ? null", "false ? null")));
 mustCatch('a wait row skipped for another cohort\'s real counts', wiring(loc, idx.replace('rows.every((r) => r.scopeKnown === false)', 'rows.length > 0')));
 mustCatch('a trending row that prints an unmeasured count', wiring(loc, idx.replace('opt.scopeKnown === false ? undefined : cohortCountLabel(opt.listingCount)', 'cohortCountLabel(opt.listingCount)')));
 
