@@ -451,13 +451,18 @@ def main() -> None:
     detail_buf: list[dict] = []            # ledger (wasalt_liveness_pilot_detail); never cross them
 
     def _flush_detail() -> None:
-        """Best-effort: an audit-log write must never fail or roll back a liveness sweep."""
+        """Best-effort: an audit-log write must never fail or roll back a liveness sweep.
+
+        Retried like every other statement: the hide after it IS retried, so a transient on the
+        insert alone (the 2026-10-02 ConnectionTerminated shape) would drop the kill row and let
+        the hide land anyway — an orphaned hide, the exact thing evidence-before-hide prevents."""
         if not detail_buf:
             return
         for i in range(0, len(detail_buf), 500):
             chunk = detail_buf[i:i + 500]
             try:
-                client.table("aqar_liveness_detail").insert(chunk).execute()
+                _run_with_retry(lambda c=chunk: client.table("aqar_liveness_detail")
+                                .insert(c).execute())
             except Exception as exc:  # noqa: BLE001 — logging must not break the lifecycle
                 print(f"⚠ detail-log insert failed (non-fatal, {len(chunk)} rows): "
                       f"{str(exc)[:160]}", flush=True)
@@ -536,6 +541,13 @@ def main() -> None:
                             killed += 1
                         else:
                             pending_kill += 1
+                        # EVIDENCE BEFORE THE HIDE. The ledger row lands before the row changes, so
+                        # a shard that dies on a later statement leaves no hide without its reason.
+                        # 2026-10-02 01:07 UTC: aqar_residential shard 7 hid 66 rows, then died on
+                        # a dropped connection with those 66 kill rows still buffered — evidence
+                        # written AFTER the hide is evidence written never. Same end state when
+                        # nothing fails; only the order of two writes differs.
+                        _flush_detail()
                         _run_with_retry(lambda u=upd, i=row["id"]:
                                         client.table(table).update(u).eq("id", i).execute())
                 elif r is not None and status == 200:
@@ -612,6 +624,13 @@ def main() -> None:
         pass
     except KeyboardInterrupt:
         print("\nInterrupted — finalizing run row.")
+    finally:
+        # Flush the remaining per-row evidence (transient / unknown / report-only readings; every
+        # applied strike or kill already flushed before its own write). A `finally` so the trail is
+        # durable for a shard that ended on StopIteration, Ctrl-C OR an unhandled exception — the
+        # plain call that used to sit after this block was skipped on the third, which is how the
+        # 66 orphaned hides of 2026-10-02 happened. Best-effort, so it can never mask the error.
+        _flush_detail()
 
     # Flush any remaining batched "alive" refreshes.
     if alive_ids:
@@ -620,10 +639,6 @@ def main() -> None:
                                  "last_liveness_probe_at": now_iso,
                                  **direct_alive_patch(now_iso=now_iso)})
                         .in_("id", ids).execute())
-
-    # Flush the remaining per-row evidence. Runs after the alive flush and before end_run so the
-    # audit trail is durable even for a shard that ended on StopIteration or Ctrl-C.
-    _flush_detail()
 
     notes = (
         f"refreshed={refreshed} killed={killed} "
