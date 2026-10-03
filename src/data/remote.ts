@@ -5,6 +5,7 @@ import { type Deal } from './taxonomy';
 import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
+import { scopeCrossesMacro } from '@/lib/searchDefaults';
 import { normalizeType, queryForSelection, queryForTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
 import { effectiveTypes, effectiveGroups, bedroomTokens } from './search';
 import { scoreListingProximity } from './proximity';
@@ -1390,7 +1391,10 @@ function kindsFor(q: SearchQuery): SourceKind[] {
 // duplicate this string at a call site.
 export const IMPLIED_CATEGORY_DEFAULT = 'Residential' as const;
 function impliedCategory(q: SearchQuery): Macro | null {
-  if (q.category) return q.category;
+  // A cross-macro scope (Residential Land under the commercial land group, owner 2026-10-03) drops the
+  // gate: the row's home macro is Residential, the user's pill says Commercial, and the type_ar list is
+  // already exact. See scopeCrossesMacro.
+  if (q.category) return scopeCrossesMacro(q) ? null : q.category;
   return effectiveCleanQuery(q) ? null : IMPLIED_CATEGORY_DEFAULT;
 }
 

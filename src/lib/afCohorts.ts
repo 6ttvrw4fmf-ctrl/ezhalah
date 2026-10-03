@@ -7,7 +7,7 @@
 //
 // The cohort DATA below is unchanged, byte for byte, from where it was profiled and certified.
 import type { SearchQuery } from '@/data/search';
-import { CLEAN_MACRO, groupsMembers } from '../data/propertyTypes.ts';
+import { groupsMembers, offeredUnder } from '../data/propertyTypes.ts';
 import { effectiveTypes, effectiveGroups } from './searchDefaults.ts';
 
 // Which amenity chips are safe for a MULTI-TYPE scope: the intersection of every selected type's
@@ -274,7 +274,9 @@ export function cohortAllows(q: SearchQuery, id: string): boolean {
     // The query's category must match the cohort's own macro (2026-08-16: was Residential-only
     // while only residential cohorts existed; commercial cohorts unlock their side, and a
     // cross-category scope still matches nothing).
-    if (q.category !== (CLEAN_MACRO[type] ?? 'Residential')) return false;
+    // …and a cross-macro shortcut (Residential Land offered under تجاري, owner 2026-10-03) counts as
+    // reachable on that side: offeredUnder() = home macro OR a group on this side lists it.
+    if (!q.category || !offeredUnder(q.category, type)) return false;
     const cfg = COHORT_QUESTIONS[type];
     if (!cfg) return false;                 // uncertified type = EMPTY cohort, never "no constraint"
     if (q.dealCombined || q.bothDeals) return cohortAllowsCombined(cfg, id);  // bothDeals: see above

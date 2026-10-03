@@ -8,7 +8,20 @@
 
 import type { SearchQuery } from '@/data/search';
 import type { Deal } from '@/data/taxonomy';
-import { groupsMembers, groupsOf, pruneTypesToGroups } from '../data/propertyTypes.ts';
+import { CLEAN_MACRO, groupsMembers, groupsOf, pruneTypesToGroups } from '../data/propertyTypes.ts';
+
+// A CROSS-MACRO SCOPE: the user is in one category and the selected type/group reaches a clean type whose
+// HOME macro is the other one — today only Residential Land offered under the commercial land group
+// (owner 2026-10-03: every land searchable in one place). The RPCs' category-purity gate reads a row's
+// home macro (known_type_ar), so under تجاري every أرض سكنية row would fail it and the new box would
+// promise ~24k listings and deliver 0. For such a scope the gate is dropped — the type_ar list is already
+// exact, the same reason a bare type pick sends no category today. Pure, so barriers execute it.
+export function scopeCrossesMacro(q: SearchQuery): boolean {
+  if (!q.category) return false;
+  const types = effectiveTypes(q);
+  const members = types.length ? types : groupsMembers(effectiveGroups(q));
+  return members.some((t) => (CLEAN_MACRO[t] ?? q.category) !== q.category);
+}
 
 // EVERY SearchQuery field an Advanced Filter answer can write. ONE list, used by both halves of the
 // carry: this module copies exactly these into the Filter store (and nothing else), and
@@ -212,7 +225,7 @@ export function sanitizeForFilterRestore(raw: SearchQuery): SearchQuery {
   // whole سكني category. That widening is reachable ONLY through the store write this change added,
   // so it had to be closed here. effectiveTypes() is the existing one-line union of the two fields.
   const typesIn = effectiveTypes(q);
-  const groups = q.typeGroups?.length ? q.typeGroups : groupsOf(typesIn);
+  const groups = q.typeGroups?.length ? q.typeGroups : groupsOf(typesIn, q.category);
   // THE ADVANCED FILTER RIDES IF AND ONLY IF ITS FACETS RIDE (owner P0 2026-09-01). The facets are
   // what the Filter home renders as removable chips, so a carried predicate always has a control on
   // screen to see and clear it — the rule this whole allowlist exists for, satisfied rather than
