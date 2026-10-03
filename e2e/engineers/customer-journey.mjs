@@ -328,7 +328,9 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
       return result;
     }
     if (MODE === 'normal') {
-      if (!found) throw new Error(`card not found after ${LOAD_MORE_MAX} «عرض المزيد» presses (total=${main.total})`);
+      // the search's own row count is already in result.evidence.search; it is never judged against the
+      // number of cards on screen (scripts/live-card-count-sites.txt)
+      if (!found) throw new Error(`card not found after ${LOAD_MORE_MAX} «عرض المزيد» presses`);
       const text = (await card.first().innerText()).replace(/\s*\n+\s*/g, ' | ');
       result.evidence.card = text.slice(0, 300);
       step('click card');
