@@ -34,7 +34,7 @@
 -- location_search_candidates_ar. Verified against production by a full dry run of that migration on
 -- 2026-09-03 (applied → all six smokes green → rolled back; 350 rows checked for 28 keys,
 -- NULL-preservation and source-row identity, parity 0, gate holding).
--- md5 of the body below: a034dbba0fff853ae4bbefde02961dff
+-- md5 of the body below: f7427472528cff2b58ccf58c9e124d18   (2026-10-03 gate amendment; before it: a034dbba0fff853ae4bbefde02961dff)
 -- Re-verify after the migration is applied under the deploy lock.
 -- Amended 2026-10-03 (migration af_every_question_multi_select_unions, owner: «never force the user to
 -- select one thing»): the gate gains p_age_buckets / p_rating_buckets / p_furnished_in, so a search
