@@ -43,3 +43,20 @@ def test_script_text_is_not_a_location_line():
     html = ("<html><head></head><body><script>var a='الغاط, حي المنتزة'; var b='حي المنتزة, الغاط';</script>"
             "</body></html>")
     assert _location_line_district_ar(html, "الغاط") is None
+
+
+def test_city_side_with_a_sub_area_after_a_dash():
+    # real ad 550358: «الغزالة - الروضه, حي الروضة» / «حي الروضة, الغزالة - الروضه»
+    html = _page("ارض سكنية للبيع", "الغزالة - الروضه, حي الروضة", "450 م²", "حي الروضة, الغزالة - الروضه")
+    assert _location_line_district_ar(html, "الغزالة") == "حي الروضة"
+
+
+def test_the_sources_own_unspecified_district_is_never_stored():
+    # real ad 520164: the page itself says «حي غير محدد»
+    html = _page("الكامل, حي غير محدد", "حي غير محدد, الكامل")
+    assert _location_line_district_ar(html, "الكامل") is None
+
+
+def test_real_lines_from_the_reread():
+    assert _location_line_district_ar(_page("بقعاء, حي بقعاء القديمة", "حي بقعاء القديمة, بقعاء"), "بقعاء") == "حي بقعاء القديمة"
+    assert _location_line_district_ar(_page("ثول, حي بلدة ثول", "حي بلدة ثول, ثول"), "ثول") == "حي بلدة ثول"
