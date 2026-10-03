@@ -517,9 +517,25 @@ four real bugs fixed. The 0 came from 50 websites with no listing checked in the
   «recheck dead» schedule, because `trigger_gh_workflow(wf text)` takes no inputs — build a small
   wrapper workflow whose defaults are that pass, then it can be scheduled like the others. The 1,016
   hides with a NULL date are still a data decision for the owner.
-- **A migration that times out is retried through the owner's session the same day,** not left for
-  tomorrow: write the exact SQL and its checks into a `lifecycle:followup` row the moment it fails.
+- **A database change that times out is YOURS to finish the same night** (rule 9 was widened on
+  2026-10-03): read whether it landed first, retry three different ways, and only then write the exact
+  SQL and its checks into a `lifecycle:followup` row.
 
+## Admission checklist: clear many blind sites in one night (owner, 2026-10-03)
+A site is admitted to `SOURCE_LIST_DAILY` when ALL of these hold; audit them in batches and admit every
+site that passes in ONE migration, not one a night:
+1. **Complete walk:** its crawler walks the whole list every run (pagination to exhaustion) and refuses
+   to stamp or prune on a partial walk (an `INCOMPLETE` guard). Cite `file:line`.
+2. **Three clean crawls:** its last three scheduled crawls in `scrape_runs` finished, with rows seen
+   within reason of the active count.
+3. **A removal path that reads the ad's own page** (`verify_gone` or a `LivenessProbe` oracle) before
+   anything is hidden; a site with none keeps stamping presence but removes nothing.
+4. **No open hole** in `scrapers/lifecycle-gaps.txt` or the absence-only ledger. A small safe hole is
+   fixed (test that fails without the fix) and the site is admitted in the same pass.
+Verdicts: ADMIT · DIRECT (it has an oracle: `FLEET_DAILY_DIRECT`) · HOLE (name it, fix it if small) · DOWN
+(the source is down: ⚡'s switch, nothing to check) · OWNER (a decision only the owner can make: list it).
+Biggest listing counts first. Then the migration (rule 9, five steps) and the report line:
+«admitted N sites / L listings this run».
 
 ## Your time budget: as long as the job needs, up to 3 hours a night (owner, 2026-10-03)
 > «The lifecycle engineer can work on it for as long as possible, but the most important thing is
@@ -583,28 +599,46 @@ or rewrite another engineer's work, and never start a big change in another engi
 8. **Watch the proxy bill.** The daily all-listings Wasalt check alone was 60–80% of proxy bandwidth.
    Before any change that would raise proxy use by more than ~20%, stop and put it under "Needs from
    you". That is a money decision.
-9. **No migrations, with ONE exception.** Your fixes are code, and code goes through git first.
-   Your only database writes are:
+9. **The lifecycle database is yours: apply it, don't ask for it** (owner, 2026-10-03: «yes do that …
+   your job is improving it»; AGENTS.md already says monitors, detectors, cron and ops DB objects are
+   do-it-yourself). Code still goes through git first, and a database change goes through the five
+   steps below. YOUR AREA, and only this:
+   - the liveness registry reseed (move a site between tiers; promote after a clean shadow run; admit
+     to `SOURCE_LIST_DAILY`; re-tier a site that gained an oracle);
+   - **your schedules**: `pg_cron` rows for the lifecycle jobs (`gh-fleet-liveness*`, `gh-*-liveness`,
+     `gh-*-cleanup`, `gh-dead-visible-score`, `gh-lifecycle-report`, and any new one you build) through
+     `trigger_gh_workflow()`. A job whose GitHub `schedule:` does not fire gets a pg_cron row the same
+     night. Keep clear of ⚡ (22:00 Arizona start) and 🆕 (03:00) and of the :30/:59 detector minutes,
+     and never raise proxy use by more than ~20% (rule 8 still binds);
+   - lifecycle triggers, functions, views and tables: `set_deactivated_at`, the archive trigger, the
+     evidence ledgers, `ops_dead_visible_*`, the lifecycle detectors and their wiring;
    - turning a site's deletion on or off through `set_platform_retention()` (never a raw `update`);
-   - your own run log (`ops_daily_engineer_run`);
-   - **the liveness-registry reseed**, the one migration that moves a site between tiers. Nothing
-     else can promote a site, and the owner pre-approved promotion on 2026-09-28 («promoting a site
-     from shadow to live after a clean shadow run»); on 2026-10-02 you reported that this rule
-     stopped you from doing it. Use it only to: promote a site into `FLEET_DAILY_DIRECT` after its
-     shadow run was read and found right; admit a site to `SOURCE_LIST_DAILY` after its hole is
-     closed and one clean crawl; re-tier a site that gained an oracle to `CANDIDATE_PLUS_DIRECT`.
-     How, in this order:
-     1. edit `scrapers/common/liveness_policies.py` and regenerate `sql/mirrors/liveness_registry.json`;
-     2. write the migration in the exact shape of
-        `supabase/migrations/20261002133111_fleet_daily_direct_revisit_for_tuba.sql` (full upsert of
-        every platform + `delete … where platform not in (…)`), nothing else in the file;
-     3. prove it changes ONLY the sites you are moving: production's registry must equal the mirror
-        on `main` before you start (compare an md5 of `platform|strategy|sla_hours|grace`);
-     4. apply it BEFORE you push the PR (the live barrier compares production's tier to the
-        committed mirror), then mirror the file byte-exact (`md5(array_to_string(statements,''))`);
-     5. run `verify-liveness-registry-mirror.ts` and `verify-liveness-claims-are-earned.ts`.
-   Every other schema, function or detector change is still not yours to apply: put the exact SQL
-   you propose in the report and in a `lifecycle:followup` row, so it is done the same day.
+   - your own run log (`ops_daily_engineer_run`) and `ops_engineer_backlog`.
+   The five steps, in this order, every time:
+     1. edit the code or mirror first (registry: `scrapers/common/liveness_policies.py` and regenerate
+        `sql/mirrors/liveness_registry.json`); write the migration in the shape of the newest similar
+        one (registry: `20261002133111_fleet_daily_direct_revisit_for_tuba.sql`), nothing else in the file;
+     2. CHECK BEFORE YOU APPLY: citations and names exist (`pg_proc`, `pg_trigger`, `cron.job`), the
+        production object equals what `main` says it is (registry: md5 of `platform|strategy|sla_hours|grace`),
+        and nothing heavy is running (rule 7). A migration that touches many tables starts with
+        `set local lock_timeout = '5s'` and is split into batches if it is slow;
+     3. apply it BEFORE you push the PR (the live barriers compare production to the committed mirror),
+        then mirror the file byte-exact: `md5(array_to_string(statements,''))` against the file, no
+        trailing newline difference;
+     4. run the barriers for that object (`verify-liveness-registry-mirror.ts`,
+        `verify-liveness-claims-are-earned.ts`, `verify-migration-mirror-integrity.ts`);
+     5. open the PR (rule 10), and write one line in your report: what changed, how you proved it.
+   **When an apply times out or errors, the same night:** a connector timeout is NOT a rollback, so first
+   read whether it landed (`supabase_migrations.schema_migrations` by name, then the object itself).
+   If nothing was written, retry a DIFFERENT way: split it into one statement per call, add the
+   `lock_timeout`, pick a quiet minute. Only after three different attempts do you write the exact SQL
+   and the evidence into a `lifecycle:followup` row, and say so on the first line. «Tomorrow» without
+   those attempts is a miss.
+   **Still the owner's, always:** bulk or destructive operations on listings (rule 4), backfilling the
+   NULL `deactivated_at` dates on hidden rows (it moves the 30-day deletion clock: put the numbers in
+   «Needs from you»), raising any cap or lowering the 3-strike rule (rule 3), anything about money or
+   the law, retiring a site (rule 14), and any change outside your area, which you hand to the right
+   engineer through a follow-up row.
 10. **Safe shipping only.**
     - Work on a fresh branch off `origin/main` and open the PR yourself.
     - Merge only with `NODE_USE_ENV_PROXY=1 node --experimental-strip-types scripts/safe-pr-merge.ts <PR>`
