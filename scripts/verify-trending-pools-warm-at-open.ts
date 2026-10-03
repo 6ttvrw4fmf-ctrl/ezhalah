@@ -27,7 +27,7 @@ function problems(a: string): string[] {
     if (!comp.includes(e)) bad.push(`the component no longer derives its scope with «${e}» — update cityPoolScopeOf to match, then this list`);
     if (!helper.includes(e)) bad.push(`cityPoolScopeOf does not use «${e}» (it drifted from the component: warmed pools would never be read)`);
   }
-  const warm = /\/\/ WARM THE NEXT TAP[\s\S]*?\}, \[\]\);/.exec(a)?.[0] ?? '';
+  const warm = /await ensureCityFieldIndex\(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams\)\.catch\(\(\) => null\);[\s\S]*?\}, \[\]\);/.exec(a)?.[0] ?? '';
   if (!warm) return [...bad, 'the warm-up effect is gone'];
   if (!/for \(const sel of \['Rent', 'Both', 'Buy'\] as const\)/.test(warm)) bad.push('the warm-up does not cover every deal selection');
   if (!/await ensureCityFieldIndex\(sc\.effDeal, sc\.rentPeriodTok, sc\.effCategory, sc\.cohortTypes, sc\.af\)/.test(warm)) bad.push('the warm-up does not load the pools (or loads them all at once)');
@@ -44,6 +44,6 @@ check('helper mirrors the component; warm-up loads the current scope, then each 
 mustCatch('a helper that drifted from the component', problems(src.replace(/(function cityPoolScopeOf[\s\S]*?)cohortTypesAr\(queryForPeriod\)/, '$1cohortTypesAr(query)')));
 mustCatch('a warm-up that skips Buy + Rent', problems(src.replace("['Rent', 'Both', 'Buy'] as const", "['Rent', 'Buy'] as const")));
 mustCatch('a warm-up that fires every pool at once', problems(src.replace('await ensureCityFieldIndex(sc.effDeal', 'void ensureCityFieldIndex(sc.effDeal')));
-mustCatch('the warm-up removed', problems(src.replace('// WARM THE NEXT TAP', '// (gone)')));
+mustCatch('the warm-up removed', problems(src.replace('await ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).catch(() => null);', '')));
 console.log(failed ? `\n${failed} FAILED` : '\nAll warm-at-open assertions passed');
 process.exit(failed ? 1 : 0);
