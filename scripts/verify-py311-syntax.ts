@@ -10,9 +10,31 @@
 //   node --experimental-strip-types scripts/verify-py311-syntax.ts
 
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
+
+// MUTATION PROOF: the same predicate (a clean zero exit) must FAIL on a file that is valid on 3.13
+// and illegal on 3.11 — a backslash inside an f-string replacement field — and PASS on one that is
+// legal on both, or this wrapper would pass anything.
+{
+  const dir = mkdtempSync(join(tmpdir(), 'py311-proof-'));
+  const run = (name: string, src: string) => {
+    const f = join(dir, name);
+    writeFileSync(f, src);
+    return spawnSync('python3', ['scripts/check_py311_syntax.py', f], { cwd: ROOT, stdio: 'ignore' }).status;
+  };
+  const bad = run('bad.py', 'x = "a"\nprint(f"{x + \'\\n\'}")\n');
+  const good = run('good.py', 'x = "a"\nprint(f"{x}")\n');
+  rmSync(dir, { recursive: true, force: true });
+  const mustCatch = (what: string, caught: boolean) => {
+    if (!caught) { console.error(`✗ MUTATION SURVIVED: ${what} was NOT caught`); process.exit(1); }
+  };
+  mustCatch('a backslash inside an f-string field (legal on 3.13, illegal on 3.11)', bad !== 0);
+  mustCatch('the guard failing a file that is legal on 3.11', good === 0);
+}
 const res = spawnSync('python3', ['scripts/check_py311_syntax.py'], { cwd: ROOT, stdio: 'inherit' });
 if (res.error) { console.error(`✗ could not run python3: ${res.error.message}`); process.exit(1); }
 // Only a clean zero exit passes; a signal-killed child reports status null and must not read green.
