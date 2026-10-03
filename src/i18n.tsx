@@ -904,6 +904,10 @@ const AR: Record<string, string> = {
   'Done': 'تم',
   'Listing not found.': 'لم يُعثر على الإعلان.',
   'Open in new tab': 'فتح في تبويب جديد',
+  // In-app ad viewer (owner 2026-10-03)
+  'Open in a new window': 'فتح في نافذة جديدة',
+  'This ad can’t be shown here': 'تعذر عرض الإعلان هنا',
+  'Oldest tab closed': 'أُغلق أقدم تبويب',
   'For Rent': 'للإيجار',
   'For Buy': 'للبيع',
   'Area': 'المساحة',
