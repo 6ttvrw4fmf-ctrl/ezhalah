@@ -612,6 +612,17 @@ def fetch_detail(s: cc.Session, listing_url: str) -> dict:
         rt = _txt(d.get("rate_text"))
         if rt:
             out["rate_text"] = rt                               # "رائع" (rating word)
+        # The unit's OWN score, as its page prints it («8.6 (7 تقييم)»). The list API sends
+        # total_present=0 / total_reviews=0 for about 1 unit in 6 that the page rates (unit 210265:
+        # list 0/0, page 8.6/7 — 2026-10-03), so the list alone left 1,536 rated units without a
+        # rating. reviews_count 0 is the page saying "no reviews yet" — kept, so the unit leaves the
+        # worklist. host_info.avg_reviews is the HOST's score across units: never this unit's.
+        rating = d.get("total_present")
+        if isinstance(rating, (int, float)) and not isinstance(rating, bool) and rating > 0:
+            out["rating"] = rating
+        reviews = d.get("total_reviews")
+        if isinstance(reviews, int) and not isinstance(reviews, bool) and reviews >= 0:
+            out["reviews_count"] = reviews
         secs: list[dict] = []
         for sec in (d.get("extraDescription") or []):
             if not isinstance(sec, dict):
@@ -632,7 +643,7 @@ def fetch_detail(s: cc.Session, listing_url: str) -> dict:
 def backfill_details(s: cc.Session, limit: int = 0, shard: Optional[int] = None,
                      shards: Optional[int] = None) -> tuple[int, int]:
     """Fill description (column) + the rich detail fields (additional_info) for ACTIVE Gathern rows that
-    still lack a description. Idempotent — re-runs skip already-filled rows. Optional stride-shard i/N
+    still lack a description OR a review count (the list API's 0/0 hides rated units). Idempotent — re-runs skip already-filled rows. Optional stride-shard i/N
     spreads the work across parallel runners: every shard pulls the SAME ordered missing-description
     worklist, then processes rows[i::N]. limit=0 → the shard's whole slice (what the workflow uses)."""
     client = db.sb()
@@ -647,7 +658,7 @@ def backfill_details(s: cc.Session, limit: int = 0, shard: Optional[int] = None,
         res = (client.table("gathern_residential_listings")
                .select("ad_number, listing_url, additional_info")
                .eq("source", SOURCE).eq("active", True)
-               .is_("description", "null")
+               .or_("description.is.null,additional_info->reviews_count.is.null")
                .order("last_seen_at", desc=True).order("id")
                .range(offset, offset + 999).execute())
         batch = (res.data if res else None) or []
@@ -668,7 +679,7 @@ def backfill_details(s: cc.Session, limit: int = 0, shard: Optional[int] = None,
         info = r.get("additional_info")
         if not isinstance(info, dict):
             info = {}
-        info.update(d)  # suitability, house_rules, check_in/out, guest_capacity, booking/views, rate_text, extra_sections
+        info.update(d)  # suitability, house_rules, check_in/out, guest_capacity, booking/views, rate_text, rating, reviews_count, extra_sections
         payload: dict[str, Any] = {"additional_info": info}
         if desc:
             payload["description"] = desc
