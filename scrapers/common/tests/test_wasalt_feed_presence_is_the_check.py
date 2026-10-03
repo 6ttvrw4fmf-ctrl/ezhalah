@@ -53,8 +53,8 @@ def test_a_source_list_site_stamps_what_its_list_serves_and_nothing_it_marked_in
 
 
 def test_a_site_not_admitted_stays_unstamped(sent):
-    # abralosol writes a row even when the ad's own page answered 404 this run (audit 2026-10-02).
-    db.upsert_abralosol_residential_batch([{"ad_number": "X1"}])
+    # therc: its only availability field has one value on every ad, so nothing could exclude a sold one.
+    db.upsert_therc_residential_batch([{"ad_number": "X1"}])
     assert "last_verified_alive_at" not in sent[0]
 
 

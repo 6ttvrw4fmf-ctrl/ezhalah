@@ -2,7 +2,7 @@
 
 **This file is the whole instruction.** The cloud routine's prompt only says "follow this file"; if
 anything else disagrees with it, this file wins. Written 2026-09-27 at the owner's request, after the
-owner deleted all 11 earlier routines to start a smaller, clearer team. Model: Claude Opus 5.5, extra
+owner deleted all 11 earlier routines to start a smaller, clearer team. Model: Claude Sonnet 5.5 (owner, 2026-10-03: all three engineers moved off Opus to keep the shared weekly limit alive), extra
 high effort (the owner will move it to Fable 5.1 if it does a bad job).
 
 **The old 11-routine setup is retired.** `docs/ops/ENGINEER_ROUTINES.md` and `AGENTS.md` still
@@ -138,6 +138,32 @@ These cost your first runs a lot of time. Use them instead of working them out a
   dispatch `source-reread.yml` with `ids: table:id,…` and read its job log with `get_job_logs` (the
   artifact's download host is blocked from the cloud; the log prints the same comparison). It shows
   what the page itself says next to what we store.
+
+## Lessons from 2026-10-03 (muktamel: seen 80 minutes late, left unfixed — the owner's order: never again)
+What happened, from the crawl log: muktamel's shards started 03:46 UTC and were cancelled at their
+2-hour limit at 05:45 UTC with 0 rows counted. You started at 05:10 UTC, when they were still
+«running», so nothing looked wrong. From 05:45 the failure was visible; you looked at ~07:05, with 30
+minutes left, and wrote «tomorrow». You rated the night 9/10; the owner's reading is 8.
+- **A crawl that is still running when you start is NOT checked. Re-check it.** At the start of the
+  run list every crawl still in progress (`scrape_runs` with no `finished_at`, and the GitHub runs
+  still queued or running). Look at that list again **every 30 minutes** and the moment you finish
+  any fix. A long crawl that fails mid-shift goes to the TOP of your queue the minute it fails, ahead
+  of small sites: the big ones carry the most listings.
+- **Long crawls first when they are due to finish.** You know their normal length (muktamel ~83
+  minutes a shard, dwelleo ~4 hours, muhaysini long). Work out when each will end and look then; don't
+  discover it at the end of the night.
+- **«Not enough time to prove it» is not a reason to skip the fix.** If the proof needs a crawl
+  longer than the time you have left: diagnose, ship the fix (test that fails without it, PR, merge
+  on green), dispatch the crawl, and report it as **«fixed, proof pending: <run URL>»** with the exact
+  number that must move. The next run's FIRST step is to read that proof and either confirm it or
+  reopen it. A site left untouched «for tomorrow» when a fix was possible is a miss, and it lowers
+  the rating by 2, not 1.
+- **A slow source is ours to absorb.** When a site is serving but slowly (muktamel's ceiling probe took
+  74 minutes), the fix is on our side: cache or shortcut the slow step, split the work, or give the
+  workflow the time it measurably needs. «The source is slow» is a finding, never the end of the job.
+- **Rate yourself on what the customer has, not on effort.** A site whose nightly refresh did not
+  complete is a broken site for that night, whatever else went well.
+
 
 ## Your time: fixing comes first, not the clock (owner, 2026-10-02 — replaces the 1-hour budget of 2026-09-28)
 The owner, 2026-10-02: «I don't care if you take 3 hours. Just fix it.» On 2026-10-02 the 1-hour

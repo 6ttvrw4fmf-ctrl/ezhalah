@@ -40,21 +40,15 @@ const RELEASE = { duration: 300, dampingRatio: 1 };
 // an empty painted stack, and scrolling it into view put it under this card's «af-confirm».
 //
 // So the pills are rendered HERE, in the overlay itself, ABOVE the card and above the scrim: nothing
-// is on top of them, and they keep their ✕. Not a copy of the transcript row — the same facets and
-// the same removal handler, threaded from the one place that owns them (agent.tsx's guidedPills /
-// removeGuidedFacet), so there is no second source of truth to drift.
+// is on top of them. Not a copy of the transcript row — the same facets, threaded from the one place
+// that owns them (agent.tsx's guidedPills), so there is no second source of truth to drift.
 //
-// SCOPE FACETS STAY UNREMOVABLE, exactly as in the transcript row (owner 2026-08-23): every other
-// advanced answer only ever NARROWS, so removing it widens back to a scope the user already had,
-// while removing a TYPE pill would broaden the search past anything they ever asked for.
+// READ-ONLY (owner 2026-10-03: «we should not show any X button on this»). Until then every pill but
+// a scope one carried a ✕ that removed the answer and re-ran the search; there is no ✕ and no handler
+// now, so the row can only SHOW what has been committed.
 export type CommittedFacet = { id: string; labels: string[] };
 
-function CommittedPills({ facets, onRemove, disabled, isScope }: {
-  facets: readonly CommittedFacet[];
-  onRemove?: (index: number) => void;
-  disabled?: boolean;
-  isScope: (id: string) => boolean;
-}) {
+function CommittedPills({ facets }: { facets: readonly CommittedFacet[] }) {
   const { isRTL } = useI18n();
   if (!facets.length) return null;
   return (
@@ -63,23 +57,9 @@ function CommittedPills({ facets, onRemove, disabled, isScope }: {
       style={[s.pillRow, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}
     >
       {facets.map((f, i) => (
-        isScope(f.id) || !onRemove ? (
-          <View key={`${f.id}-${i}`} style={s.pill}>
-            <Text style={s.pillTx}>{f.labels.join('، ')}</Text>
-          </View>
-        ) : (
-          <Pressable
-            key={`${f.id}-${i}`}
-            // @ts-expect-error web-only DOM props on the RNW host node
-            dataSet={{ testid: `af-card-pill-${i}` }}
-            style={s.pill}
-            onPress={() => onRemove(i)}
-            disabled={disabled}
-          >
-            <Text style={s.pillTx}>{f.labels.join('، ')}</Text>
-            <Ionicons name="close" size={13} color={colors.primary} />
-          </Pressable>
-        )
+        <View key={`${f.id}-${i}`} style={s.pill}>
+          <Text style={s.pillTx}>{f.labels.join('، ')}</Text>
+        </View>
       ))}
     </View>
   );
@@ -87,9 +67,6 @@ function CommittedPills({ facets, onRemove, disabled, isScope }: {
 
 export type ShellPills = {
   facets: readonly CommittedFacet[];
-  onRemove?: (index: number) => void;
-  disabled?: boolean;
-  isScope: (id: string) => boolean;
 };
 
 // Shared overlay shell (top bar + backdrop), reused by the loading, intro and question states so the
@@ -106,10 +83,7 @@ function Shell({ children, onClose, countChip, pills }: {
     <View style={s.overlay} testID="af-card">
       <Pressable style={s.backdrop} onPress={onClose} />
       {pills ? (
-        <CommittedPills
-          facets={pills.facets} onRemove={pills.onRemove}
-          disabled={pills.disabled} isScope={pills.isScope}
-        />
+        <CommittedPills facets={pills.facets} />
       ) : null}
       <Reveal style={s.card}>
         <View style={s.bar}>
@@ -460,10 +434,11 @@ export default function AdvancedQuestionCard({
               is told they exist rather than being left to infer that every listing stated the fact.
               Rendered ONLY for a truthful count: `null` means the question has no honest single
               unknown number and prints nothing, and 0 prints nothing because there is no one to
-              mention. Never a fabricated "0 did not mention" (owner rule 2026-08-28). */}
+              mention. Never a fabricated "0 did not mention" (owner rule 2026-08-28).
+              The 😔 leads the line (owner 2026-10-03): «no information» is a small loss, said gently. */}
           {unknownCount != null && unknownCount > 0 ? (
             <Text style={s.unknownNote} testID="af-unknown-count">
-              {t('{n} listings did not mention this', { n: unknownCount.toLocaleString('en-US') })}
+              {'😔 '}{t('{n} listings did not mention this', { n: unknownCount.toLocaleString('en-US') })}
             </Text>
           ) : null}
           {brandImage && BRAND_IMAGES[brandImage] ? (

@@ -61,7 +61,7 @@ import { addAdTab, inAppViewerHost } from '@/lib/inAppViewer';
 import { VIEWER_SPLIT_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import AdViewer from '@/components/AdViewer';
-import { filterToChat, searchSummary, buildAfSummary, buildAfRoundLog, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, NO_RESULTS_GENERIC_FALLBACK_EN, type SearchQuery, type SearchResult } from '@/data/search';
+import { filterToChat, searchSummary, guidedSearchSummary, buildAfSummary, buildAfRoundLog, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, NO_RESULTS_GENERIC_FALLBACK_EN, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
 import { stripCommittedAf } from '@/lib/afCarry';
@@ -86,6 +86,7 @@ import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard, type 
 import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes } from '@/lib/afProbe';
 import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, resolveScopeOptionsInBackground, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, primeLiveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
+import { markSearchLeftBehind } from '@/lib/searchLeftBehind';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
 // below a results block — NEVER before first results. Its gate is cohortAllows(q, 'property_age')
@@ -746,6 +747,14 @@ export default function Agent() {
   // moment a search happens (any user message or results — same condition that hides the guest
   // chips), it fades + collapses away: mid-conversation the pill is noise. JS driver (height).
   const modeSearched = msgs.some((m) => m.role === 'user' || m.role === 'results');
+  // Once a search has LANDED here, the Filter home must open clean when the user comes back to it
+  // (owner 2026-10-03) — see src/lib/searchLeftBehind.ts. Keyed on each results turn that lands, never
+  // on the first message: a search the user cancels before its results arrive (Back or Stop during
+  // the loader) never happened, and the Filter must come back with their city, district and area
+  // EXACTLY as they left them (verify-web-runtime-smoke.mjs [E]/[F]/[H]). Counting the turns, not a
+  // boolean, so a second search landing on this same screen raises it again.
+  const landedResultsCount = msgs.filter((m) => m.role === 'results').length;
+  useEffect(() => { if (landedResultsCount > 0) markSearchLeftBehind(); }, [landedResultsCount]);
   // BUG (owner-reported 2026-09-11): opening an old chat from the sidebar made this pill visibly
   // pop up then collapse away — a "weird animation" on every single history open. Root cause: `msgs`
   // starts EMPTY (useState([]) above) and openSaved() fills it in ONE async setMsgs() call once the
@@ -2175,8 +2184,19 @@ export default function Agent() {
     refineMsgIdRef.current = statusId;
     // Guaranteed search → the searching loader (roster + wave) starts IMMEDIATELY, no thinking beat.
     searchingAtRef.current[statusId] = Date.now();
-    setMsgs((m) => [...m, { id: uid(), role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined }]);
+    const echoId = uid();
+    setMsgs((m) => [...m, { id: echoId, role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined }]);
     toBottom();
+    // STAY IN THE SECTION YOU ARE IN (owner 2026-10-03). The round just closed on the old turn's
+    // «تحديد أكثر» button, so the new answers bubble and the loader are appended directly below it —
+    // but a viewport parked at the old bottom would show none of it and the user would have to scroll
+    // to find their own search. Ease down to that bubble (one short glide, 80 px under the top):
+    // everything above is still there, one scroll up. Measured at scroll time, like the landing.
+    // Three passes, not one: the loader is short on the first frame and grows as its platform grid
+    // renders, so the first glide can be clamped by the end of the content and leave the bubble low
+    // on screen; the later passes settle it ~80 px under the top with the loader below it. All land
+    // within the first 1.5 s, long before the user has had reason to scroll.
+    for (const d of [80, 700, 1500]) easeToMsgTop(echoId, d);
     const result = await runQuery(refined, true, run.ac.signal, ensureChatId());
     if (run.cancelled) return;
     prefetchNarrowing(result.query ?? refined, opts?.guided?.asked ?? []);  // AFTER the search — see prefetchNarrowing
@@ -2203,7 +2223,11 @@ export default function Agent() {
       // through this one call — one writer, so the store can never hold a round this screen never ran.
       writeFilterStore({ ...refined, afFacets: opts.guided.facets });
     }
-    await playListings(run, statusId, buildScrapeIntro(result.query ?? refined), result, label, !!opts?.guided);
+    // A round of the Advanced Filter reads the ORIGINAL summary plus every committed answer (owner
+    // 2026-10-03); any other refine keeps summarising the query it ran.
+    await playListings(run, statusId,
+      opts?.guided ? guidedSearchSummary(opts.guided.baseQ, opts.guided.facets) : buildScrapeIntro(result.query ?? refined),
+      result, label, !!opts?.guided);
     if (run.cancelled) return;
     void promptSignupSoon(run);
     // NO toBottom() here (owner 2026-08-24). It fired while the new turn's cards were still
@@ -2215,75 +2239,15 @@ export default function Agent() {
     setBusy(false); runRef.current = null;
   };
 
-  // Remove one interview facet from the results pills (owner 2026-08-16: «The user can remove any
-  // advanced choice and results should immediately update»). Pure recomputation: rebuild the query
-  // from the interview's baseQ by re-applying every REMAINING facet in order via its own question's
-  // apply() — never a hand-written inverse — then re-search through the same guided path so the
-  // pills row carries over minus the removed one. No mining beat here; removal is instant.
-  const removeGuidedFacet = (facetIndex: number) => {
-    if (!guidedPills || busy) return;
-    const removed = guidedPills.facets[facetIndex];
-    const remaining = guidedPills.facets.filter((_, i) => i !== facetIndex);
-    // A ROUND ON SCREEN IS PRICED ON A COHORT THIS REMOVAL JUST DESTROYED — CLOSE IT
-    // (ops_incident #242, measured on production 2026-09-13, reproduced 3/3).
-    //
-    // The owner's 2026-09-11 decision (#155) put the committed pills INTO the round overlay, so a
-    // user can delete an answer while a question is on screen. The removal widened the search
-    // correctly — but the round itself was never told: its plan, its header total, its option counts
-    // and its own facet list all still belonged to the pre-removal query, and nothing re-derived
-    // them. Measured live on جدة/الفلل والبيوت/فيلا/شراء, 390x844: round 1 committed four answers
-    // (125 results); removing «جديد» widened the search to 295 (headline 295, anon replay 295, DB
-    // truth 295) and 60s later the card still read «125 نتيجة», still drew FOUR committed pills
-    // including the deleted one, and was asking «وش الاتجاه اللي تفضله؟» priced on the 125 set —
-    // شمال 27 / جنوب 27 / شرق 27 / غرب 19 where the real set has 62 / 49 / 67 / 47. Tapping a
-    // number the user can read off the screen would have returned 2.3x that many listings, which is
-    // the one thing every AF count rule forbids (§2.5, §7: visible count = count RPC = request = DB
-    // truth), and R9.2.1 was false ON SCREEN while being true on the wire.
-    //
-    // So the round is ABANDONED, exactly as ✕ and «رجوع» from question one abandon it: bump the
-    // token first so any in-flight resolveOptions/rankQuestions probe for the dead cohort is
-    // discarded rather than painting over the close, then drop the card. Nothing is lost that was
-    // not already invalid — the committed ANSWERS live in `guidedPills`, which this function rebuilds
-    // and hands to runRefine below, and the asked-carry rides with them. What comes back is the
-    // «خلّنا نحدد الطلب أكثر» offer on the new, wider turn, and a fresh round priced on the set the
-    // user actually has (startAgeFlow re-seeds every round ref, so the next round is clean).
-    ageFlowTokenRef.current++;
-    setAgeFlow(null);
-    let q = guidedPills.baseQ;
-    for (const f of remaining) {
-      // SCOPE questions live outside ADVANCED_QUESTIONS, so the lookup must span BOTH pools: a
-      // surviving group/type facet whose question could not be resolved would be silently dropped
-      // from the rebuild and quietly widen the search (owner 2026-08-23).
-      const question = ADVANCED_QUESTIONS.find((x) => x.id === f.id) ?? SCOPE_QUESTIONS.find((x) => x.id === f.id);
-      if (question) q = question.apply(q, f.keys);
-    }
-    const label = t('Without: {label}', { label: removed.labels.join('، ') });
-    // The guided record is passed even when the LAST pill is removed (owner 2026-08-24): the pills
-    // row is gated on facets.length so nothing renders, but the carried asked-set survives — dropping
-    // it here would resurrect every question an earlier round already asked or skipped.
-    //
-    // …MINUS the removed question itself (review 2026-08-25). The carry exists to stop RE-asking what
-    // the user already RESOLVED; a facet the user just deleted is by definition unresolved again, and
-    // keeping its id in `asked` burned that dimension for the rest of the chat — remove «عمر ٣-٥
-    // سنوات» to pick a different bucket and property_age could never be offered again, and once the
-    // pool was spent that way «تحديد أكثر» disappeared entirely with no way back but a new search.
-    void runRefine(q, '__guided__', '', label,
-      { guided: { baseQ: guidedPills.baseQ, facets: remaining, asked: guidedPills.asked.filter((id) => id !== removed.id) } });
-  };
-
   // THE COMMITTED PILLS THE ROUND CARD MUST NOT COVER (owner decision 2026-09-11, #155).
-  // One source of truth: the SAME facets the transcript row renders and the SAME removal handler,
-  // handed to the overlay so it can draw them above its own scrim. A copy here would be a second
-  // place for the user's committed selections to live, and the two would drift.
-  // Declared HERE, after removeGuidedFacet: the useMemo factory runs during render, so referencing
-  // that `const` from above its declaration is a temporal-dead-zone throw, not a lint nit.
+  // One source of truth: the SAME facets the transcript row renders, handed to the overlay so it can
+  // draw them above its own scrim. A copy here would be a second place for the user's committed
+  // selections to live, and the two would drift.
+  // READ-ONLY (owner 2026-10-03: «we should not show any X button on this»). There is no removal
+  // handler any more: a committed answer is changed by going back through the round, never by a ✕.
   const afCardPills: ShellPills = useMemo(() => ({
     facets: guidedPills?.facets ?? [],
-    onRemove: removeGuidedFacet,
-    disabled: busy,
-    isScope: isScopeQuestionId,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [guidedPills, busy]);
+  }), [guidedPills]);
 
 
   // Present the step at `stepIndex`. A step the user has already seen (walked Back to, or one
@@ -3298,7 +3262,7 @@ export default function Agent() {
       // Dedup on restore too (owner audit, 2026-08-27): a chat saved before this fix shipped could
       // have a stray duplicate pill baked into its serialized transcript — restoring it verbatim
       // would resurrect exactly the bug this fix closes everywhere else. Deduping HERE (not just at
-      // render) keeps the array index-consistent for removeGuidedFacet's index-based removal.
+      // render) keeps the saved array and the chips drawn from it identical.
       const rgp = restored.guidedPills as { facets?: GuidedFacet[] } | null | undefined;
       setGuidedPills((rgp && rgp.facets ? { ...rgp, facets: dedupeFacetsByLabel(rgp.facets) } : rgp) as any);
       lastCapturedRef.current = JSON.stringify(t); // what's on screen IS what's stored — no echo write
@@ -3739,7 +3703,7 @@ export default function Agent() {
                 // message language changed. (user request.)
                 const rtl = msgRTL(m.text);
                 return (
-                  <View key={m.id} style={s.userBubble}>
+                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={s.userBubble}>
                     <Text style={[s.userText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
                       {m.typing ? <Typer text={m.text} onDone={onBubbleDone} /> : m.text}
                     </Text>
@@ -3850,7 +3814,14 @@ export default function Agent() {
                   key={m.id}
                   ref={(n: any) => { msgNodeRef.current[m.id] = n; }}
                   onLayout={(e) => { msgYRef.current[m.id] = e.nativeEvent.layout.y; }}
-                  style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%', display: searchingVisibleRef.current || (latestResult?.id !== m.id && latestResult?.typing && !doneTyping[latestResult.id]) ? 'none' : 'flex' }}
+                  // FADED, NEVER REMOVED (owner 2026-10-03: «he shouldn't go up — he's still in that same
+                  // screen»). #5400 hid every earlier results turn (`display:'none'`) while a search
+                  // loaded so an old count could not pass for the new answer. Removing them collapsed
+                  // the page under the reader — an 8,800 px thread became one screen and the browser
+                  // threw them to the top — and when they came back above the new turn the view jumped
+                  // again. Dimming keeps #5400's purpose (the old count is plainly the old one) with no
+                  // layout change at all, so the reader stays exactly where they were.
+                  style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%', opacity: searchingVisibleRef.current || (latestResult?.id !== m.id && latestResult?.typing && !doneTyping[latestResult.id]) ? 0.35 : 1 }}
                 >
                   {/* 1) BRANDED SLOGAN — sparkle icon + Ezhalah's personality line. The row sizes to its
                       content and is pushed to the correct edge by the parent's alignItems. ENGLISH →
@@ -3884,33 +3855,18 @@ export default function Agent() {
                       {m.typing ? <Typer text={introText} onDone={() => markTyped(m.id)} /> : introText}
                     </Text>
                   ))()}
-                  {/* GUIDED SUMMARY + REMOVABLE PILLS (owner 2026-08-16): after the interview, briefly
-                      show what Ezhalah understood — «بناءً على: …» — and each committed answer as a
-                      removable pill. Removing one rebuilds the query from the interview's baseQ with
-                      the remaining facets and re-searches immediately. */}
+                  {/* COMMITTED ANSWERS AS CHIPS (owner 2026-10-03). The «بناءً على: …» sentence that used
+                      to sit here is now part of the summary above — «ملخص البحث» lists every answer
+                      under «من الفلتر المتقدم» — so it is not said twice. The chips stay, read-only. */}
                   {guidedPills && guidedPills.msgId === m.id && guidedPills.facets.length ? (
                     <View style={{ alignSelf: 'stretch', gap: 7, marginTop: 2 }}>
-                      <Text style={[s.guidedBasedOn, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
-                        {buildAfSummary(guidedPills.facets)}
-                      </Text>
                       <View style={[s.guidedPillRow, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
+                        {/* Plain chips, never pressable and never a ✕ (owner 2026-10-03). The same chip
+                            for every answer, scope or not: nothing on this row removes anything. */}
                         {guidedPills.facets.map((f, i) => (
-                          // SCOPE facets (group/type) are deliberately NOT removable (owner
-                          // 2026-08-23). Every other advanced answer only ever NARROWS, so removing
-                          // its pill widens back to a scope the user already had; removing a TYPE
-                          // pill would instead broaden the search past anything they ever asked for,
-                          // with no re-interview and no control to get it back. It renders as a plain
-                          // chip — same row, no «×», not pressable.
-                          isScopeQuestionId(f.id) ? (
-                            <View key={`${f.id}-${i}`} style={s.guidedPill}>
-                              <Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>
-                            </View>
-                          ) : (
-                            <Pressable key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill} onPress={() => removeGuidedFacet(i)} disabled={busy}>
-                              <Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>
-                              <Ionicons name="close" size={13} color={colors.primary} />
-                            </Pressable>
-                          )
+                          <View key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill}>
+                            <Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>
+                          </View>
                         ))}
                       </View>
                     </View>
@@ -4585,7 +4541,6 @@ const s = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space.screenSide, paddingBottom: 8 },
   // Guided-interview summary + removable pills on the results turn (owner 2026-08-16). fontWeight
   // (not fontFamily) matches the idiom of every other text style in this sheet.
-  guidedBasedOn: { fontSize: 12.5, fontWeight: '500', color: colors.muted },
   guidedPillRow: { flexWrap: 'wrap', gap: 8, alignItems: 'center' },
   guidedPill: {
     flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.tint,

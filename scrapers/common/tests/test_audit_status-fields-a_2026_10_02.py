@@ -26,7 +26,12 @@ class _FakeDb:
 
     def __init__(self):
         self.upserted: list[str] = []
+        self.unproven: list[str] = []      # rows the crawler wrote but refused to vouch for (2026-10-03)
         self.prunes = 0
+
+    def mark_presence_unproven(self, row):
+        self.unproven.append(row["ad_number"])
+        return row
 
     def begin_run(self, slug):
         return 1
@@ -81,6 +86,7 @@ def test_opensooq_never_upserts_an_inactive_or_expired_item(monkeypatch, capsys)
     monkeypatch.setattr(OPENSOOQ, "walk", lambda s: (items, len(items)))
     fake = _run(monkeypatch, OPENSOOQ)
     assert sorted(fake.upserted) == ["OSQ1", "OSQ4"] and fake.prunes == 1
+    assert fake.unproven == ["OSQ4"]                  # kept, counted, and not stamped as checked
     out = capsys.readouterr().out
     assert "inactive_at_sourcex1" in out and "ad_end_date_expiredx1" in out
     assert "listing_status_pausedx1" in out          # a word never measured: kept, and said out loud
@@ -165,6 +171,7 @@ def test_muajarh_a_lapsed_licence_is_out_and_an_unseen_status_is_kept_and_counte
     monkeypatch.setattr(MUAJARH, "get_json", lambda s, url: {"data": next(r for r in rows if url.endswith("/" + r["slug"]))})
     fake = _run(monkeypatch, MUAJARH)
     assert sorted(fake.upserted) == ["MJR1", "MJR3", "MJR4"]
+    assert sorted(fake.unproven) == ["MJR3", "MJR4"]  # kept, counted, and not stamped as checked
     out = capsys.readouterr().out
     assert "ad_licence_expiredx1" in out
     assert "status_Falsex1" in out and "request_status_pendingx1" in out
@@ -195,5 +202,6 @@ def test_squares_a_status_term_never_measured_is_kept_and_counted_with_the_pages
     monkeypatch.setattr(SQUARES, "stated_city", lambda text: (None, None, None))
     fake = _run(monkeypatch, SQUARES)
     assert sorted(fake.upserted) == ["SQR1", "SQR2"]
+    assert fake.unproven == ["SQR2"]                  # kept, counted, and not stamped as checked
     out = capsys.readouterr().out
     assert "status_term_91_مباعx1" in out and "status_term_90" not in out

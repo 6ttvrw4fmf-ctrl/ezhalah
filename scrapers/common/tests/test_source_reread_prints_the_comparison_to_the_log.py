@@ -31,3 +31,12 @@ def test_log_lines_count_the_pages_own_images_without_our_parser():
     item = {"table": "t", "id": 1, "url": "u", "stored": {"has_photo": False}, "page": page}
     text = "\n".join(log_lines(item))
     assert "page images (JSON-LD): 4" in text and "we serve a photo: False" in text
+
+
+def test_image_paths_say_where_the_page_lists_them():
+    from scrapers.common.source_reread import page_image_paths
+    page = {"jsonld": [{"@type": "Product", "itemOffered": {"image": ["a.jpg"]}, "image": ["b.jpg", "c.jpg"]}]}
+    assert page_image_paths(page) == ["itemOffered.image x1", "image x2"]
+    assert page_image_paths({"jsonld": [{"name": "x"}]}) == []
+    text = "\n".join(log_lines({"table": "t", "id": 1, "url": "u", "stored": {}, "page": page}))
+    assert "image at: ['itemOffered.image x1', 'image x2']" in text

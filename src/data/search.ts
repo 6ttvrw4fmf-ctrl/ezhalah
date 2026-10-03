@@ -12,6 +12,7 @@ import { normalizeArabic } from '../lib/chatSearch';
 import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { combinedBudgetParts } from '@/lib/combinedBudget';
+import { withAdvancedBlock, type AfFacet } from '@/lib/afSummary';
 import { bedroomTokensPure } from '@/lib/roomBedrooms';
 import { translitPlace } from '@/lib/translitPlace';
 import { CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
@@ -651,6 +652,18 @@ export function searchSummary(q: SearchQuery): string {
 
 // AF emoji summary — pure function lives in @/lib/afSummary (zero deps, testable standalone).
 export { buildAfSummary, buildAfRoundLog } from '@/lib/afSummary';
+
+// THE SUMMARY OF A TURN THAT CAME FROM AN ADVANCED FILTER ROUND (owner 2026-10-03): the summary the
+// user already read — built from the query as it stood BEFORE the first round (`baseQ`), so the
+// original type group, deal, period, city and region lines stay exactly as they were — with every
+// committed answer listed under «من الفلتر المتقدم». Rebuilt from `baseQ` + ALL facets each time, so a
+// second round adds to the list instead of replacing it. Before this, the turn's summary came from
+// the refined query alone: an answered type overwrote «الشقق والسكن المشترك» with «شقة», and the
+// answers sat on a separate line below the intro. Committed answers only (summary == committed
+// state): a skipped question never appears here.
+export function guidedSearchSummary(baseQ: SearchQuery, facets: AfFacet[]): string {
+  return withAdvancedBlock(searchSummary(baseQ), facets, t('From the advanced filter'));
+}
 
 // A compact, dot-separated one-liner of what the user asked for — shown right before scraping as a
 // "Looking for: Villa · Rent · Riyadh · SAR 5,000 · 3 beds" confirmation. Empty fields are skipped so

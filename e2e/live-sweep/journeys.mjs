@@ -454,19 +454,18 @@ export async function typedDistrict(plan) {
   });
 }
 
-/** 9 — CLEAR ALL must reset the form. */
+/** 9 — THERE IS NO «مسح الكل» (owner 2026-10-03: «this should never show»). The control was removed:
+ *  coming back to the Filter after a search always opens a clean form, so there is nothing to clear.
+ *  This journey keeps its name so the sweep's coverage contract still counts it, and now asserts the
+ *  ABSENCE — with the form filled in, where the button used to appear. */
 export async function clearAll(plan) {
-  const name = `clear-all:${plan.city}`;
+  const name = `no-clear-all:${plan.city}`;
   return withPage(false, async (page) => {
     if (!await pickCity(page, plan.city)) return null;
     await page.locator('[data-testid="price-max-input"]').fill('500000').catch(() => {});
     await sleep(1200);
-    const clear = page.getByText('مسح الكل', { exact: false });
-    if (!await clear.count()) { note(`${name}: no «مسح الكل» control — skipped`); return null; }
-    await clear.first().click(); await sleep(2200);
-    const city = await page.locator('[data-testid="city-input"]').inputValue().catch(() => '');
-    const price = await page.locator('[data-testid="price-max-input"]').inputValue().catch(() => '');
-    if (city || price) defect(name, 'UI', `Clear All left city="${city}" priceMax="${price}"`);
-    return { name, ok: !city && !price };
+    const shown = await page.getByText('مسح الكل', { exact: false }).count();
+    if (shown) defect(name, 'UI', '«مسح الكل» is on screen with the form filled in — it was removed 2026-10-03');
+    return { name, ok: !shown };
   });
 }

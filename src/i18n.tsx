@@ -618,6 +618,7 @@ const AR: Record<string, string> = {
   "I've stopped the search. Is there anything else I can help you with today?": 'وقفت البحث. أقدر أساعدك بشي ثاني اليوم؟',
   'Precise': 'بحث دقيق',
   'Search Summary': 'ملخص البحث',
+  'From the advanced filter': 'من الفلتر المتقدم',
   'Property Type': 'نوع العقار',
   'Transaction Type': 'نوع العملية',
   'Platform': 'المنصة',
