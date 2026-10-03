@@ -363,6 +363,7 @@ const TURN_SCOPED_EXEMPT: Record<string, string> = {
 };
 const TOKEN_EXEMPT: Record<string, string> = {
   voiceStopGenRef: "mic-recording scoped, not conversation scoped: it is bumped by its own start/stop transitions and gates only the 'processing' beat of a recording the user is holding",
+  savedOpenTokenRef: "counts sidebar chat-open TAPS, not conversations: it orders two quick taps; leaving the conversation (New Chat) is detected in the same check through conversationEpochRef, which resetConversationState already bumps",
   askCountRef: "not a cancellation token despite its useRef(0) shape — it is a counter, and it is in the CONVERSATION_SCOPED contract above (cleared to 0)",
 };
 
