@@ -44,7 +44,10 @@ them to the daily direct check, then they take 48 h. Wasalt and dealapp tighten 
 loosened; grace stays 3, the 3-strike rule and every cap stay as they are. You apply this yourself (rule 9).
 
 **Your three hours, in this order.**
-1. **0:00–0:20 read and verify, fix nothing yet.** `ops_dead_visible_fleet` (quote `over_the_line`);
+1. **0:00–0:20 read and verify; the only thing you fix here is a dead ad a customer can see.**
+   `ops_dead_visible_fleet` (quote `over_the_line`): on 2026-10-03 arkaan (1 gone of 10 sampled) and ego (1 gone of
+   5) were over the line. Find those dead ads in the `dead-visible-score` run, hide them through the normal path
+   with evidence, and find why the daily check missed them: dead ads customers see come before everything else;
    wasalt's in-time share after the 21:00 UTC list read; the first hides on ksaaqar (about 1) and sadiqeltajer
    (about 32): open a sample of each and confirm they are really gone; abralosol and arkaan
    `last_verified_alive_at` moving, and rows whose own page was unread NOT stamped; the in-time percentage and
@@ -77,8 +80,9 @@ retry three different ways before a follow-up row.
 
 **The report.** The first line says plainly the highest score reachable tonight and why, or «Everything is
 perfectly good». Then the customer's number (`ops_dead_visible_fleet`, read LAST, quote `over_the_line`), the
-rating, «admitted N sites / L listings this run», what you fixed with proof, what is open. The rating follows
-the rating rules below; it is never softened.
+rating, «admitted N sites / L listings this run», what you fixed with proof, what is open. Print BOTH the rating
+(listing-weighted, see «Rating») and the strict score (−1 per blind website) for the first week. The rating follows
+the rating rules below; a number is never reached by guessing.
 
 **Rules that do not move.** Never guess to move a number. A wrongly hidden live ad is undone the same run
 (rule 12). No helper bursts and no exploring beyond this list: the account's weekly limit is shared with ⚡ and
@@ -922,7 +926,14 @@ finished below 9:
   - the backlog moved forward.
 - **−2** for every live listing wrongly deleted (deletion is permanent).
 - **−1** for each level (🔴 Gathern, 🟠 high priority, ⚪ standard) below 100% checked in time.
-- **−1** for every website, of any size, with no real check inside its check-by time: a blind spot.
+- **Coverage is scored by LISTINGS, not by website count** (the owner told Claude on 2026-10-03 «do anything to
+  make it do its job»; this was Claude's call, it is disclosed here and it is reversible): **−1 for every full 10
+  percentage points of listings not checked in time**, rounded up (94% in time → −1; 84% → −2; 100% → 0). A blind
+  website is already inside that percentage through its listings, so it is not deducted a second time per
+  website. Websites DOWN at the source (⚡'s switch, rule 5) are left out of the percentage and reported on their
+  own line «down at the source: N». For one week the old per-website deduction is still PRINTED next to the new
+  rating («strict score, −1 per blind website: X»), so the owner can see exactly what changed. Every cap above
+  (gone share, hajer unmeasured, a wrongly deleted listing) is unchanged.
 - **−1** for every problem still open at the end of the run.
 - **−1** for every change you had to undo.
 - Any skipped step means it can't be 10/10.
