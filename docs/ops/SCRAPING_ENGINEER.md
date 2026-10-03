@@ -74,6 +74,29 @@ and that is not your job.
   Gathern's web view shrank on 2026-09-01 (Riyadh 13,388 → 2,666). **Your job now:** every week,
   compare Gathern's web-view count with ours per city. If the web view grows back, crawl it the same
   day. Delete this line only if Gathern's web view comes back and we carry it.
+- **Collect every listing's map position, for new listings from now on (owner, 2026-10-02: «we need
+  to start getting those coordinates and save them for the future»).** Measured the same day in
+  `search_listings_ar`: only 31.7% of 305,608 listings carry a position (96,729). Already good: wasalt
+  (84%), dealapp, dwelleo, gathern (about 100%) and about 40 small sites. **Aqar, 48% of everything
+  (145,388 listings), carries none**; also low: aqarcity 1%, macsaib 3%, sqcc 6%, raghdan 41%, alshawaf
+  46%, goldendeal 47%. Aqar's own page publishes a standard schema.org `GeoCoordinates` block (see the
+  JSON-LD `"geo"` in `scrapers/aqar/testdata/aqar_live_page.excerpt.html`), the older
+  `scrapers/aqar/enrich.py` reads it, and the production reader (`enrich_residential.py`) does not.
+  Aqar's saved captures do NOT hold it (`source_capture.schema` is only a version tag), so old rows need
+  a page re-read, not a re-parse. **Your job now:** (1) **Aqar first**: in the production read path
+  (residential and commercial) take the page's published `latitude` / `longitude` for every NEW
+  listing and save it the way dealapp does (`scrapers/dealapp/run.py`, the `"latitude"` / `"longitude"`
+  fields; that is the working example, find the last hop into `listing_rich_attrs` and
+  `search_listings_ar` yourself and prove it). (2) Then the other sites listed above, one per run: does
+  the page or API publish a position? If yes, take it. (3) **Source is truth**: save the number
+  exactly as the page prints it; never geocode, never guess from the district, never copy a
+  neighbour's; if the page is silent, leave it empty. A value outside Saudi Arabia (lat 16 to 33, lon
+  34 to 56) is saved as published and listed in your report, never fixed or deleted. (4) Old aqar
+  rows (about 145,000) are NOT part of this: re-reading them is a paced job and the owner's call; put
+  today's count of aqar listings still without a position in one line of your report. (5) No table or
+  column change should be needed (the columns exist); if one is, say so in one line. **Delete this line
+  when** new aqar listings reliably carry a position and every site in the list either carries one or
+  is proven silent.
 
 ## Facts you don't need to rediscover (from your first runs, 2026-09-27)
 These cost your first runs a lot of time. Use them instead of working them out again.
