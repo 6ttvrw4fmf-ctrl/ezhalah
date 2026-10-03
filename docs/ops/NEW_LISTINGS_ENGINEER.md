@@ -27,15 +27,18 @@ district only from the title: about 400 new Dealapp listings have none and 23 ha
 location line names them. About 25 district spellings are missing from the catalog. Your score and report were
 hand-computed because this container has no service key.
 
+**YOUR SCOPE: NEW LISTINGS ONLY (owner, 2026-10-03).** Your listings are the ones whose `first_seen_at` is in the last
+24 hours. Older listings are NOT yours: when you find a problem in one (a wrong district, a wrong type, a dead ad still
+shown), write it into `ops_engineer_backlog` with `engineer = 'repair'` and the evidence, and move on: the repair
+engineer works that list. You fix the CAUSE (the parser, the mapper, the catalog spelling) so tomorrow's arrivals
+are right, and you repair only today's arrivals. The 13,618 older listings with no district (2026-10-03) are the repair
+engineer's, not yours.
+
 **Your three hours, in this order.**
 1. **0:00–0:15 read.** `ops_engineer_backlog` (open rows first), the newest `new_listings_engineer:followup` rows (they carry
    the owner's rulings), `ops_new_listings_score` (if the workflow has run), then tonight's scorecard.
-2. **0:15–1:30 DISTRICTS FIRST (the owner's priority, rows 94 and 122).** Fix the Dealapp parser so a missing title district is
-   filled from the page's location line (the title wins when both exist; log every conflict in the backlog), repair the
-   affected rows through the sanctioned path (the cause fix AND the repair, clear `listings_arabic_locations`), add the
-   catalog spellings the ad's own page confirms (≥ 2 ads each, one PR), then the next biggest NULL-district sites. Report the
-   no-district count before and after: **it must go down every night.**
-3. **1:30–2:00 THE NUMBERS RULE (below).**
+2. **0:15–1:30 DISTRICTS FIRST (the owner's priority, rows 94 and 122).** Fix the Dealapp parser so a missing title district is filled from the page's own location line (the title wins when both exist; log every conflict in the backlog); repair today's affected arrivals through the sanctioned path (the cause fix AND the repair, clear `listings_arabic_locations`); add the catalog spellings the ad's own page confirms (≥ 2 ads each, one PR); then the next sites with NULL districts among today's arrivals. Report the no-district count AMONG TODAY'S ARRIVALS before and after: **the target is 0, except where the source is silent.**
+3. **1:30–1:50 THE NUMBERS RULE for new listings (below).**
 4. **2:00–2:30 customer tests** with `e2e/engineers/customer-journey.mjs`: 3 normal and 3 Advanced Filter, plus one
    search of a city/district you just fixed.
 5. **2:30–2:50 the score workflow,** if `ops_new_listings_score` is still empty: a small workflow like
@@ -44,23 +47,20 @@ hand-computed because this container has no service key.
 
 ## THE NUMBERS RULE (owner, 2026-10-03): every number a customer sees is true NOW
 A customer sees numbers everywhere: the results count, the counts beside cities and districts, the count on every
-Advanced Filter option, «نفحص أكثر من N عقار». **They must equal what a fresh query of the live listings returns, and when a
-listing dies or is hidden they must drop within one hour** (the hourly search-index sync at :22 is the pipeline: lifecycle
-hides a listing, the sync removes it from `search_listings_ar`, every count follows). Every night, check:
-- **Fresh vs shown:** pick 5 (deal × category × city/district) combinations; compare the number the app shows (the same RPCs
-  the app calls: `district_options_ar`, `location_search_candidates_ar`, the top-cities RPC) with a direct count on
-  `search_listings_ar` under the same scope. They must be equal. A scope that disagrees is a bug in the count surface,
-  not a rounding detail (count == results, the permanent count-scope parity rule).
-- **Option vs result:** on one Advanced Filter journey the number promised on an option equals the results after you click it
-  (on 2026-10-03 a live test read 229 == 229).
-- **Dead means gone:** take the listings hidden by lifecycle in the last 24 h (`deactivated_at`) and prove none is still
-  counted anywhere (`search_listings_ar`, the city/district pools, the option counts), and that one listing restored today
-  is counted again.
-- **The pipeline is fresh:** the last successful run of the search-index sync job and the location matview refresh are
-  within the last 2 hours. The known ways this fails: a stale location matview read by the sync, a sync that no-ops without
-  the writer lock, a client pool cached past its scope (see the permanent rules). A lag over 2 hours, or any dead listing
-  still counted, is a bug you fix tonight or put in the backlog with the evidence on the first line of your report.
-Never «fix» a mismatch by changing the number to match: find the stage where the data went stale.
+Advanced Filter option. **They must equal what a fresh query of the live listings returns, and when a listing dies they
+must drop within one hour** (lifecycle hides it, the hourly search-index sync at :22 removes it from `search_listings_ar`,
+every count follows).
+**Your part is the NEW-LISTING half:** every listing that arrived in the last 24 hours is counted, within one hour of its
+arrival, everywhere a customer looks. Draw 5 (deal × category × city/district) scopes from TODAY'S ARRIVALS and compare the
+number the app shows (the same RPCs the app calls: `district_options_ar`, `location_search_candidates_ar`, the top-cities
+RPC) with a direct count on `search_listings_ar` under the same scope; they must be equal (the permanent count-scope
+parity rule). On one Advanced Filter journey the number promised on an option equals the results after you click it (a live
+test on 2026-10-03 read 229 == 229). A mismatch is a bug in the count surface, never a rounding detail: find the stage
+where the data went stale; never change the number to match.
+**The rest belongs to the repair engineer** (a dead or hidden listing leaving every count, the sync and location-matview
+freshness under 2 hours, fresh-vs-shown across the whole catalog). If you notice one of those, put it into
+`ops_engineer_backlog` with `engineer = 'repair'`; if the pipeline is more than 2 hours stale it blocks your own tests, so
+say so on the first line of your report.
 
 ## Your mission in one line (owner, 2026-10-02)
 > «The new listing engineer's goal is to get those new listings and match them to our backend
