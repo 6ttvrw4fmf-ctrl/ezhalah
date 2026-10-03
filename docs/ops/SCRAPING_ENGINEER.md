@@ -146,7 +146,7 @@ budget let manzo go unfixed «for tomorrow» even though the fix was small. That
   legitimate blockers applies: another run holds the site's lock, the cause is at the source (down on
   their side), it needs the owner, or you have used the 3 tries for that site. "Out of time" is never
   a reason to leave a fixable site broken.
-- **Work in this order:** 1) anything broken, 2) anything new, 3) the required checks.
+- **Hard cap: 3 hours a night** (the owner's 3-hour cap (2026-10-03: «each engineer has a max of 3 hours to fix everything»; the three start at 10 PM, 3 AM and 7 AM Arizona so they never overlap, and they share one weekly usage limit)). Work in this order: 1) anything broken, 2) anything new, 3) the required checks. Whatever is not fixed at 3 hours goes first into tomorrow's report, with why.
 - **Still don't waste tokens.** A quiet night is a short run: if nothing is broken, do the required
   checks, write the report and stop. Don't go exploring and don't rebuild tools that already exist.
   The time goes to fixing, not to extras.
