@@ -851,7 +851,9 @@ def main() -> int:
     if not (0 <= args.shard < max(1, args.shards)):
         ap.error(f"--shard must be in 0..{max(0, args.shards - 1)} for --shards {args.shards}")
 
+    t0 = time.monotonic()
     max_id = find_ceiling(args.max_id, _id_exists)
+    print(f"Muktamel ceiling: {max_id} found in {(time.monotonic() - t0) / 60:.1f} min", flush=True)
     ids = shard_ids(args.min_id, max_id, args.shards, args.shard)
     print(f"Muktamel: sweeping ids {args.min_id}..{max_id} (floor {args.max_id}, ceiling from source)"
           f"{f' shard {args.shard}/{args.shards}' if args.shards > 1 else ''} "
