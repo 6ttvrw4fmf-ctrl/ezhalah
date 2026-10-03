@@ -6,6 +6,7 @@
 // first with English fallbacks. (PRD §5.1, prototype matchLocations — extended to nationwide data.)
 
 import raw from './sa-locations.json';
+import { norm, catalogCityExtras, catalogDistrictExtras, type CatalogCity, type CatalogDistrict } from '../lib/locationSuggest';
 import { supabase } from '@/lib/supabase';
 import { CITY_AR_DISPLAY, CITY_TOKENS, cityTokensReverseLookup } from '@/lib/cityDisplay';
 import { arabicOrPlaceholder, cutPlaceName } from '@/lib/arabicText';
@@ -73,6 +74,18 @@ for (const [id, en, ar] of DATA.regions) REGION_BY_ID.set(id, { en, ar });
 const CITY_BY_ID = new Map<number, { en: string; ar: string; regionId: number }>();
 for (const [id, regionId, en, ar] of DATA.cities) CITY_BY_ID.set(id, { en, ar, regionId });
 
+// The built-in catalog as plain arrays for the instant typed matchers (src/lib/locationSuggest.ts): every city and
+// every district of every city, in memory, so typing never waits for a pool and never hides a real place.
+const CATALOG_CITIES: CatalogCity[] = DATA.cities.map(([id, regionId, , ar]) => ({
+  cityId: id, cityAr: ar, regionId, regionAr: REGION_BY_ID.get(regionId)?.ar ?? null,
+}));
+const CATALOG_DISTRICTS_BY_CITY = new Map<number, CatalogDistrict[]>();
+for (const [cityId, , , ar] of DATA.districts) {
+  const list = CATALOG_DISTRICTS_BY_CITY.get(cityId);
+  if (list) list.push({ cityId, districtAr: ar });
+  else CATALOG_DISTRICTS_BY_CITY.set(cityId, [{ cityId, districtAr: ar }]);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Normalization + search keys
 // ---------------------------------------------------------------------------------------------
@@ -82,26 +95,8 @@ for (const [id, regionId, en, ar] of DATA.cities) CITY_BY_ID.set(id, { en, ar, r
 // stripAl/stripDistrictWord downstream + this fold, so every match-time comparison a user's
 // typing hits (district picker, city picker, chat resolver, listing safety-net) tolerates the
 // same spellings the DB does. Display text is never routed through this. Latin preserved.
-const norm = (s: string) =>
-  s
-    .toLowerCase()
-    .replace(/[ً-ٟ]/g, '')
-    .replace(/ـ/g, '')
-    .replace(/[أإآٱ]/g, 'ا')
-    .replace(/ة/g, 'ه')
-    .replace(/[ىي]/g, 'ي')
-    .replace(/ئ/g, 'ي')
-    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
-    .replace(/ء/g, '')
-    .replace(/[^\p{L}\p{N}]/gu, '')
-    // Number fold, EITHER END — mirrors norm_district_tok (migration 20260914204035, owner
-    // 2026-09-14: «in our district catalog… we don't include numbers. We just match it with ours»).
-    // Our picker now offers «المحمدية» for المحمدية 1/2/3, so a user who types the «المحمدية 2» they
-    // read off a card — in the picker box or to the agent — must still land on it. Separators are
-    // already gone by this line, so the DB's space-separated number is a digit run here. Leading
-    // matters: «1النرجس» is real production data (city 67, 9 listings).
-    .replace(/^[0-9]+/, '')
-    .replace(/[0-9]+$/, '');
+// `norm` lives in the pure module so a barrier can execute it (src/lib/locationSuggest.ts).
+
 // Drop a leading definite article so "narjis" matches "Al Narjis" / "النرجس".
 const stripAl = (s: string) => s.replace(/^al/, '').replace(/^ال/, '');
 // Drop the district word ("حي" / "District" / "Dist") wherever it sits in a NORMALIZED query —
@@ -700,6 +695,9 @@ export type CityOption = {
   // Set at pool-build by applyClusterUnion(); Trending collapses a cluster to ONE row while
   // autocomplete keeps every member. See the cluster block below.
   clusterKey?: string;
+  // false = this row came from the built-in catalog while the scoped pool is not loaded (or does not carry
+  // the place): its count is UNKNOWN, so the UI prints no number and no «nothing here» claim (2026-10-03).
+  scopeKnown?: boolean;
 };
 
 // Keyed by Deal ('Buy'/'Rent') — the Top-6 + typed-autocomplete pool is scoped to the deal the user
@@ -1044,6 +1042,7 @@ export type DistrictOption = {
   totalInCity: number;   // ALL eligible listings in this city+cohort, INCLUDING no-district rows —
                          // the % means "share of what clicking the CITY returns", so the honest
                          // denominator counts the unknown-district remainder too (owner, 2026-08-15)
+  scopeKnown?: boolean;  // false = borrowed from another scope's pool or the built-in catalog: count UNKNOWN (2026-10-03)
 };
 
 // Keyed by `${cityId}:${deal}:${category}` — District is category-aware (unlike the City pool
@@ -1158,9 +1157,20 @@ export function topDistrictsForCityId(cityId: number, deal: Deal | null, categor
 // substring, using the SAME norm() folding as the city field. Empty query → the Top-6 suggestions.
 // `types` REQUIRED — same compile-time barrier as topCitiesByListings above. [[cohortTypesAr]]
 export function matchDistrictsByCityId(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, query: string, types: string[] | null, scope: AfParams | null): DistrictOption[] {
-  const all = _districtCache.get(districtCacheKey(cityId, deal, category, periodTok, types, scope)) ?? [];
+  const key = districtCacheKey(cityId, deal, category, periodTok, types, scope);
+  const exact = _districtCache.get(key);
   const q = norm(query);
-  if (!q) return all.filter((d) => d.listingCount > 0).slice(0, 6);
+  if (!q) return (exact ?? []).filter((d) => d.listingCount > 0).slice(0, 6);
+  // THE SCOPED POOL IS NOT LOADED YET (a filter just changed, or the city was just picked): do not make the user
+  // wait for it. The district NAMES do not depend on the scope, only the counts do, so borrow the names (and their
+  // spelling variants) from any pool already cached for this city and flag them count-unknown; the catalog below
+  // covers a city nobody has loaded yet. Both swap for the real counts the moment the pool arrives (2026-10-03).
+  let all: DistrictOption[] = exact ?? [];
+  if (exact === undefined) {
+    for (const [k, v] of _districtCache) {
+      if (k.startsWith(`${cityId}:`) && v.length) { all = v.map((d) => ({ ...d, listingCount: 0, scopeKnown: false })); break; }
+    }
+  }
   const scored: { opt: DistrictOption; rank: number }[] = [];
   for (const opt of all) {
     const n = norm(opt.districtAr);
@@ -1168,7 +1178,14 @@ export function matchDistrictsByCityId(cityId: number, deal: Deal | null, catego
     else if (n.includes(q)) scored.push({ opt, rank: 1 });
   }
   scored.sort((a, b) => a.rank - b.rank || b.opt.listingCount - a.opt.listingCount);
-  return scored.slice(0, 30).map((s) => s.opt);
+  const fromPool = scored.slice(0, 30).map((s) => s.opt);
+  // Every district of the city stays findable: catalog names the pool does not carry are appended (zero listings
+  // in this scope when the pool is loaded; count unknown otherwise), inside the same 30-row render cap the live-count
+  // fetch covers (verify-district-counts-honest).
+  const extras = catalogDistrictExtras(query, CATALOG_DISTRICTS_BY_CITY.get(cityId) ?? [], cityId, new Set(all.map((d) => norm(d.districtAr))), 30 - fromPool.length).map((d): DistrictOption => ({
+    districtAr: d.districtAr, listingCount: 0, matchValues: [d.districtAr], totalInCity: 0, scopeKnown: exact !== undefined,
+  }));
+  return [...fromPool, ...extras];
 }
 
 // Arabic-only prefix/substring match against city names, for the typed-autocomplete state. Reuses
@@ -1180,14 +1197,24 @@ export function matchDistrictsByCityId(cityId: number, deal: Deal | null, catego
 export function matchCitiesByText(deal: Deal | null, periodTok: string | null, category: Category | null, query: string, types: string[] | null, af: AfParams | null): CityOption[] {
   const q = norm(query);
   if (!q) return [];
+  const pool = CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types, af));
   const scored: { opt: CityOption; rank: number }[] = [];
-  for (const opt of CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types, af)) ?? []) {
+  for (const opt of pool ?? []) {
     const n = norm(opt.cityAr);
     if (n.startsWith(q)) scored.push({ opt, rank: 0 });
     else if (n.includes(q)) scored.push({ opt, rank: 1 });
   }
   scored.sort((a, b) => a.rank - b.rank || b.opt.listingCount - a.opt.listingCount);
-  return scored.map((s) => s.opt);
+  const fromPool = scored.map((s) => s.opt);
+  // EVERY real city stays findable (owner, 2026-10-03): the places the scoped pool does not carry come from the
+  // built-in catalog, instantly, after the pool's own ranked matches. When the pool is loaded the place simply has
+  // no listings in this scope (the UI says so); when it is not loaded yet its count is UNKNOWN (scopeKnown:false:
+  // no number, no «nothing here» claim) and fills in the moment the pool arrives.
+  const extras = catalogCityExtras(query, CATALOG_CITIES, new Set(fromPool.map((o) => o.cityId))).map((c): CityOption => ({
+    cityId: c.cityId, cityAr: c.cityAr, regionId: c.regionId, regionAr: c.regionAr,
+    listingCount: 0, totalInCohort: 0, scopeKnown: pool !== undefined,
+  }));
+  return [...fromPool, ...extras];
 }
 
 // True when two-or-more results in the given result set share the same display name — the ONLY

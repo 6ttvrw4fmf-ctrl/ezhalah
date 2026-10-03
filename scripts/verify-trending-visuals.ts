@@ -35,7 +35,7 @@ check('hide-on-error fallback (onError → render nothing)', /const \[failed, se
 check('city Top-6 rows get LOC_IMG.city', /icon: LOC_IMG\.city,/.test(indexSrc));
 check('district Top-6 rows get LOC_IMG.district', /icon: LOC_IMG\.district,/.test(indexSrc));
 // …while the typed rows keep the art they always had.
-check('typed city rows keep LOC_IMG.city', /<Image source=\{LOC_IMG\.city\} style=\{s\.suggLocIcon\} \/>/.test(indexSrc));
+check('typed city rows keep LOC_IMG.city', /<Image source=\{LOC_IMG\.city\} style=\{\[s\.suggLocIcon, cityEmpty && s\.suggIconEmpty\]\} \/>/.test(indexSrc));
 check('typed district rows keep LOC_IMG.district', /<Image source=\{LOC_IMG\.district\} style=\{\[s\.suggLocIcon, isEmpty && s\.suggIconEmpty\]\} \/>/.test(indexSrc));
 
 // ── Selected-value identity: the confirmed pick shows the SAME art it was picked from. ──

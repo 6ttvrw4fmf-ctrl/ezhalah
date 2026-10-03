@@ -30,6 +30,8 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 
 const src = readFileSync(new URL('../src/data/locations.ts', import.meta.url), 'utf8');
+// norm() moved to the pure module on 2026-10-03 (src/lib/locationSuggest.ts) so a barrier can execute it.
+const normFile = readFileSync(new URL('../src/lib/locationSuggest.ts', import.meta.url), 'utf8');
 
 let failed = 0;
 const check = (label: string, ok: boolean) => {
@@ -46,7 +48,7 @@ const grab = (re: RegExp, what: string): string => {
 // Anchored on norm()'s LAST line, which moved when the trailing-number fold was appended
 // (migration 20260914204035 / owner 2026-09-14). Lifting the real fn is the point — see
 // [[feedback_never-test-a-copy-of-production-code]] — so the anchor follows the source, never the reverse.
-const normSrc = grab(/const norm = \(s: string\) =>[\s\S]*?\n {4}\.replace\(\/\[0-9\]\+\$\/, ''\);/, 'norm');
+const normSrc = (normFile.match(/export const norm = \(s: string\) =>[\s\S]*?\n {4}\.replace\(\/\[0-9\]\+\$\/, ''\);/)?.[0] ?? (() => { console.error('FAIL  could not lift norm() out of src/lib/locationSuggest.ts'); process.exit(1); })()).replace('export const norm', 'const norm');
 const foldSrc = grab(/const fuzzyFold = \(s: string\) =>\n[\s\S]*?;\n/, 'fuzzyFold');
 const edSrc = grab(/function editDistance\(a: string, b: string\): number \{[\s\S]*?\n\}/, 'editDistance');
 const nearSrc = grab(/export function nearbyCityWithListings\([\s\S]*?\n\}/, 'nearbyCityWithListings');
