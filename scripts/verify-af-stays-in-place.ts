@@ -51,6 +51,8 @@ const s2 = withAdvancedBlock(BASE, [...round1, { id: 'direction', keys: ['n'], l
 check('a second round ADDS to the list instead of replacing it',
   s2.includes('• شقة 🏡') && s2.includes('• شمال 🧭') && s2.indexOf('• شقة 🏡') < s2.indexOf('• شمال 🧭'));
 check('no committed answer ⇒ the base summary exactly, with no empty heading', withAdvancedBlock(BASE, [], HEAD) === BASE);
+check('each chip, built per facet, carries its emoji — the four chips of the live round read شقة 🏡 · مفروش 🛋️ · +٢ حمامات 🚿 · عمر جديد ✨',
+  round1.map((f) => buildAfSummaryItems([f]).join('، ')).join(' · ') === 'شقة 🏡 · مفروش 🛋️ · +٢ حمامات 🚿 · عمر جديد ✨');
 check('the same answer twice is listed once (dedupe at the finished item)',
   buildAfSummaryItems([...round1, round1[1]]).length === round1.length);
 
@@ -82,6 +84,11 @@ const stayProblems = (agentSrc: string, cardSrc: string): string[] => {
     out.push('the «بناءً على» sentence is back — the summary already says it');
   if (/onRemove|removeGuidedFacet|name="close"/.test(code.slice(code.indexOf('guidedPills.facets.map'), code.indexOf('guidedPills.facets.map') + 600)))
     out.push('a transcript chip has a ✕ or a remove handler');
+  // «add the emojis here» (owner 2026-10-03): a chip reads exactly like its summary line — شقة 🏡, مفروش 🛋️.
+  if (!/<Text style=\{s\.guidedPillTx\}>\{buildAfSummaryItems\(\[f\]\)\.join\('، '\)\}<\/Text>/.test(code))
+    out.push('a transcript chip shows the bare label, without the emoji its summary line carries');
+  if (!/<Text style=\{s\.pillTx\}>\{buildAfSummaryItems\(\[f\]\)\.join\('، '\)\}<\/Text>/.test(card))
+    out.push('a question-card chip shows the bare label, without the emoji its summary line carries');
   if (!/\{'😔 '\}\{t\('\{n\} listings did not mention this'/.test(card))
     out.push('the «did not mention this» line does not lead with 😔');
   return out;
@@ -115,6 +122,10 @@ mustCatch('the turn summary reverting to the refined query alone (original lines
   stayProblems(swap(AGENT, 'guidedSearchSummary(opts.guided.baseQ, opts.guided.facets)', 'buildScrapeIntro(result.query ?? refined)'), CARD).length > 0);
 mustCatch('a ✕ coming back on the chips',
   stayProblems(swap(AGENT, '<View key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill}>', '<View key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill} onRemove={() => 1}>'), CARD).length > 0);
+mustCatch('a transcript chip losing its emoji (bare label again)',
+  stayProblems(swap(AGENT, "<Text style={s.guidedPillTx}>{buildAfSummaryItems([f]).join('، ')}</Text>", "<Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>"), CARD).length > 0);
+mustCatch('a question-card chip losing its emoji (bare label again)',
+  stayProblems(AGENT, swap(CARD, "<Text style={s.pillTx}>{buildAfSummaryItems([f]).join('، ')}</Text>", "<Text style={s.pillTx}>{f.labels.join('، ')}</Text>")).length > 0);
 mustCatch('the sad emoji dropped from the unknown line',
   stayProblems(AGENT, swap(CARD, "{'😔 '}{t('{n} listings", "{t('{n} listings")).length > 0);
 // …and the executed half must also notice its own subject disappearing.

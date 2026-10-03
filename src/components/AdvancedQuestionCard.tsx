@@ -8,6 +8,7 @@ import { LoadingDots } from '@/components/CardReveal';
 import { useI18n } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { grouped } from '@/data/search';
+import { buildAfSummaryItems } from '@/lib/afSummary';
 import { colors, radius, space, font, cardShadow } from '@/theme/tokens';
 import type { AdvancedOption } from '@/data/advancedFilters';
 
@@ -46,7 +47,9 @@ const RELEASE = { duration: 300, dampingRatio: 1 };
 // READ-ONLY (owner 2026-10-03: «we should not show any X button on this»). Until then every pill but
 // a scope one carried a ✕ that removed the answer and re-ran the search; there is no ✕ and no handler
 // now, so the row can only SHOW what has been committed.
-export type CommittedFacet = { id: string; labels: string[] };
+// Each chip reads exactly like its «من الفلتر المتقدم» line in the summary — same words, same emoji
+// (owner 2026-10-03: «add the emojis here»), so a chip and the summary can never name it differently.
+export type CommittedFacet = { id: string; keys: string[]; labels: string[] };
 
 function CommittedPills({ facets }: { facets: readonly CommittedFacet[] }) {
   const { isRTL } = useI18n();
@@ -58,7 +61,7 @@ function CommittedPills({ facets }: { facets: readonly CommittedFacet[] }) {
     >
       {facets.map((f, i) => (
         <View key={`${f.id}-${i}`} style={s.pill}>
-          <Text style={s.pillTx}>{f.labels.join('، ')}</Text>
+          <Text style={s.pillTx}>{buildAfSummaryItems([f]).join('، ')}</Text>
         </View>
       ))}
     </View>

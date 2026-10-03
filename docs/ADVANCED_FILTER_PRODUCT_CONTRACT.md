@@ -371,8 +371,11 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
   tentative selection**, before committing.
 - **R7.1.3** — The unknown-count caption («😔 X إعلان لم يذكر هذه المعلومة») shows how many listings
   have no value for the field — never rolled into any option's count. It leads with 😔 (owner
-  2026-10-03). It appears only where a TRUTHFUL count exists (age, furnished, direction today); a
-  question whose count the database cannot yet state shows nothing — never a guess, never 0.
+  2026-10-03) and is on EVERY question (owner 2026-10-03): age, furnished and direction derive it;
+  RNPL, amenities, bathrooms, street width, rating and unit subtype read a database `IS NULL` count
+  in the committed scope (migration 20261003184909; amenities = the listing stated no amenity at
+  all). Never a subtraction over threshold rungs, never a guess, never 0 — a count that is 0 or a
+  probe that failed shows nothing.
 
 ### 7.2 Multi-select marginal vs combined
 

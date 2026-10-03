@@ -299,7 +299,7 @@ export function fieldMeaning(field: string): FieldMeaning | null {
     paramsBoth: (a, b) => ({ ...a, ...b }),
   });
   switch (field) {
-    case 'amenities': return { ...single(), combine: 'and',
+    case 'amenities': return { ...single('cnt_total_base', ['cnt_amen_unknown']), combine: 'and',
       paramsBoth: (a, b) => ({ p_amenities: [...(a.p_amenities as string[]), ...(b.p_amenities as string[])] }) };
     case 'direction': return {
       combine: 'or', partition: true, totalCol: 'cnt_total_base',
@@ -310,7 +310,13 @@ export function fieldMeaning(field: string): FieldMeaning | null {
     };
     case 'furnished': return single('cnt_total_base', ['cnt_total_base', 'cnt_furnished', 'cnt_unfurnished'], true);
     case 'property_age': return single('cnt_total', ['cnt_unknown'], true);
-    case 'rnpl': case 'bathrooms': case 'street_width': case 'rating': case 'unit_subtype': return single();
+    // «😔 on every question» (owner 2026-10-03): these read a DB IS NULL column (migration 20261003184909),
+    // so «did not mention» means exactly that column — never a subtraction over the rungs.
+    case 'rnpl': return single('cnt_total_base', ['cnt_rnpl_unknown']);
+    case 'bathrooms': return single('cnt_total_base', ['cnt_bath_unknown']);
+    case 'street_width': return single('cnt_total_base', ['cnt_stw_unknown']);
+    case 'rating': return single('cnt_total_base', ['cnt_rating_unknown']);
+    case 'unit_subtype': return single('cnt_total_base', ['cnt_sub_unknown']);
     default: return null;
   }
 }
