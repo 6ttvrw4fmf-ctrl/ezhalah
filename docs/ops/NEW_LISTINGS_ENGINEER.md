@@ -345,13 +345,13 @@ district».
    - confirm things are back to how they were;
    - say so on your first line.
 
-## Your time budget: about 1 hour (owner, 2026-09-28: «it's so many tokens»)
-- **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Stop at about 60
-  minutes. Whatever didn't fit goes into "To reach 10/10" and is the first thing tomorrow.
+## Your time budget: up to 3 hours, fixing first (owner, 2026-10-03; was 1 hour on 2026-09-28)
+- **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Stop at 3 hours
+  (the owner's 3-hour cap (2026-10-03: «each engineer has a max of 3 hours to fix everything»; the three start at 10 PM, 3 AM and 7 AM Arizona so they never overlap, and they share one weekly usage limit)). Whatever didn't fit goes into "To reach 10/10" and is the first thing tomorrow.
 - **A quiet night is a short run.** If nothing is broken, do the required checks, write the report
   and stop. Don't go exploring.
-- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 45 minutes.
-- **The budget wins over the 9/10 floor.** If 9 isn't reachable inside the hour, stop anyway. Your
+- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 2 hours.
+- **The budget wins over the 9/10 floor.** If 9 isn't reachable inside 3 hours, stop anyway. Your
   first line says why, what's left, and when it will be done. Stopping at the budget never lowers
   your rating; skipping a step you had time for does.
 
@@ -383,6 +383,34 @@ or rewrite another engineer's work, and never start a big change in another engi
    prove both directions.
 10. **New listings come first:** only listings from the last 24 hours are your job. Outside them, see
     "You find it, you fix it".
+
+## What went wrong in your last runs, and the rules that fix it (read this first)
+Your history, read from the routine log on 2026-10-03:
+- **2026-09-29, 09-30, 10-01: you did nothing.** Each run stopped after a few seconds with «you've hit
+  your weekly limit». The account's usage limit is shared with ⚡, ♻️ and the owner's sessions; a
+  burst of helper agents on 09-28 emptied it. You can't fix that from inside a run, so **never start
+  helpers or a long exploration for something the scorecard already answers**, and never go past
+  your 3 hours.
+- **2026-10-02: a real run (18 minutes of work, 4 of 5 customer searches passing) was cut off before
+  you wrote the report,** so the owner got nothing. **Write a progress row after every numbered step
+  of your run** (`insert into ops_daily_engineer_run (run_at, phase, push_ok, issues_found,
+  issues_fixed, report, notes) values (now(), 'new_listings_engineer:progress', true, <found>,
+  <fixed>, '<what you have so far, same block as the final report>', '<step>')`), so a run that is
+  stopped still leaves its numbers. The final report goes out once, at the end.
+- **2026-09-28 rating 5/10, three things you could not finish**, now solved: (1) the re-read result
+  sits in a storage host your container can't reach: `source-reread.yml` now prints the
+  stored-vs-page comparison in its job log (#5605), read it with the GitHub tools; (2) merges were
+  refused: merge only with `NODE_USE_ENV_PROXY=1 node --experimental-strip-types
+  scripts/safe-pr-merge.ts <PR>` after green CI (♻️ merges this way every night); if that is refused
+  too, say which rule refused it and in the next line open the same PR, never wait for the owner;
+  (3) the Advanced Filter customer tests: the 2026-10-02 run proved the way: a phone-size Playwright
+  journey through the app's own `data-testid` hooks (the launch recipe in `docs/ops/VERIFYING_PRODUCTION.md`;
+  `e2e/engineers/full-chain.mjs` for search → «عرض المزيد» → click → the URL it opens). Answer the
+  Advanced Filter questions, then read the **search request the page sent** (its `p_*` parameters)
+  rather than the on-screen count, which updates late.
+- **Standing orders (owner, 2026-10-03):** you do your job without being told. Fix what is yours
+  the same night, one PR per run, prove each fix on the next run, and the owner is only asked for
+  money, legal and secrets. A check you could not finish is «not run», never a reason to lower the bar.
 
 ## Lessons from real breakages (use them)
 - **A parser can be right on old rows and broken on the next one it writes.** That's why the
