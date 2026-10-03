@@ -40,6 +40,7 @@ import { CardIn, LoadingDots, GoldPulse, GoldShineButton } from '@/components/Ca
 // render but behaves identically for the same listing.
 const MemoResultCard = memo(ResultCard, (prev, next) =>
   prev.listing === next.listing && prev.rank === next.rank && prev.variant === next.variant
+  && prev.row === next.row
   // activeAf is one frozen reference per results turn (afActive memoises on m.result.query), so
   // identity is the right comparison; without this term the card would swallow the prop.
   && prev.activeAf === next.activeAf);
@@ -57,7 +58,9 @@ import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } 
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
 import { listingOpenUrl, openListing } from '@/lib/openListing';
-import { addAdTab, inAppViewerHost } from '@/lib/inAppViewer';
+import {
+  EMPTY_AD_PANE, closeAdTab, hideAdPane, inAppViewerHost, openAdTab, showAdPane, type AdPane, type AdTab,
+} from '@/lib/inAppViewer';
 import { VIEWER_SPLIT_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import AdViewer from '@/components/AdViewer';
@@ -80,7 +83,7 @@ import { primeResultsFound } from '@/data/loaderResultsFound';
 import { screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
 import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
-import { listingPrice } from '@/lib/listingDisplay';
+import { listingLocationAr, listingPrice } from '@/lib/listingDisplay';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard, type ShellPills } from '@/components/AdvancedQuestionCard';
@@ -940,38 +943,44 @@ export default function Agent() {
   // above VIEWER_SPLIT_BREAKPOINT («whenever I click a new tab pops up»), a partial sheet below it.
   // Web only; every other site, and native, keep openListing() exactly as before. The results never
   // unmount, so closing returns them at the same scroll position. trackOpen fires first either way.
-  // The tab list itself (dedupe-refront, MAX_AD_TABS cap with oldest evicted) is the pure addAdTab()
-  // in lib/inAppViewer.ts, executed by scripts/verify-in-app-viewer-allowlist.ts.
-  const [adTabs, setAdTabs] = useState<Listing[]>([]);
-  const [adActive, setAdActive] = useState(0);
+  // The pane's state (tabs, active tab, hidden) is ONE value driven by pure functions in
+  // lib/inAppViewer.ts — openAdTab (dedupe-refront, MAX_AD_TABS cap, and a card click always SHOWS
+  // the pane), closeAdTab (one tab; the last one clears the pane), hideAdPane / showAdPane (the
+  // pane's own ✕ hides, nothing is deleted) — all executed by scripts/verify-in-app-viewer-allowlist.ts.
+  const [adPane, setAdPane] = useState<AdPane<AdTab>>(EMPTY_AD_PANE);
   const [adHint, setAdHint] = useState('');
   const adHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // MemoResultCard's comparator deliberately IGNORES onOpen ("behaves identically for the same
-  // listing" — see its header). An openAd that read `adTabs` from its own render would break that
+  // listing" — see its header). An openAd that read `adPane` from its own render would break that
   // contract: an already-revealed card keeps the closure from the render it was memoised in, and a
   // stale empty list REPLACED the first tab instead of appending the second (caught live in the v2
-  // harness). The ref mirror makes every closure read the same current list, whenever it was made.
-  const adTabsRef = useRef<Listing[]>([]);
+  // harness). The ref mirror makes every closure read the same current pane, whenever it was made.
+  const adPaneRef = useRef<AdPane<AdTab>>(EMPTY_AD_PANE);
+  const commitAdPane = (p: AdPane<AdTab>) => { adPaneRef.current = p; setAdPane(p); };
   const viewerSplit = useAtLeast(VIEWER_SPLIT_BREAKPOINT);
-  const openAd = (l: Listing) => {
-    if (!(IS_WEB && inAppViewerHost(listingOpenUrl(l)))) { void openListing(l); return; }
-    const r = addAdTab(adTabsRef.current, l);
-    adTabsRef.current = r.tabs;
-    setAdTabs(r.tabs);
-    setAdActive(r.active);
-    if (r.evicted) {
+  const pushAdTab = (tab: AdTab) => {
+    const { evicted, ...next } = openAdTab(adPaneRef.current, tab);
+    commitAdPane(next);
+    if (evicted) {
       // The cap's subtle hint: a small pill over the page, gone on its own.
       setAdHint(t('Oldest tab closed'));
       if (adHintTimer.current) clearTimeout(adHintTimer.current);
       adHintTimer.current = setTimeout(() => setAdHint(''), 2200);
     }
   };
-  const closeAdTab = (i: number) => {
-    const next = adTabsRef.current.filter((_, x) => x !== i);
-    adTabsRef.current = next;
-    setAdTabs(next);
-    setAdActive((a) => (a > i ? a - 1 : Math.min(a, next.length - 1)));
+  const openAd = (l: Listing) => {
+    const url = listingOpenUrl(l);
+    if (!(IS_WEB && inAppViewerHost(url))) { void openListing(l); return; }
+    pushAdTab({ source: l.source, id: l.id, title: listingLocationAr(l), url: url ?? '' });
   };
+  // "+" start-page tabs have no listing: negative ids keep them clear of every real listing id.
+  const blankTabSeq = useRef(0);
+  // LAPTOP CARDS ARE ALWAYS THE SMALL ROW (owner 2026-10-03: «for the laptop it should always be
+  // small … never make them big»), one step tighter while the pane is on screen beside them. Decided
+  // HERE, from the screen's already-mounted width gate, so a card mounts straight into its row and
+  // never paints one frame of the tall phone layout first. Phone and tablet pass nothing.
+  const adPaneBeside = viewerSplit && adPane.tabs.length > 0 && !adPane.hidden;
+  const cardRow = viewerSplit ? (adPaneBeside ? 'tight' as const : 'roomy' as const) : undefined;
   // Which result messages have finished typing their reply. The property cards stay hidden until the
   // words above them are fully written out, so listings never appear before Ezhalah has spoken (user
   // request). Keyed by message id.
@@ -3704,6 +3713,21 @@ export default function Agent() {
         {/* Redesigned to match the home screen's share button (design review 2026-07-24) — same
             tint fill/hairline/height/radius as ModeSwitch's own track, so the pill + share cluster
             reads as one continuous control across both screens, not just within one. */}
+        {/* The ad pane is hidden, not closed (its own ✕ / Escape / Back): this chip brings it back
+            exactly as it was — every tab still open, every frame still alive. Gone with the last tab. */}
+        {adPane.hidden && adPane.tabs.length > 0 && (
+          <Pressable
+            testID="ad-tabs-chip"
+            onPress={() => commitAdPane(showAdPane(adPaneRef.current))}
+            accessibilityRole="button"
+            style={({ hovered, pressed }: any) => [s.tabsChip, locale === 'ar' && s.tabsChipRtl, hovered && s.tabsChipHover, pressed && s.shareIconPressed]}
+            // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
+            dataSet={{ ...TAP44 }}
+          >
+            <Ionicons name="browsers-outline" size={16} color={colors.chipIcon} />
+            <Text style={s.tabsChipTx}>{t('Tabs ({n})', { n: adPane.tabs.length })}</Text>
+          </Pressable>
+        )}
         <Pressable
           onPress={() => setShareOpen(true)}
           style={({ pressed }) => [s.shareIcon, pressed && s.shareIconPressed]}
@@ -3962,6 +3986,7 @@ export default function Agent() {
                               listing={l}
                               variant="compact"
                               rank={i + 1}
+                              row={cardRow}
                               activeAf={activeAf}
                               onOpen={() => { trackOpen(l); openAd(l); }}
                             />
@@ -4583,15 +4608,23 @@ export default function Agent() {
         </View>
       ) : null}
     </View>
-    {adTabs.length > 0 && (
+    {adPane.tabs.length > 0 && (
       <AdViewer
-        tabs={adTabs}
-        active={adActive}
+        tabs={adPane.tabs}
+        active={adPane.active}
         split={viewerSplit}
+        hidden={adPane.hidden}
         hint={adHint}
-        onSelect={setAdActive}
-        onCloseTab={closeAdTab}
-        onCloseAll={() => { adTabsRef.current = []; setAdTabs([]); setAdActive(0); }}
+        onSelect={(i) => commitAdPane({ ...adPaneRef.current, active: i })}
+        onCloseTab={(i) => commitAdPane(closeAdTab(adPaneRef.current, i))}
+        onCloseAll={() => commitAdPane(EMPTY_AD_PANE)}
+        onHide={() => commitAdPane(hideAdPane(adPaneRef.current))}
+        onShow={() => commitAdPane(showAdPane(adPaneRef.current))}
+        onNewTab={() => { blankTabSeq.current += 1; pushAdTab({ source: '', id: -blankTabSeq.current, title: '', url: '' }); }}
+        onOpenUrl={(i, url, host) => commitAdPane({
+          ...adPaneRef.current,
+          tabs: adPaneRef.current.tabs.map((x, n) => (n === i ? { source: host, id: x.id, title: host, url } : x)),
+        })}
       />
     )}
     </View>
@@ -4644,6 +4677,15 @@ const s = StyleSheet.create({
     elevation: 2,
   },
   shareIconPressed: { opacity: 0.85 },
+  // Reopen chip for a hidden ad pane — the share button's own tint/hairline idiom, beside it.
+  tabsChip: {
+    height: 36, paddingHorizontal: 12, borderRadius: radius.pill, marginRight: 4,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine,
+  },
+  tabsChipRtl: { flexDirection: 'row-reverse' }, // the top bar is pinned LTR; the icon still leads in Arabic
+  tabsChipHover: { borderColor: colors.primary },
+  tabsChipTx: { fontSize: 12.5, fontWeight: '600', color: colors.chipIcon },
   topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   preciseBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 12, marginRight: 6 },
