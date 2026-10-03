@@ -146,6 +146,25 @@ PLATFORMS: dict[str, dict] = {
     "raghdan":   {"tables": ["raghdan_residential_listings", "raghdan_commercial_listings"], "dead_marker": _never, "controls": True},
 }
 
+# ── A redirect lands on ANOTHER ad (2026-09-29, Lifecycle Engineer) ─────────────────────────────
+# On these hosts a live ad is served AT its own stored URL (measured 2026-09-29 from a home IP: 2/2
+# live ads per site answered 200 with no redirect; their hidden ads 404). jazwtn is WordPress, and
+# WordPress answers a slug that no longer exists by guessing the nearest post and 301-ing to it
+# (`x-redirect-by: WordPress`). jazwtn rows 630165 and 630610 (posts removed in August) redirect to
+# rows 630615 and 630613 — separate ads we already list, crawled beside them on 2026-06-22. The
+# probe followed the redirect, read the OTHER ad's 200 as this one's, and the 2026-09-28 dry run
+# (cleanup_runs 208) counted them "live": a real run would have brought two dead ads back as
+# duplicates linking to someone else's listing. So here a redirect is not followed: the 3xx is the
+# answer, and verdict() reads it UNKNOWN (LISTING_LIVENESS.md §1: an unresolved redirect) — never
+# deleted, never brought back. jazwtn's own oracle already said this (`_signal`: path_changed →
+# no opinion); the cleanup was the one reader that did not. NOT aqar/aqarmonthly: their live ads
+# redirect to a canonical path on every read.
+_NO_REDIRECT_HOSTS = frozenset({"jazwtn.sa", "mizlaj.com.sa", "alnowaisiry.com", "raghdan.sa"})
+
+
+def _follows_redirects(url: str) -> bool:
+    return urlsplit(url).netloc.removeprefix("www.") not in _NO_REDIRECT_HOSTS
+
 # Sites whose cleanup has its own daily workflow (aqar-/gathern-/wasalt-cleanup.yml). Every OTHER
 # enabled site runs in the one daily fleet run (fleet-cleanup.yml → run_fleet()).
 DEDICATED_WORKFLOW = ("aqar", "gathern", "wasalt")
@@ -293,7 +312,7 @@ def _probe(url: str) -> tuple[int | None, str]:
         if pinned is not None:
             s = http._route_session(pinned, False)
     try:
-        r = s.get(url, timeout=25, allow_redirects=True, proxies=proxies)
+        r = s.get(url, timeout=25, allow_redirects=_follows_redirects(url), proxies=proxies)
         status, body = r.status_code, (r.text or "")
     except Exception:
         status, body = None, ""
@@ -322,7 +341,8 @@ def _probe_escape(url: str, status: int | None, body: str) -> tuple[int | None, 
         if profile == _probe_route.get(host, "chrome124"):
             continue
         try:
-            r = http._route_session(profile, False, fresh=True).get(url, timeout=25, allow_redirects=True)
+            r = http._route_session(profile, False, fresh=True).get(
+                url, timeout=25, allow_redirects=_follows_redirects(url))
         except Exception:
             continue
         if r.status_code in http.BLOCK_STATUSES:
@@ -359,6 +379,8 @@ def verdict_detail(status: int | None, body: str, dead_marker) -> tuple[str, str
         return "unknown", "no answer from the source (network error / proxy failure)"
     if status in (404, 410):
         return "dead", f"source returned HTTP {status} for this listing's own URL"
+    if 300 <= status < 400:
+        return "unknown", f"HTTP {status}: the source sent this URL to another page (not followed)"
     if status != 200:
         # 403 / 429 / 5xx / unfollowed redirect → about US, never about the listing.
         return "unknown", f"HTTP {status} is about our access or the source's health, not the listing"
@@ -519,7 +541,8 @@ def _bounded_candidates(client, tables, pol, cutoff, safe_cap):
     return cands[:safe_cap]
 
 
-def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_cap: int | None = None) -> dict:
+def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_cap: int | None = None,
+        restore_only: bool = False) -> dict:
     """bounded_cap: manual one-time escape from the anomaly/fraction ABORT-EVERYTHING behaviour,
     for a backlog already proven (by a fresh source-truth audit) to be genuine attrition rather
     than a scraper regression — e.g. a platform whose deletion-eligible population has grown past
@@ -554,7 +577,7 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
 
     try:
         health_ok, health_reason = (True, None)
-        if not force and not pol["enabled"]:
+        if not (force or restore_only) and not pol["enabled"]:
             _abort("policy disabled (enabled=false)")
         elif not tables:
             _abort("no tables registered for platform (default-deny)")
@@ -786,6 +809,14 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                         _abort(f"closing {why} {frozen} row(s) judged 'dead' were discarded; "
                                f"{stats['reactivated']} reactivation(s) kept.")
 
+                # RESTORE-ONLY (2026-09-29): bring back the rows this same re-check proved LIVE and
+                # delete nothing. The deletion switch refuses "on" while the latest dry run finds a
+                # live ad among the hidden, and a real run would also delete, so without this the
+                # only way to restore them was deleting without the switch. It runs every guard a
+                # real run does (health gate, aggregate gates, controls, freeze); it only drops the
+                # delete. Needs no enabled policy: restoring is the safe direction.
+                if restore_only:
+                    to_delete, log_rows = {}, []
                 if not dry_run:
                     for t, ids in to_reactivate.items():   # self-heal a wrongly-inactive live listing
                         for i in range(0, len(ids), _WRITE_CHUNK):
@@ -804,6 +835,8 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                             _delete_chunk(client, t, chunk, stats)
                 else:
                     stats["deleted"] = sum(len(v) for v in to_delete.values())
+                if restore_only:
+                    stats["note"] = "restore-only: live rows brought back, nothing deleted"
 
         client.table("cleanup_runs").insert({k: stats[k] for k in
             ("platform", "dry_run", "candidates", "rechecked", "deleted", "reactivated", "skipped", "aborted", "abort_reason", "note")}).execute()
@@ -896,6 +929,8 @@ def main() -> int:
                      help="Every enabled site without its own cleanup workflow (the daily fleet run).")
     ap.add_argument("--dry-run", action="store_true", help="Probe + classify + report; delete nothing.")
     ap.add_argument("--force", action="store_true", help="Run even if policy.enabled=false (all safety guards still apply).")
+    ap.add_argument("--restore-only", action="store_true",
+                    help="Re-check the hidden cohort and bring back the rows found LIVE; delete nothing.")
     ap.add_argument("--bounded-cap", type=int, default=None, metavar="N",
                      help="Manual one-time escape from the anomaly/fraction ABORT-EVERYTHING behaviour for a "
                           "backlog already proven genuine by a fresh source-truth audit. Never lets the work-set "
@@ -903,10 +938,11 @@ def main() -> int:
                           "by the scheduled cron path; explicit invocation only.")
     args = ap.parse_args()
     if args.all_enabled:
-        if args.force or args.bounded_cap is not None:
-            ap.error("--all-enabled honours every site's policy: no --force, no --bounded-cap")
+        if args.force or args.restore_only or args.bounded_cap is not None:
+            ap.error("--all-enabled honours every site's policy: no --force, --restore-only or --bounded-cap")
         return 1 if run_fleet(dry_run=args.dry_run) and not args.dry_run else 0
-    stats = run(args.platform, dry_run=args.dry_run, force=args.force, bounded_cap=args.bounded_cap)
+    stats = run(args.platform, dry_run=args.dry_run, force=args.force, bounded_cap=args.bounded_cap,
+                restore_only=args.restore_only)
     return 1 if stats["aborted"] and not args.dry_run else 0
 
 
