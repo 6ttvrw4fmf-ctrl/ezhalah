@@ -95,6 +95,30 @@ def page_image_count(page: dict) -> int | None:
     return sum(walk(b) for b in blocks)
 
 
+def page_image_paths(page: dict) -> list[str]:
+    """Where in the page's JSON-LD each `image` sits, e.g. ['itemOffered.image x1', 'image x4'], so a
+    scraper that reads only one of those places can be told from a page that lists no image at all."""
+    out: list[str] = []
+
+    def walk(node, path: str) -> None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                here = f"{path}.{k}" if path else k
+                if k == "image":
+                    n = len(v) if isinstance(v, list) else (1 if v else 0)
+                    if n:
+                        out.append(f"{here} x{n}")
+                else:
+                    walk(v, here)
+        elif isinstance(node, list):
+            for x in node:
+                walk(x, path)
+
+    for b in (page or {}).get("jsonld") or []:
+        walk(b, "")
+    return out
+
+
 _LOG_FIELDS = ("city_ar", "district_ar", "deal_ar", "type_ar", "rent_period_ar", "price_total", "price_annual",
                "area_m2", "bedrooms", "bathrooms")
 
@@ -110,7 +134,7 @@ def log_lines(item: dict, n_evidence: int = 15) -> list[str]:
            "   stored: " + " | ".join(f"{k}={st.get(k)}" for k in _LOG_FIELDS if st.get(k) is not None),
            f"   page title: {page.get('title')}",
            f"   page images (JSON-LD): {page_image_count(page)} | og:image: {bool((page.get('meta') or {}).get('og:image'))} "
-           f"| we serve a photo: {st.get('has_photo')}"]
+           f"| we serve a photo: {st.get('has_photo')} | image at: {page_image_paths(page)}"]
     out += [f"   page: {x[:200]}" for x in (page.get("evidence_lines") or [])[:n_evidence]]
     return out
 
