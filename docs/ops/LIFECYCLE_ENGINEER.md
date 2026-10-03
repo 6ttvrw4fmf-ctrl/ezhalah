@@ -70,6 +70,7 @@ your work.
 | must always read 0 | `mon_unverified_inactivations_24h` |
 | **the double-check** (read-only): opens N hidden + N live ads of one website through the proxy, with known-live controls; result in the run's `spot-check` artifact (`method` says whether the site has a real "gone" check or status only) | workflow `lifecycle-spot-check.yml` (inputs `platform`, `n`, `which`, `hidden_days`), code `scrapers/common/lifecycle_spot_check.py` |
 | **the deletion switch** (your only way to turn a website's 30-day deletion on or off; refuses "on" without a clean dry run in the last 7 days) | `select set_platform_retention('<site>', true \| false, '<dated evidence>')` |
+| **the report numbers in CI** (read-only): the engineer's container has no service key and no supabase client, so `lifecycle_report` runs here; read the job summary or the `lifecycle-report` artifact | workflow `lifecycle-report.yml` (input `hours`) |
 | **dead ads a customer can see** (read-only, nightly 09:05 UTC, every registered website): a random sample of production-served ads opened through each website's own check, with controls; your rating is read from it | workflow `dead-visible-score.yml` (inputs `sites`, `big`, `small`, `dry_run`), code `scrapers/common/dead_visible_score.py`, table `ops_dead_visible_score`, view `ops_dead_visible_fleet`, artifact `dead-visible-score` |
 
 **Workflows you may run:** `aqar-liveness.yml`, `wasalt-liveness.yml`, `wasalt-enum-liveness.yml`,
@@ -712,6 +713,21 @@ or rewrite another engineer's work, and never start a big change in another engi
   x.deactivated_at - interval '96 hours' and x.deactivated_at + interval '15 minutes')`.
   `auto_recover_false_inactive()` still looks at `missing_count = 0` only. The Dealapp batch of
   2026-10-02 11:30 UTC was NOT such a case: every ad in it had a GONE row written before the hide.
+- A workflow's own `schedule:` is not a schedule here. `dead-visible-score.yml` merged 2026-10-03
+  01:05 UTC with `cron: "5 9 * * *"` and had not run once by 14:05 UTC, so the table the rating is
+  read from was empty. Every lifecycle job that must run is dispatched by a pg_cron
+  `trigger_gh_workflow()` row; check `cron.job` for it, not the YAML.
+- `lifecycle-spot-check.yml --ids` judges every listed ad as LIVE (they are cards a customer can
+  see). "66 wrong" on 66 hidden ids means 66 read gone, i.e. the hides were right.
+- A status-only double-check cannot judge a site whose removed ad answers 200 (sanadak's app shell,
+  2026-10-03: 8 of 8 hidden read "live"). The spot-check now reads every `fleet_liveness.SITES` site
+  through its own oracle (method `site-oracle`), as `dead_visible_score` already did.
+- 27 platforms (54 tables) had neither `trg_set_deactivated_at` nor `trg_archive_hard_delete`
+  (2026-10-03): a hide there leaves `deactivated_at` NULL, so it is invisible to the hidden counts,
+  to `mon_unverified_inactivations_24h`, to `auto_recover_false_inactive()` and to the 30-day
+  clock (1,016 such residential rows; rakez 638). Before trusting a site's "0 hidden", check its
+  triggers: `select c.relname from pg_class c where c.relname ~ '_listings$' and not exists (select 1
+  from pg_trigger g where g.tgrelid = c.oid and g.tgname = 'trg_set_deactivated_at')`.
 - Before trusting "our servers read it wrong", open the same ads from a second network. On
   2026-10-02 the Gathern 404s that looked like a block were real.
 
@@ -804,7 +820,8 @@ are saved in your run log. Never a number from memory, an estimate, or yesterday
 
 **The numbers are computed, not reasoned (owner, 2026-10-02: «I want it to do its job always and
 perfectly so I can sit and relax»).** Run `PYTHONPATH=. python3 -m scrapers.common.lifecycle_report
---hours 24` (and `--json` for the run log) at the end of the run and **paste its lines verbatim**:
+--hours 24` (and `--json` for the run log) at the end of the run — from the cloud container, by
+dispatching `lifecycle-report.yml`, since only CI holds the key — and **paste its lines verbatim**:
 the per-website list with its marks and "The other N websites" line, checked in time / never checked
 / yesterday, hidden / brought back / deleted per website and in total, websites fully protected,
 `mon_unverified_inactivations_24h`, intended deletions not done, every lifecycle job's last run with
