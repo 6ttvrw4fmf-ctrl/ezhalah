@@ -373,7 +373,7 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
     # Numeric parsing DELIBERATELY kept local (2026-07-16 normalize-unification audit): Wasalt's
     # prices/areas/counts arrive as JSON-native numbers from __NEXT_DATA__, not display text.
     # normalize.to_int() is for human-formatted strings and is NOT behaviour-identical on these
-    # shapes (a float with 3+ decimals would be read as European digit grouping and inflated —
+    # shapes (a float of 1-3 digits + exactly 3 decimals is read as European digit grouping and inflated —
     # the mirror image of the 2026-07-13 price-fidelity bug — and scientific-notation floats would
     # be mangled), and normalize.to_int_numeric() maps 0→None where this code keeps 0. Bare
     # int()/int(float()) on JSON numbers is the provably-correct parse here; do not "unify" it
