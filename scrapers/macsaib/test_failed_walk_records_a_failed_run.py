@@ -21,7 +21,13 @@ import scrapers.macsaib.run as m  # noqa: E402
 m.db = _db
 
 
-def _boom(*a, **k):
+PROBED = object()   # the session retry_smarter_session hands back (DIRECT profiles, then the proxy)
+m.retry_smarter_session = lambda url, **k: (PROBED, ["direct/chrome124:200"])
+WALKED: list = []
+
+
+def _boom(s, *a, **k):
+    WALKED.append(s)
     raise TimeoutError("curl: (28) Connection timed out after 40002 milliseconds")
 
 
@@ -38,4 +44,5 @@ ends = [c for c in CALLS if c[0] == "end"]
 assert len(ends) == 1 and ends[0][1] == 4242, f"run not closed exactly once: {CALLS}"
 assert ends[0][2].get("ok") is False, f"failed walk not recorded as failed: {ends[0]}"
 assert "timed out" in (ends[0][2].get("notes") or ""), f"error missing from notes: {ends[0]}"
+assert WALKED == [PROBED], "the walk must use the probed (proxy-capable) session, not a bare one"
 print("ok: a failed macsaib walk closes its run ok=False")

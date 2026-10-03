@@ -38,7 +38,9 @@ jobs:
           - { source: aldarim,  cmd: "python -m scrapers.aldarim.run --pages 50" }
           - { source: aqargate, cmd: "python -m scrapers.aqargate.run --type all" }
           - { source: hajer,    cmd: "python -m scrapers.hajer.run --type all" }
-          - { source: alhoshan, cmd: "python -m scrapers.alhoshan.run --type all" }
+          #   alhoshan + macsaib: `proxy: true` (2026-10-03, Scraping Engineer): two runs in a row timed out
+          #   CONNECTING from the runner; each probes 3 profiles DIRECT first, so the proxy is spent only when walled.
+          - { source: alhoshan, cmd: "python -m scrapers.alhoshan.run --type all", proxy: true }
           - { source: sanadak,  cmd: "python -m scrapers.sanadak.run --type all" }
           - { source: eastabha, cmd: "python -m scrapers.eastabha.run --type all" }
           - { source: aqarcity, cmd: "python -m scrapers.aqarcity.run --type all" }
@@ -253,7 +255,7 @@ jobs:
           # wave 3, batch 2. vmksa walks 11 index pages + 163 ad pages (RSC); macsaib is Taearif's JSON
           # feed: 4 list pages, 20 category walks and 77 detail records.
           - { source: vmksa,        cmd: "python -m scrapers.vmksa.run --type all", tmo: 20 }
-          - { source: macsaib,      cmd: "python -m scrapers.macsaib.run --type all", tmo: 15 }
+          - { source: macsaib,      cmd: "python -m scrapers.macsaib.run --type all", tmo: 15, proxy: true }
           # wave 3, batch 3. maqrat pages its own POST index (/Property/_Properities) then reads 83 details pages.
           - { source: maqrat,       cmd: "python -m scrapers.maqrat.run --type all", tmo: 20 }
           # wave 3, batch 6: arsh is a hand-built Duda site (1 index + 23 pages).
