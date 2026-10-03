@@ -120,7 +120,7 @@ check('live counts come from the RESULTS RPC (fetchDistrictEligibleCounts exists
     && /p_limit: 1/.test(remoteSrc);
 })());
 check('per-option match_values OVERRIDE the base q districts (spread order)', /\{ \.\.\.base, p_districts: opt\.matchValues \}/.test(readFileSync(join(root, 'src/data/remote.ts'), 'utf8')));
-check('marking prefers the live full-filter-state count over the scope count', /const live = districtLiveCounts\?\.\[opt\.districtAr\];\s*\n\s*const isEmpty = live != null \? live === 0 : opt\.listingCount === 0/.test(indexSrc));
+check('marking prefers the live full-filter-state count over the scope count', /const live = districtLiveCounts\?\.\[opt\.districtAr\];\s*\n\s*const isEmpty = opt\.scopeKnown === false \? false : live != null \? live === 0 : opt\.listingCount === 0/.test(indexSrc));
 // The signature must cover the NORMAL narrowing (type/group/types/beds/size/price/area) AND every
 // ADVANCED answer. The advanced half was added 2026-08-20 by the AF major certification: without it
 // an advanced-only narrowing never triggered the live-count path at all (falling back to
