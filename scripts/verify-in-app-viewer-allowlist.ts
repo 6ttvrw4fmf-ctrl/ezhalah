@@ -60,6 +60,13 @@ check('agent.tsx still calls openListing() for everyone else', /openListing\(l\)
 check('openListing.ts web path is still window.open (new tab)', /window\.open\(url, '_blank', 'noopener,noreferrer'\)/.test(open));
 check('openListing.ts native path is still expo-web-browser', /WebBrowser\.openBrowserAsync\(url/.test(open));
 check('openListing.ts never imports the allowlist (native stays untouched)', !/inAppViewer/.test(open));
+// Closing must never go through history.back(): after the user acts inside an ad (Gathern «اختر»),
+// the frame's navigation is on top of the joint session history, so back() steps the AD back instead
+// of closing — measured live 2026-10-03 (✕ undid the booking step and the pane stayed open).
+const viewer = readFileSync(new URL('../src/components/AdViewer.tsx', import.meta.url), 'utf8');
+const viewerCode = viewer.replace(/\/\/.*$/gm, '');
+check('AdViewer never closes via history.back()', !/history\.back\(/.test(viewerCode));
+check('AdViewer frame delegates payment (checkout can continue inside)', /allow="[^"]*\bpayment\b/.test(viewer));
 
 // Mutation proof — each of these broken worlds must be CAUGHT by the checks above, or the barrier
 // is decoration (scripts/verify-new-barriers-are-mutation-proven.ts).
