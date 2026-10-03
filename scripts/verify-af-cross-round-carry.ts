@@ -268,7 +268,13 @@ check('the offer probe asks with the SAME carried asked-set the round will use',
 // and is excluded by name.
 {
   const calls = [...agentSrc.matchAll(/rankQuestions\(([^)]*)\)/g)].map((m) => m[1].trim());
-  const interviewCalls = calls.filter((a) => a !== 'scoped, seen');
+  // `rankQuestions(next, asked)` is the next-step PREFETCH (2026-10-03, verify-af-continue-never-feels-
+  // stuck): it ranks exactly what the commit will, so its asked set must be the carried set PLUS the
+  // question being answered — asserted right here, so excluding it by name cannot hide a fresh set.
+  const interviewCalls = calls.filter((a) => a !== 'scoped, seen' && a !== 'next, asked');
+  check('the next-step prefetch ranks against the carried set plus the question being answered',
+    !calls.includes('next, asked') || /const asked = new Set\(\[\.\.\.ageFlowAskedRef\.current, question\.id\]\);/.test(agentSrc),
+    'src/app/agent.tsx — prefetchNextStep must build its asked set from ageFlowAskedRef.current');
   check('the round\'s own plan is ranked against the carried set, not a fresh one',
     interviewCalls.length >= 2 && interviewCalls.every((a) => a.endsWith('ageFlowAskedRef.current')),
     `src/app/agent.tsx — every interview ranking call must pass the carried set; got ${JSON.stringify(interviewCalls)}`);
