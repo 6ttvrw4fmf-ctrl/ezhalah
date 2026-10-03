@@ -50,7 +50,7 @@ export const carriedOnRequest = (body, answered) => {
 const G = {
   apt: 'الشقق والسكن المشترك', villa: 'الفلل والبيوت', vac: 'الاستراحات والريف',
   rplot: 'الأراضي السكنية', retail: 'التجزئة والمكاتب', ind: 'الصناعة واللوجستيات',
-  cbld: 'المباني والمرافق', cplot: 'الأراضي التجارية والصناعية',
+  cbld: 'المباني والمرافق', cplot: 'الأراضي',
 };
 export const TYPE_UI = {
   'شقة': { cat: 'سكني', group: G.apt, tap: 'شقة' },
