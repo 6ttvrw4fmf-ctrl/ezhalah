@@ -207,7 +207,10 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
       let box = null;
       while (Date.now() < until && !(box = await page.evaluate(CLICK_LEAF, txt))) await page.waitForTimeout(400);
       if (!box) throw new Error(`control never rendered: ${txt}`);
-      await page.mouse.click(box.x, box.y);
+      // Never a coordinate click: the chat reflows between measuring and clicking, and a point click
+      // lands on whatever slid under it (scripts/verify-live-clicks-are-witnessed.ts, ops_incident #340).
+      // A locator click is actionability-checked by Playwright itself (visible, stable, receives events).
+      await page.getByText(txt, { exact: true }).filter({ visible: true }).first().click({ timeout: 8000 });
       await page.waitForTimeout(1000);                    // politeness: ≤ 1 action/sec
     };
     const lastMainSearchAfter = (n) => {
