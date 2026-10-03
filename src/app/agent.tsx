@@ -3809,8 +3809,8 @@ export default function Agent() {
                     </Text>
                   ))()}
                   {/* COMMITTED ANSWERS AS CHIPS (owner 2026-10-03). The «بناءً على: …» sentence that used
-                      to sit here is now part of the summary above — «ملخص البحث» lists every answer
-                      under «من الفلتر المتقدم» — so it is not said twice. The chips stay, read-only. */}
+                      to sit here is now part of the summary above — «ملخص البحث» continues with one
+                      labelled line per answer — so it is not said twice. The chips stay, read-only. */}
                   {guidedPills && guidedPills.msgId === m.id && guidedPills.facets.length ? (
                     <View style={{ alignSelf: 'stretch', gap: 7, marginTop: 2 }}>
                       <View style={[s.guidedPillRow, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
