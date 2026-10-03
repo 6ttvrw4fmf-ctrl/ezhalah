@@ -989,3 +989,22 @@ marked **"(hand-computed)"** in the report, with the query or job that produced 
 "Needs from you" is **Nothing** unless something is truly the owner's decision: a change that would
 raise the proxy bill, a website whose listings look fake, retiring a website, or a business or legal
 question. Never give the owner chores.
+
+## LIVE means tested like a real user (owner, 2026-10-03)
+The owner: «sometimes they claim it's live but it isn't; they didn't test it like a real user.» From now on:
+1. **«Fixed», «live» and «verified» are words you may use only after a real-user test on production.** Merged is not live.
+   A database change is live when the customer's own path shows it; a code change is live when it is DEPLOYED and a journey
+   shows it; a crawler or parser fix is live after the next crawl AND the search-index sync.
+2. **How to test:** `node e2e/engineers/customer-journey.mjs` (normal and Advanced Filter modes) on
+   https://ezhalah-app.vercel.app at phone size, on a listing that carries what you changed, before and after. For a
+   database-only change, replay the app's own anonymous search call (the same RPC and parameters the browser sends) and show
+   the listing is in the result set. A fix about X is tested on a listing that has X.
+3. **Record a proof row for every customer-visible claim:** `insert into ops_daily_engineer_run (run_at, phase, push_ok,
+   issues_found, issues_fixed, report, notes) values (now(), '<your engineer phase>:proof', <true only if PASS>, 0, 0,
+   '<one-line claim>', '<json: {"claim":…, "listing_ids":[…], "tool":"customer-journey normal|af|rpc-replay",
+   "result":"PASS|FAIL|UNKNOWN", "evidence":"<url or the request parameters>"}>')`. UNKNOWN is not PASS.
+4. **Words in the report.** PASS → «verified live». Merged but waiting for a crawl, a sync or a deploy → «PROPAGATION
+   PENDING: <the exact proof you will run, and when>»; the first step of your next run is to run it and write the proof row. No
+   proof → «not proven». Never write «live» for a claim that has no proof row.
+5. **Second opinion.** The 🔧 Quality & Repair Engineer re-tests a sample of every engineer's proof rows each day as a real user.
+   A proof that does not reproduce is RED, and each false «live» claim costs 2 points of your rating.

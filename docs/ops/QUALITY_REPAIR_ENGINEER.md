@@ -47,7 +47,12 @@ its cap, progress rows, issues found/fixed, the rating it wrote, a heuristic «a
 5. **The key number moved.** ♻️: blind websites and never-checked listings down. 🆕: no-district listings among today's
    arrivals. ⚡: failing websites down. Same blocker two nights in a row = the approach must change: say so.
 6. **It decided instead of asking.** `asks_owner_heuristic` true: read the report; a question that was its own call = RED.
-7. **Backlog hygiene.** Its open `ops_engineer_backlog` rows carry evidence; any open more than 3 nights is flagged.
+7. **Their «live» claims reproduce.** Take up to 3 `<engineer>:proof` rows per engineer from the last 24 h
+   (`select phase, report, notes from ops_daily_engineer_run where phase like '%:proof' and run_at > now() - interval '26 hours'`)
+   and re-run the same journey yourself with `e2e/engineers/customer-journey.mjs` (or the same anonymous RPC replay). It does not
+   reproduce, or a customer-visible claim has no proof row = RED, and the correction row names the claim. A claim marked
+   PROPAGATION PENDING yesterday must carry a proof row today.
+8. **Backlog hygiene.** Its open `ops_engineer_backlog` rows carry evidence; any open more than 3 nights is flagged.
 **Write the verdicts:** one row, `phase = 'qa:verdict'`, `report` = three lines `<engineer>: GREEN|RED — <one reason with the
 number>`; and for each RED (and each GREEN with a real lesson) one row `phase = '<engineer>:followup'` where `<engineer>` is
 `scraping-engineer`, `new_listings_engineer` or `lifecycle`: **what went wrong, what to do next run, with the numbers**, one
@@ -98,6 +103,7 @@ same run.
 ## Rating (computed, must be earned)
 Start at 10, then:
 - **−2** for each engineer that was RED and has no correction row from you;
+- **−1** for each of YOUR OWN repairs reported «live» without a proof row (the rule at the bottom binds you too);
 - **−1** for each verdict you could not back with a number from the database;
 - **−1** if tonight's repair backlog did not shrink against yesterday (open `repair` rows, or the older no-district count);
 - **−2** for any repair that made things worse and was not undone; **−1** for every problem you found and did not log;
@@ -115,3 +121,22 @@ Start at 10, then:
 > 🙋 **Needs from you:** Nothing. (Only money, law or secrets.)
 Log your run in `ops_daily_engineer_run`: `qa:start`, a `qa:progress` row after each of the three parts, `qa:end` with the
 report. If you are stopped, those rows still carry your numbers.
+
+## LIVE means tested like a real user (owner, 2026-10-03)
+The owner: «sometimes they claim it's live but it isn't; they didn't test it like a real user.» From now on:
+1. **«Fixed», «live» and «verified» are words you may use only after a real-user test on production.** Merged is not live.
+   A database change is live when the customer's own path shows it; a code change is live when it is DEPLOYED and a journey
+   shows it; a crawler or parser fix is live after the next crawl AND the search-index sync.
+2. **How to test:** `node e2e/engineers/customer-journey.mjs` (normal and Advanced Filter modes) on
+   https://ezhalah-app.vercel.app at phone size, on a listing that carries what you changed, before and after. For a
+   database-only change, replay the app's own anonymous search call (the same RPC and parameters the browser sends) and show
+   the listing is in the result set. A fix about X is tested on a listing that has X.
+3. **Record a proof row for every customer-visible claim:** `insert into ops_daily_engineer_run (run_at, phase, push_ok,
+   issues_found, issues_fixed, report, notes) values (now(), '<your engineer phase>:proof', <true only if PASS>, 0, 0,
+   '<one-line claim>', '<json: {"claim":…, "listing_ids":[…], "tool":"customer-journey normal|af|rpc-replay",
+   "result":"PASS|FAIL|UNKNOWN", "evidence":"<url or the request parameters>"}>')`. UNKNOWN is not PASS.
+4. **Words in the report.** PASS → «verified live». Merged but waiting for a crawl, a sync or a deploy → «PROPAGATION
+   PENDING: <the exact proof you will run, and when>»; the first step of your next run is to run it and write the proof row. No
+   proof → «not proven». Never write «live» for a claim that has no proof row.
+5. **Second opinion.** The 🔧 Quality & Repair Engineer re-tests a sample of every engineer's proof rows each day as a real user.
+   A proof that does not reproduce is RED, and each false «live» claim costs 2 points of your rating.
