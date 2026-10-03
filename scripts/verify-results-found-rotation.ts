@@ -256,8 +256,12 @@ const PIN_RE = /pickResultsFoundSentence\(\{[\s\S]{0,600}?stableKey: m\.id,/;
 check('agent.tsx PASSES stableKey: m.id at the call site (the per-message pin, PR #3232)',
   PIN_RE.test(agentSrc),
   'without it the picker is re-invoked on every typewriter tick and the sentence flips mid-typing');
-check('the {name} comes from AuthUser.nameAr / .nameEn (the same field the account menu renders)',
-  /user\?\.nameAr[\s\S]{0,80}user\?\.nameEn|user\?\.nameEn[\s\S]{0,80}user\?\.nameAr/.test(agentSrc));
+// 2026-10-03: `user?.nameAr ?? user?.name` printed the LATIN name in an Arabic sentence whenever nameAr
+// was not filled yet (owner screenshot: «لقينا نتائج يا Yusuf Saleh S Al Nashwan»). The name now comes
+// from pickName(user, rfLang), the one function the sidebar and the account menu render it with.
+check('the {name} comes from pickName(user, rfLang), the same function the sidebar renders',
+  /const rfName = user \? pickName\(user, rfLang\) : null;/.test(agentSrc)
+  && !/user\?\.nameAr \?\? user\?\.name/.test(agentSrc));
 
 // ── 6. NO NEW NAME SOURCE, NO LLM, NO EMAIL-BASED GUESS (owner explicit "do not create a second
 // source for the user's name") ───────────────────────────────────────────────────────────────────
