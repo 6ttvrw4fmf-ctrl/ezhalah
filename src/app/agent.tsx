@@ -78,6 +78,7 @@ import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { pickResultsFoundSentence } from '@/data/resultsFoundRotation';
 import { pickNoResultsSentence } from '@/data/noResultsRotation';
+import { pickName } from '@/lib/nameSync';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { screenKeyboardInset } from '@/lib/visualViewportFrame';
@@ -3505,10 +3506,14 @@ export default function Agent() {
         // FULL q — the replay needs the AF predicates to reproduce the conversation.
         writeFilterStore(q);
         const override = chatBubble && chatSub ? { bubble: chatBubble, sub: chatSub } : undefined;
-        startFresh();
-        setFilterOrigin(true); // this whole screen instance came from «بحث» — no composer (see the flag's own comment above)
-        if (replay === '0') void openSaved(hid, q, override);
-        else sendFilter(q, override);
+        const open = () => {
+          startFresh();
+          setFilterOrigin(true); // this whole screen instance came from «بحث» — no composer (see the flag's own comment above)
+          if (replay === '0') void openSaved(hid, q, override);
+          else sendFilter(q, override);
+        };
+        if (replay !== '0') open();
+        else turnToSavedChat(open);
         // Intent consumed — including for a sidebar replay, so refreshing a REOPENED chat also lands
         // on a new blank chat rather than reopening it again (owner requirement 6).
         consumeSearchParams();
@@ -3543,6 +3548,38 @@ export default function Agent() {
   const freshFade = useRef(new Animated.Value(1)).current;
   const freshRise = useRef(new Animated.Value(0)).current;
   const freshMountRef = useRef(true);
+  const savedOpenTokenRef = useRef(0); // counts sidebar chat-opens; only the latest may swap/fade in (see the replay branch)
+  const turnToSavedChat = (open: () => void) => {
+    // OPENING A SAVED CHAT FROM THE SIDEBAR IS A PAGE TURN, NOT A HARD CUT (owner 2026-10-03: «the
+    // animation feels too tough, it doesn't feel smooth»). It used to wipe the old chat in one
+    // frame, paint the new one at its TOP, then jump to the bottom up to five times while its
+    // cards measured. Now the old chat fades out (110 ms, like New Chat), the swap and the landing
+    // at the latest message happen while the view is invisible, and the opened chat fades and
+    // rises in once landAtLatest's first re-bottom (150 ms) has run. Decoration only:
+    // runAfterAnimation drives the swap from a timer too, and the fade-in is a plain timer.
+    // A second sidebar tap (savedOpenTokenRef) or New Chat (it bumps conversationEpochRef) during
+    // the fade drops this open instead of loading it over the newer screen.
+    const token = ++savedOpenTokenRef.current;
+    const epochAtTap = conversationEpochRef.current;
+    runAfterAnimation(
+      (onFinished) => Animated.timing(freshFade, { toValue: 0, duration: 110, useNativeDriver: true }).start(onFinished),
+      () => {
+        // stale: the newer open / New Chat runs its own fade on freshFade and brings the view back
+        if (token !== savedOpenTokenRef.current || epochAtTap !== conversationEpochRef.current) return;
+        open(); // startFresh bumps conversationEpochRef; this open owns the new value
+        const mine = conversationEpochRef.current;
+        freshRise.setValue(8);
+        setTimeout(() => {
+          if (token !== savedOpenTokenRef.current || mine !== conversationEpochRef.current) return;
+          Animated.parallel([
+            Animated.timing(freshFade, { toValue: 1, duration: 220, useNativeDriver: true }),
+            Animated.timing(freshRise, { toValue: 0, duration: 220, useNativeDriver: true }),
+          ]).start();
+        }, 180);
+      },
+      180,
+    );
+  };
   useEffect(() => {
     if (freshMountRef.current) { freshMountRef.current = false; return; }
     if (fresh === undefined) return;
@@ -3825,7 +3862,11 @@ export default function Agent() {
               // «لقينا {n} إعلان يطابق طلبك.» has no baked/DB fallback: the picker rotates from
               // search #1.
               const rfLang: 'ar' | 'en' = getLocale() === 'en' ? 'en' : 'ar';
-              const rfName = rfLang === 'ar' ? (user?.nameAr ?? user?.name) : (user?.nameEn ?? user?.name);
+              // pickName = the SAME function the sidebar and account menu print the name with. The
+              // old fallback (nameAr, else the raw name) printed the Latin name whenever nameAr was not filled
+              // yet, so an Arabic sentence greeted «يا Yusuf Saleh …» while the sidebar said «يوسف» (owner
+              // screenshot 2026-10-03). pickName never returns Latin letters for Arabic.
+              const rfName = user ? pickName(user, rfLang) : null;
               // No-Results rotation (owner rule 2026-09-26): noResultsSuggestion() in src/data/search.ts
               // has ~9 branches — 8 give an EARNED, specific diagnosis ("this district has other
               // types", "did you mean X city") and stay exactly as they render today. Only its LAST
