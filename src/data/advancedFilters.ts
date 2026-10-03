@@ -179,14 +179,15 @@ function addAmenities(q: SearchQuery, keys: string[]): SearchQuery {
 //     inflate "did not mention", so it must turn the barrier red.
 //   • PROPERTY AGE has a real `cnt_unknown` column and needs no derivation.
 //
-// Everything else stays null, and each for a stated reason:
-//   • AMENITIES — there is NO single unknown. Each chip is its own boolean column, so "didn't say"
-//     differs per amenity; one number could only be a lie about the rest.
-//   • BATHROOMS / STREET_WIDTH / RATING — threshold ladders. total − (≥1) conflates NULL with the
-//     rows that genuinely have zero/below-threshold, so no honest subtraction exists.
-//   • UNIT_SUBTYPE — total − Σ(3) is only right while the value domain has exactly 3 members. That
-//     is true today but is a data fact, not an invariant, so it is not safe to publish as truth.
-//   • RNPL — a lone boolean chip: false and null are inseparable from cnt_rnpl alone.
+//   • THE OTHER SIX (owner 2026-10-03: «😔 on every advanced filter question») read a real DB column,
+//     because none of them can be derived here without lying: bathrooms / street width / rating are
+//     threshold ladders (total − ≥1 folds the genuine zero-bathroom rows into "did not mention"),
+//     RNPL's false and NULL are inseparable from cnt_rnpl, unit subtype's total − Σ3 holds only while
+//     the domain has three values, and amenities has one column per chip. So
+//     apartment_guided_counts_ar counts `IS NULL` directly in the committed scope (migration
+//     20261003184909): cnt_rnpl_unknown, cnt_bath_unknown, cnt_stw_unknown, cnt_rating_unknown,
+//     cnt_sub_unknown, and cnt_amen_unknown = EVERY amenity column NULL (the listing stated no amenity
+//     at all — the one number true for the whole amenities card). Never a subtraction for these.
 function guidedOptions(
   counts: GuidedCounts | null | { __probeFailed: true },
   defs: Array<{ key: string; labelKey: string; count: (c: GuidedCounts) => number }>,
@@ -220,7 +221,7 @@ const RNPL_QUESTION: AdvancedQuestion = {
   eligibility: (q) => cohortAllows(q, 'rnpl'),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q),
-      [{ key: 'rnpl', labelKey: 'Offers installments', count: (c) => c.cnt_rnpl }]);
+      [{ key: 'rnpl', labelKey: 'Offers installments', count: (c) => c.cnt_rnpl }], (c) => c.cnt_rnpl_unknown);
   },
   apply: addAmenities,
 };
@@ -295,11 +296,11 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
       defs.push({ key: 'electricity',  labelKey: 'Electricity',       count: (c) => c.cnt_electricity });
       defs.push({ key: 'water_supply', labelKey: 'Water supply',      count: (c) => c.cnt_water_supply });
       const chosen = defs.filter((d) => chipAllow.includes(d.key));
-      return guidedOptions(await fetchApartmentGuidedCounts(q), chosen);
+      return guidedOptions(await fetchApartmentGuidedCounts(q), chosen, (c) => c.cnt_amen_unknown);
     }
     // Furnished chip: Annual Rent only (Buy furnished ≈2%; owner: no Furnished filter on Buy).
     if (cohortAllows(q, 'furnished')) defs.push({ key: 'furnished', labelKey: 'Furnished', count: (c) => c.cnt_furnished });
-    return guidedOptions(await fetchApartmentGuidedCounts(q), defs);
+    return guidedOptions(await fetchApartmentGuidedCounts(q), defs, (c) => c.cnt_amen_unknown);
   },
   apply: addAmenities,
 };
@@ -324,7 +325,7 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
       { key: '3', labelKey: '3+', count: (c) => c.cnt_bath3 },
       { key: '4', labelKey: '4+', count: (c) => c.cnt_bath4 },
     ];
-    return guidedOptions(await fetchApartmentGuidedCounts(q), rungs.filter((d) => parseInt(d.key, 10) > floor));
+    return guidedOptions(await fetchApartmentGuidedCounts(q), rungs.filter((d) => parseInt(d.key, 10) > floor), (c) => c.cnt_bath_unknown);
   },
   // INTERSECT, never replace (bug fix 2026-08-04). Every option's `count` is defined by the contract as
   // "exactly what Search returns if picked", and it is computed WITH the previous answer applied — so an
@@ -380,7 +381,7 @@ const STREET_WIDTH_QUESTION: AdvancedQuestion = {
       { key: '25', labelKey: '25 m or wider', count: (c) => c.cnt_stw25 },
       { key: '30', labelKey: '30 m or wider', count: (c) => c.cnt_stw30 },
     ];
-    return guidedOptions(await fetchApartmentGuidedCounts(q), rungs.filter((r) => parseInt(r.key, 10) > floor));
+    return guidedOptions(await fetchApartmentGuidedCounts(q), rungs.filter((r) => parseInt(r.key, 10) > floor), (c) => c.cnt_stw_unknown);
   },
   apply: (q, keys) => {
     const n = parseInt(keys[0] ?? '', 10);
@@ -447,7 +448,8 @@ const RATING_QUESTION: AdvancedQuestion = {
     ];
     // Monotone like BATHROOMS: only rungs that can still NARROW the current answer are offered.
     return guidedOptions(await fetchApartmentGuidedCounts(q),
-      rungs.filter((d) => parseFloat(d.key) > floor || (d.key === '9.0_rc10' && (q.reviewsMin ?? 0) < 10 && floor <= 9.0)));
+      rungs.filter((d) => parseFloat(d.key) > floor || (d.key === '9.0_rc10' && (q.reviewsMin ?? 0) < 10 && floor <= 9.0)),
+      (c) => c.cnt_rating_unknown);
   },
   apply: (q, keys) => {
     const k = keys[0];
@@ -472,7 +474,7 @@ const UNIT_SUBTYPE_QUESTION: AdvancedQuestion = {
       { key: 'استديو',      labelKey: 'Studio unit',        count: (c) => c.cnt_sub_studio },
       { key: 'شقق مخدومة',  labelKey: 'Serviced apartment', count: (c) => c.cnt_sub_serviced },
       { key: 'شقة',         labelKey: 'Regular apartment',  count: (c) => c.cnt_sub_regular },
-    ]);
+    ], (c) => c.cnt_sub_unknown);
   },
   apply: (q, keys) => (keys[0] ? { ...q, unitSubtypes: [keys[0]] } : q),
 };

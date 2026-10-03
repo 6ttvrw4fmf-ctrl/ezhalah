@@ -153,7 +153,7 @@ const S6: Entry[] = [
   { rule: 'R6.2.3', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-cross-round-carry'], evidence: 'cross-reference' },
   { rule: 'R6.3.1', dim: 'af', weight: 2, grade: 'L', barrier: [], evidence: 'CI: new results turn lands with the narrowed count (11,202 → 2,469 → 2,319)' },
   { rule: 'R6.3.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-back-boundary'], evidence: 'receipt replaces prior turn buttons' },
-  { rule: 'R6.3.3', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-emoji-summary', 'verify-af-stays-in-place'], evidence: 'committed answers appear as read-only chips and are listed in the turn summary under «من الفلتر المتقدم» (owner 2026-10-03)' },
+  { rule: 'R6.3.3', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-emoji-summary', 'verify-af-stays-in-place'], evidence: 'committed answers appear as read-only chips and are listed in the turn summary as labelled lines of the same list, no heading (owner 2026-10-03)' },
   { rule: 'R6.3.4', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-offer-gate'], evidence: 'offer reappears at >25 with a useful question remaining' },
   { rule: 'R6.3.5', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-stays-in-place'], evidence: 'owner 2026-10-03: earlier turns are dimmed, never hidden; the view eases to the new answers bubble and lands on the new turn — never to the top. Measured in a real browser: scrollHeight never below its start, scrollTop never above where the reader was' },
   { rule: 'R6.3.6', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-clear-all-reset', 'verify-af-state-never-leaks-into-filter'], evidence: 'owner 2026-10-03: coming back to the Filter after a search opens a clean form; no «مسح الكل», no carried answers' },
@@ -196,7 +196,7 @@ const S8: Entry[] = [
 
 // ── §9 PILLS ─────────────────────────────────────────────────────────────────────────────────────
 const S9: Entry[] = [
-  { rule: 'R9.1.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-emoji-summary', 'verify-af-stays-in-place'], evidence: 'owner 2026-10-03: every committed answer is listed in the turn summary under «من الفلتر المتقدم» below the ORIGINAL summary lines (withAdvancedBlock executed), and shown as a read-only chip' },
+  { rule: 'R9.1.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-emoji-summary', 'verify-af-stays-in-place'], evidence: 'owner 2026-10-03: every committed answer continues the ORIGINAL summary list as a labelled line, no heading, no emoji (withAdvancedLines executed), and shown as a read-only chip' },
   { rule: 'R9.1.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-emoji-summary', 'verify-af-stays-in-place'], evidence: 'cumulative across rounds: the summary is rebuilt from the original query plus ALL committed facets (second round adds, executed)' },
   { rule: 'R9.2.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-committed-pills-are-never-covered', 'verify-af-stays-in-place'], evidence: 'owner 2026-10-03: no pill carries a ✕ or a press handler, in the transcript or the round card' },
   { rule: 'R9.2.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'a committed answer is changed only by Back inside the round; the carried asked-set only grows' },

@@ -856,6 +856,11 @@ export type GuidedCounts = {
   // source-declared 1-10 scale — the only ones that split the distribution (<=8.0 keeps ~94%).
   cnt_rating95: number; cnt_rating90: number; cnt_rating90_rc10: number;
   cnt_sub_studio: number; cnt_sub_serviced: number; cnt_sub_regular: number;
+  // «😔 N لم يذكر» on every question (owner 2026-10-03, migration 20261003184909): the DB counts the
+  // listings whose source left the field NULL, inside the same committed scope. Amenities = every
+  // amenity column NULL (the listing stated no amenity at all).
+  cnt_rnpl_unknown: number; cnt_amen_unknown: number; cnt_bath_unknown: number;
+  cnt_stw_unknown: number; cnt_rating_unknown: number; cnt_sub_unknown: number;
 };
 
 // De-duped per the comment above fetchPropertyAgeOptionCounts — this is the function RNPL/amenities/
