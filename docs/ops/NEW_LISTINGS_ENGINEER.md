@@ -72,8 +72,12 @@ order by new_24h desc;
 ### Focus rules (why the old runs fell short)
 - **Don't build tools in your run.** The ready tools are this scorecard, `source-reread.yml` (it
   now prints the stored-vs-page comparison in the job log; read it with the GitHub connector's
-  `get_job_logs`, because the artifact's storage host is unreachable from your container), and
-  `e2e/engineers/full-chain.mjs` (search → «عرض المزيد» → click → the URL it opens). If a tool is
+  `get_job_logs`, because the artifact's storage host is unreachable from your container),
+  `e2e/engineers/full-chain.mjs` (search → «عرض المزيد» → click → the URL it opens), and
+  `e2e/engineers/customer-journey.mjs` for your normal-filter and Advanced Filter customer checks
+  (3+ of each every night: `--mode normal --sample 5` and `--mode af --sample 3`; it verifies the
+  AF on the search request's `p_*` parameters and an anon replay, never the on-screen count).
+  Never rebuild it in the run. If a tool is
   missing or broken, spend at most 10 minutes, then give it one line under "Needs" and go back to
   red cells. On 2026-10-02 the run spent most of its time building a browser harness and trying to
   download an artifact, wrote no report, and fixed nothing.
