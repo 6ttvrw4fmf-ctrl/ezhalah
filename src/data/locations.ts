@@ -1228,7 +1228,11 @@ export function matchCitiesByText(deal: Deal | null, periodTok: string | null, c
   // built-in catalog, instantly, after the pool's own ranked matches. When the pool is loaded the place simply has
   // no listings in this scope (the UI says so); when it is not loaded yet its count is UNKNOWN (scopeKnown:false:
   // no number, no «nothing here» claim) and fills in the moment the pool arrives.
-  const extras = catalogCityExtras(query, CATALOG_CITIES, new Set(fromPool.map((o) => o.cityId)), 30, exactPool === undefined ? AMBIGUOUS_CITY_NAMES : undefined).map((c): CityOption => ({
+  // A city that carries the SAME NAME as one already listed (another الهفوف in another region, with no listings) adds no
+  // choice the user can tell apart, and renders as a twin row (a real-browser test tapped the wrong twin): it is not added.
+  const poolNames = new Set(fromPool.map((o) => norm(o.cityAr)));
+  const skipNames = exactPool === undefined ? new Set([...AMBIGUOUS_CITY_NAMES, ...poolNames]) : poolNames;
+  const extras = catalogCityExtras(query, CATALOG_CITIES, new Set(fromPool.map((o) => o.cityId)), 30, skipNames).map((c): CityOption => ({
     cityId: c.cityId, cityAr: c.cityAr, regionId: c.regionId, regionAr: c.regionAr,
     listingCount: 0, totalInCohort: 0, scopeKnown: exactPool !== undefined,
   }));

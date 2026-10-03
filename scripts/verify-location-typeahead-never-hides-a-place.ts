@@ -71,6 +71,8 @@ function behaviour(impl: Impl): string[] {
   // 7b. with no pool anywhere, a name two real cities share is held back (the pool ranks the real one first)
   if (impl.cityExtras('الهفوف', CITIES, new Set(), 30, new Set([norm('الهفوف')])).length !== 0) bad.push('an ambiguous name is not held back while no pool is cached');
   if (!impl.cityExtras('خبر', CITIES, new Set(), 30, new Set([norm('الهفوف')])).some((c) => c.cityId === 3)) bad.push('holding back one ambiguous name also hid an unambiguous city');
+  // 7c. a homonym of a city the pool already lists is not offered as a twin row
+  if (impl.cityExtras('الهفوف', CITIES, new Set([4]), 30, new Set([norm('الهفوف')])).length !== 0) bad.push('a same-named twin of a listed city is offered');
   // 8. districts: only inside their own city, and not duplicating the pool's names
   const d1 = impl.districtExtras('نرجس', DISTRICTS, 1, new Set());
   if (!d1.some((d) => d.districtAr === 'النرجس')) bad.push('a district of the city cannot be typed');
@@ -92,7 +94,7 @@ function wiring(loc: string, idx: string): string[] {
   if (!/scopeKnown:\s*exactPool !== undefined/.test(city)) bad.push('city extras do not say whether their count is measured (scopeKnown)');
   if (!/for \(const v of CITY_FIELD_POOLS\.values\(\)\)/.test(city)) bad.push('matchCitiesByText does not borrow another scope\'s city names while its own pool loads');
   if (!/borrowed \? \{ \.\.\.s\.opt, listingCount: 0, scopeKnown: false \}/.test(city)) bad.push('borrowed city rows keep another scope\'s count (it would be printed as this scope\'s)');
-  if (!/exactPool === undefined \? AMBIGUOUS_CITY_NAMES : undefined/.test(city)) bad.push('while the exact pool loads, same-named catalog cities are not held back (rows would re-order under the finger)');
+  if (!/exactPool === undefined \? new Set\(\[\.\.\.AMBIGUOUS_CITY_NAMES, \.\.\.poolNames\]\) : poolNames/.test(city)) bad.push('same-named catalog cities are not held back / a homonym of a listed city is offered as a twin row');
   if (!/borrowed && AMBIGUOUS_CITY_NAMES\.has\(n\)\) continue/.test(city)) bad.push('while the exact pool loads, a borrowed same-named city is shown in ANOTHER scope\'s order (the wrong الهفوف can be first)');
   if (!/catalogDistrictExtras\(/.test(dist)) bad.push('matchDistrictsByCityId no longer adds the built-in catalog');
   if (!/_districtCache\) \{[\s\S]*startsWith\(`\$\{cityId\}:`\)/.test(dist)) bad.push('matchDistrictsByCityId does not borrow another scope\'s names while its own pool loads');
@@ -127,6 +129,8 @@ check('the wiring: both matchers add the catalog, flag unmeasured counts, the UI
 // ── mutation proofs: each deliberately broken copy must go RED ──────────────────────────────────────────────
 mustCatch('a matcher that only knows the scoped pool', behaviour({ ...REAL, cityExtras: () => [] }));
 mustCatch('a matcher that offers the pool\'s own city twice', behaviour({ ...REAL, cityExtras: (q, cat, _have, lim) => catalogCityExtras(q, cat, new Set(), lim) }));
+mustCatch('a homonym of a listed city offered as a twin row', wiring(locSrc.replace('...poolNames]) : poolNames', ']) : new Set()'), idxSrc));
+mustCatch('a homonym of a listed city offered as a twin row (pure)', behaviour({ ...REAL, cityExtras: (q, cat, have, lim) => catalogCityExtras(q, cat, have, lim) }));
 mustCatch('an ambiguous name that is not held back', behaviour({ ...REAL, cityExtras: (q, cat, have, lim) => catalogCityExtras(q, cat, have, lim) }));
 mustCatch('a district matcher that ignores the city', behaviour({ ...REAL, districtExtras: (q, cat, _cityId, have, lim) => catalogDistrictExtras(q, cat.map((d) => ({ ...d, cityId: 1 })), 1, have, lim) }));
 mustCatch('a catalog fallback that vanished from matchCitiesByText', wiring(locSrc.replace('catalogCityExtras(query', 'noExtras(query'), idxSrc));
