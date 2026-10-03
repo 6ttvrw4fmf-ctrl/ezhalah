@@ -451,13 +451,18 @@ def main() -> None:
     detail_buf: list[dict] = []            # ledger (wasalt_liveness_pilot_detail); never cross them
 
     def _flush_detail() -> None:
-        """Best-effort: an audit-log write must never fail or roll back a liveness sweep."""
+        """Best-effort: an audit-log write must never fail or roll back a liveness sweep.
+
+        Retried like every other statement: the hide after it IS retried, so a transient on the
+        insert alone (the 2026-10-02 ConnectionTerminated shape) would drop the kill row and let
+        the hide land anyway — an orphaned hide, the exact thing evidence-before-hide prevents."""
         if not detail_buf:
             return
         for i in range(0, len(detail_buf), 500):
             chunk = detail_buf[i:i + 500]
             try:
-                client.table("aqar_liveness_detail").insert(chunk).execute()
+                _run_with_retry(lambda c=chunk: client.table("aqar_liveness_detail")
+                                .insert(c).execute())
             except Exception as exc:  # noqa: BLE001 — logging must not break the lifecycle
                 print(f"⚠ detail-log insert failed (non-fatal, {len(chunk)} rows): "
                       f"{str(exc)[:160]}", flush=True)
