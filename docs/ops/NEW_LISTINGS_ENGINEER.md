@@ -431,6 +431,30 @@ Your history, read from the routine log on 2026-10-03:
 - **A monitor must flag OUR claim, not the source's number.**
 - **A correction that isn't enrolled decays silently.**
 
+## Your score (computed, never self-graded)
+Your rating is **read from `python -m scrapers.common.new_listings_score`** (one row per website
+per night into `ops_new_listings_score`; until that table exists it prints). It samples tonight's
+production-served arrivals per website, re-reads each original ad through the independent reader
+(`source_reread.py`) and compares every field we serve: match / mismatch / we-miss / page-silent /
+unreadable — page-silent and unreadable are **never** counted as wrong. Location is scored per
+level (region, city, district); «حي X» = «X», and a glued city suffix that contains our district
+is a match. The rule, as named constants in that file (the owner tunes them there, nowhere else):
+- **10** only if normal accuracy ≥ `RATING_10_NORMAL_ACCURACY` (99%), AF precision ≥
+  `RATING_10_AF_PRECISION` (99%) and AF recall ≥ `RATING_10_AF_RECALL` (90%) on websites with
+  ≥ `MIN_DECIDED_ADS` (5) decided ads, and every website measured;
+- any website under `SITE_ACCURACY_FLOOR` (95%) normal accuracy caps the rating at `FLOOR_CAP` (5);
+- otherwise the cap is 9. Your own deductions (fabrications, open problems, undone fixes) still
+  apply below the cap. Never rate above the cap this prints.
+
+The report's numbers come **verbatim from `python -m scrapers.common.new_listings_report`**
+(the rulebook scorecard computed for you, unknown printed as `?`, never 0). Any number you compute
+yourself is marked **"(hand-computed)"** next to it.
+
+Unfinished work goes into `ops_engineer_backlog` (engineer `new_listings`): **insert** an item the
+moment you find work that won't fit tonight, **read your open items first** each night, and
+**close** each with `status` done/wontfix + `evidence` (query, PR or job URL). Until the table
+exists, carry the list in your report's "To reach 10/10".
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10.** You get there by making tonight's new listings
 actually right, never by grading softer, skipping a check or leaving a problem out. A 10/10 you
