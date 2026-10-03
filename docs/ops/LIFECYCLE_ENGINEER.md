@@ -728,6 +728,11 @@ or rewrite another engineer's work, and never start a big change in another engi
   clock (1,016 such residential rows; rakez 638). Before trusting a site's "0 hidden", check its
   triggers: `select c.relname from pg_class c where c.relname ~ '_listings$' and not exists (select 1
   from pg_trigger g where g.tgrelid = c.oid and g.tgname = 'trg_set_deactivated_at')`.
+- `missing_count` is shared: the crawl's prune_unseen bumps it when an ad is missing from the feed.
+  Gathern's checker read it as its own page strikes, so 7 ads at 12:07 UTC on 2026-10-03 were hidden
+  on two page readings plus one feed miss (two such ads answered 200 a day later). A Gathern hide now
+  needs three applied 404/410 readings of its own since its last live one
+  (`liveness.demote_unearned_kills`). Count readings in `gathern_liveness_detail`, never the counter.
 - Before trusting "our servers read it wrong", open the same ads from a second network. On
   2026-10-02 the Gathern 404s that looked like a block were real.
 

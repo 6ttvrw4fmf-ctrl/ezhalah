@@ -1398,6 +1398,11 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     # 36977747732's would-hides (36, cap 428) re-read from a second network: 20 of 20 print their
     # own removal banner, 8 of 8 live controls live.
     "tuba",
+    # 2026-10-03: shadow runs (10-02, 10-03) with controls right. sadiqeltajer's would-hides are its
+    # «غير متاح» ads: 23 of the 24 its crawl stopped seeing were read gone from a second network on
+    # 10-02, and tonight's 32 dead include them. ksaaqar's one would-hide (KSA220097699161360) read
+    # 404 from a second network on 10-02; 1,382 of its 1,441 ads read live, 0 controls wrong.
+    "ksaaqar", "sadiqeltajer",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
