@@ -1020,6 +1020,25 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
   return p;
 }
 
+// The six cities every scope ranks at the top; only their NAMES are used, as a stand-in until the real pool loads.
+const PROVISIONAL_TOP_CITY_NAMES = ['الرياض', 'جدة', 'مكة المكرمة', 'المدينة المنورة', 'الدمام', 'الخبر'];
+function provisionalTopCities(k: number): CityOption[] {
+  let biggest: CityOption[] | undefined;
+  for (const v of CITY_FIELD_POOLS.values()) if (v.length > (biggest?.length ?? 0)) biggest = v;
+  // Another scope's pool, in that scope's order (so the rows do not re-order much when the exact pool arrives).
+  // A name two real cities share (الهفوف) is held back, exactly as in matchCitiesByText: the first row a user taps
+  // must never be the wrong city.
+  const rows = biggest
+    ? collapseClustersForTrending(biggest).filter((c) => c.listingCount > 0 && !AMBIGUOUS_CITY_NAMES.has(norm(c.cityAr)))
+    : PROVISIONAL_TOP_CITY_NAMES.flatMap((name) => {
+        const n = norm(name);
+        if (AMBIGUOUS_CITY_NAMES.has(n)) return [];
+        const c = CATALOG_CITIES.find((x) => norm(x.cityAr) === n);
+        return c ? [{ ...c, listingCount: 0, totalInCohort: 0 }] : [];
+      });
+  return rows.slice(0, k).map((o) => ({ ...o, listingCount: 0, scopeKnown: false }));
+}
+
 // Shown immediately when the City field is focused with no text typed yet.
 // `types` (and every param before it) is REQUIRED, not defaulted — a compile-time barrier
 // (owner P1, 2026-08-18) against the exact bug class found live: 7 call sites in index.tsx silently
@@ -1029,7 +1048,11 @@ export async function ensureCityFieldIndex(deal: Deal | null, periodTok: string 
 // call site must now pass its cohortTypesAr(query) explicitly; TypeScript refuses to compile a caller
 // that forgets it, so this class of drift can never silently reappear. [[cohortTypesAr]]
 export function topCitiesByListings(deal: Deal | null, periodTok: string | null, category: Category | null, k: number, types: string[] | null, af: AfParams | null): CityOption[] {
-  const pool = CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types, af)) ?? [];
+  const pool = CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types, af));
+  // THE SCOPED POOL IS NOT LOADED (first tap on a cold page, or a filter just changed; the counting RPC took 6-14 s
+  // while the hourly jobs ran): show city names NOW and let the numbers pop in when the pool arrives, like the typed
+  // list (owner 2026-10-03). Counts are zero and scopeKnown:false so the UI prints no number and no "nothing here".
+  if (pool === undefined) return provisionalTopCities(k);
   // Trending: one row per cluster (via its representative), each already carrying the union count
   // it clicks to; autocomplete (matchCitiesByText) still offers every member.
   return collapseClustersForTrending(pool).filter((c) => c.listingCount > 0).slice(0, k);
@@ -1156,7 +1179,17 @@ export async function ensureDistrictOptions(cityId: number, deal: Deal | null, c
 // `types` (and every param before it) is REQUIRED — same compile-time barrier as topCitiesByListings
 // above, guarding the district pool's read-back cache key. [[cohortTypesAr]]
 export function topDistrictsForCityId(cityId: number, deal: Deal | null, category: Category | null, periodTok: string | null, k: number, types: string[] | null, scope: AfParams | null): DistrictOption[] {
-  return (_districtCache.get(districtCacheKey(cityId, deal, category, periodTok, types, scope)) ?? []).filter((d) => d.listingCount > 0).slice(0, k);
+  const exact = _districtCache.get(districtCacheKey(cityId, deal, category, periodTok, types, scope));
+  if (exact !== undefined) return exact.filter((d) => d.listingCount > 0).slice(0, k);
+  // Scoped pool not loaded: the district NAMES of this city do not depend on the scope, so show them from any pool
+  // already cached for the city, count-unknown, and let the numbers pop in on arrival (owner 2026-10-03). A city
+  // nobody has loaded yet still waits: there is no honest ranking to show before the first load.
+  for (const [key, v] of _districtCache) {
+    if (key.startsWith(`${cityId}:`) && v.length) {
+      return v.filter((d) => d.listingCount > 0).slice(0, k).map((d) => ({ ...d, listingCount: 0, scopeKnown: false }));
+    }
+  }
+  return [];
 }
 
 // Typing: search the COMPLETE canonical catalog for THIS city (incl. zero-listing districts) by Arabic

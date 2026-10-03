@@ -802,11 +802,17 @@ export default function Home() {
       : status !== 'ready' ? status   // THIS cohort has not loaded — rows on screen are another cohort's
       : rows > 0 ? null
       : whenEmpty;
-  const cityZeroRow = zeroRowFor(cityLatin, cityStatus, citySuggestions.length, query.location ? 'empty' : null);
+  // ROWS FLAGGED scopeKnown:false ARE NAMES WITHOUT COUNTS (borrowed from another scope or the built-in list), shown so
+  // the user never waits on a slow counting RPC (owner 2026-10-03); they carry no number, so they are not another
+  // cohort's claim and may stay on screen while this cohort loads. Real rows from another cohort still may not.
+  const provisionalOnly = (rows: { scopeKnown?: boolean }[]) => rows.length > 0 && rows.every((r) => r.scopeKnown === false);
+  const cityZeroRow = cityStatus === 'loading' && provisionalOnly(citySuggestions) ? null
+    : zeroRowFor(cityLatin, cityStatus, citySuggestions.length, query.location ? 'empty' : null);
   const districtLatin = !!districtText && isLatinOnlyInput(districtText);
   const districtStatus = citySelected ? districtPoolStatus(citySelected.cityId, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope) : 'loading';
   // covers both "no districts with listings" (empty focus) and a typed no-match
   const districtZeroRow = !citySelected ? null
+    : districtStatus === 'loading' && provisionalOnly(districtSuggestions) ? null
     : zeroRowFor(districtLatin, districtStatus, districtSuggestions.length, 'empty');
   // Tap-to-retry for the error row: re-run the ensure (the failed promise was evicted, so this is a
   // real refetch), and keep the box open across the tap — the row press blurs the input, so cancel
@@ -1512,7 +1518,7 @@ export default function Home() {
                             // display-name collision (e.g. الهفوف ×2), prepended so it stays visible.
                             sublabel: [
                               hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
-                              cohortCountLabel(opt.listingCount),
+                              opt.scopeKnown === false ? undefined : cohortCountLabel(opt.listingCount),
                             ].filter(Boolean).join(' · ') || undefined,
                             icon: LOC_IMG.city, // restored designed art (see TrendingList.tsx note)
                           }))}

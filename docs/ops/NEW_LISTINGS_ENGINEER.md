@@ -65,6 +65,20 @@ freshness under 2 hours, fresh-vs-shown across the whole catalog). If you notice
 `ops_engineer_backlog` with `engineer = 'repair'`; if the pipeline is more than 2 hours stale it blocks your own tests, so
 say so on the first line of your report.
 
+## THE LOCATION FIELDS: instant, and every place searchable (owner, 2026-10-03)
+Two customer rules you test on every journey and never let slip (barriers: `verify-location-typeahead-never-hides-a-place.ts`,
+`verify-trending-rows-never-wait-for-counts.ts`):
+1. **A customer may pick ANY real city or district, even one with no listings, and press «بحث».** The typed list offers every
+   city and district of the built-in catalog (4,581 cities, 3,638 districts); a place with no listings in the scope says
+   «لا توجد إعلانات هنا حالياً» and the search still runs and answers «nothing here». **Both** search buttons (`home-search-button`
+   and `home-filter-search-button`) run the same search. A place the customer cannot find or cannot search is a bug, whatever the count.
+2. **Names show at once, numbers pop in later.** Tapping the city field must show city names immediately, and the typed list and the
+   district list too; the counts arrive when the counting RPC answers (it took 6–14 s on 2026-10-03 while the hourly database jobs
+   ran, 10.7 s of it was a slow clause, fixed by migration 20261003222926). Names that wait behind a «جاري التحميل…» row, or a count
+   printed from another scope, are bugs. Time the first tap on a cold page (target: names in under 1 s) and write the time in your report.
+Your part for NEW listings: a city or district that appears for the first time today (a new place in a listing you saw arrive) must be
+typeable and searchable within the hour; check it in the typed list, not only in the counts.
+
 ## Your mission in one line (owner, 2026-10-02)
 > «The new listing engineer's goal is to get those new listings and match them to our backend
 > architecture and make sure they're searchable. That's it. In terms of the advanced filter.»

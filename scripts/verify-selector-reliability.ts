@@ -85,7 +85,8 @@ check('district dropdown gate includes the zero-state branch', /<DropdownReveal 
 // (verify-suggestion-writes-carry-their-cohort.ts §D EXECUTES the predicate and mutation-proves it.)
 check('zero-row derives loading/error from the pool status, empty only when settled',
   /:\s*status !== 'ready' \? status/.test(indexSrc)
-  && /const cityZeroRow = zeroRowFor\(cityLatin, cityStatus, citySuggestions\.length,/.test(indexSrc)
+  // 2026-10-03: count-free names (scopeKnown:false) may stay while the cohort loads, so the call is preceded by that one exception
+  && /const cityZeroRow = (?:cityStatus === 'loading' && provisionalOnly\(citySuggestions\) \? null\s*:\s*)?zeroRowFor\(cityLatin, cityStatus, citySuggestions\.length,/.test(indexSrc)
   && /zeroRowFor\(districtLatin, districtStatus, districtSuggestions\.length,/.test(indexSrc));
 check('English typing keeps its OWN message path (zero-row excluded on latin input)',
   /\n    latin \? null\n/.test(indexSrc)
