@@ -29,11 +29,23 @@ _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 # strict pattern so the surrounding brackets go too.
 _PHONE_LOOSE = re.compile(r"[\(\[\{«]{1,3}\s*0?5[\d\s\.\-]{7,}\s*[\)\]\}»]{1,3}")
 
+# Not inside the fraction of a map coordinate (2026-10-02). The three number branches below have
+# no digit guard, so they cut coordinates: «maps?q=21.5401234569…» became «21.[redacted]91211» and
+# aqargate's «adMapLatitude: 24.72201[redacted]6». Measured on every *_listings text column and
+# capture: 549 cuts sat in the fraction of a TWO-digit number (16-50, Saudi lat/long), up to 6
+# fraction digits in; every phone sat after a 1- or 3-digit one («0.5…», «966.5…», the typo
+# «996.5…»), and those must stay redacted. So: no match may start within the first 8 fraction
+# digits of a number whose whole part is exactly two digits. The SAME text guards these branches
+# in the DB floor (_redact_pii_sql) and both PII monitors; a test pins it.
+_NOT_IN_A_COORDINATE = "".join(
+    r"(?<!(?<![0-9٠-٩])[0-9٠-٩]{2}[.,٫]" + (r"[0-9٠-٩]{%d}" % k if k else "") + ")" for k in range(9)
+)
+
 # Saudi phone numbers + Arabic "واتساب <number>" (union of the strongest per-scraper patterns).
 _PHONE_RE = re.compile(
-    r"(?:\+?966|00966)\s*5\d[\d\s\-]{6,}"   # +966 5X…, 00966 5X…
-    r"|0?5\d{8}"                              # 05XXXXXXXX / 5XXXXXXXX
-    r"|\b920\d{5,8}\b"                        # 920… unified business lines. 5-8 trailing digits:
+    _NOT_IN_A_COORDINATE + r"(?:\+?966|00966)\s*5\d[\d\s\-]{6,}"   # +966 5X…, 00966 5X…
+    r"|" + _NOT_IN_A_COORDINATE + r"0?5\d{8}"                        # 05XXXXXXXX / 5XXXXXXXX
+    r"|" + _NOT_IN_A_COORDINATE + r"\b920\d{5,8}\b"  # 920… unified business lines. 5-8 trailing digits:
                                               # live aqar ad 109347 carried «للتواصل : 92015189»
                                               # (920 + FIVE digits), which the old 9200\d{4,8} /
                                               # 920\d{6} pair matched neither of. (2026-08-09)
@@ -53,6 +65,10 @@ _PHONE_RE = re.compile(
 # one separator, then ONE unbroken run of 8-11 digits. Neither 966 nor 00 may follow «<digit>.»:
 # «?q=28.36,45.9661…» and «44.0012345678» are map coordinates, and the spaced «002673 0802 0801» is
 # a plan number (all measured on live rows) — none is a phone.
+# A mobile whose digit groups a right-to-left renderer reversed: «0502 33 44 00» stored as
+# «00 44 33 0502» (aqar + aqarcity «للتواصل : 00 44 33 0502», 6 live rows, 2026-10-02). Only that
+# exact shape — «00», two, two, then «05» + two, every group split by one separator — so a plan
+# number («002673 0802 0801») or a date can never match.
 _D = r"[0-9٠-٩]"
 _SEP = r"[\s.\-]?"
 _NOT_A_DECIMAL = r"(?<![0-9٠-٩][.,٫])"
@@ -63,6 +79,7 @@ _PHONE_SHAPES_RE = re.compile(
     + r"|\+[\s.\-]*[1-9١-٩](?:" + _SEP + _D + r"){7,14}"
     + r"|" + _NOT_A_DECIMAL + r"(?:00|٠٠)[1-9١-٩]" + _D + r"{0,2}" + _SEP + _D + r"{8,11}"
     + r"|[0٠]" + _SEP + r"[5٥](?:" + _SEP + _D + r"){8}"
+    + r"|(?:00|٠٠)[\s.\-]" + _D + r"{2}[\s.\-]" + _D + r"{2}[\s.\-][0٠][5٥]" + _D + r"{2}"
     + r"|٥[٠-٩]{8}"
     + r"|[0٠]" + _SEP + r"[1١][1-7١-٧](?:" + _SEP + _D + r"){7}"
     + r")(?![0-9٠-٩])"
