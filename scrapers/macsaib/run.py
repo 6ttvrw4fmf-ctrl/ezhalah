@@ -263,24 +263,28 @@ def main() -> int:
     dry = a.dry_run
 
     s = cc.Session()
-    listings, declared = walk(s, "")
-    # id → category name, learned by walking each category (the list record carries no type).
-    cat_of: dict[str, str] = {}
-    for c in get_json(s, f"{API}/properties/categories/direct").get("data") or []:
-        members, _ = walk(s, f"category_ids={c.get('id')}")
-        for m in members:
-            cat_of[str(m.get("id"))] = c.get("name")
-    if a.limit:
-        listings = listings[: a.limit]
-    print(f"{SOURCE}: {len(listings)} listing(s) (API declares total={declared}), "
-          f"{len(cat_of)} categorised", flush=True)
-
+    # The run is opened BEFORE the catalogue walk: a walk that fails (2026-10-03: a 40 s connect
+    # timeout on page 1) must close a failed run row, not crash with no row at all, which left the
+    # ledger showing yesterday's success.
     run_id = None if dry else db.begin_run(SLUG)
+    listings: list[dict] = []
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
     unreadable = 0
     try:
+        listings, declared = walk(s, "")
+        # id → category name, learned by walking each category (the list record carries no type).
+        cat_of: dict[str, str] = {}
+        for c in get_json(s, f"{API}/properties/categories/direct").get("data") or []:
+            members, _ = walk(s, f"category_ids={c.get('id')}")
+            for m in members:
+                cat_of[str(m.get("id"))] = c.get("name")
+        if a.limit:
+            listings = listings[: a.limit]
+        print(f"{SOURCE}: {len(listings)} listing(s) (API declares total={declared}), "
+              f"{len(cat_of)} categorised", flush=True)
+
         for p in listings:
             try:
                 d = get_json(s, f"{API}/properties/{p.get('slug')}").get("property") or {}
