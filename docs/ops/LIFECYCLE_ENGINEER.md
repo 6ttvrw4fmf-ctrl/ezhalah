@@ -29,10 +29,14 @@ Rating 9 first, then a real 10. A number reached by guessing, or by loosening a 
   goldendeal, eastabha, abeea, shatri, maqam, mizlaj, alsidra, alqasem, nowaisiry, alrifai, yameen, almuteb,
   fkralemar, aalbarrak, eydah), 4 that are DOWN at the source (alhoshan, sadin, aqaralsaudia, macsaib), and
   4 the owner handed to you (holoul, sqcc, masar, therc).
-- The real gap in LISTINGS is Aqar and Wasalt, not the small sites: aqar 160,622 active, 74.4% checked within
-  48 h, **25.1% never**, although 119,306 are checked every day (the SAME three quarters each day, so about
-  40,000 never get a turn); dealapp 15,008, 13% never; wasalt 66,557, 97% never (its own list read at
-  21:00 UTC on 2026-10-03 is the first under the new rule).
+- The real gap in LISTINGS is Wasalt, not the small sites (CORRECTED 2026-10-03 after measuring when the
+  never-checked rows were added): **wasalt** 66,557 active, **64,756 never checked**, 56,266 of them older than
+  three days, so structural: its own list read at 21:00 UTC on 2026-10-03 is the first under the new rule, so
+  verify it FIRST. **aqar** 160,622 active, about 40,250 never checked, but 40,184 of those were ADDED AFTER
+  last night's sweep ended (a big crawl today); all 16 shards finished clean in about 40 minutes each, so the
+  01:05 UTC sweep should cover them: verify it, do not build around it. **dealapp** 15,008, 1,957 never
+  checked, 1,795 older than three days: structural (its view quota is about 9 pages a minute, 10,540 checked a
+  day).
 
 **The windows (owner).** Gathern **24 h**. Aqar Monthly (`aqarmonthly`) **24 h**: both daily, because they
 change fastest. Every other website **48 h**. `CANDIDATE_PLUS_DIRECT` sites stay at 168 h until you promote
@@ -45,13 +49,16 @@ loosened; grace stays 3, the 3-strike rule and every cap stay as they are. You a
    (about 32): open a sample of each and confirm they are really gone; abralosol and arkaan
    `last_verified_alive_at` moving, and rows whose own page was unread NOT stamped; the in-time percentage and
    the never-checked count.
-2. **0:20–1:15 the biggest gain: the ORDER of checking.** Make the aqar liveness sweep and the dealapp
-   recover pass take **never-checked rows first, then the oldest `last_verified_alive_at`**, inside the
-   existing per-run caps. Kill rules untouched (own-page reads, 3 strikes). Aqar already reads 119k a day, so
-   all 160k are covered in under two days at no extra cost. Prove it with `pct_48h` / `pct_never` for aqar and
-   dealapp before and after, two nights running; target aqar never-checked under 5%. In the same slot, apply the
-   windows above, and fix `cleanup:aqarmonthly`, whose last run failed: aqarmonthly and gathern must read 100%
-   within 24 h in your report.
+2. **0:20–1:15 the biggest gains, in this order.** (a) **Wasalt:** if the 21:00 UTC list read did not stamp
+   it (in-time share still about 2%), that is your first investigation, it is a fifth of the fleet. (b) **Aqar:**
+   never-checked should have fallen from about 40,250 to under 1,000 after the 01:05 UTC sweep; if it did not,
+   find why before anything else. As a safeguard either way, make the aqar sweep's worklist **never-checked
+   first, then oldest `last_verified_alive_at`** (small, test first): a larger table can outgrow a fixed time
+   budget and the newest rows would starve. (c) **Dealapp:** the same ordering inside its view quota, to reach
+   its 1,795 old never-checked rows. Kill rules untouched (own-page reads, 3 strikes). Prove each with
+   `pct_48h` / `pct_never` before and after. In the same slot, apply the windows above, and fix
+   `cleanup:aqarmonthly`, whose last run failed: aqarmonthly and gathern must read 100% within 24 h in your
+   report.
 3. **1:15–1:30 hajer.** 108 of its 121 pages carry no status badge, so the dead-ads measurement is void and
    caps you at 9. A page that loads with its ad body is a «live» answer.
 4. **1:30–2:35 the blind websites, by listing count.** The 17 holes (a one-argument `_make_verify_gone(control)`
