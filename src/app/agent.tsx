@@ -2745,12 +2745,31 @@ export default function Agent() {
     }
   };
 
-  const onAgeConfirm = (keys: string[]) => { void commitGuidedStep(keys); };
+  const onAgeConfirm = (keys: string[]) => commitGuidedStep(keys);
+
+  // THE NEXT STEP IS READY BEFORE THE TAP (owner 2026-10-03: «when a user clicks المتابعة, it feels a
+  // bit stuck»). Committing an answer runs presentGuided → rankQuestions over the NEW scope, which is
+  // exactly `question.apply(current, keys)` with this question added to the asked set (deriveGuided).
+  // So the moment the footer has its count for a tick — and once at open, for the skip path (keys []) —
+  // the same rankQuestions call is made in the background; every count it learns is remembered
+  // (fetchApartmentGuidedCounts / fetchPropertyAgeOptionCounts), so the tap finds them ready. Serial by
+  // construction (it follows the footer's own call, one per tick) and de-duplicated by key, so it can
+  // never recreate the #3420 burst. A scope tier next is skipped: its counts are already remembered.
+  const nextStepPrefetchRef = useRef('');
+  const prefetchNextStep = (question: AdvancedQuestion, q: SearchQuery, keys: string[]) => {
+    const next = keys.length ? question.apply(q, keys) : q;
+    const asked = new Set([...ageFlowAskedRef.current, question.id]);
+    if (nextScopeTier(next, asked)) return;
+    const key = JSON.stringify([next, [...asked].sort()]);
+    if (nextStepPrefetchRef.current === key) return;
+    nextStepPrefetchRef.current = key;
+    rankQuestions(next, asked).catch(() => {});
+  };
 
   // Skip THIS question → next; skip-all → finish now; X (close) → abandon the flow.
   // Skip = NO PREFERENCE (owner): nothing is filtered, no false is written, the question is just
   // marked answered-as-open for this session — and walking Back to it restores it as skipped.
-  const onAgeSkip = () => { void commitGuidedStep([]); };
+  const onAgeSkip = () => commitGuidedStep([]);
 
   // «رجوع» — one question back (owner 2026-08-22). From the FIRST question it leaves the interview
   // entirely: the record is dropped and ageFlow goes null, which is exactly what the pre-AF CTA row
@@ -4490,9 +4509,14 @@ export default function Agent() {
               unknownCount={ageFlow.unknownCount}
               progressCur={ageFlow.progressCur}
               progressTotal={ageFlow.progressTotal}
-              liveCount={(keys) => (ageFlowQueryRef.current
-                ? liveResultCount(ageFlow.question.apply(ageFlowQueryRef.current, keys))
-                : Promise.resolve(null))}
+              liveCount={(keys) => {
+                const q = ageFlowQueryRef.current;
+                if (!q) return Promise.resolve(null);
+                const question = ageFlow.question;
+                const p = liveResultCount(question.apply(q, keys));
+                p.then(() => prefetchNextStep(question, q, keys), () => {});
+                return p;
+              }}
               initialKeys={ageFlow.initialKeys}
               onConfirm={onAgeConfirm}
               onSkip={onAgeSkip}
