@@ -30,14 +30,16 @@
 //     A 9th bucket would silently inflate "did not mention", so the 8-value domain is pinned below.
 //   • PROPERTY AGE has a real `cnt_unknown` column and needs no arithmetic.
 //
-// THE ABSENCES, AND WHY EACH IS RIGHT
-//   • AMENITIES — no single unknown exists; each chip is its own column, so one number would be a
-//     lie about the others.
+// THE OTHER SIX READ A REAL DB COLUMN (owner 2026-10-03: «😔 on every advanced filter question»)
+//   None of them can be derived client-side without lying, which is why they showed nothing until
+//   migration 20261003184909 made apartment_guided_counts_ar count `IS NULL` in the committed scope:
 //   • BATHROOMS / STREET_WIDTH / RATING — threshold ladders: total − (≥1) conflates NULL with rows
-//     genuinely below the threshold.
-//   • UNIT_SUBTYPE — total − Σ(3) is right only while the value domain has exactly 3 members. True
-//     today, but a data fact rather than an invariant, so it must not be published as truth.
-//   • RNPL — false and null are inseparable from cnt_rnpl alone.
+//     genuinely below the threshold (393 real zero-bathroom rows) → cnt_bath/stw/rating_unknown.
+//   • UNIT_SUBTYPE — total − Σ(3) is right only while the domain has 3 members → cnt_sub_unknown.
+//   • RNPL — false and null are inseparable from cnt_rnpl alone → cnt_rnpl_unknown.
+//   • AMENITIES — one column per chip, so no subtraction is honest → cnt_amen_unknown = every amenity
+//     column NULL (the listing stated no amenity at all).
+//   Section 5 pins that each reads ITS column and never falls back to a subtraction.
 //
 //   node --experimental-strip-types scripts/verify-af-unknown-count-truthful.ts   (in `npm test`)
 
@@ -137,24 +139,40 @@ function callArgCounts(body: string, fn: string): number[] {
     from = i + 1;
   }
 }
-const MUST_NOT_CLAIM: Array<[string, string, string]> = [
-  ['AMENITIES_QUESTION', 'const BATHROOMS_QUESTION', 'each chip is its own column — no single unknown exists'],
-  ['BATHROOMS_QUESTION', 'const FURNISHED_QUESTION', 'threshold ladder — NULL and below-threshold are not separable'],
-  ['STREET_WIDTH_QUESTION', 'const DIRECTION_DEFS', 'threshold ladder'],
-  ['RATING_QUESTION', 'const UNIT_SUBTYPE_QUESTION', 'threshold ladder'],
-  ['UNIT_SUBTYPE_QUESTION', 'export const ADVANCED_QUESTIONS', 'value domain is a data fact, not an invariant'],
-  ['RNPL_QUESTION', 'const AMENITIES_QUESTION', 'false and null inseparable from cnt_rnpl'],
+// Each of these must pass a THIRD argument that reads its own DB unknown column — a bare column read,
+// never arithmetic (a subtraction is exactly the lie the column exists to replace).
+const MUST_READ_COLUMN: Array<[string, string, string]> = [
+  ['AMENITIES_QUESTION', 'const BATHROOMS_QUESTION', 'cnt_amen_unknown'],
+  ['BATHROOMS_QUESTION', 'const FURNISHED_QUESTION', 'cnt_bath_unknown'],
+  ['STREET_WIDTH_QUESTION', 'const DIRECTION_DEFS', 'cnt_stw_unknown'],
+  ['RATING_QUESTION', 'const UNIT_SUBTYPE_QUESTION', 'cnt_rating_unknown'],
+  ['UNIT_SUBTYPE_QUESTION', 'export const ADVANCED_QUESTIONS', 'cnt_sub_unknown'],
+  ['RNPL_QUESTION', 'const AMENITIES_QUESTION', 'cnt_rnpl_unknown'],
 ];
-for (const [q, end, why] of MUST_NOT_CLAIM) {
-  const body = questionBody(`const ${q}`, end);
-  const calls = callArgCounts(body, 'guidedOptions');
-  // Every guidedOptions call in this question must pass exactly 2 args (counts, defs). A third is
-  // an unknown-count claim. Requiring calls.length > 0 is what stops the check going vacuous if the
-  // question is ever restructured out from under it.
-  check(`${q} reports NO unknown count — ${why}`,
-    body.length > 0 && calls.length > 0 && calls.every((n) => n === 2),
-    calls.length ? `guidedOptions arg counts: ${calls.join(', ')}` : 'NO guidedOptions call found — check went vacuous');
-}
+const columnProblems = (src: string): string[] => {
+  const out: string[] = [];
+  const bodyIn = (marker: string, end: string) => {
+    const i = src.indexOf(marker);
+    return i < 0 ? '' : src.slice(i, src.indexOf(end, i) > 0 ? src.indexOf(end, i) : i + 1400);
+  };
+  for (const [q, end, col] of MUST_READ_COLUMN) {
+    const body = bodyIn(`const ${q}`, end);
+    const calls = callArgCounts(body, 'guidedOptions');
+    if (!body || !calls.length) { out.push(`${q}: NO guidedOptions call found — check went vacuous`); continue; }
+    if (!calls.every((n) => n === 3)) out.push(`${q}: a guidedOptions call has no unknown resolver (arg counts ${calls.join(', ')}) — its 😔 line disappears`);
+    const reads = body.match(/\(c\) => c\.cnt_\w+_unknown\b[^,)]*/g) ?? [];
+    if (reads.length !== calls.length || !reads.every((r) => r.trim() === `(c) => c.${col}`))
+      out.push(`${q}: the unknown resolver is not the bare ${col} read (${reads.join(' | ') || 'none'})`);
+  }
+  return out;
+};
+const colReal = columnProblems(af);
+check('the six DB-backed questions each read their own IS NULL column, never a subtraction',
+  colReal.length === 0, colReal.join('; '));
+check('the client type carries every DB unknown column the questions read',
+  MUST_READ_COLUMN.every(([, , col]) => new RegExp(`\\b${col}: number`).test(read('src/data/remote.ts'))));
+check('the migration that creates those columns is in the repo (mirror rule)',
+  MUST_READ_COLUMN.every(([, , col]) => read('supabase/migrations/20261003184909_af_guided_counts_unknown_count_for_every_question.sql').includes(`as ${col}`)));
 // And the two that DO claim one must genuinely pass the third argument, or the derivations above are
 // dead prose describing code that no longer runs.
 for (const [q, end] of [['FURNISHED_QUESTION', 'const STREET_WIDTH_QUESTION'], ['DIRECTION_QUESTION', 'const RATING_QUESTION']] as const) {
@@ -294,6 +312,21 @@ await mustCatch('the clamp removed, so a broken partition renders a negative "di
 await mustCatch('the MIN_TOTAL_TO_SHOW floor inverted, so a tiny scope publishes a number anyway',
   'counts.cnt_total_base < MIN_TOTAL_TO_SHOW', 'false',
   (g) => g({ ...PROD, cnt_total_base: 3 }, DEFS, FURNISHED_UNKNOWN).unknownCount !== null);
+
+const colMut = (what: string, from: string, to: string) => {
+  const mutated = af.replace(from, to);
+  if (mutated === af) { failures++; console.log(`  ❌ MUTATION NO-OP: ${what}`); return; }
+  if (columnProblems(mutated).length > 0) mutations.push(what);
+  else { failures++; console.log(`  ❌ MUTATION SURVIVED: ${what} would NOT be caught`); }
+};
+colMut('bathrooms losing its resolver (the 😔 line silently vanishes)',
+  "rungs.filter((d) => parseInt(d.key, 10) > floor), (c) => c.cnt_bath_unknown)", "rungs.filter((d) => parseInt(d.key, 10) > floor))");
+colMut('bathrooms going back to the threshold subtraction (folds real zeros into "did not mention")',
+  '(c) => c.cnt_bath_unknown', '(c) => c.cnt_total_base - c.cnt_bath1');
+colMut('one amenities branch dropping its resolver',
+  'chosen, (c) => c.cnt_amen_unknown)', 'chosen)');
+colMut('RNPL reading another question\'s column',
+  '(c) => c.cnt_rnpl_unknown', '(c) => c.cnt_amen_unknown');
 
 for (const m of mutations) console.log(`  ✓ mutation caught: ${m}`);
 

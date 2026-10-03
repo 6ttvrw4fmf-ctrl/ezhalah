@@ -20,7 +20,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { buildAfSummaryItems, withAdvancedBlock } from '../src/lib/afSummary.ts';
+import { buildAfSummaryItems, withAdvancedLines, AF_LINE_LABEL, AF_LINE_FALLBACK } from '../src/lib/afSummary.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel: string) => readFileSync(join(root, rel), 'utf8');
@@ -33,26 +33,46 @@ const check = (label: string, ok: boolean, detail = '') => {
 };
 
 // ── 1. THE SUMMARY IS WHOLE (executed) ──────────────────────────────────────────────────────────
-const BASE = 'ملخص البحث\n• نوع العقار: الشقق والسكن المشترك\n• نوع العملية: للإيجار (سنوي)\n• المدينة: الرياض\n• الإقليم: الرياض';
-const HEAD = 'من الفلتر المتقدم';
+// Owner 2026-10-03, second pass: no «من الفلتر المتقدم» heading, no emoji in the summary — each answer
+// continues the SAME bullet list as a labelled line. The labels are translated with the REAL Arabic
+// dictionary (parsed from src/i18n.tsx), so a missing translation shows up here as an English label.
+const I18N = read('src/i18n.tsx');
+const AR = (key: string) => {
+  const m = I18N.match(new RegExp(`\\n\\s*'${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}':\\s*'([^']*)'`));
+  return m ? m[1] : key;
+};
+const BASE = 'ملخص البحث\n• نوع العقار: الشقق والسكن المشترك\n• نوع العملية: للإيجار (شهري)\n• المدينة: الرياض\n• الإقليم: الرياض';
 const round1 = [
   { id: 'property_type', keys: ['Apartment'], labels: ['شقة'] },
-  { id: 'furnished', keys: ['yes'], labels: ['مفروش'] },
-  { id: 'bathrooms', keys: ['2'], labels: ['+٢'] },
-  { id: 'property_age', keys: ['new'], labels: ['جديد'] },
+  { id: 'bathrooms', keys: ['1'], labels: ['+١'] },
+  { id: 'amenities', keys: ['kitchen', 'elevator'], labels: ['المطبخ', 'مصعد'] },
 ];
-const s1 = withAdvancedBlock(BASE, round1, HEAD);
-check('the original summary lines survive untouched, at the top', s1.startsWith(`${BASE}\n`));
-check('every committed answer is listed under the advanced heading, one bullet each, in order',
-  s1.endsWith(`${HEAD}:\n• شقة 🏡\n• مفروش 🛋️\n• +٢ حمامات 🚿\n• عمر جديد ✨`), s1);
-check('a type answer does not overwrite the original «نوع العقار» line (the old summary said «شقة» there)',
-  s1.includes('• نوع العقار: الشقق والسكن المشترك') && !s1.includes('• نوع العقار: شقة'));
-const s2 = withAdvancedBlock(BASE, [...round1, { id: 'direction', keys: ['n'], labels: ['شمال'] }], HEAD);
-check('a second round ADDS to the list instead of replacing it',
-  s2.includes('• شقة 🏡') && s2.includes('• شمال 🧭') && s2.indexOf('• شقة 🏡') < s2.indexOf('• شمال 🧭'));
-check('no committed answer ⇒ the base summary exactly, with no empty heading', withAdvancedBlock(BASE, [], HEAD) === BASE);
+const OWNER_EXAMPLE = `${BASE}\n• نوع العقار المحدد: شقة\n• دورات المياه: +١\n• المميزات: المطبخ، مصعد`;
+type Composer = (base: string, f: typeof round1, tr: (k: string) => string) => string;
+const summaryProblems = (compose: Composer): string[] => {
+  const out: string[] = [];
+  const s1 = compose(BASE, round1, AR);
+  if (s1 !== OWNER_EXAMPLE) out.push(`the owner's own example does not come out exactly:\n${s1}`);
+  if (!s1.startsWith(`${BASE}\n`)) out.push('the original summary lines are not kept untouched at the top');
+  if (/من الفلتر المتقدم/.test(s1)) out.push('the «من الفلتر المتقدم» heading is back');
+  if (/\p{Extended_Pictographic}/u.test(s1.slice(BASE.length))) out.push('an emoji is back inside the summary lines');
+  if (!s1.includes('• نوع العقار: الشقق والسكن المشترك') || s1.includes('• نوع العقار: شقة')) out.push('a type answer overwrote the original «نوع العقار» line');
+  const s2 = compose(BASE, [...round1, { id: 'amenities', keys: ['parking', 'kitchen'], labels: ['مواقف', 'المطبخ'] }, { id: 'direction', keys: ['n', 'w'], labels: ['شمال', 'غرب'] }], AR);
+  if (!s2.endsWith('• المميزات: المطبخ، مصعد، مواقف\n• الواجهة: شمال أو غرب'))
+    out.push(`a second round does not merge into the same labelled line / direction does not read «أو»:\n${s2}`);
+  if (compose(BASE, [], AR) !== BASE) out.push('no committed answer does not give back the base summary exactly');
+  for (const [id, key] of Object.entries(AF_LINE_LABEL))
+    if (AR(key) === key) out.push(`the ${id} line label «${key}» has no Arabic translation`);
+  if (AR(AF_LINE_FALLBACK) === AF_LINE_FALLBACK) out.push('the fallback label has no Arabic translation');
+  return out;
+};
+const sumReal = summaryProblems(withAdvancedLines);
+check('the summary continues the same list — «نوع العقار المحدد: شقة», «دورات المياه: +١», «المميزات: المطبخ، مصعد» — no heading, no emoji',
+  sumReal.length === 0, sumReal.join('\n      '));
+check('the chips BELOW the summary keep their emoji — شقة 🏡 · +١ حمامات 🚿 · المطبخ 🍳، مصعد 🛗',
+  round1.map((f) => buildAfSummaryItems([f]).join('، ')).join(' · ') === 'شقة 🏡 · +١ حمامات 🚿 · المطبخ 🍳، مصعد 🛗');
 check('the same answer twice is listed once (dedupe at the finished item)',
-  buildAfSummaryItems([...round1, round1[1]]).length === round1.length);
+  buildAfSummaryItems([...round1, round1[1]]).length === buildAfSummaryItems(round1).length);
 
 // ── 2. THE PAGE KEEPS ITS HEIGHT, AND THE READER STAYS (source shape, mutation-proven) ──────────
 const AGENT = read('src/app/agent.tsx');
@@ -82,6 +102,11 @@ const stayProblems = (agentSrc: string, cardSrc: string): string[] => {
     out.push('the «بناءً على» sentence is back — the summary already says it');
   if (/onRemove|removeGuidedFacet|name="close"/.test(code.slice(code.indexOf('guidedPills.facets.map'), code.indexOf('guidedPills.facets.map') + 600)))
     out.push('a transcript chip has a ✕ or a remove handler');
+  // «add the emojis here» (owner 2026-10-03): a chip reads exactly like its summary line — شقة 🏡, مفروش 🛋️.
+  if (!/<Text style=\{s\.guidedPillTx\}>\{buildAfSummaryItems\(\[f\]\)\.join\('، '\)\}<\/Text>/.test(code))
+    out.push('a transcript chip shows the bare label, without the emoji its summary line carries');
+  if (!/<Text style=\{s\.pillTx\}>\{buildAfSummaryItems\(\[f\]\)\.join\('، '\)\}<\/Text>/.test(card))
+    out.push('a question-card chip shows the bare label, without the emoji its summary line carries');
   if (!/\{'😔 '\}\{t\('\{n\} listings did not mention this'/.test(card))
     out.push('the «did not mention this» line does not lead with 😔');
   return out;
@@ -115,18 +140,24 @@ mustCatch('the turn summary reverting to the refined query alone (original lines
   stayProblems(swap(AGENT, 'guidedSearchSummary(opts.guided.baseQ, opts.guided.facets)', 'buildScrapeIntro(result.query ?? refined)'), CARD).length > 0);
 mustCatch('a ✕ coming back on the chips',
   stayProblems(swap(AGENT, '<View key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill}>', '<View key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill} onRemove={() => 1}>'), CARD).length > 0);
+mustCatch('a transcript chip losing its emoji (bare label again)',
+  stayProblems(swap(AGENT, "<Text style={s.guidedPillTx}>{buildAfSummaryItems([f]).join('، ')}</Text>", "<Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>"), CARD).length > 0);
+mustCatch('a question-card chip losing its emoji (bare label again)',
+  stayProblems(AGENT, swap(CARD, "<Text style={s.pillTx}>{buildAfSummaryItems([f]).join('، ')}</Text>", "<Text style={s.pillTx}>{f.labels.join('، ')}</Text>")).length > 0);
 mustCatch('the sad emoji dropped from the unknown line',
   stayProblems(AGENT, swap(CARD, "{'😔 '}{t('{n} listings", "{t('{n} listings")).length > 0);
-// …and the executed half must also notice its own subject disappearing.
+// …and the executed half must also notice its own subject disappearing: each broken composer below is
+// the real one with one defect, and summaryProblems() must reject it.
 {
-  // A composer that REPLACES the original summary with the answers (the old behaviour: the refined query
-  // alone), and one that prints the heading with nothing under it — the executed pins must reject both.
-  const overwriting = (_base: string, f: typeof round1, h: string) => `${h}:\n${buildAfSummaryItems(f).map((i) => `• ${i}`).join('\n')}`;
-  const emptyHeading = (b: string, _f: typeof round1, h: string) => `${b}\n${h}:`;
-  mustCatch('an advanced block that overwrites the original summary instead of following it',
-    !overwriting(BASE, round1, HEAD).startsWith(`${BASE}\n`));
-  mustCatch('an advanced heading printed with no answers under it',
-    emptyHeading(BASE, [], HEAD) !== BASE);
+  const real: Composer = withAdvancedLines;
+  mustCatch('the «من الفلتر المتقدم» heading coming back',
+    summaryProblems((b, f, tr) => { const r = real(b, f, tr); return r === b ? r : r.replace(`${b}\n`, `${b}\nمن الفلتر المتقدم:\n`); }).length > 0);
+  mustCatch('the emoji coming back into the summary lines',
+    summaryProblems((b, f, tr) => (f.length ? `${b}\n${buildAfSummaryItems(f).map((i) => `• ${i}`).join('\n')}` : b)).length > 0);
+  mustCatch('the answers overwriting the original summary instead of following it',
+    summaryProblems((b, f, tr) => real('ملخص البحث', f, tr)).length > 0);
+  mustCatch('a second round printing a second «المميزات» line instead of merging',
+    summaryProblems((b, f, tr) => (f.length ? `${b}\n${f.map((x) => real('', [x], tr).trim()).join('\n')}` : b)).length > 0);
 }
 
 if (mutFail) failed += mutFail;

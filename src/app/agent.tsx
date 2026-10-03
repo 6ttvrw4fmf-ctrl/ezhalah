@@ -61,6 +61,7 @@ import { addAdTab, inAppViewerHost } from '@/lib/inAppViewer';
 import { VIEWER_SPLIT_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import AdViewer from '@/components/AdViewer';
+import { buildAfSummaryItems } from '@/lib/afSummary';
 import { filterToChat, searchSummary, guidedSearchSummary, buildAfSummary, buildAfRoundLog, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, NO_RESULTS_GENERIC_FALLBACK_EN, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
@@ -3875,8 +3876,8 @@ export default function Agent() {
                     </Text>
                   ))()}
                   {/* COMMITTED ANSWERS AS CHIPS (owner 2026-10-03). The «بناءً على: …» sentence that used
-                      to sit here is now part of the summary above — «ملخص البحث» lists every answer
-                      under «من الفلتر المتقدم» — so it is not said twice. The chips stay, read-only. */}
+                      to sit here is now part of the summary above — «ملخص البحث» continues with one
+                      labelled line per answer — so it is not said twice. The chips stay, read-only. */}
                   {guidedPills && guidedPills.msgId === m.id && guidedPills.facets.length ? (
                     <View style={{ alignSelf: 'stretch', gap: 7, marginTop: 2 }}>
                       <View style={[s.guidedPillRow, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
@@ -3884,7 +3885,7 @@ export default function Agent() {
                             for every answer, scope or not: nothing on this row removes anything. */}
                         {guidedPills.facets.map((f, i) => (
                           <View key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill}>
-                            <Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>
+                            <Text style={s.guidedPillTx}>{buildAfSummaryItems([f]).join('، ')}</Text>
                           </View>
                         ))}
                       </View>

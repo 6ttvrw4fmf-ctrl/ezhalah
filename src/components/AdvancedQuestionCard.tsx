@@ -8,6 +8,7 @@ import { LoadingDots } from '@/components/CardReveal';
 import { useI18n } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { grouped } from '@/data/search';
+import { buildAfSummaryItems } from '@/lib/afSummary';
 import { colors, radius, space, font, cardShadow } from '@/theme/tokens';
 import type { AdvancedOption } from '@/data/advancedFilters';
 
@@ -46,7 +47,9 @@ const RELEASE = { duration: 300, dampingRatio: 1 };
 // READ-ONLY (owner 2026-10-03: «we should not show any X button on this»). Until then every pill but
 // a scope one carried a ✕ that removed the answer and re-ran the search; there is no ✕ and no handler
 // now, so the row can only SHOW what has been committed.
-export type CommittedFacet = { id: string; labels: string[] };
+// Each chip reads exactly like its transcript chip — same words, same emoji (buildAfSummaryItems;
+// owner 2026-10-03: «add the emojis here»), so the two can never name an answer differently.
+export type CommittedFacet = { id: string; keys: string[]; labels: string[] };
 
 function CommittedPills({ facets }: { facets: readonly CommittedFacet[] }) {
   const { isRTL } = useI18n();
@@ -58,7 +61,7 @@ function CommittedPills({ facets }: { facets: readonly CommittedFacet[] }) {
     >
       {facets.map((f, i) => (
         <View key={`${f.id}-${i}`} style={s.pill}>
-          <Text style={s.pillTx}>{f.labels.join('، ')}</Text>
+          <Text style={s.pillTx}>{buildAfSummaryItems([f]).join('، ')}</Text>
         </View>
       ))}
     </View>
@@ -449,9 +452,13 @@ export default function AdvancedQuestionCard({
               Rendered ONLY for a truthful count: `null` means the question has no honest single
               unknown number and prints nothing, and 0 prints nothing because there is no one to
               mention. Never a fabricated "0 did not mention" (owner rule 2026-08-28).
-              The 😔 leads the line (owner 2026-10-03): «no information» is a small loss, said gently. */}
+              The 😔 leads the line (owner 2026-10-03): «no information» is a small loss, said gently.
+              It must LEAD in reading order — on the right in Arabic. The line starts with an emoji and a
+              number (neither is a strong-direction character), so without an explicit writing direction the
+              browser laid it out left-to-right and the 😔 landed on the far LEFT (owner, same day: «make
+              sure the emoji is on the other side»). */}
           {unknownCount != null && unknownCount > 0 ? (
-            <Text style={s.unknownNote} testID="af-unknown-count">
+            <Text style={[s.unknownNote, { writingDirection: isRTL ? 'rtl' : 'ltr', textAlign: isRTL ? 'right' : 'left' }]} testID="af-unknown-count">
               {'😔 '}{t('{n} listings did not mention this', { n: unknownCount.toLocaleString('en-US') })}
             </Text>
           ) : null}
