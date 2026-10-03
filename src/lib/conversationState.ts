@@ -45,6 +45,7 @@ export const STICKY_FIELDS = [
   // advanced filter (the canonical AF question outputs)
   'amenities', 'furnishedPref', 'ratingMin', 'reviewsMin', 'bathMin', 'ageMin', 'ageMax',
   'isNewConstruction', 'streetWidthMin', 'directions', 'unitSubtypes',
+  'ageBuckets', 'ratingBuckets', 'furnishedIn',
   // ORDERING (owner, 2026-09-06). A vague adjective («رخيصة», «كبيرة») sets q.sort, and the owner's
   // ruling is that it "sticks until they change it" — same contract as every other stated field.
   // Without this entry a follow-up like «خلها في حي الشاطئ» silently dropped the cheapest-first
