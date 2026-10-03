@@ -174,11 +174,11 @@ check('no THIRD count threshold gates the continuation loop — plan.length is n
 // empty answer contributes nothing because the query is rebuilt from the record, which skips
 // empty-keyed steps outright. Asserted in that stronger form — plus the absence of any separate
 // skip-only side effect, so a future edit cannot re-split them.
-const onAgeConfirmLine = ag.match(/const onAgeConfirm = \(keys: string\[\]\) => \{[^\n]*\};/)?.[0] ?? '';
-const onAgeSkipLine = ag.match(/const onAgeSkip = \(\) => \{[^\n]*\};/)?.[0] ?? '';
+const onAgeConfirmLine = ag.match(/const onAgeConfirm = \(keys: string\[\]\) => [^\n]*;/)?.[0] ?? '';
+const onAgeSkipLine = ag.match(/const onAgeSkip = \(\) => [^\n]*;/)?.[0] ?? '';
 
 check('Skip and Confirm are the SAME commit path — Skip is simply the empty answer',
-  /void commitGuidedStep\(keys\);/.test(onAgeConfirmLine) && /void commitGuidedStep\(\[\]\);/.test(onAgeSkipLine));
+  /(?:void |=> )commitGuidedStep\(keys\);/.test(onAgeConfirmLine) && /(?:void |=> )commitGuidedStep\(\[\]\);/.test(onAgeSkipLine));
 check('neither Skip nor Confirm applies a predicate directly — the query is rebuilt from the record',
   !/question\.apply|ageFlowChangedRef\.current = true|ageFlowFacetsRef\.current\.push/.test(onAgeConfirmLine + onAgeSkipLine)
   && /const d = deriveGuided\(/.test(ag));

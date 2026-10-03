@@ -1,0 +1,73 @@
+# New listings vs their original ads — the 🆕 New Listings Engineer's nightly score, computed where the
+# service key lives (owner, 2026-10-03: «I don't want to check, it should work by itself»). The cloud
+# engineer's container has no service key, so on 2026-10-03 it hand-computed its rating and wrote 0 rows
+# into ops_new_listings_score. This job measures a sample of the last 24 hours of arrivals against their
+# original pages (scrapers/common/new_listings_score.py), writes one row per website per night, and then
+# prints the report numbers (scrapers/common/new_listings_report.py) into the job log, so the engineer reads
+# its rating and its numbers instead of reasoning them.
+#
+# Dispatch-only, like every cron job here: pg_cron row gh-new-listings-score calls
+# trigger_gh_workflow('new-listings-score.yml') at 08:35 UTC (01:35 Arizona), done well before the 🆕
+# engineer wakes at 10:00 UTC. READ-ONLY on listings. The browser + display are for wasalt
+# (cleanup._probe reaches wasalt only through scrapers/wasalt/browser.py —
+# verify-wasalt-probing-workflows-carry-the-browser.ts). A page we cannot read is UNREADABLE, never wrong.
+name: New listings score
+
+on:
+  workflow_dispatch:
+    inputs:
+      sites:
+        description: "Only these websites, space-separated (empty = every website with new listings)"
+        type: string
+        default: ""
+      per_site:
+        description: "Pages opened per website (empty = 10 on a big website, 5 on a small one)"
+        type: string
+        default: ""
+      dry_run:
+        description: "Print the rows, write nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: new-listings-score
+  cancel-in-progress: false
+
+jobs:
+  score:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
+      - name: Compare tonight's new listings with their original pages
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
+          SITES: ${{ inputs.sites }}
+          PER_SITE: ${{ inputs.per_site }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          exec xvfb-run -a python -m scrapers.common.new_listings_score \
+            $([ "$DRY_RUN" = "true" ] && echo --dry-run) \
+            $([ -n "$PER_SITE" ] && echo --per-site "$PER_SITE") \
+            $([ -n "$SITES" ] && echo --sites $SITES)
+      - name: Print the report numbers into the log
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: exec python -m scrapers.common.new_listings_report
