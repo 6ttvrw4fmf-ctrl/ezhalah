@@ -45,5 +45,26 @@ check('openListing.ts web path is still window.open (new tab)', /window\.open\(u
 check('openListing.ts native path is still expo-web-browser', /WebBrowser\.openBrowserAsync\(url/.test(open));
 check('openListing.ts never imports the allowlist (native stays untouched)', !/inAppViewer/.test(open));
 
+// Mutation proof — each of these broken worlds must be CAUGHT by the checks above, or the barrier
+// is decoration (scripts/verify-new-barriers-are-mutation-proven.ts).
+const mustCatch = (label: string, caught: boolean) => {
+  console.log(`${caught ? '✓' : '✗'} (mutation) catches ${label}`);
+  if (!caught) failed++;
+};
+// A decision that lets EVERY host in (the "forgot the allowlist" mutant).
+const letsEveryoneIn = (url: string | null | undefined) => { try { return new URL(url ?? '').hostname; } catch { return null; } };
+mustCatch('a decision that opens every site in-app', letsEveryoneIn('https://sa.aqar.fm/x') !== null);
+// A suffix match without the dot boundary (the lookalike mutant).
+const sloppySuffix = (url: string) => IN_APP_VIEWER_HOSTS.find((h) => new URL(url).hostname.endsWith(h)) ?? null;
+mustCatch('a host match without the dot boundary', sloppySuffix('https://notdealapp.sa/x') !== null);
+// A third host slipped into the list without an embed proof.
+mustCatch('an allowlist grown without proof', [...IN_APP_VIEWER_HOSTS, 'sa.aqar.fm'].join(',') !== 'dealapp.sa,gathern.co');
+// The wiring regexes against mutated sources.
+mustCatch('an agent screen that bypasses the allowlist', !/inAppViewerHost\(/.test(agent.replace(/inAppViewerHost\(/g, 'alwaysInApp(')));
+mustCatch('a card open that skips trackOpen', !/trackOpen\(l\);\s*(?:if|openAd)/.test(agent.replace(/trackOpen\(l\);\s*/g, '')));
+mustCatch('a web path that no longer opens a new tab', !/window\.open\(url, '_blank', 'noopener,noreferrer'\)/.test(open.replace("window.open(url, '_blank', 'noopener,noreferrer')", 'location.assign(url)')));
+mustCatch('a native path that no longer uses the system browser', !/WebBrowser\.openBrowserAsync\(url/.test(open.replace('WebBrowser.openBrowserAsync(url', 'Linking.openURL(url')));
+mustCatch('openListing importing the allowlist (native drift)', /inAppViewer/.test(open + "\nimport { inAppViewerHost } from './inAppViewer';"));
+
 if (failed) { console.error(`\n✗ ${failed} check(s) failed`); process.exit(1); }
-console.log('\n✓ in-app viewer allowlist: decision + wiring verified');
+console.log('\n✓ in-app viewer allowlist: decision + wiring verified, mutation-proven');
