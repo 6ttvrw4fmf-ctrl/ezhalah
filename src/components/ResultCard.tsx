@@ -657,7 +657,7 @@ function ListingPhoto({ photos, style, t }: { photos: string[]; style: any; t: (
   );
 }
 
-function SourceBadge({ source }: { source: string }) {
+export function SourceBadge({ source }: { source: string }) {
   // SPACING IS NOT IDENTITY (production defect, 2026-09-04). Every branch below tests a closed-up
   // slug, but the DB `source` value is a human brand string that often carries SPACES: production
   // stores 'Abr Alosol', 'THE RC' and 'Rawasi Dark', so `includes('abralosol' | 'therc' |
