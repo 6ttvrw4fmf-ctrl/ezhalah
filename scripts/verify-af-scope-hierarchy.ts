@@ -24,8 +24,8 @@ import {
 } from '../src/lib/afPlan.ts';
 import { cohortAllows, scopeCleanTypes } from '../src/lib/afCohorts.ts';
 import { deriveGuided, type GuidedStep } from '../src/lib/afSteps.ts';
-import { HIERARCHY, groupsFor, groupMembers, groupOf, groupsOf } from '../src/data/propertyTypes.ts';
-import { effectiveGroups, effectiveTypes } from '../src/lib/searchDefaults.ts';
+import { HIERARCHY, groupsFor, groupMembers, groupOf, groupsOf, CLEAN_MACRO, offeredUnder } from '../src/data/propertyTypes.ts';
+import { effectiveGroups, effectiveTypes, scopeCrossesMacro } from '../src/lib/searchDefaults.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -195,8 +195,8 @@ eq('a TYPE pick after a SKIPPED group backfills the owning group',
   effectiveGroups(applyScopeAnswer(SCOPE_TYPE_ID, RENT(), ['Villa'])), ['Villas & Houses']);
 eq('groupOf() is the exact reverse of groupMembers()', groupOf('Duplex'), 'Villas & Houses');
 eq('groupsOf() dedupes types sharing one group', groupsOf(['Villa', 'Duplex']), ['Villas & Houses']);
-check('every clean type in a shipped group resolves back to that same group',
-  HIERARCHY.Residential.concat(HIERARCHY.Commercial).every((g) => g.types.every((t) => groupOf(t) === g.group)));
+check('every clean type in a shipped group resolves back to that same group ON ITS OWN SIDE (a cross-macro shortcut type resolves per side)',
+  (['Residential', 'Commercial'] as const).every((macro) => HIERARCHY[macro].every((g) => g.types.every((t) => groupOf(t, macro) === g.group))));
 
 // ── IDENTITY ─────────────────────────────────────────────────────────────────────────────────────
 eq('exactly two scope tiers ship, in this order', [...SCOPE_QUESTION_IDS], ['property_group', 'property_type']);
@@ -232,6 +232,24 @@ check('isScopeQuestionId recognises both and nothing else',
     /const auto = opts\.length === 1 \? \[opts\[0\]\.key\] : \[\];/.test(block),
     'recording it as a skip would leave the scope unresolved and the cohort intersection empty');
 }
+
+// ── 7. ALL LANDS IN ONE PLACE (owner 2026-10-03): Residential Land is a CROSS-MACRO SHORTCUT ─────
+// Offered under the commercial land group too, home macro unchanged, and every gate that would have
+// turned the new box into a 0-result promise is executed here with real queries.
+const BUY = (extra: Partial<SearchQuery> = {}): SearchQuery => RENT({ deal: 'Buy', rentPeriod: undefined, ...extra });
+check('Residential Land is offered under the commercial land group', groupMembers('Commercial & Industrial Plots').includes('Residential Land'));
+check('…and still under its home group', groupMembers('Residential Plots').includes('Residential Land'));
+eq('its HOME macro stays Residential (AI-chat category, misfile scopes, DeepSeek vocabulary untouched)', CLEAN_MACRO['Residential Land'], 'Residential');
+check('offeredUnder: reachable on both sides; Villa is not reachable under Commercial', offeredUnder('Commercial', 'Residential Land') && offeredUnder('Residential', 'Residential Land') && !offeredUnder('Commercial', 'Villa'));
+eq('a type pick under تجاري backfills the COMMERCIAL land group', groupsOf(['Residential Land'], 'Commercial'), ['Commercial & Industrial Plots']);
+eq('…and the home group when no side is given', groupsOf(['Residential Land']), ['Residential Plots']);
+check('AF cohort gate lets Residential Land through under تجاري (street width, Buy)', cohortAllows(BUY({ category: 'Commercial', types: ['Residential Land'] }), 'street_width'));
+check('…and a cross-category Villa under تجاري is still refused', !cohortAllows(BUY({ category: 'Commercial', types: ['Villa'] }), 'property_age'));
+check('the RPC category gate is dropped ONLY for a cross-macro scope (group pick)', scopeCrossesMacro(BUY({ category: 'Commercial', typeGroups: ['Commercial & Industrial Plots'] })));
+check('…and for the bare type pick under تجاري', scopeCrossesMacro(BUY({ category: 'Commercial', types: ['Residential Land'] })));
+check('…but kept for a same-macro scope on either side', !scopeCrossesMacro(BUY({ category: 'Commercial', typeGroups: ['Retail & Workspace'] })) && !scopeCrossesMacro(BUY({ category: 'Residential', typeGroups: ['Residential Plots'] })) && !scopeCrossesMacro(BUY({ category: 'Commercial', types: ['Commercial Land'] })));
+check('…and never fires without a category pill (nothing-selected keeps the implied default)', !scopeCrossesMacro(BUY({ category: null as unknown as SearchQuery['category'], types: ['Residential Land'] })));
+check('TYPE candidates under the commercial land group list all three lands, deduped', JSON.stringify(scopeCandidates(SCOPE_TYPE_ID, BUY({ category: 'Commercial', typeGroups: ['Commercial & Industrial Plots'] }))) === JSON.stringify(['Commercial Land', 'Industrial Land', 'Residential Land']));
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll scope-hierarchy assertions passed');
 process.exit(failed ? 1 : 0);
