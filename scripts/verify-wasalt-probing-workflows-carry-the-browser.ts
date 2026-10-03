@@ -71,7 +71,11 @@ const PROBE_ROOT = 'scrapers.common.cleanup';
 // Raised to 5 on 2026-10-02: `scrapers.common.dead_visible_score` (the nightly "dead ads a customer
 // can see" measurement) opens aqar/wasalt/aqarcity ads through lifecycle_spot_check.open_ad → cleanup
 // `_probe`, so it joined the cohort, and dead-visible-score.yml carries the browser like the others.
-const COHORT_FLOOR = 5;
+// 2026-10-03: `scrapers.common.new_listings_score` (the 🆕 New Listings Engineer's nightly comparison
+// of new ads with their original pages) re-reads ads through cleanup's `_probe`, so it joined the
+// cohort (6). No workflow runs it — the engineer's own container does — and a wasalt page it cannot
+// read is counted UNREADABLE (never a verdict on the ad), which the score prints as such.
+const COHORT_FLOOR = 6;
 
 const ls = (glob: string) =>
   execFileSync('git', ['ls-files', glob], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
