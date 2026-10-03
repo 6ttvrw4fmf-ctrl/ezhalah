@@ -98,7 +98,7 @@ check('district_options_ar keeps its p_category (pre-existing, pinned)', /rpc\('
 //    scope: the PR#384 zero-mark and the Top-6 slice both read listingCount straight off the pool
 //    rows (no second category filter, no cross-scope mixing). ──
 check('Top-6 slice reads the (now correctly scoped) pool counts directly', /\.filter\(\(d\) => d\.listingCount > 0\)\.slice\(0, k\)/.test(locSrc));
-check('zero-mark reads the same rows (live full-filter count still wins when present)', /const isEmpty = live != null \? live === 0 : opt\.listingCount === 0/.test(indexSrc));
+check('zero-mark reads the same rows (live full-filter count still wins when present)', /const isEmpty = opt\.scopeKnown === false \? false : live != null \? live === 0 : opt\.listingCount === 0/.test(indexSrc));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MUTATIONS (ops_incident #305, third instance). Both directions, because the defect repaired here

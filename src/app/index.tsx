@@ -1520,16 +1520,21 @@ export default function Home() {
                         />
                       </>
                     ) : (
-                      citySuggestions.map((opt, i) => (
+                      citySuggestions.map((opt, i) => {
+                        // A real city with no listings in THIS scope stays findable and selectable (owner,
+                        // 2026-10-03) and says so, like a zero-listing district. scopeKnown:false = the count is
+                        // not measured yet (pool still loading): no claim either way.
+                        const cityEmpty = opt.scopeKnown !== false && !(opt.listingCount > 0);
+                        return (
                         <Tappable
                           key={opt.cityId}
                           dip={0.03}
-                          style={[s.suggRow, i < citySuggestions.length - 1 && s.suggDivider]}
+                          style={[s.suggRow, i < citySuggestions.length - 1 && s.suggDivider, cityEmpty && s.suggRowEmpty]}
                           onPress={() => cityOnPress(opt)}
                         >
-                          <Image source={LOC_IMG.city} style={s.suggLocIcon} />
+                          <Image source={LOC_IMG.city} style={[s.suggLocIcon, cityEmpty && s.suggIconEmpty]} />
                           <View style={{ flex: 1 }}>
-                            <Text style={s.suggCity}>{opt.cityAr}</Text>
+                            <Text style={[s.suggCity, cityEmpty && s.suggCityEmpty]}>{opt.cityAr}</Text>
                             {/* Region stays hidden per spec ("use the confirmed hidden region internally")
                                 UNLESS two results in this exact list share a display name — a real,
                                 verified case (e.g. الهفوف exists as two distinct real cities) — in which
@@ -1537,13 +1542,19 @@ export default function Home() {
                             {(() => {
                               const parts = [
                                 hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
-                                cohortCountLabel(opt.listingCount),
+                                cityEmpty || opt.scopeKnown === false ? undefined : cohortCountLabel(opt.listingCount),
                               ].filter(Boolean);
-                              return parts.length ? <Text style={s.suggDist}>{parts.join(' · ')}</Text> : null;
+                              return (
+                                <>
+                                  {parts.length ? <Text style={s.suggDist}>{parts.join(' · ')}</Text> : null}
+                                  {cityEmpty ? <Text style={s.suggEmptyNote}>{t('No listings here right now')}</Text> : null}
+                                </>
+                              );
                             })()}
                           </View>
                         </Tappable>
-                      ))
+                        );
+                      })
                     )}
                   </ScrollView>
                 );
@@ -1764,7 +1775,7 @@ export default function Home() {
                         // count exists it is the truth for this row's empty-marking: the number/signal
                         // beside a district must equal what selecting it returns (owner, 2026-08-13).
                         const live = districtLiveCounts?.[opt.districtAr];
-                        const isEmpty = live != null ? live === 0 : opt.listingCount === 0;
+                        const isEmpty = opt.scopeKnown === false ? false : live != null ? live === 0 : opt.listingCount === 0;
                         const isPicked = selectedLabels.has(opt.districtAr);
                         return (
                         <Tappable
