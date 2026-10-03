@@ -50,8 +50,9 @@ class _Q:
 
 
 class _DB:
-    def __init__(self, rows, runs=()):
+    def __init__(self, rows, runs=(), direct=None):
         self.rows = {r["id"]: dict(r) for r in rows}
+        self.direct = direct or {}  # id → applied page readings, when fewer than its missing_count
         self.runs = list(runs)
         self.updates: list[tuple[int, dict]] = []
 
@@ -62,6 +63,13 @@ class _DB:
         ops = {name: (a, k) for name, a, k in q.ops}
         if q.table == "scrape_runs":
             return types.SimpleNamespace(data=[{"notes": n} for n in self.runs])
+        if q.table == "gathern_liveness_detail" and "select" in ops:
+            # Each row's missing_count was earned by its own page: that many applied 404 readings.
+            ids = list(ops["in_"][0][1])
+            return types.SimpleNamespace(data=[
+                {"listing_id": rid, "run_at": f"2026-10-0{k + 1}T00:00:00+00:00", "verdict": "strike",
+                 "http_status": 404, "applied": True}
+                for rid in ids for k in range(self.direct.get(rid, self.rows[rid]["missing_count"] or 0))])
         if q.table != lv.TABLE:
             return types.SimpleNamespace(data=[])
         if "update" in ops:
@@ -218,3 +226,12 @@ def test_the_schedule_probes_every_active_row_not_only_stale_ones():
     yml = (Path(__file__).resolve().parents[3] / ".github" / "workflows" / "gathern-liveness.yml").read_text()
     assert "inputs.min_stale_days || '0'" in yml
     assert 'default: "0"' in yml.split("min_stale_days:")[1].split("kill_cap:")[0]
+
+
+# ── 3. an absence strike in missing_count earns no hide (2026-10-03) ──────────────────────────────
+def test_a_row_whose_count_holds_a_feed_miss_is_struck_not_hidden(monkeypatch):
+    # both rows sit at missing_count 2; row 21's second strike was the crawl missing it in the feed
+    db = _DB([_row(20, 2), _row(21, 2)], direct={21: 1})
+    _run_main(monkeypatch, db, ["--limit", "10", "--apply"])
+    assert _inactivated(db) == [20]
+    assert [p["missing_count"] for rid, p in db.updates if rid == 21] == [2]

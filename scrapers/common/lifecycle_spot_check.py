@@ -163,6 +163,35 @@ def _reader_for(platform: str):
     return None
 
 
+def _oracle_reader_for(platform: str, control: dict | None):
+    """A site on the daily direct check (fleet_liveness.SITES) is read by the oracle its own scraper
+    hands to prune_unseen, keyed by ad_number, or None for any other site.
+
+    WHY (2026-10-03): judged by HTTP status alone, sanadak's 8 of 8 hidden ads read "live" — its
+    removed ads answer the app's own 200 shell with no listing, which only its oracle can tell from a
+    live page (scrapers/sanadak/run.py::_gone_verdict). A status read of such a site can only ever
+    say "live", so it cannot double-check a hide; it can only raise a false alarm."""
+    from scrapers.common import fleet_liveness as FL
+    spec = FL.SITES.get(platform)
+    if spec is None:
+        return None
+    oracle = FL.oracle_for(spec, control)
+    return lambda row: FL.read(oracle, row["ad_number"])[0] if row.get("ad_number") else UNKNOWN
+
+
+def pick_reader(platform: str, dead_marker, control: dict | None):
+    """(method, read(row) -> ALIVE/DEAD/UNKNOWN): the way the site's hiding job reads it, first."""
+    site_reader = _reader_for(platform)
+    if site_reader:
+        return "site-reader", lambda row: site_reader(row["listing_url"])
+    oracle_reader = _oracle_reader_for(platform, control)
+    if oracle_reader:
+        return "site-oracle", oracle_reader
+    if dead_marker:
+        return "registered-marker", lambda row: open_ad(row["listing_url"], dead_marker)
+    return "status-only", lambda row: open_ad(row["listing_url"], dead_marker)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--platform", required=True)
@@ -177,9 +206,6 @@ def main() -> int:
     rng = random.Random(a.seed)
     reg = PLATFORMS.get(a.platform, {})
     dead_marker = reg.get("dead_marker")
-    site_reader = _reader_for(a.platform)
-    method = "site-reader" if site_reader else "registered-marker" if dead_marker else "status-only"
-    read = site_reader or (lambda url: open_ad(url, dead_marker))
     tables = tables_for(client, a.platform)
     if not tables:
         print(json.dumps({"platform": a.platform, "verdict": "void: no listing tables found"}))
@@ -188,7 +214,8 @@ def main() -> int:
     # Controls first: listings the crawl saw in the last 24 hours must come back alive, or the
     # environment (a block, a proxy failure) is lying and the run is void.
     ctl = pick_controls(client, tables, rng)
-    ctl_alive = sum(read(r["listing_url"]) == ALIVE for r in ctl)
+    method, read = pick_reader(a.platform, dead_marker, ctl[0] if ctl else None)
+    ctl_alive = sum(read(r) == ALIVE for r in ctl)
     canary = {"probed": len(ctl), "alive": ctl_alive, "ok": canary_environment_ok(ctl_alive, len(ctl))}
 
     since = (datetime.now(timezone.utc) - timedelta(days=a.hidden_days)).isoformat()
@@ -199,7 +226,7 @@ def main() -> int:
             for r in rows:
                 if not r.get("listing_url"):
                     continue
-                v = read(r["listing_url"])
+                v = read(r)
                 results.append({"side": "live", "table": table, "id": rid, "url": r["listing_url"],
                                 "verdict": v, "judged": judge("live", v)})
     elif canary["ok"]:
@@ -211,7 +238,7 @@ def main() -> int:
             for t in tables:
                 picked += [dict(r, table=t) for r in sample(client, t, active=active, n=per_table, since=win, rng=rng)]
             for r in picked[: a.n]:
-                v = read(r["listing_url"])
+                v = read(r)
                 results.append({"side": side, "table": r["table"], "id": r["id"], "url": r["listing_url"],
                                 "verdict": v, "judged": judge(side, v)})
 
