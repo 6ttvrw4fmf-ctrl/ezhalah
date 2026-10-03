@@ -79,6 +79,12 @@ for (const [id, regionId, en, ar] of DATA.cities) CITY_BY_ID.set(id, { en, ar, r
 const CATALOG_CITIES: CatalogCity[] = DATA.cities.map(([id, regionId, , ar]) => ({
   cityId: id, cityAr: ar, regionId, regionAr: REGION_BY_ID.get(regionId)?.ar ?? null,
 }));
+const AMBIGUOUS_CITY_NAMES: ReadonlySet<string> = (() => {
+  const seen = new Set<string>();
+  const dup = new Set<string>();
+  for (const c of CATALOG_CITIES) { const n = norm(c.cityAr); if (seen.has(n)) dup.add(n); else seen.add(n); }
+  return dup;
+})();
 const CATALOG_DISTRICTS_BY_CITY = new Map<number, CatalogDistrict[]>();
 for (const [cityId, , , ar] of DATA.districts) {
   const list = CATALOG_DISTRICTS_BY_CITY.get(cityId);
@@ -1197,22 +1203,31 @@ export function matchDistrictsByCityId(cityId: number, deal: Deal | null, catego
 export function matchCitiesByText(deal: Deal | null, periodTok: string | null, category: Category | null, query: string, types: string[] | null, af: AfParams | null): CityOption[] {
   const q = norm(query);
   if (!q) return [];
-  const pool = CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types, af));
+  const exactPool = CITY_FIELD_POOLS.get(cityPoolKey(deal, periodTok, category, types, af));
+  // THE SCOPED POOL IS NOT LOADED (cold start, or a filter just changed): the city NAMES do not depend on the scope,
+  // only the counts do, so borrow the biggest pool already cached under any other scope. Its order (by that scope's
+  // count) puts the cities that really have listings first, so the rows do not re-order when the exact pool arrives;
+  // its counts are hidden (scopeKnown:false) because they belong to another scope.
+  let basePool: CityOption[] | undefined = exactPool;
+  if (basePool === undefined) {
+    for (const v of CITY_FIELD_POOLS.values()) if (v.length > (basePool?.length ?? 0)) basePool = v;
+  }
+  const borrowed = exactPool === undefined && basePool !== undefined;
   const scored: { opt: CityOption; rank: number }[] = [];
-  for (const opt of pool ?? []) {
+  for (const opt of basePool ?? []) {
     const n = norm(opt.cityAr);
     if (n.startsWith(q)) scored.push({ opt, rank: 0 });
     else if (n.includes(q)) scored.push({ opt, rank: 1 });
   }
   scored.sort((a, b) => a.rank - b.rank || b.opt.listingCount - a.opt.listingCount);
-  const fromPool = scored.map((s) => s.opt);
+  const fromPool = scored.map((s) => (borrowed ? { ...s.opt, listingCount: 0, scopeKnown: false } : s.opt));
   // EVERY real city stays findable (owner, 2026-10-03): the places the scoped pool does not carry come from the
   // built-in catalog, instantly, after the pool's own ranked matches. When the pool is loaded the place simply has
   // no listings in this scope (the UI says so); when it is not loaded yet its count is UNKNOWN (scopeKnown:false:
   // no number, no «nothing here» claim) and fills in the moment the pool arrives.
-  const extras = catalogCityExtras(query, CATALOG_CITIES, new Set(fromPool.map((o) => o.cityId))).map((c): CityOption => ({
+  const extras = catalogCityExtras(query, CATALOG_CITIES, new Set(fromPool.map((o) => o.cityId)), 30, basePool === undefined ? AMBIGUOUS_CITY_NAMES : undefined).map((c): CityOption => ({
     cityId: c.cityId, cityAr: c.cityAr, regionId: c.regionId, regionAr: c.regionAr,
-    listingCount: 0, totalInCohort: 0, scopeKnown: pool !== undefined,
+    listingCount: 0, totalInCohort: 0, scopeKnown: exactPool !== undefined,
   }));
   return [...fromPool, ...extras];
 }

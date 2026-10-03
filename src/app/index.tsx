@@ -1542,7 +1542,7 @@ export default function Home() {
                             {(() => {
                               const parts = [
                                 hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
-                                cityEmpty ? undefined : cohortCountLabel(opt.listingCount),
+                                cityEmpty || opt.scopeKnown === false ? undefined : cohortCountLabel(opt.listingCount),
                               ].filter(Boolean);
                               return (
                                 <>

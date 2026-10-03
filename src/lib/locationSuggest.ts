@@ -49,8 +49,11 @@ function rankedByName<T>(items: readonly T[], query: string, nameOf: (t: T) => s
 }
 
 /** Catalog cities matching what the user typed that the scoped pool does not already carry (by city id). */
-export function catalogCityExtras(query: string, catalog: readonly CatalogCity[], haveIds: ReadonlySet<number>, limit = 30): CatalogCity[] {
-  return rankedByName(catalog, query, (c) => c.cityAr).filter((c) => !haveIds.has(c.cityId)).slice(0, limit);
+export function catalogCityExtras(query: string, catalog: readonly CatalogCity[], haveIds: ReadonlySet<number>, limit = 30, skipNames: ReadonlySet<string> = new Set()): CatalogCity[] {
+  // skipNames = folded names that two or more real cities share. While NO pool of any scope is cached the catalog cannot
+  // tell which of them has listings, and rows that re-order under the user's finger when the pool arrives are worse
+  // than a one-second wait, so those names are held back until the pool (which ranks the real one first) is there.
+  return rankedByName(catalog, query, (c) => c.cityAr).filter((c) => !haveIds.has(c.cityId) && !skipNames.has(norm(c.cityAr))).slice(0, limit);
 }
 
 /** Catalog districts of ONE city matching the query that the pool does not already carry (by folded name). */

@@ -68,6 +68,9 @@ function behaviour(impl: Impl): string[] {
   // 7. a cap, so a two-letter query cannot render thousands of rows
   const many = Array.from({ length: 200 }, (_, i): CatalogCity => ({ cityId: 100 + i, cityAr: `قرية ${i}`, regionId: 1, regionAr: null }));
   if (impl.cityExtras('قريه', many, new Set(), 30).length > 30) bad.push('the catalog extras are not capped');
+  // 7b. with no pool anywhere, a name two real cities share is held back (the pool ranks the real one first)
+  if (impl.cityExtras('الهفوف', CITIES, new Set(), 30, new Set([norm('الهفوف')])).length !== 0) bad.push('an ambiguous name is not held back while no pool is cached');
+  if (!impl.cityExtras('خبر', CITIES, new Set(), 30, new Set([norm('الهفوف')])).some((c) => c.cityId === 3)) bad.push('holding back one ambiguous name also hid an unambiguous city');
   // 8. districts: only inside their own city, and not duplicating the pool's names
   const d1 = impl.districtExtras('نرجس', DISTRICTS, 1, new Set());
   if (!d1.some((d) => d.districtAr === 'النرجس')) bad.push('a district of the city cannot be typed');
@@ -86,7 +89,10 @@ function wiring(loc: string, idx: string): string[] {
   const city = /export function matchCitiesByText[\s\S]*?\n}\n/.exec(loc)?.[0] ?? '';
   const dist = /export function matchDistrictsByCityId[\s\S]*?\n}\n/.exec(loc)?.[0] ?? '';
   if (!/catalogCityExtras\(/.test(city)) bad.push('matchCitiesByText no longer adds the built-in catalog');
-  if (!/scopeKnown:\s*pool !== undefined/.test(city)) bad.push('city extras do not say whether their count is measured (scopeKnown)');
+  if (!/scopeKnown:\s*exactPool !== undefined/.test(city)) bad.push('city extras do not say whether their count is measured (scopeKnown)');
+  if (!/for \(const v of CITY_FIELD_POOLS\.values\(\)\)/.test(city)) bad.push('matchCitiesByText does not borrow another scope\'s city names while its own pool loads');
+  if (!/borrowed \? \{ \.\.\.s\.opt, listingCount: 0, scopeKnown: false \}/.test(city)) bad.push('borrowed city rows keep another scope\'s count (it would be printed as this scope\'s)');
+  if (!/AMBIGUOUS_CITY_NAMES/.test(city)) bad.push('with no pool cached, same-named cities are not held back (rows would re-order under the finger)');
   if (!/catalogDistrictExtras\(/.test(dist)) bad.push('matchDistrictsByCityId no longer adds the built-in catalog');
   if (!/_districtCache\) \{[\s\S]*startsWith\(`\$\{cityId\}:`\)/.test(dist)) bad.push('matchDistrictsByCityId does not borrow another scope\'s names while its own pool loads');
   if (!/scopeKnown:\s*false/.test(dist)) bad.push('borrowed district names are not flagged count-unknown');
@@ -120,8 +126,11 @@ check('the wiring: both matchers add the catalog, flag unmeasured counts, the UI
 // ── mutation proofs: each deliberately broken copy must go RED ──────────────────────────────────────────────
 mustCatch('a matcher that only knows the scoped pool', behaviour({ ...REAL, cityExtras: () => [] }));
 mustCatch('a matcher that offers the pool\'s own city twice', behaviour({ ...REAL, cityExtras: (q, cat, _have, lim) => catalogCityExtras(q, cat, new Set(), lim) }));
+mustCatch('an ambiguous name that is not held back', behaviour({ ...REAL, cityExtras: (q, cat, have, lim) => catalogCityExtras(q, cat, have, lim) }));
 mustCatch('a district matcher that ignores the city', behaviour({ ...REAL, districtExtras: (q, cat, _cityId, have, lim) => catalogDistrictExtras(q, cat.map((d) => ({ ...d, cityId: 1 })), 1, have, lim) }));
 mustCatch('a catalog fallback that vanished from matchCitiesByText', wiring(locSrc.replace('catalogCityExtras(query', 'noExtras(query'), idxSrc));
+mustCatch('a city matcher that waits for its own pool', wiring(locSrc.replace('for (const v of CITY_FIELD_POOLS.values())', 'for (const v of [])'), idxSrc));
+mustCatch('a borrowed city count printed as this scope\'s', wiring(locSrc.replace('listingCount: 0, scopeKnown: false } : s.opt', 'scopeKnown: false } : s.opt'), idxSrc));
 mustCatch('a district matcher that waits for its own pool', wiring(locSrc.replace('k.startsWith(`${cityId}:`)', 'false'), idxSrc));
 mustCatch('an unmeasured district count called empty', wiring(locSrc, idxSrc.replace('opt.scopeKnown === false ? false :', '')));
 mustCatch('a second search button that stopped running onSearch', wiring(locSrc, idxSrc.replace(/(testID="home-filter-search-button"[^>]*onPress=\{)onSearch\}/, '$1() => {}}')));
