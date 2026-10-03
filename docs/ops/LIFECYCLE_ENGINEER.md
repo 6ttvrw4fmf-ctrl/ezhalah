@@ -494,6 +494,33 @@ must go up over time and never down.
   - remove it from the list, with a test.
 - **C. Sites with no direct check at all** (`CRAWL_PRESENCE_ONLY`, 63 on 2026-09-27). Same fix as B.
 
+## Lessons from 2026-10-03 (rating 0/10 with customers safe: the owner's order is «make it good»)
+The night's facts: dead ads a customer can see were ~0 in the sample, checked-in-time rose 52% → 64%,
+four real bugs fixed. The 0 came from 50 websites with no listing checked in their window, cleared at
+~7 a night. The owner will not wait a week for that.
+- **Admissions come FIRST, every night, before any other work.** The first 30 minutes of the run go to
+  moving blind-spot websites into a checked tier (rule 9 carve-out). The biggest by listings first.
+  Do not start a new investigation while a site that already qualifies is still blind.
+- **Count the gap in LISTINGS as well as in websites.** On 2026-10-03 the 50 blind sites held 12,664
+  listings (4%); the real gap was wasalt (2% of 66,557 in time) and aqar (74% of 160,622). Report both
+  numbers, and put the first effort where the most listings are.
+- **The report opens with the customer's number,** then the rating: «Dead ads a customer can see: N of
+  M sampled (estimate E)», read from `ops_dead_visible_fleet` at the moment you write, including
+  `over_the_line`. On 2026-10-03 you wrote 0 of 843 and none over the line; the view then read 2 of
+  844, estimate 184, arkaan and ego over the line. Read it last, quote it exactly.
+- **The customer click test has a ready tool: `e2e/engineers/customer-journey.mjs`** (normal and
+  Advanced Filter journeys, judged from the search request). «0 cards clicked» is not an acceptable
+  line any more; if the tool cannot launch, fix the launch and say so in one line.
+- **Applied for you on 2026-10-03 (follow-up row 106):** `gh-dead-visible-score` is on pg_cron at
+  09:05 UTC, and all 54 listing tables that lacked `trg_set_deactivated_at` /
+  `trg_archive_hard_delete` have them (migration 20261003164748). Not applied: the Gathern
+  «recheck dead» schedule, because `trigger_gh_workflow(wf text)` takes no inputs — build a small
+  wrapper workflow whose defaults are that pass, then it can be scheduled like the others. The 1,016
+  hides with a NULL date are still a data decision for the owner.
+- **A migration that times out is retried through the owner's session the same day,** not left for
+  tomorrow: write the exact SQL and its checks into a `lifecycle:followup` row the moment it fails.
+
+
 ## Your time budget: as long as the job needs, up to 3 hours a night (owner, 2026-10-03)
 > «The lifecycle engineer can work on it for as long as possible, but the most important thing is
 > that all is good.» (Earlier: 1 hour on 2026-09-27, 2 hours on 2026-09-28, 4 hours on 2026-10-02; on 2026-10-03 every engineer was capped at 3 hours so the three never overlap.)
