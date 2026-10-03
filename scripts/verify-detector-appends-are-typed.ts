@@ -107,12 +107,17 @@ const GRANDFATHERED = new Map<string, string>([
   // 20260927211052, which is the migration that introduced the `declare k text` house pattern.
   ['20260927210420_aqarmonthly_street_as_district_detector.sql',
     'aqarmonthly_street_as_district:BLIND + the main limb + :index — superseded by 20260927211052'],
+  // 🆕 New Listings Engineer, 2026-10-03: applied before this check was run locally, caught by it
+  // before merge, superseded 1 min 34 s later by 20261003103854 (same body, ::text). The applied
+  // file must stay byte-exact for migration content parity, so it is recorded here rather than edited.
+  ['20261003103720_dwelleo_amenity_trapped_detector.sql',
+    'dwelleo_amenity_trapped:BLIND + :trapped + :false_from_silence — superseded by 20261003103854'],
 ]);
 
 // Pinned in reviewed source so that adding a name to the list is not a quiet edit to a data
 // structure: it fails this check until someone also raises this number in a diff a human read. The
 // list may SHRINK (a superseded migration removed from the tree), never grow.
-const GRANDFATHERED_CEILING = 8;
+const GRANDFATHERED_CEILING = 9;
 
 const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
 check(files.length > 100, `scanned ${files.length} migrations`,
