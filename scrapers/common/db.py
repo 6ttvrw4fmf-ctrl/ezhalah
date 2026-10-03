@@ -863,6 +863,17 @@ def _apply_direct_alive(r: dict[str, Any], *, now_iso: str, table: str) -> None:
         )
 
 
+# A transient key, never a column (2026-10-03). A crawler sets it on a row its list served while
+# the ad's OWN page or record could not be read this run, or says something nobody measured. The row
+# is written exactly as before; the list sighting just does not certify it (SOURCE_LIST_PRESENCE).
+_PRESENCE_UNPROVEN_KEY = "_presence_unproven"
+
+
+def mark_presence_unproven(row: dict[str, Any]) -> dict[str, Any]:
+    row[_PRESENCE_UNPROVEN_KEY] = True
+    return row
+
+
 def _wasalt_batch(table: str, rows: list[dict[str, Any]],
                   strikes: Optional[dict[str, tuple[int, bool]]] = None) -> None:
     if not rows:
@@ -878,6 +889,7 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]],
     seen: dict[str, dict[str, Any]] = {}
     for r in rows:
         r = dict(r)
+        unproven = r.pop(_PRESENCE_UNPROVEN_KEY, False)     # stripped always: it is not a column
         r["last_seen_at"] = now
         # Seen on the source THIS crawl → reset the consecutive-miss counter (prune_unseen only
         # deactivates after `grace` consecutive misses), and reactivate it: a listing that
@@ -904,7 +916,7 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]],
         # after the marker was set, and the stamp must be judged against the row's FINAL state.
         # Also strips the transient key, which must never reach PostgREST.
         _apply_direct_alive(r, now_iso=now, table=table)
-        if presence is not None and r.get("active") is True and not held:
+        if presence is not None and r.get("active") is True and not held and not unproven:
             # Being served by the source's own feed is proof of life ONLY for a platform whose
             # registered policy declares it (presence_patch returns {} for every other policy),
             # and never for a row whose own page is under strike: the page outranks the feed.

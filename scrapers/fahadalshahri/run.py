@@ -310,6 +310,7 @@ def main() -> int:
             if p.get("is_in_stock") is not True:    # unmeasured here: kept as before, and counted
                 k = f"kept_active_is_in_stock={p.get('is_in_stock')}"
                 unmeasured[k] = unmeasured.get(k, 0) + 1
+                db.mark_presence_unproven(row)             # kept as before, never stamped as checked
             (com if cat == "commercial" else res).append(row)
         if skipped:
             print("  skipped (not guessed): "
