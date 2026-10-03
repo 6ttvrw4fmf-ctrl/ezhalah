@@ -475,7 +475,10 @@ def row_for(ad: dict, status: str, detail: Optional[dict]):
     answer) is UNKNOWN and keeps the summary row, as before."""
     if status == "gone":
         return None
-    return map_listing(ad, detail)
+    out = map_listing(ad, detail)
+    if status != "ok" and out and out[0]:
+        db.mark_presence_unproven(out[0])       # its own record was not read: written, not stamped
+    return out
 
 
 def map_listing(ad: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, bool]:

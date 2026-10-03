@@ -252,6 +252,10 @@ def map_listing(pid: str, card: dict, d: dict[str, Any]) -> tuple[Optional[tuple
     cap = {k: v for k, v in kv.items() if k not in _NEVER_STORE}
     row["source_capture"] = strip_pii_fields({"schema": "maqrat.details.v1", "fields": cap,
                                               "title": row["title"], "services": d["services"]})
+    if normalize.ad_expiry_state(row["license_expiry"]) == "expired":
+        # Its own ad licence ended. Still written (the gate is PR #5103's, the owner's call), but the
+        # list sighting does not certify it as checked-alive (2026-10-03).
+        db.mark_presence_unproven(row)
     return (row, category), ""
 
 

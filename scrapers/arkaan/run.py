@@ -217,6 +217,7 @@ def _listing_node(body: str) -> Optional[dict]:
 
 
 GONE_STATUSES = (404, 410)
+MEASURED_STATUS = "active"
 
 
 def fetch_detail(s: cc.Session, pid: str) -> dict[str, Any]:
@@ -477,7 +478,7 @@ def crawl(limit: int = 0, dry_run: bool = False) -> tuple[list[dict], list[dict]
     print(f"Arkaan: {len(items)} listings enumerated from the index", flush=True)
     res: list[dict] = []
     com: list[dict] = []
-    gone = 0
+    gone = unproven = 0
     for i, item in enumerate(items, 1):
         detail = fetch_detail(s, item["id"])
         # The ad's OWN page said gone (404/410) in this very run: never write it active from the
@@ -491,9 +492,18 @@ def crawl(limit: int = 0, dry_run: bool = False) -> tuple[list[dict], list[dict]
         if not mapped:
             continue
         row, cat = mapped
+        # Written as before, but not certified by the list sighting (2026-10-03): its own page did
+        # not answer 200 this run, or its card's data-status is not «active», the only value this
+        # site has ever served (1,996 of 1,996 stored rows, measured 2026-10-03).
+        if detail.get("http_status") != 200 or item.get("status") != MEASURED_STATUS:
+            db.mark_presence_unproven(row)
+            unproven += 1
         (com if cat == "commercial" else res).append(row)
         if not dry_run and i % 100 == 0:
             print(f"  …{i}/{len(items)}", flush=True)
+    if unproven:
+        print(f"Arkaan: {unproven} listing(s) written but not stamped — own page unread or status "
+              f"not «{MEASURED_STATUS}»", flush=True)
     if gone:
         print(f"Arkaan: {gone} listing(s) skipped — their own page answered 404/410 this run", flush=True)
     return res, com, len(res) + len(com)

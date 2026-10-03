@@ -259,6 +259,7 @@ def main() -> int:
             if got and x.get("listing_status") not in _LISTING_STATUS_MEASURED:
                 k = f"listing_status_{x.get('listing_status')}"
                 kept[k] = kept.get(k, 0) + 1
+                db.mark_presence_unproven(got[0])          # kept as before, never stamped as checked
             if not got:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue

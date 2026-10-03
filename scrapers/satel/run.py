@@ -300,6 +300,15 @@ def _resolve_city_region(raw_city_ar: str, raw_city_en: str) -> Optional[str]:
     return raw_city_en or "Riyadh"
 
 
+def _attach_detail(row: dict, d: Optional[dict]) -> None:
+    """The ad's own record: its gallery when it answered; when it did not (404 included), the row
+    is still written from the feed but the list sighting does not certify it (2026-10-03)."""
+    if d:
+        row["photo_urls"] = _photo_urls(d) or row["photo_urls"]
+    else:
+        db.mark_presence_unproven(row)
+
+
 def map_listing(p: dict) -> tuple[Optional[dict], str, bool]:
     """Map one Satel API item to a canonical row. Returns (row, category, gone)."""
     addr = p.get("address") or {}
@@ -493,9 +502,7 @@ def main() -> int:
             # failure/empty gallery the featured image stays — never blank an existing photo.
             pnum = (p.get("propertyNumber") or "").strip()
             if not gone and pnum:
-                d = _fetch_detail(s, pnum)
-                if d:
-                    row["photo_urls"] = _photo_urls(d) or row["photo_urls"]
+                _attach_detail(row, _fetch_detail(s, pnum))
             (com if cat == "commercial" else res).append(row)
             if gone:
                 gone_ct += 1

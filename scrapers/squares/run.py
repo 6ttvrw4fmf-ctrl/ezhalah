@@ -361,6 +361,7 @@ def main() -> int:
             row, cat = map_listing(rec, ptype_ar, deal, parse_detail(page))
             (com if cat == "commercial" else res).append(row)
             if not by_term:
+                db.mark_presence_unproven(row)      # a status term nobody measured: no stamp
                 m = _OWN_STATUS.search(page)
                 k = f"status_term_{sid}_{_clean(m.group(1)) if m else None}"
                 kept[k] = kept.get(k, 0) + 1
