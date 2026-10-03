@@ -416,7 +416,7 @@ check('the results pills are fed by the deduped facet set (one label per committ
 
 // ── Results summary + READ-ONLY pills (owner 2026-10-03; supersedes the 2026-08-16 §10 removable pills) ─
 // The turn's summary is the ORIGINAL summary (built from baseQ, the query before the first round) plus
-// every committed answer under «من الفلتر المتقدم», rebuilt from baseQ + ALL facets each time. The
+// one labelled line per committed answer (no heading), rebuilt from baseQ + ALL facets each time. The
 // chips below the intro stay, but nothing on them removes anything: no ✕, no handler, no rebuild path.
 check('a guided round’s summary is the original summary plus every committed answer',
   /guidedSearchSummary\(opts\.guided\.baseQ, opts\.guided\.facets\)/.test(agentSrc));
