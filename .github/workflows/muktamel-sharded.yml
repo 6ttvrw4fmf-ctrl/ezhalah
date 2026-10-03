@@ -74,7 +74,12 @@ jobs:
   crawl:
     name: Muktamel shard ${{ matrix.shard }}/8
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # 180, not 120 (2026-10-03, Scraping Engineer): measured shards ran 77-91 min on normal nights, but
+    # on 10-03 the source was slower (network timeouts 20 vs 3) and all four shards that ran were
+    # killed at 120 mid-sweep; the rerun took 101-102 min. Almost all of it is the sweep: the
+    # pre-sweep ceiling probe takes ~1 min (begin_run lands ~1 min after job start). A shard ends when
+    # its work ends, so the extra cap only costs time on a slow night.
+    timeout-minutes: 180
     strategy:
       fail-fast: false   # one blocked/slow shard must never cancel the other seven
       # 2, NOT 8 (2026-09-11, measured): the only full 8-parallel fleet run (09-03, run
@@ -110,6 +115,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           MUKTAMEL_WORKERS: "8"
+          # unbuffered: a block-buffered stdout stamped the «sweeping ids» line ~25 min late (10-03)
+          PYTHONUNBUFFERED: "1"
         run: >-
           exec python -m scrapers.muktamel.run --type all
           --min-id ${{ github.event.inputs.min_id || '24000' }}
