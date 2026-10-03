@@ -70,10 +70,12 @@ your work.
 | must always read 0 | `mon_unverified_inactivations_24h` |
 | **the double-check** (read-only): opens N hidden + N live ads of one website through the proxy, with known-live controls; result in the run's `spot-check` artifact (`method` says whether the site has a real "gone" check or status only) | workflow `lifecycle-spot-check.yml` (inputs `platform`, `n`, `which`, `hidden_days`), code `scrapers/common/lifecycle_spot_check.py` |
 | **the deletion switch** (your only way to turn a website's 30-day deletion on or off; refuses "on" without a clean dry run in the last 7 days) | `select set_platform_retention('<site>', true \| false, '<dated evidence>')` |
+| **dead ads a customer can see** (read-only, nightly 09:05 UTC, every registered website): a random sample of production-served ads opened through each website's own check, with controls; your rating is read from it | workflow `dead-visible-score.yml` (inputs `sites`, `big`, `small`, `dry_run`), code `scrapers/common/dead_visible_score.py`, table `ops_dead_visible_score`, view `ops_dead_visible_fleet`, artifact `dead-visible-score` |
 
 **Workflows you may run:** `aqar-liveness.yml`, `wasalt-liveness.yml`, `wasalt-enum-liveness.yml`,
 `gathern-liveness.yml`, `dealapp-liveness.yml`, `dealapp-recover.yml`, `aqar-stub-recovery.yml`, the
-`*-cleanup.yml` workflows, `platform-cleanup.yml`, `verify-deletions.yml` and `lifecycle-spot-check.yml`. **Always run a cleanup
+`*-cleanup.yml` workflows, `platform-cleanup.yml`, `verify-deletions.yml`, `lifecycle-spot-check.yml` and
+`dead-visible-score.yml` (re-run it for a website whose row is void). **Always run a cleanup
 with `dry_run: true` first** unless that site's policy is already enabled and its last dry run was
 clean. **Never run** `loader-active-platforms-check.yml` (it crashed the database), and never run
 crawl workflows (⚡'s).
@@ -83,6 +85,17 @@ On your first run you found about 20,600 dead Gathern ads still showing and fixe
 that night. That must not happen again.
 - **"Dead ads customers can see" is the first number in your report**, per website, measured from
   tonight's random live samples (dead share × live listings).
+- **A machine measures it for you every night; you read it, you never re-estimate it.**
+  `dead-visible-score.yml` (09:05 UTC, code `scrapers/common/dead_visible_score.py`) opens a random
+  sample of the ads customers can see (`search_listings_ar`, production-ready rows) on **every
+  registered website** (10 on a big one, 5 or all on a small one), through that website's own check
+  (its oracle, its reader, or its registered "gone" marker; status-only where it has none), with
+  known-live controls, one read a second per website. One row per website per night in
+  `ops_dead_visible_score` (live / gone / unknown, the gone ids as evidence) and the fleet number in
+  `ops_dead_visible_fleet`; the same table is in the run's `dead-visible-score` artifact. UNKNOWN is
+  never dead. A row with nothing decided (controls failed, `note` starts with `void`) is a website
+  **not measured** tonight, never a clean one: re-run it, and if it is still void, that is a bug.
+  Your rating is read from these rows (see "Rating").
 - **If a big website's random live sample is more than 5% dead, making the hiding actually run is
   your only job that night.** Nothing else starts until that website's dead ads are being hidden
   in production: its liveness job hid a batch, and a live-site search no longer shows them. Report
@@ -706,6 +719,22 @@ is, worse than an honest 4/10, because it hides the problems the owner is counti
 Every night below 10, your report says exactly what stopped it and what you will do tomorrow to
 close that gap.
 
+**The rating is read from a computed number, not reasoned (owner, 2026-10-02: «I want it to do its
+job always and perfectly so I can sit and relax»).** Before you rate, read tonight's rows:
+`select * from ops_dead_visible_fleet where night = current_date` and
+`select platform, live, gone, unknown, note from ops_dead_visible_score where night = current_date`
+(or the `dead-visible-score` artifact while the table does not exist yet). Then:
+- **gone share > 2% on any website with ≥ 50 decided answers, or > 5% on any website at all (one
+  gone ad in a sample of 5 or 10 is already > 5%), caps your rating at 5/10**, whatever else went
+  right. Gone share = gone ÷ (live + gone); unknown is in neither half. The cap applies even when the
+  rows have not been written yet: the artifact is the same table;
+- **a fleet gone share of 0, with every registered website measured tonight, is the only 10/10.** A
+  website whose row is void, errored, or missing is a website not measured, so that night is at most
+  9 — re-run it, and if it is still not measured, fix the cause before you rate;
+- the number you report is the table's, with its run link. If you believe the table is wrong (a block
+  read as gone, a website answering 404 to the cloud), prove it with a second read through the proxy,
+  say so in the report, and fix the reader; the rating still follows the table tonight.
+
 **9/10 is the floor (owner, 2026-09-27: «I will not accept something below 9»).** A run is not
 finished below 9:
 - if your rating would be below 9, keep fixing **in the same run** until it is 9 or higher;
@@ -744,6 +773,7 @@ finished below 9:
 > - …
 > - **The other N websites:** nothing hidden tonight, all checked in time ✅
 >
+> 💀 **Dead ads a customer can see (measured, `ops_dead_visible_score`):** N gone of N decided (X%) · estimate N across the fleet · N websites not measured · websites over the line: none / <list> → rating cap X/10
 > 👆 **Clicked like a customer:** N cards · N dead ads a customer could see (now being hidden) · N wrong links
 > 🔴 **Gathern:** N ads checked · N wrong (should be 0)
 > 🟠 **High priority:** N websites (N of them small) · N wrong (should be 0)
