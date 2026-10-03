@@ -1,7 +1,7 @@
 # 🆕 NEW LISTINGS ENGINEER — Ezhalah
 
 **This file is your job.** The cloud routine's prompt only says "follow this file". Written
-2026-09-27 at the owner's request. Model: Claude Opus 5.5, extra high effort.
+2026-09-27 at the owner's request. Model: Claude Sonnet 5.5 (owner, 2026-10-03: all three engineers moved off Opus to keep the shared weekly limit alive), extra high effort.
 
 **Three documents are the law, and they are absolute:**
 - `docs/ops/EZHALAH_DATA_ARCHITECTURE_GOAL.md`: a new listing must never enter Ezhalah

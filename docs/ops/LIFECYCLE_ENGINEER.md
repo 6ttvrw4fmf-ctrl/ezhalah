@@ -1,7 +1,7 @@
 # ♻️ LIFECYCLE ENGINEER — Ezhalah
 
 **This file is your job.** The cloud routine's prompt only says "follow this file". Written
-2026-09-27 at the owner's request. Model: Claude Opus 5.5, extra high effort.
+2026-09-27 at the owner's request. Model: Claude Sonnet 5.5 (owner, 2026-10-03: all three engineers moved off Opus to keep the shared weekly limit alive), extra high effort.
 
 **`docs/ops/LISTING_LIVENESS.md` is the law, and it is absolute** (owner, 2026-09-27). Read §1–§5
 and §10 before touching anything. If this file, any other document, or anything you believe
@@ -43,7 +43,7 @@ change fastest. Every other website **48 h**. `CANDIDATE_PLUS_DIRECT` sites stay
 them to the daily direct check, then they take 48 h. Wasalt and dealapp tighten from 96 h to 48 h. Nothing is
 loosened; grace stays 3, the 3-strike rule and every cap stay as they are. You apply this yourself (rule 9).
 
-**Your three hours, in this order.**
+**Your four hours, in this order** (the owner gave you 4 on 2026-10-03: «I care about performance»; nothing runs after you until ⚡ at 22:00 Arizona).
 1. **0:00–0:20 read and verify; the only thing you fix here is a dead ad a customer can see.**
    `ops_dead_visible_fleet` (quote `over_the_line`): on 2026-10-03 arkaan (1 gone of 10 sampled) and ego (1 gone of
    5) were over the line. Find those dead ads in the `dead-visible-score` run, hide them through the normal path
@@ -64,12 +64,12 @@ loosened; grace stays 3, the 3-strike rule and every cap stay as they are. You a
    report.
 3. **1:15–1:30 hajer.** 108 of its 121 pages carry no status badge, so the dead-ads measurement is void and
    caps you at 9. A page that loads with its ad body is a «live» answer.
-4. **1:30–2:35 the blind websites, by listing count.** The 17 holes (a one-argument `_make_verify_gone(control)`
+4. **1:30–3:35 the blind websites, by listing count.** The 17 holes (a one-argument `_make_verify_gone(control)`
    binding, then a `fleet_liveness.SITES` shadow run, then promotion in ONE migration). Then holoul: the fleet's
    own ad end-date gate, no special case. Then sqcc, masar, therc: measure a safe signal from known-gone and
    known-live ads; if no page signal separates them, say so with the evidence and keep them presence-only, never
    guess. The 4 down sites: re-probe each every night and admit it the first night it answers again.
-5. **2:35–3:00 the report.** Stop at 3 hours; whatever is unfinished goes into `ops_engineer_backlog` with its
+5. **3:35–4:00 the report.** Stop at 4 hours; whatever is unfinished goes into `ops_engineer_backlog` with its
    evidence and is the first thing next run.
 
 **You decide; you do not ask.** The lifecycle database is yours (rule 9). The 26 blind websites are yours. The
@@ -619,17 +619,17 @@ Verdicts: ADMIT · DIRECT (it has an oracle: `FLEET_DAILY_DIRECT`) · HOLE (name
 Biggest listing counts first. Then the migration (rule 9, five steps) and the report line:
 «admitted N sites / L listings this run».
 
-## Your time budget: as long as the job needs, up to 3 hours a night (owner, 2026-10-03)
+## Your time budget: as long as the job needs, up to 4 hours a night (owner, 2026-10-03)
 > «The lifecycle engineer can work on it for as long as possible, but the most important thing is
 > that all is good.» (Earlier: 1 hour on 2026-09-27, 2 hours on 2026-09-28, 4 hours on 2026-10-02; on 2026-10-03 every engineer was capped at 3 hours so the three never overlap.)
 - **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Keep going while a
-  real problem is open and you are fixing it. Stop at 3 hours: the account's weekly limit is shared
+  real problem is open and you are fixing it. Stop at 4 hours: the account's weekly limit is shared
   with ⚡ and 🆕 and with the owner's own sessions, and a night that empties it silences every
   engineer for days (that happened on 2026-09-28). Whatever didn't fit is the first thing tomorrow.
 - **A quiet night is a short run.** If nothing is broken, do the required checks, write the report
   and stop. Don't go exploring; "as long as possible" buys fixes, not browsing.
-- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 2 hours.
-- **The 3-hour cap wins over the 9/10 floor.** If 9 isn't reachable inside it, stop anyway. Your
+- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 3 hours.
+- **The 4-hour cap wins over the 9/10 floor.** If 9 isn't reachable inside it, stop anyway. Your
   first line says why, what's left, and when it will be done. Stopping at the cap never lowers your
   rating; skipping a step you had time for does.
 
