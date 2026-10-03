@@ -7,7 +7,7 @@
 // through it, and the old open path must still exist unchanged for everyone else.
 
 import { readFileSync } from 'node:fs';
-import { IN_APP_VIEWER_HOSTS, inAppViewerHost } from '../src/lib/inAppViewer.ts';
+import { IN_APP_VIEWER_HOSTS, MAX_AD_TABS, addAdTab, inAppViewerHost } from '../src/lib/inAppViewer.ts';
 
 let failed = 0;
 const check = (name: string, ok: boolean) => {
@@ -34,6 +34,22 @@ for (const u of [
   'https://evil.com/?u=https://dealapp.sa/x',
   '', null, undefined, 'not a url',
 ]) check(`${JSON.stringify(u)} → new tab (unchanged)`, inAppViewerHost(u) === null);
+
+// The tab model (owner revision 2026-10-03): every allowed click opens a NEW tab; the same listing
+// refronts its tab instead of duplicating; the strip caps at MAX_AD_TABS with the oldest evicted.
+{
+  const L = (id: number) => ({ source: 'Deal App', id });
+  const a = addAdTab([], L(1));
+  check('first click opens tab 0, active, no eviction', a.tabs.length === 1 && a.active === 0 && !a.evicted);
+  const b = addAdTab(a.tabs, L(2));
+  check('a second listing appends and activates', b.tabs.length === 2 && b.active === 1 && !b.evicted);
+  const c = addAdTab(b.tabs, L(1));
+  check('clicking an open card REFRONTS its tab (no duplicate)', c.tabs.length === 2 && c.active === 0 && !c.evicted);
+  const full = addAdTab(Array.from({ length: MAX_AD_TABS }, (_, i) => L(i + 1)), L(99));
+  check(`the strip caps at ${MAX_AD_TABS}: oldest evicted, flag raised, newest active`,
+    full.tabs.length === MAX_AD_TABS && full.evicted && full.tabs[0].id === 2
+    && full.tabs[full.tabs.length - 1].id === 99 && full.active === MAX_AD_TABS - 1);
+}
 
 // Wiring.
 const agent = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
@@ -65,6 +81,14 @@ mustCatch('a card open that skips trackOpen', !/trackOpen\(l\);\s*(?:if|openAd)/
 mustCatch('a web path that no longer opens a new tab', !/window\.open\(url, '_blank', 'noopener,noreferrer'\)/.test(open.replace("window.open(url, '_blank', 'noopener,noreferrer')", 'location.assign(url)')));
 mustCatch('a native path that no longer uses the system browser', !/WebBrowser\.openBrowserAsync\(url/.test(open.replace('WebBrowser.openBrowserAsync(url', 'Linking.openURL(url')));
 mustCatch('openListing importing the allowlist (native drift)', /inAppViewer/.test(open + "\nimport { inAppViewerHost } from './inAppViewer';"));
+// Naive tab mutants: a bare push never evicts; a bare push duplicates a reopened card.
+{
+  const L = (id: number) => ({ source: 'Deal App', id });
+  const naivePush = (tabs: { source: string; id: number }[], l: { source: string; id: number }) => [...tabs, l];
+  mustCatch('a tab list that never evicts at the cap',
+    naivePush(Array.from({ length: MAX_AD_TABS }, (_, i) => L(i + 1)), L(99)).length > MAX_AD_TABS);
+  mustCatch('a tab opener that duplicates an already-open card', naivePush([L(1)], L(1)).length !== 1);
+}
 
 if (failed) { console.error(`\n✗ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✓ in-app viewer allowlist: decision + wiring verified, mutation-proven');

@@ -57,7 +57,7 @@ import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } 
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
 import { listingOpenUrl, openListing } from '@/lib/openListing';
-import { inAppViewerHost } from '@/lib/inAppViewer';
+import { addAdTab, inAppViewerHost } from '@/lib/inAppViewer';
 import { VIEWER_SPLIT_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import AdViewer from '@/components/AdViewer';
@@ -925,15 +925,42 @@ export default function Agent() {
   // On desktop it's a permanent column → no button. (user: couldn't see the burger on the phone.)
   const docked = useDocked();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  // IN-APP AD VIEWER (owner 2026-10-03): a listing from an allowlisted site (lib/inAppViewer.ts) opens
-  // INSIDE Ezhalah — beside the results at/above VIEWER_SPLIT_BREAKPOINT, as a full-screen sheet below
-  // it. Web only; every other site, and native, keep openListing() exactly as before. The results
-  // never unmount, so closing returns them at the same scroll position. trackOpen fires first either way.
-  const [adViewer, setAdViewer] = useState<Listing | null>(null);
+  // IN-APP AD VIEWER, v2 (owner 2026-10-03, revised after review): a listing from an allowlisted
+  // site (lib/inAppViewer.ts) opens INSIDE Ezhalah — a tabbed mini-browser beside the results at/
+  // above VIEWER_SPLIT_BREAKPOINT («whenever I click a new tab pops up»), a partial sheet below it.
+  // Web only; every other site, and native, keep openListing() exactly as before. The results never
+  // unmount, so closing returns them at the same scroll position. trackOpen fires first either way.
+  // The tab list itself (dedupe-refront, MAX_AD_TABS cap with oldest evicted) is the pure addAdTab()
+  // in lib/inAppViewer.ts, executed by scripts/verify-in-app-viewer-allowlist.ts.
+  const [adTabs, setAdTabs] = useState<Listing[]>([]);
+  const [adActive, setAdActive] = useState(0);
+  const [adHint, setAdHint] = useState('');
+  const adHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // MemoResultCard's comparator deliberately IGNORES onOpen ("behaves identically for the same
+  // listing" — see its header). An openAd that read `adTabs` from its own render would break that
+  // contract: an already-revealed card keeps the closure from the render it was memoised in, and a
+  // stale empty list REPLACED the first tab instead of appending the second (caught live in the v2
+  // harness). The ref mirror makes every closure read the same current list, whenever it was made.
+  const adTabsRef = useRef<Listing[]>([]);
   const viewerSplit = useAtLeast(VIEWER_SPLIT_BREAKPOINT);
   const openAd = (l: Listing) => {
-    if (IS_WEB && inAppViewerHost(listingOpenUrl(l))) setAdViewer(l);
-    else void openListing(l);
+    if (!(IS_WEB && inAppViewerHost(listingOpenUrl(l)))) { void openListing(l); return; }
+    const r = addAdTab(adTabsRef.current, l);
+    adTabsRef.current = r.tabs;
+    setAdTabs(r.tabs);
+    setAdActive(r.active);
+    if (r.evicted) {
+      // The cap's subtle hint: a small pill over the page, gone on its own.
+      setAdHint(t('Oldest tab closed'));
+      if (adHintTimer.current) clearTimeout(adHintTimer.current);
+      adHintTimer.current = setTimeout(() => setAdHint(''), 2200);
+    }
+  };
+  const closeAdTab = (i: number) => {
+    const next = adTabsRef.current.filter((_, x) => x !== i);
+    adTabsRef.current = next;
+    setAdTabs(next);
+    setAdActive((a) => (a > i ? a - 1 : Math.min(a, next.length - 1)));
   };
   // Which result messages have finished typing their reply. The property cards stay hidden until the
   // words above them are fully written out, so listings never appear before Ezhalah has spoken (user
@@ -3602,7 +3629,11 @@ export default function Agent() {
     // color on this screen already flows through the `colors.*` CSS-var tokens (theme/tokens.ts),
     // which are dark-reactive by construction, so this screen was always dark-CAPABLE; only the
     // ForceLightTheme wrapper was overriding it back to light. See verify-theme-contract.ts.
-    <View style={{ flex: 1, flexDirection: 'row', backgroundColor: colors.paper }}>
+    // Owner 2026-10-03: «beside me on my right is the tabs» — the ad pane sits on the PHYSICAL right
+    // in BOTH languages (his explicit word, even in Arabic RTL; his reference is the Claude desktop
+    // app's layout). Under dir=rtl a plain 'row' flows right→left and would put the second child on
+    // the LEFT, so the direction is pinned per-locale instead of left to the document's dir.
+    <View style={{ flex: 1, flexDirection: locale === 'ar' ? 'row-reverse' : 'row', backgroundColor: colors.paper }}>
     {/* The results column. A row so the in-app ad viewer can sit BESIDE it, full height (split). */}
     <View style={{ flex: 1 }}>
       {/* Sketch backdrop behind the chat. The bottom fade is pushed all the way down (0.8→1, same as
@@ -4535,7 +4566,17 @@ export default function Agent() {
         </View>
       ) : null}
     </View>
-    {adViewer && <AdViewer listing={adViewer} split={viewerSplit} onClose={() => setAdViewer(null)} />}
+    {adTabs.length > 0 && (
+      <AdViewer
+        tabs={adTabs}
+        active={adActive}
+        split={viewerSplit}
+        hint={adHint}
+        onSelect={setAdActive}
+        onCloseTab={closeAdTab}
+        onCloseAll={() => { adTabsRef.current = []; setAdTabs([]); setAdActive(0); }}
+      />
+    )}
     </View>
   );
 }

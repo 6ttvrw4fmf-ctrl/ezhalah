@@ -20,3 +20,21 @@ export function inAppViewerHost(url: string | null | undefined): string | null {
   const bare = host.replace(/^www\./, '');
   return IN_APP_VIEWER_HOSTS.find((h) => bare === h || bare.endsWith('.' + h)) ?? null;
 }
+
+// THE TAB MODEL (owner revision 2026-10-03: «whenever I click a new tab pops up», like a browser).
+// Pure so scripts/verify-in-app-viewer-allowlist.ts can execute it: every allowed click opens a NEW
+// tab; clicking a card whose tab is already open REFRONTS that tab (no duplicate); the strip caps at
+// MAX_AD_TABS and the OLDEST tab is evicted (the UI shows a small hint when that happens).
+export const MAX_AD_TABS = 6;
+
+export function addAdTab<T extends { source: string; id: number }>(
+  tabs: T[], l: T, max: number = MAX_AD_TABS,
+): { tabs: T[]; active: number; evicted: boolean } {
+  const key = `${l.source}:${l.id}`;
+  const existing = tabs.findIndex((t) => `${t.source}:${t.id}` === key);
+  if (existing >= 0) return { tabs, active: existing, evicted: false };
+  let next = [...tabs, l];
+  const evicted = next.length > max;
+  if (evicted) next = next.slice(next.length - max);
+  return { tabs: next, active: next.length - 1, evicted };
+}
