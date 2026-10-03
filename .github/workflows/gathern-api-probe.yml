@@ -14,7 +14,13 @@
 name: Gathern per-unit API probe
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "api = msapi per-unit endpoint discovery (Option B). browser = real-Chromium canary against gathern.co (Option E)."
+        type: choice
+        options: [api, browser]
+        default: api
 
 concurrency:
   group: gathern-api-probe
@@ -34,5 +40,14 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
+      - name: Install Chromium (browser mode only)
+        if: inputs.mode == 'browser'
+        run: python -m playwright install --with-deps chromium
+
       - name: Probe (read-only, no DB credentials in scope)
-        run: exec python -m scrapers.gathern.probe_unit_api
+        run: |
+          if [ "${{ inputs.mode }}" = "browser" ]; then
+            exec python -m scrapers.gathern.probe_unit_browser
+          else
+            exec python -m scrapers.gathern.probe_unit_api
+          fi
