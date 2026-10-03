@@ -542,16 +542,19 @@ def _breadcrumb_district_ar(schema: dict, city_ar: Optional[str]) -> Optional[st
 def _location_line_district_ar(html: str, city_ar: Optional[str]) -> Optional[str]:
     """The district from the page's own VISIBLE location line, used ONLY when the title carries none.
 
-    The page prints "<city>, <district>" (e.g. «الغاط, حي المنتزة») and again as "<district>, <city>"
-    (e.g. «حي المنتزة, الغاط»). Owner 2026-10-03: «all the ones in dealapp have a district» — the
-    screenshot of a listing whose title has no district (دور للبيع, «بئر بن هرماس, حي الربوة») showed it
-    in this line, while `_breadcrumb_district_ar` returns None for such a title, so ~50 new ads a day
-    were filed «الحي غير محدد» with the source's district sitting on the page.
+    The page prints the location twice, mirrored: «<city>, <district>» and «<district>, <city>», where
+    the city side may carry a sub-area after a dash. Real lines (re-read 2026-10-03):
+        «بقعاء, حي بقعاء القديمة»  /  «حي بقعاء القديمة, بقعاء»
+        «الغزالة - الروضه, حي الروضة»  /  «حي الروضة, الغزالة - الروضه»
+        «الكامل, حي غير محدد»  /  «حي غير محدد, الكامل»      <- the source says it has NO district
+    Owner 2026-10-03: «all the ones in dealapp have a district» (screenshot: «بئر بن هرماس, حي الربوة»
+    on an ad whose title has none), so ~50 new ads a day were filed «الحي غير محدد» with the district
+    printed on the page.
 
-    It is a GAP-FILLER, never an override: the breadcrumb answer wins whenever it exists (the title is
-    the listing's own words; on 15022873 the two disagree and that conflict is the owner's call). It
-    needs BOTH orders of the line to agree, so one stray text node cannot become a district, and it only
-    accepts Arabic. Verbatim source Arabic or None."""
+    A GAP-FILLER, never an override: the breadcrumb answer wins whenever it exists (on 15022873 the title
+    and the line disagree; that conflict is the owner's call). Both mirrored lines must be present and
+    agree, so one stray text node cannot become a district. The district must be Arabic, start with «حي »,
+    and never be the source's own «غير محدد». Verbatim source Arabic or None."""
     city = (city_ar or "").strip()
     if not city:
         return None
@@ -559,13 +562,20 @@ def _location_line_district_ar(html: str, city_ar: Optional[str]) -> Optional[st
     body = html[body_start:] if body_start != -1 else html
     body = re.sub(r"<(script|style|noscript|svg)[^>]*>.*?</\1>", " ", body, flags=re.S | re.I)
     lines = [re.sub(r"\s+", " ", x).strip() for x in re.sub(r"<[^>]+>", "\n", body).split("\n")]
-    sep = r"\s*[,،]\s*"
-    first = {m.group(1).strip() for ln in lines
-             if (m := re.fullmatch(rf"{re.escape(city)}{sep}(.+)", ln))}
-    second = {m.group(1).strip() for ln in lines
-              if (m := re.fullmatch(rf"(.+?){sep}{re.escape(city)}", ln))}
-    agreed = [d for d in first & second if re.search(r"[ء-ي]", d) and d != city and len(d) <= 60]
-    return agreed[0] if len(agreed) == 1 else None
+    pairs = set()
+    for ln in lines:
+        parts = [x.strip() for x in re.split(r"\s*[,،]\s*", ln)]
+        if len(parts) == 2 and all(parts):
+            pairs.add((parts[0], parts[1]))
+
+    def is_city_side(x: str) -> bool:
+        return x == city or re.match(rf"{re.escape(city)}\s*[-–]\s*\S", x) is not None
+
+    found = {b for (a, b) in pairs
+             if (b, a) in pairs and is_city_side(a) and not is_city_side(b)
+             and re.match(r"حي\s+\S", b) and re.search(r"[ء-ي]", b)
+             and "غير محدد" not in b and len(b) <= 60}
+    return found.pop() if len(found) == 1 else None
 
 
 def _spec_value(html: str, label: str) -> Optional[str]:
