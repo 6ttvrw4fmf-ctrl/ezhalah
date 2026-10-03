@@ -60,8 +60,19 @@ check('…and resets its form (store query, city, district, scroll) when a searc
   /takeSearchLeftBehind\(\)/.test(noComments)
   && /setQuery\(\(\) => HOME_DEFAULT_QUERY\(\)\)/.test(noComments)
   && /setCitySelected\(null\)/.test(noComments) && /clearDistrict\(\)/.test(noComments));
-check('…raised by the results screen as soon as it holds a search',
-  /markSearchLeftBehind\(\)/.test(read('src/app/agent.tsx')));
+{
+  const agentSrc = read('src/app/agent.tsx');
+  // RAISED ONLY BY A SEARCH WHOSE RESULTS LANDED. A search cancelled during the loader never happened:
+  // the Filter must restore it exactly (verify-web-runtime-smoke.mjs [E]/[F]/[H], CI run 37102531144
+  // went red 6x when the flag rode the first user message instead).
+  const raisesOnResults = (src: string) =>
+    /const landedResultsCount = msgs\.filter\(\(m\) => m\.role === 'results'\)\.length;/.test(src)
+    && /useEffect\(\(\) => \{ if \(landedResultsCount > 0\) markSearchLeftBehind\(\); \}, \[landedResultsCount\]\);/.test(src);
+  check('…raised by the results screen each time a search\'s RESULTS land (a cancelled search raises nothing)',
+    raisesOnResults(agentSrc));
+  check('(mutation) catches the flag riding the first user message again (it would wipe a cancelled search)',
+    !raisesOnResults(agentSrc.replace('if (landedResultsCount > 0) markSearchLeftBehind();', 'if (modeSearched) markSearchLeftBehind();')));
+}
 const flag = await import('../src/lib/searchLeftBehind.ts');
 flag.takeSearchLeftBehind();
 check('the flag starts lowered and a first focus after load finds nothing to reset', flag.takeSearchLeftBehind() === false);

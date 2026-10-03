@@ -742,9 +742,14 @@ export default function Agent() {
   // moment a search happens (any user message or results — same condition that hides the guest
   // chips), it fades + collapses away: mid-conversation the pill is noise. JS driver (height).
   const modeSearched = msgs.some((m) => m.role === 'user' || m.role === 'results');
-  // Once this screen holds a search, the Filter home must open clean when the user comes back to it
-  // (owner 2026-10-03) — see src/lib/searchLeftBehind.ts. A blank chat raises nothing.
-  useEffect(() => { if (modeSearched) markSearchLeftBehind(); }, [modeSearched]);
+  // Once a search has LANDED here, the Filter home must open clean when the user comes back to it
+  // (owner 2026-10-03) — see src/lib/searchLeftBehind.ts. Keyed on each results turn that lands, never
+  // on the first message: a search the user cancels before its results arrive (Back or Stop during
+  // the loader) never happened, and the Filter must come back with their city, district and area
+  // EXACTLY as they left them (verify-web-runtime-smoke.mjs [E]/[F]/[H]). Counting the turns, not a
+  // boolean, so a second search landing on this same screen raises it again.
+  const landedResultsCount = msgs.filter((m) => m.role === 'results').length;
+  useEffect(() => { if (landedResultsCount > 0) markSearchLeftBehind(); }, [landedResultsCount]);
   // BUG (owner-reported 2026-09-11): opening an old chat from the sidebar made this pill visibly
   // pop up then collapse away — a "weird animation" on every single history open. Root cause: `msgs`
   // starts EMPTY (useState([]) above) and openSaved() fills it in ONE async setMsgs() call once the
