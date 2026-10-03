@@ -23,6 +23,11 @@
 -- after p_is_new_construction, then rebuild_af_filter_rpcs() — which drops every overload first —
 -- regenerates the six RPCs. No hand edit of an AF RPC.
 --
+-- CARD EVIDENCE GATE. location_search_candidates_ar packs `af_canon` (the per-listing values the card's
+-- «مطابق لطلبك» strip proves an answer with) only when some AF param is set — see
+-- sql/mirrors/af_canon_select.sql. The three new params join that gate here, or a search narrowed by
+-- a mixture alone would return af_canon NULL and the card would show nothing for the answer.
+--
 -- SELF-CHECK at apply time (any failure aborts the whole migration):
 --   • parity 0 after rebuild;
 --   • six existing counts (three scopes × two surfaces) are byte-identical before and after;
@@ -51,6 +56,9 @@ declare
          or (''9.0'' = any(p_rating_buckets) and s.rating >= 9.0)
          or (''9.0_rc10'' = any(p_rating_buckets) and s.rating >= 9.0 and s.reviews_count >= 10))))$x$;
   sig_needle text := $x$p_is_new_construction boolean DEFAULT NULL::boolean$x$;
+  gate_needle text := $x$or p_is_new_construction is not null$x$;
+  gate_new text := $x$or p_is_new_construction is not null or p_age_buckets is not null or p_rating_buckets is not null or p_furnished_in is not null$x$;
+  canon jsonb;
   sig_new text := $x$p_is_new_construction boolean DEFAULT NULL::boolean, p_age_buckets text[] DEFAULT NULL::text[], p_rating_buckets text[] DEFAULT NULL::text[], p_furnished_in boolean[] DEFAULT NULL::boolean[]$x$;
   parity int;
   b_a bigint; b_b bigint; b_f bigint; g_a bigint; g_b bigint; g_f bigint;
@@ -83,7 +91,13 @@ begin
     if position('p_age_buckets' in t.template) > 0 then continue; end if;
     occ := (length(t.template) - length(replace(t.template, sig_needle, ''))) / length(sig_needle);
     if occ <> 1 then raise exception 'ABORT: % signature needle occurs %', t.fn_name, occ; end if;
-    update af_rpc_templates set template = replace(t.template, sig_needle, sig_new) where fn_name = t.fn_name;
+    tpl := replace(t.template, sig_needle, sig_new);
+    if t.fn_name = 'location_search_candidates_ar' then
+      occ := (length(tpl) - length(replace(tpl, gate_needle, ''))) / length(gate_needle);
+      if occ <> 1 then raise exception 'ABORT: af_canon gate needle occurs %', occ; end if;
+      tpl := replace(tpl, gate_needle, gate_new);
+    end if;
+    update af_rpc_templates set template = tpl where fn_name = t.fn_name;
   end loop;
 
   perform * from rebuild_af_filter_rpcs();
@@ -133,6 +147,14 @@ begin
   select af_eligible_count(p_deal:='إيجار', p_rent_period:='شهري', p_types:=array['شقة'], p_cities:=array['الرياض'], p_category:='Residential', p_rating_min:=9.5, p_reviews_min:=10) into p3;
   if u <> p1 + p2 - p3 then raise exception 'ABORT: rating [9.5,9.0_rc10] % <> % + % - %', u, p1, p2, p3; end if;
   if u = 0 then raise exception 'ABORT: rating union proven on an empty set — pick a richer scope'; end if;
+
+  -- the card evidence gate opens for a mixture alone
+  select to_jsonb(r) -> 'af_canon' into canon from location_search_candidates_ar(
+    p_deal:='إيجار', p_rent_period:='سنوي', p_types:=array['شقة'], p_cities:=array['الرياض'], p_category:='Residential',
+    p_age_buckets:=array['new','6_9']) r limit 1;
+  if canon is null or jsonb_typeof(canon) <> 'object' or not (canon ? 'property_age') then
+    raise exception 'ABORT: a mixture-only search returns no af_canon (%)', canon;
+  end if;
 
   raise notice 'OK: three union params live; existing counts unchanged (% / % / %)', a_a, a_b, a_f;
 end

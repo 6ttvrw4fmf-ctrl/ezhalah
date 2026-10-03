@@ -117,6 +117,7 @@ const LOADED: SearchQuery = {
   ageMin: 3, ageMax: 5, isNewConstruction: true, amenities: ['elevator', 'parking'], bathMin: 3,
   ratingMin: 9, reviewsMin: 10, unitSubtypes: ['استديو'], furnishedPref: false,
   streetWidthMin: 20, directions: ['شمال', 'غرب'],
+  ageBuckets: ['new', '6_9'], ratingBuckets: ['9.5', '9.0_rc10'], furnishedIn: [true, false],
 };
 const loadedParams = rpcAdvancedFilterParams(LOADED);
 // THE SET IS DERIVED FROM THE BUILDER, NOT COUNTED OFF A FIXTURE. This used to be

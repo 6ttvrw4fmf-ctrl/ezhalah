@@ -73,6 +73,7 @@ import { commitOneAfAnswer } from './journeys.mjs';
 const AF_PARAMS = [
   'p_amenities', 'p_bath_min', 'p_furnished', 'p_street_width_min', 'p_rating_min', 'p_reviews_min',
   'p_unit_subtypes', 'p_age_min', 'p_age_max', 'p_directions', 'p_is_new_construction',
+  'p_age_buckets', 'p_rating_buckets', 'p_furnished_in',
 ];
 
 // SCOPE questions (src/data/advancedFilters.ts SCOPE_QUESTIONS) share the AF card UI and round

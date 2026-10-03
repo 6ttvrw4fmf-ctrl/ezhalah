@@ -489,6 +489,7 @@ console.log('\n── T4. injection: one carrier, one prop, comparator, strip on
     amenities: 'p_amenities', bathMin: 'p_bath_min', ratingMin: 'p_rating_min',
     reviewsMin: 'p_reviews_min', unitSubtypes: 'p_unit_subtypes', furnishedPref: 'p_furnished',
     streetWidthMin: 'p_street_width_min', directions: 'p_directions',
+    ageBuckets: 'p_age_buckets', ratingBuckets: 'p_rating_buckets', furnishedIn: 'p_furnished_in',
   };
   const ungated = AF_PREDICATE_FIELDS.filter((f) => !gate.includes(`${PARAM_OF[f]} is not null`));
   assert(ungated.length === 0,

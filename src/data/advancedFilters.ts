@@ -144,7 +144,7 @@ const AGE_QUESTION: AdvancedQuestion = {
     return { options, unknownCount: counts.cnt_unknown, total: counts.cnt_total };
   },
   apply(q, keys) {
-    const picked = AGE_BUCKETS.map((b) => b.key).filter((k) => keys.includes(k));   // bucket order, known keys only
+    const picked = ['new', '1_2', '3_5', '6_9', '10p'].filter((k) => keys.includes(k));   // bucket order, known keys only
     if (picked.length >= 2) return { ...q, ageBuckets: picked, isNewConstruction: null, ageMin: null, ageMax: null };
     switch (picked[0]) {
       case 'new': return { ...q, ageBuckets: null, isNewConstruction: true, ageMin: null, ageMax: null };
