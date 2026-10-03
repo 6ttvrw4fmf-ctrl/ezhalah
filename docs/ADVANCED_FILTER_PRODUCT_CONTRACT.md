@@ -406,6 +406,16 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
   **No production behaviour changes with this confirmation** — both shapes were already implemented
   and barriered. A future run must not re-open R7.2.2 as an owner question.
 
+- **R7.2.3 — NEVER FORCE ONE ANSWER** *(owner 2026-10-03: «many users want to choose جديد or ١–٢
+  years … It's a new rule» · «never force the user to select one thing»)*. EVERY advanced question is
+  multi-select (`selection: 'multi'`), and several picks mean EXACTLY their union — «جديد + ٦–٩» is
+  those two buckets and nothing between («you show a mixture of the ages you selected»; no gap fill,
+  never collapsed to one pick). One pick keeps the single-answer fields; two or more use the union
+  params `p_age_buckets` / `p_rating_buckets` / `p_furnished_in` (migration
+  `af_every_question_multi_select_unions`); the «at least» ladders (bathrooms, street width) union to
+  the LOWEST pick; unit subtypes were already an array. «مفروش + غير مفروش» = the listings that STATED
+  either way — a silent listing is in neither. Barrier: `scripts/verify-af-every-question-multi.ts`.
+
 ### 7.3 No stale counts
 
 - **R7.3.1** — While an RPC is in flight, the count MUST NOT show a previous scope's value.

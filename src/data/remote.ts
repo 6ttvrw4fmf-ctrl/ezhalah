@@ -432,6 +432,10 @@ export function rpcAdvancedFilterParams(q: SearchQuery) {
     ...(q.ageMin != null ? { p_age_min: q.ageMin } : {}),
     ...(q.ageMax != null ? { p_age_max: q.ageMax } : {}),
     ...(q.isNewConstruction != null ? { p_is_new_construction: q.isNewConstruction } : {}),
+    // Several answers to one question = their exact union (owner 2026-10-03); sent only when picked.
+    ...(q.ageBuckets?.length ? { p_age_buckets: q.ageBuckets } : {}),
+    ...(q.ratingBuckets?.length ? { p_rating_buckets: q.ratingBuckets } : {}),
+    ...(q.furnishedIn?.length ? { p_furnished_in: q.furnishedIn } : {}),
   };
 }
 const RPC_SORT_KEYS = new Set(['oldest', 'price_asc', 'price_desc', 'area_asc', 'area_desc', 'beds_desc']);
@@ -763,7 +767,7 @@ function withTimeout<T>(p: PromiseLike<T>, ms: number): Promise<T | { timedOut: 
 // so the un-narrowed buckets are the correct thing to price: the pick replaces the old answer.
 // Same contract as apartment_guided_counts_ar, whose per-option counts also ignore their own dimension.
 function ageAgnostic<T extends Record<string, unknown>>(params: T) {
-  const { p_age_min: _min, p_age_max: _max, p_is_new_construction: _new, ...rest } = params;
+  const { p_age_min: _min, p_age_max: _max, p_is_new_construction: _new, p_age_buckets: _buckets, ...rest } = params;
   return rest;
 }
 

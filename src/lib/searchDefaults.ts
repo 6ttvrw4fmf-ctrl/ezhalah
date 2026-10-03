@@ -47,6 +47,7 @@ export const RNPL_TOKENS: readonly string[] = ['rnpl', 'rent_now_pay_later'];
 export const AF_PREDICATE_FIELDS = [
   'ageMin', 'ageMax', 'isNewConstruction', 'amenities', 'bathMin',
   'ratingMin', 'reviewsMin', 'unitSubtypes', 'furnishedPref', 'streetWidthMin', 'directions',
+  'ageBuckets', 'ratingBuckets', 'furnishedIn',
 ] as const;
 
 // Defaults are Rent + Residential so a bare Search (nothing else chosen) returns residential

@@ -116,10 +116,16 @@ const AGE_BUCKETS: Array<{ key: string; labelKey: string; count: (c: AgeOptionCo
   { key: '10p', labelKey: '10+ years', count: (c) => c.cnt_10p },
 ];
 
+// NEVER FORCE ONE ANSWER (owner 2026-10-03: «many users want to choose جديد or ١–٢ years … never force
+// the user to select one thing»). Every question below is multi-select, and several picks mean EXACTLY
+// their union — «جديد + ٦–٩» is those two buckets and nothing between («you show a mixture of the ages
+// you selected»). One pick keeps the single-answer fields every other surface already reads; two or
+// more use the union fields (ageBuckets / ratingBuckets / furnishedIn), or — for the «at least» ladders,
+// whose union IS the lowest pick — the lowest threshold. scripts/verify-af-every-question-multi.ts.
 const AGE_QUESTION: AdvancedQuestion = {
   id: 'property_age',
   titleKey: 'How old is the property?',
-  selection: 'single',
+  selection: 'multi',
   // Was its own hand-maintained type→macro map (src/lib/ageFilterTypes.ts, deleted 2026-09-01) that
   // duplicated COHORT_QUESTIONS and drifted from it — 5 types with real, chat-certified property_age
   // data (Shop, Workshop, Commercial Building, Farm, Rest House) were unreachable from the manual
@@ -138,12 +144,14 @@ const AGE_QUESTION: AdvancedQuestion = {
     return { options, unknownCount: counts.cnt_unknown, total: counts.cnt_total };
   },
   apply(q, keys) {
-    switch (keys[0]) {
-      case 'new': return { ...q, isNewConstruction: true, ageMin: null, ageMax: null };
-      case '1_2': return { ...q, isNewConstruction: null, ageMin: 1, ageMax: 2 };
-      case '3_5': return { ...q, isNewConstruction: null, ageMin: 3, ageMax: 5 };
-      case '6_9': return { ...q, isNewConstruction: null, ageMin: 6, ageMax: 9 };
-      case '10p': return { ...q, isNewConstruction: null, ageMin: 10, ageMax: null };
+    const picked = ['new', '1_2', '3_5', '6_9', '10p'].filter((k) => keys.includes(k));   // bucket order, known keys only
+    if (picked.length >= 2) return { ...q, ageBuckets: picked, isNewConstruction: null, ageMin: null, ageMax: null };
+    switch (picked[0]) {
+      case 'new': return { ...q, ageBuckets: null, isNewConstruction: true, ageMin: null, ageMax: null };
+      case '1_2': return { ...q, ageBuckets: null, isNewConstruction: null, ageMin: 1, ageMax: 2 };
+      case '3_5': return { ...q, ageBuckets: null, isNewConstruction: null, ageMin: 3, ageMax: 5 };
+      case '6_9': return { ...q, ageBuckets: null, isNewConstruction: null, ageMin: 6, ageMax: 9 };
+      case '10p': return { ...q, ageBuckets: null, isNewConstruction: null, ageMin: 10, ageMax: null };
       default: return q;
     }
   },
@@ -309,7 +317,7 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
 const BATHROOMS_QUESTION: AdvancedQuestion = {
   id: 'bathrooms',
   titleKey: 'How many bathrooms?',
-  selection: 'single',
+  selection: 'multi',
   eligibility: (q) => cohortAllows(q, 'bathrooms'),
   async resolveOptions(q) {
     // Only rungs ABOVE the current answer can narrow. apartment_guided_counts_ar computes cnt_bath1..4
@@ -334,9 +342,10 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
   // reads 1,117 → tapping it installed bathMin=1 and returned 2,984, of which 1,867 had FEWER bathrooms
   // than the user had asked for (breaking strict-options too, not just count honesty). Math.max keeps
   // the card monotone: the answer can only ever narrow, so the pill's number always holds.
+  // «+١» and «+٣» together = at least one: the union of «at least» rungs IS the lowest pick.
   apply: (q, keys) => {
-    const n = parseInt(keys[0] ?? '', 10);
-    return Number.isFinite(n) && n > 0 ? { ...q, bathMin: Math.max(n, q.bathMin ?? 0) } : q;
+    const ns = keys.map((k) => parseInt(k, 10)).filter((n) => Number.isFinite(n) && n > 0);
+    return ns.length ? { ...q, bathMin: Math.max(Math.min(...ns), q.bathMin ?? 0) } : q;
   },
 };
 
@@ -346,7 +355,7 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
 const FURNISHED_QUESTION: AdvancedQuestion = {
   id: 'furnished',
   titleKey: 'Do you prefer it furnished?',
-  selection: 'single',
+  selection: 'multi',
   eligibility: (q) => cohortAllows(q, 'furnished'),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
@@ -354,9 +363,11 @@ const FURNISHED_QUESTION: AdvancedQuestion = {
       { key: 'no',  labelKey: 'Unfurnished', count: (c) => c.cnt_unfurnished },
     ], (c) => c.cnt_total_base - c.cnt_furnished - c.cnt_unfurnished);
   },
+  // Both = the listings that STATED either way (furnishedIn [true,false]); a silent listing is in neither.
   apply: (q, keys) =>
-    keys[0] === 'yes' ? { ...q, furnishedPref: true }
-    : keys[0] === 'no' ? { ...q, furnishedPref: false }
+    keys.includes('yes') && keys.includes('no') ? { ...q, furnishedPref: null, furnishedIn: [true, false] }
+    : keys.includes('yes') ? { ...q, furnishedPref: true, furnishedIn: null }
+    : keys.includes('no') ? { ...q, furnishedPref: false, furnishedIn: null }
     : q,
 };
 
@@ -371,7 +382,7 @@ const FURNISHED_QUESTION: AdvancedQuestion = {
 const STREET_WIDTH_QUESTION: AdvancedQuestion = {
   id: 'street_width',
   titleKey: 'How wide should the street be?',
-  selection: 'single',
+  selection: 'multi',
   eligibility: (q) => cohortAllows(q, 'street_width'),
   async resolveOptions(q) {
     const floor = q.streetWidthMin ?? 0;
@@ -383,9 +394,10 @@ const STREET_WIDTH_QUESTION: AdvancedQuestion = {
     ];
     return guidedOptions(await fetchApartmentGuidedCounts(q), rungs.filter((r) => parseInt(r.key, 10) > floor), (c) => c.cnt_stw_unknown);
   },
+  // Several «or wider» rungs = the narrowest picked one (their union).
   apply: (q, keys) => {
-    const n = parseInt(keys[0] ?? '', 10);
-    return Number.isFinite(n) && n > 0 ? { ...q, streetWidthMin: Math.max(n, q.streetWidthMin ?? 0) } : q;
+    const ns = keys.map((k) => parseInt(k, 10)).filter((n) => Number.isFinite(n) && n > 0);
+    return ns.length ? { ...q, streetWidthMin: Math.max(Math.min(...ns), q.streetWidthMin ?? 0) } : q;
   },
 };
 
@@ -437,7 +449,7 @@ const DIRECTION_QUESTION: AdvancedQuestion = {
 const RATING_QUESTION: AdvancedQuestion = {
   id: 'rating',
   titleKey: 'What rating would you prefer?',
-  selection: 'single',
+  selection: 'multi',
   eligibility: (q) => cohortAllows(q, 'rating'),
   async resolveOptions(q) {
     const floor = q.ratingMin ?? 0;
@@ -452,7 +464,10 @@ const RATING_QUESTION: AdvancedQuestion = {
       (c) => c.cnt_rating_unknown);
   },
   apply: (q, keys) => {
-    const k = keys[0];
+    // Two or more rungs = their exact union («9.5+» OR «9.0+ with 10 reviews» has no single threshold).
+    const picked = ['9.5', '9.0', '9.0_rc10'].filter((k) => keys.includes(k));
+    if (picked.length >= 2) return { ...q, ratingBuckets: picked };
+    const k = picked[0];
     if (k === '9.5')      return { ...q, ratingMin: Math.max(9.5, q.ratingMin ?? 0) };
     if (k === '9.0')      return { ...q, ratingMin: Math.max(9.0, q.ratingMin ?? 0) };
     if (k === '9.0_rc10') return { ...q, ratingMin: Math.max(9.0, q.ratingMin ?? 0), reviewsMin: Math.max(10, q.reviewsMin ?? 0) };
@@ -467,7 +482,7 @@ const RATING_QUESTION: AdvancedQuestion = {
 const UNIT_SUBTYPE_QUESTION: AdvancedQuestion = {
   id: 'unit_subtype',
   titleKey: 'What kind of unit?',
-  selection: 'single',
+  selection: 'multi',
   eligibility: (q) => cohortAllows(q, 'unit_subtype') && !(q.unitSubtypes?.length),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
@@ -476,7 +491,7 @@ const UNIT_SUBTYPE_QUESTION: AdvancedQuestion = {
       { key: 'شقة',         labelKey: 'Regular apartment',  count: (c) => c.cnt_sub_regular },
     ], (c) => c.cnt_sub_unknown);
   },
-  apply: (q, keys) => (keys[0] ? { ...q, unitSubtypes: [keys[0]] } : q),
+  apply: (q, keys) => (keys.length ? { ...q, unitSubtypes: [...keys] } : q),
 };
 
 export const ADVANCED_QUESTIONS: AdvancedQuestion[] = [

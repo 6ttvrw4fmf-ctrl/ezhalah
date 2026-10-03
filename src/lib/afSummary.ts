@@ -37,8 +37,9 @@ function facetItems(f: AfFacet): string[] {
   const items: string[] = [];
   {
     switch (f.id) {
+      // Every question takes several answers (owner 2026-10-03), so each pick is its own item.
       case 'property_age':
-        items.push(`عمر ${f.labels[0]} ${f.keys[0] === 'new' ? '✨' : '🏗️'}`);
+        f.labels.forEach((l, i) => items.push(`عمر ${l} ${f.keys[i] === 'new' ? '✨' : '🏗️'}`));
         break;
       case 'rnpl':
         items.push(`${f.labels[0]} 💳`);
@@ -56,13 +57,13 @@ function facetItems(f: AfFacet): string[] {
         for (const l of f.labels) items.push(`${l} 🏡`);
         break;
       case 'bathrooms':
-        items.push(`${f.labels[0]} حمامات 🚿`);
+        for (const l of f.labels) items.push(`${l} حمامات 🚿`);
         break;
       case 'furnished':
-        items.push(`${f.labels[0]} ${f.keys[0] === 'yes' ? '🛋️' : '🏠'}`);
+        f.labels.forEach((l, i) => items.push(`${l} ${f.keys[i] === 'yes' ? '🛋️' : '🏠'}`));
         break;
       case 'street_width':
-        items.push(`شارع ${f.labels[0]} 🛣️`);
+        for (const l of f.labels) items.push(`شارع ${l} 🛣️`);
         break;
       // «أو», not «و». p_directions is a membership filter — picking شمال and غرب returns listings
       // facing north OR west. «شمال وغرب» describes a DIFFERENT, buildable query: one corner listing
@@ -73,10 +74,10 @@ function facetItems(f: AfFacet): string[] {
         items.push(`${f.labels.join(' أو ')} 🧭`);
         break;
       case 'rating':
-        items.push(`تقييم ${f.labels[0]} ⭐`);
+        for (const l of f.labels) items.push(`تقييم ${l} ⭐`);
         break;
       case 'unit_subtype':
-        items.push(`${f.labels[0]} 🏢`);
+        for (const l of f.labels) items.push(`${l} 🏢`);
         break;
       default:
         for (const l of f.labels) items.push(l);

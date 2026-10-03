@@ -112,6 +112,7 @@ const num = (v: unknown): number => (typeof v === 'number' ? v : Number.NaN);
 // exactly; any other ageMin/ageMax combination the chat path can set («أقل من 3 سنوات» → ageMax only)
 // encodes the same way, so no combination is invisible.
 function ageKey(q: SearchQuery): string[] | null {
+  if (q.ageBuckets?.length) return q.ageBuckets;   // several picks (owner 2026-10-03): their own keys
   if (q.isNewConstruction === true) return ['new'];
   if (q.ageMin == null && q.ageMax == null) return null;
   return [q.ageMax == null ? `${q.ageMin}p` : `${q.ageMin ?? ''}_${q.ageMax}`];
@@ -134,6 +135,11 @@ function ageText(v: number, t: T): string {
   return v < 10 ? t('Age: {n} years', { n: v }) : t('Age: {n} years (over ten)', { n: v });
 }
 
+function ratingRungOk(key: string, r: Record<string, unknown>): boolean {
+  const [min, rc] = key.split('_rc');
+  return num(r.rating) >= Number(min) && (rc == null || num(r.reviews_count) >= Number(rc));
+}
+
 // Registry order = ADVANCED_QUESTIONS order, so the same query yields the same chip order on every
 // card (the barrier pins it against the real pool).
 export const AF_EVIDENCE: Record<string, EvidenceDef> = {
@@ -145,10 +151,10 @@ export const AF_EVIDENCE: Record<string, EvidenceDef> = {
     chips: (_k, _r, t) => [t('Offers installments')],
   },
   property_age: {
-    fields: ['ageMin', 'ageMax', 'isNewConstruction'],
+    fields: ['ageMin', 'ageMax', 'isNewConstruction', 'ageBuckets'],
     active: ageKey,
     reads: () => ['property_age'],
-    ok: (k, r) => ageOk(k[0], num(r.property_age)),
+    ok: (k, r) => k.some((x) => ageOk(x, num(r.property_age))),   // a mixture: the bucket it is IN
     chips: (_k, r, t) => [ageText(num(r.property_age), t)],
   },
   amenities: {
@@ -172,10 +178,11 @@ export const AF_EVIDENCE: Record<string, EvidenceDef> = {
     chips: (_k, r, t) => [`${r.bathrooms} ${t(r.bathrooms === 1 ? 'Bath' : 'Baths')}`],
   },
   furnished: {
-    fields: ['furnishedPref'],
-    active: (q) => (q.furnishedPref == null ? null : [q.furnishedPref ? 'yes' : 'no']),
+    fields: ['furnishedPref', 'furnishedIn'],
+    active: (q) => (q.furnishedIn?.length ? q.furnishedIn.map((b) => (b ? 'yes' : 'no'))
+      : q.furnishedPref == null ? null : [q.furnishedPref ? 'yes' : 'no']),
     reads: () => ['furnished'],
-    ok: (k, r) => r.furnished === (k[0] === 'yes'),
+    ok: (k, r) => (r.furnished === true && k.includes('yes')) || (r.furnished === false && k.includes('no')),
     // false is a value the SOURCE stated («غير مفروشة»); null never reaches here.
     chips: (_k, r, t) => [t(r.furnished === true ? 'Furnished' : 'Unfurnished')],
   },
@@ -195,16 +202,17 @@ export const AF_EVIDENCE: Record<string, EvidenceDef> = {
     chips: (_k, r, t) => [t(DIRECTION_LABEL[normDirectionAr(r.direction_ar) as string])],
   },
   rating: {
-    fields: ['ratingMin', 'reviewsMin'],
+    fields: ['ratingMin', 'reviewsMin', 'ratingBuckets'],
     // Key = the AF's own option keys ('9.5' | '9.0' | '9.0_rc10'): one decimal, so a query built by
     // RATING_QUESTION.apply() round-trips exactly (the barrier asserts apply → active → [key]).
-    active: (q) => (q.ratingMin == null ? null : [q.reviewsMin != null ? `${q.ratingMin.toFixed(1)}_rc${q.reviewsMin}` : q.ratingMin.toFixed(1)]),
-    reads: (k) => (k[0].includes('_rc') ? ['rating', 'reviews_count'] : ['rating']),
-    ok: (k, r) => {
-      const [min, rc] = k[0].split('_rc');
-      return num(r.rating) >= Number(min) && (rc == null || num(r.reviews_count) >= Number(rc));
-    },
-    chips: (k, r, t) => [k[0].includes('_rc') ? `★ ${r.rating} (${t('{n} reviews', { n: r.reviews_count as number })})` : `★ ${r.rating}`],
+    // A mixture (owner 2026-10-03) carries the picked keys; the listing satisfies the rung it is in.
+    active: (q) => (q.ratingBuckets?.length ? q.ratingBuckets
+      : q.ratingMin == null ? null : [q.reviewsMin != null ? `${q.ratingMin.toFixed(1)}_rc${q.reviewsMin}` : q.ratingMin.toFixed(1)]),
+    reads: (k) => (k.some((x) => x.includes('_rc')) ? ['rating', 'reviews_count'] : ['rating']),
+    ok: (k, r) => k.some((x) => ratingRungOk(x, r)),
+    // Reviews are shown when the rung that MATCHED is the review rung (a 9.5+ listing proves 9.5 alone).
+    chips: (k, r, t) => [k.some((x) => !x.includes('_rc') && ratingRungOk(x, r)) || !k.some((x) => x.includes('_rc'))
+      ? `★ ${r.rating}` : `★ ${r.rating} (${t('{n} reviews', { n: r.reviews_count as number })})`],
   },
   unit_subtype: {
     fields: ['unitSubtypes'],
