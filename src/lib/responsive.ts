@@ -78,3 +78,8 @@ export const SHARE_LABEL_BREAKPOINT = 380;
 
 /** Platform logos and their loader rows use the larger laptop size at this width. */
 export const PLATFORM_LOGO_BREAKPOINT = 720;
+
+// In-app ad viewer (owner 2026-10-03): at/above this width an allowlisted listing opens in a panel
+// BESIDE the results (split view); below it, a full-screen sheet over them. Lives here, never
+// inline, so SSR (width 0) and the client agree through useAtLeast().
+export const VIEWER_SPLIT_BREAKPOINT = 1024;

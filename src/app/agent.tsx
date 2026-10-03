@@ -48,6 +48,7 @@ import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import { ResultCard } from '@/components/ResultCard';
+import type { Listing } from '@/data/listings';
 import { ResultCardGrid } from '@/components/ResultCardGrid';
 import { parseQuery, respond } from '@/data/agent';
 import { fetchListingsForQuery } from '@/data/remote';
@@ -55,7 +56,11 @@ import { buildLocationProbeQuery, replyAfterLocationProbe } from '@/lib/agentLoc
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
-import { openListing } from '@/lib/openListing';
+import { listingOpenUrl, openListing } from '@/lib/openListing';
+import { inAppViewerHost } from '@/lib/inAppViewer';
+import { VIEWER_SPLIT_BREAKPOINT } from '@/lib/responsive';
+import { useAtLeast } from '@/lib/useAtLeast';
+import AdViewer from '@/components/AdViewer';
 import { filterToChat, searchSummary, buildAfSummary, buildAfRoundLog, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, NO_RESULTS_GENERIC_FALLBACK_EN, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
@@ -920,6 +925,16 @@ export default function Agent() {
   // On desktop it's a permanent column → no button. (user: couldn't see the burger on the phone.)
   const docked = useDocked();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // IN-APP AD VIEWER (owner 2026-10-03): a listing from an allowlisted site (lib/inAppViewer.ts) opens
+  // INSIDE Ezhalah — beside the results at/above VIEWER_SPLIT_BREAKPOINT, as a full-screen sheet below
+  // it. Web only; every other site, and native, keep openListing() exactly as before. The results
+  // never unmount, so closing returns them at the same scroll position. trackOpen fires first either way.
+  const [adViewer, setAdViewer] = useState<Listing | null>(null);
+  const viewerSplit = useAtLeast(VIEWER_SPLIT_BREAKPOINT);
+  const openAd = (l: Listing) => {
+    if (IS_WEB && inAppViewerHost(listingOpenUrl(l))) setAdViewer(l);
+    else void openListing(l);
+  };
   // Which result messages have finished typing their reply. The property cards stay hidden until the
   // words above them are fully written out, so listings never appear before Ezhalah has spoken (user
   // request). Keyed by message id.
@@ -3587,7 +3602,9 @@ export default function Agent() {
     // color on this screen already flows through the `colors.*` CSS-var tokens (theme/tokens.ts),
     // which are dark-reactive by construction, so this screen was always dark-CAPABLE; only the
     // ForceLightTheme wrapper was overriding it back to light. See verify-theme-contract.ts.
-    <View style={{ flex: 1, backgroundColor: colors.paper }}>
+    <View style={{ flex: 1, flexDirection: 'row', backgroundColor: colors.paper }}>
+    {/* The results column. A row so the in-app ad viewer can sit BESIDE it, full height (split). */}
+    <View style={{ flex: 1 }}>
       {/* Sketch backdrop behind the chat. The bottom fade is pushed all the way down (0.8→1, same as
           Home) so the landmarks fill the whole frame — including the center, which used to wash out
           to plain white during "Ezhalah is searching…". A light opacity + paper scrim keep it faint
@@ -3903,7 +3920,7 @@ export default function Agent() {
                               variant="compact"
                               rank={i + 1}
                               activeAf={activeAf}
-                              onOpen={() => { trackOpen(l); void openListing(l); }}
+                              onOpen={() => { trackOpen(l); openAd(l); }}
                             />
                           </CardIn>
                         ))}
@@ -4517,6 +4534,8 @@ export default function Agent() {
           )}
         </View>
       ) : null}
+    </View>
+    {adViewer && <AdViewer listing={adViewer} split={viewerSplit} onClose={() => setAdViewer(null)} />}
     </View>
   );
 }
