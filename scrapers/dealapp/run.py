@@ -539,6 +539,23 @@ def _breadcrumb_district_ar(schema: dict, city_ar: Optional[str]) -> Optional[st
     return None
 
 
+def _location_line_pairs(html: str) -> list[tuple[str, str]]:
+    """The page's mirrored location lines as (A, B) pairs: both «A, B» and «B, A» printed, B starting
+    with «حي» (a district, or the source's own «حي غير محدد»), A not. See _location_line_district_ar."""
+    body_start = html.find("</head>")
+    body = html[body_start:] if body_start != -1 else html
+    body = re.sub(r"<(script|style|noscript|svg)[^>]*>.*?</\1>", " ", body, flags=re.S | re.I)
+    lines = [re.sub(r"\s+", " ", x).strip() for x in re.sub(r"<[^>]+>", "\n", body).split("\n")]
+    pairs = set()
+    for ln in lines:
+        parts = [x.strip() for x in re.split(r"\s*[,،]\s*", ln)]
+        if len(parts) == 2 and all(parts):
+            pairs.add((parts[0], parts[1]))
+    return [(a, b) for (a, b) in pairs
+            if (b, a) in pairs and not a.startswith("حي") and re.match(r"حي\s+\S", b)
+            and re.search(r"[ء-ي]", b) and len(b) <= 60]
+
+
 def _location_line_district_ar(html: str, city_ar: Optional[str] = None) -> Optional[str]:
     """The district the PAGE ITSELF shows under the title, from its visible location line.
 
@@ -558,27 +575,43 @@ def _location_line_district_ar(html: str, city_ar: Optional[str] = None) -> Opti
     the page (two means the page carries other listings' lines: say nothing). `city_ar` only breaks a
     tie. Arabic only, never «غير محدد». Verbatim source Arabic or None."""
     city = (city_ar or "").strip()
-    body_start = html.find("</head>")
-    body = html[body_start:] if body_start != -1 else html
-    body = re.sub(r"<(script|style|noscript|svg)[^>]*>.*?</\1>", " ", body, flags=re.S | re.I)
-    lines = [re.sub(r"\s+", " ", x).strip() for x in re.sub(r"<[^>]+>", "\n", body).split("\n")]
-    pairs = set()
-    for ln in lines:
-        parts = [x.strip() for x in re.split(r"\s*[,،]\s*", ln)]
-        if len(parts) == 2 and all(parts):
-            pairs.add((parts[0], parts[1]))
-
-    def is_district(x: str) -> bool:
-        return (re.match(r"حي\s+\S", x) is not None and re.search(r"[ء-ي]", x) is not None
-                and "غير محدد" not in x and len(x) <= 60)
-
-    mirrored = [(a, b) for (a, b) in pairs
-                if (b, a) in pairs and not a.startswith("حي") and is_district(b)]
+    mirrored = [(a, b) for (a, b) in _location_line_pairs(html) if "غير محدد" not in b]
     districts = {re.sub(r"^(حي\s+)+", "حي ", b) for (_a, b) in mirrored}
     if len(districts) > 1 and city:
         districts = {re.sub(r"^(حي\s+)+", "حي ", b) for (a, b) in mirrored
                      if a == city or re.match(rf"{re.escape(city)}\s*[-–]", a)}
     return districts.pop() if len(districts) == 1 else None
+
+
+# Villages the page names on its location line when the title carries no city (21 new ads on 2026-10-03:
+# «طحي, حي غير محدد», «فرسان - فرسان, حي الجنوبي», «بئر بن هرماس, حي الربوة» …). Only villages that our
+# catalog holds AS A CITY and whose name is unique within ONE region are listed, each paired with a
+# loc_city_map row (migration 20261003*_dealapp_village_cities). A name that exists in several regions
+# (القويعية is in four) or that the page does not place (الصقيع, الكهفة, الحناه, السقيد: not in the
+# catalog) is NOT here: no region is ever guessed. العيينة is deliberately absent: the 2026-08 fallback
+# sends it to Diriyah while one ad on 2026-10-03 sits in Tabuk.
+LINE_PLACE_CITY_AR = {
+    "حلبان": "Halban", "سنام": "Sanam", "طحي": "Tuhayy",
+    "بئر بن هرماس": "Bir Bin Hirmas", "فرسان": "Farasan",
+}
+
+
+def _location_line_place_ar(html: str) -> Optional[str]:
+    """The place the page's location line names (A of «A, حي X», any trailing « - area» dropped), when
+    exactly one place is named. Used ONLY when the title carries no city."""
+    places = {re.split(r"\s*[-–]\s*", a)[0].strip() for (a, _b) in _location_line_pairs(html)}
+    places.discard("")
+    return places.pop() if len(places) == 1 else None
+
+
+def _city_from_line(html: str) -> tuple[Optional[str], Optional[str]]:
+    """(city_ar, canonical English city) from the location line, for an ad whose title names no city:
+    the place goes through the shared catalog map first, then the explicit village table above."""
+    place = _location_line_place_ar(html)
+    if not place:
+        return None, None
+    city = normalize.map_city(place) or LINE_PLACE_CITY_AR.get(place)
+    return (place, city) if city else (None, None)
 
 
 def _district_ar(schema: dict, html: str, city_ar: Optional[str]) -> Optional[str]:
@@ -1055,6 +1088,9 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     # ── location: breadcrumb Arabic city is the best map_city input; addressRegion is the DISTRICT ──
     city_ar = _breadcrumb_city_ar(schema)
     city = _resolve_city(city_ar)
+    if not city_ar:
+        # the title names no city (a village ad): the page's own location line may, see _city_from_line
+        city_ar, city = _city_from_line(html)
     region = normalize.region_for_city(city)
     # District: the SOURCE's own Arabic from the page's .location line ("حي …"). We deliberately do NOT
     # use schema.org address.addressRegion — it is English and frequently a wrong default ("Riyadh"),
