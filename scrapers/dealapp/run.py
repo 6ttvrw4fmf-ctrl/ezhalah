@@ -539,6 +539,35 @@ def _breadcrumb_district_ar(schema: dict, city_ar: Optional[str]) -> Optional[st
     return None
 
 
+def _location_line_district_ar(html: str, city_ar: Optional[str]) -> Optional[str]:
+    """The district from the page's own VISIBLE location line, used ONLY when the title carries none.
+
+    The page prints "<city>, <district>" (e.g. «الغاط, حي المنتزة») and again as "<district>, <city>"
+    (e.g. «حي المنتزة, الغاط»). Owner 2026-10-03: «all the ones in dealapp have a district» — the
+    screenshot of a listing whose title has no district (دور للبيع, «بئر بن هرماس, حي الربوة») showed it
+    in this line, while `_breadcrumb_district_ar` returns None for such a title, so ~50 new ads a day
+    were filed «الحي غير محدد» with the source's district sitting on the page.
+
+    It is a GAP-FILLER, never an override: the breadcrumb answer wins whenever it exists (the title is
+    the listing's own words; on 15022873 the two disagree and that conflict is the owner's call). It
+    needs BOTH orders of the line to agree, so one stray text node cannot become a district, and it only
+    accepts Arabic. Verbatim source Arabic or None."""
+    city = (city_ar or "").strip()
+    if not city:
+        return None
+    body_start = html.find("</head>")
+    body = html[body_start:] if body_start != -1 else html
+    body = re.sub(r"<(script|style|noscript|svg)[^>]*>.*?</\1>", " ", body, flags=re.S | re.I)
+    lines = [re.sub(r"\s+", " ", x).strip() for x in re.sub(r"<[^>]+>", "\n", body).split("\n")]
+    sep = r"\s*[,،]\s*"
+    first = {m.group(1).strip() for ln in lines
+             if (m := re.fullmatch(rf"{re.escape(city)}{sep}(.+)", ln))}
+    second = {m.group(1).strip() for ln in lines
+              if (m := re.fullmatch(rf"(.+?){sep}{re.escape(city)}", ln))}
+    agreed = [d for d in first & second if re.search(r"[ء-ي]", d) and d != city and len(d) <= 60]
+    return agreed[0] if len(agreed) == 1 else None
+
+
 def _spec_value(html: str, label: str) -> Optional[str]:
     """Value rendered next to a visible spec label (المساحة / عدد الغرف / …). Window-scan + strip
     tags, take the first short non-markup segment after the label.
@@ -1013,7 +1042,7 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     # use schema.org address.addressRegion — it is English and frequently a wrong default ("Riyadh"),
     # which was silently storing English/incorrect districts. No Arabic on the page → honest null.
     # (feedback_english-district-to-arabic-mapping-standard: never show English; unsure → «الحي غير محدد».)
-    district = _breadcrumb_district_ar(schema, city_ar)
+    district = _breadcrumb_district_ar(schema, city_ar) or _location_line_district_ar(html, city_ar)
     postal = (addr.get("postalCode") or "").strip() or None
 
     # ── active / sold ──
