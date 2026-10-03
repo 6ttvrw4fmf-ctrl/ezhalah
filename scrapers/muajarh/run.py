@@ -230,6 +230,7 @@ def main() -> int:
                 value = d.get(field, x.get(field))
                 if value != measured:
                     kept[f"{field}_{value}"] = kept.get(f"{field}_{value}", 0) + 1
+                    db.mark_presence_unproven(row)         # kept as before, never stamped as checked
         if skipped:
             print("  skipped (not guessed): "
                   + ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items())), flush=True)

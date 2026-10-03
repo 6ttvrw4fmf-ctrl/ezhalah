@@ -74,5 +74,7 @@ def test_abralosol_crawl_drops_a_gone_ad(monkeypatch):
 def test_aqaratikom_gone_record_is_not_mapped(monkeypatch):
     monkeypatch.setattr(AQ, "map_listing", lambda ad, d: ({"ad_number": "AQ"}, "residential", False))
     assert AQ.row_for({"id": 1}, "gone", None) is None
-    assert AQ.row_for({"id": 1}, "missing", None) == ({"ad_number": "AQ"}, "residential", False)
+    # kept, as before; since 2026-10-03 also marked so the list sighting does not stamp it
+    assert AQ.row_for({"id": 1}, "missing", None) == (
+        {"ad_number": "AQ", "_presence_unproven": True}, "residential", False)
     assert AQ.row_for({"id": 1}, "ok", {"x": 1}) == ({"ad_number": "AQ"}, "residential", False)

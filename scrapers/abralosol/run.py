@@ -572,6 +572,8 @@ def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[di
                 stats[key] += 1
                 continue
             row, category = mapped
+            if want_detail and not detail:
+                db.mark_presence_unproven(row)      # its own page was not read this run: no stamp
             if row["price_total"] is None and row["price_annual"] is None and row["price_per_meter"] is None:
                 stats["no_price"] += 1
             if row["price_per_meter"] is not None:
