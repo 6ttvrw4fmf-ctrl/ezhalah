@@ -25,7 +25,7 @@
 //   node --experimental-strip-types scripts/verify-multi-group-scope.ts     (wired into `npm test`)
 import type { SearchQuery } from '../src/data/search.ts';
 import { groupMembers, groupsMembers, pruneTypesToGroups, typeArForSelection, typeArForTypes } from '../src/data/propertyTypes.ts';
-import { effectiveGroups, effectiveTypes, toggleGroup, typesForGroups, migrateGroups, sanitizeForFilterRestore, hasActiveFilters, HOME_DEFAULT_QUERY, setCategory } from '../src/lib/searchDefaults.ts';
+import { effectiveGroups, effectiveTypes, toggleGroup, typesForGroups, migrateGroups, sanitizeForFilterRestore, HOME_DEFAULT_QUERY, setCategory } from '../src/lib/searchDefaults.ts';
 import { cohortAllows, scopeCleanTypes, intersectChips } from '../src/lib/afCohorts.ts';
 import { detailForContext } from '../src/data/taxonomy.ts';
 
@@ -199,10 +199,10 @@ check('restore migrates a LEGACY entry (single group) end to end', (() => {
   const restored = sanitizeForFilterRestore({ ...q(), typeGroup: VILLAS, types: ['Villa'] } as unknown as SearchQuery);
   return (restored.typeGroups ?? []).join() === VILLAS && (restored.types ?? []).join() === 'Villa';
 })());
-check('Clear All / New Chat default carries no group or type',
+check('the clean default (a return to the Filter / New Chat) carries no group or type',
   !HOME_DEFAULT_QUERY().typeGroups && !HOME_DEFAULT_QUERY().types);
-check('a selected group counts as an active filter (Clear All appears)',
-  hasActiveFilters(q({ typeGroups: [VILLAS] })) === true && hasActiveFilters(HOME_DEFAULT_QUERY()) === false);
+check('a selected group is a real selection, and the clean default has none',
+  effectiveGroups(q({ typeGroups: [VILLAS] })).length === 1 && effectiveGroups(HOME_DEFAULT_QUERY()).length === 0);
 
 console.log(failed === 0 ? '\n✅ multi-group / multi-type scope contract holds.' : `\n❌ ${failed} check(s) failed.`);
 process.exit(failed === 0 ? 0 : 1);

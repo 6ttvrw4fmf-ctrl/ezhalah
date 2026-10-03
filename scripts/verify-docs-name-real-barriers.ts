@@ -47,6 +47,8 @@ const NOT_A_CLAIM: { doc: string; path: string; why: string }[] = [
     why: 'PART 1 item 11 narrates this exact phantom as its worked example; the file never existed and naming it is the point' },
   { doc: 'docs/ARCHITECTURE.md', path: 'scripts/verify-gathern-rent-only.ts',
     why: '§19.1\'s correction note records what the removed table row used to promise; the row itself is gone, and a table row naming it would still fail (exceptions never excuse a `|` line)' },
+  { doc: 'docs/ops/af-trending-data-integrity-2026-09-02/RUN_2026-09-02_the_control_that_runs_backwards.md', path: 'scripts/verify-af-pill-removal-live.ts',
+    why: 'a dated run report describing the journey as it was on 2026-09-02; the journey was retired 2026-10-03 with the pill ✕ itself (owner: no ✕ anywhere), and a history document is not rewritten' },
   { doc: 'docs/ARCHITECTURE.md', path: 'scripts/verify-locations.mjs',
     why: '§19.1\'s note records that this older tripwire was REMOVED, not merely unwired — naming it is how a reader knows the earlier note was stale' },
 ];

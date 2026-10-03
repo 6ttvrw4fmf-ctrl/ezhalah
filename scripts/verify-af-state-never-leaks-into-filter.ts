@@ -42,8 +42,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripComments } from './lib/stripComments.ts';
-import { sanitizeForFilterRestore, hasActiveFilters, AF_PREDICATE_FIELDS } from '../src/lib/searchDefaults.ts';
-import { certifiedFacets, withoutFacet } from '../src/lib/afCarry.ts';
+import { sanitizeForFilterRestore, AF_PREDICATE_FIELDS } from '../src/lib/searchDefaults.ts';
+import { certifiedFacets } from '../src/lib/afCarry.ts';
 import type { SearchQuery } from '../src/data/search.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -122,21 +122,23 @@ assert(withReceipt.afFacets?.length === 1, 'the facet receipt itself rides, so t
 // not an untyped extra that a refactor drops with no compile error anywhere.
 assert(read('src/data/search.ts').includes('afFacets?:'), 'afFacets is a declared SearchQuery field');
 
-// (c) VISIBILITY IS THE PRICE OF THE CARRY. Every carried facet has a control on the Filter screen
-// that removes it. Without this the barrier would be licensing the exact invisible-filter state the
-// leak above was, only reached down a different path.
+// (c) NOTHING IS CARRIED BACK TO THE FILTER SCREEN AT ALL (owner 2026-10-03, supersedes the 2026-09-01
+// P0 carry). The invariant this file protects was always «an AF predicate may never be ACTIVE with no
+// control on screen to see and clear it». The P0 satisfied it by showing every carried answer as a
+// removable chip; the owner then ruled that going back to the Filter always opens a CLEAN form — no
+// chips, no ✕, no «مسح الكل» — with the last search kept only in the sidebar history (signed in) or
+// not at all (guest). A form that is empty on arrival cannot hold an invisible predicate, so the
+// invariant now holds by construction. Asserted as code SHAPE (JSX cannot be executed from Node).
 const indexTsx = read('src/app/index.tsx');
-assert(/query\.afFacets/.test(indexTsx), 'the Filter screen renders the carried facets');
-// The «×» must be wired to withoutFacet on the RECONCILED list — a bare `/withoutFacet\(/` would
-// have been satisfied by the identifier appearing anywhere on the screen, including an import it no
-// longer calls. Asserted as a code SHAPE here (JSX cannot be executed from Node) and EXECUTED below.
-assert(/onPress=\{\(\) => setQuery\(\(\) => withoutFacet\(query, i, AF_ALL_QUESTIONS\)\)\}/.test(indexTsx),
-  'the chip «×» commits withoutFacet() on the reconciled query (not the raw store list)');
-assert(/testID=\{`filter-af-chip-/.test(indexTsx), 'each carried facet gets its own removable chip (testID: filter-af-chip-N)');
-// «مسح الكل» is the other half of "clearable": it is only rendered when hasActiveFilters() is true,
-// so an AF-only narrowing must count as an active filter or the user gets chips with no reset.
-assert(hasActiveFilters({ ...AF_LOADED, afFacets: [{ id: 'property_age', keys: ['3_5'], labels: ['x'] }] }),
-  'a carried Advanced Filter counts as an active filter, so «مسح الكل» is offered');
+const indexCode = indexTsx.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
+assert(!/query\.afFacets/.test(indexCode) && !/filter-af-chip-/.test(indexCode) && !/withoutFacet/.test(indexCode),
+  'the Filter screen renders no carried facets and no removable chip (no «×», no withoutFacet)');
+assert(/takeSearchLeftBehind\(\)/.test(indexCode) && /setQuery\(\(\) => HOME_DEFAULT_QUERY\(\)\)/.test(indexCode),
+  'the Filter screen resets to the clean default when a search was left behind');
+assert(/markSearchLeftBehind\(\)/.test(read('src/app/agent.tsx')),
+  'the results screen raises the flag that makes the Filter open clean');
+assert(!/hasActiveFilters/.test(read('src/lib/searchDefaults.ts')) && !/Clear all/.test(indexCode),
+  'there is no «مسح الكل» and no hasActiveFilters() left to decide when to offer it');
 
 // (d) THE CARRY MUST BE RE-CERTIFIED, NEVER REPLAYED BLIND. The Filter screen can move the cohort
 // under a carried answer; the AF's SQL predicates are strict-NULL-excluding, so replaying an answer
@@ -158,14 +160,6 @@ assert(certifiedFacets(SHOP_SCOPE, ratingFacet).length === 0,
   'certifiedFacets() REFUSES an answer the current cohort never certified (executed, not grepped)');
 assert(certifiedFacets(APT_MONTHLY, ratingFacet).length === 1,
   '…and keeps the same answer on the cohort that DID certify it — the gate narrows, it is not a blanket drop');
-// The other half of «visible AND removable»: clearing the last chip must kill its predicate too, or
-// the carry parks exactly the invisible filter this file's (a) case measures.
-const oneChip: SearchQuery = { ...SHOP_SCOPE, isNewConstruction: true,
-  afFacets: [{ id: 'property_age', keys: ['new'], labels: ['جديد'] }] };
-const cleared = withoutFacet(oneChip, 0, [{ id: 'property_age', apply: (q) => q }]);
-assert(cleared.afFacets?.length === 0 && cleared.isNewConstruction === undefined,
-  'clearing the LAST chip removes its predicate as well as its control (executed withoutFacet)');
-
 // ── 2. direction is not re-asked once committed ──────────────────────────────────────────────────
 const advanced = read('src/data/advancedFilters.ts');
 const dirBlock = advanced.slice(advanced.indexOf('const DIRECTION_QUESTION'));

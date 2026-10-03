@@ -125,8 +125,11 @@ check('a merely PRESENTED step (keys null) is not asked — Back genuinely un-as
 check('the round seeds its asked-set from the carry (round N+1 never re-asks round N)',
   /ageFlowAskedRef\.current = new Set\(afCarryRef\.current\?\.asked \?\? \[\]\);/.test(agent)
   && /ageFlowAskedRef\.current = new Set\(\[\.\.\.\(afCarryRef\.current\?\.asked \?\? \[\]\), \.\.\.d\.askedIds\]\);/.test(agent));
-check('removing a pill releases ONLY that question (Back/remove keep working; the rest of the carry survives)',
-  /asked: guidedPills\.asked\.filter\(\(id\) => id !== removed\.id\)/.test(agent));
+// (2026-10-03: the pills lost their ✕, so nothing un-asks a question from the results any more — a
+// committed answer is changed only by Back INSIDE the round. This pins that the carried asked-set is
+// never filtered by a removal, because there is no removal left to filter it.)
+check('no pill removal exists to un-ask a question (the carried asked-set only ever grows)',
+  !/guidedPills\.asked\.filter\(/.test(agent) && !/removeGuidedFacet/.test(agent));
 
 // ── 5. Stale state: the card's selection reflects the CURRENT question only ─────────────────────
 const card = stripComments(read('src/components/AdvancedQuestionCard.tsx'));
