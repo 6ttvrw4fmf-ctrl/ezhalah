@@ -161,6 +161,8 @@ Both تخطي and رجوع are equal-width real buttons (§4); رجوع carries 
   prior pick; checkbox for multi — toggles); it does **not** auto-advance. The footer `Show {N}`
   commits and advances. This kills the "tap-to-advance vs toggle-then-confirm" whiplash — single and
   multi feel identical; only the selection count differs.
+- **No question forces one answer** *(owner 2026-10-03, product contract R7.2.3)*: every advanced
+  question renders checkboxes; several ticks are the exact union of what was ticked.
 - **Every question is optional/skippable** (§7).
 - **One unified eligibility gate.** `eligibility(scope)` is the *only* visibility rule a question
   declares, and all questions share the same gate contract (same thresholds: a question shows only when

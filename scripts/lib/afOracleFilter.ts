@@ -117,6 +117,9 @@ export function directionVariantsFrom(observed: Iterable<string>): Record<string
 
 export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string; unhandled: string[] } {
   const parts = ['production_ready=is.true'];
+  // Mixture params (owner 2026-10-03) are each ONE disjunction; collected and emitted once at the end so
+  // two of them never become two competing `or=` keys.
+  const orGroups: string[] = [];
   const unhandled: string[] = [];
 
   // `production_ready=is.true` IS NOT THE WHOLE ADMISSION RULE (found live 2026-09-01).
@@ -645,6 +648,37 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       case 'p_rating_min': parts.push(`rating=gte.${v}`); break;
       case 'p_reviews_min': parts.push(`reviews_count=gte.${v}`); break;
       case 'p_unit_subtypes': parts.push(`unit_subtype_ar=in.${inList(v as string[])}`); break;
+      // SEVERAL ANSWERS = THEIR UNION (owner 2026-10-03, migration af_every_question_multi_select_unions).
+      // Bucket edges restated from the age/rating questions' own option meanings, not from our SQL.
+      case 'p_age_buckets': {
+        const AGE_OR: Record<string, string> = {
+          new: 'property_age.eq.0', '1_2': 'and(property_age.gte.1,property_age.lte.2)',
+          '3_5': 'and(property_age.gte.3,property_age.lte.5)', '6_9': 'and(property_age.gte.6,property_age.lte.9)',
+          '10p': 'property_age.gte.10',
+        };
+        const ks = v as string[];
+        const bad = ks.filter((k) => !AGE_OR[k]);
+        if (bad.length) { unhandled.push(`p_age_buckets:${bad.join('|')}`); break; }
+        if (ks.length) orGroups.push(ks.map((k) => AGE_OR[k]).join(','));
+        break;
+      }
+      case 'p_rating_buckets': {
+        const RATE_OR: Record<string, string> = {
+          '9.5': 'rating.gte.9.5', '9.0': 'rating.gte.9', '9.0_rc10': 'and(rating.gte.9,reviews_count.gte.10)',
+        };
+        const ks = v as string[];
+        const bad = ks.filter((k) => !RATE_OR[k]);
+        if (bad.length) { unhandled.push(`p_rating_buckets:${bad.join('|')}`); break; }
+        if (ks.length) orGroups.push(ks.map((k) => RATE_OR[k]).join(','));
+        break;
+      }
+      // furnished = any([true,false]) — the listings that STATED either way; NULL is in neither.
+      case 'p_furnished_in': {
+        const bs = v as boolean[];
+        if (bs.includes(true) && bs.includes(false)) parts.push('furnished=not.is.null');
+        else if (bs.length) parts.push(`furnished=is.${bs[0]}`);
+        break;
+      }
       // MULTI-AMENITY IS AND (R7.2.2). Each ticked chip is its own boolean column, so every token
       // appends its OWN conjunctive part — PostgREST joins top-level filters with AND, matching the
       // clause's `and (not ('tok' = any(p_amenities)) or s.col)` chain. Collapsing these into one
@@ -677,5 +711,7 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
       default: unhandled.push(`${k}=${JSON.stringify(v)}`);
     }
   }
+  if (orGroups.length === 1) parts.push(`or=(${orGroups[0]})`);
+  else if (orGroups.length > 1) parts.push(`and=(${orGroups.map((g) => `or(${g})`).join(',')})`);
   return { qs: parts.join('&'), unhandled };
 }

@@ -180,6 +180,15 @@ export type SearchQuery = {
   // preferred directions (Residential Building + Apartment/Buy). Both map 1:1 to existing RPC params
   // (p_street_width_min / p_directions) — strict, unknown excluded, never invented.
   streetWidthMin?: number | null;
+  // SEVERAL ANSWERS TO ONE QUESTION (owner 2026-10-03: «never force the user to select one thing»). Each
+  // is the UNION of exactly the picked options, used only when 2+ are picked (one pick keeps the
+  // single-answer field above): `ageBuckets` = the age question's keys ('new','1_2','3_5','6_9','10p'),
+  // `ratingBuckets` = '9.5' / '9.0' / '9.0_rc10', `furnishedIn` = [true,false] for «مفروش + غير مفروش»
+  // (the listings that STATED either; silent stays out). Map to p_age_buckets / p_rating_buckets /
+  // p_furnished_in (migration af_every_question_multi_select_unions).
+  ageBuckets?: string[] | null;
+  ratingBuckets?: string[] | null;
+  furnishedIn?: boolean[] | null;
   directions?: string[] | null;
   // THE RECEIPT FOR EVERY AF PREDICATE ABOVE (owner P0 2026-09-01). Each committed Advanced Filter
   // answer, in commit order — the same {id, keys, labels} the results-turn pills already render.

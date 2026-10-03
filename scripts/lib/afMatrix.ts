@@ -292,6 +292,22 @@ export function optionMeaning(field: string, key: string): Meaning | null {
   }
 }
 
+// Helpers for the union of two options of one field (owner 2026-10-03, every question multi-select).
+const RATING: Record<string, Record<string, unknown>> = {
+  '9.5': { p_rating_min: 9.5 }, '9.0': { p_rating_min: 9 }, '9.0_rc10': { p_rating_min: 9, p_reviews_min: 10 },
+};
+const sameParams = (x: Record<string, unknown>, y: Record<string, unknown>) => {
+  const kx = Object.keys(x).sort(), ky = Object.keys(y).sort();
+  return kx.length === ky.length && kx.every((k, i) => k === ky[i] && JSON.stringify(x[k]) === JSON.stringify(y[k]));
+};
+/** PostgREST union of two single-option filters: `or=(and(a…),and(b…))`. */
+const orBoth = (a: string, b: string) => {
+  const inner = (r: string) => `and(${r.split('&').map((c) => c.replace('=', '.')).join(',')})`;
+  return `or=(${inner(a)},${inner(b)})`;
+};
+/** Two «at least» rungs: the lower one IS their union. */
+const lowerRung = (a: string, b: string) => (Number(a.split('gte.')[1]) <= Number(b.split('gte.')[1]) ? a : b);
+
 export function fieldMeaning(field: string): FieldMeaning | null {
   const single = (totalCol = 'cnt_total_base', unknownCols: string[] | null = null, partition = false): FieldMeaning => ({
     combine: 'and', partition, unknownCols, totalCol,
@@ -308,15 +324,25 @@ export function fieldMeaning(field: string): FieldMeaning | null {
       restBoth: (a, b) => `direction_ar=in.(${a.slice('direction_ar=in.('.length, -1)},${b.slice('direction_ar=in.('.length, -1)})`,
       paramsBoth: (a, b) => ({ p_directions: [...(a.p_directions as string[]), ...(b.p_directions as string[])] }),
     };
-    case 'furnished': return single('cnt_total_base', ['cnt_total_base', 'cnt_furnished', 'cnt_unfurnished'], true);
-    case 'property_age': return single('cnt_total', ['cnt_unknown'], true);
+    // EVERY QUESTION TAKES SEVERAL ANSWERS = their exact UNION (owner 2026-10-03: «never force the user to
+    // select one thing»). «At least» ladders union to the LOWEST pick; buckets with no single-range form
+    // carry the picked keys (p_age_buckets / p_rating_buckets / p_furnished_in); subtypes were an array.
+    case 'furnished': return { ...single('cnt_total_base', ['cnt_total_base', 'cnt_furnished', 'cnt_unfurnished'], true), combine: 'or',
+      restBoth: () => 'furnished=not.is.null',
+      paramsBoth: (a, b) => ({ p_furnished_in: [a.p_furnished, b.p_furnished].sort((x, y) => Number(y) - Number(x)) }) };
+    case 'property_age': return { ...single('cnt_total', ['cnt_unknown'], true), combine: 'or', restBoth: orBoth,
+      paramsBoth: (a, b) => ({ p_age_buckets: Object.keys(AGE).filter((k) => sameParams(AGE[k].params, a) || sameParams(AGE[k].params, b)) }) };
     // «😔 on every question» (owner 2026-10-03): these read a DB IS NULL column (migration 20261003184909),
     // so «did not mention» means exactly that column — never a subtraction over the rungs.
     case 'rnpl': return single('cnt_total_base', ['cnt_rnpl_unknown']);
-    case 'bathrooms': return single('cnt_total_base', ['cnt_bath_unknown']);
-    case 'street_width': return single('cnt_total_base', ['cnt_stw_unknown']);
-    case 'rating': return single('cnt_total_base', ['cnt_rating_unknown']);
-    case 'unit_subtype': return single('cnt_total_base', ['cnt_sub_unknown']);
+    case 'bathrooms': return { ...single('cnt_total_base', ['cnt_bath_unknown']), combine: 'or', restBoth: lowerRung,
+      paramsBoth: (a, b) => ({ p_bath_min: Math.min(Number(a.p_bath_min), Number(b.p_bath_min)) }) };
+    case 'street_width': return { ...single('cnt_total_base', ['cnt_stw_unknown']), combine: 'or', restBoth: lowerRung,
+      paramsBoth: (a, b) => ({ p_street_width_min: Math.min(Number(a.p_street_width_min), Number(b.p_street_width_min)) }) };
+    case 'rating': return { ...single('cnt_total_base', ['cnt_rating_unknown']), combine: 'or', restBoth: orBoth,
+      paramsBoth: (a, b) => ({ p_rating_buckets: Object.keys(RATING).filter((k) => sameParams(RATING[k], a) || sameParams(RATING[k], b)) }) };
+    case 'unit_subtype': return { ...single('cnt_total_base', ['cnt_sub_unknown']), combine: 'or', restBoth: orBoth,
+      paramsBoth: (a, b) => ({ p_unit_subtypes: [...(a.p_unit_subtypes as string[]), ...(b.p_unit_subtypes as string[])] }) };
     default: return null;
   }
 }
