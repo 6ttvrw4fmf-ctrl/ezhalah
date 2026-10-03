@@ -68,7 +68,10 @@ const PROBE_ROOT = 'scrapers.common.cleanup';
 // workflow carries the browser like the other two. Raised to 4 the same day:
 // `scrapers.common.source_reread` (the independent re-read the 🆕 New Listings and 🔬 Listing
 // Accuracy engineers use) fetches the same way, and its workflow carries the browser too.
-const COHORT_FLOOR = 4;
+// Raised to 5 on 2026-10-02: `scrapers.common.dead_visible_score` (the nightly "dead ads a customer
+// can see" measurement) opens aqar/wasalt/aqarcity ads through lifecycle_spot_check.open_ad → cleanup
+// `_probe`, so it joined the cohort, and dead-visible-score.yml carries the browser like the others.
+const COHORT_FLOOR = 5;
 
 const ls = (glob: string) =>
   execFileSync('git', ['ls-files', glob], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
