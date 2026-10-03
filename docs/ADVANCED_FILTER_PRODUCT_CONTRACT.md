@@ -335,8 +335,8 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 - **R6.3.2** — The PREVIOUS turn's action buttons are replaced by a read-only **receipt** of what
   was committed (e.g. "✓ عرض الشارع: ≥20م · عدد الحمامات: ≥3").
 - **R6.3.3** — Committed answers also appear as **read-only chips** above the new turn, and are
-  listed in that turn's summary under «من الفلتر المتقدم» (see §9). (Owner 2026-10-03: removable
-  pills retired — no chip carries a ✕.)
+  listed in that turn's summary as labelled lines (see §9). Each chip shows its emoji (شقة 🏡).
+  (Owner 2026-10-03: removable pills retired — no chip carries a ✕.)
 - **R6.3.4** — If the new turn still has >25 results AND a useful question remains, the offer
   button appears again — the user may run another round.
 - **R6.3.5** — **The reader stays in place** (owner 2026-10-03). When a round starts its search,
@@ -371,8 +371,11 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
   tentative selection**, before committing.
 - **R7.1.3** — The unknown-count caption («😔 X إعلان لم يذكر هذه المعلومة») shows how many listings
   have no value for the field — never rolled into any option's count. It leads with 😔 (owner
-  2026-10-03). It appears only where a TRUTHFUL count exists (age, furnished, direction today); a
-  question whose count the database cannot yet state shows nothing — never a guess, never 0.
+  2026-10-03) and is on EVERY question (owner 2026-10-03): age, furnished and direction derive it;
+  RNPL, amenities, bathrooms, street width, rating and unit subtype read a database `IS NULL` count
+  in the committed scope (migration 20261003184909; amenities = the listing stated no amenity at
+  all). Never a subtraction over threshold rungs, never a guess, never 0 — a count that is 0 or a
+  probe that failed shows nothing.
 
 ### 7.2 Multi-select marginal vs combined
 
@@ -485,7 +488,9 @@ Three sub-principles fall out of that philosophy and outrank every mechanical ru
 ### 9.1 What pills show
 
 - **R9.1.1** — Every COMMITTED (not skipped) AF answer is listed in the newest results turn's
-  summary under «من الفلتر المتقدم», one line each, below the ORIGINAL «ملخص البحث» lines (type
+  summary as a labelled line of the SAME list — «• نوع العقار المحدد: شقة», «• دورات المياه: +١»,
+  «• المميزات: المطبخ، مصعد» — no «من الفلتر المتقدم» heading, no emoji (owner 2026-10-03; answers
+  sharing a label merge into one line), right after the ORIGINAL «ملخص البحث» lines (type
   group, deal and period, city, region — built from the query as it stood BEFORE the first round,
   never overwritten by an answer). The same answers also appear as chips above the turn. (The separate
   «بناءً على: …» sentence is gone: the summary says it once.)

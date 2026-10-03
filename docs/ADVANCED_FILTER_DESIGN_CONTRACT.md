@@ -285,8 +285,9 @@ narrowing the market for them, not forcing them to fill another form.» Everythi
   with a 15 s failsafe + a catch on the search itself. Skip-everything closes with no beat.
 - **Results summary + read-only chips** *(amended 2026-10-03, owner: «we should not show any X
   button on this»)*. The guided results turn's «ملخص البحث» is the ORIGINAL summary (built from the
-  query before the first round) followed by «من الفلتر المتقدم» and one bullet per committed answer,
-  cumulative across rounds. Each answer is also a plain chip — no ✕, no press, in the transcript or
+  query before the first round) continued by one labelled bullet per committed answer — «• نوع العقار
+  المحدد: شقة», «• دورات المياه: +١», «• المميزات: المطبخ، مصعد» — no heading and no emoji (the chips
+  carry the emoji), cumulative across rounds (same label ⇒ same line). Each answer is also a plain chip — no ✕, no press, in the transcript or
   in the round card. Nothing removes an answer from the results; it is changed only by Back inside the
   round. The earlier «بناءً على: …» sentence and removable pills are retired.
 - **The reader stays in place** *(2026-10-03)*. Earlier turns are dimmed while a search loads, never
