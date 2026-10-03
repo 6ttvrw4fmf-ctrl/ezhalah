@@ -48,6 +48,9 @@ jobs:
           python -m scrapers.common.lifecycle_report --hours "$HOURS" > lifecycle-report.md
           python -m scrapers.common.lifecycle_report --hours "$HOURS" --json > lifecycle-report.json
           cat lifecycle-report.md >> "$GITHUB_STEP_SUMMARY"
+          # Also into the job log: the engineer's container can read job logs (GitHub MCP) but not
+          # artifacts or summaries, whose downloads go to blob storage its proxy refuses.
+          cat lifecycle-report.md
       - name: Keep the result for the engineer
         if: always()
         uses: actions/upload-artifact@v4
