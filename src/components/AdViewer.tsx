@@ -279,7 +279,11 @@ function TabFrame({ listing, visible, t }: { listing: Listing; visible: boolean;
           src={url}
           title={host}
           onLoad={() => setLoaded(true)}
-          allow="fullscreen"
+          // The ad must work like the site opened in Safari (owner 2026-10-03: «he can continue doing so
+          // if he wants»): a Gathern booking reaches Apple Pay / card checkout INSIDE this frame, and
+          // a cross-origin frame may only run Apple Pay / Payment Request when the embedder delegates
+          // `payment`. `storage-access` lets the site ask Safari to keep its own login inside us.
+          allow="fullscreen; payment; storage-access; clipboard-write"
           // Full CSS width of the pane/sheet — the frame IS the site's viewport, so a responsive
           // page's width=device-width resolves to this true width (owner: no zoomed-in rendering).
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0, background: '#fff' }}
