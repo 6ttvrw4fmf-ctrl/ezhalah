@@ -185,15 +185,11 @@ export function typesForGroups(q: SearchQuery): string[] {
 }
 
 // The home/filter screen's (and the store's initial-state) TRUE default (Buy highlighted — user
-// request; emptyQuery() itself stays Rent-default for the agent path). "مسح الكل" (Clear All) resets
-// to exactly this, not a partial/merged reset, so every field always lands back on a known default.
+// request; emptyQuery() itself stays Rent-default for the agent path). Coming back to the Filter after a
+// search resets to exactly this (owner 2026-10-03 — there is no «مسح الكل» any more), a full replace
+// and not a merged one, so every field always lands back on a known default.
 export const HOME_DEFAULT_QUERY = (): SearchQuery => ({ ...emptyQuery(), deal: 'Buy' });
 
-// True once ANY filter differs from the screen's initial default — drives whether "مسح الكل" is
-// shown at all (no clutter on an already-empty filter, matching the existing per-field clear icon's
-// own `query.location.length > 0 &&` convention). Covers every SearchQuery field this screen's UI can
-// actually set, INCLUDING rentPeriod (2026-07-13 fix — a stale non-default rentPeriod used to be
-// able to hide behind an invisible Clear All button; see the Rent/Buy toggle repro in index.tsx).
 // STRICT ALLOWLIST for restoring a history item into the shared store the Filter home binds to
 // (audit item 2, owner-approved 2026-07-27). An AI-agent search records its FULL parsed query —
 // including fields with NO Filter-home control (bothDeals, sources, keywords, proximity, sort,
@@ -346,33 +342,3 @@ export function dealSelectionFromQuery(q: { deal: Deal; dealCombined?: boolean }
   return q.dealCombined ? 'Both' : q.deal;
 }
 
-export function hasActiveFilters(q: SearchQuery): boolean {
-  const d = HOME_DEFAULT_QUERY();
-  return (
-    q.location.trim() !== d.location ||
-    q.deal !== d.deal ||
-    !!q.dealCombined ||
-    !!q.priceMinRent ||
-    !!q.priceMaxRent ||
-    q.category !== d.category ||
-    !!(q.typeGroups && q.typeGroups.length) ||
-    q.type !== d.type ||
-    !!(q.types && q.types.length) ||
-    q.detail !== d.detail ||
-    !!q.contextBeds ||
-    !!(q.contextBedsList && q.contextBedsList.length) ||
-    !!q.contextSize ||
-    !!q.areaMin ||
-    !!q.areaMax ||
-    q.priceInput !== d.priceInput ||
-    q.priceBand !== d.priceBand ||
-    !!q.priceMin ||
-    !!q.priceMax ||
-    (q.rentPeriod ?? 'annual') !== d.rentPeriod ||
-    // A carried Advanced Filter answer is an active filter like any other (owner P0 2026-09-01):
-    // without this, a search narrowed ONLY by the interview came back to the Filter screen with its
-    // chips on screen and «مسح الكل» hidden — an active predicate with no way to clear all of it,
-    // which is the very state this whole allowlist exists to make impossible.
-    !!(q.afFacets && q.afFacets.length)
-  );
-}

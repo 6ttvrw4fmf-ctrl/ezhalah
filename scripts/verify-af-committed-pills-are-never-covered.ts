@@ -18,20 +18,23 @@
 // the card and above the scrim, from the same facets and the same removal handler the transcript row
 // uses. Three things have to stay true:
 //
-//   1. the pills render, with their ✕, in every phase of a round (loading, intro, question);
+//   1. the pills render in every phase of a round (loading, intro, question);
 //   2. they sit ABOVE the scrim and OUTSIDE the card, so nothing of the round's is on top of them;
-//   3. a SCOPE facet stays unremovable — owner rule 2026-08-23, unchanged by any of this.
+//   3. NO pill is removable.
+//
+// AMENDED 2026-10-03 (owner: «we should not show any X button on this»). The pills stay exactly where
+// #155 put them — visible above the scrim in every phase — but they are READ-ONLY now: no ✕, no
+// handler, no removal path from the card. Rule 3 used to say a SCOPE facet stays unremovable while
+// every other facet could be removed; with nothing removable, the scope exception is moot.
 //
 // WHAT THIS HALF CAN AND CANNOT PROVE, stated plainly rather than dressed up. (1) and (2) are
 // facts about JSX nesting order, and this file reads them as such: `AdvancedQuestionCard` imports
 // reanimated, expo-image and the icon font, so a plain node barrier cannot render it. (3) is
 // EXECUTED — it imports the real `isScopeQuestionId` and the real id list and calls them.
 //
-// So this is deliberately the OFFLINE half of a split, on the precedent AGENTS.md already sets for
-// production-dependent checks. The EXECUTING half is the live journey
-// `scripts/verify-af-pill-removal-live.ts`, which opens a real round on a real browser at 390×844
-// and at 1440×900 and removes a committed pill WHILE the round is on screen — the thing a structural
-// read can never establish. Neither half is sufficient; the split is what makes both honest.
+// This file is the offline, structural check. (The live removal journeys that used to execute the
+// other half — verify-af-pill-removal-live / verify-af-remove-last-pill-live — were retired with the
+// removal itself on 2026-10-03.)
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -89,50 +92,38 @@ for (const entry of ['AdvancedQuestionLoading', 'AdvancedIntroCard']) {
 
 // ── 3. AGENT.TSX SUPPLIES THEM, FROM THE ONE SOURCE OF TRUTH ────────────────────────────────────
 // A second copy of the user's committed selections is the failure mode here: the card would show a
-// stale set while the transcript showed the live one. Pin that the overlay is fed from guidedPills
-// and removeGuidedFacet — the same two things the transcript row uses.
+// stale set while the transcript showed the live one. Pin that the overlay is fed from guidedPills —
+// the same thing the transcript row uses — and from nothing that could change them.
 {
   const memo = agentCode.indexOf('const afCardPills');
-  check('agent.tsx derives the card pills from guidedPills and removeGuidedFacet, not a copy',
-    memo >= 0
-      && /facets:\s*guidedPills\?\.facets/.test(agentCode.slice(memo, memo + 400))
-      && /onRemove:\s*removeGuidedFacet/.test(agentCode.slice(memo, memo + 400)),
+  const memoBody = agentCode.slice(memo, memo + 300);
+  check('agent.tsx derives the card pills from guidedPills, not a copy',
+    memo >= 0 && /facets:\s*guidedPills\?\.facets/.test(memoBody),
     'the AF card is being fed a second, independent list of committed selections');
+  check('…and hands the card NO removal handler (the pills are read-only)',
+    !/onRemove/.test(memoBody) && !/removeGuidedFacet/.test(agentCode),
+    'a removal path is back: the owner ruled on 2026-10-03 that no pill shows an X');
   const uses = [...agentCode.matchAll(/pills=\{afCardPills\}/g)].length;
   check('…and every AF card state on screen receives it (loading, intro, question)',
     uses === 3, `${uses} of 3 render sites pass pills`);
-  // TEMPORAL DEAD ZONE, and it is a real throw rather than a style point: the useMemo factory runs
-  // during render, so the memo must be declared BELOW removeGuidedFacet. This ordering was wrong on
-  // the first draft of the fix.
-  check('the memo is declared AFTER removeGuidedFacet (its factory runs during render)',
-    agentCode.indexOf('const afCardPills') > agentCode.indexOf('const removeGuidedFacet'),
-    'afCardPills reads removeGuidedFacet from its temporal dead zone — render would throw');
 }
 
-// ── 4. THE OWNER'S 2026-08-23 SCOPE RULE SURVIVES ───────────────────────────────────────────────
-// Scope facets (group/type) are shown but NOT removable, in the card exactly as in the transcript.
-// Executed, not read: call the predicate the component is handed and confirm both branches.
+// ── 4. NO PILL IS REMOVABLE ─────────────────────────────────────────────────────────────────────
 {
-  const { isScopeQuestionId, SCOPE_QUESTION_IDS } = await import('../src/lib/afPlan.ts');
-  // The ids come from the module, never typed here: a rename would otherwise make this pass by
-  // testing two strings the product no longer uses.
-  check('the scope predicate the card uses still recognises every scope question',
-    SCOPE_QUESTION_IDS.length > 0 && SCOPE_QUESTION_IDS.every((id) => isScopeQuestionId(id)),
-    `SCOPE_QUESTION_IDS = ${JSON.stringify(SCOPE_QUESTION_IDS)}`);
-  check('…and does not claim an ordinary advanced answer is one',
-    !isScopeQuestionId('bathrooms') && !isScopeQuestionId('amenities'));
   const pillsFn = cardCode.indexOf('function CommittedPills');
   // Up to the NEXT top-level declaration, so the whole component body is in scope rather than the
   // first few lines of it.
   const body = cardCode.slice(pillsFn, cardCode.indexOf('export type ShellPills', pillsFn));
-  check('a scope facet renders as a plain chip with no remove handler',
-    /isScope\(f\.id\)\s*\|\|\s*!onRemove\s*\?/.test(body),
-    'the card would let a user remove a TYPE pill, broadening past anything they asked for');
-  check('…and every other facet is a Pressable that calls onRemove with its own index',
-    /onPress=\{\(\)\s*=>\s*onRemove\(i\)\}/.test(body));
-  check('the card pills carry their own testIDs, distinct from the transcript row\'s',
-    /af-card-pill-\$\{i\}/.test(cardCode) && !/af-card-pill/.test(agentCode.replace(/afCardPills/g, '')),
-    'duplicate af-pill-N testIDs would make every live locator ambiguous');
+  check('the card renders every committed pill as a plain chip',
+    pillsFn >= 0 && /<View key=\{`\$\{f\.id\}-\$\{i\}`\} style=\{s\.pill\}>/.test(body),
+    'the card pills are no longer plain chips');
+  check('…with no Pressable, no handler and no ✕ anywhere in the pill row',
+    !/Pressable|onPress|onRemove|name="close"/.test(body),
+    'a pill can be pressed or carries a ✕ again — the owner banned both on 2026-10-03');
+  check('the transcript row\'s chips are equally read-only',
+    !/testID=\{`af-pill-\$\{i\}`\}[^>]*onPress/.test(agentCode)
+      && !/<Pressable[^>]*af-pill/.test(agentCode),
+    'a transcript pill takes a press again');
 }
 
 // ── MUTATION PROOF ──────────────────────────────────────────────────────────────────────────────
@@ -172,14 +163,20 @@ mustCatch('a round phase that renders a Shell without pills', (() => {
 
 // M-5: a second, independent list of committed selections in the card.
 mustCatch('the card fed a copy instead of the live guidedPills', (() => {
-  const copied = 'const afCardPills = { facets: myOwnCopyOfTheFacets, onRemove: doSomethingElse };';
+  const copied = 'const afCardPills = { facets: myOwnCopyOfTheFacets };';
   return !/facets:\s*guidedPills\?\.facets/.test(copied);
 })());
 
-// M-6: the scope rule dropped, so a TYPE pill becomes removable.
-mustCatch('a card that lets a SCOPE facet be removed', (() => {
-  const loose = '{facets.map((f, i) => (<Pressable onPress={() => onRemove(i)}>';
-  return !/isScope\(f\.id\)\s*\|\|\s*!onRemove\s*\?/.test(loose);
+// M-6: a removal handler threaded back into the card, so its pills grow a ✕ again.
+mustCatch('a card whose pills take a remove handler', (() => {
+  const loose = 'const afCardPills = { facets: guidedPills?.facets ?? [], onRemove: removeGuidedFacet };';
+  return !(!/onRemove/.test(loose) && !/removeGuidedFacet/.test(loose));
+})());
+
+// M-6b: a pill row that is pressable again.
+mustCatch('a pill row with a Pressable and a close icon', (() => {
+  const loose = '<Pressable onPress={() => onRemove(i)}><Ionicons name="close" /></Pressable>';
+  return /Pressable|onPress|onRemove|name="close"/.test(loose);
 })());
 
 // M-7: and a correct implementation must NOT be flagged.
@@ -193,6 +190,6 @@ if (mutFail > 0) failed += mutFail;
 
 console.log(
   failed === 0
-    ? '\n✅ the committed selections stand above the round, on every phase and every viewport.\n'
+    ? '\n✅ the committed selections stand above the round, on every phase and every viewport — read-only.\n'
     : `\n❌ ${failed} check(s) failed — the AF round can cover the user's committed selections.\n`);
 process.exit(failed === 0 ? 0 : 1);
