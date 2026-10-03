@@ -71,11 +71,21 @@ export function PopIn({ index, style, children }: { index: number; style?: any; 
 
 // Photo-first card approved by the owner: a clear source-link photo, then compact details.
 // Prose stays hidden; every amenity and additional-information value is immediately visible.
+//
+// LAPTOP ROW (owner 2026-10-03: «the image is so big … for the laptop it should always be small»).
+// With `row` set the same card lays out as a list row: a small rounded photo on the inline-start
+// side, every detail beside it — about half the stacked height. 'roomy' (no ad pane beside the
+// results) keeps every amenity and additional-information value visible, wrapped. 'tight' (the pane
+// is beside the results, so the column is narrow) shrinks the photo again and holds the amenities
+// and the additional information to ONE truncated line each; a tap on those lines unfolds them.
+// Nothing is dropped in either mode, and the «مطابق لطلبك» strip is never truncated (R12A.1).
+// `row` undefined is the phone/tablet card, unchanged.
 export function ResultCard({
   listing,
   onOpen,
   rank,
   activeAf,
+  row,
 }: {
   listing: Listing;
   onOpen: () => void;
@@ -84,8 +94,12 @@ export function ResultCard({
   // The Advanced-Filter predicates the turn's search ran with (afActive(m.result.query)) — one
   // stable reference per results turn; the memo comparator in agent.tsx compares it by identity.
   activeAf?: ActiveAf;
+  row?: 'roomy' | 'tight';
 }) {
   const { t, isRTL, locale } = useI18n();
+  const tight = row === 'tight';
+  // 'tight' only: the two truncated secondary lines, unfolded by a tap on them.
+  const [unfolded, setUnfolded] = useState(false);
   // Evidence for the «مطابق لطلبك» strip: NEVER read from listing.features / listing.bathrooms (raw,
   // NULL-coerced) — only from listing.canon, the canonical row the predicate actually passed on.
   const evidence = useMemo(() => afEvidence(activeAf ?? [], listing.canon, t), [activeAf, listing.canon, t]);
@@ -180,31 +194,31 @@ export function ResultCard({
     // checkable if a rendered card can be identified in the DOM; matching strips to rows by position
     // is unsound, because a row that earns no chip renders no strip and silently shifts the rest.
     // Rendering-only: no style, no behaviour, and web-only `testID` becomes `data-testid`.
-    <View testID={`card-listing-${listing.id}`} style={[card.wrap, { direction: wDir }]}>
-      <View style={card.summaryRow}>
+    <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow, { direction: wDir }]}>
       {/* The whole photo keeps the existing source-listing action. */}
-      <Pressable onPress={onOpen} accessibilityRole="link" accessibilityLabel={t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })} style={[card.photoCol, horizontal ? card.photoColWide : card.photoColMobile]}>
+      <Pressable onPress={onOpen} accessibilityRole="link" accessibilityLabel={t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })} style={[card.photoCol, row ? [card.photoColRow, tight && card.photoColTight] : horizontal ? card.photoColWide : card.photoColMobile]}>
         <ListingPhoto photos={(listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []))} style={card.photo} t={t} />
         {rank ? (
-          <View style={card.rankBadge} pointerEvents="none">
-            <Text style={card.rankText}>#{rank}</Text>
+          <View style={[card.rankBadge, row && card.rankBadgeRow]} pointerEvents="none">
+            <Text style={[card.rankText, row && card.rankTextRow]}>#{rank}</Text>
           </View>
         ) : null}
         {/* user request: removed the white "AQAR" pill that floated over the photo's top-right.
             Source attribution appears in the photo strip and the compact source row. */}
         {listing.source_url ? (
-          <View style={card.sourceStrip} pointerEvents="none">
-            <Text style={card.photoAction}>{t('Click here 👆')}</Text>
-            <Text style={card.sourceText}>{sourceHost(listing.source)}</Text>
+          <View style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none">
+            <Text style={[card.photoAction, row && card.photoActionRow]}>{t('Click here 👆')}</Text>
+            <Text style={[card.sourceText, row && card.sourceTextRow]} numberOfLines={row ? 1 : undefined}>{sourceHost(listing.source)}</Text>
           </View>
         ) : null}
       </Pressable>
 
+      <View style={row ? card.bodyRow : card.body}>
       {/* ─── property info ───────────────────────── */}
-      <Pressable onPress={onOpen} style={card.midCol}>
+      <Pressable onPress={onOpen} style={[card.midCol, row && card.midColRow]}>
         <View style={card.sourceRow}>
           <View style={card.hostHead}>
-            <View style={card.hostBadge}><View style={card.hostBadgeArt}><SourceBadge source={listing.source} /></View></View>
+            <View style={[card.hostBadge, row && card.hostBadgeRow]}><View style={[card.hostBadgeArt, row && card.hostBadgeArtRow]}><SourceBadge source={listing.source} /></View></View>
             <Text style={card.hostedOn}>{t('Hosted on {name}', { name: t(sourceName(listing.source)) })}</Text>
           </View>
           <Text style={card.typeLabel}>{typeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
@@ -216,10 +230,10 @@ export function ResultCard({
             the raw junk token. A present district with no city (or vice versa) is the normal,
             non-bug case and is untouched. */}
         <View style={card.headline}>
-        <Text style={[card.title, { textAlign: txtAlign, writingDirection: wDir }]}>
+        <Text style={[card.title, tight && card.titleTight, { textAlign: txtAlign, writingDirection: wDir }]}>
           {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
         </Text>
-        <Text style={isStayLengthPriced(listing.source) ? card.stayNote : card.price} numberOfLines={isStayLengthPriced(listing.source) ? 2 : 1}>{listingPrice(listing, locale)}</Text>
+        <Text style={isStayLengthPriced(listing.source) ? [card.stayNote, row && card.stayNoteRow] : [card.price, row && card.priceRow, tight && card.priceTight]} numberOfLines={isStayLengthPriced(listing.source) ? 2 : 1}>{listingPrice(listing, locale)}</Text>
         </View>
         <View style={card.locRow}>
           <Ionicons name="location-outline" size={12} color={colors.primary} />
@@ -339,10 +353,31 @@ export function ResultCard({
         ) : null}
       </Pressable>
 
-      </View>
-
-      {/* Amenities and additional information share the full card width. */}
-      <View style={card.rightCol}>
+      {/* Amenities and additional information: full card width when stacked, under the facts in a
+          row. 'tight' holds each to one truncated line; tapping them unfolds the full values. */}
+      {tight ? (
+        <Pressable
+          onPress={() => setUnfolded((v) => !v)}
+          accessibilityRole="button"
+          accessibilityLabel={t(unfolded ? 'Show less' : 'See more')}
+          accessibilityState={{ expanded: unfolded }}
+          style={[card.rightCol, card.rightColRow]}
+        >
+          {visible.length > 0 ? (
+            <Text numberOfLines={unfolded ? undefined : 1} style={[card.oneLine, { textAlign: txtAlign, writingDirection: wDir }]}>
+              {visible.map((f) => (
+                <Text key={f.key} style={card.featText}>
+                  <Ionicons name={f.icon} size={12} color={colors.primary} />{` ${t(f.label)}\u2003`}
+                </Text>
+              ))}
+            </Text>
+          ) : hasAddlInfo ? null : (
+            <Text style={card.noFeat}>{t('No additional features listed')}</Text>
+          )}
+          <AdditionalInformationPanel listing={listing} t={t} locale={locale} oneLine unfolded={unfolded} />
+        </Pressable>
+      ) : (
+      <View style={[card.rightCol, row && card.rightColRow]}>
         {visible.length > 0 ? (
           <View style={card.featGrid}>
             {visible.map((f) => (
@@ -360,6 +395,8 @@ export function ResultCard({
             the panel is hidden (Aqar's card stays exactly as it was). (user request 2026-06.) */}
         <AdditionalInformationPanel listing={listing} t={t} locale={locale} />
 
+      </View>
+      )}
       </View>
     </View>
   );
@@ -468,13 +505,30 @@ function arAttrValue(label: string, value: string, locale: string): string {
 // Render Wasalt's "Additional Information" rows on the card. Shows first 4 rows, with a
 // "See more" toggle that reveals the rest. Hidden entirely for Aqar (and for any Wasalt row
 // where the field hasn't been backfilled yet). Mirrors the on-site Wasalt panel design.
-function AdditionalInformationPanel({ listing, t, locale }: { listing: Listing; t: (k: string, p?: any) => string; locale: string }) {
+function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
+  listing: Listing; t: (k: string, p?: any) => string; locale: string;
+  /** Laptop 'tight' row: the same rows as one truncated line (the card unfolds it on tap). */
+  oneLine?: boolean; unfolded?: boolean;
+}) {
   const rows = listing.additional_info;
   if (!rows || rows.length === 0) return null;
   // Preserve the existing valid-row filter; all rows are visible without an expander.
   const all = rows.filter((r) => r && r.label && r.value);
   if (all.length === 0) return null;
   const visible = all;
+  if (oneLine) {
+    return (
+      <Text numberOfLines={unfolded ? undefined : 1} style={[card.oneLine, locale === 'ar' ? card.oneLineRtl : card.oneLineLtr]}>
+        {visible.map((r) => (
+          <Text key={r.key}>
+            <Text style={card.addlLabel}>{attrDisplayLabel(t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR)} </Text>
+            <Text style={card.addlValue}>{arAttrValue(r.label, r.value, locale)}</Text>
+            {'\u2003'}
+          </Text>
+        ))}
+      </Text>
+    );
+  }
   return (
     <View style={card.addlPanel}>
       <View style={card.addlGrid}>
@@ -1111,10 +1165,33 @@ const card = StyleSheet.create({
     alignItems: 'stretch',
   },
   // Full-width photo with compact, naturally wrapping details underneath.
-  summaryRow: { minWidth: 0, alignItems: 'stretch' },
+  body: { minWidth: 0 },
   photoCol: { position: 'relative', backgroundColor: colors.tint, overflow: 'hidden' },
   photoColWide: { width: '100%', height: 235 },
   photoColMobile: { width: '100%', height: 185 },
+  // Laptop row: a small rounded photo on the inline-start side that grows only as tall as the
+  // details beside it; 'tight' is the narrower column beside the ad pane.
+  wrapRow: { flexDirection: 'row' },
+  bodyRow: { flex: 1, minWidth: 0 },
+  photoColRow: { width: 168, minHeight: 118, margin: 8, borderRadius: 8, alignSelf: 'stretch' },
+  photoColTight: { width: 124, minHeight: 100, margin: 6 },
+  rankBadgeRow: { top: 5, left: 5, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 },
+  rankTextRow: { fontSize: 10 },
+  sourceStripRow: { paddingVertical: 4, paddingHorizontal: 7, columnGap: 6, rowGap: 0 },
+  photoActionRow: { fontSize: 10.5 },
+  sourceTextRow: { fontSize: 9, flexShrink: 1 },
+  midColRow: { paddingStart: 4, paddingEnd: 12, paddingTop: 7, paddingBottom: 0, gap: 2 },
+  rightColRow: { paddingStart: 4, paddingEnd: 12, paddingTop: 3, paddingBottom: 8, gap: 1 },
+  hostBadgeRow: { width: 50, height: 24 },
+  hostBadgeArtRow: { transform: [{ scale: 0.52 }] },
+  titleTight: { fontSize: 14 },
+  priceRow: { fontSize: 17 },
+  priceTight: { fontSize: 15.5 },
+  stayNoteRow: { fontSize: 12 },
+  // One truncated line of amenities / additional information ('tight'); unfolds to wrap on tap.
+  oneLine: { fontSize: 11.5, lineHeight: 18, color: colors.ink },
+  oneLineRtl: { writingDirection: 'rtl', textAlign: 'right' },
+  oneLineLtr: { writingDirection: 'ltr', textAlign: 'left' },
   photo: { width: '100%', height: '100%' },
   photoFallback: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surface2 },
   photoFallbackText: { fontSize: 11, color: colors.muted, fontWeight: '600' },
