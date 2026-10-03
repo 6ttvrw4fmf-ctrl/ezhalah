@@ -463,8 +463,8 @@
   },
   {
     "platform": "ksaaqar",
-    "strategy": "DIRECT_REVISIT",
-    "sla_hours": 48,
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
     "grace": 3
   },
   {
@@ -685,8 +685,8 @@
   },
   {
     "platform": "sadiqeltajer",
-    "strategy": "DIRECT_REVISIT",
-    "sla_hours": 48,
+    "strategy": "CRAWL_PRESENCE_ONLY",
+    "sla_hours": 168,
     "grace": 3
   },
   {
