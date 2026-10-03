@@ -49,7 +49,8 @@ JOB_RE = "^(fleet_liveness:|gathern_liveness|aqar_liveness:|dealapp_|wasalt_enum
 LIVENESS_JOB_RE = re.compile("^(fleet_liveness:|gathern_liveness|aqar_liveness|dealapp_liveness|wasalt_enum|wasalt_liveness)")
 LIFECYCLE_ALERT_RE = re.compile(
     "liveness|inactivation|deletion|resurrection|prune|lifecycle|stale_active|served_after_source_gone"
-    "|unknown_treated_as_dead|enumeration", re.I)
+    "|unknown_treated_as_dead|enumeration|served_despite|dead_but_active", re.I)
+LIFECYCLE_ROUTINE = "routine-11-lifecycle"  # alert_event.owner_routine: the computed fact, the regex is the fallback
 PR_RE = re.compile(r"#(\d{4,6})")
 MERGE_SUBJECT_RE = re.compile(r"\(#(\d+)\)\s*$", re.M)
 NO_SUCH_TABLE = re.compile("PGRST205|Could not find the table|does not exist|JSON could not be generated|'code': 404", re.I)
@@ -218,7 +219,7 @@ def collect(client, *, hours: int, now: datetime, merged: set[int] | None = None
         client.table("scrape_runs").select("platform,started_at,finished_at,ok,rows_seen,rows_upserted,notes")
         .gte("started_at", jobs_since).filter("platform", "imatch", JOB_RE).order("started_at", desc=True)), [])
     alerts = section("alert_event", lambda: _all(
-        client.table("alert_event").select("severity,kind,platform").is_("resolved_at", "null")
+        client.table("alert_event").select("severity,kind,platform,owner_routine").is_("resolved_at", "null")
         .in_("severity", ["P0", "P1", "P2"]).order("id")), None)
     unverified = section("mon_unverified_inactivations_24h", lambda: (
         client.table("mon_unverified_inactivations_24h").select("*").execute().data or [{}])[0], {})
@@ -320,8 +321,9 @@ def aggregate(raw: dict) -> dict:
             e = by_kind.setdefault(k, dict(severity=k[0], kind=k[1], n=0, platforms=defaultdict(int)))
             e["n"] += 1
             e["platforms"][a.get("platform") or "-"] += 1
-            p = a.get("platform")
-            if p in sites and LIFECYCLE_ALERT_RE.search(a.get("kind") or ""):
+            p = _platform_of_table(a.get("platform") or "")  # alert.platform is sometimes a TABLE name
+            lifecycle = a.get("owner_routine") == LIFECYCLE_ROUTINE or LIFECYCLE_ALERT_RE.search(a.get("kind") or "")
+            if p in sites and lifecycle:
                 sites[p]["alerts"][a["kind"]] = sites[p]["alerts"].get(a["kind"], 0) + 1
     alerts_out = sorted((dict(e, platforms=dict(sorted(e["platforms"].items(), key=lambda kv: -kv[1])[:5]))
                          for e in by_kind.values()), key=lambda e: (e["severity"], -e["n"]))

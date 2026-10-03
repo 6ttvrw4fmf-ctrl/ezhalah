@@ -167,6 +167,18 @@ def test_marks_follow_the_rulebook_lines_and_the_list_sums_to_every_site():
     assert (f["protected"], f["sites_in_matrix"]) == (2, 3) and f["gathern_checked"] == 200
 
 
+def test_an_alert_on_a_table_name_with_no_owner_still_turns_its_site_red():
+    # alert_event.platform is sometimes the TABLE, owner_routine may be unset: a served dead ad is the rulebook's ❌
+    rows = [dict(id=1, severity="P1", kind="served_despite_direct_404", platform="big_residential_listings",
+                 owner_routine=None, resolved_at=None),
+            dict(id=2, severity="P1", kind="some_new_kind", platform="tiny", owner_routine="routine-11-lifecycle", resolved_at=None),
+            dict(id=3, severity="P1", kind="some_new_kind", platform="quiet", owner_routine="routine-2-production", resolved_at=None)]
+    s = _by(LR.collect(_client(alert_event=rows), hours=24, now=NOW, merged=set()))
+    assert s["big"]["mark"] == "❌" and s["big"]["why"] == ["open alert: served_despite_direct_404×1"]
+    assert s["tiny"]["mark"] == "❌" and s["tiny"]["why"] == ["open alert: some_new_kind×1"]   # owner_routine is the fact
+    assert s["quiet"]["mark"] == "✅"           # neither owned by lifecycle nor a lifecycle kind
+
+
 def test_jobs_keep_recheck_apart_collapse_shards_and_carry_age():
     rep = LR.collect(_client(), hours=24, now=NOW, merged=set())
     j = {x["job"]: x for x in rep["jobs"]}
