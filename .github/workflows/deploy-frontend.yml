@@ -276,19 +276,19 @@ jobs:
         #
         # `job.status` cannot distinguish "refused before deploying" from "deployed, then a later
         # check failed". So decide from EVIDENCE in the captured safe-deploy log, not from job state.
+        #
+        # PARSING LIVES IN scripts/deploy-report.sh (extracted 2026-09-12) so it can be sourced here
+        # AND executed by scripts/verify-deploy-report.ts — never re-inline this logic. That file's
+        # header explains a false-alarm investigation this same day: the verdict below was already
+        # computed correctly but never echoed anywhere `gh run view --log` (or a human reading the
+        # raw job log) could see it — only $GITHUB_STEP_SUMMARY got it. The one thing GitHub Actions
+        # DOES print to the raw log is its own pre-execution echo of this step's SOURCE CODE — which
+        # includes the literal, unevaluated `SHIPPED=no; ...` initializer — and that is what actually
+        # looked like a false "computed no". The `echo` below closes that gap.
         run: |
-          LOG=/tmp/safe-deploy.log
-          SHIPPED=no; REFUSED_PRE=no; POST_FAILED=no; DEPLOY_URL=""
-
-          if [ -f "$LOG" ]; then
-            # safe-deploy.sh only reaches these lines AFTER the production deploy returned a deployment.
-            if grep -qE 'Aliased|^https://ezhalah-[a-z0-9]+-' "$LOG"; then SHIPPED=yes; fi
-            # Every pre-deploy gate refuses with one of these and exits before deploying.
-            if grep -qE 'REFUSING TO DEPLOY|safe-deploy: REFUSED' "$LOG"; then REFUSED_PRE=yes; fi
-            # These fire only AFTER a successful deploy (alias/env/smoke-test/drift checks).
-            if grep -q 'REFUSING TO ADVANCE THE BASELINE' "$LOG"; then POST_FAILED=yes; fi
-            DEPLOY_URL="$(grep -oE 'https://ezhalah-[a-z0-9]+-[a-z0-9-]+\.vercel\.app' "$LOG" | tail -1)"
-          fi
+          . scripts/deploy-report.sh
+          deploy_report_verdict /tmp/safe-deploy.log
+          echo "Computed verdict: SHIPPED=$SHIPPED REFUSED_PRE=$REFUSED_PRE POST_FAILED=$POST_FAILED DEPLOY_URL=${DEPLOY_URL:-<none>}"
 
           {
             if [ "${{ inputs.dry_run }}" = "true" ]; then

@@ -20,12 +20,20 @@
  *
  * The MODE READ IS FROM GIT, not the filesystem: the index is what CI checks out, and a local chmod
  * that was never committed is exactly the state this barrier has to fail on.
+ *
+ * COMMENTS ARE STRIPPED BEFORE SCANNING (2026-09-12). A prose comment ABOUT a sourced script — e.g.
+ * "so it can be sourced here" describing scripts/deploy-report.sh a few lines above the real
+ * `. scripts/deploy-report.sh` line — has no `.`/`source` token immediately before the bare path
+ * mention, so the unstripped scanner misread its own documentation as an executed reference and
+ * demanded +x on a file that is only ever dot-sourced. Same class of false alarm this file already
+ * warns about for `source`/`.` detection, one level up: describing a script is not invoking it.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 const WF_DIR = '.github/workflows';
 const SCRIPT_RE = /(^|[\s;&|(])(?:(source|\.)\s+)?(?:\.\/)?(scripts\/[A-Za-z0-9._-]+\.sh)\b/g;
+const stripComments = (s: string) => s.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -45,7 +53,7 @@ const executed = new Map<string, string>();
 const sourcedOnly = new Set<string>();
 
 for (const f of readdirSync(WF_DIR).filter((n) => /\.ya?ml$/.test(n))) {
-  const yml = readFileSync(`${WF_DIR}/${f}`, 'utf8');
+  const yml = stripComments(readFileSync(`${WF_DIR}/${f}`, 'utf8'));
   for (const m of yml.matchAll(SCRIPT_RE)) {
     const [, , sourcedWith, path] = m;
     if (sourcedWith) { if (!executed.has(path)) sourcedOnly.add(path); continue; }
@@ -87,6 +95,36 @@ mustCatch('`. scripts/x.sh` (dot-source) being misread as EXECUTED',
   classify('  . scripts/deploy-target-guard.sh')?.sourced === true);
 mustCatch('the mode predicate accepting 100644 — the exact bit that killed every deploy in #1759',
   !('100644' === '100755'));
+
+// A comment ABOUT a script — bare mention, no `.`/`source` token before it — must not be read as an
+// executed reference just because it sits above the real (correctly dot-sourced) invocation. This is
+// the exact shape that tripped this barrier on its own commit: a prose line reading "...so it can be
+// sourced here" describing scripts/deploy-report.sh, a few lines above `. scripts/deploy-report.sh`.
+const COMMENTED_THEN_SOURCED = [
+  '        # so it can be sourced here scripts/deploy-report.sh — never re-inline this logic.',
+  '        run: |',
+  '          . scripts/deploy-report.sh',
+].join('\n');
+mustCatch('a comment mentioning a script bare-ly, sitting above the real dot-sourced line, is dropped',
+  !stripComments(COMMENTED_THEN_SOURCED).includes('sourced here'));
+{
+  // Full pipeline, not just the string helper: run the actual classification loop stripComments
+  // feeds SCRIPT_RE, proving the comment cannot flip a real dot-source into "executed".
+  // lastIndex reset first: SCRIPT_RE is a shared, stateful /g regex and the classify() calls above
+  // already advanced it via .exec() — matchAll (unlike classify's own re-zeroed .exec() calls)
+  // resumes from wherever lastIndex was left, so a dirty value here would silently under-scan a
+  // short string. The real production scan (top of this file) never hits this: it's the first
+  // thing that runs, before any classify() call exists.
+  SCRIPT_RE.lastIndex = 0;
+  const matches = [...stripComments(COMMENTED_THEN_SOURCED).matchAll(SCRIPT_RE)];
+  mustCatch('after stripping, the ONLY match left is the real dot-sourced line (sourced=true)',
+    matches.length === 1 && Boolean(matches[0][2]));
+}
+// And a comment can never SATISFY the executable requirement either — a real bare-executed script
+// commented out (or merely mentioned) must not count as proof it doesn't need +x.
+const COMMENTED_BARE_EXEC = '        # scripts/safe-deploy.sh used to be run directly here.';
+mustCatch('a bare mention of a script inside a comment does not count as sourced OR executed',
+  stripComments(COMMENTED_BARE_EXEC).trim() === '');
 mustCatch('a script the scan cannot see at all (an empty executed set reading as clean)',
   !(new Map().size > 0));
 // …and not vacuous: the real workflow scan must still have found something to grade.
