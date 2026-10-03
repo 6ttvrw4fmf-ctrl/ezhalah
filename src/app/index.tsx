@@ -20,6 +20,7 @@ import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
 import { buildAfSummary, grouped, type SearchQuery } from '@/data/search';
+import { scopeCrossesMacro } from '@/lib/searchDefaults';
 import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams, searchTableScope, rentPeriodParam } from '@/data/remote';
 import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
 import { AF_ALL_QUESTIONS } from '@/data/advancedFilters';
@@ -257,7 +258,9 @@ export default function Home() {
   // Before this, pools counted ALL categories while a bare search implied Residential: district
   // counts overstated up to 86%, and commercial-only districts presented as alive yet searched to 0
   // — silently defeating the PR#384 zero-mark.
-  const effCategory: Category = query.category ?? IMPLIED_CATEGORY_DEFAULT;
+  // null for a cross-macro scope (Residential Land under تجاري): the results RPC sends no category there,
+  // so the city/district pools must not either — count == search (owner 2026-10-03).
+  const effCategory: Category | null = scopeCrossesMacro(query) ? null : (query.category ?? IMPLIED_CATEGORY_DEFAULT);
   // The cohort's Arabic types — the EXACT array the search RPC receives (one shared definition in
   // remote.ts), so Trending cities/districts, their counts, and their percentages always describe
   // the same inventory pressing Search returns.

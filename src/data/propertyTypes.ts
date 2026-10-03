@@ -37,7 +37,13 @@ export const HIERARCHY: Record<Macro, SubGroup[]> = {
     // 'Facilities' group RETIRED 2026-07-07: its 5 types (Bank/School/Health Center/Telecom Tower/Parking) are now
     // gathered under the single 'Service Facilities' (مرافق خدمية) box above. They stay DISTINCT clean types
     // internally (SERVICE_FACILITY_TYPES / SUBGROUPS below) — DB never merged, cards show raw. [[filter-mapping-decisions-2026-07-06]]
-    { group: 'Commercial & Industrial Plots',     types: ['Commercial Land', 'Industrial Land'] },
+    // 'Residential Land' is a CROSS-MACRO SHORTCUT (owner 2026-10-03: «add أرض سكنية with those … so you can
+    // search lands all in one»): offered here too, but its HOME macro stays Residential (CLEAN_MACRO keeps
+    // the first macro that lists a type). Everything that reasons about a type's macro — the AI chat's
+    // category, the misfile-recovery scopes, the DeepSeek vocabulary — keeps reading Residential; only the
+    // filter OFFERS it on the commercial side, and the RPC category gate is dropped for such a scope
+    // (scopeCrossesMacro in src/lib/searchDefaults.ts) because the type_ar list is already exact.
+    { group: 'Commercial & Industrial Plots',     types: ['Commercial Land', 'Industrial Land', 'Residential Land'] },
   ],
 };
 
@@ -70,7 +76,7 @@ export const FACILITY_TYPE_AR: Record<string, string> = {
 export const CLEAN_MACRO: Record<string, Macro> = (() => {
   const m: Record<string, Macro> = {};
   for (const macro of ['Residential', 'Commercial'] as Macro[])
-    for (const g of HIERARCHY[macro]) for (const t of g.types) m[t] = macro;
+    for (const g of HIERARCHY[macro]) for (const t of g.types) if (!(t in m)) m[t] = macro; // first macro = HOME macro
   // Facility sub-types are gathered under the 'Service Facilities' box (not HIERARCHY boxes) but remain valid
   // COMMERCIAL clean types for normalizeType + strict query + the AI agent. (owner 2026-07-07)
   for (const t of SERVICE_FACILITY_TYPES) m[t] = 'Commercial';
@@ -116,15 +122,23 @@ export const isGroup = (s: string): boolean => groupMembers(s).length > 0;
 // on there being a selected group — a type with no group would be an ACTIVE filter with no visible
 // control to remove it, the exact orphan pruneTypesToGroups() exists to prevent. Returns null for the
 // 5 service-facility types, which are real clean types but deliberately live in NO HIERARCHY group.
-export const groupOf = (type: string): string | null => {
-  for (const macro of ['Residential', 'Commercial'] as Macro[])
+// `prefer` = the macro the user is currently in: a cross-macro shortcut type (Residential Land) backfills
+// the group of THAT side, never a group from the other category (owner 2026-10-03).
+export const groupOf = (type: string, prefer?: Macro | null): string | null => {
+  const order: Macro[] = prefer === 'Commercial' ? ['Commercial', 'Residential'] : ['Residential', 'Commercial'];
+  for (const macro of order)
     for (const g of HIERARCHY[macro]) if (g.types.includes(type)) return g.group;
   return null;
 };
 
+// Whether a clean type is reachable under this macro's filter: its home macro, or a group on this side that
+// lists it as a cross-macro shortcut. Service-facility types live in no group and resolve by home macro.
+export const offeredUnder = (macro: Macro, type: string): boolean =>
+  (CLEAN_MACRO[type] ?? 'Residential') === macro || HIERARCHY[macro].some((g) => g.types.includes(type));
+
 // The groups implied by a set of clean types, deduped, in HIERARCHY order. The twin of groupsMembers().
-export const groupsOf = (types: string[]): string[] =>
-  [...new Set(types.map((t) => groupOf(t)).filter((g): g is string => g != null))];
+export const groupsOf = (types: string[], prefer?: Macro | null): string[] =>
+  [...new Set(types.map((t) => groupOf(t, prefer)).filter((g): g is string => g != null))];
 
 // ── raw → clean mapping ─────────────────────────────────────────────────────────────────────
 // Exact raw strings that map to a clean type regardless of source table. Order doesn't matter;
