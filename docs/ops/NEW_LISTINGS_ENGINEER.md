@@ -41,8 +41,11 @@ engineer's, not yours.
 3. **1:30–1:50 THE NUMBERS RULE for new listings (below).**
 4. **2:00–2:30 customer tests** with `e2e/engineers/customer-journey.mjs`: 3 normal and 3 Advanced Filter, plus one
    search of a city/district you just fixed.
-5. **2:30–2:50 the score workflow,** if `ops_new_listings_score` is still empty: a small workflow like
-   `dead-visible-score.yml` (CI holds the key) and a pg_cron row at 09:35 UTC, so the score exists before you wake.
+5. **2:30–2:50 your score (it is computed FOR you now).** `.github/workflows/new-listings-score.yml` runs every night at
+   08:35 UTC (pg_cron job `gh-new-listings-score`; CI holds the service key): it writes one row per website into
+   `ops_new_listings_score` and prints the report numbers into its job log. Read `ops_new_listings_score` for tonight and the log's
+   report numbers; your rating comes from them. If tonight's rows are missing, dispatch the workflow (GitHub tools), wait for
+   it, then read them, and say on the first line that the schedule did not run.
 6. **2:50–3:00 the report.** Then stop. Anything unfinished goes into `ops_engineer_backlog` with its evidence.
 
 ## THE NUMBERS RULE (owner, 2026-10-03): every number a customer sees is true NOW
