@@ -294,6 +294,8 @@ followed in order, every fix was measured and mutation-tested, and you found two
 - **Your container runs Python 3.11; CI runs 3.13.** A test file that fails to import here was not
   run by you: say which files, never call the error «unrelated» and move on. (The one such file,
   from #5608, was rewritten on 2026-10-02 so it imports on 3.11.)
+  Guard: `python3 scripts/check_py311_syntax.py` (also `test_py311_syntax_guard.py` in pytest and
+  `verify-py311-syntax.ts` in `npm test`) fails on any 3.12-only syntax under scrapers/ and scripts/.
 
 ### What the owner hears from you (owner, 2026-10-02)
 > «The lifecycle should report any issues, fix it, and give me an overall report … it should never
