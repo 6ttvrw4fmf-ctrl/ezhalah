@@ -78,6 +78,7 @@ import { detailFor, detailForContext, type Category } from '@/data/taxonomy';
 import { useApp } from '@/store';
 import { pickResultsFoundSentence } from '@/data/resultsFoundRotation';
 import { pickNoResultsSentence } from '@/data/noResultsRotation';
+import { pickName } from '@/lib/nameSync';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { screenKeyboardInset } from '@/lib/visualViewportFrame';
@@ -3861,7 +3862,11 @@ export default function Agent() {
               // «لقينا {n} إعلان يطابق طلبك.» has no baked/DB fallback: the picker rotates from
               // search #1.
               const rfLang: 'ar' | 'en' = getLocale() === 'en' ? 'en' : 'ar';
-              const rfName = rfLang === 'ar' ? (user?.nameAr ?? user?.name) : (user?.nameEn ?? user?.name);
+              // pickName = the SAME function the sidebar and account menu print the name with. The
+              // old fallback (nameAr, else the raw name) printed the Latin name whenever nameAr was not filled
+              // yet, so an Arabic sentence greeted «يا Yusuf Saleh …» while the sidebar said «يوسف» (owner
+              // screenshot 2026-10-03). pickName never returns Latin letters for Arabic.
+              const rfName = user ? pickName(user, rfLang) : null;
               // No-Results rotation (owner rule 2026-09-26): noResultsSuggestion() in src/data/search.ts
               // has ~9 branches — 8 give an EARNED, specific diagnosis ("this district has other
               // types", "did you mean X city") and stay exactly as they render today. Only its LAST
