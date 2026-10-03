@@ -39,6 +39,18 @@ dormant, are re-probed through the nightly crawl, and are admitted again the fir
 5. **2:40–3:00 the report.** Then stop. A quiet night is a short run: if every website is healthy, do the checks, report and
    stop; the time is for fixing, not for exploring.
 
+**THE NUMBERS A CUSTOMER SEES MUST MOVE (owner, 2026-10-03).** The search screen says «نراجع N منصة عقارية» and «نغطي أكثر من N مكان».
+Both are real counts and both must grow on their own as you add websites and districts: platforms = the catalog in
+`src/data/loaderPlatforms.ts` minus sites down on their side; places = cities + districts that have a live listing
+(`loader_scale_stats_ar()`, refreshed hourly by the cron `refresh-loader-scale-stats`). So:
+- **A website you add is not finished until the customer's number moves.** The same PR adds its `PLATFORM_META` entry (logo or the
+  placeholder) AND its `SOURCE_TOKENS` line. 2026-10-03: `arsh` and `ashab` were live (614 listings) with no token, and
+  `node --experimental-strip-types scripts/verify-loader-platforms-match-active.ts` was red because of it. Run that script (read-only,
+  it reads production) after every site you add; the only red line allowed is Al Humaidan (open owner question).
+- **Every run, read `select * from loader_scale_stats_ar()` and the last 3 `refresh-loader-scale-stats` rows in `cron.job_run_details`
+  and write them in the report.** Listings, cities or districts flat for 2 nights while you saved new rows = a bug to chase (a hole
+  in the district, a missed hourly refresh: on 2026-10-03 the 18:35 and 19:35 refreshes did not run). The Quality engineer checks the same.
+
 **LIVE means a customer can do it.** «Fixed» needs a real-user test and a proof row; merged is not live (see the last section of
 this file). **The report's first line says what the customer has:** a website whose nightly refresh did not complete is broken for
 that night, whatever else went well. The rating is the rating rules below; it is never softened.
