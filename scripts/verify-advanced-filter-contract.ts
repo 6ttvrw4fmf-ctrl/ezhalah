@@ -158,7 +158,9 @@ check('one shared per-option floor (MIN_REAL_OPTION_COUNT via meaningful()); the
 // Residential-only), no commercial list carries rnpl/furnished-question on Buy, no NEW cohort
 // carries the fresh-dead 'ac' chip, and mapped types render EXACTLY their COHORT_CHIPS list.
 check('cohortAllows matches the clean type macro and COHORT_CHIPS scopes commercial chips',
-  /q\.category !== \(CLEAN_MACRO\[type\] \?\? 'Residential'\)/.test(cohortSrc)
+  // 2026-10-03: macro equality became reachability (offeredUnder = home macro OR a group on this side lists
+  // the type) so Residential Land, offered under the commercial land group, is gated on that side too.
+  /if \(!q\.category \|\| !offeredUnder\(q\.category, type\)\) return false;/.test(cohortSrc)
   && /export const COHORT_CHIPS/.test(cohortSrc)
   && !/COHORT_CHIPS[\s\S]{0,900}'ac'/.test(cohortSrc.slice(cohortSrc.indexOf('export const COHORT_CHIPS'), cohortSrc.indexOf('export const COHORT_CHIPS') + 1200))
   && /chipAllow\.includes\(d\.key\)/.test(advSrc));
@@ -176,7 +178,7 @@ check('RNPL + amenities + bathrooms are cohort-gated through cohortAllows',
   /RNPL_QUESTION[\s\S]{0,420}cohortAllows\(q, 'rnpl'\)/.test(advSrc)
   && /cohortAllows\(q, 'amenities'\)/.test(advSrc)
   && /cohortAllows\(q, 'bathrooms'\)/.test(advSrc)
-  && /export function cohortAllows[\s\S]{0,900}q\.rentPeriod === 'monthly'\) return \(cfg\.RentMonthly/.test(cohortSrc));
+  && /export function cohortAllows[\s\S]{0,1300}q\.rentPeriod === 'monthly'\) return \(cfg\.RentMonthly/.test(cohortSrc));
 
 // Mixed period ('both', owner 2026-08-19): cohortAllows must require BOTH RentAnnual and RentMonthly
 // membership — union would let a period-specific question fire against the other period's rows.
@@ -412,14 +414,14 @@ check('the results pills are fed by the deduped facet set (one label per committ
   /const dedupedFacets = dedupeFacetsByLabel\(/.test(agentSrc)
   && /facets: dedupedFacets,/.test(agentSrc));
 
-// ── Results summary + removable pills (owner 2026-08-16 §10) ────────────────────────────────────
-// Removal is PURE recomputation — rebuild from the interview's baseQ by re-applying the remaining
-// facets through each question's own apply(), never a hand-written inverse per question id.
-check('removable pills rebuild the query from baseQ via the questions’ own apply()',
-  /removeGuidedFacet/.test(agentSrc)
-  && /for \(const f of remaining\)/.test(agentSrc)
-  && /question\.apply\(q, f\.keys\)/.test(agentSrc)
-  && /buildAfSummary\(guidedPills\.facets\)/.test(agentSrc));
+// ── Results summary + READ-ONLY pills (owner 2026-10-03; supersedes the 2026-08-16 §10 removable pills) ─
+// The turn's summary is the ORIGINAL summary (built from baseQ, the query before the first round) plus
+// every committed answer under «من الفلتر المتقدم», rebuilt from baseQ + ALL facets each time. The
+// chips below the intro stay, but nothing on them removes anything: no ✕, no handler, no rebuild path.
+check('a guided round’s summary is the original summary plus every committed answer',
+  /guidedSearchSummary\(opts\.guided\.baseQ, opts\.guided\.facets\)/.test(agentSrc));
+check('the pills are read-only: removeGuidedFacet is gone and no pill takes a press',
+  !/removeGuidedFacet/.test(agentSrc) && !/<Pressable[^>]*af-pill/.test(agentSrc));
 
 // ── Count RPCs must never receive p_sort_by (bug-hunt 2026-07-30) ────────────────────────────────
 // PostgREST resolves RPCs by exact param-name match; leaking p_sort_by 404s BOTH counts calls the

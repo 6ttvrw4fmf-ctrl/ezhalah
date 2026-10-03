@@ -306,7 +306,10 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
                                 "source_table": r["_table"], "listing_id": r["id"], "ad_number": r["ad_number"],
                                 "listing_url": r.get("listing_url") or "", "verdict": "GONE",
                                 "oracle": f"fleet_liveness.{site}", "note": f"{d.reason} · {why}"}).execute()
+                            # Dated here, not by trg_set_deactivated_at, which 27 platforms'
+                            # tables lack (2026-10-03; db.prune_unseen says why).
                             patch["active"] = False
+                            patch["deactivated_at"] = done
                             st["hidden"] += 1
                         else:
                             st["struck"] += 1

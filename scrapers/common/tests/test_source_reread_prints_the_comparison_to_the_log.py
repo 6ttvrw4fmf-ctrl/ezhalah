@@ -18,3 +18,25 @@ def test_log_lines_carry_stored_values_and_page_evidence():
 def test_a_listing_with_no_fetch_still_prints_its_header():
     lines = log_lines({"table": "t", "id": 1, "url": None, "stored": {}})
     assert lines[0].startswith("== t:1") and "url: None" in lines[1]
+
+
+def test_log_lines_count_the_pages_own_images_without_our_parser():
+    from scrapers.common.source_reread import page_image_count
+    # nested the way dealapp's JSON-LD nests it, plus a bare string image
+    page = {"jsonld": [{"@type": "Product", "image": ["a.jpg", "b.jpg", "c.jpg"],
+                        "itemOffered": {"image": "d.jpg"}}]}
+    assert page_image_count(page) == 4
+    assert page_image_count({"jsonld": [{"@type": "Product", "name": "x"}]}) == 0   # listed, none
+    assert page_image_count({"jsonld": []}) is None                               # nothing to count from
+    item = {"table": "t", "id": 1, "url": "u", "stored": {"has_photo": False}, "page": page}
+    text = "\n".join(log_lines(item))
+    assert "page images (JSON-LD): 4" in text and "we serve a photo: False" in text
+
+
+def test_image_paths_say_where_the_page_lists_them():
+    from scrapers.common.source_reread import page_image_paths
+    page = {"jsonld": [{"@type": "Product", "itemOffered": {"image": ["a.jpg"]}, "image": ["b.jpg", "c.jpg"]}]}
+    assert page_image_paths(page) == ["itemOffered.image x1", "image x2"]
+    assert page_image_paths({"jsonld": [{"name": "x"}]}) == []
+    text = "\n".join(log_lines({"table": "t", "id": 1, "url": "u", "stored": {}, "page": page}))
+    assert "image at: ['itemOffered.image x1', 'image x2']" in text

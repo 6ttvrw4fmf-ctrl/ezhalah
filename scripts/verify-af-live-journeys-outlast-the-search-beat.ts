@@ -218,21 +218,11 @@ type Registered = { file: string; ms: number; postSearchRead: boolean; why: stri
 const BEAT_WAITS: Registered[] = [
   { file: 'verify-af-live-truth.ts', ms: 14000, postSearchRead: true,
     why: 'settle after «بحث» before reading the results turn — must outlast the beat' },
-  { file: 'verify-af-pill-removal-live.ts', ms: 14000, postSearchRead: true,
-    why: 'settle after the baseline «بحث» before the first pill read — must outlast the beat' },
-  { file: 'verify-af-stale-predicate-live.ts', ms: 14000, postSearchRead: true,
-    why: 'two baseline searches, each read from the DOM afterwards — must outlast the beat' },
-  { file: 'verify-trending-live-four-way-truth.ts', ms: 14000, postSearchRead: true,
-    why: 'three searches whose Trending rows are read from the DOM — must outlast the beat' },
   { file: 'verify-web-runtime-smoke.mjs', ms: 12000, postSearchRead: true,
     why: 'SEARCH_BEAT_FLOOR_MS, hand-typed as 12000 in a .mjs that cannot import this .ts contract. '
        + 'Currently ≥ the live beat, so it is correct today — registered precisely so that the next '
        + 'rise in the beat turns this barrier red instead of turning that journey into a false '
        + 'accusation. It is the one remaining private copy of the beat in the tree.' },
-  { file: 'verify-af-scope-change-live.ts', ms: 8000, postSearchRead: false,
-    why: 'a UI settle after searchAndCapture(); the assertion that follows reads the CAPTURED '
-       + 'REQUEST, not the screen, so it is not gated on the beat. Kept registered because the '
-       + 'next UI interaction after it can still land on the loader if the beat ever grows past it.' },
 ];
 
 // THE SUBJECT IS JOURNEYS THAT DRIVE A BROWSER, NOT BARRIERS THAT READ SOURCE. A source-scanning
@@ -298,19 +288,15 @@ const SUB_BEAT_BAND = (src: string): number[] =>
   [...stripComments(src).matchAll(/waitForTimeout\(\s*(\d{4,})\s*\)/g)]
     .map((m) => Number(m[1])).filter((n) => n >= 5_000 && n < BEAT_SIZED_MS);
 
-const RESULTS_TURN_JOURNEYS = ['verify-af-agent-cta-live.ts', 'verify-af-remove-last-pill-live.ts'];
+const RESULTS_TURN_JOURNEYS = ['verify-af-agent-cta-live.ts'];
 
 // A band wait is allowed ONLY where it is provably not standing in for the beat, with the reason
 // written down — the same shape as BEAT_WAITS above, and for the same reason: the next person to
 // add one has to say why, instead of the number quietly joining the scenery.
 type BandAllowed = { file: string; ms: number; why: string };
-const SUB_BEAT_ALLOWED: BandAllowed[] = [
-  { file: 'verify-af-remove-last-pill-live.ts', ms: 5000,
-    why: 'the INITIAL page settle immediately after gotoLive(), before any search has been run. '
-       + 'There is no results turn in flight for it to read mid-cascade, so the beat does not '
-       + 'apply. Registered rather than exempted so that if it ever moves below a search it has '
-       + 'to be re-argued.' },
-];
+// (empty since 2026-10-03: its one entry belonged to verify-af-remove-last-pill-live.ts, retired with the pill ✕)
+const SUB_BEAT_ALLOWED: BandAllowed[] = [];
+
 const allowedFor = (f: string) => SUB_BEAT_ALLOWED.filter((a) => a.file === f).map((a) => a.ms);
 
 const banded = RESULTS_TURN_JOURNEYS
@@ -353,7 +339,6 @@ check('the sub-beat band is genuinely below the live beat', BEAT_SIZED_MS < SEAR
 // a future edit cannot quietly return them to a fixed sleep.
 const MUST_PACE = [
   'verify-af-card-evidence-live.ts',
-  'verify-af-pill-removal-live.ts',
   'verify-af-agent-cta-live.ts',
   'verify-combined-budget-live.ts',
 ];

@@ -19,11 +19,13 @@ import { CATEGORIES, detailFor, detailForContext, priceTabsFor, type Category } 
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
-import { buildAfSummary, grouped, type SearchQuery } from '@/data/search';
+import { grouped, type SearchQuery } from '@/data/search';
+import { scopeCrossesMacro } from '@/lib/searchDefaults';
 import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams, searchTableScope, rentPeriodParam } from '@/data/remote';
-import { HOME_DEFAULT_QUERY, hasActiveFilters, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
+import { HOME_DEFAULT_QUERY, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
 import { AF_ALL_QUESTIONS } from '@/data/advancedFilters';
-import { reconcileCommittedAf, withoutFacet, AF_PREDICATE_FIELDS } from '@/lib/afCarry';
+import { reconcileCommittedAf, AF_PREDICATE_FIELDS } from '@/lib/afCarry';
+import { takeSearchLeftBehind } from '@/lib/searchLeftBehind';
 import { toWholeNumberDigits, wholeNumberKeyDecision } from '@/lib/inputHygiene';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { noTranslateRef } from '@/noTranslate';
@@ -257,7 +259,9 @@ export default function Home() {
   // Before this, pools counted ALL categories while a bare search implied Residential: district
   // counts overstated up to 86%, and commercial-only districts presented as alive yet searched to 0
   // — silently defeating the PR#384 zero-mark.
-  const effCategory: Category = query.category ?? IMPLIED_CATEGORY_DEFAULT;
+  // null for a cross-macro scope (Residential Land under تجاري): the results RPC sends no category there,
+  // so the city/district pools must not either — count == search (owner 2026-10-03).
+  const effCategory: Category | null = scopeCrossesMacro(query) ? null : (query.category ?? IMPLIED_CATEGORY_DEFAULT);
   // The cohort's Arabic types — the EXACT array the search RPC receives (one shared definition in
   // remote.ts), so Trending cities/districts, their counts, and their percentages always describe
   // the same inventory pressing Search returns.
@@ -1091,6 +1095,25 @@ export default function Home() {
     RNAnimated.parallel([rise(badgeAnim, 80), rise(titleAnim, 230), rise(subAnim, 400)]).start();
   }, [heroAnim, entrance, badgeAnim, titleAnim, subAnim]);
   useFocusEffect(playEntrance);
+  // A RETURN TO THE FILTER IS A CLEAN FILTER (owner 2026-10-03). Coming back from a search — the
+  // toggle, the browser's Back, a new visit — always opens an empty form: the previous search is NOT
+  // kept here and there is no «مسح الكل» to undo it. Signed in, that search is in the sidebar history,
+  // like any chat product; as a guest it is simply gone, never saved. Same reset the old Clear-all
+  // button ran (store query, city and district state, scroll), run when a search was left behind
+  // (src/lib/searchLeftBehind.ts) instead of on a tap — and ONLY then, so a first focus after load
+  // can never wipe a form the user has already started to fill.
+  const resetFilterForm = useCallback(() => {
+    setQuery(() => HOME_DEFAULT_QUERY());
+    cityTextRef.current = '';
+    setCitySuggestions([]);
+    setCitySelected(null);
+    setLocMsg('');
+    setCityFocus(false);
+    clearDistrict();
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useFocusEffect(useCallback(() => { if (takeSearchLeftBehind()) resetFilterForm(); }, [resetFilterForm]));
   useEffect(() => { if (fresh) playEntrance(); }, [fresh, playEntrance]);
   // fade + lift; the title lifts a touch further for emphasis.
   const reveal = (v: RNAnimated.Value, lift = 16) => ({
@@ -1227,71 +1250,10 @@ export default function Home() {
 
           {/* Search card */}
           <View style={s.card}>
-            {hasActiveFilters(query) && (
-              <Reveal>
-                <Pressable
-                  style={s.clearAllBtn}
-                  hitSlop={8}
-                  onPress={() => {
-                    setQuery(() => HOME_DEFAULT_QUERY());
-                    cityTextRef.current = '';
-                    setCitySuggestions([]);
-                    setCitySelected(null);
-                    setLocMsg('');
-                    setCityFocus(false);
-                    clearDistrict();
-                    // The collapsing Property-type/Refine sections can leave the user stranded mid-page —
-                    // scroll back to the top so the reset filter form is what they actually see.
-                    scrollRef.current?.scrollTo({ y: 0, animated: true });
-                  }}
-                >
-                  <Ionicons name="refresh-outline" size={14} color={colors.muted} />
-                  <Text style={s.clearAllText}>{t('Clear all')}</Text>
-                </Pressable>
-              </Reveal>
-            )}
-            {/* THE ADVANCED FILTER ANSWERS CARRIED IN FROM THE CHAT (owner P0 2026-09-01).
-                THIS IS NOT DECORATION — it is what licenses the carry to exist at all.
-                sanitizeForFilterRestore is a strict allowlist of "what the Filter UI can actually
-                show", written for a measured P1: an AF predicate active with no on-screen control
-                silently amputated an unrelated search (a leaked ratingMin returned 0 of 11,552 on
-                الرياض/شراء/فيلا). The owner's requirement — every committed AF predicate must survive
-                a return to this screen — is only reconcilable with that rule by SHOWING them here and
-                letting the user remove any of them. Removing one rebuilds the query from the
-                remaining facets through each question's own apply(), exactly like the chat's pills.
-                Same «بناءً على» summary text the user already read in the chat, so the two screens
-                describe one search in one voice.
-                SCOPE facets (group/type) are absent because reconcileCommittedAf does not carry
-                them at all — the group boxes and type boxes below already ARE their control, and a
-                receipt whose predicate has a live control is not a receipt, it is a second writer
-                fighting the user (it re-applied itself over every scope edit; see @/lib/afCarry).
-                So `query.afFacets` here is exactly the advanced answers, and chip index i is facet
-                index i — which is what lets the «×» below hand `i` straight to withoutFacet(). */}
-            {query.afFacets?.length ? (
-              <Reveal>
-                <View style={s.afCarryWrap}>
-                  <Text style={[s.afCarryLead, { textAlign: isRTL ? 'right' : 'left' }]}>{buildAfSummary(query.afFacets)}</Text>
-                  <View style={[s.afCarryRow, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
-                    {query.afFacets.map((f, i) => (
-                      <Pressable
-                        key={`${f.id}-${i}`}
-                        testID={`filter-af-chip-${i}`}
-                        style={s.afCarryChip}
-                        hitSlop={6}
-                        // Removed from the RECONCILED list this row is rendered from, never from the
-                        // raw store list — a facet the cohort already retired would otherwise shift
-                        // the indexes and a «×» would delete somebody else's answer. Writing the
-                        // reconciled query back is the same commit the user just made on screen.
-                        onPress={() => setQuery(() => withoutFacet(query, i, AF_ALL_QUESTIONS))}
-                      >
-                        <Text style={s.afCarryChipTx}>{f.labels.join('، ')}</Text>
-                        <Ionicons name="close" size={13} color={colors.primary} />
-                      </Pressable>
-                    ))}
-                  </View>
-                </View>
-              </Reveal>
-            ) : null}
+            {/* NO «مسح الكل» AND NO CARRIED ANSWERS HERE (owner 2026-10-03). The filter form is always
+                clean when you arrive — see resetFilterForm above — so there is nothing to clear and no
+                committed Advanced Filter answer to show or remove. The last search lives in the
+                sidebar history for a signed-in user, and nowhere at all for a guest. */}
             {/* شراء / إيجار — TWO independent toggle buttons, not a radio (owner feature 2026-08-20,
                 mirrors the already-shipped سنوي+شهري pattern exactly): both can be on at once, which
                 means "match either Buy or Rent — Rent side accepts both Annual and Monthly." No third
@@ -2179,21 +2141,6 @@ const s = StyleSheet.create({
   rentHint: { fontSize: 11.5, color: colors.muted, marginTop: 6, paddingHorizontal: 4, lineHeight: 16 },
 
   card: { marginTop: 10, backgroundColor: colors.surface, borderRadius: radius.sheet, borderWidth: 1, borderColor: colors.fieldLine, padding: 12, ...cardShadow },
-  // "مسح الكل" (Clear All) — only rendered when hasActiveFilters(query), so an already-empty filter
-  // never shows a clear control with nothing to clear (mirrors the location field's own per-field
-  // clear icon, which is likewise conditional on query.location.length > 0).
-  clearAllBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-end', marginBottom: 10 },
-  clearAllText: { fontSize: 13, color: colors.muted, fontWeight: '600' },
-  // Carried Advanced Filter answers — same tinted pill the chat's removable pills use, so one
-  // committed answer looks like itself on whichever screen the user is standing on.
-  afCarryWrap: { alignSelf: 'stretch', gap: 7, marginBottom: 12 },
-  afCarryLead: { fontSize: 12.5, fontWeight: '500', color: colors.muted },
-  afCarryRow: { flexWrap: 'wrap', gap: 8, alignItems: 'center' },
-  afCarryChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.tint,
-    borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5,
-  },
-  afCarryChipTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
   field: { flexDirection: 'row', alignItems: 'center', gap: 10, height: 46, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.field, paddingHorizontal: 14, backgroundColor: colors.surface, ...(Platform.OS === 'web' ? { cursor: 'text' as any } : {}) },
   sizeField: { marginTop: 8, height: 46 },
   sizeFieldOn: { borderColor: colors.primary },

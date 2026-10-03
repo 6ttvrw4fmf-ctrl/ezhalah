@@ -92,8 +92,24 @@ function facetItems(f: AfFacet): string[] {
   return items;
 }
 
+// The committed answers as finished items, one per entry, in answer order — what the results turn's
+// «ملخص البحث» lists under «من الفلتر المتقدم» (owner 2026-10-03). Same items, same wording and the
+// same dedupe as the sentence below, so the list and the sentence can never name different answers.
+export function buildAfSummaryItems(facets: AfFacet[]): string[] {
+  return [...new Set(facets.flatMap(facetItems))];
+}
+
 export function buildAfSummary(facets: AfFacet[]): string {
-  return joinAr([...new Set(facets.flatMap(facetItems))]);
+  return joinAr(buildAfSummaryItems(facets));
+}
+
+// THE TURN SUMMARY OF AN ADVANCED FILTER ROUND (owner 2026-10-03): `base` is the summary the user already
+// read (searchSummary of the query BEFORE the first round, so the original type group, deal and period,
+// city and region lines are untouched), followed by `heading` and one bullet per committed answer.
+// Pure and zero-dependency so a barrier can execute it. No committed answer ⇒ `base`, unchanged.
+export function withAdvancedBlock(base: string, facets: AfFacet[], heading: string): string {
+  const items = buildAfSummaryItems(facets);
+  return items.length ? `${base}\n${heading}:\n${items.map((i) => `• ${i}`).join('\n')}` : base;
 }
 
 // «،» between, «، و» before the last — the one Arabic list joiner both sentences share, so the

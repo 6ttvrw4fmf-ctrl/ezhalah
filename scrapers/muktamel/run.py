@@ -797,8 +797,18 @@ def _id_exists(listing_id: int) -> bool:
     return False
 
 
+# The walk used to probe one id at a time. Each probe costs ~55 s when the source is slow (a page
+# that exists answers 200 with the full page), so the ~50 probes ate 46 of the shard's 120 minutes
+# on 2026-10-02 and 74 on 2026-10-03, when every shard was killed at its cap with the sweep
+# unfinished. Probing CEILING_BATCH ids at once (the crawl itself runs 8 workers) gives the same
+# answer: results are read back in id order under the same stop rule, so ids probed past the stop
+# point are never read.
+CEILING_BATCH = 8
+
+
 def find_ceiling(floor: int, exists: Callable[[int], bool], *, stride: int = CEILING_STRIDE,
-                 give_up: int = CEILING_GIVE_UP, bound: int = CEILING_BOUND) -> int:
+                 give_up: int = CEILING_GIVE_UP, bound: int = CEILING_BOUND,
+                 batch: int = CEILING_BATCH) -> int:
     """Highest id worth sweeping: walk up from `floor` every `stride` ids until `give_up` ids pass
     with no assigned id, and return the last hit + (stride-1) -- the unsampled ids just above it.
     Never below `floor`. If the negative control reads as assigned, the /404 signal cannot be
@@ -808,10 +818,16 @@ def find_ceiling(floor: int, exists: Callable[[int], bool], *, stride: int = CEI
               f"the /404 signal is broken; sweeping to the floor {floor} only", flush=True)
         return floor
     top, i = floor, floor + stride
-    while i <= floor + bound and i - top <= give_up:
-        if exists(i):
-            top = i
-        i += stride
+    with ThreadPoolExecutor(max_workers=max(1, batch)) as ex:
+        while i <= floor + bound and i - top <= give_up:
+            chunk = [i + k * stride for k in range(max(1, batch))]
+            hits = list(ex.map(exists, chunk))
+            for cid, hit in zip(chunk, hits):
+                if not (i <= floor + bound and i - top <= give_up):
+                    break
+                if hit:
+                    top = cid
+                i += stride
     if i > floor + bound:
         print(f"⚠ Muktamel ceiling: walk hit its {bound}-id backstop above {floor}", flush=True)
     return top + stride - 1
@@ -835,7 +851,9 @@ def main() -> int:
     if not (0 <= args.shard < max(1, args.shards)):
         ap.error(f"--shard must be in 0..{max(0, args.shards - 1)} for --shards {args.shards}")
 
+    t0 = time.monotonic()
     max_id = find_ceiling(args.max_id, _id_exists)
+    print(f"Muktamel ceiling: {max_id} found in {(time.monotonic() - t0) / 60:.1f} min", flush=True)
     ids = shard_ids(args.min_id, max_id, args.shards, args.shard)
     print(f"Muktamel: sweeping ids {args.min_id}..{max_id} (floor {args.max_id}, ceiling from source)"
           f"{f' shard {args.shard}/{args.shards}' if args.shards > 1 else ''} "

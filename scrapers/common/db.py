@@ -863,6 +863,17 @@ def _apply_direct_alive(r: dict[str, Any], *, now_iso: str, table: str) -> None:
         )
 
 
+# A transient key, never a column (2026-10-03). A crawler sets it on a row its list served while
+# the ad's OWN page or record could not be read this run, or says something nobody measured. The row
+# is written exactly as before; the list sighting just does not certify it (SOURCE_LIST_PRESENCE).
+_PRESENCE_UNPROVEN_KEY = "_presence_unproven"
+
+
+def mark_presence_unproven(row: dict[str, Any]) -> dict[str, Any]:
+    row[_PRESENCE_UNPROVEN_KEY] = True
+    return row
+
+
 def _wasalt_batch(table: str, rows: list[dict[str, Any]],
                   strikes: Optional[dict[str, tuple[int, bool]]] = None) -> None:
     if not rows:
@@ -878,6 +889,7 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]],
     seen: dict[str, dict[str, Any]] = {}
     for r in rows:
         r = dict(r)
+        unproven = r.pop(_PRESENCE_UNPROVEN_KEY, False)     # stripped always: it is not a column
         r["last_seen_at"] = now
         # Seen on the source THIS crawl → reset the consecutive-miss counter (prune_unseen only
         # deactivates after `grace` consecutive misses), and reactivate it: a listing that
@@ -904,7 +916,7 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]],
         # after the marker was set, and the stamp must be judged against the row's FINAL state.
         # Also strips the transient key, which must never reach PostgREST.
         _apply_direct_alive(r, now_iso=now, table=table)
-        if presence is not None and r.get("active") is True and not held:
+        if presence is not None and r.get("active") is True and not held and not unproven:
             # Being served by the source's own feed is proof of life ONLY for a platform whose
             # registered policy declares it (presence_patch returns {} for every other policy),
             # and never for a row whose own page is under strike: the page outranks the feed.
@@ -1203,9 +1215,14 @@ def prune_unseen(
             # Probed and confirmed GONE — a look, and the one that most needs recording: without it
             # a killed row keeps a stale last_seen_at and can outrank never-looked-at rows in the
             # next staleness-ordered worklist (migration 20260924).
+            # deactivated_at is written HERE, not left to trg_set_deactivated_at: 27 platforms'
+            # tables never had that trigger (2026-10-03), so their hides carried no date and were
+            # invisible to the hidden counts, the unverified-hide monitor, auto-recovery and the
+            # 30-day clock. The trigger keeps a value it is given, so both paths agree.
+            _now = datetime.now(timezone.utc).isoformat()
             ads, payload = confirmed_gone, {
                 "missing_count": new_missing, "active": False,
-                "last_liveness_probe_at": datetime.now(timezone.utc).isoformat()}
+                "deactivated_at": _now, "last_liveness_probe_at": _now}
             if not ads:
                 continue
         for i in range(0, len(ads), 200):

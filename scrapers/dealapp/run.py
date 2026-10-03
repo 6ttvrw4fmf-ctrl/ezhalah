@@ -539,6 +539,45 @@ def _breadcrumb_district_ar(schema: dict, city_ar: Optional[str]) -> Optional[st
     return None
 
 
+def _location_line_district_ar(html: str, city_ar: Optional[str]) -> Optional[str]:
+    """The district from the page's own VISIBLE location line, used ONLY when the title carries none.
+
+    The page prints the location twice, mirrored: «<city>, <district>» and «<district>, <city>», where
+    the city side may carry a sub-area after a dash. Real lines (re-read 2026-10-03):
+        «بقعاء, حي بقعاء القديمة»  /  «حي بقعاء القديمة, بقعاء»
+        «الغزالة - الروضه, حي الروضة»  /  «حي الروضة, الغزالة - الروضه»
+        «الكامل, حي غير محدد»  /  «حي غير محدد, الكامل»      <- the source says it has NO district
+    Owner 2026-10-03: «all the ones in dealapp have a district» (screenshot: «بئر بن هرماس, حي الربوة»
+    on an ad whose title has none), so ~50 new ads a day were filed «الحي غير محدد» with the district
+    printed on the page.
+
+    A GAP-FILLER, never an override: the breadcrumb answer wins whenever it exists (on 15022873 the title
+    and the line disagree; that conflict is the owner's call). Both mirrored lines must be present and
+    agree, so one stray text node cannot become a district. The district must be Arabic, start with «حي »,
+    and never be the source's own «غير محدد». Verbatim source Arabic or None."""
+    city = (city_ar or "").strip()
+    if not city:
+        return None
+    body_start = html.find("</head>")
+    body = html[body_start:] if body_start != -1 else html
+    body = re.sub(r"<(script|style|noscript|svg)[^>]*>.*?</\1>", " ", body, flags=re.S | re.I)
+    lines = [re.sub(r"\s+", " ", x).strip() for x in re.sub(r"<[^>]+>", "\n", body).split("\n")]
+    pairs = set()
+    for ln in lines:
+        parts = [x.strip() for x in re.split(r"\s*[,،]\s*", ln)]
+        if len(parts) == 2 and all(parts):
+            pairs.add((parts[0], parts[1]))
+
+    def is_city_side(x: str) -> bool:
+        return x == city or re.match(rf"{re.escape(city)}\s*[-–]\s*\S", x) is not None
+
+    found = {b for (a, b) in pairs
+             if (b, a) in pairs and is_city_side(a) and not is_city_side(b)
+             and re.match(r"حي\s+\S", b) and re.search(r"[ء-ي]", b)
+             and "غير محدد" not in b and len(b) <= 60}
+    return found.pop() if len(found) == 1 else None
+
+
 def _spec_value(html: str, label: str) -> Optional[str]:
     """Value rendered next to a visible spec label (المساحة / عدد الغرف / …). Window-scan + strip
     tags, take the first short non-markup segment after the label.
@@ -914,6 +953,18 @@ def _resolve_city(city_ar: Optional[str]) -> Optional[str]:
     return normalize.map_city(city_ar) or CITY_FALLBACK_AR.get(city_ar) or None
 
 
+def _route_land(property_type: Optional[str], usage: Optional[str]) -> Optional[str]:
+    """Land residential-vs-commercial routing. The usage chip («استخدامات العقار») decides when the
+    page RENDERS one: «تجاري» → Commercial Land, anything else → Residential Land. When the page
+    renders NO usage chip, the listing's own propertyType («ارض تجارية» / «ارض سكنية») stands.
+    It used to fall through to Residential Land on a missing chip, so an ad dealapp itself titles
+    «ارض تجارية» was filed as residential land out of silence (2 of 3,323 new rows, 2026-10-03,
+    🆕 New Listings Engineer)."""
+    if property_type in ("Residential Land", "Commercial Land") and usage:
+        return "Commercial Land" if usage == "تجاري" else "Residential Land"
+    return property_type
+
+
 def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     """Parse one /ad-details page into a canonical row. Returns (row, category, sold) —
     `sold` feeds the post-upsert inactive pin in main (see _pin_sold_inactive)."""
@@ -949,8 +1000,7 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     # ── usage chip drives residential/commercial routing (authoritative for land) ──
     usage = _spec_value(html, "استخدامات العقار")
     is_commercial_usage = usage == "تجاري"
-    if property_type in ("Residential Land", "Commercial Land"):
-        property_type = "Commercial Land" if is_commercial_usage else "Residential Land"
+    property_type = _route_land(property_type, usage)
     category = "commercial" if (property_type in COMMERCIAL_TYPES or is_commercial_usage) else "residential"
 
     # ── price ──
@@ -1002,7 +1052,7 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     # use schema.org address.addressRegion — it is English and frequently a wrong default ("Riyadh"),
     # which was silently storing English/incorrect districts. No Arabic on the page → honest null.
     # (feedback_english-district-to-arabic-mapping-standard: never show English; unsure → «الحي غير محدد».)
-    district = _breadcrumb_district_ar(schema, city_ar)
+    district = _breadcrumb_district_ar(schema, city_ar) or _location_line_district_ar(html, city_ar)
     postal = (addr.get("postalCode") or "").strip() or None
 
     # ── active / sold ──

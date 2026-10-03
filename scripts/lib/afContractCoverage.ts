@@ -153,8 +153,10 @@ const S6: Entry[] = [
   { rule: 'R6.2.3', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-cross-round-carry'], evidence: 'cross-reference' },
   { rule: 'R6.3.1', dim: 'af', weight: 2, grade: 'L', barrier: [], evidence: 'CI: new results turn lands with the narrowed count (11,202 → 2,469 → 2,319)' },
   { rule: 'R6.3.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-round-back-boundary'], evidence: 'receipt replaces prior turn buttons' },
-  { rule: 'R6.3.3', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-emoji-summary'], evidence: 'committed answers appear as pills' },
+  { rule: 'R6.3.3', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-emoji-summary', 'verify-af-stays-in-place'], evidence: 'committed answers appear as read-only chips and are listed in the turn summary under «من الفلتر المتقدم» (owner 2026-10-03)' },
   { rule: 'R6.3.4', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-offer-gate'], evidence: 'offer reappears at >25 with a useful question remaining' },
+  { rule: 'R6.3.5', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-stays-in-place'], evidence: 'owner 2026-10-03: earlier turns are dimmed, never hidden; the view eases to the new answers bubble and lands on the new turn — never to the top. Measured in a real browser: scrollHeight never below its start, scrollTop never above where the reader was' },
+  { rule: 'R6.3.6', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-clear-all-reset', 'verify-af-state-never-leaks-into-filter'], evidence: 'owner 2026-10-03: coming back to the Filter after a search opens a clean form; no «مسح الكل», no carried answers' },
 ];
 
 // ── §7 LIVE COUNTS ───────────────────────────────────────────────────────────────────────────────
@@ -194,11 +196,11 @@ const S8: Entry[] = [
 
 // ── §9 PILLS ─────────────────────────────────────────────────────────────────────────────────────
 const S9: Entry[] = [
-  { rule: 'R9.1.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-emoji-summary', 'verify-af-pill-removal-live'], evidence: 'live 2026-09-02: one AF round on production left 4 removable af-pill-* controls carrying exactly the 4 committed answers (p_bath_min, p_is_new_construction, p_amenities, p_directions)' },
-  { rule: 'R9.1.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-emoji-summary'], evidence: 'pills cumulative across rounds' },
-  { rule: 'R9.2.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-cross-round-carry', 'verify-af-pill-removal-live'], evidence: 'live 2026-09-02, on the request the browser actually sent: removing one pill dropped EXACTLY p_bath_min, left the other three byte-identical, invented none, and moved no normal-filter field. Desktop الرياض/شقة and mobile جدة/فيلا' },
-  { rule: 'R9.2.2', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-pill-removal-live', 'verify-af-remove-last-pill-live'], evidence: 'live 2026-09-02: the count WIDENED 155→237 (mobile 122→265), the new total is re-derivable through the anon REST path, a new results turn landed BELOW. "Nothing above is rewritten" was proved on headline TEXT ONLY, and ops_incident #338 slipped through exactly there — the turn above kept its headline while its CARDS went 24→48 and its closing line rewrote itself. Since 2026-09-22 the proof also counts cards PER TURN: production post-fix [19,24] → [19,24,12], every earlier turn frozen (pre-fix [19,24] → [19,48,12])' },
-  { rule: 'R9.2.3', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-cross-round-carry', 'verify-af-pill-removal-live'], evidence: 'live 2026-09-02: «تحديد أكثر» is present on the widened turn, so the removed dimension was not burned out of the asked carry' },
+  { rule: 'R9.1.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-emoji-summary', 'verify-af-stays-in-place'], evidence: 'owner 2026-10-03: every committed answer is listed in the turn summary under «من الفلتر المتقدم» below the ORIGINAL summary lines (withAdvancedBlock executed), and shown as a read-only chip' },
+  { rule: 'R9.1.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-emoji-summary', 'verify-af-stays-in-place'], evidence: 'cumulative across rounds: the summary is rebuilt from the original query plus ALL committed facets (second round adds, executed)' },
+  { rule: 'R9.2.1', dim: 'af', weight: 3, grade: 'B', barrier: ['verify-af-committed-pills-are-never-covered', 'verify-af-stays-in-place'], evidence: 'owner 2026-10-03: no pill carries a ✕ or a press handler, in the transcript or the round card' },
+  { rule: 'R9.2.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-cross-round-carry'], evidence: 'a committed answer is changed only by Back inside the round; the carried asked-set only grows' },
+  { rule: 'R9.2.3', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-cross-round-carry'], evidence: 'retired 2026-10-03 with the pill removal itself; nothing removes a pill any more' },
   { rule: 'R9.2.4', dim: 'af', weight: 1, grade: 'P', barrier: ['verify-af-cross-round-carry'], evidence: 'cross-reference' },
   { rule: 'R9.3.1', dim: 'af', weight: 3, grade: 'L', barrier: ['verify-af-emoji-summary'], evidence: '2026-08-31 live AF interview journey (production, desktop): the skipped question produced no pill/receipt anywhere in the transcript summary region.' },
 ];
@@ -225,7 +227,7 @@ const S11: Entry[] = [
 const S12: Entry[] = [
   { rule: 'R12.1', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-chat-persistence'], evidence: 'AF turns/answers/receipts/pills persist' },
   { rule: 'R12.2', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-chat-persistence'], evidence: 'switch-away/refresh/re-login restores' },
-  { rule: 'R12.3', dim: 'af', weight: 2, grade: 'L', barrier: ['verify-af-takes-over-cta', 'verify-af-remove-last-pill-live'], evidence: 'only newest turn interactive after restore (verify-af-takes-over-cta), and since 2026-09-22 "older turns are read-only history" is LIVE-proved rather than assumed: verify-af-remove-last-pill-live counts cards per results turn across a pill removal and fails if any earlier turn gains or loses one. Measured on production post-fix: [19,24] → [19,24,12], frozen. It earned the upgrade by catching a real violation first — ops_incident #338, where an outgoing turn kept revealing during the searching beat (pre-fix [19,24] → [19,48,12])' },
+  { rule: 'R12.3', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-takes-over-cta'], evidence: 'only the newest turn is interactive after restore (verify-af-takes-over-cta); older turns are read-only history' },
   { rule: 'R12.4', dim: 'af', weight: 1, grade: 'B', barrier: ['verify-chat-persistence'], evidence: 'delete removes the server transcript' },
   { rule: 'R12.5', dim: 'af', weight: 2, grade: 'B', barrier: ['verify-af-continuous-chat-history'], evidence: 'rounds never fork the sidebar entry' },
 ];

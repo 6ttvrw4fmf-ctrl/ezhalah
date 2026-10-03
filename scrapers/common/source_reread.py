@@ -34,7 +34,7 @@ STORED = ("platform,source_table,listing_id,region_ar,city_ar,district_ar,deal_a
           "price_total,price_annual,price_per_meter,payment_monthly,area_m2,bedrooms,bathrooms,property_age,"
           "furnished,elevator,parking,kitchen,air_conditioner,maid_room,driver_room,private_entrance,"
           "rent_now_pay_later,installment_available,installment_amount,direction_ar,street_width_m,"
-          "floor_number,license_number,first_seen_at,production_ready")
+          "floor_number,license_number,first_seen_at,production_ready,has_photo")
 
 # Lines of visible text worth a human's eye: money, size, rooms, and the Advanced Filter words.
 EVIDENCE = re.compile(
@@ -70,6 +70,55 @@ def page_evidence(body: str) -> dict:
     }
 
 
+def page_image_count(page: dict) -> int | None:
+    """How many images the PAGE's own structured data lists (JSON-LD `image`, any depth), counted
+    without our parser; None when the page carried no JSON-LD to count from. Photos are part of the
+    New Listings check (owner 2026-10-03), and the artifact that holds the JSON-LD is unreachable
+    from a cloud session, so the count has to be readable from the job log."""
+    blocks = (page or {}).get("jsonld") or []
+    if not blocks:
+        return None
+
+    def walk(node) -> int:
+        if isinstance(node, dict):
+            n = 0
+            for k, v in node.items():
+                if k == "image":
+                    n += len(v) if isinstance(v, list) else (1 if v else 0)
+                else:
+                    n += walk(v)
+            return n
+        if isinstance(node, list):
+            return sum(walk(x) for x in node)
+        return 0
+
+    return sum(walk(b) for b in blocks)
+
+
+def page_image_paths(page: dict) -> list[str]:
+    """Where in the page's JSON-LD each `image` sits, e.g. ['itemOffered.image x1', 'image x4'], so a
+    scraper that reads only one of those places can be told from a page that lists no image at all."""
+    out: list[str] = []
+
+    def walk(node, path: str) -> None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                here = f"{path}.{k}" if path else k
+                if k == "image":
+                    n = len(v) if isinstance(v, list) else (1 if v else 0)
+                    if n:
+                        out.append(f"{here} x{n}")
+                else:
+                    walk(v, here)
+        elif isinstance(node, list):
+            for x in node:
+                walk(x, path)
+
+    for b in (page or {}).get("jsonld") or []:
+        walk(b, "")
+    return out
+
+
 _LOG_FIELDS = ("city_ar", "district_ar", "deal_ar", "type_ar", "rent_period_ar", "price_total", "price_annual",
                "area_m2", "bedrooms", "bathrooms")
 
@@ -83,7 +132,9 @@ def log_lines(item: dict, n_evidence: int = 15) -> list[str]:
     out = [f"== {item.get('table')}:{item.get('id')} status={item.get('status')} verdict={item.get('verdict')}",
            f"   url: {item.get('url')}",
            "   stored: " + " | ".join(f"{k}={st.get(k)}" for k in _LOG_FIELDS if st.get(k) is not None),
-           f"   page title: {page.get('title')}"]
+           f"   page title: {page.get('title')}",
+           f"   page images (JSON-LD): {page_image_count(page)} | og:image: {bool((page.get('meta') or {}).get('og:image'))} "
+           f"| we serve a photo: {st.get('has_photo')} | image at: {page_image_paths(page)}"]
     out += [f"   page: {x[:200]}" for x in (page.get("evidence_lines") or [])[:n_evidence]]
     return out
 

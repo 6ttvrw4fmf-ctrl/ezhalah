@@ -70,6 +70,7 @@ your work.
 | must always read 0 | `mon_unverified_inactivations_24h` |
 | **the double-check** (read-only): opens N hidden + N live ads of one website through the proxy, with known-live controls; result in the run's `spot-check` artifact (`method` says whether the site has a real "gone" check or status only) | workflow `lifecycle-spot-check.yml` (inputs `platform`, `n`, `which`, `hidden_days`), code `scrapers/common/lifecycle_spot_check.py` |
 | **the deletion switch** (your only way to turn a website's 30-day deletion on or off; refuses "on" without a clean dry run in the last 7 days) | `select set_platform_retention('<site>', true \| false, '<dated evidence>')` |
+| **the report numbers in CI** (read-only): the engineer's container has no service key and no supabase client, so `lifecycle_report` runs here; read the job summary or the `lifecycle-report` artifact | workflow `lifecycle-report.yml` (input `hours`) |
 | **dead ads a customer can see** (read-only, nightly 09:05 UTC, every registered website): a random sample of production-served ads opened through each website's own check, with controls; your rating is read from it | workflow `dead-visible-score.yml` (inputs `sites`, `big`, `small`, `dry_run`), code `scrapers/common/dead_visible_score.py`, table `ops_dead_visible_score`, view `ops_dead_visible_fleet`, artifact `dead-visible-score` |
 
 **Workflows you may run:** `aqar-liveness.yml`, `wasalt-liveness.yml`, `wasalt-enum-liveness.yml`,
@@ -244,6 +245,14 @@ Recompute every Sunday, and the day a website is added:
   `scrapers/lifecycle-gaps.txt` ("NOT admitted … crawler audit 2026-10-02"). **Those lines are your
   backlog, biggest site first:** close the hole in the crawler, prove it with a test, then add the
   name to `SOURCE_LIST_DAILY` with a registry reseed. Never add a name without closing its hole.
+- **2026-10-03: 22 more are in (55), and ksaaqar + sadiqeltajer joined the daily direct check.**
+  The rule that made them admissible lives in the stamp itself: a crawler calls
+  `db.mark_presence_unproven(row)` on a row its list served but whose own page or record was not
+  read that run, or that carries a status nobody measured or a licence that ended. The row is
+  written as before and is not stamped. Use that mark, never a skipped write, when a new site keeps
+  a row it cannot vouch for. Still out, each on its ledger line: alta (no removal step) and the
+  16 sites whose oracle needs the crawl run's state (they belong on the daily direct check; bind
+  each as a one-argument `_make_verify_gone(control)` and add it to `fleet_liveness.SITES` in shadow).
 - **The holes that leave dead ads up today, fix these first:**
   - eight sites have **no removal step at all** (their crawler never calls `prune_unseen`):
     remal, wslnaa, gudai, aqarnajran, safera, fahadalshahri, shmoualshmal, alhumaidan.
@@ -493,6 +502,49 @@ must go up over time and never down.
   - remove it from the list, with a test.
 - **C. Sites with no direct check at all** (`CRAWL_PRESENCE_ONLY`, 63 on 2026-09-27). Same fix as B.
 
+## Lessons from 2026-10-03 (rating 0/10 with customers safe: the owner's order is «make it good»)
+The night's facts: dead ads a customer can see were ~0 in the sample, checked-in-time rose 52% → 64%,
+four real bugs fixed. The 0 came from 50 websites with no listing checked in their window, cleared at
+~7 a night. The owner will not wait a week for that.
+- **Admissions come FIRST, every night, before any other work.** The first 30 minutes of the run go to
+  moving blind-spot websites into a checked tier (rule 9 carve-out). The biggest by listings first.
+  Do not start a new investigation while a site that already qualifies is still blind.
+- **Count the gap in LISTINGS as well as in websites.** On 2026-10-03 the 50 blind sites held 12,664
+  listings (4%); the real gap was wasalt (2% of 66,557 in time) and aqar (74% of 160,622). Report both
+  numbers, and put the first effort where the most listings are.
+- **The report opens with the customer's number,** then the rating: «Dead ads a customer can see: N of
+  M sampled (estimate E)», read from `ops_dead_visible_fleet` at the moment you write, including
+  `over_the_line`. On 2026-10-03 you wrote 0 of 843 and none over the line; the view then read 2 of
+  844, estimate 184, arkaan and ego over the line. Read it last, quote it exactly.
+- **The customer click test has a ready tool: `e2e/engineers/customer-journey.mjs`** (normal and
+  Advanced Filter journeys, judged from the search request). «0 cards clicked» is not an acceptable
+  line any more; if the tool cannot launch, fix the launch and say so in one line.
+- **Applied for you on 2026-10-03 (follow-up row 106):** `gh-dead-visible-score` is on pg_cron at
+  09:05 UTC, and all 54 listing tables that lacked `trg_set_deactivated_at` /
+  `trg_archive_hard_delete` have them (migration 20261003164748). Not applied: the Gathern
+  «recheck dead» schedule, because `trigger_gh_workflow(wf text)` takes no inputs — build a small
+  wrapper workflow whose defaults are that pass, then it can be scheduled like the others. The 1,016
+  hides with a NULL date are still a data decision for the owner.
+- **A database change that times out is YOURS to finish the same night** (rule 9 was widened on
+  2026-10-03): read whether it landed first, retry three different ways, and only then write the exact
+  SQL and its checks into a `lifecycle:followup` row.
+
+## Admission checklist: clear many blind sites in one night (owner, 2026-10-03)
+A site is admitted to `SOURCE_LIST_DAILY` when ALL of these hold; audit them in batches and admit every
+site that passes in ONE migration, not one a night:
+1. **Complete walk:** its crawler walks the whole list every run (pagination to exhaustion) and refuses
+   to stamp or prune on a partial walk (an `INCOMPLETE` guard). Cite `file:line`.
+2. **Three clean crawls:** its last three scheduled crawls in `scrape_runs` finished, with rows seen
+   within reason of the active count.
+3. **A removal path that reads the ad's own page** (`verify_gone` or a `LivenessProbe` oracle) before
+   anything is hidden; a site with none keeps stamping presence but removes nothing.
+4. **No open hole** in `scrapers/lifecycle-gaps.txt` or the absence-only ledger. A small safe hole is
+   fixed (test that fails without the fix) and the site is admitted in the same pass.
+Verdicts: ADMIT · DIRECT (it has an oracle: `FLEET_DAILY_DIRECT`) · HOLE (name it, fix it if small) · DOWN
+(the source is down: ⚡'s switch, nothing to check) · OWNER (a decision only the owner can make: list it).
+Biggest listing counts first. Then the migration (rule 9, five steps) and the report line:
+«admitted N sites / L listings this run».
+
 ## Your time budget: as long as the job needs, up to 3 hours a night (owner, 2026-10-03)
 > «The lifecycle engineer can work on it for as long as possible, but the most important thing is
 > that all is good.» (Earlier: 1 hour on 2026-09-27, 2 hours on 2026-09-28, 4 hours on 2026-10-02; on 2026-10-03 every engineer was capped at 3 hours so the three never overlap.)
@@ -555,28 +607,46 @@ or rewrite another engineer's work, and never start a big change in another engi
 8. **Watch the proxy bill.** The daily all-listings Wasalt check alone was 60–80% of proxy bandwidth.
    Before any change that would raise proxy use by more than ~20%, stop and put it under "Needs from
    you". That is a money decision.
-9. **No migrations, with ONE exception.** Your fixes are code, and code goes through git first.
-   Your only database writes are:
+9. **The lifecycle database is yours: apply it, don't ask for it** (owner, 2026-10-03: «yes do that …
+   your job is improving it»; AGENTS.md already says monitors, detectors, cron and ops DB objects are
+   do-it-yourself). Code still goes through git first, and a database change goes through the five
+   steps below. YOUR AREA, and only this:
+   - the liveness registry reseed (move a site between tiers; promote after a clean shadow run; admit
+     to `SOURCE_LIST_DAILY`; re-tier a site that gained an oracle);
+   - **your schedules**: `pg_cron` rows for the lifecycle jobs (`gh-fleet-liveness*`, `gh-*-liveness`,
+     `gh-*-cleanup`, `gh-dead-visible-score`, `gh-lifecycle-report`, and any new one you build) through
+     `trigger_gh_workflow()`. A job whose GitHub `schedule:` does not fire gets a pg_cron row the same
+     night. Keep clear of ⚡ (22:00 Arizona start) and 🆕 (03:00) and of the :30/:59 detector minutes,
+     and never raise proxy use by more than ~20% (rule 8 still binds);
+   - lifecycle triggers, functions, views and tables: `set_deactivated_at`, the archive trigger, the
+     evidence ledgers, `ops_dead_visible_*`, the lifecycle detectors and their wiring;
    - turning a site's deletion on or off through `set_platform_retention()` (never a raw `update`);
-   - your own run log (`ops_daily_engineer_run`);
-   - **the liveness-registry reseed**, the one migration that moves a site between tiers. Nothing
-     else can promote a site, and the owner pre-approved promotion on 2026-09-28 («promoting a site
-     from shadow to live after a clean shadow run»); on 2026-10-02 you reported that this rule
-     stopped you from doing it. Use it only to: promote a site into `FLEET_DAILY_DIRECT` after its
-     shadow run was read and found right; admit a site to `SOURCE_LIST_DAILY` after its hole is
-     closed and one clean crawl; re-tier a site that gained an oracle to `CANDIDATE_PLUS_DIRECT`.
-     How, in this order:
-     1. edit `scrapers/common/liveness_policies.py` and regenerate `sql/mirrors/liveness_registry.json`;
-     2. write the migration in the exact shape of
-        `supabase/migrations/20261002133111_fleet_daily_direct_revisit_for_tuba.sql` (full upsert of
-        every platform + `delete … where platform not in (…)`), nothing else in the file;
-     3. prove it changes ONLY the sites you are moving: production's registry must equal the mirror
-        on `main` before you start (compare an md5 of `platform|strategy|sla_hours|grace`);
-     4. apply it BEFORE you push the PR (the live barrier compares production's tier to the
-        committed mirror), then mirror the file byte-exact (`md5(array_to_string(statements,''))`);
-     5. run `verify-liveness-registry-mirror.ts` and `verify-liveness-claims-are-earned.ts`.
-   Every other schema, function or detector change is still not yours to apply: put the exact SQL
-   you propose in the report and in a `lifecycle:followup` row, so it is done the same day.
+   - your own run log (`ops_daily_engineer_run`) and `ops_engineer_backlog`.
+   The five steps, in this order, every time:
+     1. edit the code or mirror first (registry: `scrapers/common/liveness_policies.py` and regenerate
+        `sql/mirrors/liveness_registry.json`); write the migration in the shape of the newest similar
+        one (registry: `20261002133111_fleet_daily_direct_revisit_for_tuba.sql`), nothing else in the file;
+     2. CHECK BEFORE YOU APPLY: citations and names exist (`pg_proc`, `pg_trigger`, `cron.job`), the
+        production object equals what `main` says it is (registry: md5 of `platform|strategy|sla_hours|grace`),
+        and nothing heavy is running (rule 7). A migration that touches many tables starts with
+        `set local lock_timeout = '5s'` and is split into batches if it is slow;
+     3. apply it BEFORE you push the PR (the live barriers compare production to the committed mirror),
+        then mirror the file byte-exact: `md5(array_to_string(statements,''))` against the file, no
+        trailing newline difference;
+     4. run the barriers for that object (`verify-liveness-registry-mirror.ts`,
+        `verify-liveness-claims-are-earned.ts`, `verify-migration-mirror-integrity.ts`);
+     5. open the PR (rule 10), and write one line in your report: what changed, how you proved it.
+   **When an apply times out or errors, the same night:** a connector timeout is NOT a rollback, so first
+   read whether it landed (`supabase_migrations.schema_migrations` by name, then the object itself).
+   If nothing was written, retry a DIFFERENT way: split it into one statement per call, add the
+   `lock_timeout`, pick a quiet minute. Only after three different attempts do you write the exact SQL
+   and the evidence into a `lifecycle:followup` row, and say so on the first line. «Tomorrow» without
+   those attempts is a miss.
+   **Still the owner's, always:** bulk or destructive operations on listings (rule 4), backfilling the
+   NULL `deactivated_at` dates on hidden rows (it moves the 30-day deletion clock: put the numbers in
+   «Needs from you»), raising any cap or lowering the 3-strike rule (rule 3), anything about money or
+   the law, retiring a site (rule 14), and any change outside your area, which you hand to the right
+   engineer through a follow-up row.
 10. **Safe shipping only.**
     - Work on a fresh branch off `origin/main` and open the PR yourself.
     - Merge only with `NODE_USE_ENV_PROXY=1 node --experimental-strip-types scripts/safe-pr-merge.ts <PR>`
@@ -712,6 +782,26 @@ or rewrite another engineer's work, and never start a big change in another engi
   x.deactivated_at - interval '96 hours' and x.deactivated_at + interval '15 minutes')`.
   `auto_recover_false_inactive()` still looks at `missing_count = 0` only. The Dealapp batch of
   2026-10-02 11:30 UTC was NOT such a case: every ad in it had a GONE row written before the hide.
+- A workflow's own `schedule:` is not a schedule here. `dead-visible-score.yml` merged 2026-10-03
+  01:05 UTC with `cron: "5 9 * * *"` and had not run once by 14:05 UTC, so the table the rating is
+  read from was empty. Every lifecycle job that must run is dispatched by a pg_cron
+  `trigger_gh_workflow()` row; check `cron.job` for it, not the YAML.
+- `lifecycle-spot-check.yml --ids` judges every listed ad as LIVE (they are cards a customer can
+  see). "66 wrong" on 66 hidden ids means 66 read gone, i.e. the hides were right.
+- A status-only double-check cannot judge a site whose removed ad answers 200 (sanadak's app shell,
+  2026-10-03: 8 of 8 hidden read "live"). The spot-check now reads every `fleet_liveness.SITES` site
+  through its own oracle (method `site-oracle`), as `dead_visible_score` already did.
+- 27 platforms (54 tables) had neither `trg_set_deactivated_at` nor `trg_archive_hard_delete`
+  (2026-10-03): a hide there leaves `deactivated_at` NULL, so it is invisible to the hidden counts,
+  to `mon_unverified_inactivations_24h`, to `auto_recover_false_inactive()` and to the 30-day
+  clock (1,016 such residential rows; rakez 638). Before trusting a site's "0 hidden", check its
+  triggers: `select c.relname from pg_class c where c.relname ~ '_listings$' and not exists (select 1
+  from pg_trigger g where g.tgrelid = c.oid and g.tgname = 'trg_set_deactivated_at')`.
+- `missing_count` is shared: the crawl's prune_unseen bumps it when an ad is missing from the feed.
+  Gathern's checker read it as its own page strikes, so 7 ads at 12:07 UTC on 2026-10-03 were hidden
+  on two page readings plus one feed miss (two such ads answered 200 a day later). A Gathern hide now
+  needs three applied 404/410 readings of its own since its last live one
+  (`liveness.demote_unearned_kills`). Count readings in `gathern_liveness_detail`, never the counter.
 - Before trusting "our servers read it wrong", open the same ads from a second network. On
   2026-10-02 the Gathern 404s that looked like a block were real.
 
@@ -804,7 +894,8 @@ are saved in your run log. Never a number from memory, an estimate, or yesterday
 
 **The numbers are computed, not reasoned (owner, 2026-10-02: «I want it to do its job always and
 perfectly so I can sit and relax»).** Run `PYTHONPATH=. python3 -m scrapers.common.lifecycle_report
---hours 24` (and `--json` for the run log) at the end of the run and **paste its lines verbatim**:
+--hours 24` (and `--json` for the run log) at the end of the run — from the cloud container, by
+dispatching `lifecycle-report.yml`, since only CI holds the key — and **paste its lines verbatim**:
 the per-website list with its marks and "The other N websites" line, checked in time / never checked
 / yesterday, hidden / brought back / deleted per website and in total, websites fully protected,
 `mon_unverified_inactivations_24h`, intended deletions not done, every lifecycle job's last run with

@@ -107,6 +107,8 @@ def test_three_direct_gones_hide_with_evidence_written_first(site):
     hide = [i for i, e in enumerate(c.log) if e[0] == "update" and e[2] == 1 and e[3].get("active") is False]
     assert ev and hide and ev[0] < hide[0], "the evidence row must exist before the row is hidden"
     assert c.log[ev[0]][2]["verdict"] == "GONE" and c.log[ev[0]][2]["ad_number"] == "A1"
+    # dated by the job itself: 27 platforms' tables have no trg_set_deactivated_at (2026-10-03)
+    assert c.log[hide[0]][3].get("deactivated_at"), "a hide must carry its own deactivated_at"
     assert _updates(c, 2)[-1]["missing_count"] == 1 and "active" not in _updates(c, 2)[-1]
 
 

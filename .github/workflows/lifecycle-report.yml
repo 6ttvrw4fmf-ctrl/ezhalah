@@ -1,0 +1,63 @@
+# The ♻️ Lifecycle Engineer's report numbers (docs/ops/LIFECYCLE_ENGINEER.md, "Report"), computed in CI.
+#
+# Why this exists: `python -m scrapers.common.lifecycle_report` needs the service key, and the
+# engineer's cloud container has neither the key nor the supabase client (2026-10-03: the run's first
+# call died on `ImportError: cannot import name 'Client' from 'supabase'`). Production secrets live in
+# GitHub Actions only (AGENTS.md), so the report runs here and the engineer reads the job summary or
+# the `lifecycle-report` artifact. READ-ONLY: the script only selects and calls two read-only RPCs.
+name: Lifecycle report
+
+on:
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "Window in hours"
+        type: string
+        default: "24"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lifecycle-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # "first runs" match merge subjects "(#N)" on origin/main
+          fetch-depth: 400
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Compute the report
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          HOURS: ${{ inputs.hours }}
+        run: |
+          git fetch --no-tags --depth=400 origin main:refs/remotes/origin/main || true
+          python -m scrapers.common.lifecycle_report --hours "$HOURS" > lifecycle-report.md
+          python -m scrapers.common.lifecycle_report --hours "$HOURS" --json > lifecycle-report.json
+          cat lifecycle-report.md >> "$GITHUB_STEP_SUMMARY"
+          # Also into the job log: the engineer's container can read job logs (GitHub MCP) but not
+          # artifacts or summaries, whose downloads go to blob storage its proxy refuses.
+          cat lifecycle-report.md
+      - name: Keep the result for the engineer
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifecycle-report
+          path: |
+            lifecycle-report.md
+            lifecycle-report.json
+          if-no-files-found: ignore
+          retention-days: 14

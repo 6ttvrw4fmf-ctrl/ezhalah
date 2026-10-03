@@ -159,6 +159,44 @@ def is_spike(kill_count: int, baseline: Optional[int], factor: float = DRAIN_SPI
     return kill_count > baseline * factor
 
 
+DIRECT_HISTORY_DAYS = 14
+
+
+def direct_strikes_since_alive(history: list[dict]) -> dict[int, int]:
+    """{listing_id: applied DIRECT dead readings since its newest alive reading}, from
+    gathern_liveness_detail rows (listing_id, run_at, verdict, http_status, applied)."""
+    last_alive: dict[int, str] = {}
+    for h in history:
+        if h.get("verdict") == "alive" and h.get("run_at", "") > last_alive.get(h["listing_id"], ""):
+            last_alive[h["listing_id"]] = h["run_at"]
+    out: dict[int, int] = {}
+    for h in history:
+        if (h.get("applied") and h.get("verdict") in ("strike", "kill") and looks_dead(h.get("http_status"))
+                and h.get("run_at", "") > last_alive.get(h["listing_id"], "")):
+            out[h["listing_id"]] = out.get(h["listing_id"], 0) + 1
+    return out
+
+
+def demote_unearned_kills(kill_pending: list[tuple[int, int]], prior: Optional[dict[int, int]],
+                          grace: int) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """(kills, strikes): a kill stands only when THIS reading plus the row's own earlier applied
+    direct readings reach `grace` (LISTING_LIVENESS.md §2: three consecutive DIRECT dead readings).
+
+    WHY (2026-10-03). `missing_count` is shared with the crawl's prune_unseen, which bumps it for an
+    ad missing from the feed — an ABSENCE signal (§2: a candidate, never a vote). So a row read 404
+    at 04:40 (0→1), missed by the crawl (1→2) and read 404 at 12:07 was hidden on two page readings:
+    7 rows that hour, and two ads (6711536, 1816396) hidden on one or two readings answered 200 a
+    day later. A demoted row keeps missing_count at grace-1 and is hidden by its next 404 reading
+    once it has earned it. `prior` None (history unreadable) demotes every kill: fail closed."""
+    kills, strikes = [], []
+    for rid, nm in kill_pending:
+        if prior is not None and prior.get(rid, 0) + 1 >= grace:
+            kills.append((rid, nm))
+        else:
+            strikes.append((rid, min(nm, grace - 1)))
+    return kills, strikes
+
+
 def plan_kills(kill_pending: list[tuple[int, int]], kill_cap: int, baseline: Optional[int],
                trusted: bool) -> list[tuple[int, int]]:
     """Which of this run's kill candidates, (row id, new_missing_count), to inactivate NOW.
@@ -914,6 +952,37 @@ def main() -> int:
     finally:
         _flush_alive()
         _flush_detail(detail_buf)
+
+    # ── A HIDE IS EARNED BY THREE OF THE ROW'S OWN PAGE READINGS (2026-10-03) ─────────────────────
+    # missing_count also carries the crawl's absence strikes; see demote_unearned_kills.
+    if kill_pending:
+        prior: Optional[dict[int, int]]
+        try:
+            since = (datetime.now(timezone.utc) - timedelta(days=DIRECT_HISTORY_DAYS)).isoformat()
+            ids = [rid for rid, _ in kill_pending]
+            hist: list[dict] = []
+            for i in range(0, len(ids), 200):
+                hist += (client.table("gathern_liveness_detail")
+                         .select("listing_id, run_at, verdict, http_status, applied")
+                         .in_("listing_id", ids[i:i + 200]).gte("run_at", since)
+                         .limit(10000).execute().data or [])
+            prior = direct_strikes_since_alive(hist)
+        except Exception as exc:  # noqa: BLE001 — unreadable history earns no hide
+            print(f"⚠ direct-reading history unreadable ({str(exc)[:120]}): every kill held as a strike",
+                  flush=True)
+            prior = None
+        kill_pending, demoted = demote_unearned_kills(kill_pending, prior, args.grace)
+        if demoted:
+            demoted_ids = {rid: nm for rid, nm in demoted}
+            print(f"  {len(demoted)} kill(s) held as strikes: fewer than {args.grace} direct page "
+                  f"readings (an absence strike is not one)", flush=True)
+            strike_pending += demoted
+            for e in [e for e in kill_detail if e["listing_id"] in demoted_ids]:
+                kill_detail.remove(e)
+                e["verdict"], e["missing_count_after"] = "strike", demoted_ids[e["listing_id"]]
+                strike_detail.append(e)
+            killed -= len(demoted)
+            struck += len(demoted)
 
     # ── CLOSING CANARY (2026-09-11, ops_incident #183) ────────────────────────────────────────────
     # The opening canary proves the environment at run START. That alone must never be allowed to

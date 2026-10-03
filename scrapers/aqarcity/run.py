@@ -601,9 +601,18 @@ def _ld_blocks(body: str) -> tuple[Optional[dict], Optional[dict]]:
 PI_GRID_RE = re.compile(
     r'<span class="text-xs font-medium">\s*(.*?)\s*</span>\s*</div>\s*<div class="[^"]*text-end[^"]*">\s*(.*?)\s*</div>',
     re.S)
+# 2026-10 REDESIGN: the grid became a definition list — «<dt><i …></i>LABEL</dt><dd …>VALUE</dd>», with
+# the deed text moved into its own <dd>. Neither earlier regex matched, so all 1,813 live rows were again
+# stored as type «unknown» (Scraping Engineer, 2026-10-03: #27257 reads «نوع العقار: عمارة» on the page).
+# The label may not contain another <dt> or a </dd>, so a <dt> with no <dd> of its own (the location
+# row, which holds a map button) can never swallow the next row's label.
+PI_DL_RE = re.compile(r'<dt[^>]*>((?:(?!<dt|</dd>).)*?)</dt>\s*(?:</div>\s*)?<dd[^>]*>(.*?)</dd>', re.S)
 _PI_ALIASES = {"نوع العقار": "التصنيف",
                "تاريخ إصدار الترخيص": "تاريخ إنشاء ترخيص الإعلان",
-               "تاريخ انتهاء رخصة الإعلان": "تاريخ انتهاء ترخيص الإعلان"}
+               "تاريخ انتهاء رخصة الإعلان": "تاريخ انتهاء ترخيص الإعلان",
+               "رقم الترخيص": "رقم ترخيص الإعلان",
+               "ساري حتى": "تاريخ انتهاء ترخيص الإعلان",
+               "الوصف حسب الصك": "وصف موقع العقار حسب الصك"}
 # PDPL: the grid prints the ad officer's NAME and PHONE — never read into the row, not even transiently.
 _PI_NEVER = ("مسؤول الإعلان", "رقم مسؤول الإعلان")
 _DEED_PREFIX = "الوصف حسب الصك"
@@ -626,6 +635,13 @@ def _pi_table(body: str) -> dict[str, str]:
             deed = re.sub(r"\s*رقم الإعلان\s*$", "", k[len(_DEED_PREFIX):]).strip()
             if deed:
                 out.setdefault("وصف موقع العقار حسب الصك", deed)
+            continue
+        if v and v != "—":
+            out.setdefault(_PI_ALIASES.get(k, k), v)
+    for m in PI_DL_RE.finditer(body):
+        k = _strip_tags(m.group(1))
+        v = _strip_tags(m.group(2))
+        if not k or k in _PI_NEVER:
             continue
         if v and v != "—":
             out.setdefault(_PI_ALIASES.get(k, k), v)

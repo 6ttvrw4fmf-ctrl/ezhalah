@@ -59,7 +59,10 @@ check('impliedCategory() itself uses the shared constant (no second literal)',
 // rpcAllNarrowingParams), which is noise, not a parity violation.
 check('index.tsx imports it from remote.ts',
   /import \{[^}]*\bIMPLIED_CATEGORY_DEFAULT\b[^}]*\} from '@\/data\/remote'/.test(indexSrc));
-check('effCategory = query.category ?? IMPLIED_CATEGORY_DEFAULT (the one derivation)', /const effCategory: Category = query\.category \?\? IMPLIED_CATEGORY_DEFAULT;/.test(indexSrc));
+// 2026-10-03: a cross-macro scope (Residential Land under تجاري) sends NO category to the results RPC, so the
+// pools send none either — the derivation stays ONE expression, now with that branch.
+check('effCategory = scopeCrossesMacro ? null : (query.category ?? IMPLIED_CATEGORY_DEFAULT) (the one derivation)',
+  /const effCategory: Category \| null = scopeCrossesMacro\(query\) \? null : \(query\.category \?\? IMPLIED_CATEGORY_DEFAULT\);/.test(indexSrc));
 check("index.tsx never re-duplicates the literal ('Residential' appears in no pool wiring)", !/\?\? 'Residential'/.test(indexSrc));
 
 // ── EVERY pool call in index.tsx passes effCategory — none is left at the old raw/null scope. ──
