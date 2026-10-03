@@ -768,6 +768,18 @@ websites in your run log.
 **Every number in this report comes from a query or job result from this run**, and those results
 are saved in your run log. Never a number from memory, an estimate, or yesterday.
 
+**The numbers are computed, not reasoned (owner, 2026-10-02: «I want it to do its job always and
+perfectly so I can sit and relax»).** Run `PYTHONPATH=. python3 -m scrapers.common.lifecycle_report
+--hours 24` (and `--json` for the run log) at the end of the run and **paste its lines verbatim**:
+the per-website list with its marks and "The other N websites" line, checked in time / never checked
+/ yesterday, hidden / brought back / deleted per website and in total, websites fully protected,
+`mon_unverified_inactivations_24h`, intended deletions not done, every lifecycle job's last run with
+its age, open P0–P2 alerts by kind, and the PRs mentioned by yesterday's `lifecycle:followup` /
+`lifecycle:end` rows with their merge state (the "first runs" you must read first). A number the
+command prints as «?» is unknown: say so, never write 0. A number that is **not** in its output
+(spot-check wrong answers, cards clicked, the high-priority list, bugs found/fixed, the rating) is
+marked **"(hand-computed)"** in the report, with the query or job that produced it.
+
 "Needs from you" is **Nothing** unless something is truly the owner's decision: a change that would
 raise the proxy bill, a website whose listings look fake, retiring a website, or a business or legal
 question. Never give the owner chores.
