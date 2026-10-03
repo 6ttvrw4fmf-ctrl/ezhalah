@@ -463,6 +463,8 @@ def main() -> int:
                 continue
             if args.type != "all" and cat != args.type:
                 continue
+            if unmeasured_terms(p, tax):
+                db.mark_presence_unproven(row)             # kept as before, never stamped as checked
             (com if cat == "commercial" else res).append(row)
         tally = ", ".join(f"{k}×{v}" for k, v in sorted(unmeasured.items(), key=lambda x: -x[1]))
 

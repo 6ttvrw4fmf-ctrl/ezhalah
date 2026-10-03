@@ -1398,6 +1398,12 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     # 36977747732's would-hides (36, cap 428) re-read from a second network: 20 of 20 print their
     # own removal banner, 8 of 8 live controls live.
     "tuba",
+    # 2026-10-03: shadow run of 10-03 07:25/07:31 UTC read 100% of both with controls right.
+    # sadiqeltajer's 32 would-hides (cap 173) are its «غير متاح» ads: the 34 its crawl stopped seeing
+    # were re-read from a second network the same day, 32 gone and 2 redirects (unknown), 8 of 8
+    # live controls live. ksaaqar's one would-hide (cap 145) answered 404 from the second network,
+    # 5 of 5 live controls live.
+    "ksaaqar", "sadiqeltajer",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
@@ -1436,15 +1442,25 @@ for _p, _sig in (
 # found that a row cannot be upserted active unless THIS run observed it at the source, and that the
 # crawler excludes every unavailable state the source publishes. The same day 6 in-list ads per
 # site were opened at their own URL from a second network: 488 reads, none answered "gone".
-# Not admitted, each for a named reason in scrapers/lifecycle-gaps.txt: a row written although its
-# own page failed or answered 404/410 (abralosol, arkaan, aqaratikom), a status or end-date field
+# Not admitted, each for a named reason in scrapers/lifecycle-gaps.txt: a status or end-date field
 # the crawler ignores, a sold filter that fails open, a catalogue that never changes. A site with
 # an oracle (CANDIDATE_PLUS_DIRECT) is never moved here — it belongs on the daily direct check.
+#
+# 2026-10-03, 22 more, each crawler read again by an auditor told to break it, after the 10-03
+# 04:00 UTC crawl of each finished clean. What was still open is closed by ONE rule in the stamp
+# itself: a row its list served but whose own page or record was not read this run, or that carries
+# a status nobody measured or a licence that ended, is written as before and marked
+# db.mark_presence_unproven() — the list sighting does not certify it (abralosol, arkaan,
+# aqaratikom, satel; squares, muajarh, opensooq, fahadalshahri, shmoualshmal; maqrat, nafithh).
 SOURCE_LIST_DAILY: tuple[str, ...] = (
     "abwbna", "alajlan", "alkhaas", "alobid", "amaall", "amlakalahsa", "aouj", "arsh", "ashab",
     "azdad", "bahadhabab", "compoundin", "daraa", "earthapp", "eightfloor", "erapulse", "gudai",
     "jurash", "macsaib", "maktab", "manafe", "manzo", "mobasher", "nawafeth", "rawaf", "rawasidark",
     "remal", "ryadah", "sirdab", "superoffice", "tawia", "wajaf", "wslnaa",
+    # 2026-10-03
+    "abralosol", "albukaeri", "aqaratikom", "aqarnajran", "arkaan", "awal", "dallali",
+    "fahadalshahri", "fursaghyr", "maqrat", "muajarh", "nafithh", "october", "opensooq",
+    "ramzalqasim", "safera", "satel", "shmoualshmal", "shomou", "squares", "vmksa", "wahadat",
 )
 for _p in SOURCE_LIST_DAILY:
     assert POLICIES[_p]["strategy"] == CRAWL_PRESENCE_ONLY, _p      # never demote an oracle tier

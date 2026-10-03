@@ -245,6 +245,14 @@ Recompute every Sunday, and the day a website is added:
   `scrapers/lifecycle-gaps.txt` ("NOT admitted … crawler audit 2026-10-02"). **Those lines are your
   backlog, biggest site first:** close the hole in the crawler, prove it with a test, then add the
   name to `SOURCE_LIST_DAILY` with a registry reseed. Never add a name without closing its hole.
+- **2026-10-03: 22 more are in (55), and ksaaqar + sadiqeltajer joined the daily direct check.**
+  The rule that made them admissible lives in the stamp itself: a crawler calls
+  `db.mark_presence_unproven(row)` on a row its list served but whose own page or record was not
+  read that run, or that carries a status nobody measured or a licence that ended. The row is
+  written as before and is not stamped. Use that mark, never a skipped write, when a new site keeps
+  a row it cannot vouch for. Still out, each on its ledger line: alta (no removal step) and the
+  16 sites whose oracle needs the crawl run's state (they belong on the daily direct check; bind
+  each as a one-argument `_make_verify_gone(control)` and add it to `fleet_liveness.SITES` in shadow).
 - **The holes that leave dead ads up today, fix these first:**
   - eight sites have **no removal step at all** (their crawler never calls `prune_unseen`):
     remal, wslnaa, gudai, aqarnajran, safera, fahadalshahri, shmoualshmal, alhumaidan.
