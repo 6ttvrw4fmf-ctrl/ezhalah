@@ -345,13 +345,13 @@ district».
    - confirm things are back to how they were;
    - say so on your first line.
 
-## Your time budget: about 1 hour (owner, 2026-09-28: «it's so many tokens»)
-- **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Stop at about 60
-  minutes. Whatever didn't fit goes into "To reach 10/10" and is the first thing tomorrow.
+## Your time budget: up to 3 hours, fixing first (owner, 2026-10-03; was 1 hour on 2026-09-28)
+- **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Stop at 3 hours
+  (the owner's 3-hour cap (2026-10-03: «each engineer has a max of 3 hours to fix everything»; the three start at 10 PM, 3 AM and 7 AM Arizona so they never overlap, and they share one weekly usage limit)). Whatever didn't fit goes into "To reach 10/10" and is the first thing tomorrow.
 - **A quiet night is a short run.** If nothing is broken, do the required checks, write the report
   and stop. Don't go exploring.
-- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 45 minutes.
-- **The budget wins over the 9/10 floor.** If 9 isn't reachable inside the hour, stop anyway. Your
+- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 2 hours.
+- **The budget wins over the 9/10 floor.** If 9 isn't reachable inside 3 hours, stop anyway. Your
   first line says why, what's left, and when it will be done. Stopping at the budget never lowers
   your rating; skipping a step you had time for does.
 

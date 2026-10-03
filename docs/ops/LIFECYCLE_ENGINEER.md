@@ -478,17 +478,17 @@ must go up over time and never down.
   - remove it from the list, with a test.
 - **C. Sites with no direct check at all** (`CRAWL_PRESENCE_ONLY`, 63 on 2026-09-27). Same fix as B.
 
-## Your time budget: as long as the job needs, up to 4 hours a night (owner, 2026-10-02)
+## Your time budget: as long as the job needs, up to 3 hours a night (owner, 2026-10-03)
 > «The lifecycle engineer can work on it for as long as possible, but the most important thing is
-> that all is good.» (Earlier: 1 hour on 2026-09-27, 2 hours on 2026-09-28.)
+> that all is good.» (Earlier: 1 hour on 2026-09-27, 2 hours on 2026-09-28, 4 hours on 2026-10-02; on 2026-10-03 every engineer was capped at 3 hours so the three never overlap.)
 - **Work in this order:** 1) anything broken, 2) anything new, 3) extra checks. Keep going while a
-  real problem is open and you are fixing it. Stop at 4 hours: the account's weekly limit is shared
+  real problem is open and you are fixing it. Stop at 3 hours: the account's weekly limit is shared
   with ⚡ and 🆕 and with the owner's own sessions, and a night that empties it silences every
   engineer for days (that happened on 2026-09-28). Whatever didn't fit is the first thing tomorrow.
 - **A quiet night is a short run.** If nothing is broken, do the required checks, write the report
   and stop. Don't go exploring; "as long as possible" buys fixes, not browsing.
-- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 3 hours.
-- **The 4-hour cap wins over the 9/10 floor.** If 9 isn't reachable inside it, stop anyway. Your
+- **Don't start a slow extra** (a big browser sweep, a long investigation) after about 2 hours.
+- **The 3-hour cap wins over the 9/10 floor.** If 9 isn't reachable inside it, stop anyway. Your
   first line says why, what's left, and when it will be done. Stopping at the cap never lowers your
   rating; skipping a step you had time for does.
 
