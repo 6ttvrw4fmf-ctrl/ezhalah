@@ -2219,11 +2219,14 @@ def upsert_october_commercial_batch(rows: list[dict[str, Any]]) -> None:
 
 # additional_info keys OWNED by the Tier-2 `--backfill-details` pass (detail-page fields the LIST
 # crawl never produces). The crawl rebuilds additional_info from scratch, so a plain full-row upsert
-# would drop these on every sighting — the same wipe as the description column (PR #210). Crawl keys
-# and these are disjoint, so we carry them forward from the stored row before upserting.
+# would drop these on every sighting — the same wipe as the description column (PR #210). We carry
+# them forward from the stored row before upserting. rating / reviews_count are the one overlap: the
+# crawl writes them when the list API rates the unit (the crawl wins), and leaves them out when the
+# list sends 0/0 — then the unit page's own score, read by the backfill, carries forward.
 _GATHERN_DETAIL_AI_KEYS = (
     "suitability", "house_rules", "check_in", "check_out",
     "guest_capacity", "booking_count", "views_count", "rate_text", "extra_sections",
+    "rating", "reviews_count",
 )
 
 
@@ -2246,7 +2249,7 @@ def _preserve_gathern_detail_ai(table: str, rows: list[dict[str, Any]]) -> None:
     """Read-modify-write: fetch the stored additional_info for these ad_numbers and carry the
     backfill-owned detail keys forward, so the crawl's fresh blob doesn't wipe them.
     ponytail: small race vs a concurrent backfill write; fine — crawl and backfill are separate
-    scheduled jobs and backfill only touches desc-NULL rows. Upgrade to a Postgres `||` upsert RPC
+    scheduled jobs and backfill only touches rows missing a description or a review count. Upgrade to a Postgres `||` upsert RPC
     if they ever run together."""
     ads = [r["ad_number"] for r in rows if r.get("ad_number")]
     if not ads:
