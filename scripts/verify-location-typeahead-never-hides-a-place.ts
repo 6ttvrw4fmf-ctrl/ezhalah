@@ -92,7 +92,8 @@ function wiring(loc: string, idx: string): string[] {
   if (!/scopeKnown:\s*exactPool !== undefined/.test(city)) bad.push('city extras do not say whether their count is measured (scopeKnown)');
   if (!/for \(const v of CITY_FIELD_POOLS\.values\(\)\)/.test(city)) bad.push('matchCitiesByText does not borrow another scope\'s city names while its own pool loads');
   if (!/borrowed \? \{ \.\.\.s\.opt, listingCount: 0, scopeKnown: false \}/.test(city)) bad.push('borrowed city rows keep another scope\'s count (it would be printed as this scope\'s)');
-  if (!/AMBIGUOUS_CITY_NAMES/.test(city)) bad.push('with no pool cached, same-named cities are not held back (rows would re-order under the finger)');
+  if (!/exactPool === undefined \? AMBIGUOUS_CITY_NAMES : undefined/.test(city)) bad.push('while the exact pool loads, same-named catalog cities are not held back (rows would re-order under the finger)');
+  if (!/borrowed && AMBIGUOUS_CITY_NAMES\.has\(n\)\) continue/.test(city)) bad.push('while the exact pool loads, a borrowed same-named city is shown in ANOTHER scope\'s order (the wrong الهفوف can be first)');
   if (!/catalogDistrictExtras\(/.test(dist)) bad.push('matchDistrictsByCityId no longer adds the built-in catalog');
   if (!/_districtCache\) \{[\s\S]*startsWith\(`\$\{cityId\}:`\)/.test(dist)) bad.push('matchDistrictsByCityId does not borrow another scope\'s names while its own pool loads');
   if (!/scopeKnown:\s*false/.test(dist)) bad.push('borrowed district names are not flagged count-unknown');
@@ -129,6 +130,7 @@ mustCatch('a matcher that offers the pool\'s own city twice', behaviour({ ...REA
 mustCatch('an ambiguous name that is not held back', behaviour({ ...REAL, cityExtras: (q, cat, have, lim) => catalogCityExtras(q, cat, have, lim) }));
 mustCatch('a district matcher that ignores the city', behaviour({ ...REAL, districtExtras: (q, cat, _cityId, have, lim) => catalogDistrictExtras(q, cat.map((d) => ({ ...d, cityId: 1 })), 1, have, lim) }));
 mustCatch('a catalog fallback that vanished from matchCitiesByText', wiring(locSrc.replace('catalogCityExtras(query', 'noExtras(query'), idxSrc));
+mustCatch('a borrowed same-named city shown in another scope\'s order', wiring(locSrc.replace('if (borrowed && AMBIGUOUS_CITY_NAMES.has(n)) continue;', ''), idxSrc));
 mustCatch('a city matcher that waits for its own pool', wiring(locSrc.replace('for (const v of CITY_FIELD_POOLS.values())', 'for (const v of [])'), idxSrc));
 mustCatch('a borrowed city count printed as this scope\'s', wiring(locSrc.replace('listingCount: 0, scopeKnown: false } : s.opt', 'scopeKnown: false } : s.opt'), idxSrc));
 mustCatch('a district matcher that waits for its own pool', wiring(locSrc.replace('k.startsWith(`${cityId}:`)', 'false'), idxSrc));

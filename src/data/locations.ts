@@ -1216,6 +1216,9 @@ export function matchCitiesByText(deal: Deal | null, periodTok: string | null, c
   const scored: { opt: CityOption; rank: number }[] = [];
   for (const opt of basePool ?? []) {
     const n = norm(opt.cityAr);
+    // A name two real cities share (الهفوف) ranks differently in every scope: while the exact pool is not loaded it
+    // is held back entirely, so the first row a user can tap is never the wrong one (a real-browser test caught it).
+    if (borrowed && AMBIGUOUS_CITY_NAMES.has(n)) continue;
     if (n.startsWith(q)) scored.push({ opt, rank: 0 });
     else if (n.includes(q)) scored.push({ opt, rank: 1 });
   }
@@ -1225,7 +1228,7 @@ export function matchCitiesByText(deal: Deal | null, periodTok: string | null, c
   // built-in catalog, instantly, after the pool's own ranked matches. When the pool is loaded the place simply has
   // no listings in this scope (the UI says so); when it is not loaded yet its count is UNKNOWN (scopeKnown:false:
   // no number, no «nothing here» claim) and fills in the moment the pool arrives.
-  const extras = catalogCityExtras(query, CATALOG_CITIES, new Set(fromPool.map((o) => o.cityId)), 30, basePool === undefined ? AMBIGUOUS_CITY_NAMES : undefined).map((c): CityOption => ({
+  const extras = catalogCityExtras(query, CATALOG_CITIES, new Set(fromPool.map((o) => o.cityId)), 30, exactPool === undefined ? AMBIGUOUS_CITY_NAMES : undefined).map((c): CityOption => ({
     cityId: c.cityId, cityAr: c.cityAr, regionId: c.regionId, regionAr: c.regionAr,
     listingCount: 0, totalInCohort: 0, scopeKnown: exactPool !== undefined,
   }));
