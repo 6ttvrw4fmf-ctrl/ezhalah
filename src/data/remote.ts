@@ -769,8 +769,17 @@ function ageAgnostic<T extends Record<string, unknown>>(params: T) {
 
 const inFlightAgeCounts = new Map<string, Promise<AgeOptionCounts | null>>();
 
+// REMEMBERED like settledGuidedCounts (same COUNT_MEMORY_TTL_MS, learned answers only) — added
+// 2026-10-03 for «متابعة feels stuck»: every commit re-ranks the pool, and the age question's counts were
+// the one probe nothing remembered, so each tap paid ~1.2 s for an answer the next-step prefetch
+// (agent.tsx) had already fetched seconds earlier.
+const settledAgeCounts = new Map<string, { at: number; c: AgeOptionCounts }>();
+
 export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeOptionCounts | null | ProbeFailed> {
   if (!supabase) return null;
+  const ageKey = JSON.stringify(q);
+  const ageHit = settledAgeCounts.get(ageKey);
+  if (ageHit && Date.now() - ageHit.at < COUNT_MEMORY_TTL_MS) return ageHit.c;
   const scope = await resolveSearchScope(q);
   if (isProbeFailure(scope)) return PROBE_FAILED;   // scope resolution failed = never learned the answer
   if (!scope) {
@@ -805,7 +814,9 @@ export async function fetchPropertyAgeOptionCounts(q: SearchQuery): Promise<AgeO
     const { data, error } = result;
     if (error) return PROBE_FAILED;               // transport/DB error = never learned the answer
     if (!data || !(data as AgeOptionCounts[]).length) return null;   // the source answered: nothing
-    return (data as AgeOptionCounts[])[0];
+    const c = (data as AgeOptionCounts[])[0];
+    settledAgeCounts.set(ageKey, { at: Date.now(), c });   // ONLY a learned answer is ever remembered
+    return c;
   });
 }
 
