@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Animated, Platform, Pressable, ScrollView, StyleSheet, Text, View,
+  Animated, Easing, Platform, Pressable, ScrollView, StyleSheet, Text, View,
   useWindowDimensions,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -31,8 +31,9 @@ import {
 //     Escape, and the browser Back gesture all close it.
 // The embedded page is the site's real page with the site's own headers — no proxy, nothing
 // stripped. Chrome is Ezhalah: paper strip, white active tab with a tint hairline, green accents
-// only — no solid green blocks. Loading: a calm cover per tab; after LOAD_TIMEOUT_MS without a load
-// event, «تعذر عرض الإعلان هنا» + «فتح في نافذة جديدة» — never a bare browser error.
+// only — no solid green blocks. Loading: the page shows AS SOON AS IT PAINTS, like a browser tab, with
+// a thin progress bar on top; nothing covers it while it loads, and it is never torn down for being
+// slow (see TabFrame).
 //
 // v3 (owner 2026-10-03: «make it seem like Safari / Chrome on the right side»; his reference is the
 // Claude desktop app's browser pane). The SPLIT pane now wears a browser's chrome, left-to-right in
@@ -48,7 +49,9 @@ import {
 // (pane: from/to the right edge; sheet: from/to the bottom). Reduced motion → short cross-fade.
 
 const IS_WEB = Platform.OS === 'web';
-const LOAD_TIMEOUT_MS = 12_000;
+// A page still loading after this long gets a small, dismissible «open in a new window» pill. The page
+// itself stays: it keeps loading underneath and the user can keep waiting if they prefer.
+const SLOW_HINT_MS = 5_000;
 // Marker on the history entry this viewer pushes; see the history effect below.
 const HISTORY_MARK = 'ezAdViewer';
 // Apple's "sheet" response (~0.3s), damping ratio ≈ 1 → settles with no overshoot.
@@ -421,8 +424,17 @@ export default function AdViewer({ tabs, active, split, hidden, hint, onSelect, 
   );
 }
 
-// One tab's page: its own iframe, its own calm cover, its own 12s fallback. Mounted for the tab's
-// whole life (hidden when inactive) so refronting never reloads the site.
+// One tab's page: its own iframe. Mounted for the tab's whole life (hidden when inactive) so
+// refronting never reloads the site.
+//
+// LOADING (owner 2026-10-03: «it takes so long … when I click فتح في نافذة جديدة it works perfectly …
+// make sure we never have this issue»). Measured on a phone over 4G: Gathern's content was visible
+// after ~0.3s but its frame `load` event (every image, font and tracker) came at ~2.9s, and the old
+// opaque «loading» cover waited for `load`; on a slower phone that is many seconds of blank screen,
+// and past 12s the old code even REMOVED the page and showed an error. A browser tab does neither,
+// which is why «new window» felt fast. So: the frame is visible from its first paint, a thin bar on
+// top shows progress until `load`, and a slow page gets a small «open in a new window» pill — the
+// page is never taken away.
 function TabFrame({ tab, visible, t, onNavigated }: { tab: AdTab; visible: boolean; t: (k: string) => string; onNavigated: () => void }) {
   const url = tab.url;
   const { host } = splitUrlForDisplay(url);
@@ -431,17 +443,28 @@ function TabFrame({ tab, visible, t, onNavigated }: { tab: AdTab; visible: boole
   // A plain flag on purpose: a `loads.current++ > 0` counter here took the FIRST load for a
   // navigation in the React Compiler build (seen live: ← lit up on a fresh tab and after ⟳).
   const loadedOnce = useRef(false);
-  const [failed, setFailed] = useState(false);
+  const [slow, setSlow] = useState(false);
+  const [slowDismissed, setSlowDismissed] = useState(false);
   useEffect(() => {
-    if (loaded || failed) return;
-    const id = setTimeout(() => setFailed(true), LOAD_TIMEOUT_MS);
+    if (loaded) return;
+    const id = setTimeout(() => setSlow(true), SLOW_HINT_MS);
     return () => clearTimeout(id);
-  }, [loaded, failed]);
+  }, [loaded]);
+  // The progress bar eases toward 85% while waiting (a real browser's trick: it never claims done early).
+  const bar = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (loaded) return;
+    bar.setValue(0.08);
+    const a = Animated.timing(bar, { toValue: 0.85, duration: 6_000, easing: Easing.out(Easing.cubic), useNativeDriver: false });
+    a.start();
+    return () => a.stop();
+  }, [loaded]); // eslint-disable-line react-hooks/exhaustive-deps
   const openNewTab = () => { if (IS_WEB && url) window.open(url, '_blank', 'noopener,noreferrer'); };
   const Frame: any = 'iframe';
   return (
     <View style={[s.page, !visible && s.pageHidden]}>
-      {!failed && (
+      {/* Always mounted, visible from its first paint — never covered, never removed for being slow. */}
+      {(
         <Frame
           src={url}
           title={host}
@@ -459,18 +482,22 @@ function TabFrame({ tab, visible, t, onNavigated }: { tab: AdTab; visible: boole
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0, background: '#fff' }}
         />
       )}
-      {!loaded && !failed && (
-        <View style={[s.cover, { pointerEvents: 'none' }]}>
-          <ActivityIndicator size="small" color={colors.primary} />
-          <Text style={s.coverTx}>{t('Loading listing…')}</Text>
-        </View>
+      {!loaded && (
+        <Animated.View
+          testID="ad-load-bar"
+          pointerEvents="none"
+          style={[s.loadBar, { width: bar.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }]}
+        />
       )}
-      {failed && (
-        <View style={s.cover}>
-          <Text style={s.failTx}>{t('This ad can’t be shown here')}</Text>
-          <Pressable onPress={openNewTab} accessibilityRole="link" style={({ hovered }: any) => [s.newTab, s.failBtn, hovered && s.hover]}>
-            <Ionicons name="open-outline" size={16} color={colors.primary} />
+      {!loaded && slow && !slowDismissed && (
+        <View testID="ad-slow-hint" style={s.slowPill}>
+          <Text style={s.slowTx}>{t('Taking a while?')}</Text>
+          <Pressable onPress={openNewTab} accessibilityRole="link" style={({ hovered }: any) => [s.newTab, hovered && s.hover]}>
+            <Ionicons name="open-outline" size={15} color={colors.primary} />
             <Text style={s.newTabTx}>{t('Open in a new window')}</Text>
+          </Pressable>
+          <Pressable onPress={() => setSlowDismissed(true)} accessibilityRole="button" accessibilityLabel={t('Close')} hitSlop={8} style={s.slowX}>
+            <Ionicons name="close" size={14} color={colors.muted} />
           </Pressable>
         </View>
       )}
@@ -554,10 +581,15 @@ const s = StyleSheet.create({
   body: { flex: 1, backgroundColor: colors.surface },
   page: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   pageHidden: { display: 'none' },
-  cover: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, backgroundColor: colors.surface },
-  coverTx: { fontSize: 13, color: colors.muted },
-  failTx: { fontSize: 15, color: colors.ink, textAlign: 'center' },
-  failBtn: { height: 40, paddingHorizontal: 16, backgroundColor: colors.tint },
+  loadBar: { position: 'absolute', top: 0, left: 0, height: 3, backgroundColor: colors.primary, borderTopRightRadius: 2, borderBottomRightRadius: 2 },
+  slowPill: {
+    position: 'absolute', left: 12, right: 12, bottom: 16, alignSelf: 'center', maxWidth: 420, marginHorizontal: 'auto' as any,
+    flexDirection: 'row', alignItems: 'center', gap: 8, paddingStart: 14, paddingEnd: 6, paddingVertical: 6,
+    borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
+    shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 4 },
+  },
+  slowTx: { flex: 1, fontSize: 13, color: colors.ink },
+  slowX: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   hintWrap: {
     position: 'absolute', top: 8, alignSelf: 'center',
     backgroundColor: colors.tint, borderRadius: radius.pill,

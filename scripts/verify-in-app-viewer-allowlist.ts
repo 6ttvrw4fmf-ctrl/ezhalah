@@ -7,6 +7,7 @@
 // through it, and the old open path must still exist unchanged for everyone else.
 
 import { readFileSync } from 'node:fs';
+import { windowBetween } from './lib/sourceWindow.ts';
 import {
   EMPTY_AD_PANE, EMPTY_FRAME_NAV, IN_APP_VIEWER_HOSTS, MAX_AD_TABS, adTabKey, canFrameBack, canFrameForward,
   closeAdTab, frameDropped, frameNavigated, frameStepped, hideAdPane, inAppViewerHost, openAdTab,
@@ -211,6 +212,17 @@ const localeFails = (f: (u: string, l: string) => string | undefined): string[] 
 };
 { const bad = localeFails(localizeAdUrl); check(`Arabic app → Arabic ad (Deal App /ar, Gathern bare), English app → /en${bad.length ? ' — ' + bad.join('; ') : ''}`, bad.length === 0); }
 check('openListing.ts builds ONE ad URL in the app language for the frame and the new tab', /localizeAdUrl\(url, getLocale\(\)\)/.test(open));
+// LOADING (owner 2026-10-03: «it takes so long … make sure we never have this issue»): the page is
+// visible from its first paint — no opaque cover waiting for the frame's `load` (all images and
+// trackers), and a slow page is never removed; a slow page only gets a dismissible «new window» pill.
+const frameNeverCoveredOrRemoved = (src: string) => {
+  const tf = windowBetween(src, 'function TabFrame', 'function TabIcon', 'AdViewer.tsx');
+  return /\{\/\* Always mounted[^\n]*\*\/\}\s*\{\(\s*<Frame/.test(tf)      // the frame is unconditional
+    && !/\{!\w+ && \(\s*<Frame/.test(tf)                                      // nothing gates it
+    && !/s\.cover\b/.test(tf)                                                   // no full-page cover
+    && /testID="ad-load-bar"/.test(tf) && /testID="ad-slow-hint"/.test(tf);
+};
+check('AdViewer: a loading page is visible at once (thin bar), never covered, never removed when slow', frameNeverCoveredOrRemoved(viewer));
 check('AdViewer frame delegates payment (checkout can continue inside)', /allow="[^"]*\bpayment\b/.test(viewer));
 
 // Mutation proof — each of these broken worlds must be CAUGHT by the checks above, or the barrier
@@ -244,6 +256,9 @@ mustCatch('a strip that never evicts at the cap',
 mustCatch('two tabs of one listing sharing a key (ids ignored)', paneFails({ ...realPane, open: (p, l) => { const o = openAdTab(p, l); return { ...o, tabs: o.tabs.map((t) => ({ ...t, tid: 1 })) }; } }).length > 0);
 mustCatch('a frame keyed by the listing only (a second tab would revive the first frame)',
   !frameKeyUsesTabKey(viewer.replace('const k = adTabKey(tab);', 'const k = `${tab.source}:${tab.id}`;')));
+mustCatch('a frame removed when the page is slow', !frameNeverCoveredOrRemoved(viewer.replace('{(\n        <Frame', '{!failed && (\n        <Frame')));
+mustCatch('an opaque cover over a loading page', !frameNeverCoveredOrRemoved(viewer.replace('testID="ad-load-bar"', 'testID="ad-load-bar" style={s.cover}')));
+mustCatch('a loading page with no slow-page way out', !frameNeverCoveredOrRemoved(viewer.replace('testID="ad-slow-hint"', 'testID="x"')));
 mustCatch('a «+» tab coming back', /ad-tab-new/.test(viewer + 'testID="ad-tab-new"'));
 mustCatch('an ad language that ignores the app language', localeFails((u) => u).length > 0);
 mustCatch('an English app that doubles Gathern /en', localeFails((u, l) => (l === 'en' && u.includes('gathern.co') ? u.replace('gathern.co', 'gathern.co/en') : localizeAdUrl(u, l))).length > 0);
