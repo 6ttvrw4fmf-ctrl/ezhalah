@@ -1457,6 +1457,7 @@ export default function Home() {
                     // key and were the one captured value nobody re-checked (2026-09-23, #648).
                     if (!query.location) {
                       const cohort = cityCohortSig;
+                      setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
                       void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).then(() => {
                         writeCitySuggestionsForCohort(cohort, true);
                       });
@@ -1661,6 +1662,7 @@ export default function Home() {
                     if (!districtTextRef.current) {
                       const cid = citySelected.cityId;
                       const cohort = districtCohortSigOf(cid);
+                      setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope)); // at once, like the city field
                       void ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).then(() => {
                         writeDistrictSuggestionsForCohort(cid, cohort, true);
                       });
