@@ -18,6 +18,7 @@ import { Image } from 'expo-image';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
+import { shouldRenderModeSwitch } from '@/lib/shouldRenderModeSwitch';
 import { isAppSessionStarted } from '@/lib/appSession';
 import { msgRTL } from '@/lib/textDirection';
 import { stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
@@ -3720,7 +3721,7 @@ export default function Agent() {
           pill, owner 2026-08-16: "it stays in the middle, not far right"). Fades + collapses away
           the moment a search happens, in either mode; the wrapper's animated height keeps the chat
           area from snapping up when it leaves. */}
-      {!modeGone && (
+      {shouldRenderModeSwitch(modeGone, replay) && (
         <View style={[s.modeWrap, MODE_EASE, modeSearched && s.modeWrapHidden]}>
           <ModeSwitch active="agent" onSwitch={() => router.replace('/')} t={t} />
         </View>
@@ -4666,7 +4667,7 @@ const s = StyleSheet.create({
   fbToastText: { fontSize: 12.5, fontWeight: '600', color: colors.ink },
   iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
-  title: { fontSize: 22, fontWeight: '800', color: colors.ink },   // the brand name, big (owner 2026-10-04)
+  title: { fontSize: 22, fontWeight: '800', color: colors.primary },
   // Note #5 — share icon sits beside the Filter pill in the agent header.
   // Matches the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius, soft lift) so
   // the pill + share read as one cluster across both screens (owner redesign 2026-07-24 r2).
