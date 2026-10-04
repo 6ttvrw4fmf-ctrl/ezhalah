@@ -124,6 +124,9 @@ function anyGuidedEligible(q: SearchQuery): boolean {
 
 const IS_WEB = Platform.OS === 'web';
 const EAGLE_MARK = require('../../assets/images/eagle-mark.png');
+// ChatGPT's own font list (system UI face), with the platform Arabic faces named so Arabic renders in
+// the system's modern Arabic type instead of a browser fallback. Native keeps the platform default.
+const CHAT_FONT = IS_WEB ? 'ui-sans-serif, -apple-system, system-ui, "Segoe UI", "SF Arabic", "Noto Sans Arabic", Helvetica, Arial, sans-serif' : undefined;
 // On the web the results tile into a wrap grid, so the conversation column is wider to give them
 // room (the user barely scrolls). On phone it stays a comfortable single-column reading width.
 const MAX_W = IS_WEB ? 940 : 560;
@@ -3686,7 +3689,9 @@ export default function Agent() {
             identifies the screen, so the old collapsing "✨ Ezhalah AI Agent"→"Ezhalah" title and the
             small تصفية button are both replaced by the shared two-tab control (same spot as home's,
             so switching reads as one continuous control). (owner top-nav redesign, 2026-07-24.) */}
-        <Text ref={noTranslateRef} style={s.title}>{t('Ezhalah')}</Text>
+        {/* PHONE ONLY (owner 2026-10-04: «for a phone show this ezhalah but laptop just show the ezhalah
+            near the logo»). On a laptop the docked sidebar already carries the logo + name. */}
+        {!docked ? <Text ref={noTranslateRef} style={s.title}>{t('Ezhalah')}</Text> : null}
         <View style={{ flex: 1 }} />
         {/* Logged-out sign-in (mobile only — desktop has the docked sidebar CTA). Owner 2026-08-19. */}
         {!user && !docked && (
@@ -3760,7 +3765,7 @@ export default function Agent() {
                 // speaker without turning every line into the same rounded chatbot tile.
                 const rtl = msgRTL(m.text);
                 return (
-                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={[s.userBubble, rtl ? s.userMessageRtl : s.userMessageLtr]}>
+                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={s.userBubble}>
                     <Text style={[s.userText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
                       {m.typing ? <Typer text={m.text} onDone={onBubbleDone} /> : m.text}
                     </Text>
@@ -4661,7 +4666,7 @@ const s = StyleSheet.create({
   fbToastText: { fontSize: 12.5, fontWeight: '600', color: colors.ink },
   iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
-  title: { fontSize: 22, fontWeight: '800', color: colors.primary },
+  title: { fontSize: 22, fontWeight: '800', color: colors.ink },
   // Note #5 — share icon sits beside the Filter pill in the agent header.
   // Matches the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius, soft lift) so
   // the pill + share read as one cluster across both screens (owner redesign 2026-07-24 r2).
@@ -4775,22 +4780,23 @@ const s = StyleSheet.create({
 
   // Conversation turns use a typographic transcript instead of repeated rounded chatbot tiles.
   // The green edge keys the user's request to Ezhalah's identity while leaving the paper open.
-  userBubble: { alignSelf: 'flex-end', maxWidth: IS_WEB ? '76%' : '88%', paddingVertical: 8, marginTop: 12 },
-  userMessageRtl: { borderRightWidth: 3, borderRightColor: colors.primary, paddingRight: 14, paddingLeft: 2 },
-  userMessageLtr: { borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: 14, paddingRight: 2 },
-  userText: { color: colors.userBubbleText, fontSize: IS_WEB ? 18 : 16.5, lineHeight: IS_WEB ? 31 : 28, fontWeight: '600' },
+  // CHAT TEXT LIKE CHATGPT (owner 2026-10-04: «the font … not nice, we want text like ChatGPT»): the
+  // system UI face at regular weight, ~16px with an airy line height, and the user's turn in a soft
+  // rounded bubble — not bold, not a green-edged quote.
+  userBubble: { alignSelf: 'flex-end', maxWidth: IS_WEB ? '76%' : '88%', backgroundColor: colors.userBubble, borderRadius: 20, paddingVertical: 10, paddingHorizontal: 16, marginTop: 12 },
+  userText: { fontFamily: CHAT_FONT, color: colors.userBubbleText, fontSize: IS_WEB ? 16 : 15.5, lineHeight: IS_WEB ? 26 : 24, fontWeight: '400' },
 
   status: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 2 },
   statusText: { fontSize: 12.5, color: colors.muted },
   // The Ezhalah slogan during search — plain text, prominent, with the summary beneath it. No icon.
   sloganWrap: { gap: 8, paddingVertical: 2 },
-  sloganText: { fontSize: IS_WEB ? 18 : 16.5, lineHeight: IS_WEB ? 30 : 27, fontWeight: '700', color: colors.dark, flexShrink: 1 },
+  sloganText: { fontFamily: CHAT_FONT, fontSize: IS_WEB ? 16 : 15.5, lineHeight: IS_WEB ? 28 : 26, fontWeight: '500', color: colors.ink, flexShrink: 1 },
   // The search summary shown under the results header (not with the slogan).
-  summaryText: { fontSize: IS_WEB ? 14.5 : 13, color: colors.body, lineHeight: IS_WEB ? 24 : 21, marginTop: 4 },
+  summaryText: { fontFamily: CHAT_FONT, fontSize: IS_WEB ? 15 : 14, color: colors.body, lineHeight: IS_WEB ? 26 : 24, marginTop: 4 },
 
   reply: { flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
   replyBrandMark: { width: 22, height: 22, marginTop: 3, flexShrink: 0 },
-  replyText: { flex: 1, minWidth: 0, fontSize: IS_WEB ? 17 : 16, lineHeight: IS_WEB ? 30 : 28, color: colors.ink },
+  replyText: { fontFamily: CHAT_FONT, flex: 1, minWidth: 0, fontSize: IS_WEB ? 16 : 15.5, lineHeight: IS_WEB ? 28 : 26, color: colors.ink },
   introScroll: { flexGrow: 1, justifyContent: 'center' },
   greeting: { width: '100%', alignItems: 'center', gap: 8, paddingVertical: 24 },
   greetingText: { fontSize: 24, lineHeight: 36, fontWeight: '600', color: colors.dark, textAlign: 'center', writingDirection: 'rtl' as any },
