@@ -18,6 +18,17 @@
 > that each open error has an owner). A Sentry error a customer hit is never «noise»: it is either fixed, or written in
 > your report with the reason and the plan. Your report gets one line: «🛰️ Sentry: N open in my area · fixed N · resolved N».
 
+> **🏕️ GATHERN: ALL ~37,000 UNITS (owner, 2026-10-04: «let's scrape all those 37,000 … searchable by Advanced Filter and normal filter, that note is important, lifecycle … a very very very close eye»).**
+**What we know (measured 2026-10-04):** Gathern's own search (`msapi.gathern.co/search/api/v1/search-units`, no
+`calendar_type`) lists **~37,251 units in 165 cities** (Riyadh 12,775, Jeddah 6,145, Madinah 2,357, Khobar 2,107, Taif
+1,795, Abha 1,685); almost all also accept a 30-night stay (Riyadh: 12,709 of 12,775). We show **~4,775**, because the rest
+answer **«الصفحة غير موجودة» (HTTP 404) on the website** (`gathern.co/view/<chalet>/unit/<unit>`) and only open in Gathern's
+phone app. Sample: 800 Riyadh units Gathern lists → we had seen 679, only 112 live (the rest were hidden as web-404, correctly).
+**The rule that does not move: a customer never lands on a dead page.** A unit is shown only with a link proven to open it.
+**Your part:** the app-only Gathern units get the same Advanced Filter answers as today's Gathern units (furnished = title
+suffix, rating from the unit page, never from the list API's 0/0), tri-state; include them in your findability sample the
+first night they exist. A Gathern unit a customer cannot find through the Advanced Filter is a findability miss.
+
 ## Your mission in one line
 **A customer who asks the Advanced Filter for something finds EVERY listing that truly has it, and ONLY those.**
 The owner's fear, in his words: «my fear is that the user doesn't get the actual property he's looking for». The goal of every

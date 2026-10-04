@@ -35,6 +35,18 @@ wrong, don't act on that belief: report it the same way. The old 11-routine setu
 > that each open error has an owner). A Sentry error a customer hit is never «noise»: it is either fixed, or written in
 > your report with the reason and the plan. Your report gets one line: «🛰️ Sentry: N open in my area · fixed N · resolved N».
 
+> **🏕️ GATHERN: ALL ~37,000 UNITS (owner, 2026-10-04: «let's scrape all those 37,000 … searchable by Advanced Filter and normal filter, that note is important, lifecycle … a very very very close eye»).**
+**What we know (measured 2026-10-04):** Gathern's own search (`msapi.gathern.co/search/api/v1/search-units`, no
+`calendar_type`) lists **~37,251 units in 165 cities** (Riyadh 12,775, Jeddah 6,145, Madinah 2,357, Khobar 2,107, Taif
+1,795, Abha 1,685); almost all also accept a 30-night stay (Riyadh: 12,709 of 12,775). We show **~4,775**, because the rest
+answer **«الصفحة غير موجودة» (HTTP 404) on the website** (`gathern.co/view/<chalet>/unit/<unit>`) and only open in Gathern's
+phone app. Sample: 800 Riyadh units Gathern lists → we had seen 679, only 112 live (the rest were hidden as web-404, correctly).
+**The rule that does not move: a customer never lands on a dead page.** A unit is shown only with a link proven to open it.
+**Your part:** the night ⚡ lands the first app-only Gathern units, they are new listings: every one searchable by the
+normal filter (city, district, type, rent, monthly), with the card note «اضغط للاطلاع على الأسعار حسب مدة الإقامة» and NO
+price (owner rule 2026-10-02), and its link opens the unit for a customer (test 10 by clicking, phone and laptop). A unit
+whose link does not open is not «live».
+
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «we need it to do a good job … make a plan, and one rule: the numbers a customer sees must
 stay true when listings go dead.» You decide; you do not ask (only money, legal, secrets). The 3 hours are yours: **below 9

@@ -1197,6 +1197,11 @@ const AR: Record<string, string> = {
   'Type': 'النوع',
   'm²': 'م²',
   'Description': 'الوصف',
+  'Listing bedrooms': 'الغرف',
+  'Rent period': 'مدة الإيجار',
+  'Open the ad on Aqar to contact': 'افتح الإعلان في عقار للتواصل',
+  'Details as published on Aqar.': 'المعلومات كما نشرها عقار.',
+  'Photo {n} of {total}': 'الصورة {n} من {total}',
   'Call': 'اتصال',
   'WhatsApp': 'واتساب',
   'Telegram': 'تيليجرام',
@@ -1555,7 +1560,7 @@ function fill(template: string, vars?: Record<string, string | number>): string 
 // this to its `locale` state so screens re-render from a single source of truth (React state),
 // while the module-level `t` below serves the non-React data layer.
 export function translate(loc: Locale, en: string, vars?: Record<string, string | number>): string {
-  const base = loc === 'ar' ? AR[en] ?? en : en;
+  const base = loc === 'ar' ? AR[en] ?? en : en === 'Listing bedrooms' ? 'Bedrooms' : en;
   return fill(base, vars);
 }
 
