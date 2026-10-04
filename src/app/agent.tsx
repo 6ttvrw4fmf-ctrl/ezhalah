@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { Image } from 'expo-image';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
@@ -4388,7 +4389,13 @@ export default function Agent() {
                   dataSet={{ ...TAP44 }}
                   style={({ pressed }: any) => [s.initialSearch, pressed && s.initialSearchPressed]}
                 >
-                  <Ionicons name="search-outline" size={17} color={colors.ink} />
+                  <Image
+                    source={require('../../assets/icons/eagle-search.svg')}
+                    style={s.initialSearchIcon}
+                    contentFit="contain"
+                    tintColor={colors.ink}
+                    accessible={false}
+                  />
                   <Text style={s.initialSearchText}>{t('Search')}</Text>
                 </Pressable>
               )}
@@ -4855,6 +4862,7 @@ const s = StyleSheet.create({
   composerInputColumn: { flex: 1, minWidth: 0 },
   initialSearch: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 13, marginTop: 6, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
   initialSearchPressed: { backgroundColor: colors.segTrack },
+  initialSearchIcon: { width: 17, height: 17 },
   initialSearchText: { color: colors.ink, fontSize: 14, lineHeight: 20 },
   micBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   micBtnPressed: { backgroundColor: colors.segTrack, transform: [{ scale: 0.96 }] },
