@@ -9,6 +9,7 @@ const lifted = await liftSymbols('scripts/verify-web-runtime-smoke.mjs',
 const observe = lifted.observeAfProbeTimeouts as (page: EventEmitter) => { undetermined(): boolean; dispose(): void };
 const tick = lifted.tick as (ms: number) => void;
 const names = ['apartment_guided_counts_ar', 'property_age_option_counts_ar'];
+const mustCatch = (label: string, caught: boolean) => assert.ok(caught, `mutation escaped: ${label}`);
 
 function fixture() {
   const page = new EventEmitter();
@@ -32,8 +33,10 @@ f.round();
 assert.equal(f.observer.undetermined(), false, 'one round does not prove the bounded retry exhausted');
 f.round();
 assert.equal(f.observer.undetermined(), true, 'both complete timed-out rounds prove UNKNOWN');
+// Mutate the observed batch with an additional pending/answered probe: the same predicate
+// must withdraw its verdict. Changing every(timedOut) to some(timedOut) makes this fail.
 f.request(names[0]);
-assert.equal(f.observer.undetermined(), false, 'a pending or answered probe prevents the all-timeout verdict');
+mustCatch('a pending or answered probe prevents the all-timeout verdict', !f.observer.undetermined());
 f.observer.dispose();
 assert.equal(f.page.listenerCount('request') + f.page.listenerCount('requestfailed'), 0);
 
