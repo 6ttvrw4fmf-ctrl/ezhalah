@@ -190,6 +190,6 @@ const s = StyleSheet.create({
     gap: 8, // generous icon↔label breathing room (was 4)
     borderRadius: radius.pill,
   },
-  segT: { fontFamily: font.family.arabicMedium, fontSize: 13.5, color: colors.body },
-  segTOn: { fontFamily: font.family.arabicMedium, color: colors.ink },
+  segT: { fontFamily: font.family.medium, fontSize: 13.5, color: colors.body },
+  segTOn: { fontFamily: font.family.bold, color: colors.ink },
 });

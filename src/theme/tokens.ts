@@ -50,14 +50,10 @@ export const space = {
   card: 16,
 } as const;
 
-// Tajawal is bundled and loaded in _layout for the chat and shared navigation.
-// Legacy Poppins family names remain available for other screens.
+// Poppins; falls back to system until the font is loaded (see _layout). README: body 13–15,
+// titles 18–26, pill/labels 11.
 export const font = {
-  size: { chatTitle: 28, chatTitleDesktop: 40, chatSubtitle: 17 },
-  lineHeight: { chatTitle: 42, chatTitleDesktop: 56, chatSubtitle: 28 },
   family: {
-    arabic: 'Tajawal',
-    arabicMedium: 'TajawalMedium',
     regular: 'Poppins_400Regular',
     medium: 'Poppins_500Medium',
     semibold: 'Poppins_600SemiBold',

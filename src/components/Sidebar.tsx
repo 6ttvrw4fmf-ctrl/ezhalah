@@ -14,7 +14,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePathname, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { colors, darkColors, radius, space, cardShadow, font } from '@/theme/tokens';
+import { colors, darkColors, radius, space, cardShadow } from '@/theme/tokens';
 import { useTheme } from '@/theme/theme';
 import HeroBackground from '@/components/HeroBackground';
 import AccountMenu from '@/components/AccountMenu';
@@ -662,7 +662,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
                 there is exactly ONE search affordance on screen at a time. */}
             <View style={s.brandRow}>
               <RNImage source={require('../../assets/images/eagle-mark.png')} style={s.logo} resizeMode="contain" />
-              <Text ref={noTranslateRef} style={[s.word, dark && dks.word]}>{t('EZHALAH')}</Text>
+              <Text ref={noTranslateRef} style={[s.word, !isRTL && s.wordLatin, dark && dks.word]}>{t('EZHALAH')}</Text>
               {!searching && (
                 <Pressable
                   style={(st) => [s.searchTopBtn, WEB_SMOOTH, isOn(st) && s.searchTopBtnHover]}
@@ -889,7 +889,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
           <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
             <View style={s.brandRow}>
               <RNImage source={require('../../assets/images/eagle-mark.png')} style={s.logo} resizeMode="contain" />
-              <Text ref={noTranslateRef} style={[s.word, dark && dks.word]}>{t('EZHALAH')}</Text>
+              <Text ref={noTranslateRef} style={[s.word, !isRTL && s.wordLatin, dark && dks.word]}>{t('EZHALAH')}</Text>
             </View>
 
             {/* The upper guest CTA card that used to sit here was the OLD auth prompt (removed
@@ -1003,7 +1003,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
       <View ref={panelRef} style={[s.dockPanel, dark && dks.dockPanel, acctOpen && ({ zIndex: 30 } as any), { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, LTR_PIN]}>
         {/* Dark appearance drops the light pencil-sketch backdrop: the deep green paper IS the
             dark surface (the sketch and its fade-to-light-paper gradient assume light ground). */}
-        {!dark && !onAgentScreen && <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />}
+        {!dark && <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />}
         {body}
         {dropAnnounce ? (
           <Text accessibilityLiveRegion="polite" style={s.srOnly}>{dropAnnounce}</Text>
@@ -1020,7 +1020,7 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
     <View style={s.overlay}>
       <AnimatedPressable style={[s.backdrop, backdropStyle]} onPress={close} />
       <Animated.View ref={panelRef as any} style={[s.panel, dark && dks.panel, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, panelStyle, LTR_PIN]}>
-        {!dark && !onAgentScreen && <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />}
+        {!dark && <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />}
         {body}
         {menuOverlay}
         {deleteConfirmOverlay}
@@ -1053,29 +1053,32 @@ const s = StyleSheet.create({
   searchTopBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', marginLeft: 'auto' },
   searchTopBtnHover: { backgroundColor: colors.hoverRow },
   logo: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  word: { fontFamily: font.family.arabic, fontSize: 15, fontWeight: '800', letterSpacing: 2, color: colors.ink },
+  // Bigger brand name (owner 2026-10-04: «make Ezhalah big»). Letter-spacing only on the Latin wordmark —
+  // it pulls Arabic letters apart and breaks their joining.
+  word: { fontSize: 22, fontWeight: '800', color: colors.ink },
+  wordLatin: { letterSpacing: 2 },
 
   // Owner 2026-08-24: LIGHT green default (dark-green text) → DARK green with white text only on
   // hover/focus/press. The dark green is the interaction color, never the resting color.
   newChat: { flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: colors.tint, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 13, marginTop: 12, borderWidth: 1, borderColor: colors.tintLine },
   newChatHover: { backgroundColor: colors.hoverRow, borderColor: colors.hoverRow },
-  newChatText: { fontFamily: font.family.arabic, fontSize: 14, fontWeight: '600', color: colors.dark },
+  newChatText: { fontSize: 14, fontWeight: '600', color: colors.dark },
   newChatTextOn: { color: colors.onFill },
   // Chat search (owner 2026-08-24). The button mirrors the nav-link language (quiet, discoverable);
   // the input row keeps the exact same footprint so the sidebar never jumps when it morphs.
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingVertical: 6, paddingHorizontal: 10, marginTop: 8, borderWidth: 1, borderColor: colors.primary, backgroundColor: '#ffffff' },
   searchClose: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f1f4f2' },
   // Arabic-first: the field itself presents RTL even though the panel is dir=ltr locked.
-  searchInput: { fontFamily: font.family.arabic, flex: 1, minWidth: 0, fontSize: Platform.OS === 'web' ? 16 : 13.5, paddingVertical: 4, color: colors.ink, textAlign: 'right', ...(Platform.OS === 'web' ? { outlineStyle: 'none' } : null) } as any,
-  searchHint: { fontFamily: font.family.arabic, fontSize: 11.5, color: '#9aa6a0', paddingHorizontal: 8, paddingTop: 5, textAlign: 'right' },
+  searchInput: { flex: 1, minWidth: 0, fontSize: Platform.OS === 'web' ? 16 : 13.5, paddingVertical: 4, color: colors.ink, textAlign: 'right', ...(Platform.OS === 'web' ? { outlineStyle: 'none' } : null) } as any,
+  searchHint: { fontSize: 11.5, color: '#9aa6a0', paddingHorizontal: 8, paddingTop: 5, textAlign: 'right' },
 
   hist: { flex: 1, marginTop: 14, marginBottom: 8 },
-  empty: { fontFamily: font.family.arabic, fontSize: 13, color: colors.muted, paddingVertical: 12, paddingHorizontal: 6 },
+  empty: { fontSize: 13, color: colors.muted, paddingVertical: 12, paddingHorizontal: 6 },
   group: { marginBottom: 14 },
   groupHead: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 6, paddingBottom: 6 },
   // Drag-to-Favorites target glow (drop-would-star/unstar here) — calm, matches the gold star.
   groupHeadTarget: { backgroundColor: 'rgba(227, 160, 8, 0.14)', borderRadius: 6 },
-  groupTitle: { fontFamily: font.family.arabic, fontSize: 11, fontWeight: '700', color: '#9aa6a0', textTransform: 'uppercase', letterSpacing: 0.5 },
+  groupTitle: { fontSize: 11, fontWeight: '700', color: '#9aa6a0', textTransform: 'uppercase', letterSpacing: 0.5 },
   histRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 10 },
   // Interaction color for rows (owner 2026-08-24): dark-green fill with white label on hover/press.
   // DISTINCT from histRowActive below — the current chat keeps its persistent light-green highlight
@@ -1090,14 +1093,14 @@ const s = StyleSheet.create({
   // The chat the user is currently in — a light green wash so it's obvious which conversation is open.
   histRowActive: { backgroundColor: '#dcefe1' },
   histItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 8 },
-  histLabel: { fontFamily: font.family.arabic, flex: 1, fontSize: 13.5, fontWeight: '500', color: colors.ink },
+  histLabel: { flex: 1, fontSize: 13.5, fontWeight: '500', color: colors.ink },
   histLabelMatch: { fontWeight: '800' },
   // Editing keeps the row's metrics as close as it can so the list barely moves on rename.
   // fontSize >= 16 on web keeps mobile Safari from zooming on focus and stranding the user zoomed in
   // (scripts/verify-input-font-no-ios-zoom.ts). This is the one place where the bigger web font costs a
   // little: measured, the row goes 37px -> 40px while renaming (it already grew 35 -> 37 for the border).
   // A 3px wobble on the row you are actively editing beats an unrecoverable page zoom.
-  histInput: { fontFamily: font.family.arabic, fontSize: Platform.OS === 'web' ? 16 : 13.5, paddingVertical: 0, borderRadius: 6, backgroundColor: '#ffffff',
+  histInput: { fontSize: Platform.OS === 'web' ? 16 : 13.5, paddingVertical: 0, borderRadius: 6, backgroundColor: '#ffffff',
     borderWidth: 1, borderColor: colors.primary, paddingHorizontal: 6, ...(Platform.OS === 'web' ? { outlineStyle: 'none' } as any : null) },
   dots: { paddingVertical: 6, paddingHorizontal: 8, borderRadius: 8 },
   // Soft dim over the sidebar while the menu is open so the history text behind it recedes and the
@@ -1125,7 +1128,7 @@ const s = StyleSheet.create({
   // The sidebar's ONE interaction fill (owner 2026-09-03): colors.hoverRow — dark green in light,
   // the muted deep green-gray in dark — on every clickable row, with white text/icons on top.
   navLinkHover: { backgroundColor: colors.hoverRow },
-  navText: { fontFamily: font.family.arabic, fontSize: 14.5, fontWeight: '500', color: colors.ink },
+  navText: { fontSize: 14.5, fontWeight: '500', color: colors.ink },
   navTextOn: { color: colors.onFill },
 
   lang: { flexDirection: 'row', alignSelf: 'flex-start', backgroundColor: colors.segTrack, borderRadius: radius.pill, padding: 4, gap: 4, marginBottom: 18 },
@@ -1144,8 +1147,8 @@ const s = StyleSheet.create({
   // Name + email both ALIGN LEFT (same left edge) and use writingDirection 'auto' so the Arabic name
   // still reads right-to-left INTERNALLY but its block starts flush against the avatar. Keeps the
   // pair visually tied as one column. (user request — Arabic profile alignment fix.)
-  userName: { fontFamily: font.family.arabic, fontSize: 13.5, fontWeight: '700', color: colors.ink, textAlign: 'left', writingDirection: 'auto' as any },
-  userSub: { fontFamily: font.family.arabic, fontSize: 11.5, color: colors.muted, textAlign: 'left', marginTop: 2 },
+  userName: { fontSize: 13.5, fontWeight: '700', color: colors.ink, textAlign: 'left', writingDirection: 'auto' as any },
+  userSub: { fontSize: 11.5, color: colors.muted, textAlign: 'left', marginTop: 2 },
 
   // Visually hidden, still announced: the post-drop «تم تغيير ترتيب المحادثة» confirmation.
   // Delete-confirmation dialog — same geometry as settings.tsx's account-delete confirm.
@@ -1163,8 +1166,8 @@ const s = StyleSheet.create({
   srOnly: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 },
   cta: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 9, paddingHorizontal: 13, ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : null) },
   ctaHover: { backgroundColor: colors.hoverRow },
-  ctaTitle: { fontFamily: font.family.arabic, fontSize: 13, fontWeight: '700', color: '#fff' },
-  ctaSub: { fontFamily: font.family.arabic, fontSize: 10.5, color: 'rgba(255,255,255,0.75)', marginTop: 1 },
+  ctaTitle: { fontSize: 13, fontWeight: '700', color: '#fff' },
+  ctaSub: { fontSize: 10.5, color: 'rgba(255,255,255,0.75)', marginTop: 1 },
 });
 
 // DARK APPEARANCE overrides (owner 2026-08-28) — appended after the base style when the resolved
@@ -1174,24 +1177,24 @@ const s = StyleSheet.create({
 const dks = StyleSheet.create({
   panel: { backgroundColor: darkColors.paper },
   dockPanel: { backgroundColor: darkColors.paper, borderRightColor: darkColors.line },
-  word: { fontFamily: font.family.arabic, color: darkColors.ink },
+  word: { color: darkColors.ink },
   newChat: { backgroundColor: darkColors.tint, borderColor: darkColors.tintLine },
-  newChatText: { fontFamily: font.family.arabic, color: '#cfe0d5' },
+  newChatText: { color: '#cfe0d5' },
   searchRow: { backgroundColor: darkColors.surface, borderColor: darkColors.primary },
   searchClose: { backgroundColor: '#1d2620' },
-  searchInput: { fontFamily: font.family.arabic, color: darkColors.ink },
-  searchHint: { fontFamily: font.family.arabic, color: darkColors.muted },
-  empty: { fontFamily: font.family.arabic, color: darkColors.muted },
-  groupTitle: { fontFamily: font.family.arabic, color: darkColors.muted },
+  searchInput: { color: darkColors.ink },
+  searchHint: { color: darkColors.muted },
+  empty: { color: darkColors.muted },
+  groupTitle: { color: darkColors.muted },
   histRowActive: { backgroundColor: '#1f3a2c' },
   histRowOpen: { backgroundColor: '#1d2620' },
-  histLabel: { fontFamily: font.family.arabic, color: darkColors.ink },
-  histInput: { fontFamily: font.family.arabic, backgroundColor: darkColors.surface, borderColor: darkColors.primary },
+  histLabel: { color: darkColors.ink },
+  histInput: { backgroundColor: darkColors.surface, borderColor: darkColors.primary },
   rowMenu: { backgroundColor: darkColors.surface, borderColor: darkColors.fieldLine },
   rowMenuText: { color: darkColors.ink },
   divider: { backgroundColor: darkColors.fieldLine },
-  navText: { fontFamily: font.family.arabic, color: darkColors.ink },
+  navText: { color: darkColors.ink },
   userRow: { borderTopColor: '#1d2620' },
-  userName: { fontFamily: font.family.arabic, color: darkColors.ink },
-  userSub: { fontFamily: font.family.arabic, color: darkColors.muted },
+  userName: { color: darkColors.ink },
+  userSub: { color: darkColors.muted },
 });
