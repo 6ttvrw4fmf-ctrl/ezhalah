@@ -8,9 +8,9 @@
 
 import { readFileSync } from 'node:fs';
 import {
-  EMPTY_AD_PANE, EMPTY_FRAME_NAV, IN_APP_VIEWER_HOSTS, MAX_AD_TABS, addAdTab, canFrameBack, canFrameForward,
+  EMPTY_AD_PANE, EMPTY_FRAME_NAV, IN_APP_VIEWER_HOSTS, MAX_AD_TABS, adTabKey, canFrameBack, canFrameForward,
   closeAdTab, frameDropped, frameNavigated, frameStepped, hideAdPane, inAppViewerHost, openAdTab,
-  resolveAddressInput, showAdPane, splitUrlForDisplay, type AdPane, type AddressAction, type FrameNav,
+  showAdPane, splitUrlForDisplay, type AdPane, type FrameNav,
 } from '../src/lib/inAppViewer.ts';
 import { localizeAdUrl } from '../src/lib/adLocale.ts';
 
@@ -40,20 +40,24 @@ for (const u of [
   '', null, undefined, 'not a url',
 ]) check(`${JSON.stringify(u)} → new tab (unchanged)`, inAppViewerHost(u) === null);
 
-// The tab model (owner revision 2026-10-03): every allowed click opens a NEW tab; the same listing
-// refronts its tab instead of duplicating; the strip caps at MAX_AD_TABS with the oldest evicted.
+// The tab model (owner 2026-10-03: «I click Deal again, a new tab happens to Deal … as many tabs as
+// possible»): EVERY allowed click opens a NEW tab, even for a listing that is already open; the strip
+// caps at MAX_AD_TABS with the oldest evicted; ids only count up.
 {
   const L = (id: number) => ({ source: 'Deal App', id });
-  const a = addAdTab([], L(1));
-  check('first click opens tab 0, active, no eviction', a.tabs.length === 1 && a.active === 0 && !a.evicted);
-  const b = addAdTab(a.tabs, L(2));
+  const a = openAdTab(EMPTY_AD_PANE, L(1));
+  check('first click opens tab 0, active, no eviction', a.tabs.length === 1 && a.active === 0 && !a.evicted && a.tabs[0].tid === 1);
+  const b = openAdTab(a, L(2));
   check('a second listing appends and activates', b.tabs.length === 2 && b.active === 1 && !b.evicted);
-  const c = addAdTab(b.tabs, L(1));
-  check('clicking an open card REFRONTS its tab (no duplicate)', c.tabs.length === 2 && c.active === 0 && !c.evicted);
-  const full = addAdTab(Array.from({ length: MAX_AD_TABS }, (_, i) => L(i + 1)), L(99));
+  const c = openAdTab(b, L(1));
+  check('the SAME listing again opens a THIRD tab (no dedupe)', c.tabs.length === 3 && c.active === 2 && c.tabs[2].id === 1);
+  check('two tabs of the same listing have different keys', adTabKey(c.tabs[0]) !== adTabKey(c.tabs[2]));
+  let full: ReturnType<typeof openAdTab<{ source: string; id: number; tid?: number }>> = { ...EMPTY_AD_PANE, evicted: false };
+  for (let i = 1; i <= MAX_AD_TABS + 1; i++) full = openAdTab(full, L(i));
   check(`the strip caps at ${MAX_AD_TABS}: oldest evicted, flag raised, newest active`,
     full.tabs.length === MAX_AD_TABS && full.evicted && full.tabs[0].id === 2
-    && full.tabs[full.tabs.length - 1].id === 99 && full.active === MAX_AD_TABS - 1);
+    && full.tabs[full.tabs.length - 1].id === MAX_AD_TABS + 1 && full.active === MAX_AD_TABS - 1);
+  check('the cap is generous («as many tabs as possible»)', MAX_AD_TABS >= 12);
 }
 
 // ── THE BROWSER PANE (owner 2026-10-03). Each contract below is a predicate over an IMPLEMENTATION,
@@ -62,7 +66,7 @@ for (const u of [
 // HIDE IS NOT CLOSE: the pane's ✕ hides (every tab kept); a tab's ✕ closes that tab; the last tab's
 // ✕ clears the pane — no tabs and not hidden. There is no on-screen reopen button (owner 2026-10-03):
 // a hidden pane comes back with the next card click, or the browser's Forward.
-type Tab = { source: string; id: number; nonce?: number };
+type Tab = { source: string; id: number; tid?: number };
 type PaneImpl = {
   open: (p: AdPane<Tab>, l: Tab) => AdPane<Tab>;
   close: (p: AdPane<Tab>, i: number) => AdPane<Tab>;
@@ -82,51 +86,33 @@ const paneFails = (m: PaneImpl): string[] => {
   if (!(!reopened.hidden && reopened.tabs.length === 3 && reopened.active === 2)) bad.push('a card click on a hidden pane shows it, new tab fronted');
   const one = m.close(two, 0);
   if (!(one.tabs.length === 1 && one.tabs[0].id === 2 && one.active === 0 && !one.hidden)) bad.push('a tab ✕ closes THAT tab only');
-  const mid = m.close({ tabs: [T(1), T(2), T(3)], active: 2, hidden: false }, 0);
+  const mid = m.close({ tabs: [T(1), T(2), T(3)], active: 2, hidden: false, seq: 3 }, 0);
   if (!(mid.tabs[mid.active]?.id === 3)) bad.push('closing a tab left of the active one keeps the same tab active');
   const none = m.close(one, 0);
   if (!(none.tabs.length === 0 && !none.hidden)) bad.push('the LAST tab ✕ clears the pane (no tabs, not hidden → no chip)');
   const hiddenLast = m.close(m.hide(one), 0);
   if (!(hiddenLast.tabs.length === 0 && !hiddenLast.hidden)) bad.push('an emptied pane is never left hidden');
   if (m.hide(EMPTY_AD_PANE).hidden) bad.push('an empty pane cannot be hidden');
-  // RE-CLICK = BACK TO THE LISTING (owner 2026-10-03): the same card again fronts its tab AND resets
-  // its frame (nonce bump); a different card is a new tab with no reset; the tab strip never resets.
-  const rc = m.open(two, T(1));
-  if (!(rc.tabs.length === 2 && rc.active === 0 && rc.tabs[0].nonce === 1 && rc.tabs[1].nonce === undefined && !rc.hidden))
-    bad.push('re-clicking an open card fronts its tab AND bumps ONLY its nonce (frame reset)');
-  const rc2 = m.open(rc, T(1));
-  if (!(rc2.tabs[0].nonce === 2)) bad.push('every re-click resets again (nonce keeps counting)');
+  // EVERY CLICK = A NEW TAB (owner 2026-10-03: «I go back and click on Deal again, a new tab happens»).
+  const again = m.open(two, T(1));
+  if (!(again.tabs.length === 3 && again.active === 2 && again.tabs[2].id === 1 && !again.hidden))
+    bad.push('clicking an already-open listing opens a SECOND tab for it, fronted (no dedupe, no refront)');
+  if (again.tabs[0] !== two.tabs[0] || again.tabs[1] !== two.tabs[1]) bad.push('the older tabs are left exactly as they were');
+  if (new Set(again.tabs.map(adTabKey)).size !== 3) bad.push('two tabs of the SAME listing have different keys');
   const rch = m.open(m.hide(two), T(2));
-  if (!(!rch.hidden && rch.active === 1 && rch.tabs[1].nonce === 1 && rch.tabs.length === 2)) bad.push('re-clicking a card while the pane is hidden shows it and resets that listing');
-  if (m.open(two, T(3)).tabs.some((t) => t.nonce !== undefined)) bad.push('a NEW listing is a new tab and resets nothing');
-  if (m.show(two).tabs[0] !== two.tabs[0]) bad.push('the tab strip / show never resets a frame');
+  if (!(!rch.hidden && rch.active === 2 && rch.tabs.length === 3)) bad.push('clicking a card while the pane is hidden shows it with a NEW tab');
+  const reopened2 = m.open(m.close(again, 2), T(1));
+  const keyOf = (t?: Tab) => (t ? adTabKey(t) : 'none'); // a broken opener may not have a third tab at all
+  if (keyOf(reopened2.tabs[2]) === keyOf(again.tabs[2])) bad.push('a tab id is never reused after its tab is closed');
+  let many = EMPTY_AD_PANE as AdPane<Tab>;
+  for (let i = 0; i < MAX_AD_TABS + 3; i++) many = m.open(many, T(1));
+  if (!(many.tabs.length === MAX_AD_TABS && new Set(many.tabs.map(adTabKey)).size === MAX_AD_TABS && many.active === MAX_AD_TABS - 1))
+    bad.push('many clicks of one card stay at the cap with unique keys, newest fronted');
   return bad;
 };
 const realPane: PaneImpl = { open: openAdTab, close: closeAdTab, hide: hideAdPane, show: showAdPane };
 { const bad = paneFails(realPane); check(`hide ≠ close: pane ✕ keeps tabs, tab ✕ removes one, last ✕ clears${bad.length ? ' — ' + bad.join('; ') : ''}`, bad.length === 0); }
 
-// THE "+" INPUT: allowlisted site → in-app tab; any other URL → a real browser tab; words → a Google
-// search in a real browser tab; only http(s) is ever opened.
-const G = 'https://www.google.com/search?q=';
-const addressFails = (f: (raw: string) => AddressAction | null): string[] => {
-  const got = (x: string) => { const a = f(x); return a ? `${a.kind} ${a.url}` : 'null'; };
-  const cases: Array<[string, string]> = [
-    ['https://dealapp.sa/ar/ad-details/530440', 'in-app https://dealapp.sa/ar/ad-details/530440'],
-    ['gathern.co/view/1/unit/2', 'in-app https://gathern.co/view/1/unit/2'],           // bare host gets https
-    ['http://www.dealapp.sa/x', 'in-app https://www.dealapp.sa/x'],                    // no mixed-content frame
-    ['https://sa.aqar.fm/x', 'new-tab https://sa.aqar.fm/x'],
-    ['wasalt.sa', 'new-tab https://wasalt.sa/'],
-    ['https://dealapp.sa.evil.com/x', 'new-tab https://dealapp.sa.evil.com/x'],        // lookalike stays out
-    ['شقق للإيجار في الرياض', `search ${G}${encodeURIComponent('شقق للإيجار في الرياض')}`],
-    ['villa riyadh', `search ${G}villa%20riyadh`],
-    ['gathern', `search ${G}gathern`],                                                 // one word is a search
-    ['javascript:alert(1)', `search ${G}${encodeURIComponent('javascript:alert(1)')}`],
-    ['data:text/html,<b>x</b>', `search ${G}${encodeURIComponent('data:text/html,<b>x</b>')}`],
-    ['   ', 'null'],
-  ];
-  return cases.filter(([input, want]) => got(input) !== want).map(([input]) => JSON.stringify(input));
-};
-{ const bad = addressFails(resolveAddressInput); check(`"+" input: allowlisted → in-app, other URL → new tab, words → Google in a new tab${bad.length ? ' — wrong for ' + bad.join(', ') : ''}`, bad.length === 0); }
 {
   const d = splitUrlForDisplay('https://www.gathern.co/view/39851/unit/67245');
   check('address bar: host and path split, scheme and www dropped', d.host === 'gathern.co' && d.rest === '/view/39851/unit/67245');
@@ -195,18 +181,17 @@ const paneWiring = (src: string) => /onHide=\{\(\) => commitAdPane\(hideAdPane\(
 check('AdViewer: history.back() exists only as the gated toolbar ← step', backOnlyAsGatedStep(viewer));
 check('AdViewer: close and hide retire the history marker in place, never by going back', closeAndHideDropTheMark(viewer));
 check('AdViewer: a hidden pane stays mounted (frames alive, display none)', hiddenPaneStaysMounted(viewer));
-check('AdViewer: the "+" input acts only on resolveAddressInput()', /const a = resolveAddressInput\(text\);/.test(viewer));
 check('agent.tsx: pane ✕ → hideAdPane, tab ✕ → closeAdTab', paneWiring(agent));
 check('agent.tsx: no on-screen «التبويبات (N)» reopen button (owner: no need)', !/ad-tabs-chip|tabsChip/.test(agent));
 check('agent.tsx: laptop cards use the wider grid', /<ResultCardGrid wide=\{viewerSplit\}>/.test(agent));
 const grid = readFileSync(new URL('../src/components/ResultCardGrid.tsx', import.meta.url), 'utf8');
 check('ResultCardGrid: wide stays inside the 940px chat column', /gridWide: \{ maxWidth: (\d+) \}/.test(grid) && Number(/gridWide: \{ maxWidth: (\d+) \}/.exec(grid)![1]) > 640 && Number(/gridWide: \{ maxWidth: (\d+) \}/.exec(grid)![1]) <= 940);
-// A re-click must remount the frame: the nonce is part of the frame's key, and the old frame's
-// history entries are dropped with it (as ⟳ does).
-const frameKeyHasNonce = (src: string) => /<TabFrame key=\{`\$\{k\}#\$\{tab\.nonce \?\? 0\}\.\$\{reloads\[k\] \?\? 0\}`\}/.test(src);
-const nonceDropsNav = (src: string) => /nonces\.current\[k\] !== n[\s\S]{0,200}frameDropped\(navRef\.current, k\)/.test(src);
-check('AdViewer: a re-click remounts the frame (nonce in its key)', frameKeyHasNonce(viewer));
-check('AdViewer: a re-click drops the old frame from the ← mirror', nonceDropsNav(viewer));
+// Each tab's frame is keyed by its own unique tab id (adTabKey), so a second tab of the SAME listing is
+// a second frame, not the first one revived.
+const frameKeyUsesTabKey = (src: string) => /const k = adTabKey\(tab\);\s*return <TabFrame key=\{`\$\{k\}#\$\{reloads\[k\] \?\? 0\}`\}/.test(src);
+check('AdViewer: every tab is its own frame, keyed by its unique tab id', frameKeyUsesTabKey(viewer));
+check('no «+» tab, no start page, no address input anywhere (owner: no need)', !/ad-tab-new|onNewTab|StartPage|resolveAddressInput|ad-start-input/.test(viewer + agent));
+check('agent.tsx: every card click goes through openAdTab', /openAdTab\(adPaneRef\.current, tab\)/.test(agent));
 // THE AD OPENS IN THE APP'S LANGUAGE (owner 2026-10-03).
 const D = 'https://dealapp.sa/ar/ad-details/541315', DE = 'https://dealapp.sa/en/ad-details/541315';
 const G1 = 'https://gathern.co/view/193264/unit/270328', GE = 'https://gathern.co/en/view/193264/unit/270328';
@@ -248,22 +233,18 @@ mustCatch('a card open that skips trackOpen', !/trackOpen\(l\);\s*(?:if|openAd)/
 mustCatch('a web path that no longer opens a new tab', !/window\.open\(url, '_blank', 'noopener,noreferrer'\)/.test(open.replace("window.open(url, '_blank', 'noopener,noreferrer')", 'location.assign(url)')));
 mustCatch('a native path that no longer uses the system browser', !/WebBrowser\.openBrowserAsync\(url/.test(open.replace('WebBrowser.openBrowserAsync(url', 'Linking.openURL(url')));
 mustCatch('openListing importing the allowlist (native drift)', /inAppViewer/.test(open + "\nimport { inAppViewerHost } from './inAppViewer';"));
-// Naive tab mutants: a bare push never evicts; a bare push duplicates a reopened card.
-{
-  const L = (id: number) => ({ source: 'Deal App', id });
-  const naivePush = (tabs: { source: string; id: number }[], l: { source: string; id: number }) => [...tabs, l];
-  mustCatch('a tab list that never evicts at the cap',
-    naivePush(Array.from({ length: MAX_AD_TABS }, (_, i) => L(i + 1)), L(99)).length > MAX_AD_TABS);
-  mustCatch('a tab opener that duplicates an already-open card', naivePush([L(1)], L(1)).length !== 1);
-}
-
+// Tab-model mutants, run through the same contract predicate as the real code.
 // The browser pane: every mutant below is run through the SAME contract predicate as the real code.
-mustCatch('a re-click that only fronts the tab (frame NOT reset)',
-  paneFails({ ...realPane, open: (p, l) => { const r = addAdTab(p.tabs, l); return { tabs: r.tabs, active: r.active, hidden: false }; } }).length > 0);
-mustCatch('a re-click that resets EVERY tab', paneFails({ ...realPane, open: (p, l) => { const o = openAdTab(p, l); return { ...o, tabs: o.tabs.map((t) => ({ ...t, nonce: (t.nonce ?? 0) + (p.tabs.some((x) => x.id === l.id) ? 1 : 0) })) }; } }).length > 0);
-mustCatch('a new listing that starts with a reset counter', paneFails({ ...realPane, open: (p, l) => { const o = openAdTab(p, l); return { ...o, tabs: o.tabs.map((t) => (t.id === l.id ? { ...t, nonce: t.nonce ?? 1 } : t)) }; } }).length > 0);
-mustCatch('a frame key without the nonce (re-click would not remount)', !frameKeyHasNonce(viewer.replace('${tab.nonce ?? 0}.', '')));
-mustCatch('a re-click that leaves the ← mirror stale', !nonceDropsNav(viewer.replace('frameDropped(navRef.current, k)', 'navRef.current')));
+mustCatch('a card click that refronts an open listing instead of opening a new tab',
+  paneFails({ ...realPane, open: (p, l) => { const i = p.tabs.findIndex((t) => t.id === l.id && t.source === l.source); return i >= 0 ? { ...p, active: i, hidden: false } : openAdTab(p, l); } }).length > 0);
+mustCatch('a tab id that is reused after a close',
+  paneFails({ ...realPane, open: (p, l) => { const o = openAdTab(p, l); const tid = Math.max(0, ...p.tabs.map((t) => t.tid ?? 0)) + 1; return { ...o, tabs: o.tabs.map((t, i) => (i === o.tabs.length - 1 ? { ...t, tid } : t)) }; } }).length > 0);
+mustCatch('a strip that never evicts at the cap',
+  paneFails({ ...realPane, open: (p, l) => ({ tabs: [...p.tabs, { ...l, tid: p.seq + 1 }], active: p.tabs.length, hidden: false, seq: p.seq + 1 }) }).length > 0);
+mustCatch('two tabs of one listing sharing a key (ids ignored)', paneFails({ ...realPane, open: (p, l) => { const o = openAdTab(p, l); return { ...o, tabs: o.tabs.map((t) => ({ ...t, tid: 1 })) }; } }).length > 0);
+mustCatch('a frame keyed by the listing only (a second tab would revive the first frame)',
+  !frameKeyUsesTabKey(viewer.replace('const k = adTabKey(tab);', 'const k = `${tab.source}:${tab.id}`;')));
+mustCatch('a «+» tab coming back', /ad-tab-new/.test(viewer + 'testID="ad-tab-new"'));
 mustCatch('an ad language that ignores the app language', localeFails((u) => u).length > 0);
 mustCatch('an English app that doubles Gathern /en', localeFails((u, l) => (l === 'en' && u.includes('gathern.co') ? u.replace('gathern.co', 'gathern.co/en') : localizeAdUrl(u, l))).length > 0);
 mustCatch('an Arabic app that leaves Deal App on /en', localeFails((u, l) => localizeAdUrl(u, 'en')).length > 0);
@@ -272,13 +253,6 @@ mustCatch('a tab ✕ that only hides the pane', paneFails({ ...realPane, close: 
 mustCatch('a last-tab ✕ that leaves an empty hidden pane (chip over nothing)',
   paneFails({ ...realPane, close: (p, i) => ({ ...p, tabs: p.tabs.filter((_, x) => x !== i), active: 0 }) }).length > 0);
 mustCatch('a card click that leaves the pane hidden', paneFails({ ...realPane, open: (p, l) => ({ ...openAdTab(p, l), hidden: p.hidden }) }).length > 0);
-mustCatch('a "+" input that frames every URL',
-  addressFails((raw) => { try { const u = new URL(/^https?:/i.test(raw) ? raw : `https://${raw}`); return { kind: 'in-app', url: u.href, host: u.hostname }; } catch { return null; } }).length > 0);
-mustCatch('a "+" input that opens any parsable URL (javascript:, data:)',
-  addressFails((raw) => { try { return { kind: 'new-tab', url: new URL(raw.trim()).href }; } catch { return resolveAddressInput(raw); } }).length > 0);
-mustCatch('a "+" input that treats words as a host', addressFails((raw) => (raw.trim() ? { kind: 'new-tab', url: `https://${raw.trim()}` } : null)).length > 0);
-mustCatch('a "+" host match without the allowlist boundary',
-  addressFails((raw) => { const a = resolveAddressInput(raw); return a && a.kind === 'new-tab' && a.url.includes('dealapp.sa') ? { kind: 'in-app', url: a.url, host: 'dealapp.sa' } : a; }).length > 0);
 // A per-tab load counter (the naive design): any tab that ever navigated is offered ←.
 mustCatch('a per-tab ← that ignores which frame navigated last',
   navFails({ ...realNav, canBack: (n, key) => n.stack.slice(0, n.pos).includes(key) }).length > 0);

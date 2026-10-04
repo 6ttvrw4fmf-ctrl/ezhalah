@@ -21,83 +21,50 @@ export function inAppViewerHost(url: string | null | undefined): string | null {
   return IN_APP_VIEWER_HOSTS.find((h) => bare === h || bare.endsWith('.' + h)) ?? null;
 }
 
-// THE TAB MODEL (owner revision 2026-10-03: «whenever I click a new tab pops up», like a browser).
-// Pure so scripts/verify-in-app-viewer-allowlist.ts can execute it: every allowed click opens a NEW
-// tab; clicking a card whose tab is already open REFRONTS that tab (no duplicate); the strip caps at
-// MAX_AD_TABS and the OLDEST tab is evicted (the UI shows a small hint when that happens).
-export const MAX_AD_TABS = 6;
-
-export function addAdTab<T extends { source: string; id: number }>(
-  tabs: T[], l: T, max: number = MAX_AD_TABS,
-): { tabs: T[]; active: number; evicted: boolean } {
-  const key = `${l.source}:${l.id}`;
-  const existing = tabs.findIndex((t) => `${t.source}:${t.id}` === key);
-  if (existing >= 0) return { tabs, active: existing, evicted: false };
-  let next = [...tabs, l];
-  const evicted = next.length > max;
-  if (evicted) next = next.slice(next.length - max);
-  return { tabs: next, active: next.length - 1, evicted };
-}
+// THE TAB MODEL (owner 2026-10-03: «whenever I click, a new tab happens … I click Deal again, a new tab
+// happens to Deal … as many tabs as possible», like a browser). Pure so
+// scripts/verify-in-app-viewer-allowlist.ts can execute it: EVERY allowed click opens a NEW tab — even
+// for a listing that is already open — and fronts it. Nothing is deduplicated and no click resets an
+// older tab; the tab strip is the only way back to one. The strip caps at MAX_AD_TABS (each tab is a
+// live page kept mounted, so memory is the ceiling, not taste) and the OLDEST tab is evicted, with a
+// small hint from the UI.
+export const MAX_AD_TABS = 12;
 
 // ── THE BROWSER PANE (owner 2026-10-03: «make it seem like Safari / Chrome») ─────────────────────
 // Everything below is pure for the same reason as addAdTab: the verify script executes it.
 
-/** One tab in the pane. `url: ''` is the "+" start page (no site loaded yet). */
-export type AdTab = { source: string; id: number; title: string; url: string; nonce?: number };
-export const adTabKey = (t: { source: string; id: number }) => `${t.source}:${t.id}`;
+/** One tab in the pane. `tid` is unique per tab for the whole session, so two tabs of the SAME listing
+ *  have different keys (frames, ← history and reloads are all keyed by it). */
+export type AdTab = { source: string; id: number; title: string; url: string; tid?: number };
+export const adTabKey = (t: { source: string; id: number; tid?: number }) =>
+  `${t.source}:${t.id}${t.tid != null ? `#${t.tid}` : ''}`;
 
 // HIDE IS NOT CLOSE (owner 2026-10-03: «closing doesn't mean he deletes it, it just means he wants
 // it hidden»). The pane's own ✕, Escape and the browser's Back HIDE the pane: every tab stays (and
 // stays mounted, so a half-finished booking survives). A tab's ✕ closes that one tab for real;
 // closing the last one clears the pane. A hidden pane comes back with the next card click (or the
 // browser's Forward); there is deliberately no on-screen reopen button (owner 2026-10-03).
-export type AdPane<T> = { tabs: T[]; active: number; hidden: boolean };
-export const EMPTY_AD_PANE: AdPane<never> = { tabs: [], active: 0, hidden: false };
+// `seq` is the last tab id handed out: it only counts up (closing tabs never frees an id).
+export type AdPane<T> = { tabs: T[]; active: number; hidden: boolean; seq: number };
+export const EMPTY_AD_PANE: AdPane<never> = { tabs: [], active: 0, hidden: false, seq: 0 };
 
-/** A card click (or "+"): new tab or refront, and the pane is SHOWN — also from hidden.
- *  RE-CLICKING A LISTING GOES BACK TO IT (owner 2026-10-03): the user may have wandered inside the ad,
- *  so a card whose tab is already open fronts that tab AND restarts its frame at the listing's own URL
- *  (a nonce bump remounts the frame). Switching with the tab strip never resets anything. */
-export function openAdTab<T extends { source: string; id: number; nonce?: number }>(
+/** A card click: ALWAYS a new tab, fronted, and the pane is SHOWN — also from hidden. */
+export function openAdTab<T extends { source: string; id: number; tid?: number }>(
   p: AdPane<T>, l: T, max: number = MAX_AD_TABS,
 ): AdPane<T> & { evicted: boolean } {
-  const r = addAdTab(p.tabs, l, max);
-  const reclicked = r.tabs === p.tabs; // addAdTab hands back the SAME array only for an open card
-  const tabs = reclicked
-    ? r.tabs.map((t, i) => (i === r.active ? { ...t, nonce: (t.nonce ?? 0) + 1 } : t))
-    : r.tabs;
-  return { tabs, active: r.active, hidden: false, evicted: r.evicted };
+  const tid = p.seq + 1;
+  let tabs: T[] = [...p.tabs, { ...l, tid }];
+  const evicted = tabs.length > max;
+  if (evicted) tabs = tabs.slice(tabs.length - max);
+  return { tabs, active: tabs.length - 1, hidden: false, seq: tid, evicted };
 }
 export function closeAdTab<T>(p: AdPane<T>, i: number): AdPane<T> {
   const tabs = p.tabs.filter((_, x) => x !== i);
-  if (tabs.length === 0) return { tabs, active: 0, hidden: false };
-  return { tabs, active: p.active > i ? p.active - 1 : Math.min(p.active, tabs.length - 1), hidden: p.hidden };
+  if (tabs.length === 0) return { tabs, active: 0, hidden: false, seq: p.seq };
+  return { tabs, active: p.active > i ? p.active - 1 : Math.min(p.active, tabs.length - 1), hidden: p.hidden, seq: p.seq };
 }
 export const hideAdPane = <T>(p: AdPane<T>): AdPane<T> => ({ ...p, hidden: p.tabs.length > 0 });
 export const showAdPane = <T>(p: AdPane<T>): AdPane<T> => ({ ...p, hidden: false });
-
-// THE "+" TAB'S INPUT («اكتب رابط موقع أو ابحث»). An allowlisted site opens inside as a tab; any
-// other URL opens in a real browser tab; plain words open a Google search in a real browser tab
-// (Google refuses to be framed). Only http(s) is ever opened: `javascript:` / `data:` text is words.
-export type AddressAction =
-  | { kind: 'in-app'; url: string; host: string }
-  | { kind: 'new-tab'; url: string }
-  | { kind: 'search'; url: string };
-const HOST_LIKE = /^(?:[^\s/?#:@]+\.)+[a-z؀-ۿ]{2,}(?::\d+)?(?:[/?#].*)?$/i;
-export function resolveAddressInput(raw: string): AddressAction | null {
-  const text = (raw ?? '').trim();
-  if (!text) return null;
-  const search: AddressAction = { kind: 'search', url: `https://www.google.com/search?q=${encodeURIComponent(text)}` };
-  const candidate = /^https?:\/\//i.test(text) ? text : HOST_LIKE.test(text) ? `https://${text}` : null;
-  if (!candidate) return search;
-  let u: URL;
-  try { u = new URL(candidate); } catch { return search; }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') return search;
-  const host = inAppViewerHost(u.href);
-  if (!host) return { kind: 'new-tab', url: u.href };
-  u.protocol = 'https:'; // an http frame inside our https page would be blocked as mixed content
-  return { kind: 'in-app', url: u.href, host };
-}
 
 /** The address bar's two tones: host (dark) and the rest (muted). The URL we LOADED, nothing else. */
 export function splitUrlForDisplay(url: string): { host: string; rest: string } {

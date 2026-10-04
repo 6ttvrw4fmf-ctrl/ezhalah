@@ -974,8 +974,6 @@ export default function Agent() {
     if (!(IS_WEB && inAppViewerHost(url))) { void openListing(l); return; }
     pushAdTab({ source: l.source, id: l.id, title: listingLocationAr(l), url: url ?? '' });
   };
-  // "+" start-page tabs have no listing: negative ids keep them clear of every real listing id.
-  const blankTabSeq = useRef(0);
   // LAPTOP CARDS ARE ALWAYS THE SMALL ROW (owner 2026-10-03: «for the laptop it should always be
   // small … never make them big»), one step tighter while the pane is on screen beside them. Decided
   // HERE, from the screen's already-mounted width gate, so a card mounts straight into its row and
@@ -4607,14 +4605,9 @@ export default function Agent() {
         hint={adHint}
         onSelect={(i) => commitAdPane({ ...adPaneRef.current, active: i })}
         onCloseTab={(i) => commitAdPane(closeAdTab(adPaneRef.current, i))}
-        onCloseAll={() => commitAdPane(EMPTY_AD_PANE)}
+        onCloseAll={() => commitAdPane({ ...EMPTY_AD_PANE, seq: adPaneRef.current.seq })}
         onHide={() => commitAdPane(hideAdPane(adPaneRef.current))}
         onShow={() => commitAdPane(showAdPane(adPaneRef.current))}
-        onNewTab={() => { blankTabSeq.current += 1; pushAdTab({ source: '', id: -blankTabSeq.current, title: '', url: '' }); }}
-        onOpenUrl={(i, url, host) => commitAdPane({
-          ...adPaneRef.current,
-          tabs: adPaneRef.current.tabs.map((x, n) => (n === i ? { source: host, id: x.id, title: host, url } : x)),
-        })}
       />
     )}
     </View>

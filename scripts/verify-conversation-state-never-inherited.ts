@@ -365,7 +365,6 @@ const TOKEN_EXEMPT: Record<string, string> = {
   voiceStopGenRef: "mic-recording scoped, not conversation scoped: it is bumped by its own start/stop transitions and gates only the 'processing' beat of a recording the user is holding",
   savedOpenTokenRef: "counts sidebar chat-open TAPS, not conversations: it orders two quick taps; leaving the conversation (New Chat) is detected in the same check through conversationEpochRef, which resetConversationState already bumps",
   askCountRef: "not a cancellation token despite its useRef(0) shape — it is a counter, and it is in the CONVERSATION_SCOPED contract above (cleared to 0)",
-  blankTabSeq: "an id counter for the ad pane's «+» blank tabs, not a cancellation token: it only ever counts up so two tabs never share a key, and the pane's tabs are browser-window state that outlives a conversation on purpose (resetting it could re-issue a live tab's id)",
 };
 
 /** E1 + E2 over a source text, as a predicate so it can be mutation-proven. */
