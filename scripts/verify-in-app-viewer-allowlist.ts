@@ -6,11 +6,14 @@
 // the wiring, because a correct helper nothing calls is decoration: the agent screen must route
 // through it, and the old open path must still exist unchanged for everyone else.
 
+import { stripTypeScriptTypes } from 'node:module';
+import { arabicOrPlaceholderForFreeText, translateTrailingPeriodWord } from '../src/lib/arabicText.ts';
 import { readFileSync } from 'node:fs';
+import { stripComments as codeOnly } from './lib/stripComments.ts';
 import { windowBetween } from './lib/sourceWindow.ts';
 import {
   EMPTY_AD_PANE, EMPTY_FRAME_NAV, IN_APP_VIEWER_HOSTS, MAX_AD_TABS, adTabKey, canFrameBack, canFrameForward,
-  closeAdTab, frameDropped, frameNavigated, frameStepped, hideAdPane, inAppViewerHost, openAdTab,
+  closeAdTab, frameDropped, frameNavigated, frameStepped, hideAdPane, inAppPreviewHost, inAppViewerHost, openAdTab,
   showAdPane, splitUrlForDisplay, type AdPane, type FrameNav,
 } from '../src/lib/inAppViewer.ts';
 import { localizeAdUrl } from '../src/lib/adLocale.ts';
@@ -281,6 +284,88 @@ mustCatch('a ← step without the canFrameBack gate',
 mustCatch('a hide that skips dropMark', !closeAndHideDropTheMark(viewer.replace('const requestHide = () => { dropMark(); hide(); };', 'const requestHide = () => { hide(); };')));
 mustCatch('a hidden pane that is unmounted instead of hidden', !hiddenPaneStaysMounted(viewer.replace('hidden && s.pageHidden]}>', ']}>')));
 mustCatch('a pane ✕ wired to closing every tab', !paneWiring(agent.replace('commitAdPane(hideAdPane(adPaneRef.current))', 'commitAdPane(EMPTY_AD_PANE)')));
+
+
+// Aqar uses already-loaded data, never an iframe. Keep these predicates over code only so a
+// comment describing the intended behaviour cannot make a broken implementation pass.
+const previewUrls: Array<[string | null | undefined, string | null]> = [
+  ['https://sa.aqar.fm/شقق-للبيع/الرياض/غرب-الرياض/حي-المهدية/شارع-عفيف-الدين-الثقفي-حي-المهدية-مدينة-الرياض-منطقة-الرياض-6580954', 'sa.aqar.fm'],
+  ['https://sa.aqar.fm/DailyRenting/1', 'sa.aqar.fm'],
+  ...['https://dealapp.sa/x', 'https://gathern.co/x', 'https://wasalt.sa/x',
+    'https://notsa.aqar.fm/x', 'https://sa.aqar.fm.evil.com/x',
+    'https://evil.com/?u=https://sa.aqar.fm/x', 'https://sub.sa.aqar.fm/x', '', 'not a url', null, undefined]
+    .map((u): [typeof u, null] => [u, null]),
+];
+const previewHostsPass = (f: typeof inAppPreviewHost) => previewUrls.every(([u, host]) => f(u) === host);
+check('Aqar and Monthly preview; other hosts and lookalikes do not', previewHostsPass(inAppPreviewHost));
+mustCatch('preview missing for Aqar', !previewHostsPass(() => null));
+mustCatch('preview accepts a suffix lookalike', !previewHostsPass((u) => u?.includes('sa.aqar.fm') ? 'sa.aqar.fm' : null));
+mustCatch('iframe sources rerouted to previews', !previewHostsPass((u) => inAppPreviewHost(u) ?? inAppViewerHost(u)));
+
+const previewRoute = (src: string) => {
+  const route = windowBetween(codeOnly(src), 'const openAd =', 'pushAdTab({ source: l.source, id: l.id, title: listingLocationAr(l), url: url ?? \'\' });', 'agent.tsx');
+  return /if \(IS_WEB && inAppPreviewHost\(url\)\) \{\s*pushAdTab\(\{[^}]*listing: l\s*\}\);\s*return;\s*\}\s*if \(!\(IS_WEB && inAppViewerHost\(url\)\)\) \{ void openListing\(l\); return; \}/.test(route);
+};
+check('preview precedes external fallback and carries the card Listing', previewRoute(agent));
+const previewBranch = windowBetween(agent, '    if (IS_WEB && inAppPreviewHost(url))', '    if (!(IS_WEB && inAppViewerHost(url)))', 'agent preview route');
+const externalFallback = '    if (!(IS_WEB && inAppViewerHost(url))) { void openListing(l); return; }';
+mustCatch('preview branch after external fallback', !previewRoute(agent.replace(previewBranch + externalFallback, externalFallback + '\n' + previewBranch)));
+mustCatch('preview drops the card data', !previewRoute(agent.replace(', listing: l', '')));
+
+const previewRender = (src: string) => {
+  const body = windowBetween(codeOnly(src), 'const body =', 'if (split)', 'AdViewer.tsx');
+  const branch = windowBetween(body, 'if (tab.listing)', 'return <TabFrame', 'AdViewer preview branch');
+  return /if \(tab.listing\) return \(/.test(branch)
+    && /<ListingPreview listing=\{tab.listing\} url=\{tab.url\}/.test(branch)
+    && /reloads\[adTabKey\(tab\)\]/.test(branch) && /i !== active && s.pageHidden/.test(branch)
+    && !/<(?:iframe|Frame|TabFrame)\b|ad-load-bar|ad-slow-hint/.test(branch);
+};
+check('preview tabs render only native content, stay mounted, and reload by key', previewRender(viewer));
+mustCatch('preview renders an iframe', !previewRender(viewer.replace('<ListingPreview listing=', '<iframe listing=')));
+mustCatch('preview also renders a loading frame', !previewRender(viewer.replace('<ListingPreview listing=', '<TabFrame /><ListingPreview listing=')));
+const previewNav = (src: string) => ['Back', 'Forward'].every((d) => codeOnly(src).includes(`disabled={!!current?.listing || !canFrame${d}(nav, curKey)}`));
+check('preview back and forward are disabled', previewNav(viewer));
+mustCatch('preview back enabled', !previewNav(viewer.replace('!!current?.listing || !canFrameBack', '!canFrameBack')));
+
+const preview = readFileSync(new URL('../src/components/ListingPreview.tsx', import.meta.url), 'utf8');
+const previewPrice = (src: string) => {
+  const code = codeOnly(src);
+  return /\{listingPrice\(l, locale\)\}/.test(code) && !/\bl\.(?:price|priceAnnual|pricePerMeter)\b/.test(code);
+};
+const previewProse = (src: string) => /const desc = hideArabicProseInEnglish\(/.test(codeOnly(src)) && /\{desc \? \(/.test(codeOnly(src));
+const previewContact = (src: string) => /window\.open\(url, '_blank', 'noopener,noreferrer'\)/.test(codeOnly(src));
+const previewPhotos = (src: string) => {
+  const code = codeOnly(src);
+  return /l\.photos\?\.length \? l\.photos : \[l\.photo\]/.test(code)
+    && /priority="high" loading="eager"/.test(code) && /priority="low" loading="lazy"/.test(code);
+};
+check('preview price only uses the shared price contract', previewPrice(preview));
+check('preview description is hidden in English', previewProse(preview));
+check('contact opens the original URL with noopener and noreferrer', previewContact(preview));
+check('source-ordered gallery prioritizes main photo and lazy-loads thumbnails', previewPhotos(preview));
+mustCatch('preview formats its own price', !previewPrice(preview.replace('listingPrice(l, locale)', 'l.price')));
+mustCatch('description exposes Arabic in English', !previewProse(preview.replace('const desc = hideArabicProseInEnglish(', 'const desc = String(')));
+mustCatch('contact drops opener protection', !previewContact(preview.replace('noopener,noreferrer', '')));
+mustCatch('90 thumbnails load eagerly', !previewPhotos(preview.replace('loading="lazy"', 'loading="eager"')));
+
+
+// Execute the actual facts block against real-world raw-field shapes: Aqar's age is numeric even
+// though Listing types it as a string. The live browser caught .trim() crashing the whole screen.
+const factsPass = (src: string) => {
+  const block = windowBetween(codeOnly(src), 'const facts:', 'const place =', 'ListingPreview facts');
+  const facts = new Function('l', 't', 'locale', 'arabicOrPlaceholderForFreeText', 'translateTrailingPeriodWord', 'DIRECTION_LABEL', 'ATTRIBUTE_UNRESOLVED_AR', stripTypeScriptTypes(block) + '\nreturn facts;');
+  const run = (l: object) => facts(l, (s: string) => s, 'en', arabicOrPlaceholderForFreeText, translateTrailingPeriodWord, {}, 'unknown') as string[][];
+  try {
+    const empty = run({ area: 0, beds: 0, bathrooms: null });
+    const numeric = run({ area: 147, beds: 4, property_age: 0, direction: null });
+    const text = run({ property_age: '2', rentPeriod: 'monthly' });
+    return empty.length === 0 && numeric.length === 3 && numeric.some(([k, v]) => k === 'Age' && v === 'New construction')
+      && text.some(([k, v]) => k === 'Age' && v === '2') && text.some(([k, v]) => k === 'Rent period' && v === 'Monthly');
+  } catch { return false; }
+};
+check('missing facts stay absent; numeric age never crashes and zero age means new', factsPass(preview));
+mustCatch('raw numeric age crashes on string trim', !factsPass(preview.replace("String(l.property_age ?? '').trim()", "l.property_age?.trim()")));
+mustCatch('missing area becomes a zero fact', !factsPass(preview.replace('if (l.area > 0)', 'if (true)')));
 
 if (failed) { console.error(`\n✗ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✓ in-app viewer allowlist: decision + wiring verified, mutation-proven');

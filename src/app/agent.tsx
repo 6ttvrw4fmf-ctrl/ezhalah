@@ -58,7 +58,7 @@ import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
 import { listingOpenUrl, openListing } from '@/lib/openListing';
 import {
-  EMPTY_AD_PANE, closeAdTab, hideAdPane, inAppViewerHost, openAdTab, showAdPane, type AdPane, type AdTab,
+  EMPTY_AD_PANE, closeAdTab, hideAdPane, inAppPreviewHost, inAppViewerHost, openAdTab, showAdPane, type AdPane, type AdTab,
 } from '@/lib/inAppViewer';
 import { VIEWER_SPLIT_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
@@ -940,10 +940,10 @@ export default function Agent() {
   // Web only; every other site, and native, keep openListing() exactly as before. The results never
   // unmount, so closing returns them at the same scroll position. trackOpen fires first either way.
   // The pane's state (tabs, active tab, hidden) is ONE value driven by pure functions in
-  // lib/inAppViewer.ts — openAdTab (dedupe-refront, MAX_AD_TABS cap, and a card click always SHOWS
+  // lib/inAppViewer.ts — openAdTab (every click opens a new tab, MAX_AD_TABS cap, and a card click always SHOWS
   // the pane), closeAdTab (one tab; the last one clears the pane), hideAdPane / showAdPane (the
   // pane's own ✕ hides, nothing is deleted) — all executed by scripts/verify-in-app-viewer-allowlist.ts.
-  const [adPane, setAdPane] = useState<AdPane<AdTab>>(EMPTY_AD_PANE);
+  const [adPane, setAdPane] = useState<AdPane<AdTab<Listing>>>(EMPTY_AD_PANE);
   const [adHint, setAdHint] = useState('');
   const adHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // MemoResultCard's comparator deliberately IGNORES onOpen ("behaves identically for the same
@@ -951,10 +951,10 @@ export default function Agent() {
   // contract: an already-revealed card keeps the closure from the render it was memoised in, and a
   // stale empty list REPLACED the first tab instead of appending the second (caught live in the v2
   // harness). The ref mirror makes every closure read the same current pane, whenever it was made.
-  const adPaneRef = useRef<AdPane<AdTab>>(EMPTY_AD_PANE);
-  const commitAdPane = (p: AdPane<AdTab>) => { adPaneRef.current = p; setAdPane(p); };
+  const adPaneRef = useRef<AdPane<AdTab<Listing>>>(EMPTY_AD_PANE);
+  const commitAdPane = (p: AdPane<AdTab<Listing>>) => { adPaneRef.current = p; setAdPane(p); };
   const viewerSplit = useAtLeast(VIEWER_SPLIT_BREAKPOINT);
-  const pushAdTab = (tab: AdTab) => {
+  const pushAdTab = (tab: AdTab<Listing>) => {
     const { evicted, ...next } = openAdTab(adPaneRef.current, tab);
     commitAdPane(next);
     if (evicted) {
@@ -966,6 +966,10 @@ export default function Agent() {
   };
   const openAd = (l: Listing) => {
     const url = listingOpenUrl(l);
+    if (IS_WEB && inAppPreviewHost(url)) {
+      pushAdTab({ source: l.source, id: l.id, title: listingLocationAr(l), url: url ?? '', listing: l });
+      return;
+    }
     if (!(IS_WEB && inAppViewerHost(url))) { void openListing(l); return; }
     pushAdTab({ source: l.source, id: l.id, title: listingLocationAr(l), url: url ?? '' });
   };

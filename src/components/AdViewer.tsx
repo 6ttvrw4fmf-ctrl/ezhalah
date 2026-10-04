@@ -9,6 +9,8 @@ import { TAP44 } from '@/theme/palette';
 import { useI18n } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { runAfterAnimation } from '@/lib/afterAnimation';
+import ListingPreview from '@/components/ListingPreview';
+import type { Listing } from '@/data/listings';
 import { SourceBadge } from '@/components/ResultCard';
 import {
   EMPTY_FRAME_NAV, adTabKey, canFrameBack, canFrameForward, frameDropped,
@@ -63,7 +65,7 @@ const setLtr = (node: any) => { if (IS_WEB && node?.setAttribute) node.setAttrib
 const tip = (label: string) => (node: any) => { node?.setAttribute?.('title', label); };
 
 export default function AdViewer({ tabs, active, split, hidden, hint, onSelect, onCloseTab, onCloseAll, onHide, onShow }: {
-  tabs: AdTab[];
+  tabs: AdTab<Listing>[];
   active: number;
   split: boolean;
   /** Hidden ≠ closed: the pane is out of sight, every tab and its frame stays mounted. */
@@ -356,8 +358,8 @@ export default function AdViewer({ tabs, active, split, hidden, hint, onSelect, 
         <ToolBtn testID="ad-viewer-hide" icon="close" size={18} label={t('Hide tabs')} onPress={requestHide} />
       </View>
       <View style={s.bToolRow}>
-        <ToolBtn testID="ad-nav-back" icon="arrow-back" label={t('Back')} disabled={!canFrameBack(nav, curKey)} onPress={() => step(-1)} />
-        <ToolBtn testID="ad-nav-forward" icon="arrow-forward" label={t('Forward')} disabled={!canFrameForward(nav, curKey)} onPress={() => step(1)} />
+        <ToolBtn testID="ad-nav-back" icon="arrow-back" label={t('Back')} disabled={!!current?.listing || !canFrameBack(nav, curKey)} onPress={() => step(-1)} />
+        <ToolBtn testID="ad-nav-forward" icon="arrow-forward" label={t('Forward')} disabled={!!current?.listing || !canFrameForward(nav, curKey)} onPress={() => step(1)} />
         <ToolBtn testID="ad-nav-reload" icon="refresh" label={t('Reload')} disabled={!activeUrl} onPress={reload} />
         <Pressable
           testID="ad-address"
@@ -387,6 +389,11 @@ export default function AdViewer({ tabs, active, split, hidden, hint, onSelect, 
     <View style={s.body}>
       {/* Every open tab stays mounted; only the active one is displayed — switching is instant. */}
       {tabs.map((tab, i) => {
+        if (tab.listing) return (
+          <View key={`${adTabKey(tab)}#${reloads[adTabKey(tab)] ?? 0}`} style={[s.page, i !== active && s.pageHidden]}>
+            <ListingPreview listing={tab.listing} url={tab.url} />
+          </View>
+        );
         const k = adTabKey(tab);
         return <TabFrame key={`${k}#${reloads[k] ?? 0}`} tab={tab} visible={i === active} t={t} onNavigated={() => onFrameNavigated(k)} />;
       })}
