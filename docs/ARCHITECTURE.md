@@ -191,8 +191,11 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). ~33 partner pl
   listings always come from `runQuery`, not the edge function.
 - **Results rendering order (strict):** slogan → summary → intro → "Ranked by closest match" → cards.
   `FIRST_PAGE = 25`, "Show all results" up to 200. Zero results → neutral suggestion, no cards.
-- **Greeting:** brand word only (`ازهله`), types itself out on a fresh empty chat; example-prompt chips
-  appear after (guests only), gone once a search happens.
+- **Empty-chat welcome (owner, 2026-10-03):** centered static headline «وش العقار اللي في بالك؟»
+  with smaller subtitle «قل لنا مواصفاته، وإزهله.»; no greeting typing animation or reply icon.
+  It disappears on the first conversation turn. Existing composer examples, mic/send placement,
+  top mode tabs, reply typing and search-loading animations remain; no additional example chips
+  or Filter link. Phone and desktop use the same responsive column without desktop zoom.
 - **Filter results have no chat composer (owner, 2026-09-11).** Filter and the AI Agent share this one
   screen; a Filter search arrives via the `?filter=` route param. The `filterOrigin` state flag is set
   `true` only in that arrival branch (reset to `false` by `startFresh()`, same lifecycle as every other

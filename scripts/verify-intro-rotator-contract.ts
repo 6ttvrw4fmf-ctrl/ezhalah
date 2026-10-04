@@ -32,16 +32,20 @@ const ex = await import(new URL('../src/data/introExamples.ts', import.meta.url)
 
 console.log('\nIntro greeting + rotating examples contract (owner brief 2026-08-23)\n');
 
-// ── 1. Greeting: owner's FINAL copy, byte-exact, rendered as the typed greeting ─────────────────
-const GREETING =
-  'ارحب، أنا إزهله. قلّي وش العقار اللي تدور عليه، وأنا أبحث لك بين المنصات العقارية وأطابق الخيارات مع طلبك لين نلقى اللي يناسبك… إزهلها وفالك الطيب.';
-const greetingExact = (src: string) => src.includes(`'${GREETING}'`);
+// ── 1. Owner-approved static welcome (2026-10-03) ─────────────────────────────────────────────
+const GREETING = 'وش العقار اللي في بالك؟\nقل لنا مواصفاته، وإزهله.';
+const greetingExact = (src: string) => src.includes(JSON.stringify(GREETING).slice(1, -1));
 check('1a. greeting is the owner FINAL copy, byte-exact, in greetingText()', greetingExact(agent));
-check(
-  '1b. greeting renders through the existing typed-greeting path with testID intro-greeting',
-  /testID=\{m\.greeting \? 'intro-greeting' : undefined\}/.test(agent) &&
-    /m\.greeting \? greetingText\(locale\) : m\.text/.test(agent),
-);
+const staticWelcome = (src: string) => {
+  const start = src.indexOf('if (m.greeting) {');
+  const end = src.indexOf('// Per-message direction:', start);
+  const branch = src.slice(start, end);
+  return start >= 0 && branch.includes('if (!introLanding) return null;') &&
+    branch.includes('testID="intro-greeting"') && !branch.includes('<Typer');
+};
+check('1b. complete static welcome only renders on the empty chat', staticWelcome(agent));
+check('1c. fresh greeting is created without typing',
+  /greeting: true \}\] : m/.test(agent));
 
 // ── 2. Rotation ONLY on the empty AI landing screen ─────────────────────────────────────────────
 // The predicate is the single gate: greeting-only chat AND untouched AND empty AND idle AND no turn.
@@ -181,7 +185,9 @@ const mutations: Array<[string, boolean]> = [
   ['M6 an unproven example added to the pool → check 12a fails',
     ![...list, 'أبي قصر على البحر بمسبح'].every((s) => provenSection.includes(s))],
   ['M7 greeting copy altered by one character → check 1a fails',
-    !greetingExact(agent.replace('وفالك الطيب', 'وفالك طيب'))],
+    !greetingExact(agent.replace('في بالك؟', 'في بالك'))],
+  ['M7b typing injected into welcome → check 1b fails',
+    !staticWelcome(agent.replace('<Text style={s.greetingText}>{title}</Text>', '<Text style={s.greetingText}><Typer text={title} /></Text>'))],
   ['M8 reduced-motion gate removed → check 10 fails',
     !reducedOk(rotatorBody.replace("if (reducedMotion || pool.length <= 1 || phase !== 'shown') return;", "if (pool.length <= 1 || phase !== 'shown') return;"))],
 ];
