@@ -33,6 +33,20 @@ deletion ledger) and §4 (its barriers and lessons) before changing any liveness
 > that each open error has an owner). A Sentry error a customer hit is never «noise»: it is either fixed, or written in
 > your report with the reason and the plan. Your report gets one line: «🛰️ Sentry: N open in my area · fixed N · resolved N».
 
+> **🏕️ GATHERN: ALL ~37,000 UNITS (owner, 2026-10-04: «let's scrape all those 37,000 … searchable by Advanced Filter and normal filter, that note is important, lifecycle … a very very very close eye»).**
+**What we know (measured 2026-10-04):** Gathern's own search (`msapi.gathern.co/search/api/v1/search-units`, no
+`calendar_type`) lists **~37,251 units in 165 cities** (Riyadh 12,775, Jeddah 6,145, Madinah 2,357, Khobar 2,107, Taif
+1,795, Abha 1,685); almost all also accept a 30-night stay (Riyadh: 12,709 of 12,775). We show **~4,775**, because the rest
+answer **«الصفحة غير موجودة» (HTTP 404) on the website** (`gathern.co/view/<chalet>/unit/<unit>`) and only open in Gathern's
+phone app. Sample: 800 Riyadh units Gathern lists → we had seen 679, only 112 live (the rest were hidden as web-404, correctly).
+**The rule that does not move: a customer never lands on a dead page.** A unit is shown only with a link proven to open it.
+**Your part — a VERY close eye (owner's words, three times): daily-stay units turn over fast.** Every live Gathern unit is
+checked **every day**; a unit that left Gathern is hidden the same day. For app-only units the web page is ALWAYS 404, so the
+web page is NOT their liveness oracle: use Gathern's own search list (the unit still listed = alive) plus the link proven by
+⚡; removal needs the unit gone from Gathern's list on two consecutive daily reads (or a proven app-side «not found»). Never
+hide a whole city or cohort in one run without that proof (the cardinality guard). Report a daily line: «🏕️ Gathern: live N ·
+checked today N · hidden today N · oldest unchecked N h». Anything above 26 h unchecked is RED.
+
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «I trust the lifecycle engineer … I don't want to go back and forth with it … make it
 powerful so it does an amazing job.» So this section is the whole plan, written to be followed without
