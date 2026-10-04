@@ -100,7 +100,7 @@ check(
 check(
   '8b. overlay is absolute inside the CLIPPED input wrapper (inputGrow overflow hidden) with one-line ellipsis — overflow = 0 by construction',
   /introRotator: \{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0/.test(agent) &&
-    /inputGrow: \{ flex: 1, overflow: 'hidden'/.test(agent) &&
+    /inputGrow: \{[^}]*overflow: 'hidden'/.test(agent) &&
     /<Text numberOfLines=\{1\} ellipsizeMode="tail"/.test(rotatorBody),
 );
 
@@ -187,7 +187,7 @@ const mutations: Array<[string, boolean]> = [
   ['M7 greeting copy altered by one character → check 1a fails',
     !greetingExact(agent.replace('في بالك؟', 'في بالك'))],
   ['M7b typing injected into welcome → check 1b fails',
-    !staticWelcome(agent.replace('<Text style={s.greetingText}>{title}</Text>', '<Text style={s.greetingText}><Typer text={title} /></Text>'))],
+    !staticWelcome(agent.replace('<Text style={[s.greetingText, desktopWelcome && s.desktopWelcomeTitle]}>{title}</Text>', '<Text style={s.greetingText}><Typer text={title} /></Text>'))],
   ['M8 reduced-motion gate removed → check 10 fails',
     !reducedOk(rotatorBody.replace("if (reducedMotion || pool.length <= 1 || phase !== 'shown') return;", "if (pool.length <= 1 || phase !== 'shown') return;"))],
 ];
