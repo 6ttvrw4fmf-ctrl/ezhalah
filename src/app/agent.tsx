@@ -4784,9 +4784,9 @@ const s = StyleSheet.create({
   statusText: { fontSize: 12.5, color: colors.muted },
   // The Ezhalah slogan during search — plain text, prominent, with the summary beneath it. No icon.
   sloganWrap: { gap: 8, paddingVertical: 2 },
-  sloganText: { fontFamily: font.family.arabicMedium, fontSize: IS_WEB ? 18 : 16.5, lineHeight: IS_WEB ? 30 : 27, fontWeight: '700', color: colors.dark, flexShrink: 1 },
+  sloganText: { fontSize: IS_WEB ? 18 : 16.5, lineHeight: IS_WEB ? 30 : 27, fontWeight: '700', color: colors.dark, flexShrink: 1 },
   // The search summary shown under the results header (not with the slogan).
-  summaryText: { fontFamily: font.family.arabic, fontSize: IS_WEB ? 14.5 : 13, color: colors.body, lineHeight: IS_WEB ? 24 : 21, marginTop: 4 },
+  summaryText: { fontSize: IS_WEB ? 14.5 : 13, color: colors.body, lineHeight: IS_WEB ? 24 : 21, marginTop: 4 },
 
   reply: { flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
   replyBrandMark: { width: 22, height: 22, marginTop: 3, flexShrink: 0 },
