@@ -206,7 +206,7 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
    with `NODE_USE_ENV_PROXY=1 node --experimental-strip-types scripts/safe-pr-merge.ts <PR>` on green CI, never `--admin`.
    Website changes go live only through `deploy-frontend.yml` (`confirm: DEPLOY`, a `reason`). A deploy refused by another
    session's unmerged migration: wait for it, never copy it.
-8. **Locks:** `select * from acquire_deploy_lock('falcon:<area>', '<run id>', 3600, '<what>')` before fixing; no row means
+8. **Locks:** `select * from acquire_deploy_lock('scraper:falcon-<area>', '<run id>', 3600, '<what>')` before fixing; no row means
    someone owns it, wait. Always `release_deploy_lock`.
 9. **Undo instead of experimenting:** anything worse → revert, re-apply the saved definition, redeploy, confirm it is back,
    say so. At most 3 tries per bug per run; then backlog with the evidence.
