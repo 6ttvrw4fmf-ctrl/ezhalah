@@ -203,6 +203,11 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). ~33 partner pl
   `send()` path and is disabled for whitespace-only input. It stays while typing, disappears on
   the first sent turn, and returns only for a fresh chat. Mic/send remain on the physical right;
   Filter-origin results and restored conversations do not gain this action.
+- **Conversation typography (owner request, 2026-10-03):** user turns are open text with a slim
+  Ezhalah-green edge instead of rounded chat tiles. User copy is 18/31 on web and 16.5/28 on
+  native using the bundled Tajawal Arabic family; agent replies are 17/30 on web and 16/28 on
+  native. The eagle mark identifies Ezhalah in reply and results-intro rows instead of a generic
+  sparkle. Search and persistence behavior is unchanged.
 - **Saved-chat mode pill:** when a saved conversation is selected from the sidebar (`replay=0`),
   the Filter / AI mode pill is not rendered, including while switching between saved chats. The
   replay predicate gates the animated wrapper synchronously so it cannot flash before effects run.

@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -123,6 +124,7 @@ function anyGuidedEligible(q: SearchQuery): boolean {
 }
 
 const IS_WEB = Platform.OS === 'web';
+const EAGLE_MARK = require('../../assets/images/eagle-mark.png');
 // On the web the results tile into a wrap grid, so the conversation column is wider to give them
 // room (the user barely scrolls). On phone it stays a comfortable single-column reading width.
 const MAX_W = IS_WEB ? 940 : 560;
@@ -3755,12 +3757,11 @@ export default function Agent() {
               if (m.role === 'user') {
                 // User messages ALWAYS sit on the user side (alignSelf: 'flex-end') regardless of the
                 // message language — the page direction (RTL/LTR) decides which screen edge that is.
-                // Only the TEXT inside the bubble follows its own writingDirection so Arabic still reads
-                // right-to-left and English left-to-right. The bubble never jumps sides because the
-                // message language changed. (user request.)
+                // Only the text follows its own writingDirection. A narrow green edge marks the
+                // speaker without turning every line into the same rounded chatbot tile.
                 const rtl = msgRTL(m.text);
                 return (
-                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={s.userBubble}>
+                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={[s.userBubble, rtl ? s.userMessageRtl : s.userMessageLtr]}>
                     <Text style={[s.userText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
                       {m.typing ? <Typer text={m.text} onDone={onBubbleDone} /> : m.text}
                     </Text>
@@ -3788,8 +3789,8 @@ export default function Agent() {
                 }
                 // Per-message direction: each AI reply renders in its OWN language's direction and
                 // stays put even if the next message flips. ARABIC reply → the whole row is RTL and
-                // anchored to the RIGHT (sparkle on far right, Arabic text flows right → left to its
-                // left). ENGLISH reply → row is LTR and anchored to the LEFT (sparkle on far left,
+                // anchored to the RIGHT (Ezhalah mark on far right, Arabic text flows right → left to its
+                // left). ENGLISH reply → row is LTR and anchored to the LEFT (mark on far left,
                 // English text flows left → right to its right). Earlier rows never move when a new
                 // message in the other language arrives. (user request.)
                 const txt = m.text;
@@ -3797,9 +3798,7 @@ export default function Agent() {
                 return (
                   <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: '88%' }}>
                     <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row' }]}>
-                      <View style={s.replyIcon}>
-                        <Ionicons name="sparkles" size={14} color={colors.primary} />
-                      </View>
+                      <Image source={EAGLE_MARK} style={s.replyBrandMark} resizeMode="contain" accessible={false} />
                       <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
                         {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
                       </Text>
@@ -3894,22 +3893,18 @@ export default function Agent() {
                   // layout change at all, so the reader stays exactly where they were.
                   style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%', opacity: searchingVisibleRef.current || (latestResult?.id !== m.id && latestResult?.typing && !doneTyping[latestResult.id]) ? 0.35 : 1 }}
                 >
-                  {/* 1) BRANDED SLOGAN — sparkle icon + Ezhalah's personality line. The row sizes to its
+                  {/* 1) BRANDED SLOGAN — the Ezhalah mark + its personality line. The row sizes to its
                       content and is pushed to the correct edge by the parent's alignItems. ENGLISH →
-                      icon then text (reads left-to-right, clustered left). ARABIC → text then icon
+                      mark then text (reads left-to-right, clustered left). ARABIC → text then mark
                       (icon on the far right, clustered right). */}
                   {m.slogan ? (
                     <View style={[s.reply, { flexDirection: 'row', alignItems: 'center' }]}>
                       {!msgRTL(m.slogan) && (
-                        <View style={s.replyIcon}>
-                          <Ionicons name="sparkles" size={14} color={colors.primary} />
-                        </View>
+                        <Image source={EAGLE_MARK} style={s.replyBrandMark} resizeMode="contain" accessible={false} />
                       )}
                       <Text style={[s.sloganText, { writingDirection: msgRTL(m.slogan) ? 'rtl' : 'ltr', textAlign: msgRTL(m.slogan) ? 'right' : 'left' }]}>{m.slogan}</Text>
                       {msgRTL(m.slogan) && (
-                        <View style={s.replyIcon}>
-                          <Ionicons name="sparkles" size={14} color={colors.primary} />
-                        </View>
+                        <Image source={EAGLE_MARK} style={s.replyBrandMark} resizeMode="contain" accessible={false} />
                       )}
                     </View>
                   ) : null}
@@ -4779,25 +4774,24 @@ const s = StyleSheet.create({
   promptSecondary: { paddingVertical: 8 },
   promptSecondaryTx: { color: colors.muted, fontSize: 13.5, fontWeight: '600' },
 
-  // marginTop adds breathing room above each user message so it isn't cramped against the property
-  // cards / reply text above it (on top of the column's 8px gap). (user request.)
-  // User message bubble — deliberately STRONGER light-green so it pops against the cream paper bg,
-  // like the selected recent-chat row in the sidebar. Dark green text for contrast. (user request.)
-  // User message bubble — soft light green pill, normal text weight (not heavy/black). (user request.)
-  userBubble: { alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: colors.userBubble, borderColor: colors.tintLine, borderWidth: 1, borderRadius: 16, borderBottomRightRadius: 5, paddingVertical: 10, paddingHorizontal: 14, marginTop: 10 },
-  userText: { color: colors.userBubbleText, fontSize: 14, lineHeight: 19, fontWeight: '500' },
+  // Conversation turns use a typographic transcript instead of repeated rounded chatbot tiles.
+  // The green edge keys the user's request to Ezhalah's identity while leaving the paper open.
+  userBubble: { alignSelf: 'flex-end', maxWidth: '85%', paddingVertical: 8, marginTop: 12 },
+  userMessageRtl: { borderRightWidth: 3, borderRightColor: colors.primary, paddingRight: 14, paddingLeft: 2 },
+  userMessageLtr: { borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: 14, paddingRight: 2 },
+  userText: { color: colors.userBubbleText, fontSize: IS_WEB ? 18 : 16.5, lineHeight: IS_WEB ? 31 : 28, fontWeight: '600' },
 
   status: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 2 },
   statusText: { fontSize: 12.5, color: colors.muted },
   // The Ezhalah slogan during search — plain text, prominent, with the summary beneath it. No icon.
   sloganWrap: { gap: 8, paddingVertical: 2 },
-  sloganText: { fontSize: 15.5, fontWeight: '700', color: colors.dark, flexShrink: 1 },
+  sloganText: { fontSize: IS_WEB ? 18 : 16.5, lineHeight: IS_WEB ? 30 : 27, fontWeight: '700', color: colors.dark, flexShrink: 1 },
   // The search summary shown under the results header (not with the slogan).
-  summaryText: { fontSize: 12.5, color: colors.muted, lineHeight: 18, marginTop: 2 },
+  summaryText: { fontSize: IS_WEB ? 14.5 : 13, color: colors.body, lineHeight: IS_WEB ? 24 : 21, marginTop: 4 },
 
   reply: { flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
-  replyIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  replyText: { flex: 1, fontSize: 14, lineHeight: 20, color: colors.ink },
+  replyBrandMark: { width: 22, height: 22, marginTop: 3, flexShrink: 0 },
+  replyText: { flex: 1, minWidth: 0, fontSize: IS_WEB ? 17 : 16, lineHeight: IS_WEB ? 30 : 28, color: colors.ink },
   introScroll: { flexGrow: 1, justifyContent: 'center' },
   greeting: { width: '100%', alignItems: 'center', gap: 8, paddingVertical: 24 },
   greetingText: { fontSize: 24, lineHeight: 36, fontWeight: '600', color: colors.dark, textAlign: 'center', writingDirection: 'rtl' as any },
