@@ -32,6 +32,10 @@ function problems(a: string): string[] {
   if (!/for \(const sel of \['Rent', 'Both', 'Buy'\] as const\)/.test(warm)) bad.push('the warm-up does not cover every deal selection');
   if (!/await ensureCityFieldIndex\(sc\.effDeal, sc\.rentPeriodTok, sc\.effCategory, sc\.cohortTypes, sc\.af\)/.test(warm)) bad.push('the warm-up does not load the pools (or loads them all at once)');
   if (!/await ensureCityFieldIndex\(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams\)/.test(warm)) bad.push('the warm-up does not wait for the current scope first');
+  if (!/for \(const c of topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)\)/.test(warm)
+    || !/await ensureDistrictOptions\(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope\)/.test(warm)) bad.push('the trending cities\' district lists are not warmed at open (the district field waits after a pick)');
+  // the district warm must use the SAME key the field reads: the field's own call
+  if (!/ensureDistrictOptions\(citySelected\.cityId, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope\)/.test(a)) bad.push('the district field no longer loads with the arguments the warm-up uses — re-align them');
   return bad;
 }
 
@@ -44,6 +48,8 @@ check('helper mirrors the component; warm-up loads the current scope, then each 
 mustCatch('a helper that drifted from the component', problems(src.replace(/(function cityPoolScopeOf[\s\S]*?)cohortTypesAr\(queryForPeriod\)/, '$1cohortTypesAr(query)')));
 mustCatch('a warm-up that skips Buy + Rent', problems(src.replace("['Rent', 'Both', 'Buy'] as const", "['Rent', 'Buy'] as const")));
 mustCatch('a warm-up that fires every pool at once', problems(src.replace('await ensureCityFieldIndex(sc.effDeal', 'void ensureCityFieldIndex(sc.effDeal')));
+mustCatch('districts not warmed at open', problems(src.replace('await ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope)', 'void 0')));
+mustCatch('a district warm-up on a different key than the field reads', problems(src.replace('await ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope)', 'await ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityAfParams)')));
 mustCatch('the warm-up removed', problems(src.replace('await ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).catch(() => null);', '')));
 console.log(failed ? `\n${failed} FAILED` : '\nAll warm-at-open assertions passed');
 process.exit(failed ? 1 : 0);
