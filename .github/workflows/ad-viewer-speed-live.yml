@@ -1,0 +1,53 @@
+name: Ad viewer speed — live guard
+
+# Owner 2026-10-03: «how to always keep it like this quick … always, no matter what». The in-app ad
+# viewer (Deal App / Gathern open inside Ezhalah) must show an ad as fast as a normal browser tab.
+# This drives e2e/viewer/speed-live.mjs on a phone over throttled 4G against production: every in-app
+# site must still allow framing, show its ad inside a frame within budget, and production must ship the
+# instant-show tab (never the old blank «loading» cover). Read-only. A red run reaches the engineers
+# through the alert_event bridge below.
+
+on:
+  schedule:
+    - cron: '23 */6 * * *' # every 6 hours
+  workflow_run:
+    workflows: ['Deploy frontend (production)']
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: ad-viewer-speed-live
+  cancel-in-progress: false
+
+jobs:
+  speed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Playwright + browser
+        run: |
+          npm i -D @playwright/test@^1.49
+          npx playwright install --with-deps chromium
+      - name: Phone + 4G — every in-app site frames, shows fast, production has the fix
+        env:
+          BASE_URL: https://ezhalah-app.vercel.app
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node e2e/viewer/speed-live.mjs
+
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind journey_live_check_failed
+          --workflow ad-viewer-speed-live.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
