@@ -208,6 +208,10 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). ~33 partner pl
   native using the bundled Tajawal Arabic family; agent replies are 17/30 on web and 16/28 on
   native. The eagle mark identifies Ezhalah in reply and results-intro rows instead of a generic
   sparkle. Search and persistence behavior is unchanged.
+- **Composer layout (owner request, 2026-10-04):** the AI composer is a compact 620px desktop
+  search field with 10px vertical padding and a 58px minimum control row. The 38px green search
+  target stays clear and tappable. Input direction follows the text being typed immediately: Arabic
+  stays right-aligned and Latin text left-aligned, without moving the composer itself.
 - **Saved-chat mode pill:** when a saved conversation is selected from the sidebar (`replay=0`),
   the Filter / AI mode pill is not rendered, including while switching between saved chats. The
   replay predicate gates the animated wrapper synchronously so it cannot flash before effects run.
