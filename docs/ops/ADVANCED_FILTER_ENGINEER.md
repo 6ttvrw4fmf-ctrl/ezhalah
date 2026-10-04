@@ -67,15 +67,15 @@ A page we could not read and a field the ad does not state are **never** counted
 ## Your first nights: build your own safety nets, one per night, inside your 2 hours
 The owner's design (2026-10-04): robots guard 24/7 at no AI cost; you fix what they catch and make them smarter, so the same
 bug can never come back. Build them in this order; each is a PR that ships green and is proven live:
-1. **Night 1 — the score (do ONLY this tonight; no exploring, no other fixes).** `scrapers/common/af_score.py` (imports the functions above; samples production-ready listings
+1. **Night 1 — the score (do ONLY this tonight; no exploring, no other fixes).** a new Python module **af_score**, next to new_listings_score.py in scrapers/common (it imports the functions above; samples production-ready listings
    first seen MORE than 24 hours ago, 10 per big site, 5 per small) + table `ops_af_score` (one row per site per night:
    findability tried/found, precision, capture, parity, mismatch keys as `source_table:id` only — never a URL, name or phone)
-   + `.github/workflows/af-score.yml` (dispatch-only) + a pg_cron row `gh-af-score` at **08:00 UTC** (1 AM Arizona, before
+   + a dispatch-only GitHub workflow **af-score** (copy the shape of `.github/workflows/new-listings-score.yml`) + a pg_cron row `gh-af-score` at **08:00 UTC** (1 AM Arizona, before
    you wake), same pattern as `gh-new-listings-score`. Migration rules below.
 2. **Night 2 — the hourly robot customer.** A GitHub workflow, every hour, no AI: picks 10 rotating real listings with known
    Advanced Filter answers, runs the Advanced Filter request a customer would send (the anon RPC path the app uses), and
    raises an incident when one is not found. Mutation-proven: a deliberately broken mapping must make it fail.
-3. **Night 3 — saved ads per site (catch it before it lands).** `tests/af-golden/<site>/`: 5–10 real ads per site, PII
+3. **Night 3 — saved ads per site (catch it before it lands).** a folder of saved ads per site under tests (name it af-golden, one sub-folder per site): 5–10 real ads per site, PII
    stripped, each with its reviewed Advanced Filter answers; a CI check runs the site's parser over them and fails any PR that
    makes one answer worse. Aqar, Wasalt and Dealapp first (the biggest), then every other site, a few per night.
 4. **Night 4 — the «answers vanished» guard.** After each sync, per site and field, the share of listings with an answer vs
