@@ -196,6 +196,11 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). ~33 partner pl
   It disappears on the first conversation turn. Existing composer examples, mic/send placement,
   top mode tabs, reply typing and search-loading animations remain; no additional example chips
   or Filter link. Phone and desktop use the same responsive column without desktop zoom.
+- **Opening chat Search pill (owner, 2026-10-04):** the empty AI chat also shows an outlined
+  «بحث» action under the input, with a search icon. It submits the typed text through the existing
+  `send()` path and is disabled for whitespace-only input. It stays while typing, disappears on
+  the first sent turn, and returns only for a fresh chat. Mic/send remain on the physical right;
+  Filter-origin results and restored conversations do not gain this action.
 - **Filter results have no chat composer (owner, 2026-09-11).** Filter and the AI Agent share this one
   screen; a Filter search arrives via the `?filter=` route param. The `filterOrigin` state flag is set
   `true` only in that arrival branch (reset to `false` by `startFresh()`, same lifecycle as every other
