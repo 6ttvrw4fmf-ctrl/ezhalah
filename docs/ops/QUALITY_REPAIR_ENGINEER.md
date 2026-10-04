@@ -34,6 +34,10 @@ The owner runs a small team of engineers (cloud routines), each with one job:
 - 🔬 **Advanced Filter** (2 AM, 2 h): every older listing's Advanced Filter answers equal its ad, and a customer can find it.
 - ♻️ **Lifecycle** (4 AM, 2 h): a listing deleted on its website disappears from ours.
 - 🔧 **You** (6 AM, 2 h): you **check the four of them, and you fix what they missed.**
+- 🦅 **The Falcon** (weekly, Friday 2 – 6 PM Arizona, 4 h; `docs/ops/FALCON_ENGINEER.md`): the deep audit of the normal
+  filter, the Advanced Filter and all the data behind them; fixes what everyone missed. **On Saturday morning** you re-test
+  3 of its `falcon:proof` rows and read its `falcon:end` row like any other engineer's (it is weekly, so it is not in
+  `ops_engineer_review`); its `falcon:followup` rows to you are read first.
 The owner has ADHD and does not want to check, confirm or go back and forth. **You are the one who does.** He reads one
 short report from you. You decide; you do not ask him anything except money, legal and secrets.
 
