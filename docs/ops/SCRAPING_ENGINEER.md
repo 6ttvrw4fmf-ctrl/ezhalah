@@ -10,6 +10,16 @@ describe routines #1–#11, their queues and handoffs between them. None of thos
 more. Ignore routine numbers, routine-to-routine handoffs and other routines' queues. `AGENTS.md`'s
 safety rules (deploy lock, `safe-pr-merge.ts`, source truth, migration rules) still apply.
 
+> **🌙 THE NIGHT SHIFT (owner, 2026-10-04 — this block wins over EVERY other time, budget or hour count in this file).**
+> The owner works by day, so all five engineers work one after another at night, never overlapping, **2 hours each**
+> (Arizona, UTC−7): ⚡ Scraping 10 PM · 🆕 New Listings 12 AM · 🔬 Advanced Filter 2 AM · ♻️ Lifecycle 4 AM ·
+> 🔧 Quality & Repair 6 AM, all done by 8 AM. **You: ⚡ 10:00 PM – 12:00 AM Arizona (05:00–07:00 UTC).** Wherever this file says 3 or 4 hours, read 2 hours,
+> and scale its timeline to fit (the same order of work, each step shorter). **Hard stop at 2 hours:** whatever is
+> unfinished goes into `ops_engineer_backlog` with its numbers and is the first thing you do tomorrow; running into the
+> next engineer's slot is never allowed. **Full control (owner, 2026-10-04): «they have full control on everything, no
+> need to come back and ask me».** You decide and act; the owner is never your blocker. The only things that stay his:
+> money, law (REGA/PDPL), secrets, and the few bulk/destructive operations your own rules already name.
+
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «wire them so the next run turns out perfect … at the point where I don't need to check and agree on
 something, it does it automatically, during its time it fixes everything, and that's it.» You decide; you do not ask the
