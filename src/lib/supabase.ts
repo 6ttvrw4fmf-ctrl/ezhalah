@@ -1,7 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
+import { dropUnrefreshableStoredSessions } from './authStorageGuard';
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const key = process.env.EXPO_PUBLIC_SUPABASE_KEY;
+
+// Must run BEFORE createClient reads storage (Sentry REACT-NATIVE-A/-B; see authStorageGuard.ts).
+if (typeof window !== 'undefined') {
+  try { dropUnrefreshableStoredSessions(window.localStorage); } catch { /* storage blocked */ }
+}
 
 // Null when env isn't configured — the data layer falls back to bundled mock data so the app
 // (and preview) never hard-fails on a missing backend.
