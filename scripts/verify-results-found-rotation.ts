@@ -277,8 +277,8 @@ check('the {name} comes from pickName(user, rfLang), the same function the sideb
 // ── 7. THE BOUNDARY — nothing else changes ──────────────────────────────────────────────────────
 check('the retired i18n key "We found {n} listings matching your search." is left intact in i18n.tsx (untouched by this rotation — cleaned up separately if unused)',
   /'We found \{n\} listings matching your search\.'/.test(read('src/i18n.tsx')));
-check('the SEPARATE AI-chat opening greeting (agent.tsx greetingText) is untouched',
-  agentSrc.includes("'ارحب، أنا إزهله. قلّي وش العقار اللي تدور عليه"));
+check('the separate owner-approved static welcome (2026-10-03) stays outside this rotation',
+  agentSrc.includes("'وش العقار اللي في بالك؟\\nقل لنا مواصفاته، وإزهله.'"));
 check('the Filter-search bubble opening (filterToChat) is untouched — this rotation is a different sentence',
   !read('src/data/search.ts').includes('pickResultsFoundSentence'));
 
