@@ -7,8 +7,8 @@
 # its rating and its numbers instead of reasoning them.
 #
 # Dispatch-only, like every cron job here: pg_cron row gh-new-listings-score calls
-# trigger_gh_workflow('new-listings-score.yml') at 08:35 UTC (01:35 Arizona), done well before the 🆕
-# engineer wakes at 10:00 UTC. READ-ONLY on listings. The browser + display are for wasalt
+# trigger_gh_workflow('new-listings-score.yml') at 05:35 UTC (22:35 Arizona), done well before the 🆕
+# engineer wakes at 07:00 UTC (night shift, owner 2026-10-04). READ-ONLY on listings. The browser + display are for wasalt
 # (cleanup._probe reaches wasalt only through scrapers/wasalt/browser.py —
 # verify-wasalt-probing-workflows-carry-the-browser.ts). A page we cannot read is UNREADABLE, never wrong.
 name: New listings score

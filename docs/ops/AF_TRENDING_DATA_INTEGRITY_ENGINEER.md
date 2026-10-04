@@ -1,3 +1,6 @@
+> **RETIRED (owner, 2026-10-04).** This routine no longer runs. The Advanced Filter now has its own engineer: read
+> `docs/ops/ADVANCED_FILTER_ENGINEER.md`. This file stays only as history.
+
 # 🎯 SENIOR ADVANCED FILTER + TRENDING DATA INTEGRITY ENGINEER (canonical, owner 2026-08-23)
 
 **This file is the source of truth for this routine — the file wins over the live routine prompt
