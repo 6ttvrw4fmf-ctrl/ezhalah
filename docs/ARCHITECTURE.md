@@ -195,7 +195,11 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). ~33 partner pl
   with smaller subtitle «قل لنا مواصفاته، وإزهله.»; no greeting typing animation or reply icon.
   It disappears on the first conversation turn. Existing composer examples, mic/send placement,
   top mode tabs, reply typing and search-loading animations remain; no additional example chips
-  or Filter link. Phone and desktop use the same responsive column without desktop zoom.
+  or Filter link. The AI chat uses a plain paper background (including its sidebar) and bundled
+  Tajawal Arabic type. On desktop the heading and 720px-wide rounded composer form one centered
+  group; on phones the composer stays at the bottom. The composer has a full-width text row above
+  the existing mic and send controls, which remain on the physical right. Sending the first message
+  hides the welcome and docks the desktop composer at the bottom. No desktop zoom.
 - **Filter results have no chat composer (owner, 2026-09-11).** Filter and the AI Agent share this one
   screen; a Filter search arrives via the `?filter=` route param. The `filterOrigin` state flag is set
   `true` only in that arrival branch (reset to `false` by `startFresh()`, same lifecycle as every other
