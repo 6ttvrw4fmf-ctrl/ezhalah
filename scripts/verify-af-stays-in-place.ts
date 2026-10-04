@@ -94,7 +94,7 @@ const stayProblems = (agentSrc: string, cardSrc: string): string[] => {
     out.push('a round does not give its answers bubble an id the view can ease to');
   if (!/for \(const d of \[80, 700, 1500\]\) easeToMsgTop\(echoId, d\);/.test(code))
     out.push('a round does not ease down to its own answers bubble when its search starts (the reader would have to scroll to find it)');
-  if (!/<View key=\{m\.id\} ref=\{\(n: any\) => \{ msgNodeRef\.current\[m\.id\] = n; \}\} style=\{s\.userBubble\}>/.test(code))
+  if (!/<View key=\{m\.id\} ref=\{\(n: any\) => \{ msgNodeRef\.current\[m\.id\] = n; \}\} style=\{[^}]*\}>/.test(code))
     out.push('the user bubble is not registered in msgNodeRef, so easing to it measures nothing');
   if (!/guidedSearchSummary\(opts\.guided\.baseQ, opts\.guided\.facets\)/.test(code))
     out.push('a guided round\'s turn does not use the whole summary (original + every committed answer)');
@@ -135,7 +135,7 @@ mustCatch('earlier turns neither dimmed nor hidden',
 mustCatch('the round no longer eases to its own answers bubble',
   stayProblems(swap(AGENT, 'for (const d of [80, 700, 1500]) easeToMsgTop(echoId, d);', ''), CARD).length > 0);
 mustCatch('the user bubble losing its node registration',
-  stayProblems(swap(AGENT, '<View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={s.userBubble}>', '<View key={m.id} style={s.userBubble}>'), CARD).length > 0);
+  stayProblems(swap(AGENT, '<View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={[s.userBubble, rtl ? s.userMessageRtl : s.userMessageLtr]}>', '<View key={m.id} style={[s.userBubble, rtl ? s.userMessageRtl : s.userMessageLtr]}>'), CARD).length > 0);
 mustCatch('the turn summary reverting to the refined query alone (original lines overwritten)',
   stayProblems(swap(AGENT, 'guidedSearchSummary(opts.guided.baseQ, opts.guided.facets)', 'buildScrapeIntro(result.query ?? refined)'), CARD).length > 0);
 mustCatch('a ✕ coming back on the chips',
