@@ -1558,7 +1558,9 @@ export default function Home() {
                             // display-name collision (e.g. الهفوف ×2), prepended so it stays visible.
                             sublabel: [
                               hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
-                              opt.scopeKnown === false ? undefined : cohortCountLabel(opt.listingCount),
+                              // «…» while this scope's count is loading (owner 2026-10-04: a name with no number looked
+                              // broken); never another scope's number.
+                              opt.scopeKnown === false ? '…' : cohortCountLabel(opt.listingCount),
                             ].filter(Boolean).join(' · ') || undefined,
                             icon: LOC_IMG.city, // restored designed art (see TrendingList.tsx note)
                           }))}
@@ -1799,6 +1801,8 @@ export default function Home() {
                             // "no count beats a wrong count" rule the city pool already follows.
                             sublabel: districtLiveCounts?.[opt.districtAr] === 0
                               ? t('No listings here right now')
+                              // «…» = this scope's count is still loading (owner 2026-10-04), never a blank row
+                              : opt.scopeKnown === false ? '…'
                               : hasDistrictNarrowing
                                 ? (districtLiveCounts?.[opt.districtAr] != null
                                     ? cohortCountLabel(districtLiveCounts[opt.districtAr]) : '')
