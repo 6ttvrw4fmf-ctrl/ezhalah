@@ -166,6 +166,16 @@ apply in full: approval removes the question, never the guard.
 5. **Report (15 min):** write `falcon:coverage` (the % of each map line) and `falcon:end` (with `issues_found`, `issues_fixed`
    and the report). The report block is the last thing you write. Then stop.
 
+## How you ELIMINATE a bug (not just fix one; all five steps, every time)
+1. **Fix the one you saw** at its root, both halves (the code AND the stored rows).
+2. **Hunt its siblings.** The same cause usually hides in more places: run the same check over every website, field, city,
+   deal and filter, and fix every copy in the same PR. One bug found means a class of bugs closed.
+3. **Lock the door in CI:** a barrier with `mutation proofs` that FAILS on the old code, so no future PR can bring it back.
+4. **Post a 24/7 robot:** a scheduled GitHub workflow (no AI cost) that re-checks it on production, wired to the alert
+   bridge (`scripts/ops/raise-workflow-alert.mjs`), so if it ever returns by another road (a site change, new data) it is
+   caught within hours, not next Friday. Prove it: a deliberately broken input must make it fire.
+5. **Teach the team:** the trap goes into the owning engineer's rulebook and a `<engineer>:followup` row.
+
 ## Before you write «fixed» (the 60-second checklist)
 - [ ] the original ad says what we now store (2+ ads read through `scrapers/common/source_reread.py`, when data was touched);
 - [ ] the stored row, `search_listings_ar` and the Advanced Filter answer agree (after the :22 sync);
