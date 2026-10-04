@@ -3796,7 +3796,7 @@ export default function Agent() {
                 const txt = m.text;
                 const rtl = msgRTL(txt);
                 return (
-                  <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: '88%' }}>
+                  <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: IS_WEB ? '76%' : '88%' }}>
                     <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row' }]}>
                       <Image source={EAGLE_MARK} style={s.replyBrandMark} resizeMode="contain" accessible={false} />
                       <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
@@ -4776,7 +4776,7 @@ const s = StyleSheet.create({
 
   // Conversation turns use a typographic transcript instead of repeated rounded chatbot tiles.
   // The green edge keys the user's request to Ezhalah's identity while leaving the paper open.
-  userBubble: { alignSelf: 'flex-end', maxWidth: '85%', paddingVertical: 8, marginTop: 12 },
+  userBubble: { alignSelf: 'flex-end', maxWidth: IS_WEB ? '76%' : '88%', paddingVertical: 8, marginTop: 12 },
   userMessageRtl: { borderRightWidth: 3, borderRightColor: colors.primary, paddingRight: 14, paddingLeft: 2 },
   userMessageLtr: { borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: 14, paddingRight: 2 },
   userText: { color: colors.userBubbleText, fontSize: IS_WEB ? 18 : 16.5, lineHeight: IS_WEB ? 31 : 28, fontWeight: '600' },
@@ -4785,9 +4785,9 @@ const s = StyleSheet.create({
   statusText: { fontSize: 12.5, color: colors.muted },
   // The Ezhalah slogan during search — plain text, prominent, with the summary beneath it. No icon.
   sloganWrap: { gap: 8, paddingVertical: 2 },
-  sloganText: { fontSize: IS_WEB ? 18 : 16.5, lineHeight: IS_WEB ? 30 : 27, fontWeight: '700', color: colors.dark, flexShrink: 1 },
+  sloganText: { fontFamily: font.family.arabicMedium, fontSize: IS_WEB ? 18 : 16.5, lineHeight: IS_WEB ? 30 : 27, fontWeight: '700', color: colors.dark, flexShrink: 1 },
   // The search summary shown under the results header (not with the slogan).
-  summaryText: { fontSize: IS_WEB ? 14.5 : 13, color: colors.body, lineHeight: IS_WEB ? 24 : 21, marginTop: 4 },
+  summaryText: { fontFamily: font.family.arabic, fontSize: IS_WEB ? 14.5 : 13, color: colors.body, lineHeight: IS_WEB ? 24 : 21, marginTop: 4 },
 
   reply: { flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
   replyBrandMark: { width: 22, height: 22, marginTop: 3, flexShrink: 0 },
