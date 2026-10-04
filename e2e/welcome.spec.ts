@@ -16,7 +16,9 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 
     await expect(welcome).toContainText('قل لنا مواصفاته، وإزهله.');
     const box = await welcome.boundingBox();
     expect(box).not.toBeNull();
-    expect(Math.abs(box!.x + box!.width / 2 - viewport.width / 2)).toBeLessThan(12);
+    const footer = await page.getByTestId('agent-footer').boundingBox();
+    // Desktop reserves room for the existing sidebar; center within the chat.
+    expect(Math.abs(box!.x + box!.width / 2 - (footer!.x + footer!.width / 2))).toBeLessThan(12);
     expect(box!.y).toBeGreaterThan(200);
     const mic = await page.getByTestId('voice-mic').boundingBox();
     const send = page.getByLabel('بحث', { exact: true });
