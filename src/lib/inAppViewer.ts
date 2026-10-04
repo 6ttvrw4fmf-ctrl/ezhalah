@@ -9,7 +9,7 @@
 // <iframe> with the site's own headers — no X-Frame-Options, no CSP frame-ancestors, no
 // frame-busting script. Both entries were proven 2026-10-03 with Playwright against a local page
 // (dealapp.sa/ar/ad-details/530440, gathern.co/view/193264/unit/270328). We never proxy or strip a
-// site's headers to force an embed; Aqar uses the data preview below, all other sites open externally.
+// site's headers to force an embed; the preview allowlist below uses already-loaded listing data.
 export const IN_APP_VIEWER_HOSTS = ['dealapp.sa', 'gathern.co'] as const;
 
 /** The allowlisted host a listing URL belongs to, or null when it must open the old way. */
@@ -21,8 +21,61 @@ export function inAppViewerHost(url: string | null | undefined): string | null {
   return IN_APP_VIEWER_HOSTS.find((h) => bare === h || bare.endsWith('.' + h)) ?? null;
 }
 
-// Aqar forbids framing. Its tab renders the card's existing data, never the remote document.
-export const IN_APP_PREVIEW_HOSTS = ['sa.aqar.fm'] as const;
+// These sites cannot be framed. Render the card's existing data, never a remote document.
+// Exact hosts verified across every active listing on 2026-10-04; see the preview QA evidence.
+export const IN_APP_PREVIEW_HOSTS = [
+  'sa.aqar.fm',
+  'wasalt.sa',
+  'sa.sakan.co',
+  'abralosol.com',
+  'nofodh.sa',
+  'arkaanalaqar.com',
+  'bossbihoffice.com.sa',
+  'ksaaqar.com',
+  'mustqr.sa',
+  'aqalemhajer.com',
+  'alshawaf.com.sa',
+  'rightcompound.com',
+  'reinvest.sa',
+  'marketplace.sirdab.co',
+  'therc.aqar.digital',
+  'app.abaadapp.sa',
+  'sokok.sa',
+  'raghdan.sa',
+  'alsaedan.com',
+  'nufouth.com',
+  'akariyoun.sa',
+  'sakani.sa',
+  'sukna.app',
+  'goldendeal.sa',
+  'aqargate.com',
+  'aldarim.sa',
+  'shomoalaqar.com.sa',
+  'abwbna.com',
+  'jazwtn.sa',
+  'alobidoffice.com',
+  '1000.com.sa',
+  'aljassimaqar.com',
+  'maqrat.com',
+  'sa.opensooq.com',
+  'manafe.com.sa',
+  'map.earthapp.com.sa',
+  'senanrealestate.sa',
+  'bahadhabab-res.com',
+  'property.maqamco.sa',
+  'erapulse.sa',
+  'jawher2030.com',
+  'm3tmd.com',
+  'mizlaj.com.sa',
+  'azure.sa',
+  'app.holoul.io',
+  'arshglobal.com.sa',
+  'superoffice.sa',
+  'flow.life',
+  'hasaadestate.com',
+  'yameen.sa',
+  'maktab.sa',
+] as const;
 export function inAppPreviewHost(url: string | null | undefined): string | null {
   if (!url) return null;
   let host: string;

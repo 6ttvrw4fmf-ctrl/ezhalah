@@ -6,13 +6,16 @@
 // the wiring, because a correct helper nothing calls is decoration: the agent screen must route
 // through it, and the old open path must still exist unchanged for everyone else.
 
+import ts from 'typescript';
+import { liftSymbols } from './lib/liftSymbols.ts';
+import * as arabicText from '../src/lib/arabicText.ts';
 import { stripTypeScriptTypes } from 'node:module';
 import { arabicOrPlaceholderForFreeText, translateTrailingPeriodWord } from '../src/lib/arabicText.ts';
 import { readFileSync } from 'node:fs';
 import { stripComments as codeOnly } from './lib/stripComments.ts';
 import { windowBetween } from './lib/sourceWindow.ts';
 import {
-  EMPTY_AD_PANE, EMPTY_FRAME_NAV, IN_APP_VIEWER_HOSTS, MAX_AD_TABS, adTabKey, canFrameBack, canFrameForward,
+  EMPTY_AD_PANE, EMPTY_FRAME_NAV, IN_APP_VIEWER_HOSTS, IN_APP_PREVIEW_HOSTS, MAX_AD_TABS, adTabKey, canFrameBack, canFrameForward,
   closeAdTab, frameDropped, frameNavigated, frameStepped, hideAdPane, inAppPreviewHost, inAppViewerHost, openAdTab,
   showAdPane, splitUrlForDisplay, type AdPane, type FrameNav,
 } from '../src/lib/inAppViewer.ts';
@@ -291,7 +294,7 @@ mustCatch('a pane ✕ wired to closing every tab', !paneWiring(agent.replace('co
 const previewUrls: Array<[string | null | undefined, string | null]> = [
   ['https://sa.aqar.fm/شقق-للبيع/الرياض/غرب-الرياض/حي-المهدية/شارع-عفيف-الدين-الثقفي-حي-المهدية-مدينة-الرياض-منطقة-الرياض-6580954', 'sa.aqar.fm'],
   ['https://sa.aqar.fm/DailyRenting/1', 'sa.aqar.fm'],
-  ...['https://dealapp.sa/x', 'https://gathern.co/x', 'https://wasalt.sa/x',
+  ...['https://dealapp.sa/x', 'https://gathern.co/x', 'https://sanadak.sa/x',
     'https://notsa.aqar.fm/x', 'https://sa.aqar.fm.evil.com/x',
     'https://evil.com/?u=https://sa.aqar.fm/x', 'https://sub.sa.aqar.fm/x', '', 'not a url', null, undefined]
     .map((u): [typeof u, null] => [u, null]),
@@ -301,6 +304,77 @@ check('Aqar and Monthly preview; other hosts and lookalikes do not', previewHost
 mustCatch('preview missing for Aqar', !previewHostsPass(() => null));
 mustCatch('preview accepts a suffix lookalike', !previewHostsPass((u) => u?.includes('sa.aqar.fm') ? 'sa.aqar.fm' : null));
 mustCatch('iframe sources rerouted to previews', !previewHostsPass((u) => inAppPreviewHost(u) ?? inAppViewerHost(u)));
+
+// Independent owner-approved host contract: each positive/negative is executed, including www,
+// lookalike and unapproved-subdomain cases. Each site's missing route is mutation-proven.
+const additionalPreviewHosts = [
+  'wasalt.sa',
+  'sa.sakan.co',
+  'abralosol.com',
+  'nofodh.sa',
+  'arkaanalaqar.com',
+  'bossbihoffice.com.sa',
+  'ksaaqar.com',
+  'mustqr.sa',
+  'aqalemhajer.com',
+  'alshawaf.com.sa',
+  'rightcompound.com',
+  'reinvest.sa',
+  'marketplace.sirdab.co',
+  'therc.aqar.digital',
+  'app.abaadapp.sa',
+  'sokok.sa',
+  'raghdan.sa',
+  'alsaedan.com',
+  'nufouth.com',
+  'akariyoun.sa',
+  'sakani.sa',
+  'sukna.app',
+  'goldendeal.sa',
+  'aqargate.com',
+  'aldarim.sa',
+  'shomoalaqar.com.sa',
+  'abwbna.com',
+  'jazwtn.sa',
+  'alobidoffice.com',
+  '1000.com.sa',
+  'aljassimaqar.com',
+  'maqrat.com',
+  'sa.opensooq.com',
+  'manafe.com.sa',
+  'map.earthapp.com.sa',
+  'senanrealestate.sa',
+  'bahadhabab-res.com',
+  'property.maqamco.sa',
+  'erapulse.sa',
+  'jawher2030.com',
+  'm3tmd.com',
+  'mizlaj.com.sa',
+  'azure.sa',
+  'app.holoul.io',
+  'arshglobal.com.sa',
+  'superoffice.sa',
+  'flow.life',
+  'hasaadestate.com',
+  'yameen.sa',
+  'maktab.sa',
+];
+const hostPass = (host: string, previewHost: typeof inAppPreviewHost, frameHost = inAppViewerHost) =>
+  [`https://${host}/ad/1`, `https://www.${host}/ad/1`, `https://${host.toUpperCase()}/ad/1`]
+    .every((url) => previewHost(url) === host && frameHost(url) === null)
+  && [`https://evil.${host}/ad/1`, `https://${host}.evil.test/ad/1`, `https://not${host}/ad/1`]
+    .every((url) => previewHost(url) === null);
+for (const host of additionalPreviewHosts) {
+  check(`${host}: exact + www preview, never iframe or lookalike`, hostPass(host, inAppPreviewHost));
+  mustCatch(`${host}: missing preview route`, !hostPass(host, (u) => inAppPreviewHost(u) === host ? null : inAppPreviewHost(u)));
+  mustCatch(`${host}: accidentally framed`, !hostPass(host, inAppPreviewHost, (u) => inAppPreviewHost(u)));
+  mustCatch(`${host}: unapproved subdomain`, !hostPass(host, (u) => u === `https://evil.${host}/ad/1` ? host : inAppPreviewHost(u)));
+}
+const disjoint = (previews: readonly string[], frames: readonly string[]) =>
+  previews.every((p) => frames.every((f) => p !== f && !p.endsWith('.' + f)));
+check('preview and iframe allowlists never overlap', disjoint(IN_APP_PREVIEW_HOSTS, IN_APP_VIEWER_HOSTS));
+mustCatch('same host added to both lists', !disjoint([...IN_APP_PREVIEW_HOSTS, 'dealapp.sa'], IN_APP_VIEWER_HOSTS));
+mustCatch('preview is a framed subdomain', !disjoint([...IN_APP_PREVIEW_HOSTS, 'sub.gathern.co'], IN_APP_VIEWER_HOSTS));
 
 const previewRoute = (src: string) => {
   const route = windowBetween(codeOnly(src), 'const openAd =', 'pushAdTab({ source: l.source, id: l.id, title: listingLocationAr(l), url: url ?? \'\' });', 'agent.tsx');
@@ -366,6 +440,62 @@ const factsPass = (src: string) => {
 check('missing facts stay absent; numeric age never crashes and zero age means new', factsPass(preview));
 mustCatch('raw numeric age crashes on string trim', !factsPass(preview.replace("String(l.property_age ?? '').trim()", "l.property_age?.trim()")));
 mustCatch('missing area becomes a zero fact', !factsPass(preview.replace('if (l.area > 0)', 'if (true)')));
+
+// Execute the actual TSX render with host components represented as inspectable nodes. Real
+// sourceName and AR dictionary/translation run unchanged; no replica of preview render logic.
+const display = await liftSymbols(new URL('../src/lib/listingDisplay.ts', import.meta.url).pathname,
+  [{ header: 'export function sourceName' }], ['sourceName']);
+const i18n = await liftSymbols(new URL('../src/i18n.tsx', import.meta.url).pathname,
+  [{ header: 'const AR:' }, { header: 'function fill' }, { header: 'export function translate' }], ['translate']);
+const translate = i18n.translate as (locale: string, key: string, vars?: Record<string, string | number>) => string;
+type Node = { type: string; props: Record<string, any> };
+const renderPreview = (src: string, source: string, locale: string, photos: string[] = []) => {
+  const jsx = (type: string, props: Record<string, any>) => ({ type, props });
+  const output = ts.transpileModule(src, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const modules: Record<string, unknown> = {
+    'react/jsx-runtime': { jsx, jsxs: jsx },
+    react: { useState: (value: unknown) => [value, () => {}] },
+    'react-native': { Platform: { OS: 'web' }, Pressable: 'Pressable', ScrollView: 'ScrollView', Text: 'Text', View: 'View', StyleSheet: { create: (x: unknown) => x } },
+    'expo-image': { Image: 'Image' }, '@expo/vector-icons/Ionicons': { default: 'Ionicons' },
+    '@/theme/tokens': { colors: {}, radius: {} },
+    '@/i18n': { useI18n: () => ({ locale, isRTL: locale === 'ar', t: (key: string, vars?: Record<string, string | number>) => translate(locale, key, vars) }) },
+    '@/lib/listingDisplay': { ...display, listingPrice: () => 'shared-price' },
+    '@/lib/arabicText': arabicText,
+    '@/lib/translitPlace': { translitPlace: (x: string) => x }, '@/lib/afEvidence': { DIRECTION_LABEL: {} },
+  };
+  const exports: Record<string, any> = {};
+  new Function('require', 'exports', output)((name: string) => {
+    if (!(name in modules)) throw new Error(`Unexpected preview dependency: ${name}`);
+    return modules[name];
+  }, exports);
+  return exports.default({ listing: { source, photos, photo: null, city: 'Riyadh', district: '', type: 'Apartment', area: 0, beds: 0 }, url: 'https://example.com/ad/1' }) as Node;
+};
+const nodes = (root: any): Node[] => !root || typeof root !== 'object' ? [] : Array.isArray(root)
+  ? root.flatMap(nodes) : [root, ...nodes(root.props?.children)];
+const textOf = (root: any): string => root == null || root === false ? '' : typeof root !== 'object'
+  ? String(root) : Array.isArray(root) ? root.map(textOf).join('') : textOf(root.props?.children);
+const namingPass = (src: string) => ['AQAR', 'Wasalt', 'Abr Alosol', 'THE RC', 'عقاريون', 'Sakan'].every((source) =>
+  ['ar', 'en'].every((locale) => {
+    const tree = renderPreview(src, source, locale);
+    const name = translate(locale, (display.sourceName as (s: string) => string)(source));
+    return textOf(nodes(tree).find((n) => n.props.testID === 'listing-preview-contact')) === translate(locale, 'Open the ad on {name} to contact', { name })
+      && nodes(tree).some((n) => n.type === 'Text' && textOf(n) === translate(locale, 'Details as published on {name}.', { name }))
+      && (source !== 'AQAR' || locale !== 'ar' || name === 'عقار');
+  }));
+check('rendered contact and attribution use the card source name in AR + EN (Aqar = عقار)', namingPass(preview));
+mustCatch('contact hardcodes Aqar', !namingPass(preview.replace("t('Open the ad on {name} to contact', { name })", "t('Open the ad on {name} to contact', { name: t('AQAR') })")));
+mustCatch('attribution hardcodes Aqar', !namingPass(preview.replace("t('Details as published on {name}.', { name })", "t('Details as published on {name}.', { name: t('AQAR') })")));
+mustCatch('raw source bypasses translated card name', !namingPass(preview.replace('t(sourceName(l.source))', 'l.source')));
+const noPhotoPass = (src: string) => {
+  const empty = nodes(renderPreview(src, 'Wasalt', 'ar'));
+  const single = nodes(renderPreview(src, 'Wasalt', 'en', ['https://example.com/photo.jpg']));
+  return !empty.some((n) => n.type === 'Image' || n.props.testID === 'listing-preview-gallery')
+    && empty.some((n) => n.props.testID === 'listing-preview-contact') && empty.some((n) => textOf(n) === 'shared-price')
+    && single.filter((n) => n.type === 'Image').length === 1 && single.some((n) => n.props.testID === 'listing-preview-gallery');
+};
+check('zero photos renders complete details without image/empty gallery; one photo renders one image', noPhotoPass(preview));
+mustCatch('no-photo listing gets an empty gallery/broken image', !noPhotoPass(preview.replace('photos.length > 0 &&', 'true &&')));
+mustCatch('single-photo listing loses its gallery', !noPhotoPass(preview.replace('photos.length > 0 &&', 'photos.length > 1 &&')));
 
 if (failed) { console.error(`\n✗ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✓ in-app viewer allowlist: decision + wiring verified, mutation-proven');
