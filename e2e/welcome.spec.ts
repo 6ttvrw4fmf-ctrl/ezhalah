@@ -26,11 +26,12 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 
     expect(sendBox!.x).toBeGreaterThan(mic!.x);
     await page.screenshot({ path: `/tmp/ez-welcome-${viewport.width}.png` });
     const input = page.locator('textarea, input[aria-label]').last();
-    await input.fill('أبي شقة');
+    const query = 'أبي شقة'; // user input, not a product control label
+    await input.fill(query);
     await expect(welcome).toBeVisible();
     await send.click();
     await expect(welcome).toHaveCount(0);
-    await expect(page.getByText('أبي شقة', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(query, { exact: true }).first()).toBeVisible();
     await expect(page.getByTestId('agent-footer')).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   });
