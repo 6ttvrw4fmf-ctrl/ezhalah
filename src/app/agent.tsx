@@ -482,9 +482,14 @@ function runTypewriter(total: number, setN: (n: number) => void, onDone?: () => 
   if (total <= 0) { onDone?.(); return () => {}; }
   let i = 0;
   let done = false;
+  // finish() stops the interval too. When the fallback paid out first, the still-running interval
+  // used to keep calling setN(i) — rewinding the finished sentence — and its own last tick hit the
+  // `done` guard, leaving the reveal one tick short for good: the Results-Found emoji (always the
+  // last glyph) vanished (owner 2026-10-04: «sometimes doesn't show an emoji»).
   const finish = () => {
     if (done) return;
     done = true;
+    clearInterval(id);
     setN(total);
     onDone?.();
   };
