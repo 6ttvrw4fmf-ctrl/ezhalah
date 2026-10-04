@@ -337,10 +337,13 @@ Owner-approved web behaviour (2026-10-03): Deal App and Gathern open their real 
 iframes, with their own headers unchanged. The allowlist in `src/lib/inAppViewer.ts` is exactly
 `dealapp.sa,gathern.co`. No proxy, header stripping, or framing bypass is permitted.
 
-Aqar and Aqar Monthly (`sa.aqar.fm` only) use the same panel with a native `ListingPreview` of the
+Aqar, Aqar Monthly and the 50 owner-approved non-embeddable platforms (2026-10-04, exact hosts in
+`IN_APP_PREVIEW_HOSTS`) use the same panel with a native `ListingPreview` of the
 card's existing `Listing`, with no additional listing-data fetch. Source-ordered photos, the shared
 `listingPrice` (including the stay-length note), source-stated facts and redacted description lead
-to an explicit external Aqar contact link. Arabic prose is hidden in English like ResultCard.
+to an explicit external contact link to the original ad. Both the contact label and attribution
+use `t(sourceName(listing.source))`, matching the result card. Arabic prose is hidden in English
+like ResultCard. No photos means no gallery box. The preview and iframe host lists are disjoint.
 
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
 up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.

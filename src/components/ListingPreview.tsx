@@ -4,18 +4,19 @@ import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius } from '@/theme/tokens';
 import { useI18n, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
-import { listingPrice } from '@/lib/listingDisplay';
+import { listingPrice, sourceName } from '@/lib/listingDisplay';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { translitPlace } from '@/lib/translitPlace';
 import { DIRECTION_LABEL } from '@/lib/afEvidence';
 import type { Listing } from '@/data/listings';
 
-// A site that refuses to be framed (Aqar sends X-Frame-Options: SAMEORIGIN) still opens in a tab of
+// Allowlisted sites that cannot be framed still open in a tab of
 // the same pane — showing Ezhalah's own copy of the ad, exactly as the site published it, plus one
 // button to the real ad for calling / messaging. Nothing is computed: a field the source left silent
 // is simply not shown (never «0», never «no»).
 export default function ListingPreview({ listing: l, url }: { listing: Listing; url: string }) {
   const { t, locale, isRTL } = useI18n();
+  const name = t(sourceName(l.source));
   const photos = (l.photos?.length ? l.photos : [l.photo]).filter(Boolean);
   const [main, setMain] = useState(0);
   const open = () => { if (Platform.OS === 'web' && url) window.open(url, '_blank', 'noopener,noreferrer'); };
@@ -45,14 +46,12 @@ export default function ListingPreview({ listing: l, url }: { listing: Listing; 
 
   return (
     <ScrollView testID="listing-preview" style={s.root} contentContainerStyle={s.content}>
-      <View style={s.photoMain}>
-        {photos[main] ? <Image source={{ uri: photos[main] }} style={s.fill} contentFit="cover" priority="high" loading="eager" accessibilityLabel={t('Photo {n} of {total}', { n: main + 1, total: photos.length })} /> : (
-          <View style={[s.fill, s.noPhoto]}><Ionicons name="image-outline" size={36} color={colors.muted} /></View>
-        )}
+      {photos.length > 0 && <View testID="listing-preview-gallery" style={s.photoMain}>
+        <Image source={{ uri: photos[main] }} style={s.fill} contentFit="cover" priority="high" loading="eager" accessibilityLabel={t('Photo {n} of {total}', { n: main + 1, total: photos.length })} />
         {photos.length > 1 && (
           <View style={s.counter}><Text style={[s.counterTx, face]}>{main + 1} / {photos.length}</Text></View>
         )}
-      </View>
+      </View>}
       {photos.length > 1 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.thumbs}>
           {photos.map((p, i) => (
@@ -82,7 +81,7 @@ export default function ListingPreview({ listing: l, url }: { listing: Listing; 
 
       <Pressable testID="listing-preview-contact" onPress={open} accessibilityRole="link" style={({ hovered }: any) => [s.cta, hovered && s.ctaHover]}>
         <Ionicons name="open-outline" size={18} color={colors.onFill} />
-        <Text style={[s.ctaTx, face]}>{t('Open the ad on Aqar to contact')}</Text>
+        <Text style={[s.ctaTx, face]}>{t('Open the ad on {name} to contact', { name })}</Text>
       </Pressable>
 
       {desc ? (
@@ -92,7 +91,7 @@ export default function ListingPreview({ listing: l, url }: { listing: Listing; 
         </View>
       ) : null}
 
-      <Text style={[s.note, tx]}>{t('Details as published on Aqar.')}</Text>
+      <Text style={[s.note, tx]}>{t('Details as published on {name}.', { name })}</Text>
     </ScrollView>
   );
 }
@@ -102,7 +101,6 @@ const s = StyleSheet.create({
   content: { padding: 16, paddingBottom: 40, gap: 10 },
   fill: { width: '100%', height: '100%' },
   photoMain: { width: '100%', aspectRatio: 16 / 10, borderRadius: radius.card, overflow: 'hidden', backgroundColor: colors.chipFill },
-  noPhoto: { alignItems: 'center', justifyContent: 'center' },
   counter: { position: 'absolute', bottom: 10, left: 10, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 3 },
   counterTx: { color: '#fff', fontSize: 13 },
   thumbs: { gap: 8 },
