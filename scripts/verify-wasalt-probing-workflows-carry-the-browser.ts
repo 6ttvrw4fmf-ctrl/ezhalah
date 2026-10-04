@@ -75,7 +75,10 @@ const PROBE_ROOT = 'scrapers.common.cleanup';
 // of new ads with their original pages) re-reads ads through cleanup's `_probe`, so it joined the
 // cohort (6). No workflow runs it — the engineer's own container does — and a wasalt page it cannot
 // read is counted UNREADABLE (never a verdict on the ad), which the score prints as such.
-const COHORT_FLOOR = 6;
+// 2026-10-04: `scrapers.common.af_score` (the 🔬 Advanced Filter Engineer's nightly score) imports
+// new_listings_score and so reaches the same probe (7). Its workflow af-score.yml runs it under
+// xvfb with WASALT_BROWSER and Chromium, like new-listings-score.yml.
+const COHORT_FLOOR = 7;
 
 const ls = (glob: string) =>
   execFileSync('git', ['ls-files', glob], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
