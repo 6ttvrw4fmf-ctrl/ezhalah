@@ -974,8 +974,6 @@ export default function Agent() {
     if (!(IS_WEB && inAppViewerHost(url))) { void openListing(l); return; }
     pushAdTab({ source: l.source, id: l.id, title: listingLocationAr(l), url: url ?? '' });
   };
-  // "+" start-page tabs have no listing: negative ids keep them clear of every real listing id.
-  const blankTabSeq = useRef(0);
   // LAPTOP CARDS ARE ALWAYS THE SMALL ROW (owner 2026-10-03: «for the laptop it should always be
   // small … never make them big»), one step tighter while the pane is on screen beside them. Decided
   // HERE, from the screen's already-mounted width gate, so a card mounts straight into its row and
@@ -3714,21 +3712,6 @@ export default function Agent() {
         {/* Redesigned to match the home screen's share button (design review 2026-07-24) — same
             tint fill/hairline/height/radius as ModeSwitch's own track, so the pill + share cluster
             reads as one continuous control across both screens, not just within one. */}
-        {/* The ad pane is hidden, not closed (its own ✕ / Escape / Back): this chip brings it back
-            exactly as it was — every tab still open, every frame still alive. Gone with the last tab. */}
-        {adPane.hidden && adPane.tabs.length > 0 && (
-          <Pressable
-            testID="ad-tabs-chip"
-            onPress={() => commitAdPane(showAdPane(adPaneRef.current))}
-            accessibilityRole="button"
-            style={({ hovered, pressed }: any) => [s.tabsChip, locale === 'ar' && s.tabsChipRtl, hovered && s.tabsChipHover, pressed && s.shareIconPressed]}
-            // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
-            dataSet={{ ...TAP44 }}
-          >
-            <Ionicons name="browsers-outline" size={16} color={colors.chipIcon} />
-            <Text style={s.tabsChipTx}>{t('Tabs ({n})', { n: adPane.tabs.length })}</Text>
-          </Pressable>
-        )}
         <Pressable
           onPress={() => setShareOpen(true)}
           style={({ pressed }) => [s.shareIcon, pressed && s.shareIconPressed]}
@@ -3978,7 +3961,7 @@ export default function Agent() {
                           per user request ("remove that, not nice"). The cards just appear, no fade,
                           no scale, no stagger. The responsive grid fills the available result width
                           while keeping the original card order in either language. */}
-                      <ResultCardGrid>
+                      <ResultCardGrid wide={viewerSplit}>
                         {/* Live typed turn: default to 0 visible until startReveal begins the one-by-one
                             drip (prevents a full-grid flash if setDoneTyping flushes a render before
                             setRevealCount(0)). History/replay turns (not typing) show all immediately. */}
@@ -4622,14 +4605,9 @@ export default function Agent() {
         hint={adHint}
         onSelect={(i) => commitAdPane({ ...adPaneRef.current, active: i })}
         onCloseTab={(i) => commitAdPane(closeAdTab(adPaneRef.current, i))}
-        onCloseAll={() => commitAdPane(EMPTY_AD_PANE)}
+        onCloseAll={() => commitAdPane({ ...EMPTY_AD_PANE, seq: adPaneRef.current.seq })}
         onHide={() => commitAdPane(hideAdPane(adPaneRef.current))}
         onShow={() => commitAdPane(showAdPane(adPaneRef.current))}
-        onNewTab={() => { blankTabSeq.current += 1; pushAdTab({ source: '', id: -blankTabSeq.current, title: '', url: '' }); }}
-        onOpenUrl={(i, url, host) => commitAdPane({
-          ...adPaneRef.current,
-          tabs: adPaneRef.current.tabs.map((x, n) => (n === i ? { source: host, id: x.id, title: host, url } : x)),
-        })}
       />
     )}
     </View>
@@ -4683,14 +4661,6 @@ const s = StyleSheet.create({
   },
   shareIconPressed: { opacity: 0.85 },
   // Reopen chip for a hidden ad pane — the share button's own tint/hairline idiom, beside it.
-  tabsChip: {
-    height: 36, paddingHorizontal: 12, borderRadius: radius.pill, marginRight: 4,
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine,
-  },
-  tabsChipRtl: { flexDirection: 'row-reverse' }, // the top bar is pinned LTR; the icon still leads in Arabic
-  tabsChipHover: { borderColor: colors.primary },
-  tabsChipTx: { fontSize: 12.5, fontWeight: '600', color: colors.chipIcon },
   topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   preciseBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 12, marginRight: 6 },

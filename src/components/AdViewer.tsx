@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Animated, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+  ActivityIndicator, Animated, Platform, Pressable, ScrollView, StyleSheet, Text, View,
   useWindowDimensions,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -11,8 +11,8 @@ import { useReducedMotion } from '@/lib/useReducedMotion';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { SourceBadge } from '@/components/ResultCard';
 import {
-  EMPTY_FRAME_NAV, IN_APP_VIEWER_HOSTS, adTabKey, canFrameBack, canFrameForward, frameDropped,
-  frameNavigated, frameStepped, resolveAddressInput, splitUrlForDisplay, type AdTab, type FrameNav,
+  EMPTY_FRAME_NAV, adTabKey, canFrameBack, canFrameForward, frameDropped,
+  frameNavigated, frameStepped, splitUrlForDisplay, type AdTab, type FrameNav,
 } from '@/lib/inAppViewer';
 
 // THE IN-APP AD VIEWER, v2 (owner review 2026-10-03; tab list: lib/inAppViewer.ts).
@@ -37,10 +37,10 @@ import {
 // v3 (owner 2026-10-03: «make it seem like Safari / Chrome on the right side»; his reference is the
 // Claude desktop app's browser pane). The SPLIT pane now wears a browser's chrome, left-to-right in
 // both languages like that reference: a tab strip ([site logo] [title] [✕], the active tab a filled
-// chip, "+" after the last tab, the pane's own ✕ in the corner) over a toolbar (← → ⟳, an address
+// chip, the pane's own ✕ in the corner) over a toolbar (← → ⟳, an address
 // bar with the host dark and the path muted, open-in-a-new-window). The pane's ✕, Escape and the
 // browser's Back HIDE the pane — tabs and their frames stay mounted, the results show a
-// «التبويبات (N)» chip to bring it back. A tab's ✕ closes that tab; the last one closes the pane.
+// A card click (or the browser's Forward) brings it back. A tab's ✕ closes that tab; the last one closes the pane.
 // The address bar shows the URL WE loaded: a cross-origin frame never tells us where the user went
 // inside it, so it does not pretend to follow. The phone sheet is unchanged.
 //
@@ -59,7 +59,7 @@ const setLtr = (node: any) => { if (IS_WEB && node?.setAttribute) node.setAttrib
 // Hover tooltip for icon-only controls: RNW forwards no `title`, so set it on the host node.
 const tip = (label: string) => (node: any) => { node?.setAttribute?.('title', label); };
 
-export default function AdViewer({ tabs, active, split, hidden, hint, onSelect, onCloseTab, onCloseAll, onHide, onShow, onNewTab, onOpenUrl }: {
+export default function AdViewer({ tabs, active, split, hidden, hint, onSelect, onCloseTab, onCloseAll, onHide, onShow }: {
   tabs: AdTab[];
   active: number;
   split: boolean;
@@ -72,9 +72,6 @@ export default function AdViewer({ tabs, active, split, hidden, hint, onSelect, 
   onCloseAll: () => void;
   onHide: () => void;
   onShow: () => void;
-  onNewTab: () => void;
-  /** The "+" tab's input resolved to an allowlisted site: load it in tab `i`. */
-  onOpenUrl: (i: number, url: string, host: string) => void;
 }) {
   const { t, isRTL } = useI18n();
   const reduced = useReducedMotion();
@@ -219,14 +216,6 @@ export default function AdViewer({ tabs, active, split, hidden, hint, onSelect, 
       setTimeout(() => setCopied(false), 1400);
     }).catch(() => { /* clipboard denied: the text is still selected */ });
   };
-  // The "+" tab's input. The decision is the pure resolveAddressInput(); this only acts on it.
-  const submitAddress = (i: number, text: string) => {
-    const a = resolveAddressInput(text);
-    if (!a) return;
-    if (a.kind === 'in-app') onOpenUrl(i, a.url, a.host);
-    else if (IS_WEB) window.open(a.url, '_blank', 'noopener,noreferrer');
-  };
-
   // Sheet drag (grabber row) — the SAME Pointer Events + capture machinery the sign-in drag uses
   // (lib/cardDrag.ts; PanResponder proved unreliable on RNW here): 1:1 tracking from the grab,
   // a 120ms-recency velocity window (drag → pause → release drops in place; a live flick still
@@ -360,7 +349,6 @@ export default function AdViewer({ tabs, active, split, hidden, hint, onSelect, 
               </Pressable>
             );
           })}
-          <ToolBtn testID="ad-tab-new" icon="add" size={18} label={t('New tab')} onPress={onNewTab} />
         </ScrollView>
         <ToolBtn testID="ad-viewer-hide" icon="close" size={18} label={t('Hide tabs')} onPress={requestHide} />
       </View>
@@ -397,9 +385,7 @@ export default function AdViewer({ tabs, active, split, hidden, hint, onSelect, 
       {/* Every open tab stays mounted; only the active one is displayed — switching is instant. */}
       {tabs.map((tab, i) => {
         const k = adTabKey(tab);
-        return tab.url
-          ? <TabFrame key={`${k}#${reloads[k] ?? 0}`} tab={tab} visible={i === active} t={t} onNavigated={() => onFrameNavigated(k)} />
-          : <StartPage key={k} visible={i === active} t={t} isRTL={isRTL} onSubmit={(text) => submitAddress(i, text)} />;
+        return <TabFrame key={`${k}#${reloads[k] ?? 0}`} tab={tab} visible={i === active} t={t} onNavigated={() => onFrameNavigated(k)} />;
       })}
       {hint ? (
         <View style={s.hintWrap} pointerEvents="none"><Text style={s.hintTx}>{hint}</Text></View>
@@ -492,47 +478,11 @@ function TabFrame({ tab, visible, t, onNavigated }: { tab: AdTab; visible: boole
   );
 }
 
-// The "+" tab: one calm field. What it does with the text is resolveAddressInput()'s decision.
-function StartPage({ visible, t, isRTL, onSubmit }: { visible: boolean; t: (k: string, p?: any) => string; isRTL: boolean; onSubmit: (text: string) => void }) {
-  const [text, setText] = useState('');
-  const [focused, setFocused] = useState(false);
-  return (
-    <View style={[s.page, s.start, !visible && s.pageHidden]}>
-      <View style={[s.startField, focused && s.startFieldFocus]}>
-        <Ionicons name="search" size={16} color={colors.muted} />
-        <TextInput
-          testID="ad-start-input"
-          value={text}
-          onChangeText={setText}
-          onSubmitEditing={() => onSubmit(text)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          autoFocus
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="go"
-          placeholder={t('Type a site link or search')}
-          placeholderTextColor={colors.muted}
-          // Typed text keeps its own direction (a URL reads left-to-right, Arabic words right-to-left);
-          // only the empty field's placeholder is aligned to the page language.
-          style={[s.startInput, !text && isRTL && s.startInputRtl]}
-        />
-      </View>
-      <Text style={s.startHint}>
-        {t('Opens here: {hosts}', { hosts: IN_APP_VIEWER_HOSTS.join('  ·  ') })}
-        {'\n'}
-        {t('Any other site, or a search, opens in a new browser tab.')}
-      </Text>
-    </View>
-  );
-}
-
-// A tab's mark: the site's logo, or a plain globe on the "+" start page (never another site's logo).
+// A tab's mark: the site's logo.
 // SourceBadge is the one logo resolver in the app; a tab slot is smaller than its 96×48 frame, so
 // it renders scaled inside a clipped slot rather than forking a second size-threaded copy of it.
 function TabIcon({ tab, scale }: { tab: AdTab; scale: number }) {
   const box = { width: Math.round(96 * scale), height: Math.round(48 * scale) };
-  if (!tab.url) return <View style={[s.tabLogo, box]}><Ionicons name="globe-outline" size={15} color={colors.muted} /></View>;
   return (
     <View style={[s.tabLogo, box]} pointerEvents="none">
       <View style={{ transform: [{ scale }] }}><SourceBadge source={tab.source} /></View>
@@ -643,16 +593,4 @@ const s = StyleSheet.create({
   bUrl: { flex: 1, fontSize: 12.5, color: colors.muted, writingDirection: 'ltr', textAlign: 'left' },
   bUrlHost: { color: colors.ink, fontWeight: '600' },
 
-  // "+" start page.
-  start: { alignItems: 'center', paddingTop: 96, paddingHorizontal: 24, gap: 12, backgroundColor: colors.surface },
-  startField: {
-    width: '100%', maxWidth: 420, height: 44, paddingHorizontal: 14, borderRadius: radius.pill,
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: colors.paper, borderWidth: 1, borderColor: colors.line,
-  },
-  startFieldFocus: { borderColor: colors.primary, backgroundColor: colors.surface },
-  startInput: { flex: 1, minWidth: 0, height: 42, fontSize: 16, // >=16: iOS Safari zooms a focused input below 16px
-    color: colors.ink, outlineStyle: 'none' as any },
-  startInputRtl: { textAlign: 'right' },
-  startHint: { maxWidth: 420, fontSize: 12, lineHeight: 18, color: colors.muted, textAlign: 'center' },
 });
