@@ -4329,6 +4329,7 @@ export default function Agent() {
                   mid-transition heights and ratchets an empty box to max — observed live). The
                   textarea keeps the pre-redesign numeric-height contract; the wrapper eases to the
                   same target and clips the single frame of difference. */}
+              <View style={s.composerInputColumn}>
               <View style={[s.inputGrow, INPUT_EASE, { height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) }]}>
               <TextInput
                 ref={inputRef}
@@ -4373,6 +4374,24 @@ export default function Agent() {
                   Absolutely positioned inside this clipped wrapper: it can never resize the
                   composer, push the mic/Send, or overflow horizontally (owner brief §7/§9). */}
               {showIntroExamples ? <IntroExampleRotator reducedMotion={reducedMotion} /> : null}
+              </View>
+              {introLanding && !busy && !revealing && !completed && (
+                <Pressable
+                  testID="initial-chat-search"
+                  accessibilityRole="button"
+                  accessibilityLabel={t('Search')}
+                  accessibilityState={{ disabled: !typed.trim() }}
+                  disabled={!typed.trim()}
+                  onPress={() => send()}
+                  hitSlop={5}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
+                  style={({ pressed }: any) => [s.initialSearch, pressed && s.initialSearchPressed]}
+                >
+                  <Ionicons name="search-outline" size={17} color={colors.ink} />
+                  <Text style={s.initialSearchText}>{t('Search')}</Text>
+                </Pressable>
+              )}
               </View>
               {busy || revealing ? (
                 // While Ezhalah is thinking/searching OR the cards are still popping in, the Send button
@@ -4833,6 +4852,10 @@ const s = StyleSheet.create({
   // all times); the recording row overlays it absolutely so the morph never changes the surface.
   composerInner: { flex: 1, flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
   composerInnerHidden: { opacity: 0 },
+  composerInputColumn: { flex: 1, minWidth: 0 },
+  initialSearch: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 13, marginTop: 6, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
+  initialSearchPressed: { backgroundColor: colors.segTrack },
+  initialSearchText: { color: colors.ink, fontSize: 14, lineHeight: 20 },
   micBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   micBtnPressed: { backgroundColor: colors.segTrack, transform: [{ scale: 0.96 }] },
   // The LTR pin that fixes the physical order lives INLINE on the row (Sidebar's LTR_PIN idiom —
