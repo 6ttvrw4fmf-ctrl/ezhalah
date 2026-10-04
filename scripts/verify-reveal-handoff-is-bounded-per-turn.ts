@@ -220,12 +220,11 @@ function driveTurn(opts: { bounded: boolean; churnFor: number; thenIdle: number 
     });
     return n;
   };
-  const preFixFile = join(root, 'node_modules', '.cache-verify-typewriter-prefix.tsx');
-  const { writeFileSync, rmSync } = await import('node:fs');
-  writeFileSync(preFixFile, agent.replace(/\n\s*clearInterval\(id\);\n(\s*setN\(total\);)/, '\n$1'));
-  const preFix = (await liftSymbols(preFixFile, [{ header: 'function runTypewriter(' }], ['runTypewriter'],
-    'const TYPE_TICK_MS = 24;\nconst TYPE_CHARS = 2;\n')).runTypewriter as typeof runTypewriter;
-  rmSync(preFixFile, { force: true });
+  // The pre-fix body, rebuilt in memory from the REAL lifted function with the one line removed —
+  // no file is written, so nothing can be left mutated if this process is killed.
+  const preFixSrc = runTypewriter.toString().replace(/\n\s*clearInterval\(id\);\n(\s*setN\(total\);)/, '\n$1');
+  const preFix = new Function('TYPE_TICK_MS', 'TYPE_CHARS', `return ${preFixSrc};`)(24, 2) as typeof runTypewriter;
+  check('the pre-fix rebuild really removed finish()\'s clearInterval (so the mutation below is the right one)', preFixSrc !== runTypewriter.toString());
   const before = slowThenResume(preFix);
   mustCatch(`the pre-fix runTypewriter ending one tick short (${before}/${TOTAL} glyphs) once a starved interval resumes after the fallback — the missing emoji`, before < TOTAL);
   const after = slowThenResume(runTypewriter);
