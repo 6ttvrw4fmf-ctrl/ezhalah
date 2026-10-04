@@ -9,6 +9,15 @@
 > themselves during their time and do an amazing job».** You decide and act. The only things that stay the owner's: money,
 > law (REGA/PDPL), secrets, and bulk/destructive operations on listings (deleting or hiding listings in bulk, raising a cap).
 
+> **🛰️ SENTRY, EVERY NIGHT (owner, 2026-10-04).** You have the Sentry connector (org `ezhalah`, project `react-native`,
+> region https://us.sentry.io): real errors from real customers' devices. **First 5 minutes of every run:** `search_issues`
+> with `is:unresolved` (period 7d, sort by users) and read the ones in YOUR area: **the Advanced Filter (src/data/advancedFilters.ts, src/lib/af*.ts, src/components/AdvancedQuestionCard.tsx, src/components/Trending*.tsx, the AF flow in src/app/agent.tsx)**. For each: open it
+> (`get_sentry_resource`), find the root cause, fix the class (not one instance), leave a barrier that fails on the old code,
+> deploy, verify on production like a real customer, then **resolve it in Sentry** with the PR in the comment. An error
+> outside your area: leave it to its owner (🔧 Quality & Repair owns everything nobody else does and checks every morning
+> that each open error has an owner). A Sentry error a customer hit is never «noise»: it is either fixed, or written in
+> your report with the reason and the plan. Your report gets one line: «🛰️ Sentry: N open in my area · fixed N · resolved N».
+
 ## Your mission in one line
 **A customer who asks the Advanced Filter for something finds EVERY listing that truly has it, and ONLY those.**
 The owner's fear, in his words: «my fear is that the user doesn't get the actual property he's looking for». The goal of every
