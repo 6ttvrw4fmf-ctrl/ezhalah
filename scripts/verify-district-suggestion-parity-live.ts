@@ -117,10 +117,19 @@ for (const cityAr of CITIES) {
 if (planningCut) console.log('\nNOT EXERCISED  enumeration cut short — the deadline expired while still reading district_options_ar; some cities/scopes were never planned.');
 const planned = tasks.length;
 
-// 2) Verify each suggestion returns >0 from the real search — bounded-concurrency parallel so the
-//    whole barrier finishes in seconds, not minutes (CI-viable). A worker takes NO new task once the
+// 2) Verify each suggestion returns >0 from the real search. A worker takes NO new task once the
 //    deadline has passed: the tasks left over are reported, never silently dropped.
-const CONCURRENCY = 10;
+//
+//    TWO WORKERS, NOT TEN (P0, 2026-10-04 21:52-22:12 UTC). Every search here is a full-scope
+//    location_search_candidates_ar — the SAME query a user's «بحث» waits on, on the same instance.
+//    At 10 workers this check alone held ~9.5 of them in flight for its whole run (edge logs:
+//    06:16 1,414 calls / 11,351 DB-s in 20 min; 12:48 1,678 / 8,105 in 14 min; 21:52 1,001 /
+//    10,964 in 20 min, mean 11 s, 137 × 5xx). Users' searches queued behind it: a real
+//    جدة/شراء/سكني search showed «يجري تحميل الإعلانات» after ~45 s with 0 cards, and browser p90
+//    rose to 17-20 s. Ten workers never made the check faster either — each call slowed ~8x
+//    because they fought each other. Two keeps it inside the shared envelope ops_search_load_now
+//    publishes (safe_qps 1.5); the deadline in the workflow is sized for the longer wall-clock.
+const CONCURRENCY = 2;
 let cursor = 0;
 async function worker() {
   while (cursor < tasks.length) {

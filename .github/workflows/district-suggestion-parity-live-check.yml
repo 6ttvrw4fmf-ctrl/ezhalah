@@ -30,7 +30,10 @@ jobs:
     # actually prevents a silent kill: the check stops taking new work and reports, strictly inside
     # this cap. Keep (sum of CHECK_DEADLINE_SECONDS in this job) + 180s <= timeout-minutes * 60 —
     # pinned by scripts/verify-live-check-deadline-beats-its-job-timeout.ts.
-    timeout-minutes: 25
+    # 25 → 50 and 1200 → 2700 on 2026-10-04: the check now runs 2 searches at a time instead of 10
+    # (10 crowded real users' searches into timeouts — see the CONCURRENCY note in the script), so
+    # the same 1,772 suggestions take longer wall-clock: ~1.3 s × 1,772 / 2 ≈ 19 min quiet.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -41,7 +44,7 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
           EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
-          CHECK_DEADLINE_SECONDS: '1200'
+          CHECK_DEADLINE_SECONDS: '2700'
         run: node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-district-suggestion-parity-live.ts
 
       # ── Failure→alert bridge (2026-09-04, issue #1349) ──────────────────────────────────────────
