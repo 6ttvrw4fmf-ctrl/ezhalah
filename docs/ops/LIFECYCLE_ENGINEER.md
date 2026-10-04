@@ -14,6 +14,16 @@ it the same way. The old 11-routine setup is retired; `AGENTS.md`'s safety rules
 instructions, but it is required reference: read §2 (the chain, link by link), §2.5a–b (the
 deletion ledger) and §4 (its barriers and lessons) before changing any liveness or cleanup code.
 
+> **🌙 THE NIGHT SHIFT (owner, 2026-10-04 — this block wins over EVERY other time, budget or hour count in this file).**
+> The owner works by day, so all five engineers work one after another at night, never overlapping, **2 hours each**
+> (Arizona, UTC−7): ⚡ Scraping 10 PM · 🆕 New Listings 12 AM · 🔬 Advanced Filter 2 AM · ♻️ Lifecycle 4 AM ·
+> 🔧 Quality & Repair 6 AM, all done by 8 AM. **You: ♻️ 4:00 – 6:00 AM Arizona (11:00–13:00 UTC); the dead-ads score lands at 2:05 AM, before you wake.** Wherever this file says 3 or 4 hours, read 2 hours,
+> and scale its timeline to fit (the same order of work, each step shorter). **Hard stop at 2 hours:** whatever is
+> unfinished goes into `ops_engineer_backlog` with its numbers and is the first thing you do tomorrow; running into the
+> next engineer's slot is never allowed. **Full control (owner, 2026-10-04): «they have full control on everything, no
+> need to come back and ask me».** You decide and act; the owner is never your blocker. The only things that stay his:
+> money, law (REGA/PDPL), secrets, and the few bulk/destructive operations your own rules already name.
+
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «I trust the lifecycle engineer … I don't want to go back and forth with it … make it
 powerful so it does an amazing job.» So this section is the whole plan, written to be followed without

@@ -16,6 +16,16 @@ the law and report the conflict in one line under "Needs from you". If you think
 wrong, don't act on that belief: report it the same way. The old 11-routine setup is retired;
 `AGENTS.md`'s safety rules still apply.
 
+> **🌙 THE NIGHT SHIFT (owner, 2026-10-04 — this block wins over EVERY other time, budget or hour count in this file).**
+> The owner works by day, so all five engineers work one after another at night, never overlapping, **2 hours each**
+> (Arizona, UTC−7): ⚡ Scraping 10 PM · 🆕 New Listings 12 AM · 🔬 Advanced Filter 2 AM · ♻️ Lifecycle 4 AM ·
+> 🔧 Quality & Repair 6 AM, all done by 8 AM. **You: 🆕 12:00 – 2:00 AM Arizona (07:00–09:00 UTC); your computed score lands at 10:35 PM, before you wake.** Wherever this file says 3 or 4 hours, read 2 hours,
+> and scale its timeline to fit (the same order of work, each step shorter). **Hard stop at 2 hours:** whatever is
+> unfinished goes into `ops_engineer_backlog` with its numbers and is the first thing you do tomorrow; running into the
+> next engineer's slot is never allowed. **Full control (owner, 2026-10-04): «they have full control on everything, no
+> need to come back and ask me».** You decide and act; the owner is never your blocker. The only things that stay his:
+> money, law (REGA/PDPL), secrets, and the few bulk/destructive operations your own rules already name.
+
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «we need it to do a good job … make a plan, and one rule: the numbers a customer sees must
 stay true when listings go dead.» You decide; you do not ask (only money, legal, secrets). The 3 hours are yours: **below 9
@@ -42,7 +52,7 @@ engineer's, not yours.
 4. **2:00–2:30 customer tests** with `e2e/engineers/customer-journey.mjs`: 3 normal and 3 Advanced Filter, plus one
    search of a city/district you just fixed.
 5. **2:30–2:50 your score (it is computed FOR you now).** `.github/workflows/new-listings-score.yml` runs every night at
-   08:35 UTC (pg_cron job `gh-new-listings-score`; CI holds the service key): it writes one row per website into
+   05:35 UTC (pg_cron job `gh-new-listings-score`; CI holds the service key): it writes one row per website into
    `ops_new_listings_score` and prints the report numbers into its job log. Read `ops_new_listings_score` for tonight and the log's
    report numbers; your rating comes from them. If tonight's rows are missing, dispatch the workflow (GitHub tools), wait for
    it, then read them, and say on the first line that the schedule did not run.
