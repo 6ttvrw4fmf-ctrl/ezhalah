@@ -328,17 +328,22 @@ operating on the restored turns' own embedded queries and paging state.
 - Barrier: `scripts/verify-chat-persistence.ts` (pure contract executed + identity + sync + RLS
   pins, mutation-proven). Live proof: `scripts/verify-chat-persistence-live.mjs`.
 
-### 7.5 In-app browser (`src/app/browser.tsx`)
+### 7.5 Listing viewer (`src/components/AdViewer.tsx`)
 
-Opens the listing at its **real source**, in-app:
-- **Web:** `<iframe>` → `/api/proxy?url=…` (server proxy fetches the partner page and strips
-  `x-frame-options` so it embeds); dimmed modal card, spinner until load, 12s timeout → fallback
-  (Reload / "Open on source" new tab); `sandbox` blocks framebusting.
-- **Native:** hands off to Chrome Custom Tab / Safari View Controller (`expo-web-browser`).
-`trackOpen(listing)` fires on open (CPC). Listing resolved by `id` via `findListing`.
-> ⚠️ Verify the proxy/iframe path works for **all** partners, not just Aqar (the copy/localization is
-> Aqar-centric). A prior note claimed "iframe impossible" — the code now uses proxy+iframe on web;
-> reconcile before relying on it broadly.
+Owner-approved web behaviour (2026-10-03): Deal App and Gathern open their real pages in plain
+iframes, with their own headers unchanged. The allowlist in `src/lib/inAppViewer.ts` is exactly
+`dealapp.sa,gathern.co`. No proxy, header stripping, or framing bypass is permitted.
+
+Aqar and Aqar Monthly (`sa.aqar.fm` only) use the same panel with a native `ListingPreview` of the
+card's existing `Listing`, with no additional listing-data fetch. Source-ordered photos, the shared
+`listingPrice` (including the stay-length note), source-stated facts and redacted description lead
+to an explicit external Aqar contact link. Arabic prose is hidden in English like ResultCard.
+
+Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
+up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.
+Preview tabs have no frame history/loading indicator, and reload remounts their content.
+All other web hosts still open externally. Native keeps `expo-web-browser`; `trackOpen` is unchanged.
+Barrier: `scripts/verify-in-app-viewer-allowlist.ts` (executed host/tab contracts and mutation proofs).
 
 ---
 
@@ -1186,8 +1191,6 @@ migration-drift-guard rule in `AGENTS.md`).
   **Owner decision: leave as-is** — no split, no code change (project memory
   `project_rawland-classification-decision-2026-07-23`).
 - **Rent scaling:** monthly price ×12 handling vs Gathern's pre-annualized `price_annual`.
-- **In-app browser proxy** proven for all partners (currently Aqar-centric); reconcile the "iframe
-  impossible" note.
 - **`scrapers/common/normalize.category_for_type()`'s residential set is missing "Duplex"/"Studio"
   fleet-wide (found 2026-09-24).** Every "house pattern" scraper that calls this shared helper
   unqualified gets `Commercial` for these two types, so they physically land in each platform's

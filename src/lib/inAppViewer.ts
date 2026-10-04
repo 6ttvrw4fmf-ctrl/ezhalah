@@ -9,7 +9,7 @@
 // <iframe> with the site's own headers — no X-Frame-Options, no CSP frame-ancestors, no
 // frame-busting script. Both entries were proven 2026-10-03 with Playwright against a local page
 // (dealapp.sa/ar/ad-details/530440, gathern.co/view/193264/unit/270328). We never proxy or strip a
-// site's headers to force an embed; a site that says no stays a new tab.
+// site's headers to force an embed; Aqar uses the data preview below, all other sites open externally.
 export const IN_APP_VIEWER_HOSTS = ['dealapp.sa', 'gathern.co'] as const;
 
 /** The allowlisted host a listing URL belongs to, or null when it must open the old way. */
@@ -19,6 +19,15 @@ export function inAppViewerHost(url: string | null | undefined): string | null {
   try { host = new URL(url).hostname.toLowerCase(); } catch { return null; }
   const bare = host.replace(/^www\./, '');
   return IN_APP_VIEWER_HOSTS.find((h) => bare === h || bare.endsWith('.' + h)) ?? null;
+}
+
+// Aqar forbids framing. Its tab renders the card's existing data, never the remote document.
+export const IN_APP_PREVIEW_HOSTS = ['sa.aqar.fm'] as const;
+export function inAppPreviewHost(url: string | null | undefined): string | null {
+  if (!url) return null;
+  let host: string;
+  try { host = new URL(url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return null; }
+  return IN_APP_PREVIEW_HOSTS.find((h) => host === h) ?? null;
 }
 
 // THE TAB MODEL (owner 2026-10-03: «whenever I click, a new tab happens … I click Deal again, a new tab
@@ -35,7 +44,7 @@ export const MAX_AD_TABS = 12;
 
 /** One tab in the pane. `tid` is unique per tab for the whole session, so two tabs of the SAME listing
  *  have different keys (frames, ← history and reloads are all keyed by it). */
-export type AdTab = { source: string; id: number; title: string; url: string; tid?: number };
+export type AdTab<T = unknown> = { source: string; id: number; title: string; url: string; tid?: number; listing?: T };
 export const adTabKey = (t: { source: string; id: number; tid?: number }) =>
   `${t.source}:${t.id}${t.tid != null ? `#${t.tid}` : ''}`;
 
