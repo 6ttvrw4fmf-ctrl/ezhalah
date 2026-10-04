@@ -67,7 +67,7 @@ A page we could not read and a field the ad does not state are **never** counted
 ## Your first nights: build your own safety nets, one per night, inside your 2 hours
 The owner's design (2026-10-04): robots guard 24/7 at no AI cost; you fix what they catch and make them smarter, so the same
 bug can never come back. Build them in this order; each is a PR that ships green and is proven live:
-1. **Night 1 — the score.** `scrapers/common/af_score.py` (imports the functions above; samples production-ready listings
+1. **Night 1 — the score (do ONLY this tonight; no exploring, no other fixes).** `scrapers/common/af_score.py` (imports the functions above; samples production-ready listings
    first seen MORE than 24 hours ago, 10 per big site, 5 per small) + table `ops_af_score` (one row per site per night:
    findability tried/found, precision, capture, parity, mismatch keys as `source_table:id` only — never a URL, name or phone)
    + `.github/workflows/af-score.yml` (dispatch-only) + a pg_cron row `gh-af-score` at **08:00 UTC** (1 AM Arizona, before
@@ -93,6 +93,47 @@ cannot find), plus growing the saved-ads sets.
    row (below). Merged is not live.
 4. **Report (15 min):** the block at the bottom, last thing you write. Then stop.
 
+## Traps that already cost real days (read every night; each one is a real past mistake)
+1. **«The site doesn't publish that field» is a claim you must prove from the raw payload.** aqar's parking was declared
+   «unpublished» and pinned NULL; it was nested one level deeper (`extended_details.special_parking`). Read the whole JSON /
+   `__NEXT_DATA__` of 2+ live ads before deciding.
+2. **The on-screen count updates late.** Never judge a journey by the number on screen; `customer-journey.mjs` proves it on
+   the request the page sent. Use the tool, never a hand-made Playwright script (the 🆕 engineer lost 10 of 18 minutes
+   rebuilding one).
+3. **Amenity parameters are English slugs** (`elevator`, `parking`, `kitchen`, `ac`, `maid_room`, `driver_room`,
+   `private_entrance`, `furnished`, `rnpl`), while every other filter value is Arabic (`بيع`, `شهري`, `شقة`, `شمال`).
+4. **Column names differ between a site's table and `search_listings_ar`.** Read `information_schema.columns` for both before
+   writing SQL or an upsert (a whole first crawl died on 4 wrong keys).
+5. **A field can live in `additional_info` (JSON), not a column.** Gathern's `furnished` is a title suffix and never a column;
+   Gathern's list API says rating 0/0 for units whose own page shows «8.6 (7 تقييم)» — the unit page is the truth.
+6. **Prose has FOUR outcomes, not two:** names it (true) · says it is absent (false) · says nothing (NULL) · ambiguous (NULL).
+   «مصعد» vs «لا يوجد مصعد». Prose only where the site has no structured field at all.
+7. **A None-dropping upsert hides a broken extractor:** a parser that starts returning None leaves yesterday's values in
+   place, so NULL counts do not move. To judge a parser fix, replay old vs new over EVERY row the path reaches and classify:
+   no-write / unchanged / NULL→gain / REWRITE.
+8. **`sync_search_listings_ar()` silently does nothing without the writer lock** (zero rows, no error), and the hourly sync can
+   read a stale location view (13% of hours). Never «sync by hand» to prove a fix; wait for the :22 sync and check the row.
+9. **A cardinality cap in `af_eligibility_clause()` fails CLOSED** (honest zero) when the table list grows past it: a sudden
+   zero everywhere is a cap, not lost data. Read the RPC body before blaming data.
+10. **Privileged SQL proves logic, not access.** After any change to a table or RPC the app reads, call it with the PUBLIC anon
+   key (the customer's path). A table without the right policy works for you and returns nothing to customers.
+11. **Never hand-compute a score.** The cloud container has no service key; anything needing it runs as a GitHub workflow
+   (CI holds the key), dispatched and read from its log. The 🆕 engineer's first night wrote 0 score rows doing it by hand.
+12. **The interview only appears with more than 25 results.** A journey in a tiny scope says UNKNOWN, never PASS or FAIL;
+   widen to the city, as the tool already does.
+13. **Barrier culture:** a new barrier needs `mustCatch(...)` mutation proofs and must pin CODE, never a comment (two CI
+   ratchets fail otherwise); every `.py` must parse on Python 3.11.
+14. **Don't run the monitoring detectors by hand while their cron runs** (it doubles the load and skews their results).
+
+## Before you write «fixed» (the 60-second checklist)
+- [ ] the ad's own page says what we now store (2+ ads, read through `source_reread.py`);
+- [ ] the stored row, `search_listings_ar` and the Advanced Filter answer all agree (after the :22 sync);
+- [ ] the public anon RPC returns the listing for the customer's request;
+- [ ] `customer-journey.mjs --mode af` PASSES on production, and the proof row is written;
+- [ ] a barrier or saved ad would have FAILED on the old code;
+- [ ] nothing else got worse (the same scope's counts before and after; any other website touched re-checked).
+Missing one box = «PROPAGATION PENDING» or «not fixed yet», never «fixed».
+
 ## How you change things safely (each rule exists because breaking it cost real days)
 - **One PR per run** (trains for waiting PRs); merge only when every check is green, through the normal merge; never `--admin`.
 - **Migrations:** check what you cite exists before applying; a repair is first run as a **rolled-back dry run** proving the
@@ -107,13 +148,18 @@ cannot find), plus growing the saved-ads sets.
 - **Never:** weaken, skip or delete a barrier (repoint only, same strength); change a number to match; turn NULL into false;
   read prose for a field the site publishes structurally; open the Advanced Filter by itself.
 
-## Rating (computed, must be earned)
-Start from tonight's `ops_af_score` (fleet):
-- **10** only when findability ≥ 99%, precision ≥ 99%, capture ≥ 90%, parity 100% on every website with ≥ 5 decided ads, every
-  website measured, the robots ran in the last 24 h, and your backlog is smaller than yesterday;
-- **cap 8** if any website is below 95% findability; **cap 5** if a customer-visible number or answer was wrong and you
-  neither fixed nor logged it; **−1** for each «live» claim without a proof row; **−2** for anything you made worse and did not
-  undo the same run. Before night 1 ships the score, the rating is at most 6 and says why.
+## Rating (computed, must be earned — and fair)
+**Build nights (until your four nets exist):** the night's job is the net. **10** when that net ships green, is proven live
+(it ran on production and wrote/caught what it should), nothing got worse, and your report states the numbers you could
+measure honestly (say «not measured yet» where a net does not exist yet; that is not a deduction). A net you did not finish
+inside 2 hours: the finished part is in a PR or the backlog with its numbers, and the rating is at most 8.
+**Fixing nights (after the four nets):** from tonight's `ops_af_score` (fleet): **10** only when findability ≥ 99%,
+precision ≥ 99%, capture ≥ 90%, parity 100% on every website with ≥ 5 decided ads, every website measured, the robots ran in
+the last 24 h, and your backlog is smaller than yesterday. Below target, the rating is the share of the gap you closed
+tonight, honestly: **9** if tonight's fix moved the worst website × field measurably and was proven live; **cap 8** if any
+website is below 95% findability and you did not work on the worst one.
+**Always:** **−1** for each «live» claim without a proof row; **−2** for anything you made worse and did not undo the same
+run; **cap 5** if a customer-visible number or answer was wrong and you neither fixed nor logged it.
 
 ## Report: the LAST thing you write (short; Arizona time)
 > ✅ One plain first line: «Customers can find what they ask for: N%.» or «Not good: <what>, and what I did about it.»
