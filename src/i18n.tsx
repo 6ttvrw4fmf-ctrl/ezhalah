@@ -906,7 +906,7 @@ const AR: Record<string, string> = {
   'Open in new tab': 'فتح في تبويب جديد',
   // In-app ad viewer (owner 2026-10-03)
   'Open in a new window': 'فتح في نافذة جديدة',
-  'This ad can’t be shown here': 'تعذر عرض الإعلان هنا',
+  'Taking a while?': 'يأخذ وقتًا؟',
   'Oldest tab closed': 'أُغلق أقدم تبويب',
   'New tab': 'تبويب جديد',
   'Hide tabs': 'إخفاء التبويبات',
