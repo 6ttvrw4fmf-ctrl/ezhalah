@@ -4336,7 +4336,7 @@ export default function Agent() {
                 ref={inputRef}
                 // writingDirection RTL for Arabic (the parent col is LTR-pinned, so without this the
                 // placeholder's trailing «...» lands on the wrong side — it must read «…السعودية»). (owner 2026-07-09)
-                style={[s.input, { textAlign: typed.trim() ? (msgRTL(typed) ? 'right' : 'left') : 'right', writingDirection: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : 'rtl', height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) } as any]}
+                style={[s.input, { flex: 1, alignSelf: 'stretch', textAlign: typed.trim() ? (msgRTL(typed) ? 'right' : 'left') : 'right', writingDirection: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : 'rtl', height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) } as any]}
                 // While the rotating examples occupy the placeholder slot, the input's own static
                 // placeholder yields (empty string) so the two never overlap; the moment the
                 // rotation stops (any interaction) the familiar static placeholder returns.
@@ -4822,14 +4822,14 @@ const s = StyleSheet.create({
   // The LTR-pinned column keeps mic/send on the physical right in either locale.
   // Desktop welcome and composer share one compact column; messages still use MAX_W.
   composerCol: { maxWidth: 620, alignSelf: 'center' },
-  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 18, paddingVertical: 10, paddingHorizontal: 12, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
+  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 16, paddingVertical: 6, paddingHorizontal: 10, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
   // Focus glow target — COMPOSER_EASE (web) glides border-color and box-shadow between these two.
   // Carries the FULL shadow set: RNW compiles box-shadow per-style, so a partial override here
   // would win wholesale and drop the green tint + offset (observed live).
   composerFocused: { borderColor: colors.primary, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.2, shadowRadius: 18, shadowOffset: { width: 0, height: 6 } },
   // The wrapper owns the glide (INPUT_EASE) and the row position; marginVertical 6 =
   // (34 send-button − 22 line) / 2, the single-line centering trick above.
-  inputGrow: { flex: 1, overflow: 'hidden', marginVertical: 6 },
+  inputGrow: { flex: 1, overflow: 'hidden', marginVertical: 3, minWidth: 0 },
   // 15/22 breathes better for Arabic script than the old 14/20. Height is the same numeric target
   // as the wrapper's — set state-wise, never transitioned (see the JSX note on measurement).
   // fontSize MUST be >=16 on web: mobile Safari/Chrome auto-zoom the page when focusing an input under
@@ -4844,7 +4844,7 @@ const s = StyleSheet.create({
   // ── Voice recording composer (owner brief 2026-08-23) ──
   // composerInner keeps the normal controls' exact pre-voice layout (it owns the composer's size at
   // all times); the recording row overlays it absolutely so the morph never changes the surface.
-  composerInner: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'flex-end', minHeight: 58, gap: 8 },
+  composerInner: { flex: 1, flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'flex-end', alignItems: 'flex-end', minHeight: 44, gap: 6 },
   composerInnerHidden: { opacity: 0 },
   composerInputColumn: { flex: 1, minWidth: 0 },
   initialSearch: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 13, marginTop: 6, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
