@@ -18,6 +18,7 @@ import { Image } from 'expo-image';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
+import { shouldRenderModeSwitch } from '@/lib/shouldRenderModeSwitch';
 import { isAppSessionStarted } from '@/lib/appSession';
 import { msgRTL } from '@/lib/textDirection';
 import { stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
@@ -122,6 +123,7 @@ function anyGuidedEligible(q: SearchQuery): boolean {
 }
 
 const IS_WEB = Platform.OS === 'web';
+const EAGLE_MARK = require('../../assets/images/eagle-mark.png');
 // On the web the results tile into a wrap grid, so the conversation column is wider to give them
 // room (the user barely scrolls). On phone it stays a comfortable single-column reading width.
 const MAX_W = IS_WEB ? 940 : 560;
@@ -3720,7 +3722,7 @@ export default function Agent() {
           pill, owner 2026-08-16: "it stays in the middle, not far right"). Fades + collapses away
           the moment a search happens, in either mode; the wrapper's animated height keeps the chat
           area from snapping up when it leaves. */}
-      {!modeGone && (
+      {shouldRenderModeSwitch(modeGone, replay) && (
         <View style={[s.modeWrap, MODE_EASE, modeSearched && s.modeWrapHidden]}>
           <ModeSwitch active="agent" onSwitch={() => router.replace('/')} t={t} />
         </View>
@@ -3754,12 +3756,11 @@ export default function Agent() {
               if (m.role === 'user') {
                 // User messages ALWAYS sit on the user side (alignSelf: 'flex-end') regardless of the
                 // message language — the page direction (RTL/LTR) decides which screen edge that is.
-                // Only the TEXT inside the bubble follows its own writingDirection so Arabic still reads
-                // right-to-left and English left-to-right. The bubble never jumps sides because the
-                // message language changed. (user request.)
+                // Only the text follows its own writingDirection. A narrow green edge marks the
+                // speaker without turning every line into the same rounded chatbot tile.
                 const rtl = msgRTL(m.text);
                 return (
-                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={s.userBubble}>
+                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={[s.userBubble, rtl ? s.userMessageRtl : s.userMessageLtr]}>
                     <Text style={[s.userText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
                       {m.typing ? <Typer text={m.text} onDone={onBubbleDone} /> : m.text}
                     </Text>
@@ -3787,18 +3788,16 @@ export default function Agent() {
                 }
                 // Per-message direction: each AI reply renders in its OWN language's direction and
                 // stays put even if the next message flips. ARABIC reply → the whole row is RTL and
-                // anchored to the RIGHT (sparkle on far right, Arabic text flows right → left to its
-                // left). ENGLISH reply → row is LTR and anchored to the LEFT (sparkle on far left,
+                // anchored to the RIGHT (Ezhalah mark on far right, Arabic text flows right → left to its
+                // left). ENGLISH reply → row is LTR and anchored to the LEFT (mark on far left,
                 // English text flows left → right to its right). Earlier rows never move when a new
                 // message in the other language arrives. (user request.)
                 const txt = m.text;
                 const rtl = msgRTL(txt);
                 return (
-                  <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: '88%' }}>
+                  <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: IS_WEB ? '76%' : '88%' }}>
                     <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row' }]}>
-                      <View style={s.replyIcon}>
-                        <Ionicons name="sparkles" size={14} color={colors.primary} />
-                      </View>
+                      <Image source={EAGLE_MARK} style={s.replyBrandMark} resizeMode="contain" accessible={false} />
                       <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
                         {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
                       </Text>
@@ -3893,22 +3892,18 @@ export default function Agent() {
                   // layout change at all, so the reader stays exactly where they were.
                   style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%', opacity: searchingVisibleRef.current || (latestResult?.id !== m.id && latestResult?.typing && !doneTyping[latestResult.id]) ? 0.35 : 1 }}
                 >
-                  {/* 1) BRANDED SLOGAN — sparkle icon + Ezhalah's personality line. The row sizes to its
+                  {/* 1) BRANDED SLOGAN — the Ezhalah mark + its personality line. The row sizes to its
                       content and is pushed to the correct edge by the parent's alignItems. ENGLISH →
-                      icon then text (reads left-to-right, clustered left). ARABIC → text then icon
+                      mark then text (reads left-to-right, clustered left). ARABIC → text then mark
                       (icon on the far right, clustered right). */}
                   {m.slogan ? (
                     <View style={[s.reply, { flexDirection: 'row', alignItems: 'center' }]}>
                       {!msgRTL(m.slogan) && (
-                        <View style={s.replyIcon}>
-                          <Ionicons name="sparkles" size={14} color={colors.primary} />
-                        </View>
+                        <Image source={EAGLE_MARK} style={s.replyBrandMark} resizeMode="contain" accessible={false} />
                       )}
                       <Text style={[s.sloganText, { writingDirection: msgRTL(m.slogan) ? 'rtl' : 'ltr', textAlign: msgRTL(m.slogan) ? 'right' : 'left' }]}>{m.slogan}</Text>
                       {msgRTL(m.slogan) && (
-                        <View style={s.replyIcon}>
-                          <Ionicons name="sparkles" size={14} color={colors.primary} />
-                        </View>
+                        <Image source={EAGLE_MARK} style={s.replyBrandMark} resizeMode="contain" accessible={false} />
                       )}
                     </View>
                   ) : null}
@@ -4336,7 +4331,7 @@ export default function Agent() {
                 ref={inputRef}
                 // writingDirection RTL for Arabic (the parent col is LTR-pinned, so without this the
                 // placeholder's trailing «...» lands on the wrong side — it must read «…السعودية»). (owner 2026-07-09)
-                style={[s.input, { textAlign: locale === 'ar' ? 'right' : 'left', writingDirection: locale === 'ar' ? 'rtl' : 'ltr', height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) } as any]}
+                style={[s.input, { textAlign: typed.trim() ? (msgRTL(typed) ? 'right' : 'left') : 'right', writingDirection: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : 'rtl', height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) } as any]}
                 // While the rotating examples occupy the placeholder slot, the input's own static
                 // placeholder yields (empty string) so the two never overlap; the moment the
                 // rotation stops (any interaction) the familiar static placeholder returns.
@@ -4666,7 +4661,7 @@ const s = StyleSheet.create({
   fbToastText: { fontSize: 12.5, fontWeight: '600', color: colors.ink },
   iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
-  title: { fontSize: 22, fontWeight: '800', color: colors.ink },   // the brand name, big (owner 2026-10-04)
+  title: { fontSize: 22, fontWeight: '800', color: colors.primary },
   // Note #5 — share icon sits beside the Filter pill in the agent header.
   // Matches the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius, soft lift) so
   // the pill + share read as one cluster across both screens (owner redesign 2026-07-24 r2).
@@ -4778,25 +4773,24 @@ const s = StyleSheet.create({
   promptSecondary: { paddingVertical: 8 },
   promptSecondaryTx: { color: colors.muted, fontSize: 13.5, fontWeight: '600' },
 
-  // marginTop adds breathing room above each user message so it isn't cramped against the property
-  // cards / reply text above it (on top of the column's 8px gap). (user request.)
-  // User message bubble — deliberately STRONGER light-green so it pops against the cream paper bg,
-  // like the selected recent-chat row in the sidebar. Dark green text for contrast. (user request.)
-  // User message bubble — soft light green pill, normal text weight (not heavy/black). (user request.)
-  userBubble: { alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: colors.userBubble, borderColor: colors.tintLine, borderWidth: 1, borderRadius: 16, borderBottomRightRadius: 5, paddingVertical: 10, paddingHorizontal: 14, marginTop: 10 },
-  userText: { color: colors.userBubbleText, fontSize: 14, lineHeight: 19, fontWeight: '500' },
+  // Conversation turns use a typographic transcript instead of repeated rounded chatbot tiles.
+  // The green edge keys the user's request to Ezhalah's identity while leaving the paper open.
+  userBubble: { alignSelf: 'flex-end', maxWidth: IS_WEB ? '76%' : '88%', paddingVertical: 8, marginTop: 12 },
+  userMessageRtl: { borderRightWidth: 3, borderRightColor: colors.primary, paddingRight: 14, paddingLeft: 2 },
+  userMessageLtr: { borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: 14, paddingRight: 2 },
+  userText: { color: colors.userBubbleText, fontSize: IS_WEB ? 18 : 16.5, lineHeight: IS_WEB ? 31 : 28, fontWeight: '600' },
 
   status: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 2 },
   statusText: { fontSize: 12.5, color: colors.muted },
   // The Ezhalah slogan during search — plain text, prominent, with the summary beneath it. No icon.
   sloganWrap: { gap: 8, paddingVertical: 2 },
-  sloganText: { fontSize: 15.5, fontWeight: '700', color: colors.dark, flexShrink: 1 },
+  sloganText: { fontSize: IS_WEB ? 18 : 16.5, lineHeight: IS_WEB ? 30 : 27, fontWeight: '700', color: colors.dark, flexShrink: 1 },
   // The search summary shown under the results header (not with the slogan).
-  summaryText: { fontSize: 12.5, color: colors.muted, lineHeight: 18, marginTop: 2 },
+  summaryText: { fontSize: IS_WEB ? 14.5 : 13, color: colors.body, lineHeight: IS_WEB ? 24 : 21, marginTop: 4 },
 
   reply: { flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
-  replyIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  replyText: { flex: 1, fontSize: 14, lineHeight: 20, color: colors.ink },
+  replyBrandMark: { width: 22, height: 22, marginTop: 3, flexShrink: 0 },
+  replyText: { flex: 1, minWidth: 0, fontSize: IS_WEB ? 17 : 16, lineHeight: IS_WEB ? 30 : 28, color: colors.ink },
   introScroll: { flexGrow: 1, justifyContent: 'center' },
   greeting: { width: '100%', alignItems: 'center', gap: 8, paddingVertical: 24 },
   greetingText: { fontSize: 24, lineHeight: 36, fontWeight: '600', color: colors.dark, textAlign: 'center', writingDirection: 'rtl' as any },
@@ -4819,25 +4813,10 @@ const s = StyleSheet.create({
   refineBtnTx: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
   composerWrap: { paddingHorizontal: space.screenSide, paddingTop: 10, alignItems: 'center' },
-  // The send/stop button is pinned to the PHYSICAL right (right:4) and never mirrors — it stays on the
-  // right in Arabic too, so paddingRight leaves room for it regardless of text direction. (user request.)
-  // Inline row (no absolute button): input flexes, the send/stop button sits at the end, vertically
-  // centered with comfortable edge padding. flexDirection is set per language at the call site so the
-  // button lands on the correct side in both LTR and RTL. (user request: balanced, centered send button.)
-  // ChatGPT-style bar (owner 2026-07-08): single row, send button anchored on the far right (16px from
-  // the edge, vertically centered), thinner single-line input that grows on wrap. paddingRight 16 places
-  // the button; the input + button are flex siblings so text always stops before the button (never under).
-  // The composer sits inside the LTR-pinned `col`, so `row` (not row-reverse) is what puts the send
-  // button on the FAR RIGHT here; the input (flex:1) fills to its left and right-aligns its Arabic
-  // text next to the button. (owner 2026-07-09: send button must be far right.)
-  // Composer redesign (2026-08-16). The chat column is 940 wide on desktop — a full-width composer
-  // there reads as a search bar, not a place to talk. 720 keeps it a deliberate, centered object.
-  composerCol: { maxWidth: 720, alignSelf: 'center' },
-  // alignItems flex-end pins the send arrow to the BOTTOM edge as the box grows (the ChatGPT/Claude
-  // composer contract); the input's own marginVertical re-centers a single line against the 34px
-  // button, so idle still reads as one compact pill. borderColor/shadowOpacity/shadowRadius are
-  // ANIMATED inline (focus glow) — only the static halves live here.
-  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 24, paddingVertical: 8, paddingLeft: 18, paddingRight: 8, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.1, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 3 },
+  // The LTR-pinned column keeps mic/send on the physical right in either locale.
+  // Desktop welcome and composer share one compact column; messages still use MAX_W.
+  composerCol: { maxWidth: 620, alignSelf: 'center' },
+  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 18, paddingVertical: 10, paddingHorizontal: 12, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
   // Focus glow target — COMPOSER_EASE (web) glides border-color and box-shadow between these two.
   // Carries the FULL shadow set: RNW compiles box-shadow per-style, so a partial override here
   // would win wholesale and drop the green tint + offset (observed live).
@@ -4851,13 +4830,15 @@ const s = StyleSheet.create({
   // 16px and never zoom back out — the single worst mobile-web chat bug. overflowY:'auto' gives the
   // internal scroll once the textarea reaches COMPOSER_MAX_H. (owner 2026-08-19)
   input: { width: '100%', fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any, overflowY: 'auto' as any } : {}) },
-  sendBtn: { width: 34, height: 34, borderRadius: radius.pill, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
+  // A clear, compact search target: large enough to read and tap, small enough to leave the
+  // composer feeling like a focused property-search field rather than a chat card.
+  sendBtn: { width: 38, height: 38, borderRadius: radius.pill, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
   sendBtnHover: { backgroundColor: colors.dark },
   sendDisabled: { opacity: 0.35 },
   // ── Voice recording composer (owner brief 2026-08-23) ──
   // composerInner keeps the normal controls' exact pre-voice layout (it owns the composer's size at
   // all times); the recording row overlays it absolutely so the morph never changes the surface.
-  composerInner: { flex: 1, flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
+  composerInner: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'flex-end', minHeight: 58, gap: 8 },
   composerInnerHidden: { opacity: 0 },
   composerInputColumn: { flex: 1, minWidth: 0 },
   initialSearch: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 13, marginTop: 6, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },

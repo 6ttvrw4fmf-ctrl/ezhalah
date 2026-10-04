@@ -196,13 +196,27 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). ~33 partner pl
   It disappears on the first conversation turn. Existing composer examples, mic/send placement,
   top mode tabs, reply typing and search-loading animations remain; no additional example chips
   or Filter link. Phone and desktop use the same responsive column without desktop zoom.
-- **Opening chat Search pill (owner, 2026-10-04):** the empty AI chat also shows an outlined
+ - **Opening chat Search pill (owner, 2026-10-04):** the empty AI chat also shows an outlined
   «بحث» action under the input, with a 17px magnifying glass enclosing a small angular eagle eye
   (`assets/icons/eagle-search.svg`, owner-approved 2026-10-04). The existing pill dimensions,
   label and theme colors stay unchanged. It submits the typed text through the existing
   `send()` path and is disabled for whitespace-only input. It stays while typing, disappears on
   the first sent turn, and returns only for a fresh chat. Mic/send remain on the physical right;
   Filter-origin results and restored conversations do not gain this action.
+- **Conversation typography (owner request, 2026-10-03):** user turns are open text with a slim
+  Ezhalah-green edge instead of rounded chat tiles. User copy is 18/31 on web and 16.5/28 on
+  native using the bundled Tajawal Arabic family; agent replies are 17/30 on web and 16/28 on
+  native. The eagle mark identifies Ezhalah in reply and results-intro rows instead of a generic
+  sparkle. Search and persistence behavior is unchanged.
+- **Composer layout (owner request, 2026-10-04):** the AI composer is a compact 620px desktop
+  search field with 10px vertical padding and a 58px minimum control row. The 38px green search
+  target stays clear and tappable. Input direction follows the text being typed immediately: Arabic
+  stays right-aligned and Latin text left-aligned, without moving the composer itself.
+- **Saved-chat mode pill:** when a saved conversation is selected from the sidebar (`replay=0`),
+  the Filter / AI mode pill is not rendered, including while switching between saved chats. The
+  replay predicate gates the animated wrapper synchronously so it cannot flash before effects run.
+  On a fresh chat and during live search, existing mode-pill behavior is unchanged. The Ezhalah
+  header title is 22px bold on the agent screen.
 - **Filter results have no chat composer (owner, 2026-09-11).** Filter and the AI Agent share this one
   screen; a Filter search arrives via the `?filter=` route param. The `filterOrigin` state flag is set
   `true` only in that arrival branch (reset to `false` by `startFresh()`, same lifecycle as every other
