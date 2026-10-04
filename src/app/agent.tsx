@@ -179,15 +179,11 @@ const bedsLabel = (n: string, ar: boolean): string => {
 // playful "you got it" in Najdi colour, never a recommendation or any judgement on the search (user
 // request: speak in the Saudi dialect, plain and simple, never advise). The English locale gets
 // equivalent breezy one-liners so a non-Arabic user reads the same energy.
-// The opening greeting Ezhalah types into a fresh chat (owner-authored FINAL copy, 2026-08-23 —
-// verbatim, do not edit without an explicit owner instruction; the intro-rotator barrier pins it
-// byte-exact). One warm Saudi sentence that says exactly what Ezhalah does. Language follows the UI
-// locale — rendered live (not frozen at send time) so flipping language re-renders it. The English
-// branch stays the bare brand word: the product is Arabic-only and English is latent code — no
-// English marketing copy is invented here (owner brief §10).
+// Owner-approved static welcome (2026-10-03). Only the empty chat renders it;
+// conversation replies keep their existing typing and loading animations.
 const greetingText = (locale: Locale): string =>
   locale === 'ar'
-    ? 'ارحب، أنا إزهله. قلّي وش العقار اللي تدور عليه، وأنا أبحث لك بين المنصات العقارية وأطابق الخيارات مع طلبك لين نلقى اللي يناسبك… إزهلها وفالك الطيب.'
+    ? 'وش العقار اللي في بالك؟\nقل لنا مواصفاته، وإزهله.'
     : 'Ezhalah';
 
 // Ezhalah's SEARCHING-phase voice — one Najdi-flavoured swagger line chosen at random before each
@@ -3385,20 +3381,11 @@ export default function Agent() {
     toTop();
   };
 
-  // Ezhalah greets a fresh chat itself: after a short beat (~1.2s) it drops its opening message as a
-  // normal agent bubble that types itself out, with the quick-suggestion chips underneath. Only fires
-  // when the chat is still empty (a filter/seed/history open never gets the greeting on top).
+  // A fresh chat shows the complete welcome immediately, without a typing timer.
   const sendGreeting = () => {
     if (greetTimerRef.current) clearTimeout(greetTimerRef.current);
-    // Stay pinned to the TOP while the greeting types and the "Click here to start" cards pop in one
-    // by one — never glide the user downward as each box appears (web + phone). (user request.)
     pinModeRef.current = 'top';
-    // Drop the greeting almost immediately so the FIRST sentence starts typing right away — no blank
-    // screen on entering the agent. The example chips wait until this greeting finishes typing, then
-    // pop in one by one. (user request.)
-    greetTimerRef.current = setTimeout(() => {
-      setMsgs((m) => (m.length === 0 ? [{ id: uid(), role: 'agent', text: '', greeting: true, typing: true }] : m));
-    }, 150);
+    setMsgs((m) => (m.length === 0 ? [{ id: uid(), role: 'agent', text: '', greeting: true }] : m));
     // A genuinely fresh empty chat re-arms the rotating composer examples (owner brief §6) — the
     // ONLY re-arm point, so they can never restart while the user is mid-interaction.
     setIntroInteracted(false);
@@ -3540,7 +3527,7 @@ export default function Agent() {
   // if we were already on the agent screen (where the component doesn't remount). (user request.)
   // The wipe is a "fresh page turn", not a hard cut (owner 2026-08-14: the New Chat moment should
   // FEEL like a new chat): the old conversation breathes out (~110ms fade), the clean chat rises
-  // softly back in, and the greeting starts typing as it settles. The wipe itself rides
+  // softly back in, and the static welcome appears as it settles. The wipe itself rides
   // runAfterAnimation — the animation is decoration, the fresh chat is the function, so a frozen
   // rAF (hidden tab) can never leave the user stuck on the old conversation.
   const freshFade = useRef(new Animated.Value(1)).current;
@@ -3751,7 +3738,7 @@ export default function Agent() {
         <ScrollView
           ref={scrollRef}
           style={{ flex: 1 }}
-          contentContainerStyle={[s.scroll, { paddingBottom: 16 }]}
+          contentContainerStyle={[s.scroll, { paddingBottom: 16 }, introLanding && s.introScroll]}
           keyboardShouldPersistTaps="handled"
           onContentSizeChange={onGrow}
           onScroll={maybeRevealOnScroll}
@@ -3783,13 +3770,23 @@ export default function Agent() {
                 return <SearchLoader key={m.id} bottomInset={loaderBottomInset} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} />;
               }
               if (m.role === 'agent') {
+                if (m.greeting) {
+                  if (!introLanding) return null;
+                  const [title, subtitle] = greetingText(locale).split('\n');
+                  return (
+                    <View key={m.id} testID="intro-greeting" style={s.greeting}>
+                      <Text style={s.greetingText}>{title}</Text>
+                      {!!subtitle && <Text style={s.greetingSubtitle}>{subtitle}</Text>}
+                    </View>
+                  );
+                }
                 // Per-message direction: each AI reply renders in its OWN language's direction and
                 // stays put even if the next message flips. ARABIC reply → the whole row is RTL and
                 // anchored to the RIGHT (sparkle on far right, Arabic text flows right → left to its
                 // left). ENGLISH reply → row is LTR and anchored to the LEFT (sparkle on far left,
                 // English text flows left → right to its right). Earlier rows never move when a new
                 // message in the other language arrives. (user request.)
-                const txt = m.greeting ? greetingText(locale) : m.text;
+                const txt = m.text;
                 const rtl = msgRTL(txt);
                 return (
                   <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: '88%' }}>
@@ -3797,7 +3794,7 @@ export default function Agent() {
                       <View style={s.replyIcon}>
                         <Ionicons name="sparkles" size={14} color={colors.primary} />
                       </View>
-                      <Text testID={m.greeting ? 'intro-greeting' : undefined} style={[s.replyText, m.greeting && s.greetingText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
+                      <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
                         {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
                       </Text>
                     </View>
@@ -4770,10 +4767,10 @@ const s = StyleSheet.create({
   reply: { flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
   replyIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
   replyText: { flex: 1, fontSize: 14, lineHeight: 20, color: colors.ink },
-  // The opening greeting is larger and a touch heavier than a normal reply so it reads as a proper
-  // welcome, not just another line. (user request: make it bigger.) 17/27 since the 2026-08-23 copy
-  // became a full marketing sentence — still clearly the welcome, without turning into a wall.
-  greetingText: { fontSize: 17, lineHeight: 27, fontWeight: '600', color: colors.dark },
+  introScroll: { flexGrow: 1, justifyContent: 'center' },
+  greeting: { width: '100%', alignItems: 'center', gap: 8, paddingVertical: 24 },
+  greetingText: { fontSize: 24, lineHeight: 36, fontWeight: '600', color: colors.dark, textAlign: 'center', writingDirection: 'rtl' as any },
+  greetingSubtitle: { fontSize: 16, lineHeight: 26, color: colors.body, textAlign: 'center', writingDirection: 'rtl' as any },
   // Rotating composer examples (owner brief 2026-08-23): the absolute overlay fills the input's own
   // clipped wrapper (inputGrow), so it is structurally unable to move the mic/Send or overflow; the
   // text mirrors the input's placeholder metrics exactly (16px web / muted / RTL right-aligned) so
