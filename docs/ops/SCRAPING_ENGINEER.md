@@ -130,6 +130,25 @@ diagnostic workflow, or `loader-active-platforms-check.yml`. Cleanup and livenes
 and that is not your job.
 
 ## The owner's open requests (do these first, then delete each line when it's done and proven)
+> **🏕️ GATHERN: ALL ~37,000 UNITS (owner, 2026-10-04: «let's scrape all those 37,000 … searchable by Advanced Filter and normal filter, that note is important, lifecycle … a very very very close eye»).**
+**What we know (measured 2026-10-04):** Gathern's own search (`msapi.gathern.co/search/api/v1/search-units`, no
+`calendar_type`) lists **~37,251 units in 165 cities** (Riyadh 12,775, Jeddah 6,145, Madinah 2,357, Khobar 2,107, Taif
+1,795, Abha 1,685); almost all also accept a 30-night stay (Riyadh: 12,709 of 12,775). We show **~4,775**, because the rest
+answer **«الصفحة غير موجودة» (HTTP 404) on the website** (`gathern.co/view/<chalet>/unit/<unit>`) and only open in Gathern's
+phone app. Sample: 800 Riyadh units Gathern lists → we had seen 679, only 112 live (the rest were hidden as web-404, correctly).
+**The rule that does not move: a customer never lands on a dead page.** A unit is shown only with a link proven to open it.
+**Your part, in order (it is your first open request until done):**
+1. **Tonight: find a link that opens an app-only unit for a customer.** Test on a phone-size browser AND a laptop: Gathern's
+   universal/app links, any share link the app produces, the web search page with the unit filter, `gathern.co/unit/<id>`
+   style redirects (they 404 today), `?check_in=&check_out=` (404 today). PASS = the unit's own page or the app opens on it.
+   Write what you tried and what opened into `ops_engineer_backlog` (`engineer = 'scraping-engineer'`, item «gathern app-only
+   link») with the evidence. **No working link → stop here, report it in one line, keep the ~4,775; that is a correct answer.**
+   A link that works on phones only is acceptable: record it, and the plan becomes «show app-only units on phones only».
+2. **Nights 2–3: crawl every unit** through the search API city by city, every page (pages go deep: Riyadh has ~1,271 pages
+   of 10), paced, `has_available` NOT required for listing, each unit with its own link from step 1. Same reader, same fields,
+   same tables as today; stored link = the proven link. Daily-stay units are the same units (they accept 30 nights).
+3. Hand off: a `new_listings_engineer:followup` and a `lifecycle:followup` row the night the first app-only units land.
+
 - **Gathern monthly coverage (owner, 2026-09-28: «we are not scraping much of Gathern monthly
   data»).** Measured the same day: Gathern's full catalogue has about 31,445 homes (Riyadh 11,011),
   but its **website** only shows about 4,462 (Riyadh 1,321), and we already crawl about 100% of
