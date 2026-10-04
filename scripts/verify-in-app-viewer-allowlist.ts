@@ -12,6 +12,7 @@ import {
   closeAdTab, frameDropped, frameNavigated, frameStepped, hideAdPane, inAppViewerHost, openAdTab,
   resolveAddressInput, showAdPane, splitUrlForDisplay, type AdPane, type AddressAction, type FrameNav,
 } from '../src/lib/inAppViewer.ts';
+import { localizeAdUrl } from '../src/lib/adLocale.ts';
 
 let failed = 0;
 const check = (name: string, ok: boolean) => {
@@ -59,8 +60,9 @@ for (const u of [
 // so the mutation proofs at the bottom run the very same predicate against a broken one.
 
 // HIDE IS NOT CLOSE: the pane's ✕ hides (every tab kept); a tab's ✕ closes that tab; the last tab's
-// ✕ clears the pane — no tabs and not hidden, so no «التبويبات (N)» chip with nothing behind it.
-type Tab = { source: string; id: number };
+// ✕ clears the pane — no tabs and not hidden. There is no on-screen reopen button (owner 2026-10-03):
+// a hidden pane comes back with the next card click, or the browser's Forward.
+type Tab = { source: string; id: number; nonce?: number };
 type PaneImpl = {
   open: (p: AdPane<Tab>, l: Tab) => AdPane<Tab>;
   close: (p: AdPane<Tab>, i: number) => AdPane<Tab>;
@@ -75,7 +77,7 @@ const paneFails = (m: PaneImpl): string[] => {
   const h = m.hide(two);
   if (!(h.hidden && h.tabs.length === 2 && h.active === 1 && h.tabs[0] === two.tabs[0])) bad.push('pane ✕ HIDES: every tab kept, same tab active');
   const back = m.show(h);
-  if (!(!back.hidden && back.tabs.length === 2 && back.active === 1)) bad.push('the chip shows the pane exactly as it was');
+  if (!(!back.hidden && back.tabs.length === 2 && back.active === 1)) bad.push('a hidden pane shown again (browser Forward) is exactly as it was');
   const reopened = m.open(h, T(3));
   if (!(!reopened.hidden && reopened.tabs.length === 3 && reopened.active === 2)) bad.push('a card click on a hidden pane shows it, new tab fronted');
   const one = m.close(two, 0);
@@ -87,6 +89,17 @@ const paneFails = (m: PaneImpl): string[] => {
   const hiddenLast = m.close(m.hide(one), 0);
   if (!(hiddenLast.tabs.length === 0 && !hiddenLast.hidden)) bad.push('an emptied pane is never left hidden');
   if (m.hide(EMPTY_AD_PANE).hidden) bad.push('an empty pane cannot be hidden');
+  // RE-CLICK = BACK TO THE LISTING (owner 2026-10-03): the same card again fronts its tab AND resets
+  // its frame (nonce bump); a different card is a new tab with no reset; the tab strip never resets.
+  const rc = m.open(two, T(1));
+  if (!(rc.tabs.length === 2 && rc.active === 0 && rc.tabs[0].nonce === 1 && rc.tabs[1].nonce === undefined && !rc.hidden))
+    bad.push('re-clicking an open card fronts its tab AND bumps ONLY its nonce (frame reset)');
+  const rc2 = m.open(rc, T(1));
+  if (!(rc2.tabs[0].nonce === 2)) bad.push('every re-click resets again (nonce keeps counting)');
+  const rch = m.open(m.hide(two), T(2));
+  if (!(!rch.hidden && rch.active === 1 && rch.tabs[1].nonce === 1 && rch.tabs.length === 2)) bad.push('re-clicking a card while the pane is hidden shows it and resets that listing');
+  if (m.open(two, T(3)).tabs.some((t) => t.nonce !== undefined)) bad.push('a NEW listing is a new tab and resets nothing');
+  if (m.show(two).tabs[0] !== two.tabs[0]) bad.push('the tab strip / show never resets a frame');
   return bad;
 };
 const realPane: PaneImpl = { open: openAdTab, close: closeAdTab, hide: hideAdPane, show: showAdPane };
@@ -178,12 +191,41 @@ const closeAndHideDropTheMark = (src: string) => {
 const hiddenPaneStaysMounted = (src: string) => /style=\{\[s\.split, motion, hidden && s\.pageHidden\]\}/.test(src);
 const paneWiring = (src: string) => /onHide=\{\(\) => commitAdPane\(hideAdPane\(adPaneRef\.current\)\)\}/.test(src)
   && /onCloseTab=\{\(i\) => commitAdPane\(closeAdTab\(adPaneRef\.current, i\)\)\}/.test(src)
-  && /\{adPane\.hidden && adPane\.tabs\.length > 0 && \(/.test(src);
+ ;
 check('AdViewer: history.back() exists only as the gated toolbar ← step', backOnlyAsGatedStep(viewer));
 check('AdViewer: close and hide retire the history marker in place, never by going back', closeAndHideDropTheMark(viewer));
 check('AdViewer: a hidden pane stays mounted (frames alive, display none)', hiddenPaneStaysMounted(viewer));
 check('AdViewer: the "+" input acts only on resolveAddressInput()', /const a = resolveAddressInput\(text\);/.test(viewer));
-check('agent.tsx: pane ✕ → hideAdPane, tab ✕ → closeAdTab, reopen chip only while hidden with tabs', paneWiring(agent));
+check('agent.tsx: pane ✕ → hideAdPane, tab ✕ → closeAdTab', paneWiring(agent));
+check('agent.tsx: no on-screen «التبويبات (N)» reopen button (owner: no need)', !/ad-tabs-chip|tabsChip/.test(agent));
+check('agent.tsx: laptop cards use the wider grid', /<ResultCardGrid wide=\{viewerSplit\}>/.test(agent));
+const grid = readFileSync(new URL('../src/components/ResultCardGrid.tsx', import.meta.url), 'utf8');
+check('ResultCardGrid: wide stays inside the 940px chat column', /gridWide: \{ maxWidth: (\d+) \}/.test(grid) && Number(/gridWide: \{ maxWidth: (\d+) \}/.exec(grid)![1]) > 640 && Number(/gridWide: \{ maxWidth: (\d+) \}/.exec(grid)![1]) <= 940);
+// A re-click must remount the frame: the nonce is part of the frame's key, and the old frame's
+// history entries are dropped with it (as ⟳ does).
+const frameKeyHasNonce = (src: string) => /<TabFrame key=\{`\$\{k\}#\$\{tab\.nonce \?\? 0\}\.\$\{reloads\[k\] \?\? 0\}`\}/.test(src);
+const nonceDropsNav = (src: string) => /nonces\.current\[k\] !== n[\s\S]{0,200}frameDropped\(navRef\.current, k\)/.test(src);
+check('AdViewer: a re-click remounts the frame (nonce in its key)', frameKeyHasNonce(viewer));
+check('AdViewer: a re-click drops the old frame from the ← mirror', nonceDropsNav(viewer));
+// THE AD OPENS IN THE APP'S LANGUAGE (owner 2026-10-03).
+const D = 'https://dealapp.sa/ar/ad-details/541315', DE = 'https://dealapp.sa/en/ad-details/541315';
+const G1 = 'https://gathern.co/view/193264/unit/270328', GE = 'https://gathern.co/en/view/193264/unit/270328';
+const localeFails = (f: (u: string, l: string) => string | undefined): string[] => {
+  const bad: string[] = [];
+  const eq = (got: unknown, want: unknown, what: string) => { if (got !== want) bad.push(`${what} (got ${String(got)})`); };
+  eq(f(D, 'ar'), D, 'Arabic app keeps a Deal App /ar/ ad');
+  eq(f(DE, 'ar'), D, 'Arabic app turns a /en/ Deal App ad into /ar/');
+  eq(f(D, 'en'), DE, 'English app turns a Deal App /ar/ ad into /en/');
+  eq(f(G1, 'ar'), G1, 'Arabic app keeps the unprefixed (Arabic) Gathern ad');
+  eq(f(GE, 'ar'), G1, 'Arabic app strips /en from a Gathern ad');
+  eq(f(G1, 'en'), GE, 'English app adds /en to a Gathern ad');
+  eq(f(GE, 'en'), GE, 'English app does not double the /en');
+  eq(f('https://sa.aqar.fm/x/1', 'en'), 'https://sa.aqar.fm/x/1', 'other sites are untouched');
+  eq(f('', 'ar'), undefined, 'empty in, undefined out');
+  return bad;
+};
+{ const bad = localeFails(localizeAdUrl); check(`Arabic app → Arabic ad (Deal App /ar, Gathern bare), English app → /en${bad.length ? ' — ' + bad.join('; ') : ''}`, bad.length === 0); }
+check('openListing.ts builds ONE ad URL in the app language for the frame and the new tab', /localizeAdUrl\(url, getLocale\(\)\)/.test(open));
 check('AdViewer frame delegates payment (checkout can continue inside)', /allow="[^"]*\bpayment\b/.test(viewer));
 
 // Mutation proof — each of these broken worlds must be CAUGHT by the checks above, or the barrier
@@ -216,6 +258,15 @@ mustCatch('openListing importing the allowlist (native drift)', /inAppViewer/.te
 }
 
 // The browser pane: every mutant below is run through the SAME contract predicate as the real code.
+mustCatch('a re-click that only fronts the tab (frame NOT reset)',
+  paneFails({ ...realPane, open: (p, l) => { const r = addAdTab(p.tabs, l); return { tabs: r.tabs, active: r.active, hidden: false }; } }).length > 0);
+mustCatch('a re-click that resets EVERY tab', paneFails({ ...realPane, open: (p, l) => { const o = openAdTab(p, l); return { ...o, tabs: o.tabs.map((t) => ({ ...t, nonce: (t.nonce ?? 0) + (p.tabs.some((x) => x.id === l.id) ? 1 : 0) })) }; } }).length > 0);
+mustCatch('a new listing that starts with a reset counter', paneFails({ ...realPane, open: (p, l) => { const o = openAdTab(p, l); return { ...o, tabs: o.tabs.map((t) => (t.id === l.id ? { ...t, nonce: t.nonce ?? 1 } : t)) }; } }).length > 0);
+mustCatch('a frame key without the nonce (re-click would not remount)', !frameKeyHasNonce(viewer.replace('${tab.nonce ?? 0}.', '')));
+mustCatch('a re-click that leaves the ← mirror stale', !nonceDropsNav(viewer.replace('frameDropped(navRef.current, k)', 'navRef.current')));
+mustCatch('an ad language that ignores the app language', localeFails((u) => u).length > 0);
+mustCatch('an English app that doubles Gathern /en', localeFails((u, l) => (l === 'en' && u.includes('gathern.co') ? u.replace('gathern.co', 'gathern.co/en') : localizeAdUrl(u, l))).length > 0);
+mustCatch('an Arabic app that leaves Deal App on /en', localeFails((u, l) => localizeAdUrl(u, 'en')).length > 0);
 mustCatch('a pane ✕ that deletes the tabs', paneFails({ ...realPane, hide: () => ({ tabs: [], active: 0, hidden: true }) }).length > 0);
 mustCatch('a tab ✕ that only hides the pane', paneFails({ ...realPane, close: (p) => ({ ...p, hidden: true }) }).length > 0);
 mustCatch('a last-tab ✕ that leaves an empty hidden pane (chip over nothing)',

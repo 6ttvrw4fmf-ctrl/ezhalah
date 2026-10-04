@@ -912,7 +912,6 @@ const AR: Record<string, string> = {
   'Hide tabs': 'إخفاء التبويبات',
   'Forward': 'للأمام',
   'Copy link': 'نسخ الرابط',
-  'Tabs ({n})': 'التبويبات ({n})',
   'Type a site link or search': 'اكتب رابط موقع أو ابحث',
   'Opens here: {hosts}': 'يفتح هنا: {hosts}',
   'Any other site, or a search, opens in a new browser tab.': 'أي موقع آخر، أو بحث، يفتح في تبويب جديد بالمتصفح.',

@@ -40,7 +40,7 @@ import {
 // chip, "+" after the last tab, the pane's own ✕ in the corner) over a toolbar (← → ⟳, an address
 // bar with the host dark and the path muted, open-in-a-new-window). The pane's ✕, Escape and the
 // browser's Back HIDE the pane — tabs and their frames stay mounted, the results show a
-// «التبويبات (N)» chip to bring it back. A tab's ✕ closes that tab; the last one closes the pane.
+// A card click (or the browser's Forward) brings it back. A tab's ✕ closes that tab; the last one closes the pane.
 // The address bar shows the URL WE loaded: a cross-origin frame never tells us where the user went
 // inside it, so it does not pretend to follow. The phone sheet is unchanged.
 //
@@ -201,6 +201,20 @@ export default function AdViewer({ tabs, active, split, hidden, hint, onSelect, 
     setNavBoth(frameDropped(navRef.current, curKey));
     setReloads((r) => ({ ...r, [curKey]: (r[curKey] ?? 0) + 1 }));
   };
+  // A re-clicked listing's frame is remounted (its tab's nonce changed): same as ⟳ — the old frame's
+  // history entries go with it, so ← must not offer steps that no longer exist.
+  const nonces = useRef<Record<string, number>>({});
+  useEffect(() => {
+    for (const tb of tabs) {
+      const k = adTabKey(tb);
+      const n = tb.nonce ?? 0;
+      if (k in nonces.current && nonces.current[k] !== n) {
+        if (pendingRef.current === k) pendingRef.current = null;
+        setNavBoth(frameDropped(navRef.current, k));
+      }
+      nonces.current[k] = n;
+    }
+  }, [tabs]); // eslint-disable-line react-hooks/exhaustive-deps
   // A closed tab's frame is gone, and the browser drops its history entries with it.
   useEffect(() => {
     const open = new Set(tabs.map(adTabKey));
@@ -398,7 +412,7 @@ export default function AdViewer({ tabs, active, split, hidden, hint, onSelect, 
       {tabs.map((tab, i) => {
         const k = adTabKey(tab);
         return tab.url
-          ? <TabFrame key={`${k}#${reloads[k] ?? 0}`} tab={tab} visible={i === active} t={t} onNavigated={() => onFrameNavigated(k)} />
+          ? <TabFrame key={`${k}#${tab.nonce ?? 0}.${reloads[k] ?? 0}`} tab={tab} visible={i === active} t={t} onNavigated={() => onFrameNavigated(k)} />
           : <StartPage key={k} visible={i === active} t={t} isRTL={isRTL} onSubmit={(text) => submitAddress(i, text)} />;
       })}
       {hint ? (

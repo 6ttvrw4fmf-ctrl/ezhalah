@@ -3,6 +3,7 @@ import * as WebBrowser from 'expo-web-browser';
 import type { Listing } from '@/data/listings';
 import { getLocale } from '@/i18n';
 import { gathernClickThroughUrl } from '@/lib/gathernUrl';
+import { localizeAdUrl } from '@/lib/adLocale';
 
 // Open a listing on its source platform in the way that "views it normally" for the user:
 //   • WEB  → a new browser tab (real Aqar page in their own Chrome; can't be an iframe — Aqar sends
@@ -36,9 +37,11 @@ function localizeAqarUrl(url: string | null | undefined, locale: string): string
 // an embedded page and a new tab always show the same address.
 export function listingOpenUrl(listing: Listing): string | undefined {
   const raw = listing.source_url;
-  return raw?.includes('gathern.co')
+  const url = raw?.includes('gathern.co')
     ? gathernClickThroughUrl(raw)
     : localizeAqarUrl(raw, getLocale());
+  // Deal App / Gathern follow the app's language too (Arabic app → Arabic ad). Frame and new tab agree.
+  return localizeAdUrl(url, getLocale());
 }
 
 export async function openListing(listing: Listing): Promise<void> {

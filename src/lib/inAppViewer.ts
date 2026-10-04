@@ -43,22 +43,30 @@ export function addAdTab<T extends { source: string; id: number }>(
 // Everything below is pure for the same reason as addAdTab: the verify script executes it.
 
 /** One tab in the pane. `url: ''` is the "+" start page (no site loaded yet). */
-export type AdTab = { source: string; id: number; title: string; url: string };
+export type AdTab = { source: string; id: number; title: string; url: string; nonce?: number };
 export const adTabKey = (t: { source: string; id: number }) => `${t.source}:${t.id}`;
 
 // HIDE IS NOT CLOSE (owner 2026-10-03: «closing doesn't mean he deletes it, it just means he wants
 // it hidden»). The pane's own ✕, Escape and the browser's Back HIDE the pane: every tab stays (and
 // stays mounted, so a half-finished booking survives). A tab's ✕ closes that one tab for real;
-// closing the last one clears the pane, and with it the «التبويبات (N)» reopen chip.
+// closing the last one clears the pane. A hidden pane comes back with the next card click (or the
+// browser's Forward); there is deliberately no on-screen reopen button (owner 2026-10-03).
 export type AdPane<T> = { tabs: T[]; active: number; hidden: boolean };
 export const EMPTY_AD_PANE: AdPane<never> = { tabs: [], active: 0, hidden: false };
 
-/** A card click (or "+"): new tab or refront, and the pane is SHOWN — also from hidden. */
-export function openAdTab<T extends { source: string; id: number }>(
+/** A card click (or "+"): new tab or refront, and the pane is SHOWN — also from hidden.
+ *  RE-CLICKING A LISTING GOES BACK TO IT (owner 2026-10-03): the user may have wandered inside the ad,
+ *  so a card whose tab is already open fronts that tab AND restarts its frame at the listing's own URL
+ *  (a nonce bump remounts the frame). Switching with the tab strip never resets anything. */
+export function openAdTab<T extends { source: string; id: number; nonce?: number }>(
   p: AdPane<T>, l: T, max: number = MAX_AD_TABS,
 ): AdPane<T> & { evicted: boolean } {
   const r = addAdTab(p.tabs, l, max);
-  return { tabs: r.tabs, active: r.active, hidden: false, evicted: r.evicted };
+  const reclicked = r.tabs === p.tabs; // addAdTab hands back the SAME array only for an open card
+  const tabs = reclicked
+    ? r.tabs.map((t, i) => (i === r.active ? { ...t, nonce: (t.nonce ?? 0) + 1 } : t))
+    : r.tabs;
+  return { tabs, active: r.active, hidden: false, evicted: r.evicted };
 }
 export function closeAdTab<T>(p: AdPane<T>, i: number): AdPane<T> {
   const tabs = p.tabs.filter((_, x) => x !== i);
