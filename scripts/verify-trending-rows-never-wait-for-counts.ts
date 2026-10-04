@@ -31,6 +31,9 @@ function wiring(l: string, i: string): string[] {
   if (!/rows\.every\(\(r\) => r\.scopeKnown === false\)/.test(i)) bad.push('the wait row is skipped for rows that DO carry another cohort\'s counts (#648)');
   if (!/opt\.scopeKnown === false \? '…' : cohortCountLabel\(opt\.listingCount\),\n\s*\]\.filter\(Boolean\)\.join\(' · '\) \|\| undefined/.test(i)) bad.push('a trending city row prints a count that was not measured, or nothing while it loads');
   if (!/: opt\.scopeKnown === false \? '…'\n\s*: hasDistrictNarrowing/.test(i)) bad.push('a trending district row shows nothing (looks broken) while its count loads');
+  // the TAP itself shows rows at once (2026-10-04, live: a scope change then a tap showed «جاري التحميل…» for seconds)
+  if (!/const cohort = cityCohortSig;\s*\n(?:\s*\/\/[^\n]*\n)*\s*setCitySuggestions\(topCitiesByListings\(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams\)\);\s*\n\s*void ensureCityFieldIndex/.test(i)) bad.push('tapping the city field waits for the counts before showing any row');
+  if (!/const cohort = districtCohortSigOf\(cid\);\s*\n\s*setDistrictSuggestions\(topDistrictsForCityId\(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope\)\);[^\n]*\n\s*void ensureDistrictOptions/.test(i)) bad.push('tapping the district field waits for the counts before showing any row');
   return bad;
 }
 
@@ -58,5 +61,7 @@ mustCatch('a wait row skipped for another cohort\'s real counts', wiring(loc, id
 mustCatch('a trending row that prints an unmeasured count', wiring(loc, idx.replace("opt.scopeKnown === false ? '…' : cohortCountLabel(opt.listingCount)", 'cohortCountLabel(opt.listingCount)')));
 mustCatch('a trending district row blank while loading', wiring(loc, idx.replace(/: opt\.scopeKnown === false \? '…'(\n\s*: hasDistrictNarrowing)/, ": false ? '…'$1")));
 
+mustCatch('a city tap that waits for its counts', wiring(loc, idx.replace(/(const cohort = cityCohortSig;\s*\n(?:\s*\/\/[^\n]*\n)*)\s*setCitySuggestions\(topCitiesByListings\([^\n]*\n/, '$1')));
+mustCatch('a district tap that waits for its counts', wiring(loc, idx.replace(/(const cohort = districtCohortSigOf\(cid\);\s*\n)\s*setDistrictSuggestions\(topDistrictsForCityId\([^\n]*\n/, '$1')));
 console.log(failed ? `\n${failed} FAILED` : '\nAll trending-instant assertions passed');
 process.exit(failed ? 1 : 0);
