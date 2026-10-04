@@ -167,8 +167,8 @@ check('the English key text is untouched (no {opening} added there — English s
   i18nSrc.includes('"I\'m looking for {what}{detail} {verb} in {place}{price}": \'{opening}'));
 
 const agentSrc = read('src/app/agent.tsx');
-check('the SEPARATE AI-chat opening greeting (agent.tsx greetingText) is byte-exact untouched — this rotation must never touch it',
-  agentSrc.includes("'ارحب، أنا إزهله. قلّي وش العقار اللي تدور عليه، وأنا أبحث لك بين المنصات العقارية وأطابق الخيارات مع طلبك لين نلقى اللي يناسبك… إزهلها وفالك الطيب.'"));
+check('the separate owner-approved static welcome (2026-10-03) stays outside this rotation',
+  agentSrc.includes("'وش العقار اللي في بالك؟\\nقل لنا مواصفاته، وإزهله.'"));
 check('filterGreetingRotation is never imported by agent.tsx — the rotation has exactly one call site',
   !agentSrc.includes('filterGreetingRotation'));
 
