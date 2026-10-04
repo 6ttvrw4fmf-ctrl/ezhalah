@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Platform, View } from 'react-native';
 import { Stack, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useFonts } from 'expo-font';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AppProvider } from '@/store';
@@ -51,6 +52,10 @@ if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && !(globalThis a
 // right; `row-reverse` under RTL cancels that mirroring so the sidebar (the first child) stays on the
 // physical left in both locales. On mobile/native it collapses away into a tap-to-open drawer.
 function Shell() {
+  useFonts({
+    Tajawal: require('../../assets/fonts/tajawal/Tajawal-Regular.ttf'),
+    TajawalMedium: require('../../assets/fonts/tajawal/Tajawal-Medium.ttf'),
+  });
   const docked = useDocked();
   const { isRTL } = useI18n();
   // Space occupied by a docked third-party auth prompt — Google One Tap's legacy sheet, on WHICHEVER
