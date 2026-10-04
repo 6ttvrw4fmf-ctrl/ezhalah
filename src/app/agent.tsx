@@ -4851,8 +4851,8 @@ const s = StyleSheet.create({
   // all times); the recording row overlays it absolutely so the morph never changes the surface.
   composerInner: { flex: 1, flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'flex-end', alignItems: 'flex-end', minHeight: 44, gap: 6 },
   composerInnerHidden: { opacity: 0 },
-  composerInputColumn: { flex: 1, minWidth: 0, alignItems: 'stretch' },
-  initialSearch: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7, height: 34, paddingHorizontal: 13, marginTop: 6, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
+  composerInputColumn: { flex: 1, minWidth: 0, alignItems: 'stretch', position: 'relative' },
+  initialSearch: { position: 'absolute', left: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', gap: 7, height: 30, paddingHorizontal: 11, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
   initialSearchPressed: { backgroundColor: colors.segTrack },
   initialSearchIcon: { width: 17, height: 17 },
   initialSearchText: { color: colors.ink, fontSize: 14, lineHeight: 20 },
