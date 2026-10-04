@@ -222,6 +222,18 @@ These cost your first runs a lot of time. Use them instead of working them out a
   artifact's download host is blocked from the cloud; the log prints the same comparison). It shows
   what the page itself says next to what we store.
 
+## Lessons from 2026-10-04 (your first night-shift report: honest, every number matched the database — and still a 7, not a 9)
+1. **A site that fails twice in a week gets its root cause fixed THAT night.** gudai timed out on its sitemap on 2 of 6
+   nights; «it recovers the next night» is not a fix. Fix the cause (per-request timeout, retry with backoff, read the sitemap
+   index in parts, or fall back to its listing pages), a test that fails on the old code, PR, merge on green, dispatch, proof row.
+2. **Below 9, use the whole slot.** You stopped at 64 of 120 minutes while gudai was unfixed. While long crawls run, fix the
+   next thing (a recurring failure, a queued test, any site with a failed run in the last 7 days). Waiting is allowed only when
+   nothing else is left, and then say so.
+3. **A 9 needs a fix shipped and proven, or a night where nothing was broken.** «issues_fixed = 0» with a broken site is ≤ 7.
+4. **Gathern app-only units (measured 10-04):** every web variant 404s; Gathern's app-association file claims `/link/view/*`
+   and `/r/*` for its app, so those open only on a phone with the app installed. The share-link endpoint is still untested
+   (backlog row 13) — test it from CI.
+
 ## Lessons from 2026-10-03 (muktamel: seen 80 minutes late, left unfixed — the owner's order: never again)
 What happened, from the crawl log: muktamel's shards started 03:46 UTC and were cancelled at their
 2-hour limit at 05:45 UTC with 0 rows counted. You started at 05:10 UTC, when they were still

@@ -1457,6 +1457,7 @@ export default function Home() {
                     // key and were the one captured value nobody re-checked (2026-09-23, #648).
                     if (!query.location) {
                       const cohort = cityCohortSig;
+                      setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
                       void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).then(() => {
                         writeCitySuggestionsForCohort(cohort, true);
                       });
@@ -1558,7 +1559,9 @@ export default function Home() {
                             // display-name collision (e.g. الهفوف ×2), prepended so it stays visible.
                             sublabel: [
                               hasNameCollision(citySuggestions, opt.cityAr) ? opt.regionAr ?? undefined : undefined,
-                              opt.scopeKnown === false ? undefined : cohortCountLabel(opt.listingCount),
+                              // «…» while this scope's count is loading (owner 2026-10-04: a name with no number looked
+                              // broken); never another scope's number.
+                              opt.scopeKnown === false ? '…' : cohortCountLabel(opt.listingCount),
                             ].filter(Boolean).join(' · ') || undefined,
                             icon: LOC_IMG.city, // restored designed art (see TrendingList.tsx note)
                           }))}
@@ -1659,6 +1662,7 @@ export default function Home() {
                     if (!districtTextRef.current) {
                       const cid = citySelected.cityId;
                       const cohort = districtCohortSigOf(cid);
+                      setDistrictSuggestions(topDistrictsForCityId(cid, effDeal, effCategory, rentPeriodTok, 6, cohortTypes, cityTableScope)); // at once, like the city field
                       void ensureDistrictOptions(cid, effDeal, effCategory, rentPeriodTok, cohortTypes, cityTableScope).then(() => {
                         writeDistrictSuggestionsForCohort(cid, cohort, true);
                       });
@@ -1799,6 +1803,8 @@ export default function Home() {
                             // "no count beats a wrong count" rule the city pool already follows.
                             sublabel: districtLiveCounts?.[opt.districtAr] === 0
                               ? t('No listings here right now')
+                              // «…» = this scope's count is still loading (owner 2026-10-04), never a blank row
+                              : opt.scopeKnown === false ? '…'
                               : hasDistrictNarrowing
                                 ? (districtLiveCounts?.[opt.districtAr] != null
                                     ? cohortCountLabel(districtLiveCounts[opt.districtAr]) : '')
