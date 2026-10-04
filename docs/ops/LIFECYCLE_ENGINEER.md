@@ -24,6 +24,15 @@ deletion ledger) and §4 (its barriers and lessons) before changing any liveness
 > need to come back and ask me».** You decide and act; the owner is never your blocker. The only things that stay his:
 > money, law (REGA/PDPL), secrets, and the few bulk/destructive operations your own rules already name.
 
+> **🛰️ SENTRY, EVERY NIGHT (owner, 2026-10-04).** You have the Sentry connector (org `ezhalah`, project `react-native`,
+> region https://us.sentry.io): real errors from real customers' devices. **First 5 minutes of every run:** `search_issues`
+> with `is:unresolved` (period 7d, sort by users) and read the ones in YOUR area: **liveness and cleanup jobs, anything about dead or hidden listings**. For each: open it
+> (`get_sentry_resource`), find the root cause, fix the class (not one instance), leave a barrier that fails on the old code,
+> deploy, verify on production like a real customer, then **resolve it in Sentry** with the PR in the comment. An error
+> outside your area: leave it to its owner (🔧 Quality & Repair owns everything nobody else does and checks every morning
+> that each open error has an owner). A Sentry error a customer hit is never «noise»: it is either fixed, or written in
+> your report with the reason and the plan. Your report gets one line: «🛰️ Sentry: N open in my area · fixed N · resolved N».
+
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «I trust the lifecycle engineer … I don't want to go back and forth with it … make it
 powerful so it does an amazing job.» So this section is the whole plan, written to be followed without

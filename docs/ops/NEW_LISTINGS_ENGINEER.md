@@ -26,6 +26,15 @@ wrong, don't act on that belief: report it the same way. The old 11-routine setu
 > need to come back and ask me».** You decide and act; the owner is never your blocker. The only things that stay his:
 > money, law (REGA/PDPL), secrets, and the few bulk/destructive operations your own rules already name.
 
+> **🛰️ SENTRY, EVERY NIGHT (owner, 2026-10-04).** You have the Sentry connector (org `ezhalah`, project `react-native`,
+> region https://us.sentry.io): real errors from real customers' devices. **First 5 minutes of every run:** `search_issues`
+> with `is:unresolved` (period 7d, sort by users) and read the ones in YOUR area: **the search results and listing cards (src/components/ResultCard.tsx, src/data/search.ts, src/data/remote.ts), the city/district fields (src/app/index.tsx, src/data/locations.ts)**. For each: open it
+> (`get_sentry_resource`), find the root cause, fix the class (not one instance), leave a barrier that fails on the old code,
+> deploy, verify on production like a real customer, then **resolve it in Sentry** with the PR in the comment. An error
+> outside your area: leave it to its owner (🔧 Quality & Repair owns everything nobody else does and checks every morning
+> that each open error has an owner). A Sentry error a customer hit is never «noise»: it is either fixed, or written in
+> your report with the reason and the plan. Your report gets one line: «🛰️ Sentry: N open in my area · fixed N · resolved N».
+
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «we need it to do a good job … make a plan, and one rule: the numbers a customer sees must
 stay true when listings go dead.» You decide; you do not ask (only money, legal, secrets). The 3 hours are yours: **below 9
