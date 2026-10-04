@@ -9,27 +9,35 @@
 //
 // THE RULE. Among committed migrations that (re)define listing_native_location_v2, the LATEST by
 // version must still carry resolve_district_ar. A new full redefinition built from a stale copy
-// is RED here at PR time. Mutation: delete 20261004073216 and this fails on 20260927051226.
+// is RED here at PR time.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+type Mig = { f: string; sql: string };
 const dir = join(process.cwd(), 'supabase', 'migrations');
-const redefines = readdirSync(dir)
+const all: Mig[] = readdirSync(dir)
   .filter((f) => f.endsWith('.sql'))
   .sort()
-  .map((f) => ({ f, sql: readFileSync(join(dir, f), 'utf8') }))
-  .filter(({ sql }) => /listing_native_location_v2/.test(sql) && /create or replace view/i.test(sql));
+  .map((f) => ({ f, sql: readFileSync(join(dir, f), 'utf8') }));
 
-if (redefines.length === 0) {
-  console.error('FAIL: no migration (re)defines listing_native_location_v2 — the barrier lost its subject');
-  process.exit(1);
+/** Problems with the migration set: the latest v2 redefinition must keep the Gathern district resolver. */
+function problems(migs: Mig[]): string[] {
+  const redefines = migs.filter(({ sql }) => /listing_native_location_v2/.test(sql) && /create or replace view/i.test(sql));
+  if (redefines.length === 0) return ['no migration (re)defines listing_native_location_v2 — the barrier lost its subject'];
+  const latest = redefines[redefines.length - 1];
+  return /resolve_district_ar/.test(latest.sql) ? [] : [
+    `the latest redefinition of listing_native_location_v2 (${latest.f}) does not resolve Gathern's additional_info->>'district_ar' via resolve_district_ar(): every new Gathern unit would lose its district`,
+  ];
 }
-const latest = redefines[redefines.length - 1];
-if (!/resolve_district_ar/.test(latest.sql)) {
-  console.error(
-    `FAIL: the latest redefinition of listing_native_location_v2 (${latest.f}) does not resolve Gathern's ` +
-      'additional_info->>\'district_ar\' via resolve_district_ar(): every new Gathern unit would lose its district.',
-  );
-  process.exit(1);
-}
-console.log(`ok: latest v2 redefinition ${latest.f} keeps the Gathern district resolver`);
+
+let failed = 0;
+const check = (label: string, bad: string[]) => { if (bad.length) failed++; console.log(`${bad.length ? 'FAIL' : 'PASS'}  ${label}${bad.length ? '\n        ' + bad.join('\n        ') : ''}`); };
+const mustCatch = (label: string, bad: string[]) => { if (!bad.length) failed++; console.log(`${bad.length ? 'PASS' : 'FAIL'}  (mutation) catches ${label}`); };
+
+check('the latest listing_native_location_v2 redefinition keeps the Gathern district resolver', problems(all));
+// Mutation: without the 2026-10-04 fix the latest redefinition is the stale 0927 copy, which must go RED.
+mustCatch('a stale full redefinition (the 2026-10-04 fix removed)', problems(all.filter((m) => !m.f.startsWith('20261004073216'))));
+// Mutation: a NEW redefinition from a stale copy, added after the fix, must go RED too.
+mustCatch('a future stale redefinition', problems([...all, { f: '99999999999999_stale_copy.sql', sql: 'create or replace view public.listing_native_location_v2 as select NULL::text AS district_ar' }]));
+console.log(failed ? `\n${failed} FAILED` : '\nAll Gathern-district-survival assertions passed');
+process.exit(failed ? 1 : 0);
