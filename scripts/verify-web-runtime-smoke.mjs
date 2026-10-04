@@ -183,6 +183,31 @@ const BENIGN = /Minified React error #(418|423|425)/;
 // a harness race, not a product defect. Named once so both journeys move together next time.
 const SEARCH_BEAT_FLOOR_MS = 12000;
 
+// The September passive probe hides the CTA when its bounded retry is UNKNOWN. The old
+// journey inferred UNKNOWN only from a CTA coming back after a click, so it misdiagnosed
+// this earlier timeout as a broken open. Require network evidence for BOTH complete rounds;
+// a missing request, pending request, HTTP error, or any answered probe still fails closed.
+function observeAfProbeTimeouts(page) {
+  const attempts = new Map();
+  const names = ['apartment_guided_counts_ar', 'property_age_option_counts_ar'];
+  const onRequest = (request) => {
+    const name = new URL(request.url()).pathname.split('/rpc/')[1];
+    if (names.includes(name)) attempts.set(request, { name, start: Date.now(), timedOut: false });
+  };
+  const onFailed = (request) => {
+    const attempt = attempts.get(request);
+    if (attempt) attempt.timedOut = Date.now() - attempt.start >= 3500
+      && /ERR_ABORTED|ERR_TIMED_OUT/.test(request.failure()?.errorText ?? '');
+  };
+  page.on('request', onRequest);
+  page.on('requestfailed', onFailed);
+  return {
+    undetermined: () => names.every((name) => [...attempts.values()].filter((p) => p.name === name).length >= 2)
+      && [...attempts.values()].every((p) => p.timedOut),
+    dispose: () => { page.off('request', onRequest); page.off('requestfailed', onFailed); },
+  };
+}
+
 const launchOpts = { args: ['--no-sandbox', '--ignore-certificate-errors', '--disable-quic'] };
 if (process.env.PW_CHROMIUM) launchOpts.executablePath = process.env.PW_CHROMIUM;
 // A TLS-terminating egress proxy can reset Chromium's post-quantum ClientHello; pinning max TLS
@@ -776,6 +801,7 @@ try {
     await page.waitForTimeout(300);
   }
   await tap('الفلل والبيوت'); await tap('فيلا');
+  const afProbeTimeouts = observeAfProbeTimeouts(page);
   await tap('بحث');
   const reentrancyStart = await waitForCount(45000);
   check('[I] reentrancy-journey scope lands with a real start count', Number.isFinite(reentrancyStart), `start=${reentrancyStart}`);
@@ -804,18 +830,21 @@ try {
   //
   // So: tap ONCE, then poll on the same 45s budget the count waits already use, and say WHY on
   // failure instead of printing a bare `false` (the [H mobile] precedent).
-  await tap('خلّنا نحدد الطلب أكثر').catch(() => {});
+  // The total can render before the passive probes finish and before this CTA exists.
+  // Wait for the actual control; never swallow a missing click and pretend an open ran.
+  const narrowButton = page.getByTestId('results-narrow');
+  const ctaReady = await narrowButton.waitFor({ state: 'visible', timeout: 45000 }).then(() => true, () => false);
+  if (ctaReady) await narrowButton.click();
   let afOpened = false;
-  const afOpenUntil = Date.now() + 45000;
+  const afOpenUntil = Date.now() + (ctaReady ? 45000 : 0);
   while (Date.now() < afOpenUntil) {
     afOpened = await afPresent();
     if (afOpened) break;
     await page.waitForTimeout(500);
   }
   if (!afOpened) {
-    // Distinguish the two ways this legitimately ends up false, so the next failure explains itself:
-    // the CTA coming BACK means AF opened and closed again (fell back to refine), which is a real
-    // product signal; the CTA still absent means the open is simply still in flight.
+    // Presence alone cannot diagnose this: the passive probe can withhold the CTA before
+    // any click. Only the recorded timeout evidence below permits an UNKNOWN skip.
     const ctaBack = await page.evaluate(() =>
       Array.from(document.querySelectorAll('div,span,button,a,[role="button"]'))
         .some((e) => (e.innerText || '').trim().includes('خلّنا نحدد الطلب أكثر') && e.getBoundingClientRect().width > 0));
@@ -830,15 +859,15 @@ try {
       const t = document.body.innerText;
       return ['أي حي تفضّل', 'كم ميزانيتك', 'كم غرفة'].some((c) => t.includes(c));
     });
-    if (ctaBack && !refineChipsShown) {
-      console.log('SKIP  [I] Advanced Filter opens on this large multi-district scope '
-        + '— AF declined on an UNDETERMINED probe batch (no refine chips offered), which is the '
+    if (!refineChipsShown && afProbeTimeouts.undetermined()) {
+      skipCheck('[I] Advanced Filter opens on this large multi-district scope',
+        'BOTH count RPCs timed out in BOTH bounded attempts (no refine chips offered), which is the '
         + 'specified behaviour under «UNKNOWN must never become NO». This is an environment/latency '
         + 'symptom, not a product defect: the per-question count probes did not answer within 4s. '
         + 'A REAL regression would instead show the refine chips (a probe-backed "nothing to narrow").');
     } else
     check('[I] Advanced Filter opens on this large multi-district scope', false,
-      `af-card never appeared within 45s. cta-returned=${ctaBack}\n`
+      `af-card never appeared within 45s. cta-ready=${ctaReady} cta-returned=${ctaBack}\n`
       + `        cta-returned=true  => startAgeFlow RAN and DECLINED: its ranked plan came back shorter\n`
       + `                              than MIN_USEFUL_QUESTIONS_TO_SHOW, so it setAgeFlow(null) and fell\n`
       + `                              back to refine. That has TWO causes and they look identical here:\n`
@@ -847,11 +876,13 @@ try {
       + `                                     AGE_COUNT_TIMEOUT_MS) so every question lost its options.\n`
       + `                              (ii) is a load artefact being rendered as a data verdict — see the\n`
       + `                              JOURNEY I note in this file's header before calling it a regression.\n`
-      + `        cta-returned=false => the open never landed at all (still in flight / crashed).\n`
+      + `        cta-ready=false => no click ran; the passive probe never exposed the control.\n`
+      + `        cta-ready=true, cta-returned=false => the clicked interview never landed.\n`
       + `        url=${page.url()} body=${(await body()).slice(0, 300).replace(/\n/g, ' | ')}`);
   } else {
     check('[I] Advanced Filter opens on this large multi-district scope', true);
   }
+  afProbeTimeouts.dispose();
   // `afOpened` is the interview LOOP's own variable below and flips to false the moment the card
   // closes — which is the normal, successful end of the interview. The gates further down must ask
   // "did it ever open?", so latch that here rather than re-reading a variable that means something
