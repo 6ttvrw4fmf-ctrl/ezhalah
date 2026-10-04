@@ -197,7 +197,9 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). ~33 partner pl
   top mode tabs, reply typing and search-loading animations remain; no additional example chips
   or Filter link. Phone and desktop use the same responsive column without desktop zoom.
 - **Opening chat Search pill (owner, 2026-10-04):** the empty AI chat also shows an outlined
-  «بحث» action under the input, with a search icon. It submits the typed text through the existing
+  «بحث» action under the input, with a 17px magnifying glass enclosing a small angular eagle eye
+  (`assets/icons/eagle-search.svg`, owner-approved 2026-10-04). The existing pill dimensions,
+  label and theme colors stay unchanged. It submits the typed text through the existing
   `send()` path and is disabled for whitespace-only input. It stays while typing, disappears on
   the first sent turn, and returns only for a fresh chat. Mic/send remain on the physical right;
   Filter-origin results and restored conversations do not gain this action.
