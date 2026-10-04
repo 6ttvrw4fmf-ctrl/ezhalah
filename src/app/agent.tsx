@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { colors, radius, space, cardShadow, font } from '@/theme/tokens';
+import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { isAppSessionStarted } from '@/lib/appSession';
@@ -44,6 +44,7 @@ const MemoResultCard = memo(ResultCard, (prev, next) =>
   // activeAf is one frozen reference per results turn (afActive memoises on m.result.query), so
   // identity is the right comparison; without this term the card would swallow the prop.
   && prev.activeAf === next.activeAf);
+import HeroBackground from '@/components/HeroBackground';
 import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
 import Sidebar, { useDocked } from '@/components/Sidebar';
@@ -3635,7 +3636,6 @@ export default function Agent() {
   // interacted, no recording, no turn in flight. Filter mode is a different screen (index.tsx) and
   // never renders this component at all.
   const introLanding = msgs.every((m) => m.role === 'agent' && !!m.greeting);
-  const desktopWelcome = introLanding && docked;
   const showIntroExamples =
     introLanding && !introInteracted && !typed && voiceState === 'idle' && !busy;
 
@@ -3655,6 +3655,11 @@ export default function Agent() {
     <View style={{ flex: 1, flexDirection: locale === 'ar' ? 'row-reverse' : 'row', backgroundColor: colors.paper }}>
     {/* The results column. A row so the in-app ad viewer can sit BESIDE it, full height (split). */}
     <View style={{ flex: 1 }}>
+      {/* Sketch backdrop behind the chat. The bottom fade is pushed all the way down (0.8→1, same as
+          Home) so the landmarks fill the whole frame — including the center, which used to wash out
+          to plain white during "Ezhalah is searching…". A light opacity + paper scrim keep it faint
+          enough that message text stays readable: the user sees the same sketch, just light. */}
+      <HeroBackground imageOpacity={0.55} scrim={0.2} fadeStart={0.8} fadeEnd={1} />
       {/* Header */}
       <View ref={setLtr} style={[s.topBar, { paddingTop: insets.top + 8 }]}>
         {/* Mobile only: a plain hamburger that opens the existing sidebar — same clean style as the
@@ -3690,7 +3695,7 @@ export default function Agent() {
             dataSet={{ ...TAP44 }}
           >
             <Ionicons name="person-outline" size={15} color="#fff" />
-            <Text numberOfLines={1} style={s.topSignInText}>{t('Sign up / Log in')}</Text>
+            <Text style={s.topSignInText}>{t('Sign up / Log in')}</Text>
           </Pressable>
         )}
         {/* Note #5 — Share is ALWAYS visible the moment the user is in AI Agent mode. Not gated on
@@ -3726,18 +3731,18 @@ export default function Agent() {
         // iOS-NATIVE does its own lifting and still needs this. On WEB the root is pinned to the
         // visible window (lib/visualViewportFrame.ts), so the column already ends above the keyboard
         // and kbInset is 0 — the style below therefore adds nothing on web, deliberately.
-        style={[{ flex: 1 }, desktopWelcome && s.desktopWelcome, IS_WEB && kbInset > 0 ? { paddingBottom: kbInset } : null]}
+        style={[{ flex: 1 }, IS_WEB && kbInset > 0 ? { paddingBottom: kbInset } : null]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={insets.top + 52}
       >
         {/* The fresh-page turn (New Chat): this wrapper fades the whole conversation out and rises
             the clean chat back in — see the ?fresh effect. Decoration only; the wipe never depends
             on it completing. */}
-        <Animated.View style={{ flex: desktopWelcome ? undefined : 1, flexShrink: desktopWelcome ? 0 : undefined, opacity: freshFade, transform: [{ translateY: freshRise }] }}>
+        <Animated.View style={{ flex: 1, opacity: freshFade, transform: [{ translateY: freshRise }] }}>
         <ScrollView
           ref={scrollRef}
-          style={desktopWelcome ? { flexGrow: 0, flexShrink: 0 } : { flex: 1 }}
-          contentContainerStyle={[s.scroll, { paddingBottom: 16 }, introLanding && s.introScroll, desktopWelcome && s.desktopWelcomeScroll]}
+          style={{ flex: 1 }}
+          contentContainerStyle={[s.scroll, { paddingBottom: 16 }, introLanding && s.introScroll]}
           keyboardShouldPersistTaps="handled"
           onContentSizeChange={onGrow}
           onScroll={maybeRevealOnScroll}
@@ -3774,7 +3779,7 @@ export default function Agent() {
                   const [title, subtitle] = greetingText(locale).split('\n');
                   return (
                     <View key={m.id} testID="intro-greeting" style={s.greeting}>
-                      <Text style={[s.greetingText, desktopWelcome && s.desktopWelcomeTitle]}>{title}</Text>
+                      <Text style={s.greetingText}>{title}</Text>
                       {!!subtitle && <Text style={s.greetingSubtitle}>{subtitle}</Text>}
                     </View>
                   );
@@ -4278,9 +4283,12 @@ export default function Agent() {
         </ScrollView>
         </Animated.View>
 
-        {/* One rounded message box: full-width text above the existing mic/send controls.
-            Controls remain on the physical right. The input's measured-height animation and
-            recording overlay keep their existing behavior. */}
+        {/* Composer — redesigned 2026-08-16 (owner brief: "closer to ChatGPT/Claude in interaction,
+            still Ezhalah in identity"). One RTL input + the send arrow + the disclaimer; nothing else.
+            The surface is the ModeSwitch family's raised-white card: hairline border that eases to
+            brand green on focus, soft green-tinted lift that deepens with it, pill radius. Height
+            GLIDES between line counts (inputHAnim) instead of snapping; the send arrow pins to the
+            bottom edge as the box grows, and the input keeps paddingEnd so text never reaches it. */}
         {/* When the keyboard is open (web), the home-indicator safe area sits behind it, so drop
             insets.bottom and keep the composer tight above the keyboard instead of double-padding. */}
         {/* COMPLETED SEARCH (owner 2026-08-30, composer restored 2026-09-05): Advanced Filter reached
@@ -4609,7 +4617,8 @@ export default function Agent() {
 
 const s = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space.screenSide, paddingBottom: 8 },
-  // Guided-interview summary + removable pills on the results turn (owner 2026-08-16).
+  // Guided-interview summary + removable pills on the results turn (owner 2026-08-16). fontWeight
+  // (not fontFamily) matches the idiom of every other text style in this sheet.
   guidedPillRow: { flexWrap: 'wrap', gap: 8, alignItems: 'center' },
   guidedPill: {
     flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.tint,
@@ -4631,7 +4640,7 @@ const s = StyleSheet.create({
   fbToastText: { fontSize: 12.5, fontWeight: '600', color: colors.ink },
   iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
-  title: { fontFamily: font.family.arabic, fontSize: 14, fontWeight: '700', color: colors.ink },
+  title: { fontSize: 22, fontWeight: '800', color: colors.ink },   // the brand name, big (owner 2026-10-04)
   // Note #5 — share icon sits beside the Filter pill in the agent header.
   // Matches the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius, soft lift) so
   // the pill + share read as one cluster across both screens (owner redesign 2026-07-24 r2).
@@ -4653,8 +4662,8 @@ const s = StyleSheet.create({
   },
   shareIconPressed: { opacity: 0.85 },
   // Reopen chip for a hidden ad pane — the share button's own tint/hairline idiom, beside it.
-  topSignIn: { flexShrink: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
-  topSignInText: { flexShrink: 1, fontFamily: font.family.arabic, fontSize: 12, fontWeight: '700', color: '#fff' },
+  topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
+  topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   preciseBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.tint, borderColor: colors.tintLine, borderWidth: 1, borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: 12, marginRight: 6 },
 
   scroll: { paddingHorizontal: space.screenSide, alignItems: 'center', paddingTop: 4 },
@@ -4749,7 +4758,7 @@ const s = StyleSheet.create({
   // like the selected recent-chat row in the sidebar. Dark green text for contrast. (user request.)
   // User message bubble — soft light green pill, normal text weight (not heavy/black). (user request.)
   userBubble: { alignSelf: 'flex-end', maxWidth: '85%', backgroundColor: colors.userBubble, borderColor: colors.tintLine, borderWidth: 1, borderRadius: 16, borderBottomRightRadius: 5, paddingVertical: 10, paddingHorizontal: 14, marginTop: 10 },
-  userText: { fontFamily: font.family.arabic, color: colors.userBubbleText, fontSize: 14, lineHeight: 19, fontWeight: '500' },
+  userText: { color: colors.userBubbleText, fontSize: 14, lineHeight: 19, fontWeight: '500' },
 
   status: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 2 },
   statusText: { fontSize: 12.5, color: colors.muted },
@@ -4761,20 +4770,17 @@ const s = StyleSheet.create({
 
   reply: { flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
   replyIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  replyText: { fontFamily: font.family.arabic, flex: 1, fontSize: 14, lineHeight: 20, color: colors.ink },
+  replyText: { flex: 1, fontSize: 14, lineHeight: 20, color: colors.ink },
   introScroll: { flexGrow: 1, justifyContent: 'center' },
-  desktopWelcome: { justifyContent: 'center', paddingBottom: 96 },
-  desktopWelcomeScroll: { flexGrow: 0, paddingBottom: 0 },
-  desktopWelcomeTitle: { fontSize: font.size.chatTitleDesktop, lineHeight: font.lineHeight.chatTitleDesktop },
-  greeting: { width: '100%', alignItems: 'center', gap: 6, paddingTop: 16, paddingBottom: 26 },
-  greetingText: { fontFamily: font.family.arabicMedium, fontSize: font.size.chatTitle, lineHeight: font.lineHeight.chatTitle, fontWeight: '400', color: colors.ink, textAlign: 'center', writingDirection: 'rtl' as any },
-  greetingSubtitle: { fontFamily: font.family.arabic, fontSize: font.size.chatSubtitle, lineHeight: font.lineHeight.chatSubtitle, color: colors.body, textAlign: 'center', writingDirection: 'rtl' as any },
+  greeting: { width: '100%', alignItems: 'center', gap: 8, paddingVertical: 24 },
+  greetingText: { fontSize: 24, lineHeight: 36, fontWeight: '600', color: colors.dark, textAlign: 'center', writingDirection: 'rtl' as any },
+  greetingSubtitle: { fontSize: 16, lineHeight: 26, color: colors.body, textAlign: 'center', writingDirection: 'rtl' as any },
   // Rotating composer examples (owner brief 2026-08-23): the absolute overlay fills the input's own
   // clipped wrapper (inputGrow), so it is structurally unable to move the mic/Send or overflow; the
   // text mirrors the input's placeholder metrics exactly (16px web / muted / RTL right-aligned) so
   // it reads as the placeholder, not as a second element.
   introRotator: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, justifyContent: 'center' },
-  introRotatorText: { fontFamily: font.family.arabic, fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.muted, paddingHorizontal: 2, textAlign: 'right', writingDirection: 'rtl' as any },
+  introRotatorText: { fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.muted, paddingHorizontal: 2, textAlign: 'right', writingDirection: 'rtl' as any },
   brand: { fontWeight: '700', color: colors.primary },
 
   emptyRes: { fontSize: 14, color: colors.muted },
@@ -4787,30 +4793,45 @@ const s = StyleSheet.create({
   refineBtnTx: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
   composerWrap: { paddingHorizontal: space.screenSide, paddingTop: 10, alignItems: 'center' },
-  // The LTR-pinned column keeps mic/send on the physical right in either locale.
-  // Desktop welcome and composer share one compact column; messages still use MAX_W.
+  // The send/stop button is pinned to the PHYSICAL right (right:4) and never mirrors — it stays on the
+  // right in Arabic too, so paddingRight leaves room for it regardless of text direction. (user request.)
+  // Inline row (no absolute button): input flexes, the send/stop button sits at the end, vertically
+  // centered with comfortable edge padding. flexDirection is set per language at the call site so the
+  // button lands on the correct side in both LTR and RTL. (user request: balanced, centered send button.)
+  // ChatGPT-style bar (owner 2026-07-08): single row, send button anchored on the far right (16px from
+  // the edge, vertically centered), thinner single-line input that grows on wrap. paddingRight 16 places
+  // the button; the input + button are flex siblings so text always stops before the button (never under).
+  // The composer sits inside the LTR-pinned `col`, so `row` (not row-reverse) is what puts the send
+  // button on the FAR RIGHT here; the input (flex:1) fills to its left and right-aligns its Arabic
+  // text next to the button. (owner 2026-07-09: send button must be far right.)
+  // Composer redesign (2026-08-16). The chat column is 940 wide on desktop — a full-width composer
+  // there reads as a search bar, not a place to talk. 720 keeps it a deliberate, centered object.
   composerCol: { maxWidth: 720, alignSelf: 'center' },
-  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.sheet, padding: 16, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
+  // alignItems flex-end pins the send arrow to the BOTTOM edge as the box grows (the ChatGPT/Claude
+  // composer contract); the input's own marginVertical re-centers a single line against the 34px
+  // button, so idle still reads as one compact pill. borderColor/shadowOpacity/shadowRadius are
+  // ANIMATED inline (focus glow) — only the static halves live here.
+  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 24, paddingVertical: 8, paddingLeft: 18, paddingRight: 8, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.1, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 3 },
   // Focus glow target — COMPOSER_EASE (web) glides border-color and box-shadow between these two.
   // Carries the FULL shadow set: RNW compiles box-shadow per-style, so a partial override here
   // would win wholesale and drop the green tint + offset (observed live).
   composerFocused: { borderColor: colors.primary, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.2, shadowRadius: 18, shadowOffset: { width: 0, height: 6 } },
-  // A full-width first row keeps Arabic input clear of the controls below. The wrapper
-  // owns the height glide and clips the rotating placeholder to the same measured bounds.
-  inputGrow: { width: '100%', flexBasis: '100%', flexGrow: 0, flexShrink: 0, overflow: 'hidden', marginBottom: 12 },
+  // The wrapper owns the glide (INPUT_EASE) and the row position; marginVertical 6 =
+  // (34 send-button − 22 line) / 2, the single-line centering trick above.
+  inputGrow: { flex: 1, overflow: 'hidden', marginVertical: 6 },
   // 15/22 breathes better for Arabic script than the old 14/20. Height is the same numeric target
   // as the wrapper's — set state-wise, never transitioned (see the JSX note on measurement).
   // fontSize MUST be >=16 on web: mobile Safari/Chrome auto-zoom the page when focusing an input under
   // 16px and never zoom back out — the single worst mobile-web chat bug. overflowY:'auto' gives the
   // internal scroll once the textarea reaches COMPOSER_MAX_H. (owner 2026-08-19)
-  input: { fontFamily: font.family.arabic, width: '100%', fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any, overflowY: 'auto' as any } : {}) },
+  input: { width: '100%', fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any, overflowY: 'auto' as any } : {}) },
   sendBtn: { width: 34, height: 34, borderRadius: radius.pill, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
   sendBtnHover: { backgroundColor: colors.dark },
   sendDisabled: { opacity: 0.35 },
   // ── Voice recording composer (owner brief 2026-08-23) ──
   // composerInner keeps the normal controls' exact pre-voice layout (it owns the composer's size at
   // all times); the recording row overlays it absolutely so the morph never changes the surface.
-  composerInner: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'flex-end', minHeight: 88, gap: 10 },
+  composerInner: { flex: 1, flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
   composerInnerHidden: { opacity: 0 },
   micBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   micBtnPressed: { backgroundColor: colors.segTrack, transform: [{ scale: 0.96 }] },
@@ -4824,7 +4845,7 @@ const s = StyleSheet.create({
   // fixed-width controls, whatever the amplitude (owner brief §1/§4).
   voiceWaveWrap: { flex: 1, alignSelf: 'stretch', minHeight: 34, overflow: 'hidden' },
   stopBtn: { width: 34, height: 34, borderRadius: 12, backgroundColor: colors.dark, alignItems: 'center', justifyContent: 'center' },
-  disc: { fontFamily: font.family.arabic, fontSize: 11, lineHeight: 16, color: colors.muted, textAlign: 'center', marginTop: 10, paddingHorizontal: 12 },
+  disc: { fontSize: 11, lineHeight: 16, color: colors.muted, textAlign: 'center', marginTop: 10, paddingHorizontal: 12 },
   // Centered Filter/AI pill band under the header (see the JSX note). Explicit height on BOTH ends
   // so MODE_EASE can glide it to 0; overflow hidden so the collapse clips instead of squashing.
   modeWrap: { alignSelf: 'center', alignItems: 'center', justifyContent: 'center', height: 58, overflow: 'hidden' },

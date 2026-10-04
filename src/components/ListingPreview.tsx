@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { colors, radius, font } from '@/theme/tokens';
+import { colors, radius } from '@/theme/tokens';
 import { useI18n, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { listingPrice } from '@/lib/listingDisplay';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish, translateTrailingPeriodWord } from '@/lib/arabicText';
@@ -38,8 +38,9 @@ export default function ListingPreview({ listing: l, url }: { listing: Listing; 
   const typeLabel = arabicOrPlaceholder(/[ء-ي]/.test(l.type || '') ? l.type : t(l.cleanType ?? l.type), locale, TYPE_UNRESOLVED_AR);
   const title = hideArabicProseInEnglish((() => { const v = (l.title ?? '').trim(); return v && /[ء-ي]/.test(v) ? '\u200f' + v : null; })(), locale) || typeLabel;
   const desc = hideArabicProseInEnglish((() => { const d = (l.description ?? '').trim(); return d && /[ء-ي]/.test(d) ? '\u200f' + d : null; })(), locale);
-  // Shell loads this family (including Latin glyphs); the legacy Poppins tokens are not loaded.
-  const face = { fontFamily: font.family.arabic };
+  // The app's own type, same as the chat around it (the Tajawal face was retired 2026-10-04 — owner:
+  // «the text format is weird, not like how it was»).
+  const face = {};
   const tx = { ...face, textAlign: (isRTL ? 'right' : 'left') as 'right' | 'left', writingDirection: (isRTL ? 'rtl' : 'ltr') as 'rtl' | 'ltr' };
 
   return (
