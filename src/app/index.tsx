@@ -103,6 +103,20 @@ const AREA_HINT: RangeHintCfg = {
 // HOME_DEFAULT_QUERY / hasActiveFilters moved to src/lib/searchDefaults.ts (zero-dependency, so a
 // plain Node test can execute them — imported above).
 
+// The city-pool scope a query produces: the SAME expressions the Home component derives its own scope with (a barrier,
+// verify-trending-pools-warm-at-open.ts, holds the two in lockstep). Used only to WARM the pools one deal press away.
+function cityPoolScopeOf(query: SearchQuery) {
+  const rentPeriod: 'monthly' | 'annual' | 'both' = validRentPeriod(query.rentPeriod) ?? 'annual';
+  const effDeal = query.dealCombined ? null : query.deal;
+  const queryForPeriod: SearchQuery = effDeal === 'Rent' ? { ...query, rentPeriod } : query;
+  const rentPeriodTok: string | null = rentPeriodParam(queryForPeriod);
+  const effCategory: Category | null = scopeCrossesMacro(query) ? null : (query.category ?? IMPLIED_CATEGORY_DEFAULT);
+  const cohortTypes = cohortTypesAr(queryForPeriod);
+  const { isBroadCommercial: _scopeFlag, ...tableScope } = searchTableScope(queryForPeriod) ?? {};
+  const af = { ...rpcAllNarrowingParams(queryForPeriod), ...tableScope };
+  return { effDeal, rentPeriodTok, effCategory, cohortTypes, af };
+}
+
 export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -543,6 +557,24 @@ export default function Home() {
   // City in this form, so it's always known here; Category is picked AFTER City/District, so a
   // Category-aware ranking can't reach this field without moving Category earlier in the flow — a
   // bigger UX change the owner declined (2026-07-20). Deal-only is what this data can support today.
+  // WARM THE NEXT TAP (owner 2026-10-03: «once the user opens it, the timer is already on»). The current scope's pool
+  // starts loading at mount (the effect below). Once it lands, the pools ONE deal press away (Rent only, Buy + Rent,
+  // Buy only) load one after another, never in a burst on the shared database, so a user who switches the deal and
+  // taps the city field finds the counts already there. A scope already cached resolves at once; a failure is ignored
+  // (the field loads it on demand exactly as before).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).catch(() => null);
+      for (const sel of ['Rent', 'Both', 'Buy'] as const) {
+        if (cancelled) return;
+        const sc = cityPoolScopeOf({ ...query, ...dealSelectionToQuery(sel, query.deal) });
+        await ensureCityFieldIndex(sc.effDeal, sc.rentPeriodTok, sc.effCategory, sc.cohortTypes, sc.af).catch(() => null);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     const cohort = cityCohortSig;
     void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).then((pool) => {
