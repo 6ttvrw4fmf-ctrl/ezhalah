@@ -1457,8 +1457,6 @@ export default function Home() {
                     // key and were the one captured value nobody re-checked (2026-09-23, #648).
                     if (!query.location) {
                       const cohort = cityCohortSig;
-                      // AT ONCE, never a «جاري التحميل…» wait (owner 2026-10-04): this cohort's rows if loaded, else the
-                      // count-free names with «…»; the real counts replace them when the pool lands.
                       setCitySuggestions(topCitiesByListings(effDeal, rentPeriodTok, effCategory, 6, cohortTypes, cityAfParams));
                       void ensureCityFieldIndex(effDeal, rentPeriodTok, effCategory, cohortTypes, cityAfParams).then(() => {
                         writeCitySuggestionsForCohort(cohort, true);
