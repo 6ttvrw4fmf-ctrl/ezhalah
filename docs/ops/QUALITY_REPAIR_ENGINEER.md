@@ -79,6 +79,30 @@ and this standing list:
   one restored listing is counted again; the hourly search-index sync (:22) and the location matview refreshed within the last
   2 hours. A lag or a dead listing still counted is a bug you fix; never change a number to match.
 - **D. Anything the three engineers wrote as `engineer = 'repair'`** in `ops_engineer_backlog`.
+- **E. SPEED AND THE SCREENS THE OWNER FIXED ON 2026-10-03 — every day, never skipped** (owner: «we never want this ever
+  again, especially the slow one, because I know this happens a lot»). A customer who waits leaves. Measure, then fix:
+  1. **First tap on a cold page, as a real user** (real browser on https://ezhalah-app.vercel.app, a fresh page, tap the city
+     field): city names visible in **under 1 s**, counts in **under 3 s**. Then switch to إيجار and to شراء + إيجار and tap
+     again: counts already there (the pools warm at open). Type a city with no listings («المرموثة»): it shows at once with
+     «لا توجد إعلانات هنا حالياً», can be picked, and BOTH «بحث» buttons answer «nothing here». Write the times in a proof row.
+  2. **The counting RPCs inside the database:** `explain (analyze, timing off, summary on)` of `top_cities_by_deal_ar` for
+     (بيع, Residential), (إيجار, Residential, سنوي) and (deal null): each **under 2 s** execution. Above 3 s is RED. Read
+     `pg_stat_statements` for `top_cities_by_deal_ar`, `district_options_ar`, `location_search_candidates_ar`: a mean above
+     2 s is a regression to fix TODAY. On 2026-10-03 the cause was a correlated sub-query run once per listing row
+     (223,216 times, 10.7 s); the plan shows it as `SubPlan … loops=<row count>`. Fix it the way migration
+     20261003222926 did: a rolled-back dry run first proving IDENTICAL rows over at least 5 scopes, then apply, mirror
+     byte-exact, PR.
+  3. **Database crowding:** from `cron.job_run_details`, the jobs that ran longer than 5 minutes in the last 24 h and when.
+     On 2026-10-03 `mon-detectors-and-dispatch` (twice an hour, up to 14 min) and the hourly sync made the same RPC take
+     6–14 s in the browser. A job that got slower than yesterday is yours to fix (its query, its index). Moving or thinning
+     the MONITORING schedule is the owner's call: put the numbers in the report instead.
+  4. **The names:** signed in, a results sentence in Arabic never shows a Latin name (it uses `pickName`, like the sidebar).
+  5. **Opening a saved chat from the sidebar** fades out and fades in at the latest message: no hard cut, no visible jumps.
+  These barriers guard them and may NEVER be weakened, skipped or deleted (only repointed with the same strength):
+  `verify-trending-rows-never-wait-for-counts`, `verify-trending-pools-warm-at-open`,
+  `verify-location-typeahead-never-hides-a-place`, `verify-arabic-sentence-never-greets-in-latin`,
+  `verify-saved-chat-open-is-smooth`. A slowdown you find is fixed in the same run, or logged in `ops_engineer_backlog`
+  with the measured numbers and fixed the next run, never «tomorrow» twice.
 Each repair is measured: the count before and after, written in the report. A repair that made anything worse is undone the
 same run.
 
@@ -107,6 +131,7 @@ Start at 10, then:
 - **−1** for each verdict you could not back with a number from the database;
 - **−1** if tonight's repair backlog did not shrink against yesterday (open `repair` rows, or the older no-district count);
 - **−2** for any repair that made things worse and was not undone; **−1** for every problem you found and did not log;
+- **cap 6** if a first-tap or RPC time is above its limit (track E) and was neither fixed nor logged with numbers;
 - **cap 9** if any of the three verdicts could not be computed; **cap 5** if a customer-visible number was wrong and you did
   not fix or log it.
 **10 requires:** three verdicts with evidence, a correction for every RED, at least one repair batch shipped and measured
@@ -117,6 +142,7 @@ Start at 10, then:
 > 🚦 ⚡ GREEN/RED — <reason with the number> · 🆕 GREEN/RED — … · ♻️ GREEN/RED — …
 > 🔧 **Repaired today:** N listings · <what> · before → after
 > 🔢 **Numbers a customer sees:** matched N of 5 scopes · dead listings still counted: N · sync age: N minutes
+> ⚡ **Speed:** first tap names N ms, counts N ms · top_cities (بيع سكني) N ms in the database · longest cron job N min
 > ⭐ **Rating:** N/10 (computed: the deductions) · 🎯 To reach 10/10: <the exact next steps>
 > 🙋 **Needs from you:** Nothing. (Only money, law or secrets.)
 Log your run in `ops_daily_engineer_run`: `qa:start`, a `qa:progress` row after each of the three parts, `qa:end` with the
