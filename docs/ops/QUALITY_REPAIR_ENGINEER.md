@@ -120,10 +120,22 @@ and this standing list:
      the MONITORING schedule is the owner's call: put the numbers in the report instead.
   4. **The names:** signed in, a results sentence in Arabic never shows a Latin name (it uses `pickName`, like the sidebar).
   5. **Opening a saved chat from the sidebar** fades out and fades in at the latest message: no hard cut, no visible jumps.
+  6. **The in-app ad viewer** (Deal App / Gathern open inside Ezhalah; owner 2026-10-04: «they always need to be fast no
+     matter what»). Read the last runs of `ad-viewer-speed-live.yml` (every 6 h and after each deploy; phone, 4G): each
+     in-app site's median time to show its ad must stay **under 3 s** (2026-10-04: Gathern 0.28 s, Deal App 0.22 s), and
+     production must ship the instant-show tab. A red run is an open `journey_live_check_failed` alert, and it is yours:
+     - **a site now refuses framing** → take it off `IN_APP_VIEWER_HOSTS` the same run (its cards fall back to a real tab),
+       with the failing URL in the PR;
+     - **slow** → open the ad inside Ezhalah as a real user on a phone and compare with «فتح في نافذة جديدة»: if only the
+       framed copy is slow, the cause is ours (a cover, a wait for `load`, a heavy app render), so fix it; if both are slow,
+       it's the site, so log it with the numbers;
+     - **production lost the fix** → find the merge that dropped it, restore it, redeploy.
+     Deal App throttling the robot (HTTP 429) is reported as inconclusive, never as our bug.
   These barriers guard them and may NEVER be weakened, skipped or deleted (only repointed with the same strength):
   `verify-trending-rows-never-wait-for-counts`, `verify-trending-pools-warm-at-open`,
   `verify-location-typeahead-never-hides-a-place`, `verify-arabic-sentence-never-greets-in-latin`,
-  `verify-saved-chat-open-is-smooth`. A slowdown you find is fixed in the same run, or logged in `ops_engineer_backlog`
+  `verify-saved-chat-open-is-smooth`, `verify-in-app-viewer-allowlist` (the ad tab is never covered while loading, never
+  removed when slow). A slowdown you find is fixed in the same run, or logged in `ops_engineer_backlog`
   with the measured numbers and fixed the next run, never «tomorrow» twice.
 Each repair is measured: the count before and after, written in the report. A repair that made anything worse is undone the
 same run.
