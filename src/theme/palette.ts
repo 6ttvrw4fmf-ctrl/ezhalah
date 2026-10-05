@@ -149,6 +149,7 @@ export function buildThemeCss(): string {
     // subtree root beats every :root block above for everything inside it — both dark paths.
     `[data-ez-light]{${decl(lightColors)}color-scheme:light;}`,
     TAP_TARGET_CSS,
+    COMPOSER_PLACEHOLDER_CSS,
   ].join('\n');
 }
 
@@ -207,3 +208,12 @@ export const TAP_TARGET_CSS =
  *      dataSet={{ ...TAP44 }}                      // or
  *      dataSet={{ ...TAP44, testid: 'voice-mic' }} // alongside an existing testid  */
 export const TAP44 = { tap44: '1' } as const;
+
+/** The AI-chat composer's empty-box hint stays on ONE line and ends in an ellipsis (owner 2026-10-05).
+ *  With the typed text sharing a line with the mic and Send, the long hint «اكتب العقار اللي تبحث عنه في
+ *  السعودية...» wrapped to two lines on a phone, which made the box taller and lifted typed text above
+ *  the buttons. `text-overflow` trails at the END of the line in the field's own direction, so in Arabic
+ *  the dots sit on the left, after the words. Opt-in by marker, like TAP44. */
+export const COMPOSER_INPUT = { composerInput: '1' } as const;
+export const COMPOSER_PLACEHOLDER_CSS =
+  '[data-composer-input]::placeholder{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}';
