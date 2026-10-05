@@ -776,6 +776,15 @@ are saved in your run log. Never from memory, an estimate or yesterday.
 source, a new field or filter worth adding, a rule that seems wrong, or a business or legal question.
 Never give the owner chores.
 
+## Better every night (owner, 2026-10-05: «stronger and better in every run, every single time»)
+1. **Start:** read your own rows in `ops_engineer_fix_rate` (last 7 nights) and every `<you>:followup` row since your last
+   run (🔧's coach note is the newest). Tonight's fix rate must beat last night's; `over_claimed = true` last night means
+   your first job is proving or withdrawing those claims.
+2. **During:** prove yesterday's pending fixes first; fix every bug you find tonight the same night where it is yours.
+3. **End:** your report carries one line «📚 Lesson: <the one mistake or slow part tonight, and the rule that prevents it>».
+   🔧 copies it into this rulebook the next morning, so no lesson is learned twice.
+4. The same lesson two nights in a row means you change your approach, not just try harder.
+
 ## LIVE means tested like a real user (owner, 2026-10-03)
 The owner: «sometimes they claim it's live but it isn't; they didn't test it like a real user.» From now on:
 1. **«Fixed», «live» and «verified» are words you may use only after a real-user test on production.** Merged is not live.

@@ -13,7 +13,7 @@ import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
 import { isStayLengthPriced, listingPrice } from '@/lib/listingDisplay';
-import { afEvidence, type ActiveAf } from '@/lib/afEvidence';
+import { afEvidence, AMENITY_COL, type ActiveAf } from '@/lib/afEvidence';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -176,7 +176,19 @@ export function ResultCard({
   const allActive = (listing.features
     ? FEATURE_META.filter((m) => Boolean(listing.features?.[m.key]))
     : []);
-  const visible = allActive;
+  // THE CARD LIGHTS UP WHAT THE USER ASKED FOR (owner 2026-10-05: «check mark and highlight — when the
+  // user gets the answer, the property card shows it»). Every feature the Advanced Filter asked for is
+  // drawn IN PLACE with a ✓ and the brand tint, and moved to the front of the grid; the bathrooms stat
+  // lights up the same way. Display-only: the set comes from the active answers, and a feature is only
+  // drawn at all when the listing itself carries it (the AF predicate is strict, so it always does).
+  const pickedFeatures = useMemo(() => {
+    const keys = activeAf?.find((a) => a.id === 'amenities')?.keys ?? [];
+    return new Set(keys.map((k) => (k === 'balcony' ? 'balcony_terrace' : AMENITY_COL[k] ?? k)));
+  }, [activeAf]);
+  const bathPicked = !!activeAf?.some((a) => a.id === 'bathrooms');
+  const visible = pickedFeatures.size
+    ? [...allActive.filter((f) => pickedFeatures.has(f.key)), ...allActive.filter((f) => !pickedFeatures.has(f.key))]
+    : allActive;
   // Land listings (amlakalahsa, etc.) legitimately have zero boolean amenities (no elevator/parking/
   // kitchen on raw land) while still having real street_width/parcel_number in additional_info — that
   // combo was rendering "No additional features listed" directly above a populated "Additional
@@ -322,7 +334,7 @@ export function ResultCard({
         ) : null)}
         <View style={card.statsRow}>
           {listing.beds > 0 ? <Stat icon="bed-outline" big={String(listing.beds)} small={t(listing.beds === 1 ? 'Bed' : 'Beds')} /> : null}
-          {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} /> : null}
+          {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} picked={bathPicked} /> : null}
           {listing.area > 0 ? <Stat icon="resize-outline" big={`${listing.area} ${tr('m²')}`} small={t('Area')} /> : null}
           <Stat icon="business-outline" big={typeLabel} small={t('Property Type')} />
           {listedClean ? <Stat icon="calendar-outline" big={t('Added')} small={listedClean} /> : null}
@@ -366,8 +378,8 @@ export function ResultCard({
           {visible.length > 0 ? (
             <Text numberOfLines={unfolded ? undefined : 1} style={[card.oneLine, { textAlign: txtAlign, writingDirection: wDir }]}>
               {visible.map((f) => (
-                <Text key={f.key} style={card.featText}>
-                  <Ionicons name={f.icon} size={12} color={colors.primary} />{` ${t(f.label)}\u2003`}
+                <Text key={f.key} style={[card.featText, pickedFeatures.has(f.key) && card.featTextPicked]}>
+                  <Ionicons name={pickedFeatures.has(f.key) ? 'checkmark-circle' : f.icon} size={12} color={colors.primary} />{` ${t(f.label)}\u2003`}
                 </Text>
               ))}
             </Text>
@@ -380,12 +392,15 @@ export function ResultCard({
       <View style={[card.rightCol, row && card.rightColRow]}>
         {visible.length > 0 ? (
           <View style={card.featGrid}>
-            {visible.map((f) => (
-              <View key={f.key} style={card.featCell}>
-                <Ionicons name={f.icon} size={14} color={colors.primary} />
-                <Text style={card.featText}>{t(f.label)}</Text>
-              </View>
-            ))}
+            {visible.map((f) => {
+              const picked = pickedFeatures.has(f.key);
+              return (
+                <View key={f.key} style={[card.featCell, picked && card.featCellPicked]} testID={picked ? `card-feature-picked-${f.key}` : undefined}>
+                  <Ionicons name={picked ? 'checkmark-circle' : f.icon} size={14} color={colors.primary} />
+                  <Text style={[card.featText, picked && card.featTextPicked]}>{t(f.label)}</Text>
+                </View>
+              );
+            })}
           </View>
         ) : hasAddlInfo ? null : (
           <Text style={card.noFeat}>{t('No additional features listed')}</Text>
@@ -1145,10 +1160,10 @@ function RnplBanner({ monthly, source, t }: { monthly?: number; source?: string;
 }
 
 // One stat chip — used in the middle column's stats row.
-function Stat({ icon, big, small }: { icon: any; big: string; small: string }) {
+function Stat({ icon, big, small, picked }: { icon: any; big: string; small: string; picked?: boolean }) {
   return (
-    <View style={card.statChip}>
-      <Ionicons name={icon} size={14} color={colors.primary} />
+    <View style={[card.statChip, picked && card.statChipPicked]} testID={picked ? 'card-stat-picked' : undefined}>
+      <Ionicons name={picked ? 'checkmark-circle' : icon} size={14} color={colors.primary} />
       <View style={card.statWords}>
         <Text style={card.statBig} numberOfLines={1}>{big}</Text>
         <Text style={card.statSmall} numberOfLines={1}>{small}</Text>
@@ -1278,6 +1293,7 @@ const card = StyleSheet.create({
 
   statsRow: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 8, rowGap: 4, marginTop: 2 },
   statChip: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: '100%' },
+  statChipPicked: { backgroundColor: colors.tint, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   statWords: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: 3, flexShrink: 1 },
   statBig: { fontSize: 12.5, fontWeight: '700', color: colors.ink, lineHeight: 15 },
   statSmall: { fontSize: 10, color: colors.muted, lineHeight: 12 },
@@ -1321,6 +1337,9 @@ const card = StyleSheet.create({
   featGrid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, rowGap: 2 },
   featCell: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2, maxWidth: '100%' },
   featText: { fontSize: 11.5, color: colors.ink, fontWeight: '500', flexShrink: 1 },
+  // An Advanced-Filter pick, lit in place: the «مطابق لطلبك» chip's tint, primary bold text, ✓ icon.
+  featCellPicked: { backgroundColor: colors.tint, borderRadius: 6, paddingHorizontal: 6 },
+  featTextPicked: { color: colors.primary, fontWeight: '700' },
   noFeat: { fontSize: 11, color: colors.muted, fontStyle: 'italic' },
   moreBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
