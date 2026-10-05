@@ -319,6 +319,17 @@ def is_price_refresh_artifact(new_price: int, area_m2, price_per_meter) -> bool:
 CONTROLS = 5
 
 
+def _known_live_controls(client, tbl: str) -> list[dict]:
+    """Candidate known-live controls: the most recently seen UNSTRUCK active ads. Deliberately NOT
+    the sweep cohort (_cohort): under --only-struck the cohort is struck rows, and a control must be
+    an ad we have reason to believe is live. READ-ONLY by contract (no update/insert); the
+    scoped-verification barrier excludes only this body from its sweep-read count and pins that."""
+    return _run_with_retry(lambda: client.table(tbl)
+                           .select("id, listing_url, last_seen_at, missing_count")
+                           .eq("active", True).eq("missing_count", 0)
+                           .order("last_seen_at", desc=True).limit(40).execute()).data or []
+
+
 def looks_dead(status: int, body: str) -> bool:
     """True iff the response confirms this listing is gone (vs a transient hiccup)."""
     if status in (404, 410):
@@ -450,10 +461,7 @@ def main() -> None:
             except ValueError:
                 return False
         try:
-            cands = _run_with_retry(lambda: client.table(table)
-                                    .select("id, listing_url, last_seen_at, missing_count")
-                                    .eq("active", True).eq("missing_count", 0)
-                                    .order("last_seen_at", desc=True).limit(40).execute()).data or []
+            cands = _known_live_controls(client, table)
         except Exception as exc:  # noqa: BLE001 — unreadable controls hide nothing
             cands, controls_note = [], f"controls unreadable ({str(exc)[:80]}) "
             args.report_only = True
