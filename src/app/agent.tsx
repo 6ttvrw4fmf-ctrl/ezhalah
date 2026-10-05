@@ -4863,7 +4863,12 @@ const s = StyleSheet.create({
   composerFocused: { borderColor: colors.primary, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.2, shadowRadius: 18, shadowOffset: { width: 0, height: 6 } },
   // The wrapper owns the glide (INPUT_EASE) and the row position; marginVertical 6 =
   // (34 send-button − 22 line) / 2, the single-line centering trick above.
-  inputGrow: { flex: 1, overflow: 'hidden', marginVertical: 3, minWidth: 0 },
+  // NO flex: 1 here (owner 2026-10-04, real iPhone: «I can type but I don't see what I type»). Since #6009
+  // this wrapper lives inside composerInputColumn — a COLUMN — where flex: 1 means flex-basis 0% on the
+  // VERTICAL axis. iOS Safari resolves that 0% against the column's indefinite height as 0, so the row
+  // collapsed to 0px: keyboard up, text typed, nothing drawn (pill measured 53px on the phone, 82px in
+  // desktop WebKit, which treats the basis as content). The explicit height below is the only size.
+  inputGrow: { overflow: 'hidden', marginVertical: 3, minWidth: 0, alignSelf: 'stretch', flexShrink: 0 },
   // 15/22 breathes better for Arabic script than the old 14/20. Height is the same numeric target
   // as the wrapper's — set state-wise, never transitioned (see the JSX note on measurement).
   // fontSize MUST be >=16 on web: mobile Safari/Chrome auto-zoom the page when focusing an input under

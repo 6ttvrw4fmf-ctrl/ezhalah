@@ -100,7 +100,7 @@ check(
 check(
   '8b. overlay is absolute inside the CLIPPED input wrapper (inputGrow overflow hidden) with one-line ellipsis — overflow = 0 by construction',
   /introRotator: \{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0/.test(agent) &&
-    /inputGrow: \{ flex: 1, overflow: 'hidden'/.test(agent) &&
+    /inputGrow: \{ overflow: 'hidden'/.test(agent) && !/inputGrow: \{[^}]*\bflex: 1\b/.test(agent) &&
     /<Text numberOfLines=\{1\} ellipsizeMode="tail"/.test(rotatorBody),
 );
 
