@@ -3,7 +3,9 @@
 # PUBLIC anon RPC the app uses (scrapers/common/af_robot.py). A miss raises a P2 alert (af_robot_miss) and
 # one work-queue row, and fails this job. Dispatch-only: pg_cron row gh-af-robot calls
 # trigger_gh_workflow('af-robot.yml') at :41 every hour (clear of the :22 search sync).
-# READ-ONLY on listings.
+# READ-ONLY on listings. It never opens a page, but it imports af_score's request builder, whose module
+# graph reaches the wasalt browser — so it carries the same transport every such job must
+# (verify-wasalt-probing-workflows-carry-the-browser.ts).
 name: AF robot customer
 
 on:
@@ -34,10 +36,13 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
       - name: Ask for 10 real listings the way a customer would
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          WASALT_BROWSER: "1"
           DRY_RUN: ${{ inputs.dry_run }}
-        run: exec python -m scrapers.common.af_robot $([ "$DRY_RUN" = "true" ] && echo --dry-run)
+        run: exec xvfb-run -a python -m scrapers.common.af_robot $([ "$DRY_RUN" = "true" ] && echo --dry-run)
