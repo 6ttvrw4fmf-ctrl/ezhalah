@@ -123,6 +123,34 @@ _LOG_FIELDS = ("city_ar", "district_ar", "deal_ar", "type_ar", "rent_period_ar",
                "area_m2", "bedrooms", "bathrooms")
 
 
+def page_structured_props(page: dict, limit: int = 40) -> list[str]:
+    """The page's OWN structured facts, as «name=value», from schema.org `additionalProperty` and
+    `amenityFeature` at any depth of its JSON-LD. Trap 1 of the 🔬 rulebook: «the site doesn't publish
+    that field» must be proven from the raw payload, and the artifact holding the JSON-LD cannot be
+    downloaded from a cloud session — so the names (and short values) go to the job log. Only these two
+    lists are walked: never `seller`, `author` or any contact block (PDPL)."""
+    out: list[str] = []
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k in ("seller", "author", "agent", "provider", "contactPoint", "telephone", "email"):
+                    continue
+                if k in ("additionalProperty", "amenityFeature") and isinstance(v, list):
+                    for x in v:
+                        if isinstance(x, dict) and x.get("name") is not None:
+                            out.append(f"{x.get('name')}={str(x.get('value'))[:40]}")
+                else:
+                    walk(v)
+        elif isinstance(node, list):
+            for x in node:
+                walk(x)
+
+    for b in (page or {}).get("jsonld") or []:
+        walk(b)
+    return out[:limit]
+
+
 def log_lines(item: dict, n_evidence: int = 15) -> list[str]:
     """The comparison as plain log lines. The reread.json artifact cannot be downloaded from a cloud
     agent session (its blob host is refused by the egress proxy, measured 2026-10-02), so the
@@ -135,6 +163,9 @@ def log_lines(item: dict, n_evidence: int = 15) -> list[str]:
            f"   page title: {page.get('title')}",
            f"   page images (JSON-LD): {page_image_count(page)} | og:image: {bool((page.get('meta') or {}).get('og:image'))} "
            f"| we serve a photo: {st.get('has_photo')} | image at: {page_image_paths(page)}"]
+    props = page_structured_props(page)
+    if props:
+        out.append("   page structured props: " + " | ".join(props))
     out += [f"   page: {x[:200]}" for x in (page.get("evidence_lines") or [])[:n_evidence]]
     return out
 

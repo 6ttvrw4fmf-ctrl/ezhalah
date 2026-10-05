@@ -439,6 +439,7 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "region_id": rid,
         "source_capture": {k: v for k, v in L.items() if k not in _PII},
     }
+    normalize.silence_unfilled_room_block(row, L)   # an untouched room block is silence (2026-10-05)
     return row, category
 
 

@@ -31,6 +31,21 @@ check("never a stored-false answer", ns["customer_answers"](L("مصعد"), {"ele
 p = ns["rpc_params"]({"deal_ar": "بيع", "city_ar": "الرياض", "type_ar": "شقة"}, ["elevator", "furnished"])
 check("amenity is an English slug", p["p_amenities"] == ["elevator"] and p["p_furnished"] is True)
 check("no city, no request", ns["rpc_params"]({"deal_ar": "بيع", "type_ar": "شقة"}, ["elevator"]) is None)
+r = ns["rpc_params"]({"deal_ar": "إيجار", "city_ar": "الرياض", "type_ar": "شقة", "rent_period_ar": "شهري"}, ["elevator"])
+check("a rent request carries the rent period the customer picks", r.get("p_rent_period") == "شهري")
+check("furnished is never asked on Monthly (no Monthly cohort offers it)",
+      ns["offered"](["elevator", "furnished"], {"rent_period_ar": "شهري"}) == ["elevator"]
+      and ns["offered"](["furnished"], {"rent_period_ar": "سنوي"}) == ["furnished"])
+check("a navigation link is not the ad", ns["page_lines"]({"evidence_lines": ["مواقف سيارات للإيجار", "موقف خاص"]}) == L("موقف خاص"))
+check("an empty label is not a yes", not ns["page_says_yes"](ns["page_lines"]({"evidence_lines": ["موقف السيارة :"]}), "parking"))
+check("furniture is not furnished", not ns["page_says_yes"](L("شركات الصيانة ونقل المفروشات"), "furnished")
+      and ns["page_says_yes"](L("شقة مفروشة"), "furnished"))
+nd = {"props": {"pageProps": {"propertyDetailsV3": {"title": "شقة للإيجار", "description": "شقة مع مصعد وموقف خاص",
+      "agentInfo": {"name": "X", "phone": "0500000000"}}}}}
+wp = ns["wasalt_page"]("https://wasalt.sa/ar/property/1", fetch=lambda u: (nd, 200, 1))
+check("a live wasalt page is read, not unreadable", wp is not None and ns["page_says_yes"](L(*wp["evidence_lines"]), "elevator"))
+check("wasalt contact fields are never read", wp is not None and not any("0500" in x for x in wp["evidence_lines"]))
+check("a wasalt block stays unreadable", ns["wasalt_page"]("u", fetch=lambda u: (None, None, 0)) is None)
 print(json.dumps(out))
 `;
 
@@ -50,6 +65,12 @@ mustCatch('a failed request read as not found', 'if rows is None:\n        retur
 mustCatch('a negated amenity read as a yes', 'and not all(re.search(NEG', 'and not any(re.search(r"^$"');
 mustCatch('stored NULL no longer asked for', 'in (MATCH, WE_MISS) and page_says_yes', 'in (MATCH,) and page_says_yes');
 mustCatch('amenity sent as Arabic', 'p["p_amenities"] = slugs', 'p["p_amenities"] = answers');
+mustCatch('rent period dropped for «إيجار»', 'RENT = ("إيجار", "ايجار")', 'RENT = ("ايجار",)');
+mustCatch('furnished asked on Monthly', 'return [a for a in answers if a != FURNISHED]', 'return answers');
+mustCatch('wasalt agent block read', 'if key and _WASALT_SKIP.search(key):', 'if False:');
+mustCatch('wasalt page dropped as unreadable', 'if status != 200 or not isinstance(pd, dict):\n        return None', 'return None');
+mustCatch('an empty label read as a yes', 'and not BARE_LABEL.match(x)]', ']');
+mustCatch('site navigation read as the ad', 'if x and not CHROME.match(x) and', 'if x and');
 
 const fail = (m: string) => { console.error(m); process.exit(1); };
 const wf = '.github/workflows/af-score.yml';
@@ -61,4 +82,14 @@ const mig = readdirSync('supabase/migrations').filter((f) => /ops_af_score/.test
 const sql = mig.map((f) => readFileSync('supabase/migrations/' + f, 'utf8')).join('\n');
 if (!/create table if not exists public\.ops_af_score/.test(sql)) fail('ops_af_score migration missing');
 if (!/cron\.schedule\('gh-af-score', '0 8 \* \* \*'/.test(sql)) fail('gh-af-score cron row (08:00 UTC) missing');
+// The night-2 net: the hourly robot customer (scrapers/common/af_robot.py; its mutation proof — a broken
+// slug mapping must be reported as a miss — is scrapers/common/tests/test_af_robot.py).
+const rwf = '.github/workflows/af-robot.yml';
+if (!existsSync(rwf)) fail('af-robot.yml missing');
+const rw = readFileSync(rwf, 'utf8');
+if (/^\s*(schedule|push|pull_request):/m.test(rw) || !rw.includes('workflow_dispatch')) fail('af-robot.yml must be dispatch-only');
+if (!rw.includes('scrapers.common.af_robot') || !rw.includes('EXPO_PUBLIC_SUPABASE_ANON_KEY')) fail('af-robot.yml must run af_robot with the anon key');
+const rsql = readdirSync('supabase/migrations').filter((f) => /af_robot/.test(f)).map((f) => readFileSync('supabase/migrations/' + f, 'utf8')).join('\n');
+if (!/cron\.schedule\('gh-af-robot', '41 \* \* \* \*'/.test(rsql)) fail('gh-af-robot hourly cron row (:41) missing');
+if (!existsSync('scrapers/common/tests/test_af_robot.py')) fail('the robot lost its mutation proof');
 console.log('verify-af-score-measures-the-customer-path: ok');

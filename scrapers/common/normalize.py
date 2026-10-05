@@ -462,6 +462,32 @@ def to_int_numeric(v) -> Optional[int]:
     except (TypeError, ValueError):
         return None
 
+# The aldarim SaaS (aldarim, abwbna, alobid, bahadhabab) publishes a ROOM BLOCK of counts — bedrooms,
+# bathrooms, living_rooms, kitchens, maid_rooms, driver_rooms, balconies — that defaults to 0 when the
+# advertiser never fills it in. Measured 2026-10-05 (🔬 AF engineer) over stored source_capture: an
+# all-zero block sits on a 21M-SAR, six-bedroom villa whose own description lists «2 غرفة خادمة»,
+# «2غرفة سائق», «مطبخ» (aldarim 53104); 45 aldarim, 13 alobid and 6 bahadhabab non-land rows with an
+# all-zero block name a maid room / kitchen / driver room in their own prose. A villa with 0 bedrooms AND
+# 0 bathrooms has not stated anything — so when the block is untouched, its counts are SILENCE (NULL),
+# never «no». A block with any non-zero count was filled in, and its zeros stay real negatives.
+ROOM_BLOCK_KEYS = ("bedrooms", "bathrooms", "living_rooms", "kitchens")
+ROOM_BLOCK_COLUMNS = ("kitchen", "maid_room", "driver_room", "balcony_terrace")
+
+
+def room_block_unfilled(payload: dict) -> bool:
+    return all(str(payload.get(k) if payload.get(k) is not None else "0").strip() in ("0", "", "0.0")
+               for k in ROOM_BLOCK_KEYS)
+
+
+def silence_unfilled_room_block(row: dict, payload: dict) -> dict:
+    """Turn the room-block columns of `row` into UNKNOWN when the source never filled the block in."""
+    if room_block_unfilled(payload):
+        for c in ROOM_BLOCK_COLUMNS:
+            if c in row:
+                row[c] = None
+    return row
+
+
 def count_flag(v) -> Optional[bool]:
     """A source COUNT ("how many balconies?") → an amenity tri-state, never a manufactured negative.
 
@@ -887,6 +913,19 @@ def amenities_from_text(raw: Optional[str]) -> dict[str, bool]:
             seen.setdefault(col, set()).add(val)
     # Two clauses that disagree («مصعد، بدون مصعد») have not stated the fact: NULL, not line order.
     return {col: vals.pop() for col, vals in seen.items() if len(vals) == 1}
+
+
+def amenities_from_lines(raw: Optional[str]) -> dict[str, bool]:
+    """amenities_from_text() per LINE of the source's own text, merged. The matcher's negation window
+    reaches ~12 characters back, so across a line break «الشقة غير مؤثثة\nمطبخ مغلق» read kitchen=False
+    (bossbih, 2026-09-20). Two lines that disagree have not stated the fact: NULL."""
+    if not raw:
+        return {}
+    seen: dict[str, set[bool]] = {}
+    for line in re.split(r"[\n\r]+", str(raw)):
+        for col, val in amenities_from_text(line).items():
+            seen.setdefault(col, set()).add(val)
+    return {col: next(iter(vals)) for col, vals in seen.items() if len(vals) == 1}
 
 
 # A clause break ends a fact. «الشقة غير مؤثثة\nمطبخ مغلق» is two statements, and the «غير» of the

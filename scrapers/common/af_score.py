@@ -53,13 +53,20 @@ AMENITY_SLUG = {"elevator": "elevator", "parking": "parking", "kitchen": "kitche
                 "maid_room": "maid_room", "driver_room": "driver_room", "private_entrance": "private_entrance"}
 FURNISHED = "furnished"
 BOOL_KW = {n: kw for n, k, _, kw in FIELDS if k == "bool"}
-RENT = "ايجار"
+RENT = ("إيجار", "ايجار")      # search_listings_ar stores «إيجار»; the bare spelling never matched it
+MONTHLY = "شهري"
+# Site chrome, not the ad: a short category link such as «مواقف سيارات للإيجار» / «شقق للبيع» sits in every
+# aqar page's navigation, so it says nothing about THIS listing (norm() has already folded hamza).
+CHROME = re.compile(r"^(?:\S+\s){0,3}(?:للايجار|للبيع)$")
+# An EMPTY label («موقف السيارة :», «التكييف :») is printed on every tuba / ksaaqar page whatever the
+# answer — the value sits elsewhere, or nowhere. A label is not a statement.
+BARE_LABEL = re.compile(r"^[^:]{1,30}:$")
 
 
 def page_lines(page: dict) -> list[str]:
     ls = [norm(x) for x in ([page.get("title") or ""] + list((page.get("meta") or {}).values())
                             + (page.get("evidence_lines") or []) + (page.get("text_head") or "").split(" | "))]
-    return [x for x in ls if x]
+    return [x for x in ls if x and not CHROME.match(x) and not BARE_LABEL.match(x)]
 
 
 def page_says_yes(lines: list[str], field: str) -> bool:
@@ -77,6 +84,15 @@ def customer_answers(lines: list[str], results: dict[str, str]) -> list[str]:
     return cols[:MAX_ANSWERS]
 
 
+def offered(answers: list[str], stored: dict) -> list[str]:
+    """Only answers a customer can actually give in this listing's scope. The Advanced Filter never asks
+    «furnished» on a Monthly search (src/lib/afCohorts.ts: no RentMonthly cohort lists it), so a request
+    carrying it is not a customer's request and its miss is not a customer's miss."""
+    if stored.get("rent_period_ar") == MONTHLY:
+        return [a for a in answers if a != FURNISHED]
+    return answers
+
+
 def rpc_params(stored: dict, answers: list[str]) -> dict | None:
     if not (stored.get("deal_ar") and stored.get("city_ar") and stored.get("type_ar")):
         return None
@@ -84,7 +100,7 @@ def rpc_params(stored: dict, answers: list[str]) -> dict | None:
                "p_limit": RPC_LIMIT, "p_offset": 0}
     if stored.get("district_ar"):
         p["p_districts"] = [stored["district_ar"]]
-    if stored.get("deal_ar") == RENT and stored.get("rent_period_ar"):
+    if stored.get("deal_ar") in RENT and stored.get("rent_period_ar"):
         p["p_rent_period"] = stored["rent_period_ar"]
     slugs = [AMENITY_SLUG[a] for a in answers if a in AMENITY_SLUG]
     if slugs:
@@ -101,6 +117,53 @@ def findable(rows: list[dict] | None, source_table: str, listing_id: int) -> boo
     if any(r.get("source_table") == source_table and int(r.get("listing_id")) == int(listing_id) for r in rows):
         return True
     return None if len(rows) >= RPC_LIMIT else False
+
+
+# Keys under propertyDetailsV3 that can hold a person or a contact: never read (PDPL).
+_WASALT_SKIP = re.compile(r"agent|broker|owner|advertiser|user|phone|mobile|whats|email|contact|licen|\bid$|_id$|uuid",
+                          re.I)
+
+
+def wasalt_page(url: str, fetch=None) -> dict | None:
+    """A wasalt listing read like any other ad, through the browser path wasalt requires.
+
+    cleanup._probe() answers a live wasalt page with (200, "") by design: liveness needs only the status,
+    so the body is dropped — which made every wasalt page «unreadable» here (ops_af_score 2026-10-04 and
+    10-05: 5/5 and 10/10). The page's own __NEXT_DATA__ (propertyDetailsV3) is the ad: its text values
+    become the evidence lines our comparison reads. Contact/agent keys are skipped. None = unreadable."""
+    if fetch is None:
+        from scrapers.common.cleanup import _wasalt_browser, _wasalt_browser_enabled
+        if not _wasalt_browser_enabled():
+            return None
+        fetch = _wasalt_browser().page_data
+    try:
+        data, status, _n = fetch(url)
+    except Exception:  # noqa: BLE001 — a failed read is unknown, never wrong
+        return None
+    pd = (((data or {}).get("props") or {}).get("pageProps") or {}).get("propertyDetailsV3")
+    if status != 200 or not isinstance(pd, dict):
+        return None
+    texts: list[str] = []
+
+    def walk(node, key: str = "") -> None:
+        if key and _WASALT_SKIP.search(key):
+            return
+        if isinstance(node, dict):
+            for k, v in node.items():
+                walk(v, str(k))
+        elif isinstance(node, list):
+            for x in node:
+                walk(x, key)
+        elif isinstance(node, str) and node.strip():
+            texts.extend(x.strip() for x in node.splitlines() if x.strip())
+
+    walk(pd)
+    return {"title": next((t for t in texts if re.search(r"[ء-ي]", t)), None), "meta": {}, "jsonld": [],
+            "evidence_lines": texts[:200], "text_head": " | ".join(texts)[:1500]}
+
+
+def is_wasalt(url: str) -> bool:
+    return "wasalt.sa" in url or "wasalt.com" in url
 
 
 def anon_client():
@@ -157,7 +220,7 @@ def sample_size(n: int, per_site: int | None) -> int:
 
 
 def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, night: str,
-               pace: float = PACE_S, probe=None) -> dict:
+               pace: float = PACE_S, probe=None, wasalt=wasalt_page) -> dict:
     probe = probe or _probe
     row = new_row(night, platform)
     last = 0.0
@@ -172,19 +235,22 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
             continue
         time.sleep(max(0.0, last + pace - time.monotonic()))
         last = time.monotonic()
-        try:
-            status, body = probe(url)
-        except Exception:  # noqa: BLE001
-            status, body = None, ""
-        if status != 200 or not body:
+        if is_wasalt(url) and wasalt is not None:
+            page = wasalt(url)
+        else:
+            try:
+                status, body = probe(url)
+            except Exception:  # noqa: BLE001
+                status, body = None, ""
+            page = page_evidence(body) if status == 200 and body else None
+        if page is None:
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
-        page = page_evidence(body)
         results = compare_listing(stored, page, skip_price=False)
         af_only = {k: v for k, v in results.items() if k in AF_FIELDS}
         fold(row, key, af_only, stored)
-        answers = customer_answers(page_lines(page), af_only)
+        answers = offered(customer_answers(page_lines(page), af_only), stored)
         params = rpc_params(stored, answers) if anon is not None and answers else None
         if params:
             verdict = findable(ask(anon, params), table, rid)
@@ -269,6 +335,11 @@ def main() -> int:
             row = new_row(night, p, note=f"error: {type(e).__name__}: {e}"[:300])
         rows.append(row)
         print(_line(row), flush=True)
+    try:
+        from scrapers.common.cleanup import _close_wasalt_browser
+        _close_wasalt_browser()
+    except Exception:  # noqa: BLE001 — closing a browser that never opened is not an error
+        pass
     out = {"night": night, "fleet": fleet_totals(rows), "sites": rows,
            "written": "dry run: nothing written" if a.dry_run else write_rows(client, rows)}
     if a.json:

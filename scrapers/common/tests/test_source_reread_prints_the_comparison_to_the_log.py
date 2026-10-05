@@ -40,3 +40,17 @@ def test_image_paths_say_where_the_page_lists_them():
     assert page_image_paths({"jsonld": [{"name": "x"}]}) == []
     text = "\n".join(log_lines({"table": "t", "id": 1, "url": "u", "stored": {}, "page": page}))
     assert "image at: ['itemOffered.image x1', 'image x2']" in text
+
+
+def test_structured_props_reach_the_log_without_the_seller():
+    """Trap 1: the page's own additionalProperty / amenityFeature names must be readable from the job
+    log (the artifact is unreachable from a cloud session), and the seller block never is (PDPL)."""
+    from scrapers.common.source_reread import log_lines, page_structured_props
+    page = {"jsonld": [{"itemOffered": {"additionalProperty": [{"name": "facing", "value": "North"},
+                                                               {"name": "utilities", "value": "Electricity"}],
+                                        "amenityFeature": [{"name": "Kitchen", "value": True}]},
+                        "offers": {"seller": {"additionalProperty": [{"name": "phone", "value": "0500000000"}]}}}]}
+    props = page_structured_props(page)
+    assert "facing=North" in props and "Kitchen=True" in props
+    assert not any("phone" in p or "0500" in p for p in props)
+    assert any("page structured props: facing=North" in x for x in log_lines({"page": page, "stored": {}}))
