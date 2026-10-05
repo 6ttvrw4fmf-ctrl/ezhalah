@@ -708,6 +708,26 @@ export default function Agent() {
     Animated.spring(sendScale, { toValue, stiffness: 260, damping: 26, mass: 0.7, useNativeDriver: Platform.OS !== 'web' }).start();
   const [sendHover, setSendHover] = useState(false);
   const inputRef = useRef<any>(null);
+  // A tap ANYWHERE on the composer pill focuses the input (owner 2026-10-04, real iPhone: «I can't type
+  // using my phone»). The textarea is one 22px line inside a taller pill, so on iOS a finger landing
+  // on the pill's padding, the rotating examples or the row gap focused nothing. Controls (mic, Send,
+  // «بحث» — RNW renders them focusable) keep their own tap; the click handler runs inside the user's
+  // gesture, so iOS raises the keyboard. Callback ref: the pill remounts when filterOrigin flips.
+  const composerTapRef = useRef<{ node: any; onTap: (ev: Event) => void } | null>(null);
+  const composerRef = useCallback((node: any) => {
+    if (!IS_WEB) return;
+    const prev = composerTapRef.current;
+    if (prev) { prev.node.removeEventListener('click', prev.onTap); composerTapRef.current = null; }
+    if (!node?.addEventListener) return;
+    const onTap = (ev: Event) => {
+      const target = ev.target as HTMLElement | null;
+      if (!target || target.closest?.('textarea, button, a, [role="button"], [tabindex]')) return;
+      if (voiceActiveRef.current) return;
+      inputRef.current?.focus?.();
+    };
+    node.addEventListener('click', onTap);
+    composerTapRef.current = { node, onTap };
+  }, []);
   // Desktop-web keyboard contract (ChatGPT/Claude convention): Enter sends and KEEPS focus for the
   // next message; Shift+Enter makes a new line. Bound as a raw DOM keydown on the textarea because
   // RNW's onKeyPress normalization reported key: "" for Enter (observed live) — the DOM event is
@@ -4320,7 +4340,7 @@ export default function Agent() {
                 keeps its full composer (input + Stop while busy/revealing, input + mic/send once
                 idle) exactly as before. */}
             {!filterOrigin ? (
-            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
+            <View ref={composerRef} style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
               {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
                   recording row is an absolute overlay on the same surface), so the composer's size
                   never jumps during the morph — one physical object changing state, not a component
