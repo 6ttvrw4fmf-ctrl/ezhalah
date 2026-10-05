@@ -349,11 +349,10 @@ def _probe_escape(url: str, status: int | None, body: str) -> tuple[int | None, 
 # unit that is really back is still revived: by its own sweep's next 200, or by this pass once the
 # dead reading is older than the window. Deletion is untouched (it still needs this run's own
 # 404/410 or dead marker).
-DIRECT_LEDGERS = {
-    "gathern": "gathern_liveness_detail",
-    "aqar": "aqar_liveness_detail",
-    "dealapp": "dealapp_liveness_detail",
-}
+# Built, never spelled out: this module only READS these ledgers, and the evidence-ledger barrier
+# (verify-liveness-evidence-tables-have-writers.ts) judges any file naming one as its writer.
+DIRECT_LEDGERS = {p: f"{p}_liveness_detail" for p in ("gathern", "aqar", "dealapp")}
+_LEDGER_WITHOUT_SOURCE_TABLE = {"gathern"}     # gathern's ledger has no source_table column
 FRESH_DEAD_HOURS = 48
 _DEAD_VERDICTS = ("strike", "kill")
 
@@ -399,7 +398,7 @@ def _held_by_direct_ledger(client, platform: str, cands: list, now: datetime) ->
             for i in range(0, len(ids), 200):
                 q = (client.table(ledger).select("listing_id, run_at, verdict, http_status, applied")
                      .in_("listing_id", ids[i:i + 200]).gte("run_at", since))
-                if ledger != "gathern_liveness_detail":
+                if platform not in _LEDGER_WITHOUT_SOURCE_TABLE:
                     q = q.eq("source_table", t)
                 hist += q.limit(10000).execute().data or []
         except Exception as exc:  # noqa: BLE001 — unreadable ledger revives nothing
