@@ -4840,7 +4840,7 @@ const s = StyleSheet.create({
   // fontSize MUST be >=16 on web: mobile Safari/Chrome auto-zoom the page when focusing an input under
   // 16px and never zoom back out — the single worst mobile-web chat bug. overflowY:'auto' gives the
   // internal scroll once the textarea reaches COMPOSER_MAX_H. (owner 2026-08-19)
-  input: { width: '100%', fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any, overflowY: 'auto' as any } : {}) },
+  input: { width: '100%', fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.ink, paddingVertical: 0, paddingHorizontal: 2, textAlignVertical: 'center', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any, overflowY: 'auto' as any, cursor: 'text' as any, position: 'relative' as any, zIndex: 2 } : {}) },
   // A clear, compact search target: large enough to read and tap, small enough to leave the
   // composer feeling like a focused property-search field rather than a chat card.
   sendBtn: { width: 38, height: 38, borderRadius: radius.pill, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
