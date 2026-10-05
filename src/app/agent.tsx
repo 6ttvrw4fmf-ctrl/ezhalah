@@ -4335,7 +4335,7 @@ export default function Agent() {
                   mid-transition heights and ratchets an empty box to max — observed live). The
                   textarea keeps the pre-redesign numeric-height contract; the wrapper eases to the
                   same target and clips the single frame of difference. */}
-              <View style={s.composerInputColumn}>
+              <View style={[s.composerInputColumn, introLanding && !busy && !revealing && !completed && s.composerInputColumnFull]}>
               <View style={[s.inputGrow, INPUT_EASE, { height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) }]}>
               <TextInput
                 ref={inputRef}
@@ -4369,6 +4369,12 @@ export default function Agent() {
                 // Live per-character switching is reserved for the Home filter's location field.
                 // (user request.)
                 multiline
+                // ONE line when empty (owner 2026-10-04: «when I write هلا it gets plugged in … I want the
+                // box smaller»). A <textarea> with no rows attribute is TWO lines tall, so RNW measured
+                // a 44px empty box and one word sat on the top line over a blank one. rows=1 makes the
+                // measured content height a single 22px line; growth with wrapping is unchanged.
+                // @ts-expect-error web-only prop (RNW maps it to the textarea's rows attribute)
+                rows={1}
                 // Desktop-web Enter handling lives in a raw DOM keydown listener (see the effect by
                 // inputRef): RNW's onKeyPress normalization delivered key: "" for Enter here, so the
                 // send shortcut binds below the framework. Native keeps the platform submit path.
@@ -4381,6 +4387,10 @@ export default function Agent() {
                   composer, push the mic/Send, or overflow horizontally (owner brief §7/§9). */}
               {showIntroExamples ? <IntroExampleRotator reducedMotion={reducedMotion} /> : null}
               </View>
+              </View>
+              {/* «بحث» sits on its OWN row under the text (owner 2026-10-04: «the بحث should be below, and
+                  this should be above»): the input column takes the full first row (flexBasis 100% →
+                  wrap), so English text starting at the left can never run into the chip. */}
               {introLanding && !busy && !revealing && !completed && (
                 <Pressable
                   testID="initial-chat-search"
@@ -4404,7 +4414,6 @@ export default function Agent() {
                   <Text style={s.initialSearchText}>{t('Search')}</Text>
                 </Pressable>
               )}
-              </View>
               {busy || revealing ? (
                 // While Ezhalah is thinking/searching OR the cards are still popping in, the Send button
                 // is a Stop box — tap it to cancel the search and freeze the cards shown. (user request.)
@@ -4849,10 +4858,11 @@ const s = StyleSheet.create({
   // ── Voice recording composer (owner brief 2026-08-23) ──
   // composerInner keeps the normal controls' exact pre-voice layout (it owns the composer's size at
   // all times); the recording row overlays it absolutely so the morph never changes the surface.
-  composerInner: { flex: 1, flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'flex-end', alignItems: 'flex-end', minHeight: 44, gap: 6 },
+  composerInner: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'flex-end', minHeight: 44, columnGap: 6, rowGap: 2 },
   composerInnerHidden: { opacity: 0 },
   composerInputColumn: { flex: 1, minWidth: 0, alignItems: 'stretch', position: 'relative' },
-  initialSearch: { position: 'absolute', left: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', gap: 7, height: 30, paddingHorizontal: 11, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
+  composerInputColumnFull: { flexBasis: '100%' },
+  initialSearch: { marginRight: 'auto', alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 7, height: 30, paddingHorizontal: 11, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
   initialSearchPressed: { backgroundColor: colors.segTrack },
   initialSearchIcon: { width: 17, height: 17 },
   initialSearchText: { color: colors.ink, fontSize: 14, lineHeight: 20 },
