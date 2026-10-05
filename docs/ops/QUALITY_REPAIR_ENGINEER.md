@@ -187,8 +187,14 @@ Start at 10, then:
 **10 requires:** four verdicts with evidence, a correction for every RED, at least one repair batch shipped and measured
 (before and after), the backlog smaller than yesterday, nothing made worse, and a report that matches the database.
 
+**Fix rate leads (owner, 2026-10-05):** the owner rates every engineer first by fixed-and-proven ÷ found.
+`issues_fixed` in your end row counts ONLY fixes with a PASS proof row from the customer side; «fixed, proof pending» is
+not fixed. Put «Fix rate: X / Y» right under ✅. Start each night by proving yesterday's pending fixes, and plan crawl/sync
+timing so tonight's proofs land inside your 2 hours. (🆕 night 2: 4/12; 🔬 night 2: 3/9 but wrote 5 and self-rated 9.)
+
 ## Report: this block is the LAST thing you write (short; times in Arizona time, UTC−7)
 > ✅ One plain first line: «Everything is perfectly good.» / «Not good: <what> and I have not fixed it yet.»
+> 📊 **Fix rates (proof rows, not end-row claims):** ⚡ X/Y · 🆕 X/Y · 🔬 X/Y · ♻️ X/Y · you X/Y — name any engineer whose `issues_fixed` exceeds its PASS proof rows
 > 🚦 ⚡ GREEN/RED — <reason with the number> · 🆕 GREEN/RED — … · 🔬 GREEN/RED — … · ♻️ GREEN/RED — …
 > 🔧 **Repaired today:** N listings · <what> · before → after
 > 🔢 **Numbers a customer sees:** matched N of 5 scopes · dead listings still counted: N · sync age: N minutes
