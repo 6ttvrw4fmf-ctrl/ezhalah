@@ -14,9 +14,22 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 
     const welcome = page.getByTestId('intro-greeting');
     await expect(welcome).toContainText('وش العقار اللي في بالك؟');
     await expect(welcome).toContainText('قل لنا مواصفاته، وإزهله.');
-    const box = await welcome.boundingBox();
+    // The greeting slides into place after it appears (measured 2026-10-05 at 390px: y 207 on first paint,
+    // 333 once settled), so a single read races the animation (CI read 198.5 and failed). Measure the
+    // SETTLED layout: the box must hold still for consecutive frames before any position is asserted.
+    const settled = async (loc: ReturnType<typeof page.getByTestId>) => {
+      let prev = await loc.boundingBox();
+      for (let i = 0; i < 60; i++) {
+        await page.waitForTimeout(100);
+        const cur = await loc.boundingBox();
+        if (prev && cur && Math.abs(cur.x - prev.x) < 0.5 && Math.abs(cur.y - prev.y) < 0.5) return cur;
+        prev = cur;
+      }
+      throw new Error('layout never settled within 6 s');
+    };
+    const box = await settled(welcome);
     expect(box).not.toBeNull();
-    const footer = await page.getByTestId('agent-footer').boundingBox();
+    const footer = await settled(page.getByTestId('agent-footer'));
     // Desktop reserves room for the existing sidebar; center within the chat.
     expect(Math.abs(box!.x + box!.width / 2 - (footer!.x + footer!.width / 2))).toBeLessThan(12);
     expect(box!.y).toBeGreaterThan(200);
