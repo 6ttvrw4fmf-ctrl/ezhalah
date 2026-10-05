@@ -334,6 +334,7 @@ def test_the_skip_tally_and_detail_count_reach_end_run(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["run.py"])
     monkeypatch.setattr(R, "PAUSE", 0)
     monkeypatch.setattr(R, "session", lambda: None)
+    monkeypatch.setattr(R, "walk_session", lambda: R.session())   # no live probe offline
     monkeypatch.setattr(R, "fetch_catalogue", lambda s, limit=0: (units, len(units)))
     monkeypatch.setattr(R, "fetch_detail", lambda s, uid: R.parse_detail(DETAIL_672) if uid == 672 else None)
     monkeypatch.setattr(R.db, "begin_run", lambda src: 1)
@@ -354,6 +355,7 @@ def test_an_incomplete_enumeration_never_prunes(monkeypatch):
     pruned: list = []
     monkeypatch.setattr(sys, "argv", ["run.py", "--no-detail"])
     monkeypatch.setattr(R, "session", lambda: None)
+    monkeypatch.setattr(R, "walk_session", lambda: R.session())   # no live probe offline
     monkeypatch.setattr(R, "fetch_catalogue", lambda s, limit=0: ([U672], 80))   # site says 80, we got 1
     monkeypatch.setattr(R.db, "begin_run", lambda src: 1)
     monkeypatch.setattr(R.db, "_wasalt_batch", lambda t, rows: None)

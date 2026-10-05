@@ -101,10 +101,14 @@ jobs:
           # gudai / safera / alhumaidan are three tenant offices of ONE inblaj.net WordPress
           # product and share scrapers/common/inblaj_platform.py, but each runs as its own source
           # so one office being down never hides another, and each keeps its own run ledger.
-          - { source: gudai,         cmd: "python -m scrapers.gudai.run --type all", tmo: 20 }
+          #   gudai: `proxy: true` (2026-10-05, Scraping Engineer) — its sitemap stalled on every DIRECT route on
+          #   09-30 and 10-04; inblaj_platform.fetch_catalogue tries the proxy ONLY after a transport stall.
+          - { source: gudai,         cmd: "python -m scrapers.gudai.run --type all", tmo: 20, proxy: true }
           - { source: safera,        cmd: "python -m scrapers.safera.run --type all", tmo: 20 }
           - { source: alhumaidan,    cmd: "python -m scrapers.alhumaidan.run --type all", tmo: 20 }
-          - { source: aqarnajran,    cmd: "python -m scrapers.aqarnajran.run --type all", tmo: 20 }
+          #   aqarnajran: `proxy: true` (2026-10-05, Scraping Engineer) — walk_session() probes 3 profiles DIRECT first;
+          #   the proxy is spent only when DIRECT is refused (failed 10-05 on one pinned profile).
+          - { source: aqarnajran,    cmd: "python -m scrapers.aqarnajran.run --type all", tmo: 20, proxy: true }
           - { source: fahadalshahri, cmd: "python -m scrapers.fahadalshahri.run --type all", tmo: 20 }
           # compoundin walks 129 compound pages and emits one row per UNIT, so it is the slowest
           # of this batch by page count even though its row count is small.
@@ -200,8 +204,12 @@ jobs:
           - { source: wadod,          cmd: "python -m scrapers.wadod.run --type all", tmo: 20 }
           - { source: alrifai,        cmd: "python -m scrapers.alrifai.run --type all", tmo: 20 }
           - { source: sodasyat,       cmd: "python -m scrapers.sodasyat.run --type all", tmo: 20 }
-          - { source: hasaad,         cmd: "python -m scrapers.hasaad.run --type all", tmo: 20 }
-          - { source: justsa,         cmd: "python -m scrapers.justsa.run --type all", tmo: 20 }
+          #   hasaad: `proxy: true` (2026-10-05, Scraping Engineer) — walk_session() probes 3 profiles DIRECT first;
+          #   the proxy is spent only when DIRECT is refused (failed 10-05 on one pinned profile).
+          - { source: hasaad,         cmd: "python -m scrapers.hasaad.run --type all", tmo: 20, proxy: true }
+          #   justsa: `proxy: true` (2026-10-05, Scraping Engineer) — walk_session() probes 3 profiles DIRECT first;
+          #   the proxy is spent only when DIRECT is refused (failed 10-05 on one pinned profile).
+          - { source: justsa,         cmd: "python -m scrapers.justsa.run --type all", tmo: 20, proxy: true }
           - { source: albdah,         cmd: "python -m scrapers.albdah.run --type all", tmo: 20 }
           - { source: eydah,          cmd: "python -m scrapers.eydah.run --type all", tmo: 20 }
           - { source: villassa,       cmd: "python -m scrapers.villassa.run --type all", tmo: 20 }

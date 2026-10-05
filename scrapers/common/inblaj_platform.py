@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import functools
 import html as ihtml
+import os
 import re
 import sys
 import time
@@ -54,8 +55,8 @@ from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # n
 _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
 
-def session(profile: str = "chrome124") -> cc.Session:
-    s = cc.Session(impersonate=profile)   # impersonate OWNS the User-Agent — never set one here
+def session(profile: str = "chrome124", proxies: Optional[dict] = None) -> cc.Session:
+    s = cc.Session(impersonate=profile, proxies=proxies)   # impersonate OWNS the User-Agent — never set one here
     s.headers.update({"Accept": "text/html,application/xhtml+xml",
                       "Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
     return s
@@ -411,6 +412,44 @@ def map_listing(url: str, page_html: str, *, source: str, prefix: str) -> tuple[
 # answer when they refuse a specific Chrome handshake.
 CATALOGUE_PROFILES = ("chrome124", "safari17_0", "firefox133")
 
+# THE STALL CLASS (gudai, 2026-09-30 and 2026-10-04). Every DIRECT attempt — 3 profiles × 2 sitemap
+# spellings — hit the full 40 s timeout (04:25:17 → 04:29:26), while safera and alhumaidan, the SAME
+# host and code, were served in the same minute, and gudai itself was served in ~10 s on the re-run
+# three hours later. That is a host that stalls for a few minutes, not a site that is down and not a
+# handshake block: rotating the profile inside one 4-minute window cannot outlast it. So, ONLY when an
+# attempt died on the transport (an HTTP answer such as 404 is the source speaking and is believed):
+#   1. the residential proxy (`proxy: true` → WASALT_PROXY_URL), a different egress; then
+#   2. a LATE round after a pause long enough to outlast the stall, with a longer timeout.
+CATALOGUE_PROXY_PROFILES = ("chrome124", "safari17_0")
+LATE_ROUND_BACKOFF_S = 120
+LATE_ROUND_TIMEOUT_S = 90
+
+
+def _proxies_from_env(env: str = "WASALT_PROXY_URL") -> Optional[dict]:
+    # The VALUE lives only in the secret and must never be written here.
+    purl = os.environ.get(env, "").strip()
+    return {"http": purl, "https": purl} if purl else None
+
+
+def _read_sitemaps(sess, base: str, label: str, timeout: int, trace: list[str]) -> tuple[set[str], bool]:
+    """One pass over both sitemap spellings. Returns (urls, whether any attempt died on the transport)."""
+    seen: set[str] = set()
+    stalled = False
+    for sm in (f"{base}/property-sitemap.xml", f"{base}/wp-sitemap-posts-property-1.xml"):
+        try:
+            r = sess.get(sm, timeout=timeout)
+        except Exception as e:  # noqa: BLE001 — any transport error → next sitemap / route
+            trace.append(f"{label}:{sm.rsplit('/', 1)[-1]}:{type(e).__name__}")
+            stalled = True
+            continue
+        if r.status_code == 200 and "<loc" in r.text:
+            seen |= {u for u in re.findall(r"<loc>([^<]+)</loc>", r.text) if "/property/" in u}
+        trace.append(f"{label}:{sm.rsplit('/', 1)[-1]}:HTTP {r.status_code}"
+                     + ("" if seen else " no /property/ loc"))
+        if seen:
+            break
+    return seen, stalled
+
 
 def fetch_catalogue(s: cc.Session, base: str, limit: int = 0, *,
                     make_session=session) -> tuple[list[str], cc.Session, list[str]]:
@@ -432,21 +471,11 @@ def fetch_catalogue(s: cc.Session, base: str, limit: int = 0, *,
     Returns (urls, the session that served them, a per-attempt trace). The trace names what every
     profile got, so a genuinely empty result says WHY in the run ledger instead of just "empty"."""
     trace: list[str] = []
+    stalled = False
     for attempt, prof in enumerate(CATALOGUE_PROFILES):
         sess = s if attempt == 0 else make_session(prof)
-        seen: set[str] = set()
-        for sm in (f"{base}/property-sitemap.xml", f"{base}/wp-sitemap-posts-property-1.xml"):
-            try:
-                r = sess.get(sm, timeout=40)
-            except Exception as e:  # noqa: BLE001 — any transport error → next sitemap / profile
-                trace.append(f"{prof}:{sm.rsplit('/', 1)[-1]}:{type(e).__name__}")
-                continue
-            if r.status_code == 200 and "<loc" in r.text:
-                seen |= {u for u in re.findall(r"<loc>([^<]+)</loc>", r.text) if "/property/" in u}
-            trace.append(f"{prof}:{sm.rsplit('/', 1)[-1]}:HTTP {r.status_code}"
-                         + ("" if seen else " no /property/ loc"))
-            if seen:
-                break
+        seen, st = _read_sitemaps(sess, base, prof, 40, trace)
+        stalled |= st
         if seen:
             out = sorted(seen)
             return (out[:limit] if limit else out), sess, trace
@@ -454,6 +483,22 @@ def fetch_catalogue(s: cc.Session, base: str, limit: int = 0, *,
             print(f"  sitemap empty with {prof} (attempt {attempt + 1}/{len(CATALOGUE_PROFILES)}) — "
                   f"retrying on a fresh session", flush=True)
             time.sleep(3 * (attempt + 1))
+    if not stalled:
+        return [], s, trace          # the source ANSWERED every time: believe it, fail loud upstream
+    late: list[tuple[str, str, Optional[dict], int]] = []
+    proxies = _proxies_from_env()
+    if proxies:
+        late += [(f"proxy/{p}", p, proxies, 60) for p in CATALOGUE_PROXY_PROFILES]
+    late.append((f"late/{CATALOGUE_PROFILES[0]}", CATALOGUE_PROFILES[0], None, LATE_ROUND_TIMEOUT_S))
+    for label, prof, prx, tmo in late:
+        if label.startswith("late/"):
+            print(f"  sitemap stalled on every route — waiting {LATE_ROUND_BACKOFF_S}s to outlast it", flush=True)
+            time.sleep(LATE_ROUND_BACKOFF_S)
+        sess = make_session(prof, prx) if prx else make_session(prof)
+        seen, _st = _read_sitemaps(sess, base, label, tmo, trace)
+        if seen:
+            out = sorted(seen)
+            return (out[:limit] if limit else out), sess, trace
     return [], s, trace
 
 

@@ -60,6 +60,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 
@@ -88,6 +89,17 @@ _JNUM_RE = re.compile(r"\bJ\d{3,6}\b")
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome")   # impersonate OWNS the User-Agent — never set one here
     s.headers.update({"Accept-Language": "ar,en;q=0.7"})
+    return s
+
+
+def walk_session() -> cc.Session:
+    # 2026-10-05 (Scraping Engineer): one pinned profile, no retry — a single refused handshake or
+    # stalled connect failed the whole night (10-05 04:32 curl 28 connect timeout, ok 10-04 with 82
+    # rows). Probe 3 profiles DIRECT, then the residential proxy (`proxy: true` → WASALT_PROXY_URL,
+    # spent only when DIRECT is refused), and keep the session that is served. The attempt log is the
+    # step-6 evidence if the site is truly down.
+    s, tried = retry_smarter_session(f"{CATALOGUE}?ajax=1&page=1&per_page=1", headers=dict(session().headers))
+    print(f"{SOURCE}: probe {' '.join(tried)}", flush=True)
     return s
 
 
@@ -322,7 +334,7 @@ def main() -> int:
     ap.add_argument("--no-detail", action="store_true", help="skip the per-unit page (JSON only)")
     args = ap.parse_args()
 
-    s = session()
+    s = walk_session()
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run("justsa")
     res: list[dict] = []

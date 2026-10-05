@@ -238,6 +238,8 @@ def test_inblaj_keeps_and_counts_a_status_word_nobody_measured(fake, monkeypatch
 def _run_rest(mod, monkeypatch, items: list[dict], total, argv=("run",)):
     monkeypatch.setattr(mod, "session", lambda: Sess(lambda url, params: Resp(
         200, data=items, headers={} if total is None else {"x-wp-total": str(total)})))
+    if hasattr(mod, "walk_session"):    # the live profile/proxy probe is not part of this test
+        monkeypatch.setattr(mod, "walk_session", lambda: mod.session())
     monkeypatch.setattr(mod, "map_listing", lambda p: (
         _row(f"X{p['id']}"), "commercial" if p.get("com") else "residential", ""))
     monkeypatch.setattr(sys, "argv", list(argv))
