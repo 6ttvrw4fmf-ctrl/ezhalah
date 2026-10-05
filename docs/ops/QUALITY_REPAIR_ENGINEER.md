@@ -198,6 +198,29 @@ Start at 10, then:
 Log your run in `ops_daily_engineer_run`: `qa:start`, a `qa:progress` row after each of the three parts, `qa:end` with the
 report. If you are stopped, those rows still carry your numbers.
 
+## Every morning: COACH every engineer (owner, 2026-10-05: «better and better, every single run»)
+After your own repairs, for each of ⚡ scraping-engineer · 🆕 new_listings_engineer · 🔬 advanced_filter · ♻️ lifecycle:
+1. Read its row in `ops_engineer_fix_rate` (fix rate, change vs last night, `over_claimed`) and its end report.
+2. Verify one of its «fixed» claims yourself (a proof row you re-run). A claim that doesn't reproduce is moved to its
+   queue as a bug, and you say so in your report.
+3. Write ONE `<engineer>:followup` row = its coach note for tonight: last night's fix rate; the exact ordered list
+   (pending proofs first, then its open `ops_engineer_backlog` items, biggest customer impact first); and «10/10 tonight
+   means: …» with concrete, provable items that fit 2 hours.
+4. Copy its «📚 Lesson» line (or, if it gave none, the main mistake you saw) into the «Lessons» section of its rulebook in
+   `docs/ops/`. One docs-only PR for all four rulebooks, merged through the safe gate.
+5. Fix rate down two nights running, or the same lesson twice → shrink its list to the 3 biggest items and say why.
+Your report opens with the trend line from `ops_engineer_fix_rate`, e.g. «📊 ⚡ 44%→61% ▲ · 🆕 33%→… · 🔬 … · ♻️ … · 🔧 …».
+You coach yourself the same way: your own row, your own lesson line.
+
+## Better every night (owner, 2026-10-05: «stronger and better in every run, every single time»)
+1. **Start:** read your own rows in `ops_engineer_fix_rate` (last 7 nights) and every `<you>:followup` row since your last
+   run (🔧's coach note is the newest). Tonight's fix rate must beat last night's; `over_claimed = true` last night means
+   your first job is proving or withdrawing those claims.
+2. **During:** prove yesterday's pending fixes first; fix every bug you find tonight the same night where it is yours.
+3. **End:** your report carries one line «📚 Lesson: <the one mistake or slow part tonight, and the rule that prevents it>».
+   🔧 copies it into this rulebook the next morning, so no lesson is learned twice.
+4. The same lesson two nights in a row means you change your approach, not just try harder.
+
 ## LIVE means tested like a real user (owner, 2026-10-03)
 The owner: «sometimes they claim it's live but it isn't; they didn't test it like a real user.» From now on:
 1. **«Fixed», «live» and «verified» are words you may use only after a real-user test on production.** Merged is not live.
