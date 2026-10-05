@@ -1127,3 +1127,62 @@ def test_platform_without_a_ledger_is_unchanged():
 
 def test_gathern_has_a_direct_ledger():
     assert C.DIRECT_LEDGERS["gathern"] == "gathern_liveness_detail"
+
+
+# ── A listing URL that lands on the site's home page is no answer (2026-10-05) ────────────────────
+# gathern: a removed unit answers 307 -> /ar?error=500 and the home page serves 200; the old reader
+# called that live (496 false revivals in 7 days, two false P0 deleted_but_source_live).
+class _HomeResp:
+    def __init__(self, status, text, url):
+        self.status_code, self.text, self.url = status, text, url
+
+
+class _HomeSess:
+    def __init__(self, resp): self.resp = resp
+    def get(self, url, **k): return self.resp
+
+
+class _Real:
+    """The real cleanup._probe (_install replaces C._probe), with C's own globals."""
+    _probe = staticmethod(lambda u: _REAL_PROBE(u))
+    verdict = staticmethod(lambda *a: C.verdict(*a))
+    PLATFORMS = property(lambda self: C.PLATFORMS)
+
+
+def _real_probe_with(monkeypatch, resp, escape_resp=None):
+    monkeypatch.setattr(C.http, "session", lambda: _HomeSess(resp))
+    monkeypatch.setattr(C.http, "_route_session",
+                        lambda *a, **k: _HomeSess(escape_resp or resp))
+    C._probe_route.clear()
+    return _Real()
+
+
+def test_redirect_to_the_home_page_is_no_answer_never_live(monkeypatch):
+    u = "https://gathern.co/view/94419/unit/135509"
+    mod = _real_probe_with(monkeypatch, _HomeResp(200, "<html>home</html>", "https://gathern.co/ar?error=500"))
+    status, body = mod._probe(u)
+    assert status is None and body == ""
+    assert mod.verdict(status, body, mod.PLATFORMS["gathern"]["dead_marker"]) == "unknown"
+
+
+def test_home_redirect_falls_through_to_a_profile_that_reads_the_real_404(monkeypatch):
+    u = "https://gathern.co/view/94419/unit/135509"
+    mod = _real_probe_with(monkeypatch, _HomeResp(200, "home", "https://gathern.co/ar?error=500"),
+                           escape_resp=_HomeResp(404, "الصفحة غير موجودة", u))
+    assert mod._probe(u)[0] == 404
+
+
+def test_a_live_listing_page_and_a_slug_redirect_stay_live(monkeypatch):
+    u = "https://gathern.co/view/197331/unit/275879"
+    mod = _real_probe_with(monkeypatch, _HomeResp(200, "<html>unit</html>", u))
+    assert mod._probe(u)[0] == 200
+    mod = _real_probe_with(monkeypatch, _HomeResp(200, "<html>ad</html>", "https://x.sa/ad/123-villa-riyadh"))
+    assert mod._probe("https://x.sa/ad/123")[0] == 200
+
+
+def test_landed_on_home_predicate():
+    assert C._landed_on_home("https://gathern.co/view/1/unit/2", "https://gathern.co/ar?error=500")
+    assert C._landed_on_home("https://a.sa/p/9", "https://a.sa/")
+    assert not C._landed_on_home("https://a.sa/p/9", "https://a.sa/p/9/")
+    assert not C._landed_on_home("https://a.sa/", "https://a.sa/")
+    assert not C._landed_on_home("https://a.sa/p/9", None)

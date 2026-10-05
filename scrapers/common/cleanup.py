@@ -275,6 +275,26 @@ def _close_wasalt_browser() -> None:
         _BROWSER = None
 
 
+# ── A listing URL that lands on the site's HOME page is no answer (2026-10-05) ───────────────────
+# gathern answers a removed unit (to this session's headers) with 307 -> /ar?error=500, its home
+# page, which then serves 200. Following the redirect read that 200 as "the listing is live": the
+# cleanup re-showed 496 hidden gathern ads in 7 days (every one of the 142 of 2026-10-05 read 404 on
+# the direct sweep within 3 hours), and verify_deletions raised two P0 deleted_but_source_live
+# (cleanup_deletion_verification 793, 794) on units that answer 404 «الصفحة غير موجودة» to
+# gathern's own session. An unresolved redirect is UNKNOWN (LISTING_LIVENESS.md §1). Narrow on
+# purpose: a listing never lives at "/", "/ar" or "/en", so a slug redirect to the listing's own
+# canonical page is untouched.
+_HOME_PATHS = frozenset({"", "/ar", "/en"})
+
+
+def _landed_on_home(requested: str, final: str | None) -> bool:
+    if not final:
+        return False
+    want = urlsplit(requested).path.rstrip("/").lower()
+    got = urlsplit(final).path.rstrip("/").lower()
+    return got in _HOME_PATHS and got != want
+
+
 def _probe(url: str) -> tuple[int | None, str]:
     """Fetch the real listing page and return (status_code, body). Unlike common.http.get (which
     collapses every non-200 to None), this PRESERVES the status so we can tell a 404 (gone) apart
@@ -295,6 +315,8 @@ def _probe(url: str) -> tuple[int | None, str]:
     try:
         r = s.get(url, timeout=25, allow_redirects=True, proxies=proxies)
         status, body = r.status_code, (r.text or "")
+        if _landed_on_home(url, str(getattr(r, "url", "") or "")):
+            status, body = None, ""          # redirected to the home page: no answer about the ad
     except Exception:
         status, body = None, ""
     if proxies is None and (status is None or status in http.BLOCK_STATUSES):
@@ -325,7 +347,7 @@ def _probe_escape(url: str, status: int | None, body: str) -> tuple[int | None, 
             r = http._route_session(profile, False, fresh=True).get(url, timeout=25, allow_redirects=True)
         except Exception:
             continue
-        if r.status_code in http.BLOCK_STATUSES:
+        if r.status_code in http.BLOCK_STATUSES or _landed_on_home(url, str(getattr(r, "url", "") or "")):
             continue
         if r.status_code == 200:
             _probe_route[host] = profile
