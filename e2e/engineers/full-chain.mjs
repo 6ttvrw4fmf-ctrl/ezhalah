@@ -116,6 +116,17 @@ try {
       // what takes the customer to the source: press it and record that URL.
       let opened = await page.evaluate(() => window.__opened.at(-1));
       if (!opened) {
+        // A click that lands while the card is still settling opens nothing (compoundin 12390491,
+        // 2026-10-05: missed once, matched on the re-run). One more click before any verdict.
+        await page.waitForTimeout(1500);
+        opened = await page.evaluate(() => window.__opened.at(-1));
+        if (!opened) {
+          await card.first().getByRole('link').first().click().catch(() => {});
+          await page.waitForTimeout(1200);
+          opened = await page.evaluate(() => window.__opened.at(-1));
+        }
+      }
+      if (!opened) {
         const openAd = page.getByText(/افتح الإعلان في/).last();
         await openAd.waitFor({ timeout: 8000 }).catch(() => {});
         if (await openAd.count()) {
