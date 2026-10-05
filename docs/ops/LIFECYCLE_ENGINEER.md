@@ -935,6 +935,13 @@ or rewrite another engineer's work, and never start a big change in another engi
   text/html,…` header (dropping only that header gives the real 404), so gathern is now read with
   its own session shape (`cleanup._OWN_SESSION_HOSTS`), the one its liveness sweep always used.
 
+- The aqar sweep, the fleet's biggest hider, ran with no known-live control until 2026-10-05: it hid
+  inline on a page's own 404 or dead marker with nothing proving the run could see a live page.
+  It now reads 5 fresh, unstruck ads first through the same get()/looks_dead(); if they do not
+  come back live the shard is report-only (`CONTROLS-QUARANTINED` in its run notes). Its strikes
+  are all direct readings (the aqar crawl never bumps `missing_count`), so a struck-only recheck at
+  13:00 UTC is the next step toward "removed ads leave in a day".
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
