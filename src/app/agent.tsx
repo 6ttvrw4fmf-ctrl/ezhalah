@@ -16,7 +16,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
-import { TAP44 } from '@/theme/palette';
+import { COMPOSER_INPUT, TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { shouldRenderModeSwitch } from '@/lib/shouldRenderModeSwitch';
 import { isAppSessionStarted } from '@/lib/appSession';
@@ -4355,13 +4355,13 @@ export default function Agent() {
                   mid-transition heights and ratchets an empty box to max — observed live). The
                   textarea keeps the pre-redesign numeric-height contract; the wrapper eases to the
                   same target and clips the single frame of difference. */}
-              <View style={[s.composerInputColumn, introLanding && !busy && !revealing && !completed && s.composerInputColumnFull]}>
+              <View style={s.composerInputColumn}>
               <View style={[s.inputGrow, INPUT_EASE, { height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) }]}>
               <TextInput
                 ref={inputRef}
                 // writingDirection RTL for Arabic (the parent col is LTR-pinned, so without this the
                 // placeholder's trailing «...» lands on the wrong side — it must read «…السعودية»). (owner 2026-07-09)
-                style={[s.input, { flex: 1, alignSelf: 'stretch', textAlign: typed.trim() ? (msgRTL(typed) ? 'right' : 'left') : 'right', writingDirection: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : 'rtl', direction: typed.trim() && msgRTL(typed) ? 'rtl' : 'ltr', paddingRight: 0, paddingLeft: 0, height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) } as any]}
+                style={[s.input, { flex: 1, alignSelf: 'stretch', textAlign: typed.trim() ? (msgRTL(typed) ? 'right' : 'left') : 'right', writingDirection: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : 'rtl', direction: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : (getLocale() === 'en' ? 'ltr' : 'rtl'), paddingRight: 0, paddingLeft: 0, height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) } as any]}
                 // While the rotating examples occupy the placeholder slot, the input's own static
                 // placeholder yields (empty string) so the two never overlap; the moment the
                 // rotation stops (any interaction) the familiar static placeholder returns.
@@ -4393,8 +4393,10 @@ export default function Agent() {
                 // box smaller»). A <textarea> with no rows attribute is TWO lines tall, so RNW measured
                 // a 44px empty box and one word sat on the top line over a blank one. rows=1 makes the
                 // measured content height a single 22px line; growth with wrapping is unchanged.
-                // @ts-expect-error web-only prop (RNW maps it to the textarea's rows attribute)
-                rows={1}
+                // Web-only host props (RNW forwards both to the <textarea>): rows=1 and the one-line hint
+                // marker (COMPOSER_PLACEHOLDER_CSS, src/theme/palette.ts). Spread as one object because
+                // TypeScript reports two unknown props on the element itself, not per line.
+                {...({ rows: 1, dataSet: COMPOSER_INPUT } as any)}
                 // Desktop-web Enter handling lives in a raw DOM keydown listener (see the effect by
                 // inputRef): RNW's onKeyPress normalization delivered key: "" for Enter here, so the
                 // send shortcut binds below the framework. Native keeps the platform submit path.
@@ -4408,32 +4410,6 @@ export default function Agent() {
               {showIntroExamples ? <IntroExampleRotator reducedMotion={reducedMotion} /> : null}
               </View>
               </View>
-              {/* «بحث» sits on its OWN row under the text (owner 2026-10-04: «the بحث should be below, and
-                  this should be above»): the input column takes the full first row (flexBasis 100% →
-                  wrap), so English text starting at the left can never run into the chip. */}
-              {introLanding && !busy && !revealing && !completed && (
-                <Pressable
-                  testID="initial-chat-search"
-                  accessibilityRole="button"
-                  accessibilityLabel={t('Search')}
-                  accessibilityState={{ disabled: !typed.trim() }}
-                  disabled={!typed.trim()}
-                  onPress={() => send()}
-                  hitSlop={5}
-                  // @ts-expect-error web-only DOM props on the RNW host node
-                  dataSet={{ ...TAP44 }}
-                  style={({ pressed }: any) => [s.initialSearch, pressed && s.initialSearchPressed]}
-                >
-                  <Image
-                    source={require('../../assets/icons/eagle-search.svg')}
-                    style={s.initialSearchIcon}
-                    contentFit="contain"
-                    tintColor={colors.ink}
-                    accessible={false}
-                  />
-                  <Text style={s.initialSearchText}>{t('Search')}</Text>
-                </Pressable>
-              )}
               {busy || revealing ? (
                 // While Ezhalah is thinking/searching OR the cards are still popping in, the Send button
                 // is a Stop box — tap it to cancel the search and freeze the cards shown. (user request.)
@@ -4493,6 +4469,35 @@ export default function Agent() {
                     </Animated.View>
                   </Pressable>
                 </>
+              )}
+              {/* Typed text sits on the SAME line as the mic and Send; «بحث» gets the line below, alone
+                  (owner 2026-10-05: «when user clicks and start typing I want it to be in the same
+                  sentence — not down or above the microphone»). The chip's row is a full-width flex
+                  line (flexBasis 100% on the ROW axis), so it always wraps under the text line. */}
+              {introLanding && !busy && !revealing && !completed && (
+                <View style={s.initialSearchRow}>
+                <Pressable
+                  testID="initial-chat-search"
+                  accessibilityRole="button"
+                  accessibilityLabel={t('Search')}
+                  accessibilityState={{ disabled: !typed.trim() }}
+                  disabled={!typed.trim()}
+                  onPress={() => send()}
+                  hitSlop={5}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
+                  style={({ pressed }: any) => [s.initialSearch, pressed && s.initialSearchPressed]}
+                >
+                  <Image
+                    source={require('../../assets/icons/eagle-search.svg')}
+                    style={s.initialSearchIcon}
+                    contentFit="contain"
+                    tintColor={colors.ink}
+                    accessible={false}
+                  />
+                  <Text style={s.initialSearchText}>{t('Search')}</Text>
+                </Pressable>
+                </View>
               )}
               </View>
               {/* ── Recording mode ── same composer surface, ChatGPT's spatial hierarchy, PHYSICALLY
@@ -4886,8 +4891,8 @@ const s = StyleSheet.create({
   composerInner: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'flex-end', minHeight: 44, columnGap: 6, rowGap: 2 },
   composerInnerHidden: { opacity: 0 },
   composerInputColumn: { flex: 1, minWidth: 0, alignItems: 'stretch', position: 'relative' },
-  composerInputColumnFull: { flexBasis: '100%' },
-  initialSearch: { marginRight: 'auto', alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 7, height: 30, paddingHorizontal: 11, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
+  initialSearchRow: { flexBasis: '100%', flexDirection: 'row', justifyContent: 'flex-start' },
+  initialSearch: { flexDirection: 'row', alignItems: 'center', gap: 7, height: 30, paddingHorizontal: 11, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
   initialSearchPressed: { backgroundColor: colors.segTrack },
   initialSearchIcon: { width: 17, height: 17 },
   initialSearchText: { color: colors.ink, fontSize: 14, lineHeight: 20 },
