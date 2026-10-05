@@ -340,8 +340,28 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
       const link = card.first().getByRole('link').first();
       if (await link.count()) await link.click(); else await card.first().click();
       await page.waitForTimeout(1500);
-      const opened = await page.evaluate(() => window.__opened.at(-1) ?? null);
+      let opened = await page.evaluate(() => window.__opened.at(-1) ?? null);
+      if (!opened) {
+        // Hosts on the in-app viewer / preview allowlists (src/lib/inAppViewer.ts: dealapp, gathern
+        // framed; aqar, wasalt, … previewed) open INSIDE Ezhalah, not through window.open. The
+        // customer reaches the source from that panel: «فتح في نافذة جديدة» (ad-open-new-window) on a
+        // framed ad (no testID on the phone sheet, so its text too), «افتح الإعلان في …» on a preview. Press it and record the URL it opens
+        // (2026-10-05: dealapp 15449761 opened the viewer and was reported «opened nothing»).
+        await page.locator('[data-testid="ad-viewer"]').first().waitFor({ timeout: 8000 }).catch(() => {});
+        if (await page.locator('[data-testid="ad-viewer"]').count()) {
+          result.evidence.inAppViewer = true;
+          const newWin = page.locator('[data-testid="ad-open-new-window"]');
+          const newWinText = page.getByText('فتح في نافذة جديدة', { exact: true }); // phone sheet: no testID
+          const openAd = page.getByText(/افتح الإعلان في/);
+          if (await newWin.count()) await newWin.last().click().catch(() => {});
+          else if (await newWinText.count()) await newWinText.last().click().catch(() => {});
+          else if (await openAd.count()) await openAd.last().click().catch(() => {});
+          await page.waitForTimeout(1000);
+          opened = await page.evaluate(() => window.__opened.at(-1) ?? null);
+        }
+      }
       result.evidence.opened = opened;
+      if (!opened) result.evidence.adTestIds = await page.evaluate(() => [...new Set([...document.querySelectorAll('[data-testid^="ad-"]')].map((e) => e.getAttribute('data-testid')))]);
       result.evidence.sourceUrl = sourceUrl;
       if (!opened) throw new Error('card click opened nothing');
       if (normUrl(opened) !== normUrl(sourceUrl)) throw new Error(`opened ${opened} ≠ stored ${sourceUrl}`);
