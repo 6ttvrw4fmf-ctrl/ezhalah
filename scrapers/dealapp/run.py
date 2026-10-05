@@ -1006,6 +1006,35 @@ def _route_land(property_type: Optional[str], usage: Optional[str]) -> Optional[
     return property_type
 
 
+# ── Advanced Filter answers (🔬 AF engineer, 2026-10-05) ─────────────────────────────────────────
+# 15,311 active dealapp listings stored NULL for every amenity and utility. Read from the raw payload
+# (source-reread run 37290037560, ads 557924 + the Abu Arish apartment): the JSON-LD additionalProperty
+# carries ONLY propertyType / facing / streetWidth / propertyAge / utilities / licenseNumber — dealapp
+# has NO structured amenity field, so the ad's own prose is the source (ADVANCED_FILTER_SOURCE_TRUTH:
+# prose only where nothing structured exists; four outcomes via the shared normalize matcher).
+#   utilities  «Electricity, Waters, Sanitation, FixedPhone, FibreOpt» → a LISTED utility is a yes; an
+#              unlisted one stays UNKNOWN (an unticked box on the advertiser's form is not a stated «no»).
+UTILITY_COLUMNS = {"electricity": "electricity", "waters": "water_supply", "water": "water_supply",
+                   "sanitation": "sanitation", "fibreopt": "optical_fibers", "fiberopt": "optical_fibers"}
+PROSE_AMENITY_COLUMNS = frozenset({"elevator", "kitchen", "air_conditioner", "parking", "maid_room",
+                                   "driver_room", "laundry_room", "balcony_terrace", "private_entrance",
+                                   "car_entrance", "optical_fibers"})
+
+
+def af_answers(aprops: dict, description: Optional[str]) -> dict[str, bool]:
+    out: dict[str, bool] = {}
+    for col, val in normalize.amenities_from_lines(description).items():
+        if col in PROSE_AMENITY_COLUMNS:
+            out[col] = val
+    util = aprops.get("utilities")
+    if isinstance(util, str) and util.strip():
+        for tok in re.split(r"[,،]", util):
+            col = UTILITY_COLUMNS.get(re.sub(r"[^a-z]", "", tok.lower()))
+            if col:
+                out[col] = True          # the structured list wins over prose for the same column
+    return out
+
+
 def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
     """Parse one /ad-details page into a canonical row. Returns (row, category, sold) —
     `sold` feeds the post-upsert inactive pin in main (see _pin_sold_inactive)."""
@@ -1173,6 +1202,7 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
         "description": _redact(schema.get("description")),
         "photo_urls": _images(schema),
         "additional_info": info,
+        **af_answers(aprops, _redact(schema.get("description"))),
     }
     return row, category, sold
 

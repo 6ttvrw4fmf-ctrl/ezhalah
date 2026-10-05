@@ -889,6 +889,19 @@ def amenities_from_text(raw: Optional[str]) -> dict[str, bool]:
     return {col: vals.pop() for col, vals in seen.items() if len(vals) == 1}
 
 
+def amenities_from_lines(raw: Optional[str]) -> dict[str, bool]:
+    """amenities_from_text() per LINE of the source's own text, merged. The matcher's negation window
+    reaches ~12 characters back, so across a line break «الشقة غير مؤثثة\nمطبخ مغلق» read kitchen=False
+    (bossbih, 2026-09-20). Two lines that disagree have not stated the fact: NULL."""
+    if not raw:
+        return {}
+    seen: dict[str, set[bool]] = {}
+    for line in re.split(r"[\n\r]+", str(raw)):
+        for col, val in amenities_from_text(line).items():
+            seen.setdefault(col, set()).add(val)
+    return {col: next(iter(vals)) for col, vals in seen.items() if len(vals) == 1}
+
+
 # A clause break ends a fact. «الشقة غير مؤثثة\nمطبخ مغلق» is two statements, and the «غير» of the
 # first must not reach the «مطبخ» of the second (bossbih, live 2026-09-20: kitchen came back False).
 _CLAUSE_BREAK_RE = re.compile(r"[\n\r،,.;؛|•▫▪+]+|\s-\s")
