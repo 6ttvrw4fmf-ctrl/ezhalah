@@ -170,6 +170,14 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False) -> di
             if skip_price:
                 continue
             stored_v = stored.get("price_total") or stored.get("price_annual") or stored.get("price_per_meter")
+            # The fleet stores a MONTHLY rent ×12 in price_annual (normalize.rent_period_from_ad) and the
+            # card shows it ÷12; the page prints the monthly figure. Compare what the page prints
+            # (superoffice 15485140, 2026-10-05: page «6288.40 ريال / شهر», stored 75456 = 6288×12).
+            if (not stored.get("price_total") and stored.get("price_annual")
+                    and stored.get("rent_period_ar") == "شهري"):
+                stored_v = float(stored["price_annual"]) / 12
+                if stored_v == int(stored_v):
+                    stored_v = int(stored_v)
             out[name] = _cmp_number(stored_v, lines, whole, kw)
         elif kind == "number":
             out[name] = _cmp_number(stored.get(col), lines, whole, kw)

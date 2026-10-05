@@ -248,3 +248,18 @@ def test_new_building_word_never_answers_another_number_field():
     # bedrooms 0 is not «جديد» (its keyword line is the same spec line): the word is the age label's only
     got = compare_listing({"bedrooms": 0}, page(AQAR_SPEC))
     assert got["bedrooms"] == MISMATCH
+
+
+# ── A monthly rent is stored ×12; the page prints the month (superoffice 15485140, 2026-10-05) ──
+
+def test_monthly_rent_compares_the_monthly_figure():
+    stored = {"price_annual": 75456, "rent_period_ar": "شهري"}
+    assert compare_listing(stored, page("6288.40 ريال / شهر"))["price"] == MATCH
+    # the ×12 figure is never on the page, and a different month is still wrong
+    assert compare_listing(stored, page("7000 ريال / شهر"))["price"] == MISMATCH
+
+
+def test_annual_rent_is_compared_as_stored():
+    stored = {"price_annual": 75456, "rent_period_ar": "سنوي"}
+    assert compare_listing(stored, page("75,456 ريال سنوياً"))["price"] == MATCH
+    assert compare_listing(stored, page("6288 ريال"))["price"] == MISMATCH
