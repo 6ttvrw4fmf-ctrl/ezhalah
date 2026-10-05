@@ -108,8 +108,8 @@ console.log('\n── mutation proof: this check actually fails on the regressio
 // Mutation 1: someone "simplifies" the JSX by dropping the whole three-way branch, leaving the
 // composer unconditional again (the ORIGINAL 09-11 bug this barrier prevents).
 const mutatedNoGate = agent.replace(
-  '{!filterOrigin ? (\n            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>',
-  '<View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>',
+  '{!filterOrigin ? (\n            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>',
+  '<View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>',
 );
 mustCatch('removing the branch (composer unconditional again)',
   !COMPOSER_BRANCH.test(decomment(mutatedNoGate)));
