@@ -20,6 +20,10 @@ on:
         description: "Run even if policy.enabled=false (all safety guards still apply)"
         type: boolean
         default: false
+      restore_only:
+        description: "Bring back the hidden rows the re-check finds LIVE; delete nothing (no policy needed)"
+        type: boolean
+        default: false
 
 concurrency:
   group: platform-cleanup-${{ github.event.inputs.platform }}
@@ -65,4 +69,5 @@ jobs:
           exec xvfb-run -a python -m scrapers.common.cleanup \
             --platform "${{ github.event.inputs.platform }}" \
             ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }} \
-            ${{ github.event.inputs.force == 'true' && '--force' || '' }}
+            ${{ github.event.inputs.force == 'true' && '--force' || '' }} \
+            ${{ github.event.inputs.restore_only == 'true' && '--restore-only' || '' }}
