@@ -912,6 +912,19 @@ or rewrite another engineer's work, and never start a big change in another engi
 - Before trusting "our servers read it wrong", open the same ads from a second network. On
   2026-10-02 the Gathern 404s that looked like a block were real.
 
+- A cleanup's one 200 must not overrule a fresh direct 404 (2026-10-05). The 03:00 UTC gathern
+  cleanup picks hidden rows by `last_seen_at`, so a row hidden by day was re-read that night, read
+  200 and set back to active with no evidence: 496 revived in 7 days, and all 142 of 2026-10-05 read
+  404 again on the bracketed direct sweep within 3 hours (dead ad 737704 was hidden and re-shown daily
+  since 08-30). `cleanup.DIRECT_LEDGERS` now holds such a row as UNKNOWN (neither revived nor
+  deleted) while its newest direct reading inside 48 h is an applied 404/410; read
+  `held_live_vs_fresh_direct_dead=` in `cleanup_runs.note`.
+
+- A "live" signal that only a few pages carry leaves a site unmeasurable (hajer, 2026-10-05): 108 of
+  121 pages had no status badge, so 107 ads were never verified and the controls read 1/5, voiding
+  the dead-ads row every night. The listing's own rendered page (`single-rem_property` body class)
+  is now the live answer; a «sold»/«rented» badge is still read first.
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a

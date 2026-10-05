@@ -28,7 +28,7 @@ import math
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
 from scrapers.common import http
@@ -331,6 +331,83 @@ def _probe_escape(url: str, status: int | None, body: str) -> tuple[int | None, 
             _probe_route[host] = profile
         return r.status_code, (r.text or "")
     return status, body
+
+
+# ── A cleanup "live" may not overrule a FRESH direct "dead" (2026-10-05, Lifecycle Engineer) ────
+# The cleanup re-reads a hidden row once, at 03:00 UTC, through its own plain session. On gathern
+# that one reading said 200 for 496 hidden rows in 7 days (28% of all it re-checked), and each was
+# set back to active with no evidence row and no `last_verified_alive_at`. Measured 2026-10-05:
+# all 142 rows it revived that night read 404 again on gathern's own bracketed direct sweep within
+# three hours, and `dead_visible_score` drew one of them (737704, 404 on every direct reading since
+# 2026-08-30) as a dead ad a customer could see. Because the cleanup picks rows by `last_seen_at`
+# (the feed stopped serving them weeks ago), every hide of such a row is re-checked the very next
+# night, so the same dead ad was hidden by day and re-shown by night, indefinitely.
+#
+# So when the platform keeps a direct-reading ledger, a cleanup 'live' on a row whose NEWEST direct
+# reading (inside FRESH_DEAD_HOURS) was an applied 404/410 strike or kill is a CONTRADICTION, and
+# a contradiction is UNKNOWN (LISTING_LIVENESS.md §1): the row is neither revived nor deleted. A
+# unit that is really back is still revived: by its own sweep's next 200, or by this pass once the
+# dead reading is older than the window. Deletion is untouched (it still needs this run's own
+# 404/410 or dead marker).
+# Built, never spelled out: this module only READS these ledgers, and the evidence-ledger barrier
+# (verify-liveness-evidence-tables-have-writers.ts) judges any file naming one as its writer.
+DIRECT_LEDGERS = {p: f"{p}_liveness_detail" for p in ("gathern", "aqar", "dealapp")}
+_LEDGER_WITHOUT_SOURCE_TABLE = {"gathern"}     # gathern's ledger has no source_table column
+FRESH_DEAD_HOURS = 48
+_DEAD_VERDICTS = ("strike", "kill")
+
+
+def fresh_direct_dead(history: list[dict], now: datetime, hours: int = FRESH_DEAD_HOURS) -> set:
+    """Listing ids whose newest DIRECT reading in `history` is an applied 404/410 strike/kill no
+    older than `hours`. `history` rows: listing_id, run_at (ISO), verdict, http_status, applied.
+    A newer 'alive' reading (any applied verdict) wins, so a unit that came back is never held."""
+    newest: dict = {}
+    for h in history:
+        rid, at = h.get("listing_id"), h.get("run_at") or ""
+        if rid is None or (not h.get("applied") and h.get("verdict") != "alive"):
+            continue
+        if at > newest.get(rid, ("", None))[0]:
+            newest[rid] = (at, h)
+    out = set()
+    for rid, (at, h) in newest.items():
+        try:
+            ts = datetime.fromisoformat(at.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if (h.get("verdict") in _DEAD_VERDICTS and h.get("http_status") in (404, 410)
+                and (now - ts).total_seconds() <= hours * 3600):
+            out.add(rid)
+    return out
+
+
+def _held_by_direct_ledger(client, platform: str, cands: list, now: datetime) -> set:
+    """{(table, id)} of candidates a cleanup 'live' may not revive. Fails CLOSED into the safe
+    direction for a hidden row: an unreadable ledger holds every candidate (nothing revived on a
+    reading we could not cross-check), and holding never deletes anything."""
+    ledger = DIRECT_LEDGERS.get(platform)
+    if not ledger or not cands:
+        return set()
+    since = (now - timedelta(hours=FRESH_DEAD_HOURS)).isoformat()
+    held = set()
+    by_table: dict = {}
+    for t, r in cands:
+        by_table.setdefault(t, []).append(r["id"])
+    for t, ids in by_table.items():
+        try:
+            hist = []
+            for i in range(0, len(ids), 200):
+                q = (client.table(ledger).select("listing_id, run_at, verdict, http_status, applied")
+                     .in_("listing_id", ids[i:i + 200]).gte("run_at", since))
+                if platform not in _LEDGER_WITHOUT_SOURCE_TABLE:
+                    q = q.eq("source_table", t)
+                hist += q.limit(10000).execute().data or []
+        except Exception as exc:  # noqa: BLE001 — unreadable ledger revives nothing
+            print(f"⚠ cleanup {platform}: direct ledger {ledger} unreadable ({str(exc)[:120]}); "
+                  f"no row of {t} is revived this run", flush=True)
+            held |= {(t, i) for i in ids}
+            continue
+        held |= {(t, i) for i in fresh_direct_dead(hist, now)}
+    return held
 
 
 def verdict_detail(status: int | None, body: str, dead_marker) -> tuple[str, str]:
@@ -704,6 +781,8 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                 # inflate the rate and could freeze a perfectly healthy run.
                 inconclusive = 0
                 now = datetime.now(timezone.utc)
+                held_live = _held_by_direct_ledger(client, platform, cands, now)
+                held_contradicted = 0
                 for t, r in cands:
                     url = (r.get("listing_url") or "").strip()
                     if pol["require_source_recheck"]:
@@ -733,11 +812,20 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
                         log_rows.append({"run_id": run_id, "platform": platform, "source_table": t,
                                          "listing_id": r["id"], "ad_number": r.get("ad_number"), "listing_url": url,
                                          "reason": reason})
+                    elif v == "live" and (t, r["id"]) in held_live:
+                        held_contradicted += 1     # contradicts a fresh direct 404: UNKNOWN
+                        stats["skipped"] += 1
                     elif v == "live":
                         to_reactivate.setdefault(t, []).append(r["id"])
                         stats["reactivated"] += 1
                     else:
                         stats["skipped"] += 1
+
+                if held_contradicted:
+                    msg = (f"held_live_vs_fresh_direct_dead={held_contradicted} (a 200 here against "
+                           f"a direct 404 inside {FRESH_DEAD_HOURS}h: UNKNOWN, not revived)")
+                    stats["note"] = f"{stats['note']}; {msg}" if stats["note"] else msg
+                    print(f"  cleanup {platform}: {msg}", flush=True)
 
                 # ── run-level inconclusive-evidence freeze (2026-08-23) ────────────────────────
                 # verdict() already refuses to delete any INDIVIDUAL row whose recheck was
@@ -849,12 +937,10 @@ def run(platform: str, *, dry_run: bool = False, force: bool = False, bounded_ca
 
 
 def _days(n):
-    from datetime import timedelta
     return timedelta(days=int(n))
 
 
 def _hours(n):
-    from datetime import timedelta
     return timedelta(hours=int(n))
 
 

@@ -127,6 +127,15 @@ _OWN_BADGE_RE = re.compile(r'class="property-status-badge status-([a-z-]+)"')
 # opinion rather than an unmeasured one. Having no opinion can never contradict the crawl path.
 _GONE_BADGE = ("sold", "rented")
 _ALIVE_BADGE = ("available",)
+# THE LISTING'S OWN PAGE RENDERED (2026-10-05, Lifecycle Engineer; owner rule «a page that loads
+# with its ad body is a live answer»). Only 13 of 121 active pages carry any badge, so with the badge
+# as the only "live" signal 107 ads were never verified and the known-live controls read 1/5, voiding
+# the nightly dead-ads measurement. Measured 2026-10-05 from a plain connection: 10 of 10 active ads
+# answered 200 with WordPress's single-property body class (`single-rem_property postid-<n>`), one
+# with «available», nine with no badge; 3 of 4 hidden ads carried «sold»/«rented» (still gone: the
+# badge is read FIRST); an unknown slug answered 404 with no such class. The class is the template
+# WordPress picks for THIS post, so neither the theme's CSS palette nor a listing grid can produce it.
+_OWN_PROPERTY_PAGE_RE = re.compile(r'<body[^>]*\bclass="[^"]*\bsingle-rem_property\b')
 
 
 _oracle_sess: Any = None
@@ -157,7 +166,9 @@ def _signal(status: Optional[int], body: str, path_changed: bool) -> Optional[st
         return "gone"                    # THIS listing's own badge says sold/rented
     if any(b in _ALIVE_BADGE for b in badges):
         return "live"                    # THIS listing's own badge says available
-    return None                          # no badge at all — the common case; hold at UNKNOWN
+    if _OWN_PROPERTY_PAGE_RE.search(body or ""):
+        return "live"                    # no badge, but the listing's own page rendered (the common case)
+    return None                          # not this listing's page: hold at UNKNOWN
 
 
 _probe = http_liveness.LivenessProbe(

@@ -1052,3 +1052,78 @@ def test_any_other_delete_error_still_raises():
     with pytest.raises(Exception):
         C._delete_chunk(_Cl(), "t", [1, 2, 3], stats)
     assert stats["deleted"] == 0
+
+
+# ── A cleanup "live" may not overrule a FRESH direct "dead" (2026-10-05) ──────────────────────────
+# gathern: the 03:00 cleanup re-read 496 hidden rows as 200 in 7 days and revived them; all 142 it
+# revived on 2026-10-05 read 404 again on the bracketed direct sweep within 3 hours.
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+
+def _ago(h): return (_dt.now(_tz.utc) - _td(hours=h)).isoformat()
+
+
+def _ledger_row(i, verdict, status, hours_ago, applied=True):
+    return {"listing_id": i, "source_table": "testp_listings", "run_at": _ago(hours_ago),
+            "verdict": verdict, "http_status": status, "applied": applied}
+
+
+def _with_ledger(ledger_rows, probe):
+    C.DIRECT_LEDGERS["testp"] = "testp_liveness_detail"
+    return _install({"testp_listings": [_cand(1)], "testp_liveness_detail": ledger_rows}, POL(), probe=probe)
+
+
+def test_cleanup_200_does_not_revive_a_row_its_direct_sweep_read_404_hours_ago():
+    c = _with_ledger([_ledger_row(1, "kill", 404, 3)], probe=lambda url: (200, "page"))
+    s = C.run("testp", force=True)
+    assert s["reactivated"] == 0 and s["deleted"] == 0 and s["skipped"] == 1
+    assert not c.updated.get("testp_listings")          # not set back to active
+    assert "held_live_vs_fresh_direct_dead=1" in (s["note"] or "")
+
+
+def test_a_newer_direct_alive_reading_lets_the_cleanup_revive():
+    c = _with_ledger([_ledger_row(1, "kill", 404, 10), _ledger_row(1, "alive", 200, 2)],
+                     probe=lambda url: (200, "page"))
+    s = C.run("testp", force=True)
+    assert s["reactivated"] == 1 and c.updated.get("testp_listings")
+
+
+def test_a_stale_direct_dead_reading_does_not_hold_a_real_comeback():
+    c = _with_ledger([_ledger_row(1, "kill", 404, C.FRESH_DEAD_HOURS + 5)], probe=lambda url: (200, "page"))
+    s = C.run("testp", force=True)
+    assert s["reactivated"] == 1 and c.updated.get("testp_listings")
+
+
+def test_an_unapplied_dead_reading_holds_nothing():
+    c = _with_ledger([_ledger_row(1, "kill", 404, 3, applied=False)], probe=lambda url: (200, "page"))
+    s = C.run("testp", force=True)
+    assert s["reactivated"] == 1
+
+
+def test_the_hold_never_changes_deletion():
+    c = _with_ledger([_ledger_row(1, "kill", 404, 3)], probe=lambda url: (404, ""))
+    s = C.run("testp", force=True)
+    assert s["deleted"] == 1 and s["reactivated"] == 0
+
+
+def test_an_unreadable_ledger_revives_nothing():
+    c = _with_ledger([], probe=lambda url: (200, "page"))
+    orig = c.table
+    def table(name):
+        if name == "testp_liveness_detail":
+            raise RuntimeError("ledger down")
+        return orig(name)
+    c.table = table
+    s = C.run("testp", force=True)
+    assert s["reactivated"] == 0 and s["deleted"] == 0
+
+
+def test_platform_without_a_ledger_is_unchanged():
+    C.DIRECT_LEDGERS.pop("testp", None)
+    c = _install({"testp_listings": [_cand(1)]}, POL(), probe=lambda url: (200, "page"))
+    s = C.run("testp", force=True)
+    assert s["reactivated"] == 1
+
+
+def test_gathern_has_a_direct_ledger():
+    assert C.DIRECT_LEDGERS["gathern"] == "gathern_liveness_detail"
