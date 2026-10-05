@@ -156,6 +156,15 @@ DETAIL = f"{BASE}/marketUnitsApi/v6/market_units/"
 DISTRICTS = f"{BASE}/marketplaceApi/search/v1/districts"
 PAGE_SIZE = 20
 PAUSE = 1.5            # seconds between requests — the pace that drew no challenge
+# THE WALLED DETAIL ROUTE (2026-10-05 04:29 UTC, Actions job 111614516016). The catalogue walk was
+# served (273 units), then EVERY detail call drew «HTTP 403 challenge after 4 tries» — ~65 s each —
+# so the walk ground on until the job's 45-minute cap cancelled it with 0 rows written (rows are
+# only written after the walk). A challenge is about our session, so after DETAIL_WALL_AFTER
+# consecutive unread details the session is re-negotiated (a fresh handshake, through the proxy when
+# set); after MAX_RENEGOTIATIONS fresh sessions are walled too, the run stops and says so, in
+# minutes instead of burning the job — nothing is guessed, nothing is pruned, stored rows are kept.
+DETAIL_WALL_AFTER = 3
+MAX_RENEGOTIATIONS = 2
 
 _CHALLENGE = re.compile(r"Just a moment|cf-chl|challenge-platform|cf_chl", re.I)
 
@@ -600,6 +609,8 @@ def main() -> int:
         print(f"{SOURCE}: {len(units)} rent units in the catalogue", flush=True)
 
         districts: dict = {}
+        walled_run = 0          # consecutive details that drew no answer at all
+        renegotiated = 0
         for idx, rich in units:
             seen += 1
             uid = str(rich.get("resource_id") or idx.get("resource_id") or "")
@@ -607,6 +618,20 @@ def main() -> int:
             if uid:
                 time.sleep(PAUSE)
                 state, detail = fetch_detail(s, uid)
+                walled_run = walled_run + 1 if state == "miss" else 0
+                if walled_run >= DETAIL_WALL_AFTER:
+                    if renegotiated >= MAX_RENEGOTIATIONS:
+                        raise RuntimeError(
+                            f"detail route walled: {walled_run} consecutive unread details after "
+                            f"{renegotiated} fresh sessions — stopped at unit {seen} of {len(units)}; "
+                            f"nothing written, nothing pruned")
+                    renegotiated += 1
+                    walled_run = 0
+                    print(f"   ↻ detail route walled — fresh session {renegotiated}/{MAX_RENEGOTIATIONS}",
+                          flush=True)
+                    _oracle_sess = s = session()
+                    state, detail = fetch_detail(s, uid)
+                    walled_run = 1 if state == "miss" else 0
                 if state == "not_found":
                     # The index still lists it but its own page would bounce the user home.
                     skipped["detail_not_found"] = skipped.get("detail_not_found", 0) + 1

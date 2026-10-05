@@ -87,7 +87,8 @@ def test_every_profile_failing_stays_empty_and_says_why(monkeypatch):
 
     assert urls == [], "an unreadable sitemap must never turn into a catalogue"
     assert used is first
-    assert made == list(IP.CATALOGUE_PROFILES[1:]), "every configured profile must be tried once"
+    # every configured profile once, then (all of them died on the transport) the late round
+    assert made == list(IP.CATALOGUE_PROFILES[1:]) + [IP.CATALOGUE_PROFILES[0]], made
     assert len(set(IP.CATALOGUE_PROFILES)) == len(IP.CATALOGUE_PROFILES) >= 3
     for prof in IP.CATALOGUE_PROFILES:
         assert any(t.startswith(prof + ":") for t in trace), f"trace must say what {prof} got"
@@ -103,3 +104,60 @@ def test_healthy_first_session_needs_no_retry(monkeypatch):
     urls, used, _trace = IP.fetch_catalogue(first, BASE, limit=1, make_session=make)
     assert urls == [f"{BASE}/property/a/"] and used is first
     assert len(first.calls) == 1, "the WP-core sitemap is only a fallback"
+
+
+# ─────────── the STALL class: gudai 2026-09-30 and 2026-10-04 (every direct attempt timed out) ───────────
+def test_a_stalled_host_is_outlasted_by_the_late_round(monkeypatch):
+    """gudai 2026-10-04 04:25: 3 profiles × 2 sitemaps all hit the 40 s timeout, then the same host
+    served the sitemap in ~10 s three hours later. The old code returned [] (run failed). The fix
+    waits LATE_ROUND_BACKOFF_S and tries once more with a longer timeout."""
+    slept: list[float] = []
+    monkeypatch.setattr(IP.time, "sleep", lambda s: slept.append(s))
+    monkeypatch.delenv("WASALT_PROXY_URL", raising=False)
+    first = _Sess("chrome124", 0, "", raises=True)
+    made: list[_Sess] = []
+
+    def make(profile: str) -> _Sess:
+        # the stall lasts through the three direct profiles; the late round is served
+        sess = _Sess(profile, 200, SITEMAP, raises=len(made) < len(IP.CATALOGUE_PROFILES) - 1)
+        made.append(sess)
+        return sess
+
+    urls, used, trace = IP.fetch_catalogue(first, BASE, make_session=make)
+    assert urls == [f"{BASE}/property/a/", f"{BASE}/property/b/"], trace
+    assert used is made[-1]
+    assert IP.LATE_ROUND_BACKOFF_S in slept, "the late round must wait long enough to outlast the stall"
+    assert IP.LATE_ROUND_BACKOFF_S >= 60 and IP.LATE_ROUND_TIMEOUT_S > 40
+    assert any(t.startswith("late/") for t in trace)
+
+
+def test_a_stalled_host_tries_the_residential_proxy_when_configured(monkeypatch):
+    monkeypatch.setattr(IP.time, "sleep", lambda _s: None)
+    monkeypatch.setenv("WASALT_PROXY_URL", "http://proxy.invalid:1")
+    first = _Sess("chrome124", 0, "", raises=True)
+    calls: list[tuple] = []
+
+    def make(profile: str, proxies=None) -> _Sess:
+        calls.append((profile, proxies))
+        return _Sess(profile, 200, SITEMAP) if proxies else _Sess(profile, 0, "", raises=True)
+
+    urls, _used, trace = IP.fetch_catalogue(first, BASE, make_session=make)
+    assert urls, trace
+    assert any(p for _prof, p in calls), "the proxy route must be tried before giving up"
+    assert any(t.startswith("proxy/") for t in trace)
+
+
+def test_an_answering_host_gets_no_late_round(monkeypatch):
+    """A 404 is the source speaking: no 2-minute wait, no proxy spend — fail loud as before."""
+    slept: list[float] = []
+    monkeypatch.setattr(IP.time, "sleep", lambda s: slept.append(s))
+    monkeypatch.setenv("WASALT_PROXY_URL", "http://proxy.invalid:1")
+    made: list[str] = []
+
+    def make(profile: str, proxies=None) -> _Sess:
+        made.append(profile if not proxies else "proxy/" + profile)
+        return _Sess(profile, 404, "")
+
+    urls, _used, _trace = IP.fetch_catalogue(_Sess("chrome124", 404, ""), BASE, make_session=make)
+    assert urls == [] and IP.LATE_ROUND_BACKOFF_S not in slept
+    assert made == list(IP.CATALOGUE_PROFILES[1:])

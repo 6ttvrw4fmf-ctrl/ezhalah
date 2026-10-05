@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://aqarnajran.com"
@@ -45,6 +46,17 @@ _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome124")
     s.headers.update({"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"})
+    return s
+
+
+def walk_session() -> cc.Session:
+    # 2026-10-05 (Scraping Engineer): one pinned profile, no retry — a single refused handshake or
+    # stalled connect failed the whole night (10-05 04:23 «wp-json returned no posts», ok 10-04 with
+    # 39 rows). Probe 3 profiles DIRECT, then the residential proxy (`proxy: true` → WASALT_PROXY_URL,
+    # spent only when DIRECT is refused), and keep the session that is served. The attempt log is the
+    # step-6 evidence if the site is truly down.
+    s, tried = retry_smarter_session(f"{BASE}/wp-json/wp/v2/posts?per_page=1&_fields=id", headers=dict(session().headers))
+    print(f"{SOURCE}: probe {' '.join(tried)}", flush=True)
     return s
 
 
@@ -295,6 +307,10 @@ def fetch_posts(s: cc.Session, limit: int = 0) -> list[dict]:
                   params={"per_page": 50, "page": page,
                           "_fields": "id,link,title,content,date_gmt,modified_gmt"}, timeout=40)
         if r.status_code != 200:
+            if page == 1:
+                # Page 1 refused is a fact about our access, never "the site has no posts": say what
+                # the source answered (it used to break silently into «wp-json returned no posts»).
+                raise RuntimeError(f"wp-json posts page 1 → HTTP {r.status_code}")
             break
         total = r.headers.get("x-wp-total")
         batch = r.json()
@@ -318,7 +334,7 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    s = session()
+    s = walk_session()
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run("aqarnajran")
     res: list[dict] = []

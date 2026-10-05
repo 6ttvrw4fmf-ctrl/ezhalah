@@ -68,6 +68,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 
 BASE = "https://hasaadestate.com"
@@ -104,6 +105,17 @@ def session() -> cc.Session:
     return s
 
 
+def walk_session() -> cc.Session:
+    # 2026-10-05 (Scraping Engineer): one pinned profile, no retry — a single refused handshake or
+    # stalled connect failed the whole night (10-05 04:32 «projects sitemap → HTTP 404», ok 10-04 with
+    # 12 rows). Probe 3 profiles DIRECT, then the residential proxy (`proxy: true` → WASALT_PROXY_URL,
+    # spent only when DIRECT is refused), and keep the session that is served. The attempt log is the
+    # step-6 evidence if the site is truly down.
+    s, tried = retry_smarter_session(SITEMAP, headers=dict(session().headers))
+    print(f"{SOURCE}: probe {' '.join(tried)}", flush=True)
+    return s
+
+
 def plain(s: Optional[str]) -> str:
     return re.sub(r"\s+", " ", ihtml.unescape(re.sub(r"<[^>]+>", " ", s or ""))).strip()
 
@@ -131,11 +143,44 @@ def parse_price(raw: Optional[str]) -> tuple[Optional[int], bool]:
     return (normalize.to_int(nums[0]) if nums else None), False
 
 
-def fetch_project_urls(s: cc.Session, limit: int = 0) -> list[str]:
+# Where a WordPress site lists its sitemaps. projects-sitemap.xml answered HTTP 404 on 2026-10-05
+# (ok 10-04): a sitemap that moves is a LAYOUT change, not an empty site (compoundin moved to a
+# sitemap index on 2026-10-02). So the indexes are read for whichever child names the projects.
+SITEMAP_INDEXES = (f"{BASE}/sitemap_index.xml", f"{BASE}/sitemap.xml", f"{BASE}/wp-sitemap.xml")
+
+
+def _projects_sitemap(s: cc.Session) -> tuple[Optional[str], list[str]]:
+    """(the projects sitemap's XML, a trace of every attempt). The fixed address first, then any
+    child of a sitemap index whose own address names projects."""
+    trace: list[str] = []
     r = s.get(SITEMAP, timeout=40)
-    if r.status_code != 200:
-        raise RuntimeError(f"projects sitemap → HTTP {r.status_code}")
-    urls = [u for u in re.findall(r"<loc>([^<]+)</loc>", r.text)
+    trace.append(f"{SITEMAP.rsplit('/', 1)[-1]}:HTTP {r.status_code}")
+    if r.status_code == 200 and "<loc>" in r.text:
+        return r.text, trace
+    for idx in SITEMAP_INDEXES:
+        try:
+            ri = s.get(idx, timeout=40)
+        except Exception as e:  # noqa: BLE001 — recorded, then the next index
+            trace.append(f"{idx.rsplit('/', 1)[-1]}:{type(e).__name__}")
+            continue
+        trace.append(f"{idx.rsplit('/', 1)[-1]}:HTTP {ri.status_code}")
+        if ri.status_code != 200:
+            continue
+        for child in re.findall(r"<loc>([^<]+)</loc>", ri.text):
+            if "project" not in child.lower() or not child.lower().split("?")[0].endswith(".xml"):
+                continue
+            rc = s.get(child.strip(), timeout=40)
+            trace.append(f"{child.strip().rsplit('/', 1)[-1]}:HTTP {rc.status_code}")
+            if rc.status_code == 200 and "<loc>" in rc.text:
+                return rc.text, trace
+    return None, trace
+
+
+def fetch_project_urls(s: cc.Session, limit: int = 0) -> list[str]:
+    xml, trace = _projects_sitemap(s)
+    if xml is None:
+        raise RuntimeError("projects sitemap → " + "; ".join(trace))
+    urls = [u for u in re.findall(r"<loc>([^<]+)</loc>", xml)
             if "/projects/" in u and "/en/" not in u and u.rstrip("/") != f"{BASE}/projects"]
     urls = sorted(dict.fromkeys(urls))
     return urls[:limit] if limit else urls
@@ -301,7 +346,7 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    s = session()
+    s = walk_session()
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run("hasaad")
     res: list[dict] = []
