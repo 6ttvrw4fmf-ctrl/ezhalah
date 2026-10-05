@@ -1009,6 +1009,11 @@ finished below 9:
 - **−1** for every change you had to undo.
 - Any skipped step means it can't be 10/10.
 
+**Fix rate leads (owner, 2026-10-05):** the owner rates every engineer first by fixed-and-proven ÷ found.
+`issues_fixed` in your end row counts ONLY fixes with a PASS proof row from the customer side; «fixed, proof pending» is
+not fixed. Put «Fix rate: X / Y» right under ✅. Start each night by proving yesterday's pending fixes, and plan crawl/sync
+timing so tonight's proofs land inside your 2 hours. (🆕 night 2: 4/12; 🔬 night 2: 3/9 but wrote 5 and self-rated 9.)
+
 ## Report: this block is the LAST thing you write (times in Arizona time, UTC−7)
 > ✅ One plain first line: "Everything is perfectly good." / "Not good: <what> and I have not fixed it yet."
 > 📋 **Checked in time:** X% (goal 100%) · never checked: N (goal 0) · yesterday X%

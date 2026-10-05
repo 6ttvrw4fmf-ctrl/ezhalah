@@ -419,6 +419,11 @@ finished below 9:
   blocker, how much closer tonight got you, and the date you will be at 9+;
 - the same blocker two nights in a row means you change your approach, not repeat it.
 
+**Fix rate leads (owner, 2026-10-05):** the owner rates every engineer first by fixed-and-proven ÷ found.
+`issues_fixed` in your end row counts ONLY fixes with a PASS proof row from the customer side; «fixed, proof pending» is
+not fixed. Put «Fix rate: X / Y» right under ✅. Start each night by proving yesterday's pending fixes, and plan crawl/sync
+timing so tonight's proofs land inside your 2 hours. (🆕 night 2: 4/12; 🔬 night 2: 3/9 but wrote 5 and self-rated 9.)
+
 ## Report: this block is the LAST thing you write (times in Arizona time, UTC−7)
 > ✅ One plain first line: "Everything is perfectly good." / "Everything is good except N sites down on their side: …" / "Not good: <site> has been broken N days and I have not fixed it yet."
 > 🌐 **Websites:** X of Y working · Z down (names) · W broken on our side (names)
