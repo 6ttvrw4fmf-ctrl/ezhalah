@@ -184,3 +184,48 @@ def test_fold_counts_af_recall_misses():
     assert row["af_page_states"] == 1 and row["af_captured"] == 0
     assert af_recall(row) == 0.0
     assert row["normal_match"] == 1      # district is a normal field
+
+
+# ── The writer: only the table's columns, and only a missing TABLE is forgiven (2026-10-05) ─────
+
+class _Upsert:
+    def __init__(self, sink, err=None):
+        self.sink, self.err = sink, err
+
+    def upsert(self, payload, on_conflict=None):
+        self.sink.append((payload, on_conflict))
+        return self
+
+    def execute(self):
+        if self.err:
+            raise Exception(self.err)
+        return self
+
+
+class _WriteClient:
+    def __init__(self, err=None):
+        self.sent, self.err = [], err
+
+    def table(self, _name):
+        return _Upsert(self.sent, self.err)
+
+
+def test_write_rows_sends_only_table_columns():
+    from scrapers.common.new_listings_score import COLUMNS, write_rows
+    row = empty_row("2026-10-05", "aqar")
+    row["new_24h"] = 3180                     # the extra key that made PostgREST refuse every night
+    c = _WriteClient()
+    assert write_rows(c, [row]) == "wrote 1 rows to ops_new_listings_score"
+    (payload, conflict), = c.sent
+    assert set(payload[0]) == set(COLUMNS) and conflict == "night,platform"
+
+
+def test_write_rows_missing_column_is_loud_not_table_missing():
+    from scrapers.common.new_listings_score import write_rows
+    c = _WriteClient(err="{'code': 'PGRST204', 'message': \"Could not find the 'x' column of "
+                         "'ops_new_listings_score' in the schema cache\"}")
+    with pytest.raises(Exception):
+        write_rows(c, [empty_row("2026-10-05", "aqar")])
+    gone = _WriteClient(err="{'code': 'PGRST205', 'message': \"Could not find the table "
+                            "'public.ops_new_listings_score' in the schema cache\"}")
+    assert "does not exist yet" in write_rows(gone, [empty_row("2026-10-05", "aqar")])

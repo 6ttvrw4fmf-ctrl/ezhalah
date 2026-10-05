@@ -434,14 +434,23 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
 
 # ── Output ──────────────────────────────────────────────────────────────────────────────────────
 
+# The table's own columns (supabase/migrations: ops_new_listings_score). Anything else a row carries
+# (decided_ads, unreadable_pages, new_24h) is for the log only: sending it makes PostgREST refuse the
+# whole upsert with PGRST204 «Could not find the '<col>' column», and until 2026-10-05 that refusal
+# matched a loose "not find" filter below and was printed as «does not exist yet» — 0 rows written on
+# every night the job ran.
+COLUMNS = ("night", "platform", "sampled", "fields", "normal_match", "normal_mismatch", "af_claimed",
+           "af_agree", "af_page_states", "af_captured", "mismatch_ids", "note")
+
+
 def write_rows(client, rows: list[dict]) -> str:
-    """Until the migration lands this table does not exist: rows are printed, never a failure."""
-    payload = [{k: v for k, v in r.items() if k not in ("decided_ads", "unreadable_pages")} for r in rows]
+    """Only a MISSING TABLE (PGRST205 / 42P01) prints instead of writing; every other refusal raises."""
+    payload = [{k: r.get(k) for k in COLUMNS} for r in rows]
     try:
         client.table(TABLE).upsert(payload, on_conflict="night,platform").execute()
     except Exception as e:  # noqa: BLE001
         text = str(e)
-        if TABLE in text and ("PGRST205" in text or "42P01" in text or "not find" in text):
+        if "PGRST205" in text or "42P01" in text:
             return f"{TABLE} does not exist yet: rows printed only"
         raise
     return f"wrote {len(rows)} rows to {TABLE}"
