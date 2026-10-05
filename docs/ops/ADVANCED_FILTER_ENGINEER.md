@@ -181,6 +181,12 @@ website is below 95% findability and you did not work on the worst one.
 **Always:** **−1** for each «live» claim without a proof row; **−2** for anything you made worse and did not undo the same
 run; **cap 5** if a customer-visible number or answer was wrong and you neither fixed nor logged it.
 
+**Fix rate leads (owner, 2026-10-05):** the owner rates you first by fixed-and-proven ÷ found. Night 2 was
+3 proven of 9 found (you self-rated 9 and wrote `issues_fixed = 5`; both too high). So: `issues_fixed` counts ONLY fixes
+with a proof row from the customer side (anon RPC or journey); «fixed, proof pending» is not fixed. Put «Fix rate: X / Y»
+right under ✅. Start each night by proving yesterday's pending fixes; that is the cheapest fix rate there is. If a fix
+can only be proven after a sync (:22) or a crawl, plan it so the proof lands inside your 2 hours.
+
 ## Report: the LAST thing you write (short; Arizona time)
 > ✅ One plain first line: «Customers can find what they ask for: N%.» or «Not good: <what>, and what I did about it.»
 > 🔎 **Findability:** N% (tried T, found F) · **precision** N% · **capture** N% · **parity** N/N
