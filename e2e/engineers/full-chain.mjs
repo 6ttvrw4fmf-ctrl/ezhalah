@@ -111,7 +111,20 @@ try {
       const text = (await card.first().innerText()).replace(/\s*\n+\s*/g, ' | ');
       await card.first().getByRole('link').first().click();
       await page.waitForTimeout(800);
-      const opened = await page.evaluate(() => window.__opened.at(-1));
+      // Hosts on the in-app viewer allowlist (src/lib/inAppViewer.ts, e.g. aqargate) open INSIDE
+      // Ezhalah in a side panel, not through window.open. The panel's «افتح الإعلان في …» button is
+      // what takes the customer to the source: press it and record that URL.
+      let opened = await page.evaluate(() => window.__opened.at(-1));
+      if (!opened) {
+        const openAd = page.getByText(/افتح الإعلان في/).last();
+        await openAd.waitFor({ timeout: 8000 }).catch(() => {});
+        if (await openAd.count()) {
+          await openAd.click();
+          await page.waitForTimeout(800);
+          opened = await page.evaluate(() => window.__opened.at(-1));
+          log('(opened in the in-app viewer, then «افتح الإعلان»)');
+        }
+      }
       ok = norm(opened) === norm(a.url) && (!a.price || text.includes(a.price));
       log(`card found after ${p} «عرض المزيد» press(es)`);
       log(`card: ${text}`);
