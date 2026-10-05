@@ -18,7 +18,7 @@
 //
 // Mutation-proven manually during authorship (see the PR body for the pass/fail/pass sequence):
 // reverting any ONE of checks 1-5 below in isolation reproduces a ❌ on this file.
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 
 let failures = 0;
 const check = (name: string, cond: boolean, why?: string) => {
@@ -107,13 +107,25 @@ check(
 //    deploy having actually aliased (never from "the script exited 0"), and must render a message
 //    that says production changed when a deploy shipped but a later check failed — the opposite
 //    would misreport every post-check failure on an already-live deploy as "nothing happened".
+//
+// 2026-09-12: this parsing was extracted into scripts/deploy-report.sh (sourced by the Report step,
+// and independently regression-tested by scripts/verify-deploy-report.ts) so it could finally be
+// EXECUTED by a test instead of only trusted by reading it — see that file's header for why. The
+// two checks below now look in either place, but only trust the sourced file if the workflow
+// genuinely wires it in (source + call), not merely because a same-named file happens to exist.
+const REPORT_LIB = 'scripts/deploy-report.sh';
+const sourcesReportLib = /\.\s+scripts\/deploy-report\.sh\b/.test(workflow)
+  && /deploy_report_verdict\s+\/tmp\/safe-deploy\.log/.test(workflow);
+const reportLibCode = sourcesReportLib && existsSync(REPORT_LIB) ? readFileSync(REPORT_LIB, 'utf8') : '';
 check(
   "deploy-frontend.yml derives SHIPPED from an 'Aliased' marker in the log, not from exit status",
-  /grep\s+-qE\s+'[^']*Aliased[^']*'\s+"\$LOG";\s*then\s+SHIPPED=yes/.test(workflow),
+  /grep\s+-qE\s+'[^']*Aliased[^']*'\s+"\$LOG";\s*then\s+SHIPPED=yes/.test(workflow)
+    || /grep\s+-qE\s+'[^']*Aliased[^']*'\s+"\$log";\s*then\s+SHIPPED=yes/.test(reportLibCode),
 );
 check(
   'deploy-frontend.yml distinguishes POST_FAILED (shipped, later check failed) from REFUSED_PRE (nothing shipped)',
-  /POST_FAILED=yes/.test(workflow) && /REFUSED_PRE=yes/.test(workflow),
+  (/POST_FAILED=yes/.test(workflow) || /POST_FAILED=yes/.test(reportLibCode))
+    && (/REFUSED_PRE=yes/.test(workflow) || /REFUSED_PRE=yes/.test(reportLibCode)),
 );
 check(
   'deploy-frontend.yml renders "Production WAS changed" when SHIPPED=yes and POST_FAILED=yes',
