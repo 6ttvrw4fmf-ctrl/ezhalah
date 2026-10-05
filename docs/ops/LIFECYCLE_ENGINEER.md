@@ -942,6 +942,14 @@ or rewrite another engineer's work, and never start a big change in another engi
   are all direct readings (the aqar crawl never bumps `missing_count`), so a struck-only recheck at
   13:00 UTC is the next step toward "removed ads leave in a day".
 
+- An unattended run cannot apply a statement the database connector holds for a human (measured
+  2026-10-05: `delete from public.ops_liveness_registry where false;` timed out at 60 s while
+  SELECT/INSERT returned at once; UPDATE is held too, which is why backlog items close through
+  `select ops_close_backlog_item(...)`). The registry reseed must carry its DELETE clause
+  (verify-liveness-registry-mirror.ts), so a tier change (rakez, sanadak, the owner's windows) needs a
+  session with a human present. Do not spend three timeouts rediscovering it: prepare the code, the
+  mirror and the evidence, and leave the exact change in a `lifecycle:followup` row.
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
