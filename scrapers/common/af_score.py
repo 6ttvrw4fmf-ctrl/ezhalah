@@ -58,12 +58,15 @@ MONTHLY = "شهري"
 # Site chrome, not the ad: a short category link such as «مواقف سيارات للإيجار» / «شقق للبيع» sits in every
 # aqar page's navigation, so it says nothing about THIS listing (norm() has already folded hamza).
 CHROME = re.compile(r"^(?:\S+\s){0,3}(?:للايجار|للبيع)$")
+# An EMPTY label («موقف السيارة :», «التكييف :») is printed on every tuba / ksaaqar page whatever the
+# answer — the value sits elsewhere, or nowhere. A label is not a statement.
+BARE_LABEL = re.compile(r"^[^:]{1,30}:$")
 
 
 def page_lines(page: dict) -> list[str]:
     ls = [norm(x) for x in ([page.get("title") or ""] + list((page.get("meta") or {}).values())
                             + (page.get("evidence_lines") or []) + (page.get("text_head") or "").split(" | "))]
-    return [x for x in ls if x and not CHROME.match(x)]
+    return [x for x in ls if x and not CHROME.match(x) and not BARE_LABEL.match(x)]
 
 
 def page_says_yes(lines: list[str], field: str) -> bool:

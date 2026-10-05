@@ -37,6 +37,7 @@ check("furnished is never asked on Monthly (no Monthly cohort offers it)",
       ns["offered"](["elevator", "furnished"], {"rent_period_ar": "شهري"}) == ["elevator"]
       and ns["offered"](["furnished"], {"rent_period_ar": "سنوي"}) == ["furnished"])
 check("a navigation link is not the ad", ns["page_lines"]({"evidence_lines": ["مواقف سيارات للإيجار", "موقف خاص"]}) == L("موقف خاص"))
+check("an empty label is not a yes", not ns["page_says_yes"](ns["page_lines"]({"evidence_lines": ["موقف السيارة :"]}), "parking"))
 check("furniture is not furnished", not ns["page_says_yes"](L("شركات الصيانة ونقل المفروشات"), "furnished")
       and ns["page_says_yes"](L("شقة مفروشة"), "furnished"))
 nd = {"props": {"pageProps": {"propertyDetailsV3": {"title": "شقة للإيجار", "description": "شقة مع مصعد وموقف خاص",
@@ -68,7 +69,8 @@ mustCatch('rent period dropped for «إيجار»', 'RENT = ("إيجار", "اي
 mustCatch('furnished asked on Monthly', 'return [a for a in answers if a != FURNISHED]', 'return answers');
 mustCatch('wasalt agent block read', 'if key and _WASALT_SKIP.search(key):', 'if False:');
 mustCatch('wasalt page dropped as unreadable', 'if status != 200 or not isinstance(pd, dict):\n        return None', 'return None');
-mustCatch('site navigation read as the ad', 'if x and not CHROME.match(x)]', 'if x]');
+mustCatch('an empty label read as a yes', 'and not BARE_LABEL.match(x)]', ']');
+mustCatch('site navigation read as the ad', 'if x and not CHROME.match(x) and', 'if x and');
 
 const fail = (m: string) => { console.error(m); process.exit(1); };
 const wf = '.github/workflows/af-score.yml';
