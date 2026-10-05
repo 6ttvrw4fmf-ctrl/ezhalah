@@ -925,6 +925,14 @@ or rewrite another engineer's work, and never start a big change in another engi
   the dead-ads row every night. The listing's own rendered page (`single-rem_property` body class)
   is now the live answer; a «sold»/«rented» badge is still read first.
 
+- A redirect to the site's home page is not a live listing (2026-10-05, the root cause of the line
+  above). gathern answers a removed unit, for `cleanup._probe`'s headers, with 307 -> `/ar?error=500`
+  and the home page serves 200; the shared reader followed it and said "live". The same reader feeds
+  verify_deletions, the spot-check, af_score and source_reread, so it also raised two false P0
+  `deleted_but_source_live` (793, 794: both 404 «الصفحة غير موجودة» to gathern's own session, live
+  controls 200). `cleanup._landed_on_home` now makes that no answer (UNKNOWN); a slug redirect to the
+  listing's own page is untouched.
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
