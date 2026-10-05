@@ -122,7 +122,7 @@ export async function loadLifted(root: string): Promise<Lifted> {
   const lifted = await liftSymbols(
     join(root, 'src/data/advancedFilters.ts'),
     [
-      { header: 'const AGE_BUCKETS', endsWith: /^\];$/ },
+      { header: 'const AGE_LADDER', endsWith: /^\];$/ },
       { header: 'const DIRECTION_DEFS', endsWith: /^\];$/ },
       { header: 'function addAmenities' },
       ...QUESTION_CONSTS.map((h) => ({ header: `const ${h}` })),
@@ -213,8 +213,14 @@ const DIR_COL: Record<string, string> = {
   'شمال شرق': 'cnt_dir_ne', 'شمال غرب': 'cnt_dir_nw', 'جنوب شرق': 'cnt_dir_se', 'جنوب غرب': 'cnt_dir_sw',
 };
 const SUBTYPE_COL: Record<string, string> = { 'استديو': 'cnt_sub_studio', 'شقق مخدومة': 'cnt_sub_serviced', 'شقة': 'cnt_sub_regular' };
-const AGE: Record<string, { params: Record<string, unknown>; lo: number | null; hi: number | null; exact?: number }> = {
+// The age question is a one-tap cumulative «up to» ladder (owner 2026-10-05): new · upto2 · upto5 · upto9.
+// A rung's count is the SUM of its bucket columns; the recording proxy hands back column NAMES, so the
+// sum reads as their concatenation — `cntCols.join('')` is that exact recorded value.
+const AGE: Record<string, { params: Record<string, unknown>; lo: number | null; hi: number | null; exact?: number; cntCols?: string[] }> = {
   new: { params: { p_is_new_construction: true }, lo: null, hi: null, exact: 0 },
+  upto2: { params: { p_age_buckets: ['new', '1_2'] }, lo: 0, hi: 2, cntCols: ['cnt_new', 'cnt_1_2'] },
+  upto5: { params: { p_age_buckets: ['new', '1_2', '3_5'] }, lo: 0, hi: 5, cntCols: ['cnt_new', 'cnt_1_2', 'cnt_3_5'] },
+  upto9: { params: { p_age_buckets: ['new', '1_2', '3_5', '6_9'] }, lo: 0, hi: 9, cntCols: ['cnt_new', 'cnt_1_2', 'cnt_3_5', 'cnt_6_9'] },
   '1_2': { params: { p_age_min: 1, p_age_max: 2 }, lo: 1, hi: 2 },
   '3_5': { params: { p_age_min: 3, p_age_max: 5 }, lo: 3, hi: 5 },
   '6_9': { params: { p_age_min: 6, p_age_max: 9 }, lo: 6, hi: 9 },
@@ -285,7 +291,7 @@ export function optionMeaning(field: string, key: string): Meaning | null {
         : a.hi == null
           ? { rest: `property_age=gte.${a.lo}`, notMatching: `property_age=lt.${a.lo}`, ok: (v: number) => v >= (a.lo as number) }
           : { rest: `property_age=gte.${a.lo}&property_age=lte.${a.hi}`, notMatching: `or=(property_age.lt.${a.lo},property_age.gt.${a.hi})`, ok: (v: number) => v >= (a.lo as number) && v <= (a.hi as number) };
-      return { params: a.params, cntCol: `cnt_${key}`, cols: ['property_age'], rest: range.rest, notMatching: range.notMatching,
+      return { params: a.params, cntCol: a.cntCols ? a.cntCols.join('') : `cnt_${key}`, cols: ['property_age'], rest: range.rest, notMatching: range.notMatching,
         unknown: 'property_age=is.null', satisfies: (r) => typeof r.property_age === 'number' && range.ok(r.property_age) };
     }
     default: return null;

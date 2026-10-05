@@ -73,7 +73,7 @@ const lifted = await liftSymbols(
   join(ROOT, 'src/data/advancedFilters.ts'),
   // addAmenities is a plain function two questions use as their whole apply(); the rest are object
   // literals whose members are all lazily evaluated, so apply() needs no prelude at all.
-  [{ header: 'function addAmenities' }, ...QUESTION_CONSTS.map((header) => ({ header: `const ${header}` }))],
+  [{ header: 'function addAmenities' }, { header: 'const AGE_LADDER', endsWith: /^\];$/ }, ...QUESTION_CONSTS.map((header) => ({ header: `const ${header}` }))],
   ['addAmenities', ...QUESTION_CONSTS],
   // §12 also CALLS AMENITIES_QUESTION.resolveOptions, to read the token set the card can offer from
   // the question itself rather than hand-listing it here. Its cohort logic is imported REAL; only
@@ -186,7 +186,7 @@ console.log('\n── 3. EVERY question, on a cohort the registry itself certifi
 // draft used the Arabic display name «محل» where the code holds the clean key `Shop`, so
 // cohortAllows() refused everything and eight of these checks failed for the wrong reason).
 const ANSWER_KEYS: Record<string, string[]> = {
-  property_age: ['3_5'], amenities: ['elevator'], rnpl: ['rnpl'], bathrooms: ['3'],
+  property_age: ['upto5'], amenities: ['elevator'], rnpl: ['rnpl'], bathrooms: ['3'],
   furnished: ['no'], street_width: ['20'], direction: ['شمال'], rating: ['9.0_rc10'], unit_subtype: ['استديو'],
 };
 const LEGS = {

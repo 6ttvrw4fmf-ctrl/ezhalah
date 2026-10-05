@@ -92,11 +92,10 @@ check('the installment question stays a single binary source-confirmed chip (no 
 // deal to its source-justified question list; cohortAllows() is the ONLY eligibility gate for the
 // config-driven questions. The old per-question hardcoded gates are superseded, but their
 // INVARIANTS survive as data shape and are pinned below.
-// 2026-10-03, owner «never force the user to select one thing» (R7.2.3): every question is multi-select;
-// several picks are their exact union — scripts/verify-af-every-question-multi.ts executes the unions.
-check('furnished question is multi-select, cohort-gated, true tri-state via furnishedPref (both = furnishedIn)',
-  /FURNISHED_QUESTION[\s\S]{0,400}selection:\s*'multi'/.test(advSrc)
-  && /furnishedIn:\s*\[true, false\]/.test(advSrc)
+// 2026-10-05, owner approving the one-tap plan (R7.2.4, supersedes R7.2.3): one tap where a second pick
+// would widen — scripts/verify-af-selection-policy.ts executes what each pick sends.
+check('furnished question is one tap, cohort-gated, true tri-state via furnishedPref',
+  /FURNISHED_QUESTION[\s\S]{0,400}selection:\s*'single'/.test(advSrc)
   && /FURNISHED_QUESTION[\s\S]{0,420}cohortAllows\(q, 'furnished'\)/.test(advSrc)
   && /furnishedPref:\s*true/.test(advSrc) && /furnishedPref:\s*false/.test(advSrc));
 // MONTHLY UNFROZEN BY OWNER ORDER 2026-08-18 ("Start building the Monthly Advanced Filter now") —
@@ -122,9 +121,8 @@ check('no Monthly list carries a fresh-dead Annual staple (age/furnished/rnpl/st
 check('no Buy list contains a rent-only question',
   !/Buy:\s*\[[^\]]*'furnished'/.test(advSrc)
   && !/Buy:\s*\[[^\]]*'rnpl'/.test(advSrc));
-check('the rating question is cohort-gated, multi-select (mixture = ratingBuckets), monotone, and review-confidence rides WITH a rating floor',
-  /RATING_QUESTION[\s\S]{0,500}selection:\s*'multi'/.test(advSrc)
-  && /ratingBuckets:\s*picked/.test(advSrc)
+check('the rating question is cohort-gated, one tap, monotone, and review-confidence rides WITH a rating floor',
+  /RATING_QUESTION[\s\S]{0,500}selection:\s*'single'/.test(advSrc)
   && /RATING_QUESTION[\s\S]{0,600}cohortAllows\(q, 'rating'\)/.test(advSrc)
   && /ratingMin:\s*Math\.max\(9\.5/.test(advSrc)
   && /reviewsMin:\s*Math\.max\(10/.test(advSrc)
@@ -137,12 +135,11 @@ check('the unit-subtype question is strict Gathern vocabulary and never rewrites
 check('the pool carries the two new data-justified questions (street_width + direction)',
   /STREET_WIDTH_QUESTION, DIRECTION_QUESTION,/.test(advSrc)
   && /cnt_stw15/.test(advSrc) && /cnt_dir_n/.test(advSrc));
-check('no advanced question forces one answer — RNPL, amenities, age and bathrooms are all multi',
+check('several picks only where they narrow (features) or name the type; age and bathrooms are one tap',
   /RNPL_QUESTION[\s\S]{0,400}selection:\s*'multi'/.test(advSrc)
   && /AMENITIES_QUESTION[\s\S]{0,500}selection:\s*'multi'/.test(advSrc)
-  && /AGE_QUESTION[\s\S]{0,400}selection:\s*'multi'/.test(advSrc)
-  && /BATHROOMS_QUESTION[\s\S]{0,400}selection:\s*'multi'/.test(advSrc)
-  && !/selection:\s*'single',/.test(advSrc));
+  && /AGE_QUESTION[\s\S]{0,400}selection:\s*'single'/.test(advSrc)
+  && /BATHROOMS_QUESTION[\s\S]{0,400}selection:\s*'single'/.test(advSrc));
 
 // ── Unified gates + floors (age gate moved INTO its config; ONE per-option floor) ────────────────
 check("age's eligibility lives in its own config, driven DIRECTLY by cohortAllows (2026-09-01: no separate isAgeFilterScope gate anywhere)",

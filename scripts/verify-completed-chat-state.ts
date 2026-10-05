@@ -78,8 +78,11 @@ check(`every setCompleted(true) site is gated by the ≤50 threshold or the 500-
 // WIDENED 2026-09-20: the round completes the chat at ANY total, with R11.1's threshold still
 // standing behind it as the second arm (and still the ONLY arm for a plain search, a typed message
 // or a refine chip — those paths are untouched and asserted elsewhere in this file).
-check("a completed AF round finishes the chat inside finishGuided's onFetched, R11.1 still behind it",
-  /onFetched: \(total\) => \{[\s\S]{0,2200}?if \(afRoundEndsChat \|\| searchIsFinishedAtThreshold\(total, INTERVIEW_STOP_AT\)\) setCompleted\(true\);/.test(agent));
+// 2026-10-05: the owner switched the round-ends-chat arm OFF (R6.3.4 reinstated) — a round finishes the
+// chat only at R11.1's threshold; the named arm stays so this ratchet can tell the two apart.
+check("a completed AF round finishes the chat inside finishGuided's onFetched only at R11.1 (afRoundEndsChat is off)",
+  /onFetched: \(total\) => \{[\s\S]{0,2200}?if \(afRoundEndsChat \|\| searchIsFinishedAtThreshold\(total, INTERVIEW_STOP_AT\)\) setCompleted\(true\);/.test(agent)
+  && /const afRoundEndsChat = false;/.test(agent));
 check("R11.2 (revised again 2026-09-12/13, silent this time): a MEASURED 'no' after a committed AF round is neither spoken nor a silent completion",
   !/No further truthful narrowing question exists for this scope/.test(agent)
   && !/noMoreSaidRef/.test(agent)

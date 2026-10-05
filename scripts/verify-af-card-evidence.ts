@@ -67,12 +67,12 @@ const lifted = await liftSymbols(
   join(ROOT, 'src/data/advancedFilters.ts'),
   [
     { header: 'function addAmenities' },
-    { header: 'const AGE_BUCKETS', endsWith: /^\];$/ },
+    { header: 'const AGE_LADDER', endsWith: /^\];$/ },
     { header: 'const DIRECTION_DEFS', endsWith: /^\];$/ },
     ...QUESTION_CONSTS.map((header) => ({ header: `const ${header}` })),
     { header: 'export const ADVANCED_QUESTIONS', endsWith: /^\];$/ },
   ],
-  ['addAmenities', 'AGE_BUCKETS', 'DIRECTION_DEFS', ...QUESTION_CONSTS, 'ADVANCED_QUESTIONS'],
+  ['addAmenities', 'AGE_LADDER', 'DIRECTION_DEFS', ...QUESTION_CONSTS, 'ADVANCED_QUESTIONS'],
   // Cohort logic is imported REAL; only the count path is shimmed. The shim hands each def's key AND
   // labelKey through so T2 can assert the evidence speaks with the chip's own voice (owner
   // decision 6) — without ever hand-listing a label here.
@@ -84,7 +84,7 @@ const lifted = await liftSymbols(
   ].join('\n'),
 );
 const ADVANCED = lifted.ADVANCED_QUESTIONS as Question[];
-const AGE_BUCKETS = lifted.AGE_BUCKETS as Opt[];
+const AGE_BUCKETS = lifted.AGE_LADDER as Opt[];   // the one-tap «up to» ladder (owner 2026-10-05)
 const { applyScopeAnswer, SCOPE_GROUP_ID, SCOPE_TYPE_ID } = await import('../src/lib/afPlan.ts');
 const ALL = [
   ...ADVANCED,
@@ -153,6 +153,10 @@ const HAND: Record<string, { row: AfCanon; text: string; not: AfCanon }> = {
   'property_age:6_9': { row: { property_age: 7 }, text: 'عمر 7 سنوات', not: { property_age: 10 } },
   // owner decision 5: canonical 10 is exact for aqar but the «10+» bucket for wasalt → «١٠ سنوات فأكثر»
   'property_age:10p': { row: { property_age: 10 }, text: '١٠ سنوات فأكثر', not: { property_age: 9 } },
+  // The one-tap «up to» ladder (owner 2026-10-05): the chip still prints the LISTING's own age (R12A.2).
+  'property_age:upto2': { row: { property_age: 2 }, text: 'عمر سنتين', not: { property_age: 3 } },
+  'property_age:upto5': { row: { property_age: 4 }, text: 'عمر 4 سنوات', not: { property_age: 6 } },
+  'property_age:upto9': { row: { property_age: 7 }, text: 'عمر 7 سنوات', not: { property_age: 10 } },
   'rating:9.5': { row: { rating: 9.7 }, text: '★ 9.7', not: { rating: 9.2 } },
   'rating:9.0': { row: { rating: 9.2 }, text: '★ 9.2', not: { rating: 8.9 } },
   'rating:9.0_rc10': { row: { rating: 9.2, reviews_count: 59 }, text: '★ 9.2 (59 تقييم)', not: { rating: 9.2, reviews_count: 3 } },
@@ -245,11 +249,13 @@ console.log('\n── T2b. multi-value semantics + adjectival direction + AND on
 {
   const apt = scopeQuery('Apartment', 'Buy');
   const dirQ = ADVANCED.find((x) => x.id === 'direction')!;
-  const two = afActive(dirQ.apply(apt, ['شمال', 'غرب'])).find((a) => a.id === 'direction')!;
-  assert(!!two && same([...two.keys].sort(), ['شمال', 'غرب'].sort()), 'direction: two picks → both keys active (OR)');
+  // Direction is ONE tap since 2026-10-05: a second key is never smuggled in.
+  const two = afActive(dirQ.apply(apt, ['غرب', 'شمال'])).find((a) => a.id === 'direction')!;
+  assert(!!two && same([...two.keys], ['غرب']), 'direction: one tap → only the picked facing is active');
   assert(same(afEvidence([two], { direction_ar: 'غربي' }, t).map((x) => x.text), [t('West')]),
-    'direction: OR → ONE chip, the listing\'s real facing, adjectival «غربي» normalised like norm_direction_ar');
-  assert(same(afEvidence([two], { direction_ar: 'شمالية' }, t).map((x) => x.text), [t('North')]), 'direction: «شمالية» → «شمال»');
+    'direction: ONE chip, the listing\'s real facing, adjectival «غربي» normalised like norm_direction_ar');
+  const north = afActive(dirQ.apply(apt, ['شمال'])).find((a) => a.id === 'direction')!;
+  assert(same(afEvidence([north], { direction_ar: 'شمالية' }, t).map((x) => x.text), [t('North')]), 'direction: «شمالية» → «شمال»');
   assert(afEvidence([two], { direction_ar: 'جنوب' }, t).length === 0, 'direction: a facing outside the picks → nothing');
   assert(afEvidence([two], { direction_ar: 'شمال غرب' }, t).length === 0, 'direction: «شمال غرب» is not «شمال» (no substring match)');
   assert(normDirectionAr('  شمال  شرقي ') === 'شمال شرق' && normDirectionAr('غير معروف') === null, 'normDirectionAr mirrors norm_direction_ar: whitespace + adjective folding; outside the 8 → UNKNOWN');
@@ -512,6 +518,24 @@ console.log('\n── T4. injection: one carrier, one prop, comparator, strip on
     'c.af_canon ||', 'Boolean(c.af_canon)', 'c.af_canon ?? []']) {
     assert(!remote.includes(forbidden), `remote.ts never coerces the canonical row (${forbidden})`);
   }
+}
+
+console.log('\n── T9. R12A.7 — the card lights up what was asked, IN PLACE (owner 2026-10-05) ─────────────');
+{
+  const card = readFileSync(join(ROOT, 'src/components/ResultCard.tsx'), 'utf8');
+  const featKeys = new Set([...card.matchAll(/\{ key: '([a-z_]+)',\s+icon:/g)].map((m) => m[1]));
+  // The same token → grid-key mapping ResultCard uses: the canonical column, except balcony's grid key.
+  const gridKey = (tok: string) => (tok === 'balcony' ? 'balcony_terrace' : AMENITY_COL[tok]);
+  const lit = ['kitchen', 'parking', 'elevator', 'ac', 'private_entrance', 'maid_room', 'balcony', 'laundry_room', 'optical_fibers'];
+  assert(lit.every((tok) => featKeys.has(gridKey(tok))), `every grid feature the AF can ask for maps to a grid cell (missing: ${lit.filter((tok) => !featKeys.has(gridKey(tok))).join(', ') || 'none'})`);
+  assert(/const pickedFeatures = useMemo\(\(\) => \{[\s\S]{0,240}a\.id === 'amenities'[\s\S]{0,200}AMENITY_COL\[k\]/.test(card), 'the picked set is built from the ACTIVE amenities answer through AMENITY_COL');
+  assert(/picked \? 'checkmark-circle' : f\.icon/.test(card) && /picked && card\.featCellPicked/.test(card) && /picked && card\.featTextPicked/.test(card),
+    'a picked grid cell draws a ✓ and the brand tint');
+  assert(/allActive\.filter\(\(f\) => pickedFeatures\.has\(f\.key\)\), \.\.\.allActive\.filter\(\(f\) => !pickedFeatures\.has\(f\.key\)\)/.test(card),
+    'picked features move to the FRONT of the grid (R12A.4: a selection is never the one a cap hides)');
+  assert(/const bathPicked = !!activeAf\?\.some\(\(a\) => a\.id === 'bathrooms'\)/.test(card) && /picked=\{bathPicked\}/.test(card) && /picked \? 'checkmark-circle' : icon/.test(card),
+    'the bathrooms stat lights up (✓ + tint) when the bathrooms question was answered');
+  assert(!/featCellPicked[^\n]*listing\./.test(card), 'display-only: the highlight never reads a raw listing field to decide a match');
 }
 
 console.log('');
