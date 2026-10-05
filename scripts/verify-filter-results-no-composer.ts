@@ -58,8 +58,9 @@ check('the seed-chip path (a chip, NOT the Filter) never sets it true',
   !/lastSeedRef\.current = seed;[\s\S]{0,300}setFilterOrigin\(true\)/.test(code));
 
 console.log('\n── JSX: two-way branch — real composer OR nothing — disclaimer never gated ──');
-// Branch 1: the REAL composer (TextInput and all) renders ONLY on `!filterOrigin`.
-const COMPOSER_BRANCH = /\{!filterOrigin \? \(\s*\n\s*<View style=\{\[s\.composer, COMPOSER_EASE/;
+// Branch 1: the REAL composer (TextInput and all) renders ONLY on `!filterOrigin` — and, since
+// 2026-10-05 (owner «Hide it completely»), only while the search is not finished (`!completed`).
+const COMPOSER_BRANCH = /\{!filterOrigin && !completed \? \(\s*\n\s*<View style=\{\[s\.composer, COMPOSER_EASE/;
 check('the real composer is gated behind `!filterOrigin` (never a wider condition that could show it for a Filter search)',
   COMPOSER_BRANCH.test(code));
 // Branch 2: filterOrigin → NOTHING. No Stop-alone branch, no composer pill, no TextInput anywhere
@@ -68,7 +69,7 @@ check('the real composer is gated behind `!filterOrigin` (never a wider conditio
 const twoWayEnd = /\)\s*\n\s*\}\s*<\/View>\s*\n\s*<\/View>\s*\n\s*<Pressable/;  // sanity: outer composer wrap closes cleanly
 // The branch must close with `) : null}` and MUST NOT open a `(busy || revealing) ?` sub-branch
 // (the earlier Stop-alone tightening this second tightening removes).
-const composerBranchStart = code.indexOf('{!filterOrigin ? (');
+const composerBranchStart = code.indexOf('{!filterOrigin && !completed ? (');
 const nullCloseIdx = composerBranchStart >= 0 ? code.indexOf(') : null}', composerBranchStart) : -1;
 const midBranch = composerBranchStart >= 0 && nullCloseIdx >= 0
   ? code.slice(composerBranchStart, nullCloseIdx + ') : null}'.length)
@@ -108,7 +109,7 @@ console.log('\n── mutation proof: this check actually fails on the regressio
 // Mutation 1: someone "simplifies" the JSX by dropping the whole three-way branch, leaving the
 // composer unconditional again (the ORIGINAL 09-11 bug this barrier prevents).
 const mutatedNoGate = agent.replace(
-  '{!filterOrigin ? (\n            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>',
+  '{!filterOrigin && !completed ? (\n            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>',
   '<View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>',
 );
 mustCatch('removing the branch (composer unconditional again)',
@@ -125,7 +126,7 @@ const mutatedStopBackForFilter = agent.replace(
 mustCatch('a Stop-alone branch creeping back into the filterOrigin path (the exact regression this second tightening removes)',
   mutatedStopBackForFilter !== agent && (() => {
     const c = decomment(mutatedStopBackForFilter);
-    return /\{!filterOrigin \? \([\s\S]*?\) : \([\s\S]*?onPress=\{stop\}[\s\S]*?\) : null\}/.test(c);
+    return /\{!filterOrigin && !completed \? \([\s\S]*?\) : \([\s\S]*?onPress=\{stop\}[\s\S]*?\) : null\}/.test(c);
   })());
 // Mutation 3: the branch stays, but someone moves the disclaimer's closing marker so it lands
 // INSIDE the branch, hiding the legal notice along with the composer on Filter-origin.

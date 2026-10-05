@@ -4340,7 +4340,9 @@ export default function Agent() {
                 undressed as a composer — no input, no pill, no placeholder — while the AI-Agent path
                 keeps its full composer (input + Stop while busy/revealing, input + mic/send once
                 idle) exactly as before. */}
-            {!filterOrigin ? (
+            {/* A FINISHED search shows no box at all (owner 2026-10-05: «this message that the chat is closed
+                must not show» → «Hide it completely»); a new search starts from ☰ or «تصفية». */}
+            {!filterOrigin && !completed ? (
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>
               {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
                   recording row is an absolute overlay on the same surface), so the composer's size
@@ -4356,6 +4358,32 @@ export default function Agent() {
                   mid-transition heights and ratchets an empty box to max — observed live). The
                   textarea keeps the pre-redesign numeric-height contract; the wrapper eases to the
                   same target and clips the single frame of difference. */}
+              {/* ONE ROW (owner 2026-10-05: «this box is still big» → «One row»): «بحث» at the far left,
+                  the text in the middle, mic + Send on the right. The chip is a flex SIBLING of the input,
+                  never laid over it, so English text starting at the left can't run into it. */}
+              {introLanding && !busy && !revealing && !completed && (
+                <Pressable
+                  testID="initial-chat-search"
+                  accessibilityRole="button"
+                  accessibilityLabel={t('Search')}
+                  accessibilityState={{ disabled: !typed.trim() }}
+                  disabled={!typed.trim()}
+                  onPress={() => send()}
+                  hitSlop={5}
+                  // @ts-expect-error web-only DOM props on the RNW host node
+                  dataSet={{ ...TAP44 }}
+                  style={({ pressed }: any) => [s.initialSearch, pressed && s.initialSearchPressed]}
+                >
+                  <Image
+                    source={require('../../assets/icons/eagle-search.svg')}
+                    style={s.initialSearchIcon}
+                    contentFit="contain"
+                    tintColor={colors.ink}
+                    accessible={false}
+                  />
+                  <Text style={s.initialSearchText}>{t('Search')}</Text>
+                </Pressable>
+              )}
               <View style={s.composerInputColumn}>
               <View style={[s.inputGrow, INPUT_EASE, { height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) }]}>
               <TextInput
@@ -4470,35 +4498,6 @@ export default function Agent() {
                     </Animated.View>
                   </Pressable>
                 </>
-              )}
-              {/* Typed text sits on the SAME line as the mic and Send; «بحث» gets the line below, alone
-                  (owner 2026-10-05: «when user clicks and start typing I want it to be in the same
-                  sentence — not down or above the microphone»). The chip's row is a full-width flex
-                  line (flexBasis 100% on the ROW axis), so it always wraps under the text line. */}
-              {introLanding && !busy && !revealing && !completed && (
-                <View style={s.initialSearchRow}>
-                <Pressable
-                  testID="initial-chat-search"
-                  accessibilityRole="button"
-                  accessibilityLabel={t('Search')}
-                  accessibilityState={{ disabled: !typed.trim() }}
-                  disabled={!typed.trim()}
-                  onPress={() => send()}
-                  hitSlop={5}
-                  // @ts-expect-error web-only DOM props on the RNW host node
-                  dataSet={{ ...TAP44 }}
-                  style={({ pressed }: any) => [s.initialSearch, pressed && s.initialSearchPressed]}
-                >
-                  <Image
-                    source={require('../../assets/icons/eagle-search.svg')}
-                    style={s.initialSearchIcon}
-                    contentFit="contain"
-                    tintColor={colors.ink}
-                    accessible={false}
-                  />
-                  <Text style={s.initialSearchText}>{t('Search')}</Text>
-                </Pressable>
-                </View>
               )}
               </View>
               {/* ── Recording mode ── same composer surface, ChatGPT's spatial hierarchy, PHYSICALLY
@@ -4889,11 +4888,12 @@ const s = StyleSheet.create({
   // ── Voice recording composer (owner brief 2026-08-23) ──
   // composerInner keeps the normal controls' exact pre-voice layout (it owns the composer's size at
   // all times); the recording row overlays it absolutely so the morph never changes the surface.
-  composerInner: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'flex-end', minHeight: 44, columnGap: 6, rowGap: 2 },
+  composerInner: { flex: 1, flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'flex-end', alignItems: 'flex-end', minHeight: 44, gap: 6 },
   composerInnerHidden: { opacity: 0 },
-  composerInputColumn: { flex: 1, minWidth: 0, alignItems: 'stretch', position: 'relative' },
-  initialSearchRow: { flexBasis: '100%', flexDirection: 'row', justifyContent: 'flex-start' },
-  initialSearch: { flexDirection: 'row', alignItems: 'center', gap: 7, height: 30, paddingHorizontal: 11, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
+  // alignSelf center: one line of text sits on the same middle line as «بحث», mic and Send; taller
+  // (wrapped) text simply fills the row, and the buttons stay bottom-aligned.
+  composerInputColumn: { flex: 1, minWidth: 0, alignItems: 'stretch', position: 'relative', alignSelf: 'center' },
+  initialSearch: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 7, height: 30, paddingHorizontal: 11, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
   initialSearchPressed: { backgroundColor: colors.segTrack },
   initialSearchIcon: { width: 17, height: 17 },
   initialSearchText: { color: colors.ink, fontSize: 14, lineHeight: 20 },
