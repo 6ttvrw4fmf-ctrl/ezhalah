@@ -21,7 +21,10 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 
     expect(Math.abs(box!.x + box!.width / 2 - (footer!.x + footer!.width / 2))).toBeLessThan(12);
     expect(box!.y).toBeGreaterThan(200);
     const mic = await page.getByTestId('voice-mic').boundingBox();
-    const send = page.getByLabel('بحث', { exact: true });
+    // The send arrow beside the mic. Since #6099 the composer also shows a «بحث» text button on its own
+    // row (testID initial-chat-search) with the same accessible name, so the label alone matches two.
+    const send = page.locator('[aria-label="بحث"]:not([data-testid="initial-chat-search"])');
+    await expect(send).toHaveCount(1);
     const sendBox = await send.boundingBox();
     expect(sendBox!.x).toBeGreaterThan(mic!.x);
     await page.screenshot({ path: `/tmp/ez-welcome-${viewport.width}.png` });
