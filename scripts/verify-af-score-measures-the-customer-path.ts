@@ -80,4 +80,14 @@ const mig = readdirSync('supabase/migrations').filter((f) => /ops_af_score/.test
 const sql = mig.map((f) => readFileSync('supabase/migrations/' + f, 'utf8')).join('\n');
 if (!/create table if not exists public\.ops_af_score/.test(sql)) fail('ops_af_score migration missing');
 if (!/cron\.schedule\('gh-af-score', '0 8 \* \* \*'/.test(sql)) fail('gh-af-score cron row (08:00 UTC) missing');
+// The night-2 net: the hourly robot customer (scrapers/common/af_robot.py; its mutation proof — a broken
+// slug mapping must be reported as a miss — is scrapers/common/tests/test_af_robot.py).
+const rwf = '.github/workflows/af-robot.yml';
+if (!existsSync(rwf)) fail('af-robot.yml missing');
+const rw = readFileSync(rwf, 'utf8');
+if (/^\s*(schedule|push|pull_request):/m.test(rw) || !rw.includes('workflow_dispatch')) fail('af-robot.yml must be dispatch-only');
+if (!rw.includes('scrapers.common.af_robot') || !rw.includes('EXPO_PUBLIC_SUPABASE_ANON_KEY')) fail('af-robot.yml must run af_robot with the anon key');
+const rsql = readdirSync('supabase/migrations').filter((f) => /af_robot/.test(f)).map((f) => readFileSync('supabase/migrations/' + f, 'utf8')).join('\n');
+if (!/cron\.schedule\('gh-af-robot', '41 \* \* \* \*'/.test(rsql)) fail('gh-af-robot hourly cron row (:41) missing');
+if (!existsSync('scrapers/common/tests/test_af_robot.py')) fail('the robot lost its mutation proof');
 console.log('verify-af-score-measures-the-customer-path: ok');
