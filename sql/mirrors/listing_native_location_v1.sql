@@ -31,6 +31,13 @@
 -- CAUGHT BY verify-sql-mirrors-not-stale only because the w3b wiring landed on a NEW calendar day:
 -- the four same-day passes before it left this mirror stale and the barrier green (it compares
 -- dates, not bodies), while mon_detect_sql_mirror_drift compared live against the wave-2 digest.
+-- Re-verified 2026-09-28: migration 20260928014300 (the aqarmonthly location bridge stops claiming
+--   a district) NAMES this view only inside mon_raise() string literals — the detector's `why`/`action`
+--   text explaining that v1 COALESCEs to listings_arabic_locations. It neither calls nor redefines it.
+--   Because that mention is EXECUTED text rather than a comment, verify-sql-mirrors-not-stale counts
+--   it as "touching" and required this line. Verified against production the same day:
+--   md5(pg_get_viewdef) = c5ecf54a3590d794cb1f7e752c11d89c over 144502 chars, byte-identical to the
+--   body below and equal to the md5 this header already records. The view is unchanged.
  WITH native AS (
          SELECT 'alhoshan'::text AS platform,
             'alhoshan_residential_listings'::text AS source_table,
