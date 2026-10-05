@@ -23,7 +23,7 @@ def _t(h):
 
 class _Q:
     def __init__(self, rows):
-        self.rows, self._lo, self._hi = list(rows), None, None
+        self.rows, self._lo, self._hi, self._lim = list(rows), None, None, None
 
     def select(self, *a, **k): return self
     def eq(self, c, v): self.rows = [r for r in self.rows if r.get(c) == v]; return self
@@ -42,11 +42,14 @@ class _Q:
         self.rows.sort(key=lambda r: (r.get(c) is None, r.get(c)), reverse=desc)
         return self
 
-    def limit(self, n): self.rows = self.rows[:n]; return self
+    # PostgREST's count=exact is the TOTAL match count; .limit() only trims the rows returned.
+    def limit(self, n): self._lim = n; return self
     def range(self, lo, hi): self._lo, self._hi = lo, hi; return self
 
     def execute(self):
         rows = self.rows if self._lo is None else self.rows[self._lo:self._hi + 1]
+        if self._lim is not None:
+            rows = rows[:self._lim]
         return SimpleNamespace(data=rows, count=len(self.rows))
 
 

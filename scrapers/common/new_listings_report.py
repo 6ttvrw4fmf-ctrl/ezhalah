@@ -100,7 +100,7 @@ def collect(client, *, hours: int = 24, now: datetime | None = None) -> dict:
         totals = _bucket(rows)
 
     try:
-        backlog = (client.table("search_listings_ar").select("listing_id", count="exact", head=True)
+        backlog = (client.table("search_listings_ar").select("listing_id", count="exact")
                    .eq("production_ready", True).is_("district_ar", "null").limit(1).execute().count)
     except Exception as e:  # noqa: BLE001
         errors.append(f"no-district backlog: {str(e)[:160]}")

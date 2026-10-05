@@ -177,8 +177,9 @@ def collect(client, *, hours: int, now: datetime, merged: set[int] | None = None
     for p, tbls in list(tables.items()):
         for tbl in list(tbls):
             try:
-                hidden_by_table[tbl] = (client.table(tbl).select("id", count="exact", head=True)
-                                        .eq("active", False).gte("deactivated_at", since_iso).execute().count)
+                hidden_by_table[tbl] = (client.table(tbl).select("id", count="exact")
+                                        .eq("active", False).gte("deactivated_at", since_iso)
+                                        .limit(1).execute().count)
             except Exception as e:  # noqa: BLE001
                 if cov and cov[0]["tbl"] is None and NO_SUCH_TABLE.search(str(e)):
                     tbls.remove(tbl)  # a name tried under the view fallback that this site does not have

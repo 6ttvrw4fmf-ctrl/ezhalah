@@ -386,7 +386,7 @@ def sample_size(n_new: int, per_site: int | None) -> int:
 
 def no_district_backlog(client) -> dict:
     """production_ready rows with NULL district: the number the owner watches shrink nightly."""
-    total = (client.table("search_listings_ar").select("listing_id", count="exact", head=True)
+    total = (client.table("search_listings_ar").select("listing_id", count="exact")
              .eq("production_ready", True).is_("district_ar", "null").limit(1).execute().count or 0)
     per_site: dict[str, int] = defaultdict(int)
     if 0 < total <= 50000:
