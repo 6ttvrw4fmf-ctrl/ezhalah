@@ -201,7 +201,12 @@ These cost your first runs a lot of time. Use them instead of working them out a
   `own_price_check` (aqar's own-row price check) are healthy; an empty source (manzo, alhumaidan) is
   the source's truth, not a bug to fix.
 - **Rotation, last full-chain check (oldest first next time):** alajlan, alrifai, aqargate, remaxsa,
-  tuba, shatri, compoundin, awal, muhaysini, dwelleo: all 2026-10-02.
+  tuba, shatri, compoundin, awal, muhaysini, dwelleo: all 2026-10-05, all PASS. Next: the sites with
+  no `scraping-engineer:proof` row yet.
+- **In-app viewer hosts** (`src/lib/inAppViewer.ts`, e.g. aqargate) open in Ezhalah's side panel,
+  not a new tab; `full-chain.mjs` presses the panel's «افتح الإعلان في …» button (fixed 2026-10-05).
+- **A dormant site that crawls ok again must be flipped back the SAME night** (step 7). alhoshan and
+  macsaib crawled ok on 10-04 and stayed dormant until 10-05: ~110 listings hidden for a day.
 
 ## Testing on the live site (what your first runs learned)
 - **Save your browser test in the repo and reuse it.** The first time, commit it in your PR in the
