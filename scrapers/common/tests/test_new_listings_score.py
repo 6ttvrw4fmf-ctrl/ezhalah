@@ -184,3 +184,82 @@ def test_fold_counts_af_recall_misses():
     assert row["af_page_states"] == 1 and row["af_captured"] == 0
     assert af_recall(row) == 0.0
     assert row["normal_match"] == 1      # district is a normal field
+
+
+# ── The writer: only the table's columns, and only a missing TABLE is forgiven (2026-10-05) ─────
+
+class _Upsert:
+    def __init__(self, sink, err=None):
+        self.sink, self.err = sink, err
+
+    def upsert(self, payload, on_conflict=None):
+        self.sink.append((payload, on_conflict))
+        return self
+
+    def execute(self):
+        if self.err:
+            raise Exception(self.err)
+        return self
+
+
+class _WriteClient:
+    def __init__(self, err=None):
+        self.sent, self.err = [], err
+
+    def table(self, _name):
+        return _Upsert(self.sent, self.err)
+
+
+def test_write_rows_sends_only_table_columns():
+    from scrapers.common.new_listings_score import COLUMNS, write_rows
+    row = empty_row("2026-10-05", "aqar")
+    row["new_24h"] = 3180                     # the extra key that made PostgREST refuse every night
+    c = _WriteClient()
+    assert write_rows(c, [row]) == "wrote 1 rows to ops_new_listings_score"
+    (payload, conflict), = c.sent
+    assert set(payload[0]) == set(COLUMNS) and conflict == "night,platform"
+
+
+def test_write_rows_missing_column_is_loud_not_table_missing():
+    from scrapers.common.new_listings_score import write_rows
+    c = _WriteClient(err="{'code': 'PGRST204', 'message': \"Could not find the 'x' column of "
+                         "'ops_new_listings_score' in the schema cache\"}")
+    with pytest.raises(Exception):
+        write_rows(c, [empty_row("2026-10-05", "aqar")])
+    gone = _WriteClient(err="{'code': 'PGRST205', 'message': \"Could not find the table "
+                            "'public.ops_new_listings_score' in the schema cache\"}")
+    assert "does not exist yet" in write_rows(gone, [empty_row("2026-10-05", "aqar")])
+
+
+# ── «عمر العقار جديد» is the figure 0 (aqar 15415047, 2026-10-05) ───────────────────────────────
+
+AQAR_SPEC = ("تفاصيل الإعلان نوع العقار سكني غرف النوم 3 الصالات 1 دورات المياه 2 الدور أرضي "
+             "عمر العقار جديد المساحة 273 م² غرف نوم 3")
+
+
+@pytest.mark.parametrize("age,want", [(0, MATCH), (5, MISMATCH), (None, WE_MISS)])
+def test_new_building_word_reads_as_age_zero(age, want):
+    got = compare_listing({"property_age": age, "area_m2": 273}, page(AQAR_SPEC))
+    assert got["property_age"] == want
+    assert got["area"] == MATCH          # the spec line's own area is still read as before
+
+
+def test_new_building_word_never_answers_another_number_field():
+    # bedrooms 0 is not «جديد» (its keyword line is the same spec line): the word is the age label's only
+    got = compare_listing({"bedrooms": 0}, page(AQAR_SPEC))
+    assert got["bedrooms"] == MISMATCH
+
+
+# ── A monthly rent is stored ×12; the page prints the month (superoffice 15485140, 2026-10-05) ──
+
+def test_monthly_rent_compares_the_monthly_figure():
+    stored = {"price_annual": 75456, "rent_period_ar": "شهري"}
+    assert compare_listing(stored, page("6288.40 ريال / شهر"))["price"] == MATCH
+    # the ×12 figure is never on the page, and a different month is still wrong
+    assert compare_listing(stored, page("7000 ريال / شهر"))["price"] == MISMATCH
+
+
+def test_annual_rent_is_compared_as_stored():
+    stored = {"price_annual": 75456, "rent_period_ar": "سنوي"}
+    assert compare_listing(stored, page("75,456 ريال سنوياً"))["price"] == MATCH
+    assert compare_listing(stored, page("6288 ريال"))["price"] == MISMATCH

@@ -92,6 +92,9 @@ def norm_district(s: str) -> str:
 
 NORMAL_FIELDS = ("region", "city", "district", "deal", "type", "rent_period", "price", "area", "bedrooms")
 
+AGE_KW = r"عمر العقار"
+NEW_BUILDING = re.compile(AGE_KW + r"\s*[:：]?\s*جديد")
+
 FIELDS: list[tuple[str, str, str, str]] = [
     ("region", "word", "region_ar", ""),
     ("city", "word", "city_ar", ""),
@@ -104,7 +107,7 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("bedrooms", "number", "bedrooms", r"غرف|غرفه نوم"),
     # Advanced Filter fields the app serves (the rulebook scorecard's af_n columns + bathrooms).
     ("bathrooms", "number", "bathrooms", r"حمام|دوره مياه|دورات مياه"),
-    ("property_age", "number", "property_age", r"عمر العقار"),
+    ("property_age", "number", "property_age", AGE_KW),
     ("street_width_m", "number", "street_width_m", r"عرض الشارع"),
     ("floor_number", "number", "floor_number", r"الطابق|رقم الدور"),
     ("living_rooms", "number", "living_rooms", r"صاله|صالات"),
@@ -167,6 +170,14 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False) -> di
             if skip_price:
                 continue
             stored_v = stored.get("price_total") or stored.get("price_annual") or stored.get("price_per_meter")
+            # The fleet stores a MONTHLY rent ×12 in price_annual (normalize.rent_period_from_ad) and the
+            # card shows it ÷12; the page prints the monthly figure. Compare what the page prints
+            # (superoffice 15485140, 2026-10-05: page «6288.40 ريال / شهر», stored 75456 = 6288×12).
+            if (not stored.get("price_total") and stored.get("price_annual")
+                    and stored.get("rent_period_ar") == "شهري"):
+                stored_v = float(stored["price_annual"]) / 12
+                if stored_v == int(stored_v):
+                    stored_v = int(stored_v)
             out[name] = _cmp_number(stored_v, lines, whole, kw)
         elif kind == "number":
             out[name] = _cmp_number(stored.get(col), lines, whole, kw)
@@ -202,6 +213,11 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
                 return MATCH
             if any(0 <= j < len(lines) and bare.match(lines[j]) for j in (i - 1, i + 1)):
                 return MATCH
+        # «عمر العقار جديد» is how aqar (and others) publish a new building; we store it as 0. Read as
+        # the figure 0 both ways: stored 0 + «جديد» is a MATCH, stored 5 + «جديد» stays a MISMATCH
+        # (aqar 15415047, 2026-10-05: spec block «عمر العقار جديد», stored 0, was scored wrong).
+        if kw == AGE_KW and NEW_BUILDING.search(" | ".join(lines[i] for i in kw_hits)):
+            return MATCH if float(stored) == 0 else MISMATCH
         page_states = page_states or any(
             0 <= j < len(lines) and re.match(r"^\s*[\d,.٬]+" + _UNIT_TAIL + r"$", lines[j])
             for i in kw_hits for j in (i - 1, i + 1))
@@ -434,14 +450,23 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
 
 # ── Output ──────────────────────────────────────────────────────────────────────────────────────
 
+# The table's own columns (supabase/migrations: ops_new_listings_score). Anything else a row carries
+# (decided_ads, unreadable_pages, new_24h) is for the log only: sending it makes PostgREST refuse the
+# whole upsert with PGRST204 «Could not find the '<col>' column», and until 2026-10-05 that refusal
+# matched a loose "not find" filter below and was printed as «does not exist yet» — 0 rows written on
+# every night the job ran.
+COLUMNS = ("night", "platform", "sampled", "fields", "normal_match", "normal_mismatch", "af_claimed",
+           "af_agree", "af_page_states", "af_captured", "mismatch_ids", "note")
+
+
 def write_rows(client, rows: list[dict]) -> str:
-    """Until the migration lands this table does not exist: rows are printed, never a failure."""
-    payload = [{k: v for k, v in r.items() if k not in ("decided_ads", "unreadable_pages")} for r in rows]
+    """Only a MISSING TABLE (PGRST205 / 42P01) prints instead of writing; every other refusal raises."""
+    payload = [{k: r.get(k) for k in COLUMNS} for r in rows]
     try:
         client.table(TABLE).upsert(payload, on_conflict="night,platform").execute()
     except Exception as e:  # noqa: BLE001
         text = str(e)
-        if TABLE in text and ("PGRST205" in text or "42P01" in text or "not find" in text):
+        if "PGRST205" in text or "42P01" in text:
             return f"{TABLE} does not exist yet: rows printed only"
         raise
     return f"wrote {len(rows)} rows to {TABLE}"

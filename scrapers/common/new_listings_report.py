@@ -108,7 +108,7 @@ def collect(client, *, hours: int = 24, now: datetime | None = None) -> dict:
 
     try:
         open_items = _all(client.table("ops_engineer_backlog").select("id,item,opened_at,evidence")
-                          .eq("engineer", "new_listings").eq("status", "open").order("opened_at"))
+                          .eq("engineer", "new_listings_engineer").eq("status", "open").order("opened_at"))
     except Exception as e:  # noqa: BLE001 — until the migration lands the table does not exist
         errors.append(f"ops_engineer_backlog: {str(e)[:120]} (open items unknown until the table exists)")
         open_items = None
@@ -183,7 +183,7 @@ def render(rep: dict) -> str:
     else:
         out.append("- ?")
     items = rep["open_items"]
-    out += ["", "**Open items (ops_engineer_backlog, engineer=new_listings):**"]
+    out += ["", "**Open items (ops_engineer_backlog, engineer=new_listings_engineer):**"]
     if items is None:
         out.append("- ? (table not readable; see errors)")
     elif not items:
