@@ -920,6 +920,11 @@ or rewrite another engineer's work, and never start a big change in another engi
   deleted) while its newest direct reading inside 48 h is an applied 404/410; read
   `held_live_vs_fresh_direct_dead=` in `cleanup_runs.note`.
 
+- A "live" signal that only a few pages carry leaves a site unmeasurable (hajer, 2026-10-05): 108 of
+  121 pages had no status badge, so 107 ads were never verified and the controls read 1/5, voiding
+  the dead-ads row every night. The listing's own rendered page (`single-rem_property` body class)
+  is now the live answer; a «sold»/«rented» badge is still read first.
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
