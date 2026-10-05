@@ -78,6 +78,28 @@ for (const [v, c, why] of mustNot) {
 // A city name with regex metacharacters must never be spliced in.
 if (js(cityGuard).test('مدينة (الملك)')) fail.push('the city guard admits regex metacharacters');
 
+// ── Al-Ahsa dahiyah ordinals (20261005131858): «الضاحية الحي X» → the attested «ضاحية هجر(الحي X)» / «هجر X».
+const ord = readFileSync(
+  join(root, 'supabase/migrations/20261005131858_district_resolver_al_ahsa_dahiyah_ordinals.sql'),
+  'utf8',
+);
+const ordM = ord.match(/and k ~ '([^']+)' then/);
+if (!ordM) fail.push('could not find the Al-Ahsa ordinal pattern');
+if (!/if result is null and p_city_id = 3677/.test(ord)) fail.push('the ordinal rule is no longer scoped to Al-Ahsa (3677) or no longer runs only on a miss');
+// Both targets must be LOOKUPS in the attested catalog, never a string returned as-is.
+if ((ord.match(/from public\.loc_canonical_district d\s+where d\.city_id = 3677/g) ?? []).length !== 2) {
+  fail.push('the ordinal targets are no longer both looked up in the attested catalog for 3677');
+}
+if (ordM) {
+  const re = js(ordM[1]);
+  for (const k of ['ضاحيه الحي الرابع', 'ضاحيه هجر الحي الحادي عشر', 'ضاحيه الحي الاول']) {
+    if (!re.test(k)) fail.push(`ordinal «${k}» must match`);
+  }
+  for (const k of ['ضاحيه الحي الثاني عشر', 'ضاحيه الامير سلطان', 'ضاحيه هجر', 'ضاحيه الحي الرابع ج']) {
+    if (re.test(k)) fail.push(`«${k}» must NOT match (unattested ordinal, another place, or no ordinal)`);
+  }
+}
+
 if (fail.length) {
   console.error('❌ district city-suffix fallback:\n  ' + fail.join('\n  '));
   process.exit(1);
