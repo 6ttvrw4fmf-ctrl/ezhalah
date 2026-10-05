@@ -53,13 +53,17 @@ AMENITY_SLUG = {"elevator": "elevator", "parking": "parking", "kitchen": "kitche
                 "maid_room": "maid_room", "driver_room": "driver_room", "private_entrance": "private_entrance"}
 FURNISHED = "furnished"
 BOOL_KW = {n: kw for n, k, _, kw in FIELDS if k == "bool"}
-RENT = "ايجار"
+RENT = ("إيجار", "ايجار")      # search_listings_ar stores «إيجار»; the bare spelling never matched it
+MONTHLY = "شهري"
+# Site chrome, not the ad: a short category link such as «مواقف سيارات للإيجار» / «شقق للبيع» sits in every
+# aqar page's navigation, so it says nothing about THIS listing (norm() has already folded hamza).
+CHROME = re.compile(r"^(?:\S+\s){0,3}(?:للايجار|للبيع)$")
 
 
 def page_lines(page: dict) -> list[str]:
     ls = [norm(x) for x in ([page.get("title") or ""] + list((page.get("meta") or {}).values())
                             + (page.get("evidence_lines") or []) + (page.get("text_head") or "").split(" | "))]
-    return [x for x in ls if x]
+    return [x for x in ls if x and not CHROME.match(x)]
 
 
 def page_says_yes(lines: list[str], field: str) -> bool:
@@ -77,6 +81,15 @@ def customer_answers(lines: list[str], results: dict[str, str]) -> list[str]:
     return cols[:MAX_ANSWERS]
 
 
+def offered(answers: list[str], stored: dict) -> list[str]:
+    """Only answers a customer can actually give in this listing's scope. The Advanced Filter never asks
+    «furnished» on a Monthly search (src/lib/afCohorts.ts: no RentMonthly cohort lists it), so a request
+    carrying it is not a customer's request and its miss is not a customer's miss."""
+    if stored.get("rent_period_ar") == MONTHLY:
+        return [a for a in answers if a != FURNISHED]
+    return answers
+
+
 def rpc_params(stored: dict, answers: list[str]) -> dict | None:
     if not (stored.get("deal_ar") and stored.get("city_ar") and stored.get("type_ar")):
         return None
@@ -84,7 +97,7 @@ def rpc_params(stored: dict, answers: list[str]) -> dict | None:
                "p_limit": RPC_LIMIT, "p_offset": 0}
     if stored.get("district_ar"):
         p["p_districts"] = [stored["district_ar"]]
-    if stored.get("deal_ar") == RENT and stored.get("rent_period_ar"):
+    if stored.get("deal_ar") in RENT and stored.get("rent_period_ar"):
         p["p_rent_period"] = stored["rent_period_ar"]
     slugs = [AMENITY_SLUG[a] for a in answers if a in AMENITY_SLUG]
     if slugs:
@@ -184,7 +197,7 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
         results = compare_listing(stored, page, skip_price=False)
         af_only = {k: v for k, v in results.items() if k in AF_FIELDS}
         fold(row, key, af_only, stored)
-        answers = customer_answers(page_lines(page), af_only)
+        answers = offered(customer_answers(page_lines(page), af_only), stored)
         params = rpc_params(stored, answers) if anon is not None and answers else None
         if params:
             verdict = findable(ask(anon, params), table, rid)

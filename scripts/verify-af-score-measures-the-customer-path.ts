@@ -31,6 +31,14 @@ check("never a stored-false answer", ns["customer_answers"](L("مصعد"), {"ele
 p = ns["rpc_params"]({"deal_ar": "بيع", "city_ar": "الرياض", "type_ar": "شقة"}, ["elevator", "furnished"])
 check("amenity is an English slug", p["p_amenities"] == ["elevator"] and p["p_furnished"] is True)
 check("no city, no request", ns["rpc_params"]({"deal_ar": "بيع", "type_ar": "شقة"}, ["elevator"]) is None)
+r = ns["rpc_params"]({"deal_ar": "إيجار", "city_ar": "الرياض", "type_ar": "شقة", "rent_period_ar": "شهري"}, ["elevator"])
+check("a rent request carries the rent period the customer picks", r.get("p_rent_period") == "شهري")
+check("furnished is never asked on Monthly (no Monthly cohort offers it)",
+      ns["offered"](["elevator", "furnished"], {"rent_period_ar": "شهري"}) == ["elevator"]
+      and ns["offered"](["furnished"], {"rent_period_ar": "سنوي"}) == ["furnished"])
+check("a navigation link is not the ad", ns["page_lines"]({"evidence_lines": ["مواقف سيارات للإيجار", "موقف خاص"]}) == L("موقف خاص"))
+check("furniture is not furnished", not ns["page_says_yes"](L("شركات الصيانة ونقل المفروشات"), "furnished")
+      and ns["page_says_yes"](L("شقة مفروشة"), "furnished"))
 print(json.dumps(out))
 `;
 
@@ -50,6 +58,9 @@ mustCatch('a failed request read as not found', 'if rows is None:\n        retur
 mustCatch('a negated amenity read as a yes', 'and not all(re.search(NEG', 'and not any(re.search(r"^$"');
 mustCatch('stored NULL no longer asked for', 'in (MATCH, WE_MISS) and page_says_yes', 'in (MATCH,) and page_says_yes');
 mustCatch('amenity sent as Arabic', 'p["p_amenities"] = slugs', 'p["p_amenities"] = answers');
+mustCatch('rent period dropped for «إيجار»', 'RENT = ("إيجار", "ايجار")', 'RENT = ("ايجار",)');
+mustCatch('furnished asked on Monthly', 'return [a for a in answers if a != FURNISHED]', 'return answers');
+mustCatch('site navigation read as the ad', 'if x and not CHROME.match(x)]', 'if x]');
 
 const fail = (m: string) => { console.error(m); process.exit(1); };
 const wf = '.github/workflows/af-score.yml';

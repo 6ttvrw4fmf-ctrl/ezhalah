@@ -216,11 +216,81 @@ def _month_windows_ms(offsets=(1, 31, 61, 91, 121, 151)) -> list[tuple[int, int]
 FIND_Q = ("query($drf:DailyRentingFilter,$size:Int,$from:Int){ Search{ "
           "find(daily_renting_filter:$drf, size:$size, from:$from){ total listings{ id } } } }")
 
-DETAIL_Q = ("query($id:Int!,$s:Float!,$e:Float!){ "
+# Aqar's structured amenity flags (2026-10-05, 🔬 AF engineer). The same Listing object the aqar page
+# embeds — and scrapers/aqar/enrich_residential.py already reads for the annual inventory — carries
+# `lift` / `ketchen` / `ac` / `maid` / `driver` / `car_entrance` (0/1/null), the two entrance flags and
+# `extended_details` (special_parking, laundry_room). This query fetched `furnished` and nothing else, so
+# all 3,675 searchable Aqar Monthly units stored NULL for every Advanced Filter amenity while their own
+# pages render «مطبخ · مصعد · مكيف · موقف خاص» (source-reread run 37288862098, ad 6570974) — invisible
+# to every customer who ticks an amenity on a Monthly search (ops_af_score 2026-10-05: find 0/10).
+AMENITY_GQL_FIELDS: tuple[str, ...] = ("lift", "ketchen", "ac", "maid", "driver", "car_entrance",
+                                       "special_entrance", "two_entrances", "extended_details")
+# The subset the live schema accepted this run (see settle_amenity_fields); () = today's query exactly.
+_amenity_fields: tuple[str, ...] = ()
+
+
+def detail_query(extra: tuple[str, ...] = ()) -> str:
+    return ("query($id:Int!,$s:Float!,$e:Float!){ "
             "Listing{ get(id:$id){ id category beds area rooms capacity furnished content content_en uri imgs "
-            "address location_city location_district location_region location_street city_id district_id } } "
+            "address location_city location_district location_region location_street city_id district_id"
+            + "".join(" " + f for f in extra) + " } } "
             "DailyRenting{ getCalculatedBookingPriceWithDiscount(listing_id:$id, start_date:$s, end_date:$e){ "
             "discounted_price total_price } } }")
+
+
+DETAIL_Q = detail_query()
+
+
+def settle_amenity_fields(answer, fields: tuple[str, ...] = AMENITY_GQL_FIELDS) -> tuple[str, ...]:
+    """The amenity fields the live GraphQL schema accepts, proven by asking it once before the crawl.
+
+    `answer(query) -> dict | None` sends one detail query and returns the parsed JSON. A GraphQL
+    VALIDATION error (an unknown field, an object field without a selection) answers with no data at
+    all — sent on every unit, it would drop the whole catalogue. So a field the schema names in an error
+    is removed and the query re-asked; an answer that cannot be read, or an error that names none of
+    our fields, falls back to () — exactly the query this scraper ran before. Fail-safe both ways."""
+    fields = tuple(fields)
+    for _ in range(len(fields) + 1):
+        if not fields:
+            return ()
+        d = answer(detail_query(fields))
+        if not isinstance(d, dict):
+            return ()
+        if ((d.get("data") or {}).get("Listing") or {}).get("get") is not None:
+            return fields
+        msgs = " ".join(str((e or {}).get("message", "")) for e in (d.get("errors") or []))
+        bad = {f for f in fields if re.search(r'"' + re.escape(f) + r'"', msgs)}
+        if not bad:
+            return ()
+        fields = tuple(f for f in fields if f not in bad)
+    return ()
+
+
+def map_amenities(g: dict) -> dict:
+    """aqar's 0/1/null flags → our tri-state columns, through the SAME tables and _tri_state the annual
+    aqar parser uses (one reading of one payload). A key the payload does not carry is not emitted, and
+    None is UNKNOWN (the upsert drops it, so it never overwrites a known value). Only columns
+    aqarmonthly_residential_listings has are emitted (it has no `furnished` column: that stays NULL)."""
+    from scrapers.aqar.enrich_residential import (
+        _EXTENDED_DETAIL_KEYS, _PRIVATE_ENTRANCE_KEYS, _STRUCTURED_AMENITY_KEYS, _extended_details, _tri_state,
+    )
+    out: dict = {}
+    for key, col in _STRUCTURED_AMENITY_KEYS.items():
+        if col in AMENITY_COLUMNS and key in g:
+            out[col] = _tri_state(g.get(key))
+    ext = _extended_details(g)
+    for key, col in _EXTENDED_DETAIL_KEYS.items():
+        if col in AMENITY_COLUMNS and key in ext:
+            out[col] = _tri_state(ext.get(key))
+    vals = [_tri_state(g.get(k)) for k in _PRIVATE_ENTRANCE_KEYS if k in g]
+    if vals:
+        out["private_entrance"] = True if any(v is True for v in vals) else (
+            False if all(v is False for v in vals) else None)
+    return out
+
+
+AMENITY_COLUMNS = frozenset({"elevator", "kitchen", "air_conditioner", "maid_room", "driver_room",
+                             "car_entrance", "parking", "laundry_room", "private_entrance"})
 
 
 ES_FROM_CAP = 9500          # ES refuses from+size past ~10k; the vertical is smaller, but pin the bound.
@@ -474,6 +544,7 @@ def map_listing(g: dict, price: dict) -> dict | None:
         "city_id":          loc["city_id"],
         "region_id":        loc["region_id"],
         "source_capture":   capture,
+        **map_amenities(g),
     }
 
 
@@ -482,7 +553,7 @@ def fetch_row(listing_id: int, windows: list[tuple[int, int]]) -> dict | None:
     so we only re-issue the cheap price query per window until one is free."""
     g = None
     for (s_ms, e_ms) in windows:
-        d, errored = _gql(DETAIL_Q, {"id": int(listing_id), "s": s_ms, "e": e_ms})
+        d, errored = _gql(detail_query(_amenity_fields), {"id": int(listing_id), "s": s_ms, "e": e_ms})
         if d:
             if g is None:
                 g = (d.get("Listing") or {}).get("get")
@@ -558,6 +629,16 @@ def main() -> int:
             ids.sort()
             ids = ids[si::sn]
             print(f"  shard {si}/{sn} → {len(ids)} ids")
+
+        global _amenity_fields
+        s0, e0 = windows[0]
+
+        def _answer(q: str) -> dict | None:
+            _throttle()
+            return _post(_sess(), {"query": q, "variables": {"id": int(ids[0]), "s": s0, "e": e0}})[0]
+
+        _amenity_fields = settle_amenity_fields(_answer)
+        print(f"  amenity fields accepted by the schema: {list(_amenity_fields) or 'none (query unchanged)'}")
 
         rows: list[dict] = []
         seen_ads: set[str] = set()

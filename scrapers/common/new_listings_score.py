@@ -113,7 +113,8 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("living_rooms", "number", "living_rooms", r"صاله|صالات"),
     ("majlis_rooms", "number", "majlis_rooms", r"مجلس|مجالس"),
     ("total_floors", "number", "total_floors", r"عدد الادوار|عدد الطوابق"),
-    ("furnished", "bool", "furnished", r"مفروش|مؤثث"),
+    # «مفروشات» / «مؤثثات» are FURNITURE (muktamel's nav: «شركات الصيانة ونقل المفروشات»), not «furnished».
+    ("furnished", "bool", "furnished", r"مفروش(?!ات)|مؤثث(?!ات)"),
     ("elevator", "bool", "elevator", r"مصعد"),
     ("parking", "bool", "parking", r"موقف|مواقف|كراج|جراج"),
     ("kitchen", "bool", "kitchen", r"مطبخ"),
