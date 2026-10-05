@@ -229,3 +229,22 @@ def test_write_rows_missing_column_is_loud_not_table_missing():
     gone = _WriteClient(err="{'code': 'PGRST205', 'message': \"Could not find the table "
                             "'public.ops_new_listings_score' in the schema cache\"}")
     assert "does not exist yet" in write_rows(gone, [empty_row("2026-10-05", "aqar")])
+
+
+# ── «عمر العقار جديد» is the figure 0 (aqar 15415047, 2026-10-05) ───────────────────────────────
+
+AQAR_SPEC = ("تفاصيل الإعلان نوع العقار سكني غرف النوم 3 الصالات 1 دورات المياه 2 الدور أرضي "
+             "عمر العقار جديد المساحة 273 م² غرف نوم 3")
+
+
+@pytest.mark.parametrize("age,want", [(0, MATCH), (5, MISMATCH), (None, WE_MISS)])
+def test_new_building_word_reads_as_age_zero(age, want):
+    got = compare_listing({"property_age": age, "area_m2": 273}, page(AQAR_SPEC))
+    assert got["property_age"] == want
+    assert got["area"] == MATCH          # the spec line's own area is still read as before
+
+
+def test_new_building_word_never_answers_another_number_field():
+    # bedrooms 0 is not «جديد» (its keyword line is the same spec line): the word is the age label's only
+    got = compare_listing({"bedrooms": 0}, page(AQAR_SPEC))
+    assert got["bedrooms"] == MISMATCH

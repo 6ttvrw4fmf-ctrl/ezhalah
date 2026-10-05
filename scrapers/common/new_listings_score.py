@@ -92,6 +92,9 @@ def norm_district(s: str) -> str:
 
 NORMAL_FIELDS = ("region", "city", "district", "deal", "type", "rent_period", "price", "area", "bedrooms")
 
+AGE_KW = r"عمر العقار"
+NEW_BUILDING = re.compile(AGE_KW + r"\s*[:：]?\s*جديد")
+
 FIELDS: list[tuple[str, str, str, str]] = [
     ("region", "word", "region_ar", ""),
     ("city", "word", "city_ar", ""),
@@ -104,7 +107,7 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("bedrooms", "number", "bedrooms", r"غرف|غرفه نوم"),
     # Advanced Filter fields the app serves (the rulebook scorecard's af_n columns + bathrooms).
     ("bathrooms", "number", "bathrooms", r"حمام|دوره مياه|دورات مياه"),
-    ("property_age", "number", "property_age", r"عمر العقار"),
+    ("property_age", "number", "property_age", AGE_KW),
     ("street_width_m", "number", "street_width_m", r"عرض الشارع"),
     ("floor_number", "number", "floor_number", r"الطابق|رقم الدور"),
     ("living_rooms", "number", "living_rooms", r"صاله|صالات"),
@@ -202,6 +205,11 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
                 return MATCH
             if any(0 <= j < len(lines) and bare.match(lines[j]) for j in (i - 1, i + 1)):
                 return MATCH
+        # «عمر العقار جديد» is how aqar (and others) publish a new building; we store it as 0. Read as
+        # the figure 0 both ways: stored 0 + «جديد» is a MATCH, stored 5 + «جديد» stays a MISMATCH
+        # (aqar 15415047, 2026-10-05: spec block «عمر العقار جديد», stored 0, was scored wrong).
+        if kw == AGE_KW and NEW_BUILDING.search(" | ".join(lines[i] for i in kw_hits)):
+            return MATCH if float(stored) == 0 else MISMATCH
         page_states = page_states or any(
             0 <= j < len(lines) and re.match(r"^\s*[\d,.٬]+" + _UNIT_TAIL + r"$", lines[j])
             for i in kw_hits for j in (i - 1, i + 1))
