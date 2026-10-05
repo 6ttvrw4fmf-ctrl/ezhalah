@@ -4340,7 +4340,7 @@ export default function Agent() {
                 keeps its full composer (input + Stop while busy/revealing, input + mic/send once
                 idle) exactly as before. */}
             {!filterOrigin ? (
-            <View ref={composerRef} style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]}>
+            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>
               {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
                   recording row is an absolute overlay on the same surface), so the composer's size
                   never jumps during the morph — one physical object changing state, not a component
