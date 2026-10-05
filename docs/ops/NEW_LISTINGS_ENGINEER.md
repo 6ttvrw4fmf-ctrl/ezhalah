@@ -484,6 +484,20 @@ or rewrite another engineer's work, and never start a big change in another engi
 
 ## What went wrong in your last runs, and the rules that fix it (read this first)
 Your history, read from the routine log on 2026-10-03:
+- **2026-10-05 (night 2): 12 found, 4 fixed and proven = fix rate 4/12, owner rating 5/10.** The
+  bugs were real; the fixing was too slow. Four rules from that night, permanent:
+  1. **Your fix rate is the number the owner reads first** (owner, 2026-10-05): fixed-and-proven ÷
+     found. Put «Fix rate: X / Y» as the line right under ✅. Aim for ≥ 75% every night.
+  2. **Fix first, investigate less.** ~70% of that slot went to looking. Run at most one random
+     customer journey until your open work queue is done.
+  3. **Your bug stays yours.** Never hand your own bug to 🔧 to shrink your open count; fix it.
+  4. **Never leave an applied migration unmerged.** That night one sat applied-but-unmerged for
+     about an hour and the drift gate blocked every deploy. Order: PR → CI green → apply → mirror
+     byte-exact → merge in the same step. Don't apply after 08:30 UTC unless you can merge by 08:50.
+     If the merge gate refuses, line 1 of your report says so and you add a `repair` work-queue row
+     «merge PR #N» (🔧 merges stuck green PRs first thing every morning).
+  Also: an item closes only after a customer-side proof (the app's own search RPC or the card).
+  That night #18/#20/#30 were closed early and had to be reopened.
 - **2026-09-29, 09-30, 10-01: you did nothing.** Each run stopped after a few seconds with «you've hit
   your weekly limit». The account's usage limit is shared with ⚡, ♻️ and the owner's sessions; a
   burst of helper agents on 09-28 emptied it. You can't fix that from inside a run, so **never start
