@@ -5,7 +5,7 @@
 // from the affected phone names the cause. Plain DOM, no React: it must observe the page, not be part
 // of what it observes. Without the flag this module does nothing at all.
 
-const MAX_LINES = 8;
+const MAX_LINES = 12;
 
 function describe(el: EventTarget | null): string {
   const e = el as HTMLElement | null;
@@ -50,7 +50,22 @@ export function installTapDebug(): () => void {
     setTimeout(() => log(`  → active=${describe(document.activeElement)}`), 350);
   };
   const onClick = (ev: Event) => log(`click ${describe(ev.target)} prevented=${ev.defaultPrevented}`);
-  const onFocusIn = (ev: Event) => log(`focusin ${describe(ev.target)}`);
+  // Composer geometry (owner 2026-10-04: keyboard opens, typed text and caret invisible, pill ~53px
+  // tall on the phone vs 82px in every emulator) — every box from the textarea up to the pill.
+  const r = (e: Element | null | undefined) => { if (!e) return '-'; const b = e.getBoundingClientRect(); return `${Math.round(b.width)}x${Math.round(b.height)}@${Math.round(b.top)}`; };
+  const geometry = () => {
+    const ta = document.querySelector('textarea');
+    if (!ta) return;
+    const wrap = ta.parentElement, col = wrap?.parentElement, inner = col?.parentElement, pill = inner?.parentElement;
+    const cs = getComputedStyle(ta), ics = inner ? getComputedStyle(inner) : null, ccs = col ? getComputedStyle(col) : null;
+    const vv = window.visualViewport;
+    log(`ta ${r(ta)} sT=${ta.scrollTop}/${ta.scrollHeight}/${ta.clientHeight} len=${ta.value.length} col=${cs.color} op=${cs.opacity} vis=${cs.visibility}`);
+    log(`wrap ${r(wrap)} sT=${wrap?.scrollTop} col ${r(col)} basis=${ccs?.flexBasis} grow=${ccs?.flexGrow} shrink=${ccs?.flexShrink}`);
+    log(`inner ${r(inner)} wrap=${ics?.flexWrap} dir=${ics?.flexDirection} pill ${r(pill)} vv=${vv ? Math.round(vv.height) + '+' + Math.round(vv.offsetTop) : '-'} root ${r(document.getElementById('root'))}`);
+  };
+  let geoTimer: ReturnType<typeof setTimeout> | null = null;
+  const onInput = () => { if (geoTimer) clearTimeout(geoTimer); geoTimer = setTimeout(geometry, 250); };
+  const onFocusIn = (ev: Event) => { log(`focusin ${describe(ev.target)}`); if ((ev.target as HTMLElement)?.tagName === 'TEXTAREA') setTimeout(geometry, 900); };
   const onFocusOut = (ev: Event) => log(`focusout ${describe(ev.target)}`);
   // Capture for the touch/click (who was hit), bubble-end check for defaultPrevented via a late
   // window listener so a handler anywhere on the path is already reflected.
@@ -59,6 +74,7 @@ export function installTapDebug(): () => void {
   window.addEventListener('click', onClick);
   document.addEventListener('focusin', onFocusIn, true);
   document.addEventListener('focusout', onFocusOut, true);
+  document.addEventListener('input', onInput, true);
   const vv = window.visualViewport;
   log(`tap debug on · ${navigator.userAgent.slice(0, 60)} · vv=${vv ? Math.round(vv.width) + 'x' + Math.round(vv.height) : 'none'}`);
   return () => {
@@ -67,6 +83,7 @@ export function installTapDebug(): () => void {
     window.removeEventListener('click', onClick);
     document.removeEventListener('focusin', onFocusIn, true);
     document.removeEventListener('focusout', onFocusOut, true);
+    document.removeEventListener('input', onInput, true);
     box.remove();
   };
 }
