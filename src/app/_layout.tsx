@@ -13,6 +13,7 @@ import { shouldSendRefreshHome } from '@/lib/webRefreshRoute';
 import { markAppSessionStarted } from '@/lib/appSession';
 import { usePromptInsets } from '@/lib/bottomPromptInset';
 import { useVisualViewportRoot } from '@/lib/visualViewportFrame';
+import { installTapDebug } from '@/lib/tapDebug';
 import Head from 'expo-router/head';
 import { OG_IMAGE, SHARE_BLURB_AR, SHARE_LINK, SHARE_TITLE_AR } from '@/lib/share';
 import Sidebar, { useDocked } from '@/components/Sidebar';
@@ -70,6 +71,8 @@ function Shell() {
   // viewport and scrolls the layout one; without this the conversation slides out of the top while
   // the composer still looks correct. See lib/visualViewportFrame.ts for the measurements.
   useVisualViewportRoot();
+  // ?debug=tap only: an on-screen log of what each touch hit (see lib/tapDebug.ts). No-op otherwise.
+  useEffect(() => installTapDebug(), []);
   const pathname = usePathname();
   const router = useRouter();
   // The AUTO-SHOWING centered popup (owner 2026-08-28) was RETIRED by the owner's 2026-08-29
