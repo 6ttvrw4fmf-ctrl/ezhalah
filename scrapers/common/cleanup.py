@@ -295,6 +295,27 @@ def _landed_on_home(requested: str, final: str | None) -> bool:
     return got in _HOME_PATHS and got != want
 
 
+# ── gathern is read with gathern's OWN session shape (2026-10-05) ────────────────────────────────
+# The shared session sends an explicit `Accept: text/html,…`; for a REMOVED gathern unit that header
+# makes gathern answer 500 -> 307 /ar?error=500 (measured: dropping only `Accept` turns the same
+# request into its real 404 «الصفحة غير موجودة»; dropping any other header does not). gathern's
+# own liveness sweep (scrapers/gathern/run.py::detail_session: chrome124 + Accept-Language only)
+# has always read the 404, so the cleanup, verify_deletions and the spot-check read it the same
+# way now. _landed_on_home stays as the backstop for any other site that does this.
+_OWN_SESSION_HOSTS = ("gathern.co",)
+_own_sessions: dict = {}
+
+
+def _own_session(host: str):
+    s = _own_sessions.get(host)
+    if s is None:
+        from curl_cffi import requests as _cc
+        s = _cc.Session(impersonate="chrome124")
+        s.headers.update({"Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
+        _own_sessions[host] = s
+    return s
+
+
 def _probe(url: str) -> tuple[int | None, str]:
     """Fetch the real listing page and return (status_code, body). Unlike common.http.get (which
     collapses every non-200 to None), this PRESERVES the status so we can tell a 404 (gone) apart
@@ -302,14 +323,17 @@ def _probe(url: str) -> tuple[int | None, str]:
     (None, '') on a network error. Routes wasalt through the Saudi proxy, same as liveness."""
     if ("wasalt.sa" in url or "wasalt.com" in url) and _wasalt_browser_enabled():
         return _wasalt_browser_probe(url)
-    s = http.session()
     proxies = None
     if "wasalt.sa" in url or "wasalt.com" in url:
         purl = os.environ.get("WASALT_PROXY_URL", "").strip()
         if purl:
             proxies = {"http": purl, "https": purl}
-    if proxies is None:
-        pinned = _probe_route.get(urlsplit(url).netloc)
+    host = urlsplit(url).netloc.lower()
+    if proxies is None and any(host == h or host.endswith("." + h) for h in _OWN_SESSION_HOSTS):
+        s = _own_session(host)
+    else:
+        s = http.session()
+        pinned = _probe_route.get(urlsplit(url).netloc) if proxies is None else None
         if pinned is not None:
             s = http._route_session(pinned, False)
     try:

@@ -931,7 +931,9 @@ or rewrite another engineer's work, and never start a big change in another engi
   verify_deletions, the spot-check, af_score and source_reread, so it also raised two false P0
   `deleted_but_source_live` (793, 794: both 404 «الصفحة غير موجودة» to gathern's own session, live
   controls 200). `cleanup._landed_on_home` now makes that no answer (UNKNOWN); a slug redirect to the
-  listing's own page is untouched.
+  listing's own page is untouched. Why gathern did it: the shared session's explicit `Accept:
+  text/html,…` header (dropping only that header gives the real 404), so gathern is now read with
+  its own session shape (`cleanup._OWN_SESSION_HOSTS`), the one its liveness sweep always used.
 
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the

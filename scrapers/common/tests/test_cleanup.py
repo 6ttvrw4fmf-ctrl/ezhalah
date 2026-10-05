@@ -1151,6 +1151,7 @@ class _Real:
 
 def _real_probe_with(monkeypatch, resp, escape_resp=None):
     monkeypatch.setattr(C.http, "session", lambda: _HomeSess(resp))
+    monkeypatch.setattr(C, "_own_session", lambda host: _HomeSess(resp))
     monkeypatch.setattr(C.http, "_route_session",
                         lambda *a, **k: _HomeSess(escape_resp or resp))
     C._probe_route.clear()
@@ -1186,3 +1187,26 @@ def test_landed_on_home_predicate():
     assert not C._landed_on_home("https://a.sa/p/9", "https://a.sa/p/9/")
     assert not C._landed_on_home("https://a.sa/", "https://a.sa/")
     assert not C._landed_on_home("https://a.sa/p/9", None)
+
+
+def test_gathern_is_read_with_its_own_session_not_the_shared_one(monkeypatch):
+    """The shared session's explicit Accept header turns a removed gathern unit into 307 -> home;
+    gathern's own session shape reads the real 404 (measured 2026-10-05)."""
+    u = "https://gathern.co/view/94419/unit/135509"
+    used = []
+    monkeypatch.setattr(C.http, "session", lambda: used.append("shared") or _HomeSess(
+        _HomeResp(200, "home", "https://gathern.co/ar?error=500")))
+    monkeypatch.setattr(C, "_own_session", lambda host: used.append("own:" + host) or _HomeSess(
+        _HomeResp(404, "الصفحة غير موجودة", u)))
+    C._probe_route.clear()
+    assert _REAL_PROBE(u)[0] == 404
+    assert used == ["own:gathern.co"]
+
+
+def test_other_hosts_keep_the_shared_session(monkeypatch):
+    used = []
+    monkeypatch.setattr(C.http, "session", lambda: used.append("shared") or _HomeSess(
+        _HomeResp(200, "<html>ad</html>", "https://x.sa/ad/1")))
+    monkeypatch.setattr(C, "_own_session", lambda host: used.append("own") or None)
+    C._probe_route.clear()
+    assert _REAL_PROBE("https://x.sa/ad/1")[0] == 200 and used == ["shared"]
