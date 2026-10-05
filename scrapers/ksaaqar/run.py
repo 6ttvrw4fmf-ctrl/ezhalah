@@ -661,6 +661,10 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         "direction": parse_direction(page_text),
         "street_width_m": spec_int(page_text, "عرض الشارع", 1, 120),
         "furnished": parse_furnished(page_text),
+        # «التكييف : …» is the site's own structured AC field (19/30 pages). It used to be filed only in
+        # additional_info.air_conditioning, so the Advanced Filter's AC chip — which reads the column —
+        # never saw 393 published «yes» and 89 published «no» (🔬 AF engineer, 2026-10-05).
+        "air_conditioner": parse_tristate(page_text, "التكييف"),
         "title": title or None,
         "photo_urls": own_photos(page_html),
     }

@@ -48,6 +48,16 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 🔬 AF engineer, 2026-10-05 (PR #6112). A one-shot BACK-FILL, not a correction of a value that could
+  // drift: ksaaqar's map_listing() parsed «التكييف» but filed it only in additional_info.air_conditioning.
+  // From this PR on, the column and that key are written by the SAME parse_tristate(page_text, "التكييف")
+  // call in the same map_listing() on every crawl, so the two cannot diverge again — pinned by
+  // test_the_published_ac_answer_is_stored_in_the_column (fails on the old map_listing). The migration only
+  // copies the already-captured JSON boolean into rows crawled before the fix, where the column was NULL.
+  // A re-scrape cannot re-corrupt it: the upsert drops None, and a non-None value is the same parse.
+  '20261005103137_ksaaqar_ac_reaches_the_column.sql':
+    'back-fill of a column now written by the same parse as its source key on every crawl; pinned by ' +
+    'test_ksaaqar_captures_what_the_source_publishes.py::test_the_published_ac_answer_is_stored_in_the_column',
   // routine #11, 2026-09-24 (ops_incident). Resets wasalt missing_count in {1,2} to 0 — every one of
   // those strikes was produced by the enum-rollup clock bug (rollup_started_at() in
   // scrapers/wasalt/liveness.py), not by real absence, and nothing has self-healed a wasalt row since
