@@ -374,6 +374,10 @@ const AR: Record<string, string> = {
   '3–5 years': '٣-٥ سنوات',
   '6–9 years': '٦-٩ سنوات',
   '10+ years': '١٠ سنوات فأكثر',
+  // Age is a one-tap «up to» ladder (owner 2026-10-05): each option includes every newer bucket.
+  'Up to 2 years': 'حتى سنتين',
+  'Up to 5 years': 'حتى ٥ سنوات',
+  'Up to 9 years': 'حتى ٩ سنوات',
   // «مطابق لطلبك» card evidence (§12A / R13.12, owner 2026-09-03). The age voices print the
   // LISTING's own age, not the bucket the user picked (R12A.2), so they need the singular/dual forms
   // Arabic actually uses; «١٠ سنوات فأكثر» above is reused verbatim for 10, which is exact on aqar

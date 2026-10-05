@@ -111,14 +111,19 @@ const num = (v: unknown): number => (typeof v === 'number' ? v : Number.NaN);
 // Age option key ⇄ range. The AF's own keys ('new' | '1_2' | '3_5' | '6_9' | '10p') round-trip
 // exactly; any other ageMin/ageMax combination the chat path can set («أقل من 3 سنوات» → ageMax only)
 // encodes the same way, so no combination is invisible.
+// The one-tap «up to» ladder (owner 2026-10-05) sends its rung as the buckets under it; read it back
+// as the rung so the key the user tapped round-trips.
+const AGE_LADDER_KEY: Record<string, string> = { 'new,1_2': 'upto2', 'new,1_2,3_5': 'upto5', 'new,1_2,3_5,6_9': 'upto9' };
 function ageKey(q: SearchQuery): string[] | null {
-  if (q.ageBuckets?.length) return q.ageBuckets;   // several picks (owner 2026-10-03): their own keys
+  if (q.ageBuckets?.length) { const rung = AGE_LADDER_KEY[q.ageBuckets.join(',')]; return rung ? [rung] : q.ageBuckets; }
   if (q.isNewConstruction === true) return ['new'];
   if (q.ageMin == null && q.ageMax == null) return null;
   return [q.ageMax == null ? `${q.ageMin}p` : `${q.ageMin ?? ''}_${q.ageMax}`];
 }
 function ageOk(key: string, v: number): boolean {
   if (key === 'new') return v === 0;
+  const upto = /^upto(\d+)$/.exec(key);
+  if (upto) return v >= 0 && v <= Number(upto[1]);
   const m = /^(\d*)(?:_(\d+)|p)$/.exec(key);
   if (!m) return false;
   const lo = m[1] === '' ? null : Number(m[1]);
