@@ -39,6 +39,12 @@ check("furnished is never asked on Monthly (no Monthly cohort offers it)",
 check("a navigation link is not the ad", ns["page_lines"]({"evidence_lines": ["مواقف سيارات للإيجار", "موقف خاص"]}) == L("موقف خاص"))
 check("furniture is not furnished", not ns["page_says_yes"](L("شركات الصيانة ونقل المفروشات"), "furnished")
       and ns["page_says_yes"](L("شقة مفروشة"), "furnished"))
+nd = {"props": {"pageProps": {"propertyDetailsV3": {"title": "شقة للإيجار", "description": "شقة مع مصعد وموقف خاص",
+      "agentInfo": {"name": "X", "phone": "0500000000"}}}}}
+wp = ns["wasalt_page"]("https://wasalt.sa/ar/property/1", fetch=lambda u: (nd, 200, 1))
+check("a live wasalt page is read, not unreadable", wp is not None and ns["page_says_yes"](L(*wp["evidence_lines"]), "elevator"))
+check("wasalt contact fields are never read", wp is not None and not any("0500" in x for x in wp["evidence_lines"]))
+check("a wasalt block stays unreadable", ns["wasalt_page"]("u", fetch=lambda u: (None, None, 0)) is None)
 print(json.dumps(out))
 `;
 
@@ -60,6 +66,8 @@ mustCatch('stored NULL no longer asked for', 'in (MATCH, WE_MISS) and page_says_
 mustCatch('amenity sent as Arabic', 'p["p_amenities"] = slugs', 'p["p_amenities"] = answers');
 mustCatch('rent period dropped for «إيجار»', 'RENT = ("إيجار", "ايجار")', 'RENT = ("ايجار",)');
 mustCatch('furnished asked on Monthly', 'return [a for a in answers if a != FURNISHED]', 'return answers');
+mustCatch('wasalt agent block read', 'if key and _WASALT_SKIP.search(key):', 'if False:');
+mustCatch('wasalt page dropped as unreadable', 'if status != 200 or not isinstance(pd, dict):\n        return None', 'return None');
 mustCatch('site navigation read as the ad', 'if x and not CHROME.match(x)]', 'if x]');
 
 const fail = (m: string) => { console.error(m); process.exit(1); };

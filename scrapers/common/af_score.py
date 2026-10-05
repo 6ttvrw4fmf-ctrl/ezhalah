@@ -116,6 +116,53 @@ def findable(rows: list[dict] | None, source_table: str, listing_id: int) -> boo
     return None if len(rows) >= RPC_LIMIT else False
 
 
+# Keys under propertyDetailsV3 that can hold a person or a contact: never read (PDPL).
+_WASALT_SKIP = re.compile(r"agent|broker|owner|advertiser|user|phone|mobile|whats|email|contact|licen|\bid$|_id$|uuid",
+                          re.I)
+
+
+def wasalt_page(url: str, fetch=None) -> dict | None:
+    """A wasalt listing read like any other ad, through the browser path wasalt requires.
+
+    cleanup._probe() answers a live wasalt page with (200, "") by design: liveness needs only the status,
+    so the body is dropped — which made every wasalt page «unreadable» here (ops_af_score 2026-10-04 and
+    10-05: 5/5 and 10/10). The page's own __NEXT_DATA__ (propertyDetailsV3) is the ad: its text values
+    become the evidence lines our comparison reads. Contact/agent keys are skipped. None = unreadable."""
+    if fetch is None:
+        from scrapers.common.cleanup import _wasalt_browser, _wasalt_browser_enabled
+        if not _wasalt_browser_enabled():
+            return None
+        fetch = _wasalt_browser().page_data
+    try:
+        data, status, _n = fetch(url)
+    except Exception:  # noqa: BLE001 — a failed read is unknown, never wrong
+        return None
+    pd = (((data or {}).get("props") or {}).get("pageProps") or {}).get("propertyDetailsV3")
+    if status != 200 or not isinstance(pd, dict):
+        return None
+    texts: list[str] = []
+
+    def walk(node, key: str = "") -> None:
+        if key and _WASALT_SKIP.search(key):
+            return
+        if isinstance(node, dict):
+            for k, v in node.items():
+                walk(v, str(k))
+        elif isinstance(node, list):
+            for x in node:
+                walk(x, key)
+        elif isinstance(node, str) and node.strip():
+            texts.extend(x.strip() for x in node.splitlines() if x.strip())
+
+    walk(pd)
+    return {"title": next((t for t in texts if re.search(r"[ء-ي]", t)), None), "meta": {}, "jsonld": [],
+            "evidence_lines": texts[:200], "text_head": " | ".join(texts)[:1500]}
+
+
+def is_wasalt(url: str) -> bool:
+    return "wasalt.sa" in url or "wasalt.com" in url
+
+
 def anon_client():
     """The customer's path: the public anon key, never the service key (trap 10)."""
     from supabase import create_client
@@ -170,7 +217,7 @@ def sample_size(n: int, per_site: int | None) -> int:
 
 
 def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, night: str,
-               pace: float = PACE_S, probe=None) -> dict:
+               pace: float = PACE_S, probe=None, wasalt=wasalt_page) -> dict:
     probe = probe or _probe
     row = new_row(night, platform)
     last = 0.0
@@ -185,15 +232,18 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
             continue
         time.sleep(max(0.0, last + pace - time.monotonic()))
         last = time.monotonic()
-        try:
-            status, body = probe(url)
-        except Exception:  # noqa: BLE001
-            status, body = None, ""
-        if status != 200 or not body:
+        if is_wasalt(url) and wasalt is not None:
+            page = wasalt(url)
+        else:
+            try:
+                status, body = probe(url)
+            except Exception:  # noqa: BLE001
+                status, body = None, ""
+            page = page_evidence(body) if status == 200 and body else None
+        if page is None:
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
-        page = page_evidence(body)
         results = compare_listing(stored, page, skip_price=False)
         af_only = {k: v for k, v in results.items() if k in AF_FIELDS}
         fold(row, key, af_only, stored)
@@ -282,6 +332,11 @@ def main() -> int:
             row = new_row(night, p, note=f"error: {type(e).__name__}: {e}"[:300])
         rows.append(row)
         print(_line(row), flush=True)
+    try:
+        from scrapers.common.cleanup import _close_wasalt_browser
+        _close_wasalt_browser()
+    except Exception:  # noqa: BLE001 — closing a browser that never opened is not an error
+        pass
     out = {"night": night, "fleet": fleet_totals(rows), "sites": rows,
            "written": "dry run: nothing written" if a.dry_run else write_rows(client, rows)}
     if a.json:
