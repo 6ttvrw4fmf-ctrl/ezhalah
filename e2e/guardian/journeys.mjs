@@ -513,13 +513,19 @@ const G5 = {
   steps: [
     'Open https://ezhalah-app.vercel.app/, dismiss the sign-in card, pick الرياض and press «بحث».',
     'Read the rendered text of every card-listing-* element.',
-    'For each card assert: a price figure or «السعر عند الطلب»; a «سيأخذك إلى <domain>» source attribution; a non-empty location before «المملكة العربية السعودية».',
+    'For each card assert: a price figure or «السعر عند الطلب»; a visible source domain whose link names the same «سيأخذك إلى <domain>»; a non-empty location before «المملكة العربية السعودية».',
     'For each card assert no HTML entity, no «[object Object]», no bare «undefined»/«NaN», and no zero-valued money token.',
   ],
   async run(page, ctx) {
     await searchAsGuest(page);
     const cards = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="card-listing-"]')]
-      .map((c) => ({ id: c.getAttribute('data-testid'), text: c.innerText || '' })));
+      .map((c) => ({
+        id: c.getAttribute('data-testid'),
+        text: c.innerText || '',
+        // The «الضغط على هذا الإعلان سيأخذك إلى <host>» sentence is the card link's accessible name
+        // (ResultCard.tsx); the card SHOWS the host on its own line beside «مستضاف على X».
+        aria: [...c.querySelectorAll('[aria-label]')].map((e) => e.getAttribute('aria-label') || ''),
+      })));
     if (!cards.length) throw new HarnessError('the search rendered no cards to inspect');
 
     const bad = [];
@@ -530,8 +536,13 @@ const G5 = {
       if (!hasPrice) bad.push(`${card.id}: no price treatment at all — neither a figure nor «${PRICE_ON_REQUEST}»`);
       const zero = t.match(ZERO_MONEY);
       if (zero) bad.push(`${card.id}: renders a zero-valued money token «${zero[0].trim()}» — a NULL price surfacing as 0`);
-      const source = t.match(/سيأخذك إلى\s+(\S+\.\S+)/u);
-      if (!source) bad.push(`${card.id}: no source attribution — the «الضغط على هذا الإعلان سيأخذك إلى <منصة>» line names no domain`);
+      // Source attribution = the host a customer SEES on the card, and the link's «سيأخذك إلى <host>» names
+      // the same host (a screen reader hears where the tap goes). Either missing, or the two disagreeing, fails.
+      const shownHost = t.match(/^\s*((?:[a-z0-9-]+\.)+[a-z]{2,})\s*$/imu)?.[1]?.toLowerCase() ?? null;
+      const saidHost = [t, ...card.aria].map((x) => x.match(/سيأخذك إلى\s+(\S+\.\S+)/u)?.[1]).find(Boolean)?.toLowerCase() ?? null;
+      if (!shownHost) bad.push(`${card.id}: no source attribution — the card shows no source domain`);
+      if (!saidHost) bad.push(`${card.id}: no source attribution — the «الضغط على هذا الإعلان سيأخذك إلى <منصة>» link names no domain`);
+      if (shownHost && saidHost && shownHost !== saidHost) bad.push(`${card.id}: the card shows ${shownHost} but its link says it goes to ${saidHost}`);
       const location = t.match(/(.*)،?\s*المملكة العربية السعودية/u) || t.match(/([^\n]+),\s*المملكة العربية السعودية/u);
       if (!location || !location[1].trim()) bad.push(`${card.id}: no location — the country line names no city`);
       for (const [re, label] of junk) {

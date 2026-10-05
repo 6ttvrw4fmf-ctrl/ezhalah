@@ -24,6 +24,9 @@
 -- Re-verified 2026-10-02 (migration 20261002143502_source_list_presence_tier): UNCHANGED. That migration
 --   only READS this view (ops_platform_protection_matrix selects from it); md5(live pg_get_viewdef) ==
 --   5f223424d56192158ef4e40c69e12c31 == body below, 146,852 chars.
+-- Re-verified 2026-10-05 (migration 20261005132644_stale_refresh_location_index_hourly_thresholds): UNCHANGED.
+--   That migration only names this view inside a mon_refresh_targets notes string; md5(live
+--   pg_get_viewdef) == 5f223424d56192158ef4e40c69e12c31 == body below, 146,852 chars.
 --
 -- CAUGHT BY verify-sql-mirrors-not-stale only because the w3b wiring landed on a NEW calendar day:
 -- the four same-day passes before it left this mirror stale and the barrier green (it compares
