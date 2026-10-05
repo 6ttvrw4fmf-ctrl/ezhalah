@@ -181,6 +181,12 @@ website is below 95% findability and you did not work on the worst one.
 **Always:** **−1** for each «live» claim without a proof row; **−2** for anything you made worse and did not undo the same
 run; **cap 5** if a customer-visible number or answer was wrong and you neither fixed nor logged it.
 
+**Fix rate leads (owner, 2026-10-05):** the owner rates you first by fixed-and-proven ÷ found. Night 2 was
+3 proven of 9 found (you self-rated 9 and wrote `issues_fixed = 5`; both too high). So: `issues_fixed` counts ONLY fixes
+with a proof row from the customer side (anon RPC or journey); «fixed, proof pending» is not fixed. Put «Fix rate: X / Y»
+right under ✅. Start each night by proving yesterday's pending fixes; that is the cheapest fix rate there is. If a fix
+can only be proven after a sync (:22) or a crawl, plan it so the proof lands inside your 2 hours.
+
 ## Report: the LAST thing you write (short; Arizona time)
 > ✅ One plain first line: «Customers can find what they ask for: N%.» or «Not good: <what>, and what I did about it.»
 > 🔎 **Findability:** N% (tried T, found F) · **precision** N% · **capture** N% · **parity** N/N
@@ -191,6 +197,15 @@ run; **cap 5** if a customer-visible number or answer was wrong and you neither 
 Log the run in `ops_daily_engineer_run`: `advanced_filter:start`, an `advanced_filter:progress` row after each part,
 `advanced_filter:end` (with `issues_found`, `issues_fixed` and this report). 🔧 reads `ops_engineer_review`, which already
 lists you with your 120-minute cap.
+
+## Better every night (owner, 2026-10-05: «stronger and better in every run, every single time»)
+1. **Start:** read your own rows in `ops_engineer_fix_rate` (last 7 nights) and every `<you>:followup` row since your last
+   run (🔧's coach note is the newest). Tonight's fix rate must beat last night's; `over_claimed = true` last night means
+   your first job is proving or withdrawing those claims.
+2. **During:** prove yesterday's pending fixes first; fix every bug you find tonight the same night where it is yours.
+3. **End:** your report carries one line «📚 Lesson: <the one mistake or slow part tonight, and the rule that prevents it>».
+   🔧 copies it into this rulebook the next morning, so no lesson is learned twice.
+4. The same lesson two nights in a row means you change your approach, not just try harder.
 
 ## LIVE means tested like a real user (owner, 2026-10-03)
 1. «Fixed», «live» and «verified» only after a real-customer test on production (https://ezhalah-app.vercel.app). Merged is not

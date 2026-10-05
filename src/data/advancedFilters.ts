@@ -107,25 +107,27 @@ export const primeLiveResultCount = (q: SearchQuery): Promise<number | null> =>
 // ── Questions ────────────────────────────────────────────────────────────────────────────────────
 
 // Property age — eligible for every type/deal/period COHORT_QUESTIONS certifies for 'property_age'
-// (see cohortAllows() below). 5 strict buckets; each is exactly what Search returns if picked.
-const AGE_BUCKETS: Array<{ key: string; labelKey: string; count: (c: AgeOptionCounts) => number }> = [
-  { key: 'new', labelKey: 'New construction', count: (c) => c.cnt_new },
-  { key: '1_2', labelKey: '1–2 years', count: (c) => c.cnt_1_2 },
-  { key: '3_5', labelKey: '3–5 years', count: (c) => c.cnt_3_5 },
-  { key: '6_9', labelKey: '6–9 years', count: (c) => c.cnt_6_9 },
-  { key: '10p', labelKey: '10+ years', count: (c) => c.cnt_10p },
+// (see cohortAllows() below).
+//
+// ONE TAP, CUMULATIVE «UP TO» LADDER (owner 2026-10-05 — supersedes the 2026-10-03 «every question is
+// multi-select» rule for this question). Ticking جديد and then ١–٢ made the footer count JUMP UP
+// (10,846 → 12,990, measured live): a second pick widened the set, which reads as the filter getting
+// worse. The owner still wanted «new or 1–2 years» reachable without being forced into one narrow
+// bucket, so the options are nested instead: جديد · حتى سنتين · حتى ٥ سنوات · حتى ٩ سنوات. One tap
+// covers the common mixes, and no tap can make the number grow. Each «up to» option is the union of
+// the disjoint integer buckets below it (af_eligibility_clause: property_age = 0 | 1–2 | 3–5 | 6–9), so
+// its count is the exact sum and its query is p_age_buckets — the same predicate the counts read.
+const AGE_LADDER: Array<{ key: string; labelKey: string; buckets: string[] | null; count: (c: AgeOptionCounts) => number }> = [
+  { key: 'new',   labelKey: 'New construction', buckets: null,                        count: (c) => c.cnt_new },
+  { key: 'upto2', labelKey: 'Up to 2 years',    buckets: ['new', '1_2'],               count: (c) => c.cnt_new + c.cnt_1_2 },
+  { key: 'upto5', labelKey: 'Up to 5 years',    buckets: ['new', '1_2', '3_5'],        count: (c) => c.cnt_new + c.cnt_1_2 + c.cnt_3_5 },
+  { key: 'upto9', labelKey: 'Up to 9 years',    buckets: ['new', '1_2', '3_5', '6_9'], count: (c) => c.cnt_new + c.cnt_1_2 + c.cnt_3_5 + c.cnt_6_9 },
 ];
 
-// NEVER FORCE ONE ANSWER (owner 2026-10-03: «many users want to choose جديد or ١–٢ years … never force
-// the user to select one thing»). Every question below is multi-select, and several picks mean EXACTLY
-// their union — «جديد + ٦–٩» is those two buckets and nothing between («you show a mixture of the ages
-// you selected»). One pick keeps the single-answer fields every other surface already reads; two or
-// more use the union fields (ageBuckets / ratingBuckets / furnishedIn), or — for the «at least» ladders,
-// whose union IS the lowest pick — the lowest threshold. scripts/verify-af-every-question-multi.ts.
 const AGE_QUESTION: AdvancedQuestion = {
   id: 'property_age',
   titleKey: 'How old is the property?',
-  selection: 'multi',
+  selection: 'single',
   // Was its own hand-maintained type→macro map (src/lib/ageFilterTypes.ts, deleted 2026-09-01) that
   // duplicated COHORT_QUESTIONS and drifted from it — 5 types with real, chat-certified property_age
   // data (Shop, Workshop, Commercial Building, Farm, Rest House) were unreachable from the manual
@@ -140,20 +142,14 @@ const AGE_QUESTION: AdvancedQuestion = {
     const counts = await fetchPropertyAgeOptionCounts(q);
     if (isProbeFailure(counts)) return { options: [], unknownCount: null, total: 0, probeFailed: true };
     if (!counts || counts.cnt_total < MIN_TOTAL_TO_SHOW) return { options: [], unknownCount: null, total: counts?.cnt_total ?? 0 };
-    const options = meaningful(AGE_BUCKETS.map((b) => ({ key: b.key, label: t(b.labelKey), count: b.count(counts) })));
+    const options = meaningful(AGE_LADDER.map((b) => ({ key: b.key, label: t(b.labelKey), count: b.count(counts) })));
     return { options, unknownCount: counts.cnt_unknown, total: counts.cnt_total };
   },
   apply(q, keys) {
-    const picked = ['new', '1_2', '3_5', '6_9', '10p'].filter((k) => keys.includes(k));   // bucket order, known keys only
-    if (picked.length >= 2) return { ...q, ageBuckets: picked, isNewConstruction: null, ageMin: null, ageMax: null };
-    switch (picked[0]) {
-      case 'new': return { ...q, ageBuckets: null, isNewConstruction: true, ageMin: null, ageMax: null };
-      case '1_2': return { ...q, ageBuckets: null, isNewConstruction: null, ageMin: 1, ageMax: 2 };
-      case '3_5': return { ...q, ageBuckets: null, isNewConstruction: null, ageMin: 3, ageMax: 5 };
-      case '6_9': return { ...q, ageBuckets: null, isNewConstruction: null, ageMin: 6, ageMax: 9 };
-      case '10p': return { ...q, ageBuckets: null, isNewConstruction: null, ageMin: 10, ageMax: null };
-      default: return q;
-    }
+    const rung = AGE_LADDER.find((b) => keys.includes(b.key));
+    if (!rung) return q;
+    if (!rung.buckets) return { ...q, ageBuckets: null, isNewConstruction: true, ageMin: null, ageMax: null };
+    return { ...q, ageBuckets: [...rung.buckets], isNewConstruction: null, ageMin: null, ageMax: null };
   },
 };
 
@@ -317,7 +313,7 @@ const AMENITIES_QUESTION: AdvancedQuestion = {
 const BATHROOMS_QUESTION: AdvancedQuestion = {
   id: 'bathrooms',
   titleKey: 'How many bathrooms?',
-  selection: 'multi',
+  selection: 'single',
   eligibility: (q) => cohortAllows(q, 'bathrooms'),
   async resolveOptions(q) {
     // Only rungs ABOVE the current answer can narrow. apartment_guided_counts_ar computes cnt_bath1..4
@@ -355,7 +351,7 @@ const BATHROOMS_QUESTION: AdvancedQuestion = {
 const FURNISHED_QUESTION: AdvancedQuestion = {
   id: 'furnished',
   titleKey: 'Do you prefer it furnished?',
-  selection: 'multi',
+  selection: 'single',
   eligibility: (q) => cohortAllows(q, 'furnished'),
   async resolveOptions(q) {
     return guidedOptions(await fetchApartmentGuidedCounts(q), [
@@ -363,11 +359,11 @@ const FURNISHED_QUESTION: AdvancedQuestion = {
       { key: 'no',  labelKey: 'Unfurnished', count: (c) => c.cnt_unfurnished },
     ], (c) => c.cnt_total_base - c.cnt_furnished - c.cnt_unfurnished);
   },
-  // Both = the listings that STATED either way (furnishedIn [true,false]); a silent listing is in neither.
+  // One tap (owner 2026-10-05): «مفروش» or «غير مفروش»; Skip = doesn't matter. The first key wins if a
+  // caller ever hands two — a single-select answer never widens to «both».
   apply: (q, keys) =>
-    keys.includes('yes') && keys.includes('no') ? { ...q, furnishedPref: null, furnishedIn: [true, false] }
-    : keys.includes('yes') ? { ...q, furnishedPref: true, furnishedIn: null }
-    : keys.includes('no') ? { ...q, furnishedPref: false, furnishedIn: null }
+    keys[0] === 'yes' ? { ...q, furnishedPref: true, furnishedIn: null }
+    : keys[0] === 'no' ? { ...q, furnishedPref: false, furnishedIn: null }
     : q,
 };
 
@@ -382,7 +378,7 @@ const FURNISHED_QUESTION: AdvancedQuestion = {
 const STREET_WIDTH_QUESTION: AdvancedQuestion = {
   id: 'street_width',
   titleKey: 'How wide should the street be?',
-  selection: 'multi',
+  selection: 'single',
   eligibility: (q) => cohortAllows(q, 'street_width'),
   async resolveOptions(q) {
     const floor = q.streetWidthMin ?? 0;
@@ -417,7 +413,7 @@ const DIRECTION_QUESTION: AdvancedQuestion = {
   id: 'direction',
   titleKey: 'Which direction do you prefer?',
   descriptionKey: 'Results update as you choose',
-  selection: 'multi',
+  selection: 'single',
   // Not asked once directions are already committed — the same guard unit_subtype carries, for the
   // same reason. cnt_dir_* is computed INSIDE a scope that already applies p_directions, while
   // apply() UNIONS the new key: so every direction outside the committed set counts 0 while tapping
@@ -435,7 +431,7 @@ const DIRECTION_QUESTION: AdvancedQuestion = {
       // derivation cannot drift from the offered chips.
       (c) => c.cnt_total_base - DIRECTION_DEFS.reduce((a, d) => a + d.count(c), 0));
   },
-  apply: (q, keys) => (keys.length ? { ...q, directions: [...new Set([...(q.directions ?? []), ...keys])] } : q),
+  apply: (q, keys) => (keys.length ? { ...q, directions: [...new Set([...(q.directions ?? []), keys[0]])] } : q),   // one tap (owner 2026-10-05)
 };
 
 // ── Monthly-only questions (owner order 2026-08-18) ─────────────────────────────────────────────
@@ -449,7 +445,7 @@ const DIRECTION_QUESTION: AdvancedQuestion = {
 const RATING_QUESTION: AdvancedQuestion = {
   id: 'rating',
   titleKey: 'What rating would you prefer?',
-  selection: 'multi',
+  selection: 'single',
   eligibility: (q) => cohortAllows(q, 'rating'),
   async resolveOptions(q) {
     const floor = q.ratingMin ?? 0;
@@ -464,10 +460,8 @@ const RATING_QUESTION: AdvancedQuestion = {
       (c) => c.cnt_rating_unknown);
   },
   apply: (q, keys) => {
-    // Two or more rungs = their exact union («9.5+» OR «9.0+ with 10 reviews» has no single threshold).
-    const picked = ['9.5', '9.0', '9.0_rc10'].filter((k) => keys.includes(k));
-    if (picked.length >= 2) return { ...q, ratingBuckets: picked };
-    const k = picked[0];
+    // One tap (owner 2026-10-05); the first rung offered wins if a caller ever hands two.
+    const k = ['9.5', '9.0', '9.0_rc10'].find((r) => keys.includes(r));
     if (k === '9.5')      return { ...q, ratingMin: Math.max(9.5, q.ratingMin ?? 0) };
     if (k === '9.0')      return { ...q, ratingMin: Math.max(9.0, q.ratingMin ?? 0) };
     if (k === '9.0_rc10') return { ...q, ratingMin: Math.max(9.0, q.ratingMin ?? 0), reviewsMin: Math.max(10, q.reviewsMin ?? 0) };
