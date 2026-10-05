@@ -191,15 +191,17 @@ if (poolExpr && syncExpr) {
 // Lifted from src/data/advancedFilters.ts so this cannot go stale against a hand-copied fixture.
 const ageApply = lift(afSrc, 'src/data/advancedFilters.ts', "AGE_QUESTION's apply body",
   /id: 'property_age',[\s\S]*?apply\(q, keys\) \{([\s\S]*?)\n {2}\},/);
+// The one-tap ladder (owner 2026-10-05) reads AGE_LADDER — lifted from the same file, not copied.
+const AGE_PRELUDE = `const AGE_LADDER = ${(/const AGE_LADDER:[\s\S]*?\}> = (\[[\s\S]*?\n\]);/.exec(afSrc) ?? [])[1] ?? '[]'};`;
 if (ageApply) {
-  const apply = new Function('q', 'keys', ageApply) as (q: any, k: string[]) => any;
-  const r1 = apply({ city: 'الرياض' }, ['3_5']);          // round 1: «٣-٥ سنوات»
-  const r2 = apply(r1, ['10p']);                          // round 2 re-asks: «١٠+ سنوات»
+  const apply = new Function('q', 'keys', `${AGE_PRELUDE}${ageApply}`) as (q: any, k: string[]) => any;
+  const r1 = apply({ city: 'الرياض' }, ['upto2']);        // round 1: «حتى سنتين»
+  const r2 = apply(r1, ['upto9']);                        // round 2 re-asks: «حتى ٩ سنوات»
   check('property_age.apply REPLACES — a re-ask discards the earlier answer and WIDENS',
-    r1.ageMin === 3 && r1.ageMax === 5 && r2.ageMin === 10 && r2.ageMax === null,
+    JSON.stringify(r1.ageBuckets) === JSON.stringify(['new', '1_2']) && JSON.stringify(r2.ageBuckets) === JSON.stringify(['new', '1_2', '3_5', '6_9']),
     'if this ever becomes monotone the carry is still required — but revisit this check\'s wording');
   check('property_age can even be re-answered back to «جديد», dropping the age window entirely',
-    (() => { const back = apply(r1, ['new']); return back.ageMin === null && back.ageMax === null && back.isNewConstruction === true; })());
+    (() => { const back = apply(r1, ['new']); return back.ageBuckets === null && back.ageMin === null && back.ageMax === null && back.isNewConstruction === true; })());
 }
 const furnApply = lift(afSrc, 'src/data/advancedFilters.ts', "FURNISHED_QUESTION's apply expression",
   /id: 'furnished',[\s\S]*?apply: \(q, keys\) =>([\s\S]*?),\n\};/);
@@ -344,7 +346,7 @@ mustCatch('the asked-set being grown with .add() instead of derived',
 // (g) the applies really are replacing — a monotone fixture would make check 6 meaningless
 mustCatch('a fixture that pretended the applies were monotone',
   ((q: any, k: string[]) => ({ ...q, ageMin: Math.max(q.ageMin ?? 0, Number(k[0])) }))({ ageMin: 3 }, ['10']).ageMin === 10
-  && new Function('q', 'keys', ageApply ?? 'return q;')({ ageMin: 3, ageMax: 5 }, ['10p']).ageMax === null);
+  && new Function('q', 'keys', `${AGE_PRELUDE}${ageApply ?? 'return q;'}`)({ ageBuckets: ['new', '1_2', '3_5', '6_9'] }, ['new']).ageBuckets === null);
 // (h)-(m) the React wiring
 mustCatch('finishGuided no longer publishing the asked-set onto its results turn',
   !/asked: \[\.\.\.ageFlowAskedRef\.current\]/.test(

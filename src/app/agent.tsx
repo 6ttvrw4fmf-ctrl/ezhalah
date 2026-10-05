@@ -2591,7 +2591,8 @@ export default function Agent() {
         // every-setCompleted-is-gated ratchet still means something: the defect that check exists for
         // is a "nothing left to ask" VERDICT silently locking the chat (2026-09-12), which this is
         // not — this fires on a round that actually landed results, never on a probe's opinion.
-        const afRoundEndsChat = true;
+        // OFF since 2026-10-05 (owner: re-offer «خلّنا نحدد الطلب أكثر» while >25 + a useful question; a tap, never a timer).
+        const afRoundEndsChat = false;
         if (afRoundEndsChat || searchIsFinishedAtThreshold(total, INTERVIEW_STOP_AT)) setCompleted(true);
         // A ROUND NEVER RE-OPENS ITSELF (owner 2026-09-20 — REVERSES the 2026-09-04 "rounds continue
         // automatically" rule quoted below in git history). That rule popped a brand-new round of
