@@ -236,6 +236,20 @@ def _throttle(_last: list[float] = [0.0]) -> None:
     _last[0] = time.monotonic()
 
 
+_HOME_PATHS = frozenset({"", "/ar", "/en"})
+
+
+def _landed_on_home(requested: str, final: str) -> bool:
+    """The same test as cleanup._landed_on_home, kept here so this checker does not import the
+    cleanup engine (and, through it, the wasalt browser)."""
+    from urllib.parse import urlsplit
+    if not final:
+        return False
+    want = urlsplit(requested).path.rstrip("/").lower()
+    got = urlsplit(final).path.rstrip("/").lower()
+    return got in _HOME_PATHS and got != want
+
+
 def probe(s, url: str, retries: int = 3) -> int:
     """Return the real HTTP status (200/404/410/…), retrying only transient 429/5xx; 0 = no verdict."""
     for attempt in range(retries):
@@ -246,6 +260,12 @@ def probe(s, url: str, retries: int = 3) -> int:
             time.sleep(2 * (attempt + 1)); continue
         if r.status_code == 429 or r.status_code >= 500:
             time.sleep(3 * (attempt + 1)); continue
+        if r.status_code == 200 and _landed_on_home(url, str(getattr(r, "url", "") or "")):
+            # gathern answers a removed unit, for some request shapes, with 307 -> /ar?error=500 and
+            # its home page serves 200 (2026-10-05, cleanup lesson). That 200 is the home page, not
+            # this unit: no verdict. It matters most to --recheck-dead, whose only write is a
+            # restore on a 200, now that it runs every day (2026-10-06).
+            return 0
         return r.status_code
     return 0
 

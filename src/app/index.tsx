@@ -953,7 +953,9 @@ export default function Home() {
       // speak when it has no category-scoped number to speak from: `undefined` makes
       // noResultsSuggestion fall through to its generic probes, which re-count against the real pool
       // and are correct in both cases. A message we cannot ground is worse than the general one.
+      // A borrowed count (scopeKnown:false) is a name without a number — never sent as one.
       districtListingCount: districtsSelected.length && !(cohortTypes && cohortTypes.length)
+        && districtsSelected.every((d) => d.scopeKnown !== false)
         ? districtsSelected.reduce((sum, d) => sum + d.listingCount, 0)
         : undefined,
     };

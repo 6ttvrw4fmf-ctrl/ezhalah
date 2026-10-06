@@ -217,7 +217,7 @@ def _stub_db(pending_rows, retry_rows=()):
             self._retry = False
 
         def select(self, *a, **k):
-            self._head = bool(k.get("head"))
+            self._head = bool(k.get("head") or k.get("count"))  # the breaker count (a GET with count=exact since 2026-10-06)
             return self
 
         def eq(self, *a): return self
@@ -426,7 +426,7 @@ def test_the_salvaged_row_is_WRITTEN_without_arabic_location_columns(monkeypatch
 
     class _Q:
         def __init__(self): self._head = False; self._retry = False
-        def select(self, *a, **k): self._head = bool(k.get("head")); return self
+        def select(self, *a, **k): self._head = bool(k.get("head") or k.get("count")); return self  # count=exact GET since 2026-10-06
         def eq(self, *a): return self
         def like(self, *a): return self
         def lt(self, *a): return self

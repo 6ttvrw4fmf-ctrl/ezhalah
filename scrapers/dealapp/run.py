@@ -1412,16 +1412,8 @@ def main() -> int:
         pruned = 0
         for tbl, rows_seen in (("dealapp_residential_listings", res),
                                ("dealapp_commercial_listings", com)):
-            seen_set = {r["ad_number"] for r in rows_seen}
-            n = (db.prune_unseen(tbl, seen_set, source=SOURCE, verify_gone=_verify_gone,
-                                 shards=args.shards, shard=args.shard)
-                 if args.shards > 1
-                 else db.prune_unseen(tbl, seen_set, source=SOURCE,
-                                      verify_gone=_verify_gone))
-            if n < 0:
-                print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
-            else:
-                pruned += n
+            pruned += prune_table(tbl, {r["ad_number"] for r in rows_seen}, absent, _verify_gone,
+                                  args.shards, args.shard)
         print(f"✓ Deal App: {len(res)} residential + {len(com)} commercial upserted, "
               f"{sold_ct} sold (inactive), {pruned} stale pruned, {superseded} cross-table superseded")
         # end_run's RC-B guard returns the EFFECTIVE ok it wrote (see scrapers/common/db.py) —
@@ -1452,6 +1444,62 @@ def main() -> int:
         import traceback
         traceback.print_exc()
         return 1
+
+
+def prune_table(tbl: str, seen_set: set[str], absent: dict[str, str], verify_gone: Any,
+                shards: int, shard: int) -> int:
+    """The absence prune for one table, then — only if its guard tripped — the direct strikes."""
+    n = (db.prune_unseen(tbl, seen_set, source=SOURCE, verify_gone=verify_gone,
+                         shards=shards, shard=shard)
+         if shards > 1
+         else db.prune_unseen(tbl, seen_set, source=SOURCE, verify_gone=verify_gone))
+    if n < 0:
+        print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
+        n = _strike_confirmed_absent(tbl, absent, verify_gone, shards, shard)
+    return max(n, 0)
+
+
+def _strike_confirmed_absent(tbl: str, absent: dict[str, str], verify_gone: Any,
+                             shards: int, shard: int) -> int:
+    """Strike ONLY the ids this run read gone on their own page, when the absence prune is guarded.
+
+    prune_unseen's coverage/collapse guard exists so a PARTIAL walk never counts absence as a miss.
+    Every dealapp shard ends on its time budget (not_reached_time_budget 260–606 a shard on
+    2026-10-06) and re-sees ~60% of its slice, so the guard trips every night and the removal
+    evidence the same run collected — confirmed_absent(): a fresh origin render of the ad's OWN
+    page as dealapp's no-listing page, between two live-ad renders — was thrown away with it.
+    Measured 2026-10-05: 0 dealapp hides in 7 days against ~15k active.
+
+    That evidence is not absence. So the same prune runs again with every active row of this slice
+    counted as seen EXCEPT the confirmed-absent ones: unreached rows stay untouched (UNKNOWN), a
+    confirmed one takes one strike per night, and at grace verify_gone answers from the same
+    evidence. Every guard of prune_unseen (collapse, grace, evidence rows) still applies."""
+    if not absent:
+        return 0
+    rows: list[str] = []
+    start = 0
+    while True:   # PostgREST caps a select at 1000 rows — page explicitly
+        page = db._execute(
+            db.sb().table(tbl).select("ad_number").eq("active", True).eq("source", SOURCE)
+              .range(start, start + 999), what=tbl + ".absent_slice").data or []
+        rows += [r["ad_number"] for r in page if r.get("ad_number")]
+        if len(page) < 1000:
+            break
+        start += 1000
+
+    def _canon(ad: str) -> Optional[str]:
+        m = re.search(r"\d+", ad or "")
+        return str(int(m.group())) if m else None
+
+    struck = [a for a in rows if _canon(a) in absent]
+    if not struck:
+        return 0
+    kept = {a for a in rows if _canon(a) not in absent}
+    print(f"  {tbl}: guard tripped, striking only the {len(struck)} confirmed-absent row(s) "
+          f"(own-page no-listing render between live ads)", flush=True)
+    return (db.prune_unseen(tbl, kept, source=SOURCE, verify_gone=verify_gone,
+                            shards=shards, shard=shard)
+            if shards > 1 else db.prune_unseen(tbl, kept, source=SOURCE, verify_gone=verify_gone))
 
 
 if __name__ == "__main__":

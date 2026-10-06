@@ -243,6 +243,30 @@ check('the journey still fails when the closing line offers «عرض المزي�
   /PROMISE-WITHOUT-BUTTON/.test(showMore) && /results-load-more/.test(showMore),
   'standing down on the AF case must not mean standing down on the defect inside it');
 
+// ── 1d. THE «عرض المزيد» JOURNEY COUNTS THE TURN IT PAGES, NOT THE TRANSCRIPT (2026-10-06) ──────
+// Counted document-wide, the AF cohort's pre-AF turn (24 cards) was added to the AF turn's 500 and
+// reported CAP-EXCEEDED «524» on a turn that stopped at exactly 500 (measured: grids [24, 500]).
+// EXECUTED: countCards()'s in-page function is lifted from showmore.mjs and run on a two-turn DOM.
+{
+  const body = /const countCards = \(page\) => page\.evaluate\(\(\) =>([\s\S]*?)\);\n/.exec(showMore)?.[1];
+  const twoTurns = (older: number, newest: number) => {
+    const grid = (n: number) => ({ cards: Array.from({ length: n }, () => ({})),
+      querySelectorAll(sel: string) { return sel.includes('card-listing-') ? this.cards : []; } });
+    const grids = [grid(older), grid(newest)];
+    return { querySelectorAll: (sel: string) => (sel.includes('result-card-grid') ? grids
+      : sel.includes('card-listing-') ? grids.flatMap((g) => g.cards) : []) };
+  };
+  const run = (src: string | undefined, doc: unknown) => (src ? new Function('document', `return (${src});`)(doc) : NaN);
+  check('the «عرض المزيد» journey\'s countCards() is found in showmore.mjs', body != null);
+  check('…and counts ONLY the newest results turn (pre-AF 24 + AF 500 reads 500, not 524)',
+    run(body, twoTurns(24, 500)) === 500, `read ${run(body, twoTurns(24, 500))}`);
+  check('…and that per-turn hook is still rendered by the product (ResultCardGrid testID)',
+    /testID="result-card-grid"/.test(read('src/components/ResultCardGrid.tsx')));
+  const docWide = "document.querySelectorAll('[data-testid^=\"card-listing-\"]').length";
+  check('(mutation) the document-wide count that reported CAP-EXCEEDED «524» is caught',
+    run(docWide, twoTurns(24, 500)) === 524 && run(docWide, twoTurns(24, 500)) !== run(body, twoTurns(24, 500)));
+}
+
 // ── 2. the floors, at or above the values the owner set ─────────────────────────────────────────
 const REQUIRED_FLOORS: Record<string, number> = {
   nonRiyadhCities: 3, mobileJourneys: 1, afJourneys: 1, trendingCityJourneys: 1,

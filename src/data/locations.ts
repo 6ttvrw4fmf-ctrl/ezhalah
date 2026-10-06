@@ -143,6 +143,8 @@ type Key = { k: string; lead: boolean };
 
 const ARTICLE = new Set(['al', 'ال']);
 const DISTRICT_WORD = new Set(['district', 'dist', 'حي']);
+// The user SAID it is a district («حي X», «X district») — X must not be read as a town.
+const DISTRICT_MARKER = /(?:^|\s)(?:حي|district|dist\.?|neighbou?rhood)(?:\s|$)/i;
 
 function pushKey(map: Map<string, boolean>, k: string, lead: boolean) {
   if (!k) return;
@@ -1387,6 +1389,22 @@ export function cityHasListings(cityEn: string): boolean {
   return LIVE_CITIES.some((v) => v.city.toLowerCase() === lc && v.n > 0);
 }
 
+/** The location index's own count (ALL deals, ALL types) for exactly the place a search sent — the
+ *  «shelf» src/lib/shelfCheck.ts weighs a zero against. null = the index can't say. A mapping miss
+ *  (city label spelled differently) only UNDER-counts, which can never raise a false alarm. */
+export function liveShelfCount(lm: LocationResolution, districts?: string[]): number | null {
+  if (!_liveLoaded) return null;
+  const cities = new Set((lm.cities?.length ? lm.cities : [lm.city]).filter(Boolean).map((c) => c.toLowerCase()));
+  if (lm.kind === 'district' && districts?.length) {
+    const want = new Set(districts);
+    let n = 0;
+    for (const d of LIVE_DISTRICTS) if (want.has(d.district) && (!cities.size || cities.has(d.city.toLowerCase()))) n += Number(d.n) || 0;
+    return n;
+  }
+  if (lm.kind === 'city' && cities.size === 1) return LIVE_CITIES.find((c) => cities.has(c.city.toLowerCase()))?.n ?? null;
+  return null;
+}
+
 // A close city that DOES have inventory and the user might have meant — to offer an honest "did you
 // mean X?" when the place they named is real but empty (e.g. "القرص" = Al Qars, Tabuk, 0 listings; the
 // likely intent is "الرس" = Ar Rass, Qassim, 213). We SUGGEST a real alternative, never silently swap
@@ -1475,6 +1493,25 @@ function districtBridge(): Map<string, Set<string>> {
 // removed — so "Al Doha District, Yanbu" probes "al doha" (not the city). A bare city name probes to
 // empty → no district match (stays a city search). When a city is named we scope to it; otherwise a
 // district name shared by several cities returns all of them (the ambiguity case).
+// A district WORD's stem: the article is not part of the word (see the note in liveDistrictLookup).
+const districtStem = (w: string) => w.replace(/^(?:ال|al)/, '');
+/** Typo recovery for ONE district word, both sides already fuzzyFold-ed: same first letter, similar
+ *  length (±1), a small edit distance — compared on the STEMS, and only for a stem of 4+ letters.
+ *  Exported so scripts/verify-district-typo-never-floods.ts can execute it on real district names. */
+export function districtWordIsTypo(probeF: string, tf: string): boolean {
+  const ps = districtStem(probeF), ts = districtStem(tf);
+  if (ps.length < 4 || ts.length < 4) return false;
+  const maxD = ps.length <= 4 ? 1 : 2;
+  return ts[0] === ps[0] && Math.abs(ts.length - ps.length) <= 1 && editDistance(ts, ps) <= maxD;
+}
+
+// Live districts literally NAMED what the user typed (normDist equality — never a word inside a longer
+// name), strongest first. See «THE NAME AS TYPED WINS» in liveDistrictLookup.
+function liveNamedExactly(raw: string): LiveDistrict[] {
+  const typed = normDist(raw);
+  return typed.length < 2 ? [] : LIVE_DISTRICTS.filter((d) => normDist(d.district) === typed).sort((a, b) => b.n - a.n);
+}
+
 function liveDistrictLookup(raw: string): LiveDistrict[] {
   if (!LIVE_DISTRICTS.length) return [];
   const cityHit = matchLocations(raw).find((p) => p.kind === 'city');
@@ -1503,7 +1540,26 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   // 22 where 770 exist). 27 city spellings Kingdom-wide resolved to a district the same way.
   // (defect abha-city-rescope, 2026-08-23; barrier verify-city-never-rescoped-to-district.ts.)
   probe = cutPlaceName(cutPlaceName(probe, cityKey), cityKeyAr);
-  if (probe.length < 2) return []; // input is just a city (or nothing district-specific)
+  // THE NAME AS TYPED WINS (owner 2026-10-05, «never get this issue — or anything like it»). Typing every
+  // real district name into this resolver lost 538 of 3,297 (16,509 listings): a town's name hidden INSIDE
+  // the district's own name became the scope — «حي العقيق» (Riyadh, 1,545) searched the town العقيق,
+  // «حي العريجاء الغربية» (453) and «حي الشامية الجديد» found nothing. A district literally NAMED what the
+  // user wrote (EXACT name, never a word inside a longer one — «حي الرياض» must not pull «العليا الرياض»)
+  // is that district, so when the town-scoped path finds nothing — or the «town» swallowed the whole
+  // input after an explicit «حي» — fall back to those exactly-named districts, in whatever city they are.
+  // A bare city name with no «حي» still stays that city (EXACT LOCATION ONLY, defect abha-city-rescope).
+  const namedExactly = () => liveNamedExactly(raw);
+  if (probe.length < 2) return DISTRICT_MARKER.test(raw) ? namedExactly() : []; // input is just a city (or nothing district-specific)
+  if (cityKey) {
+    // The town was READ OUT OF the text — if the exact name typed lives only in OTHER cities, the town
+    // was part of the district's own name, not a scope («حي ام الحمام الغربي» is Riyadh's).
+    const named = namedExactly();
+    const inTown = (d: LiveDistrict) => {
+      const dc = flatLoc(d.city);
+      return dc === cityKey || dc === cityKeyAr || (!!cityKeyAr && flatLoc(CITY_AR_DISPLAY[dc] || '') === cityKeyAr);
+    };
+    if (named.length && !named.some(inTown)) return named;
+  }
   // Add the OTHER-script equivalents of the probe so a Latin query reaches Arabic-tagged districts and
   // vice-versa (the catalog provides the en↔ar pairing). (user: Al Olaya missed its Arabic listings.)
   const probeAlts = [probe, ...(districtBridge().get(probe) || [])];
@@ -1512,21 +1568,25 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   // or partial district token still hits — "Rakk" ≈ the "Rakah" in "Al Rakah Al Shamaliyah". Shared
   // first letter + a small edit distance keeps it tight. CAP at 2: a 3-edit gap on a short district
   // token is a different word, not a typo (the ±1 length guard below already rules most of them out).
-  const tokenMaxD = probeF.length <= 3 ? 1 : 2;
-  const fuzzyTokenHit = (district: string): boolean => {
-    if (probeF.length < 4) return false;
+  // THE ARTICLE IS NOT PART OF THE WORD (owner 2026-10-05, «حي الملك» → «لا نتائج»). The probe and every
+  // district token used to be compared WITH their «ال»: nearly every district word is «ال» + 3–4 letters,
+  // so «الملك» sat within 2 edits of الملقا, الملز, السلي, الأمل, المها, المجد, العمل… and ~40 unrelated
+  // districts Kingdom-wide were searched as «typos» of it (never substitute a different place —
+  // project_exact-location-only-rule). Typo recovery now compares the STEMS (article stripped) and only
+  // for a stem of 4+ letters — «الياسمن» still reaches «الياسمين»; a 3-letter stem like «ملك» never
+  // fuzzes (it still matches every district that really CONTAINS «الملك» through districtMatchesProbe).
+  // Returns the district WORD the typo was recovered to (its stem), or null.
+  const fuzzyTokenHit = (district: string): string | null => {
+    if (districtStem(probeF).length < 4) return null;
     for (const tok of district.split(/[^\p{L}\p{N}]+/u)) {
       const tf = fuzzyFold(tok);
       if (tf.length < 4 || ARTICLE.has(tf) || DISTRICT_WORD.has(tf)) continue;
-      if (tf === probeF) return true;
-      // Typo recovery: same first letter, SIMILAR length (±1), small edit distance. The length guard
-      // stops a longer DIFFERENT word from passing as a typo — «البلد»(5) vs «البلدية»(7) is a +2 suffix,
-      // a different word, not a typo, so it must NOT match. (paired with the word-aligned exact match.)
-      if (tf[0] === probeF[0] && Math.abs(tf.length - probeF.length) <= 1 && editDistance(tf, probeF) <= tokenMaxD) return true;
+      if (tf === probeF || districtWordIsTypo(probeF, tf)) return districtStem(tf);
     }
-    return false;
+    return null;
   };
   const out: LiveDistrict[] = [];
+  const typoHits: Array<{ d: LiveDistrict; word: string }> = [];
   for (const d of LIVE_DISTRICTS) {
     const nd = normDist(d.district);
     if (nd.length < 2) continue;
@@ -1535,7 +1595,9 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
     // query is matched on its Arabic form) OR fuzzy-match a word (typo recovery). Do NOT match the
     // reverse (probe contains raw) — that let a long English probe pull a SHORTER, different district
     // ("assafarat" ⊃ "assafa"). Raw Arabic is the source of truth; English is a helper alias. (user.)
-    if (!(probeAlts.some((p) => districtMatchesProbe(d.district, p)) || fuzzyTokenHit(d.district))) continue;
+    const exact = probeAlts.some((p) => districtMatchesProbe(d.district, p));
+    const typoWord = exact ? null : fuzzyTokenHit(d.district);
+    if (!exact && !typoWord) continue;
     if (cityKey) {
       // Bug-fix #11 (audit `liveDistrictLookup-canonical-mismatch`): the live index stores d.city in
       // English DB labels while the picker / catalog may pass cityKeyAr in Arabic. Route through
@@ -1546,8 +1608,15 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
       const dcAr = CITY_AR_DISPLAY[dc] || '';
       if (dc !== cityKey && dc !== cityKeyAr && flatLoc(dcAr) !== cityKeyAr) continue;
     }
-    out.push(d);
+    if (exact) out.push(d); else typoHits.push({ d, word: typoWord! });
   }
+  // SPELL-CHECK ONLY FIXES A WORD THAT DOESN'T EXIST, AND ONLY TO ONE WORD (owner 2026-10-05: «never get
+  // this issue — or anything like it»). Whatever districtWordIsTypo's thresholds become, a typo search can
+  // never fan out to several different districts: (1) a word that really exists as typed is searched
+  // exactly, never "corrected"; (2) a correction that could be two different words is a guess, not a fix
+  // — search nothing extra rather than a different place (project_exact-location-only-rule).
+  if (!out.length && new Set(typoHits.map((h) => h.word)).size === 1) out.push(...typoHits.map((h) => h.d));
+  if (!out.length && cityKey) return namedExactly(); // the «city» we scoped to was part of the district's own name
   out.sort((a, b) => b.n - a.n); // strongest (most listings) first
   return out;
 }
@@ -1656,8 +1725,13 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
   //    geography/lifestyle so a genuine place always wins over a loose keyword. Districts rank above
   //    the city in the matcher when the typed name IS a district, satisfying the priority order.
   const hit = matchLocations(raw)[0];
-  // A catalog DISTRICT wins (clean names + region context).
-  if (hit && hit.kind === 'district') {
+  // A catalog DISTRICT wins (clean names + region context) — unless it is only the catalog's nearest
+  // GUESS at a name that really exists, exactly as typed, in live inventory (owner 2026-10-05 sweep:
+  // «حي ام الحمام الغربي» (Riyadh) matched the catalog's «ذهبان الغربي» in خميس مشيط). Then the live
+  // merge below searches the name the user actually wrote.
+  const catalogGuessed = !!hit && hit.kind === 'district' && normDist(hit.nameAr) !== normDist(raw)
+    && normDist(hit.nameEn) !== normDist(raw) && liveNamedExactly(raw).length > 0;
+  if (hit && hit.kind === 'district' && !catalogGuessed) {
     // Bare-district ambiguity: if this district name recurs across SEVERAL cities in real inventory and
     // the user did NOT pin a city, ASK which city (inventory-first) instead of silently picking the
     // biggest. liveDistrictLookup already scopes to a city the user named — so «الروضة، جدة» stays
@@ -1668,12 +1742,22 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
       for (const d of liveCat) { const e = byCity.get(d.city) ?? { region: d.region, n: 0 }; e.n += d.n; byCity.set(d.city, e); }
       const entries = Array.from(byCity.entries()).sort((a, b) => b[1].n - a[1].n);
       const maxN = entries[0][1].n;
-      const strong = entries.filter(([, e]) => e.n >= Math.max(3, maxN * 0.15)).slice(0, 6);
+      const strong = entries.filter(([, e]) => e.n >= Math.max(Math.min(3, maxN), maxN * 0.15)).slice(0, 6);
       if (strong.length >= 2) {
         // Multi-city → the engine searches ALL `cities` (+ "multiple locations" notice) and the agent's
         // deterministic backstop asks «أي مدينة؟», listing these cities inventory-first.
         const allDistricts = Array.from(new Set(liveCat.map((d) => d.district)));
         return { raw, kind: 'district', city: strong[0][0], region: strong[0][1].region, label: ar(locale) ? hit.nameAr : hit.nameEn, districts: allDistricts, cities: strong.map(([c]) => c), ambiguous: true, exact: true };
+      }
+      // THE INVENTORY OUTRANKS THE CATALOG'S FIRST GUESS (owner 2026-10-05 sweep). The catalog's first
+      // match is just one of several towns' «حي الصفا»; when the name as typed lives in ONE other city's
+      // inventory, that city's district is what the user named («الصفاء» → جدة's 369, not تبوك's الصفا;
+      // «حي العريض» → المدينة, not الرياض's «عريض»).
+      const [only, e] = strong[0];
+      const onlyAr = flatLoc(CITY_AR_DISPLAY[flatLoc(only)] || '');
+      if (flatLoc(only) !== flatLoc(hit.cityEn ?? '') && (!onlyAr || onlyAr !== flatLoc(hit.cityAr ?? ''))) {
+        const ds = Array.from(new Set(liveCat.filter((d) => d.city === only).map((d) => d.district)));
+        return { raw, kind: 'district', city: only, region: e.region, label: ds[0], districts: ds, cities: [], exact: true };
       }
     }
     // Single, unambiguous district. city/region are ENGINE-FACING (the engine's cityFilterFor only
@@ -1702,7 +1786,7 @@ export function resolveLocation(input: string, locale: string): LocationResoluti
     }
     const entries = Array.from(byCity.entries()).sort((a, b) => b[1].n - a[1].n);
     const maxN = entries[0][1].n;
-    const strong = entries.filter(([, e]) => e.n >= Math.max(3, maxN * 0.15)).slice(0, 6);
+    const strong = entries.filter(([, e]) => e.n >= Math.max(Math.min(3, maxN), maxN * 0.15)).slice(0, 6);
     const allDistricts = Array.from(new Set(live.map((d) => d.district)));
     if (strong.length === 1) {
       const [cityName, e] = strong[0];

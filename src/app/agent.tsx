@@ -56,6 +56,7 @@ import { ResultCardGrid } from '@/components/ResultCardGrid';
 import { parseQuery, respond } from '@/data/agent';
 import { fetchListingsForQuery } from '@/data/remote';
 import { buildLocationProbeQuery, replyAfterLocationProbe } from '@/lib/agentLocationProbe';
+import { logZeroResult } from '@/data/zeroResultLog';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
@@ -3080,7 +3081,10 @@ export default function Agent() {
       // zero-result turn (see `introZeroResult ? m.result.suggestion` below), so overriding it HERE
       // scopes the change to exactly this call site — a fresh, free-text AI-Agent search — rather
       // than rewriting the shared module every other surface (Filter, AF) also depends on.
-      const zeroMatch = result.listings.length === 0
+      // A FAILED FETCH IS NOT AN EMPTY ANSWER (owner 2026-10-05: «we should never get this — is this true?»
+      // — a «حي الملك» search that timed out was told «ما لقينا نتائج» while the same search returns
+      // 16,874). runSearch already words a failure as «try again in a few seconds»; never overwrite it.
+      const zeroMatch = result.listings.length === 0 && !result.fetchFailed
         ? { ...result, suggestion: t('Sorry, no listings currently match your request. Try using the Filter to widen your search.') }
         : result;
       await playListings(run, statusId, withNotice, zeroMatch, v);
@@ -3124,6 +3128,8 @@ export default function Agent() {
       if (turn.locationQuestion && turn.query) {
         const probe = await fetchListingsForQuery(buildLocationProbeQuery(turn.query), { signal: run.ac.signal });
         if (run.cancelled) return;
+        // This «no results» is shown too — the notebook notes it like any other (owner 2026-10-05).
+        if (probe.listings && probe.listings.length === 0) logZeroResult(buildLocationProbeQuery(turn.query), null, false);
         reply = replyAfterLocationProbe(
           turn.reply,
           t('Sorry, no listings currently match your request. Try using the Filter to widen your search.'),

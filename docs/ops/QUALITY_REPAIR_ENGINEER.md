@@ -100,6 +100,17 @@ a lesson; you may never remove or soften a rule of theirs).
 ## 2. REPAIR (0:40–2:40): fix what was missed
 Work, biggest customer impact first, from `select * from ops_engineer_backlog where engineer = 'repair' and status = 'open'`
 and this standing list:
+- **0. FIRST, EVERY NIGHT: every «no results» a real user saw (owner 2026-10-05: «we should never get this — is this true?»).**
+  `select at, entry from ops_zero_result_log where at > now() - interval '26 hours' order by at desc;` — one row per zero
+  shown (place, kind, city/cities, districts, deal, category, filters, AF answers; never free text, never who). Rows with
+  `entry->>'robot' = 'true'` are our own CI journeys (they probe honest zeros on purpose) — real users first. For each
+  distinct search, decide against the DATABASE whether «none» was TRUE: count the active, searchable listings for that
+  place + deal + category + type(s) + filters. `clash = true` rows are already proven false by the app's own shelf check
+  (the user was told «try again»): those are P1. A false zero is a bug in OUR search — wrong place resolved, a filter that
+  drops what it should keep, a count/results scope mismatch — never «the user's search was too narrow». Fix the root cause
+  → barrier with a mutation proof → deploy → re-run that exact search on production like a real user. A zero you confirm
+  as TRUE needs nothing. Report: «N zeros · X true · Y false (fixed: …)». Also read the nightly
+  `district-name-sweep.yml` run: every district name it lists as lost is a «no results» waiting to happen.
 - **A. Older listings with no district** (13,618 searchable on 2026-10-03; mostly abralosol 1,439, arkaan 942, alshawaf 567,
   bossbih 628, dealapp ~1,600, wasalt 1,069 waiting for its Arabic read). About 95% of them HAVE a district on the source,
   spelled differently: a city word glued on («الرابية الهفوف»), block numbers («البراك رقم 4 بلك 28»), no «حي»,

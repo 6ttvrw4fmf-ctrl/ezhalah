@@ -363,9 +363,11 @@ export async function cardClickBack(plan) {
     if (!await pickCity(page, plan.city)) { note(`${name}: city not offered — skipped`); return null; }
     await runSearch(page);
     const before = lastCount(await page.evaluate(() => document.body.innerText));
-    const card = page.locator('text=/الضغط على هذا الإعلان/').first();
+    // The card's own testID + its photo link's role — never the «الضغط على هذا الإعلان» copy, which
+    // PR #5425 (2026-10-01) moved into that link's aria-label, so a text locator found no card at all.
+    const card = page.locator('[data-testid^="card-listing-"] [role="link"]').first();
     if (!await card.count()) { note(`${name}: no cards rendered — skipped`); return null; }
-    const target = await page.evaluate(() => (document.body.innerText.match(/الضغط على هذا الإعلان سيأخذك إلى\s*([^\s\n]+)/) || [])[1] ?? null);
+    const target = ((await card.getAttribute('aria-label')) ?? '').match(/سيأخذك إلى\s*(\S+)/)?.[1] ?? null;
     const ctx = page.context();
     const opened = ctx.waitForEvent('page', { timeout: 25000 }).catch(() => null);
     await card.click({ timeout: 15000 }).catch(() => {});
@@ -377,7 +379,7 @@ export async function cardClickBack(plan) {
         defect(name, 'RENDERED→EXTERNAL', `card promised ${target} but opened ${host}`);
       }
       await tab.close();
-    }
+    } else note(`${name}: the card opened no new tab (in-app ad viewer host?) — external host not checked`);
     await page.bringToFront(); await sleep(2200);
     const after = lastCount(await page.evaluate(() => document.body.innerText));
     if (before != null && after != null && before !== after) {

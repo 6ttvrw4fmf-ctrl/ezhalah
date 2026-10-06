@@ -18,8 +18,15 @@ on:
         required: false
         default: ""
 
+# A TARGETED re-run (input `source` set) gets its own lane (2026-10-06, Scraping Engineer). With one
+# shared group a re-run of a site that failed at 04:3x waited behind the nightly run's longest job
+# (dwelleo ~4 h, muhaysini ~2 h) — on 10-05 the fixes for 4 failed sites could not be proven until
+# 07:30, and on 10-06 hasaad/eastabha would have waited until ~08:30, past the engineers' window.
+# The nightly (blank input) keeps the shared group; each distinct source list is its own group, so
+# two dispatches of the same list still queue (never cancel). Re-run only sites whose nightly job
+# has finished — a list naming a site that is still running would crawl it twice at once.
 concurrency:
-  group: small-sources-sync
+  group: small-sources-sync${{ github.event.inputs.source && format('-{0}', github.event.inputs.source) || '' }}
   cancel-in-progress: false
 
 jobs:
@@ -42,7 +49,10 @@ jobs:
           #   CONNECTING from the runner; each probes 3 profiles DIRECT first, so the proxy is spent only when walled.
           - { source: alhoshan, cmd: "python -m scrapers.alhoshan.run --type all", proxy: true }
           - { source: sanadak,  cmd: "python -m scrapers.sanadak.run --type all" }
-          - { source: eastabha, cmd: "python -m scrapers.eastabha.run --type all" }
+          #   eastabha: `proxy: true` (2026-10-06, Scraping Engineer) — every DIRECT route (4 profiles) timed out
+          #   connecting from the runner and the shared http.get logged «proxy fallback not enabled»: 0 rows (223 on 10-05).
+          #   With SCRAPE_PROXY_FALLBACK_URL below, http.get tries the proxy only after every DIRECT profile fails.
+          - { source: eastabha, cmd: "python -m scrapers.eastabha.run --type all", proxy: true }
           - { source: aqarcity, cmd: "python -m scrapers.aqarcity.run --type all" }
           - { source: raghdan,    cmd: "python -m scrapers.raghdan.run --type all" }
           - { source: eaqartabuk, cmd: "python -m scrapers.eaqartabuk.run --type all" }
@@ -486,6 +496,12 @@ jobs:
           #
           # Before adding a source here, check whether its session() reads WASALT_PROXY_URL.
           WASALT_PROXY_URL: ${{ matrix.proxy && secrets.WASALT_PROXY_URL || '' }}
+          # 2026-10-06 (Scraping Engineer): the SHARED scrapers.common.http.get() escapes a block/stall
+          # through the proxy only when SCRAPE_PROXY_FALLBACK_URL is set, and this workflow never set it —
+          # so `proxy: true` reached only scrapers that read WASALT_PROXY_URL themselves, and every site on
+          # http.get (eastabha 10-06: «proxy fallback not enabled», 0 rows) stayed DIRECT-only. Same gate
+          # (matrix.proxy), same secret; the proxy leg runs only after every DIRECT profile failed.
+          SCRAPE_PROXY_FALLBACK_URL: ${{ matrix.proxy && secrets.WASALT_PROXY_URL || '' }}
         run: |
           # Per-source cadence (owner 2026-07-07): most small sources run daily (every_n_days unset = 1),
           # but a few (souq24) scrape every N days to cut metered-proxy bandwidth. Skip today when the

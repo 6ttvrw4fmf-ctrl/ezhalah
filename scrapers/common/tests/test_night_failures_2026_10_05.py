@@ -148,3 +148,57 @@ def test_the_walk_session_is_probed_over_profiles_and_the_proxy(monkeypatch, mod
     assert mod.walk_session() is served
     assert asked and asked[0][0].startswith(mod.BASE)
     assert "accept-language" in {k.lower() for k in (asked[0][1] or {})}, "the site's headers ride along"
+
+
+# ───────────────────────────── 2026-10-06: hasaad, every sitemap gone ─────────────────────────────
+def test_hasaad_no_sitemap_reads_the_project_links_from_the_sites_own_pages():
+    """10-05 07:30 and 10-06 04:35: projects-sitemap.xml, sitemap_index.xml, sitemap.xml and
+    wp-sitemap.xml all 404 — the old code raised and saved 0 rows. The project pages are still
+    linked from /projects/ (absolute, relative, raw Arabic and escaped hrefs)."""
+    base = HSD.BASE
+    listing = (f'<a href="{base}/projects/%d8%ac%d9%88%d8%a7%d8%b1-19/">a</a>'
+               f'<a href="/projects/شقق-جوار-20">b</a>'
+               f'<a href="https://www.hasaadestate.com/projects/%d8%ac%d9%88%d8%a7%d8%b1-19/">dup</a>'
+               f'<a href="{base}/projects/">index</a><a href="{base}/en/projects/x/">en</a>')
+
+    class _S:
+        def get(self, url, timeout=None):
+            if url == f"{base}/projects/":
+                return _Resp(200, listing)
+            if url == f"{base}/sitemap.xml":
+                raise TimeoutError("stalled")
+            return _Resp(404)
+
+    urls = HSD.fetch_project_urls(_S())
+    assert urls == sorted([f"{base}/projects/%d8%ac%d9%88%d8%a7%d8%b1-19/",
+                           f"{base}/projects/%d8%b4%d9%82%d9%82-%d8%ac%d9%88%d8%a7%d8%b1-20/"])
+
+
+def test_hasaad_nothing_served_still_fails_loudly_naming_every_attempt():
+    class _S:
+        def get(self, url, timeout=None):
+            return _Resp(404)
+    with pytest.raises(RuntimeError) as e:
+        HSD.fetch_project_urls(_S())
+    msg = str(e.value)
+    for part in ("projects-sitemap.xml:HTTP 404", "wp-sitemap.xml:HTTP 404", "/projects/:HTTP 404", "/:HTTP 404"):
+        assert part in msg
+
+
+def test_small_sources_proxy_sites_enable_the_shared_http_get_proxy_fallback():
+    """eastabha 2026-10-06: every DIRECT route timed out and http.get logged «proxy fallback not
+    enabled», because small-sources-sync never set SCRAPE_PROXY_FALLBACK_URL."""
+    wf = (ROOT / ".github/workflows/small-sources-sync.yml").read_text()
+    assert "SCRAPE_PROXY_FALLBACK_URL: ${{ matrix.proxy && secrets.WASALT_PROXY_URL || '' }}" in wf
+    assert '- { source: eastabha, cmd: "python -m scrapers.eastabha.run --type all", proxy: true }' in wf
+
+
+def test_targeted_small_sources_rerun_does_not_queue_behind_the_nightly():
+    """10-05 and 10-06: re-runs of the night's failed sites queued behind dwelleo's ~4 h job in the
+    one shared concurrency group and could not be proven inside the engineers' window."""
+    wf = (ROOT / ".github/workflows/small-sources-sync.yml").read_text()
+    m = __import__("re").search(r"\nconcurrency:\n  group: ([^\n]+)\n  cancel-in-progress: (\w+)", wf)
+    assert m, "small-sources-sync must declare a concurrency group"
+    assert "github.event.inputs.source" in m.group(1), "a targeted re-run needs its own lane"
+    assert m.group(1).startswith("small-sources-sync"), m.group(1)
+    assert m.group(2) == "false", "queued runs must never be cancelled"

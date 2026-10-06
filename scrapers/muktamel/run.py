@@ -75,6 +75,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, http_liveness, normalize  # noqa: E402
+from scrapers.common.arabic_location import to_catalog  # noqa: E402
 
 BASE = "https://www.muktamel.com"
 WORKERS = int(os.environ.get("MUKTAMEL_WORKERS", "8"))
@@ -543,6 +544,10 @@ def _photo_urls(parsed: dict) -> list[str]:
     return out[:30]
 
 
+# A metro-zone label («شمال الرياض») names a part of its region's main city, not a town of its own.
+_ZONE_LABEL = re.compile(r"^(شمال|جنوب|شرق|غرب|وسط)\s+")
+
+
 def _resolve_location(offer: dict, addr_json: Optional[dict]) -> tuple[Optional[str], Optional[str], Optional[str], dict]:
     """Return (city_en, region_en, district_ar, raw_names) from the numeric address ids."""
     a = offer.get("address") or {}
@@ -558,12 +563,20 @@ def _resolve_location(offer: dict, addr_json: Optional[dict]) -> tuple[Optional[
     # City: the Cities dict mixes real city names with metro-zone labels ("شمال الرياض").
     # Try a direct map first; if that misses, derive from the region's anchor city.
     city_en = normalize.map_city(city_ar) if city_ar else None
-    if not city_en and region_en:
+    catalog_city_id = None
+    if not city_en and city_ar and not _ZONE_LABEL.match(city_ar.strip()):
+        # A real town the English map lacks («بحرة», «ضمد», «سراة عبيدة»). It is NEVER the region's
+        # capital: that fallback filed 36 Bahrah listings under Makkah city (2026-10-06, muktamel
+        # 15741395). Resolve the town in the catalog, inside its published region, or leave it unknown;
+        # resolve_small_platform_cities() reads catalog_city_id when the city column is unresolved.
+        catalog_city_id, _ = to_catalog(city_ar, region_hint=region_ar or region_en)
+    elif not city_en and region_en:
         # zone labels like "شمال/غرب/شرق/وسط/جنوب الرياض" → the region's main city
         city_en = normalize.map_city(region_ar.replace("منطقة", "").strip()) if region_ar else None
     if not region_en and city_en:
         region_en = normalize.region_for_city(city_en)
-    raw = {"region_ar": region_ar, "city_ar": city_ar, "district_ar": district_ar}
+    raw = {"region_ar": region_ar, "city_ar": city_ar, "district_ar": district_ar,
+           "catalog_city_id": catalog_city_id}
     return city_en or "Other", region_en, district_ar, raw
 
 
@@ -701,6 +714,7 @@ def map_listing(listing_id: int, parsed: dict) -> tuple[Optional[dict], str]:
         "city_ar": raw["city_ar"],
         "region_ar": raw["region_ar"],
         "district_ar": raw["district_ar"],
+        "catalog_city_id": raw.get("catalog_city_id"),
         "created_date": offer.get("createDate"),
         "updated_date": offer.get("lastUpdateDate"),
         "publisher_type": offer.get("publisherType"),
