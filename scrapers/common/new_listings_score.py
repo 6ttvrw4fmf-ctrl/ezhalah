@@ -196,8 +196,13 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False) -> di
 _UNIT_TAIL = r"\s*(?:م2|م²|متر|ريال|ر\.س)?\s*"
 
 
+# A control prompt («اختر عدد الغرف», rakez's room picker) names a field without stating it; the unit
+# prices listed under it are not a room count (rakez 15742193 / 15741402, 2026-10-06: 5/5 «mismatch»).
+CONTROL_PROMPT = re.compile(r"^\s*اختر\s")
+
+
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
-    kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x)]
+    kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
     page_states = any(re.search(r"\d", lines[i]) for i in kw_hits)
     if stored is None:
         return WE_MISS if page_states else PAGE_SILENT

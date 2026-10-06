@@ -271,3 +271,13 @@ def test_annual_rent_is_compared_as_stored():
     stored = {"price_annual": 75456, "rent_period_ar": "سنوي"}
     assert compare_listing(stored, page("75,456 ريال سنوياً"))["price"] == MATCH
     assert compare_listing(stored, page("6288 ريال"))["price"] == MISMATCH
+
+
+# ── «اختر عدد الغرف» is a room picker, not a stated count (rakez 15742193, 2026-10-06) ─────────────
+
+def test_room_picker_prompt_is_not_a_room_count():
+    lines = ("اختر عدد الغرف", "2,600,000 ريال", "268.75 م²", "2,450,000 ريال", "332.46 م²")
+    assert compare_listing({"bedrooms": 4}, page(*lines))["bedrooms"] == PAGE_SILENT
+    # a real stated count on the same page still decides
+    assert compare_listing({"bedrooms": 4}, page(*lines, "غرف النوم 3"))["bedrooms"] == MISMATCH
+    assert compare_listing({"bedrooms": 3}, page(*lines, "غرف النوم 3"))["bedrooms"] == MATCH
