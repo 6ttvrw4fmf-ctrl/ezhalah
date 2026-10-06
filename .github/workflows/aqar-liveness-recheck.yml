@@ -1,0 +1,68 @@
+# AQAR FAST CONFIRM (♻️ Lifecycle Engineer, 2026-10-06; backlog #87).
+#
+# aqar-liveness.yml (01:00 UTC) reads every active aqar ad once a day, so an ad aqar removed was
+# read "gone" on three consecutive nights and stayed visible about two days. This re-reads ONLY the
+# rows already carrying a direct strike (--min-strikes 1), at 13:00 UTC, through the same reader,
+# the same known-live controls (a failed control makes the shard report-only) and the same 3-strike
+# grace. A row looked at in the last 6 h waits (RECHECK_MIN_GAP_HOURS), so the three strikes stay
+# three separate readings. Nothing is loosened: a removed ad now leaves in ~24 h instead of ~48 h.
+#
+# Dispatched by pg_cron (`gh-aqar-liveness-recheck`, trigger_gh_workflow cannot pass inputs, hence
+# its own file). Its runs carry their own label, aqar_liveness_recheck:<table>:<shard>/<shards>.
+# Same concurrency group as the daily sweep, so the two never read aqar at the same time.
+name: Aqar liveness recheck (struck rows)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: aqar-liveness
+  cancel-in-progress: false
+
+jobs:
+  recheck:
+    name: Recheck ${{ matrix.table }} #${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        table:
+          - aqar_residential_listings
+          - aqar_commercial_listings
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Re-read struck rows (${{ matrix.table }} shard ${{ matrix.shard }})
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AQAR_SOFT_CLOSE_ARMED: "1"
+        run: exec python -m scrapers.aqar.liveness --table ${{ matrix.table }} --shards 4 --shard ${{ matrix.shard }} --min-strikes 1
+
+  aqarmonthly:
+    name: Recheck aqarmonthly_residential_listings
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Re-read struck rows (aqarmonthly_residential_listings)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AQAR_SOFT_CLOSE_ARMED: "1"
+        run: exec python -m scrapers.aqar.liveness --table aqarmonthly_residential_listings --shards 1 --shard 0 --min-strikes 1

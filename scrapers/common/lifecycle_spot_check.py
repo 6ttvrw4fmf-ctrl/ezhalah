@@ -119,6 +119,24 @@ def sample(client, table: str, *, active: bool, n: int, since: str | None, rng: 
     return rng.sample(rows, min(n, len(rows)))
 
 
+def live_in_sibling(client, tables: list[str], row: dict) -> bool:
+    """A hidden row whose ad_number is ACTIVE in another of the site's tables was retired as
+    superseded (a category flip), not as dead: its URL is live because the sibling row serves it.
+    Opening it and calling the hide "wrong" is a false alarm (abralosol 10301747, 2026-10-06)."""
+    ad = row.get("ad_number")
+    if not ad:
+        return False
+    for t in tables:
+        if t == row.get("table"):
+            continue
+        try:
+            if client.table(t).select("id").eq("ad_number", ad).eq("active", True).limit(1).execute().data:
+                return True
+        except Exception:  # noqa: BLE001 — a failed lookup keeps the row in the sample
+            continue
+    return False
+
+
 def parse_ids(spec: str) -> list[tuple[str, int]]:
     """'table:id,table:id' → [(table, id)]. Anything malformed is refused, never guessed."""
     out = []
@@ -237,6 +255,8 @@ def main() -> int:
             picked = []
             for t in tables:
                 picked += [dict(r, table=t) for r in sample(client, t, active=active, n=per_table, since=win, rng=rng)]
+            if side == "hidden":
+                picked = [r for r in picked if not live_in_sibling(client, tables, r)]
             for r in picked[: a.n]:
                 v = read(r)
                 results.append({"side": side, "table": r["table"], "id": r["id"], "url": r["listing_url"],
