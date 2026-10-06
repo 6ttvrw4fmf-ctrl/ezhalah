@@ -48,6 +48,13 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 🔬 AF engineer, 2026-10-06. Same shape as the ksaaqar back-fill below: a one-shot copy of a value
+  // the scraper ALREADY captured verbatim (source_capture.rem_fields «واجهة العقار») into the column
+  // the same scraper now writes from the same field on every crawl (scrapers/hajer/run.py map_listing),
+  // pinned by test_hajer_direction_reaches_the_column.py (3 tests fail on the old map_listing).
+  '20261006100226_hajer_direction_reaches_the_column.sql':
+    'back-fill of the direction column from the REM field the scraper now writes to it on every crawl; ' +
+    'pinned by test_hajer_direction_reaches_the_column.py::test_the_published_facade_is_stored_in_the_column',
   '20261005094209_aldarim_saas_unfilled_room_block_is_silence.sql':
     'watched by its companion 20261006095236_aldarim_saas_unfilled_block_false_detector.sql, which creates ' +
     'mon_detect_aldarim_saas_unfilled_block_false() over the same eight tables and predicate and needle-edits ' +
