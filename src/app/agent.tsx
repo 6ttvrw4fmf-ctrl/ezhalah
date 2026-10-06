@@ -3053,7 +3053,10 @@ export default function Agent() {
       // zero-result turn (see `introZeroResult ? m.result.suggestion` below), so overriding it HERE
       // scopes the change to exactly this call site — a fresh, free-text AI-Agent search — rather
       // than rewriting the shared module every other surface (Filter, AF) also depends on.
-      const zeroMatch = result.listings.length === 0
+      // A FAILED FETCH IS NOT AN EMPTY ANSWER (owner 2026-10-05: «we should never get this — is this true?»
+      // — a «حي الملك» search that timed out was told «ما لقينا نتائج» while the same search returns
+      // 16,874). runSearch already words a failure as «try again in a few seconds»; never overwrite it.
+      const zeroMatch = result.listings.length === 0 && !result.fetchFailed
         ? { ...result, suggestion: t('Sorry, no listings currently match your request. Try using the Filter to widen your search.') }
         : result;
       await playListings(run, statusId, withNotice, zeroMatch, v);

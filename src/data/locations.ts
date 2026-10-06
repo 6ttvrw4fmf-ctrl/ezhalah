@@ -1475,6 +1475,18 @@ function districtBridge(): Map<string, Set<string>> {
 // removed — so "Al Doha District, Yanbu" probes "al doha" (not the city). A bare city name probes to
 // empty → no district match (stays a city search). When a city is named we scope to it; otherwise a
 // district name shared by several cities returns all of them (the ambiguity case).
+// A district WORD's stem: the article is not part of the word (see the note in liveDistrictLookup).
+const districtStem = (w: string) => w.replace(/^(?:ال|al)/, '');
+/** Typo recovery for ONE district word, both sides already fuzzyFold-ed: same first letter, similar
+ *  length (±1), a small edit distance — compared on the STEMS, and only for a stem of 4+ letters.
+ *  Exported so scripts/verify-district-typo-never-floods.ts can execute it on real district names. */
+export function districtWordIsTypo(probeF: string, tf: string): boolean {
+  const ps = districtStem(probeF), ts = districtStem(tf);
+  if (ps.length < 4 || ts.length < 4) return false;
+  const maxD = ps.length <= 4 ? 1 : 2;
+  return ts[0] === ps[0] && Math.abs(ts.length - ps.length) <= 1 && editDistance(ts, ps) <= maxD;
+}
+
 function liveDistrictLookup(raw: string): LiveDistrict[] {
   if (!LIVE_DISTRICTS.length) return [];
   const cityHit = matchLocations(raw).find((p) => p.kind === 'city');
@@ -1512,17 +1524,20 @@ function liveDistrictLookup(raw: string): LiveDistrict[] {
   // or partial district token still hits — "Rakk" ≈ the "Rakah" in "Al Rakah Al Shamaliyah". Shared
   // first letter + a small edit distance keeps it tight. CAP at 2: a 3-edit gap on a short district
   // token is a different word, not a typo (the ±1 length guard below already rules most of them out).
-  const tokenMaxD = probeF.length <= 3 ? 1 : 2;
+  // THE ARTICLE IS NOT PART OF THE WORD (owner 2026-10-05, «حي الملك» → «لا نتائج»). The probe and every
+  // district token used to be compared WITH their «ال»: nearly every district word is «ال» + 3–4 letters,
+  // so «الملك» sat within 2 edits of الملقا, الملز, السلي, الأمل, المها, المجد, العمل… and ~40 unrelated
+  // districts Kingdom-wide were searched as «typos» of it (never substitute a different place —
+  // project_exact-location-only-rule). Typo recovery now compares the STEMS (article stripped) and only
+  // for a stem of 4+ letters — «الياسمن» still reaches «الياسمين»; a 3-letter stem like «ملك» never
+  // fuzzes (it still matches every district that really CONTAINS «الملك» through districtMatchesProbe).
   const fuzzyTokenHit = (district: string): boolean => {
-    if (probeF.length < 4) return false;
+    if (districtStem(probeF).length < 4) return false;
     for (const tok of district.split(/[^\p{L}\p{N}]+/u)) {
       const tf = fuzzyFold(tok);
       if (tf.length < 4 || ARTICLE.has(tf) || DISTRICT_WORD.has(tf)) continue;
       if (tf === probeF) return true;
-      // Typo recovery: same first letter, SIMILAR length (±1), small edit distance. The length guard
-      // stops a longer DIFFERENT word from passing as a typo — «البلد»(5) vs «البلدية»(7) is a +2 suffix,
-      // a different word, not a typo, so it must NOT match. (paired with the word-aligned exact match.)
-      if (tf[0] === probeF[0] && Math.abs(tf.length - probeF.length) <= 1 && editDistance(tf, probeF) <= tokenMaxD) return true;
+      if (districtWordIsTypo(probeF, tf)) return true;
     }
     return false;
   };
