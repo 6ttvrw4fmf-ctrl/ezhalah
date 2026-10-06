@@ -191,3 +191,14 @@ def test_small_sources_proxy_sites_enable_the_shared_http_get_proxy_fallback():
     wf = (ROOT / ".github/workflows/small-sources-sync.yml").read_text()
     assert "SCRAPE_PROXY_FALLBACK_URL: ${{ matrix.proxy && secrets.WASALT_PROXY_URL || '' }}" in wf
     assert '- { source: eastabha, cmd: "python -m scrapers.eastabha.run --type all", proxy: true }' in wf
+
+
+def test_targeted_small_sources_rerun_does_not_queue_behind_the_nightly():
+    """10-05 and 10-06: re-runs of the night's failed sites queued behind dwelleo's ~4 h job in the
+    one shared concurrency group and could not be proven inside the engineers' window."""
+    wf = (ROOT / ".github/workflows/small-sources-sync.yml").read_text()
+    m = __import__("re").search(r"\nconcurrency:\n  group: ([^\n]+)\n  cancel-in-progress: (\w+)", wf)
+    assert m, "small-sources-sync must declare a concurrency group"
+    assert "github.event.inputs.source" in m.group(1), "a targeted re-run needs its own lane"
+    assert m.group(1).startswith("small-sources-sync"), m.group(1)
+    assert m.group(2) == "false", "queued runs must never be cancelled"
