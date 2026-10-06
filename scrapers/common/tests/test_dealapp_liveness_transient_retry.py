@@ -108,3 +108,27 @@ def test_same_run_without_failures_writes_the_same(monkeypatch):
     rc, client, _ended = _run(monkeypatch, flaky=False)
     assert rc == 0
     assert sum(1 for u, _f in client.updates if u.get("last_verified_alive_at")) == 28
+
+
+def test_never_probed_rows_are_read_before_sitemap_present_ones(monkeypatch):
+    """Backlog #84 (2026-10-06): 567 active rows had never been opened, because sorting the window
+    sitemap-present first cut the never-probed (sitemap-absent) rows off its end every run."""
+    rows = ([{"id": i, "ad_number": f"D{i}", "listing_url": f"{lr.BASE}/ar/ad-details/{i}",
+              "missing_count": 0, "last_verified_alive_at": None, "last_liveness_probe_at": None}
+             for i in range(1, 6)]                                     # never probed, off-sitemap
+            + [{"id": i, "ad_number": f"D{i}", "listing_url": f"{lr.BASE}/ar/ad-details/{i}",
+                "missing_count": 0, "last_verified_alive_at": "2026-10-05T00:00:00+00:00",
+                "last_liveness_probe_at": "2026-10-05T00:00:00+00:00"} for i in range(6, 41)])
+    client = _Client(rows, flaky=False)
+    read: list[str] = []
+    monkeypatch.setattr(lr, "sb", lambda: client)
+    monkeypatch.setattr(lr, "begin_run", lambda *_a, **_k: 1)
+    monkeypatch.setattr(lr, "end_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(lr, "_session", lambda *_a, **_k: object())
+    monkeypatch.setattr(lr, "harvest_sitemap_ids",
+                        lambda *_a, **_k: frozenset(str(i) for i in range(6, 41)))
+    monkeypatch.setattr(lr, "probe_listing", lambda _s, url, _b=None: read.append(url) or (ALIVE, 200))
+    monkeypatch.setattr(sys, "argv", ["liveness_run", "--limit", "10"])
+    assert lr.main() == 0
+    worklist = [u.rsplit("/", 1)[1] for u in read if "999999999" not in u][-10:]
+    assert {"1", "2", "3", "4", "5"} <= set(worklist), worklist
