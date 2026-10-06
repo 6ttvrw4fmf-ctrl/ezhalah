@@ -984,17 +984,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // place-only search whose place we KNOW holds listings is our failure, not an answer: ask once
         // more, and if it is still zero, word it as a failure («try again»), report it, note it.
         let shelfClash = false;
+        let shelf: number | null = null;
         if (rows && rows.length === 0 && !signal?.aborted) {
           const lm = q.locationMatch;
-          const shelf = shelfCount(q, lm ? liveShelfCount(lm, q.districts) : null);
+          shelf = shelfCount(q, lm ? liveShelfCount(lm, q.districts) : null);
           if (zeroContradictsShelf(shelf)) {
             ({ listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal, rotationSeed: searchSeed }));
             shelfClash = !!rows && rows.length === 0;
             if (shelfClash) reportMessage('zero_contradicts_shelf', { place: lm?.label, kind: lm?.kind, districts: q.districts?.length ?? 0, shelf });
           }
-          if (rows && rows.length === 0 && !signal?.aborted) logZeroResult(q, shelf, shelfClash);
         }
         const r = runSearch(q, buildPools(rows ?? []), { fetchFailed: rows === null || shelfClash });
+        // THE NOTEBOOK records the zero the USER SEES — measured live 2026-10-05: «فيلا … بسعر 5000» came
+        // back from the server with rows and the client's own filters emptied it, so a fetch-level hook
+        // never wrote it. A network failure is not «no results» (it reads «try again») and is not noted.
+        if (rows !== null && r.listings.length === 0 && !signal?.aborted) logZeroResult(q, shelf, shelfClash);
         // Attach the RESOLVED query so the caller renders the Search Summary from what actually ran
         // (the corrected city/region), not the raw pre-resolution text. (one-engine summary parity.)
         const result: SearchResult = { ...r, query: q, pageOffset: pageCand, hasMore: pageCand >= 1500, matchTotal: pageTotal, rotationSeed: searchSeed };
