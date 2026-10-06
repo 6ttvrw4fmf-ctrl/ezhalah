@@ -67,8 +67,16 @@ const BASELINE_FILE = join(ROOT, 'scripts', 'migration-reference-baseline.txt');
  *  absent from supabase_migrations.schema_migrations, checked directly. So the file cannot be both
  *  parity-correct and citation-clean, and parity is the one that is mandatory. The pointer is a
  *  COMMENT on a function, carrying no schema dependency: nothing resolves it at runtime.
- *  Again: no newly authored migration may use this. Mint the version you cite, or cite nothing. */
-const MAX_BASELINE_ENTRIES = 31;
+ *  Again: no newly authored migration may use this. Mint the version you cite, or cite nothing.
+ *
+ *  31 -> 32 on 2026-10-06 (QA & Repair), the SAME mirror exception. Production's 20260928014300
+ *  (the_aqarmonthly_location_bridge_stops_claiming_a_district) was in no branch: its version slot
+ *  held a DIFFERENT file (a_street_is_not_a_district_in_the_dropdown_either, really applied as
+ *  20260928014243), which kept the P1 migration_content_parity alert open for ten days. The file
+ *  was renamed to its true version and 20260928014300 recovered byte-exact (md5 a59fb939…). Its
+ *  production text says «repair 20260927234500-era» in a COMMENT; that version was never minted
+ *  (checked: no schema_migrations row between 20260927230000 and 20260927240000 but 230000). */
+const MAX_BASELINE_ENTRIES = 32;
 
 let failed = 0;
 const check = (ok: boolean, pass: string, fail: string) => {

@@ -525,6 +525,7 @@ Your history, read from the routine log on 2026-10-03:
   money, legal and secrets. A check you could not finish is «not run», never a reason to lower the bar.
 
 ## Lessons from real breakages (use them)
+- **2026-10-06 (copied by 🔧 QA):** count before/after on a FIXED set of ids, never a sliding 24-hour window: the window read 61 → 61 while the truth was 61 → 29. And when one tool is down (the DB connector, 07:24–08:03), work the next item instead of stopping: you ended at 95 of 120 minutes with a 3/10.
 - **A parser can be right on old rows and broken on the next one it writes.** That's why the
   guards must run on newly scraped listings, and why you exist.
 - **aqar parking:** first read from prose (wrong), then declared "not published" (wrong), while aqar

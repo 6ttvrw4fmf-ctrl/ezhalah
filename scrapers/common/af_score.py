@@ -69,6 +69,21 @@ def page_lines(page: dict) -> list[str]:
     return [x for x in ls if x and not CHROME.match(x) and not BARE_LABEL.match(x)]
 
 
+# A line printed on EVERY sampled page of one website is that website's template, not any one ad: its
+# menu («أجهزة مطبخ», «مكيفات هواء» on opensooq), a services strip («موقف سيارة» on superoffice), or
+# feature art shared by all projects («موقف خاص» on hasaad, beside a district none of them is in).
+# Measured 2026-10-06 (source-reread 37445697709): each produced a 5/5 «we miss» that no parser could
+# fix. Applied only with TEMPLATE_MIN_PAGES readable pages, so two ads that happen to agree stay ads.
+TEMPLATE_MIN_PAGES = 3
+
+
+def template_lines(pages: list[list[str]]) -> set[str]:
+    readable = [set(p) for p in pages if p]
+    if len(readable) < TEMPLATE_MIN_PAGES:
+        return set()
+    return set.intersection(*readable)
+
+
 def page_says_yes(lines: list[str], field: str) -> bool:
     """The ad itself names the amenity and does not negate it («مصعد» yes, «لا يوجد مصعد» no)."""
     kw = BOOL_KW[field]
@@ -224,11 +239,11 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
     probe = probe or _probe
     row = new_row(night, platform)
     last = 0.0
+    read: list[tuple[str, int, dict, dict]] = []
     for table, rid in picks:
         stored = (client.table("search_listings_ar").select(STORED).eq("source_table", table)
                   .eq("listing_id", rid).limit(1).execute().data or [{}])[0]
         url = (client.table(table).select("listing_url").eq("id", rid).limit(1).execute().data or [{}])[0].get("listing_url")
-        key = f"{table}:{rid}"
         if not url:
             row["sampled"] += 1
             row["unreadable_pages"] += 1
@@ -247,10 +262,16 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
+        read.append((table, rid, stored, page))
+    # Second pass: the website's template is known only once every page of the sample has been read.
+    chrome = template_lines([page_lines(pg) for _, _, _, pg in read])
+    for table, rid, stored, page in read:
+        key = f"{table}:{rid}"
         results = compare_listing(stored, page, skip_price=False)
         af_only = {k: v for k, v in results.items() if k in AF_FIELDS}
         fold(row, key, af_only, stored)
-        answers = offered(customer_answers(page_lines(page), af_only), stored)
+        ad_lines = [x for x in page_lines(page) if x not in chrome]
+        answers = offered(customer_answers(ad_lines, af_only), stored)
         params = rpc_params(stored, answers) if anon is not None and answers else None
         if params:
             verdict = findable(ask(anon, params), table, rid)

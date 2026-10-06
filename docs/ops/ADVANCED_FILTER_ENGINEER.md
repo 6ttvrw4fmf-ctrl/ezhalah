@@ -214,3 +214,7 @@ lists you with your 120-minute cap.
    'advanced_filter:proof', true, '<what you tested, the listing keys, PASS/FAIL>')`.
 3. Waiting for a crawl, a sync or a deploy → say «PROPAGATION PENDING» with the number that must move, and prove it the next night.
 4. 🔧 Quality re-tests a sample of your proof rows every morning. A proof that does not reproduce is RED.
+
+## Lessons from real breakages (use them)
+- **2026-10-06:** a back-fill that does not move `last_updated` never reaches search through the incremental :22 sync. Plan the proof on the next crawl, or bump the row the sanctioned way, before you promise it tonight.
+- **2026-10-06 (🔧 QA):** do not park a question the law already answers (backlog 77). A site WITH a structured field is structured-only, and an unfilled block is silence → NULL. Decide and close.

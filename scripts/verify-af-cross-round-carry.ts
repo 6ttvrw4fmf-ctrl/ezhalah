@@ -225,7 +225,7 @@ check('the results turn\'s guided record carries `asked` all the way through run
   && has(/setGuidedPills\(\{[^)]*asked: opts\.guided\.asked/),
   'src/app/agent.tsx — a record without `asked` silently forgets every skip');
 check('«تحديد أكثر» seeds the carry from THAT turn\'s record, including `asked`',
-  has(/afCarryRef\.current = q\s*\n?\s*\? \{ msgId: m\.id, originQ: carried\?\.baseQ \?\? q, facets: carried\?\.facets \?\? \[\], asked: carried\?\.asked \?\? \[\] \}/),
+  has(/afCarryRef\.current = q\s*\n?\s*\? \{ msgId: m\.id, originQ: carried\?\.baseQ \?\? q, facets: carried\?\.facets \?\? \[\], asked: \[\.\.\.new Set\(\[\.\.\.\(carried\?\.asked \?\? \[\]\), \.\.\.\(afSkippedByMsgRef\.current\[m\.id\] \?\? \[\]\)\]\)\] \}/),
   'src/app/agent.tsx — the CTA is the only place a round learns what came before it');
 
 // The seed must be written BEFORE the round opens: startAgeFlow reads afCarryRef synchronously.
@@ -355,8 +355,8 @@ mustCatch('the guided record losing `asked` on the way through runRefine',
   !/setGuidedPills\(\{[^)]*asked: opts\.guided\.asked/.test(
     mut(agentSrc, 'asked: opts.guided.asked, ', '')));
 mustCatch('the CTA seeding a carry with no history',
-  !/afCarryRef\.current = q\s*\n?\s*\? \{ msgId: m\.id, originQ: carried\?\.baseQ \?\? q, facets: carried\?\.facets \?\? \[\], asked: carried\?\.asked \?\? \[\] \}/.test(
-    mut(agentSrc, 'asked: carried?.asked ?? [] }', 'asked: [] }')));
+  !/afCarryRef\.current = q\s*\n?\s*\? \{ msgId: m\.id, originQ: carried\?\.baseQ \?\? q, facets: carried\?\.facets \?\? \[\], asked: \[\.\.\.new Set\(\[\.\.\.\(carried\?\.asked \?\? \[\]\), \.\.\.\(afSkippedByMsgRef\.current\[m\.id\] \?\? \[\]\)\]\)\] \}/.test(
+    mut(agentSrc, '...(carried?.asked ?? [])', '...([])')));
 {
   const broken = mut(agentSrc,
     /const carried = guidedPills\?\.msgId === m\.id \? guidedPills : null;([\s\S]*?): null;\n(\s*)if \(q && anyGuidedEligible\(q\)\) void startAgeFlow\(q\);/,
