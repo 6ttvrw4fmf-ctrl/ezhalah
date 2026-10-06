@@ -374,7 +374,20 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
     if (!targets.length) { result.status = 'UNKNOWN'; result.failedStep = 'listing carries no DB-known AF answer (all unknown/false)'; return result; }
     result.evidence.cardFoundBeforeAF = found;            // informative, not the AF verdict
     step(`open AF (targets: ${targets.map((t) => t.kind === 'amenity' ? t.token : 'furnished=yes').join(', ')})`);
-    const nAF = searches.length;
+    // A round asks at most AF_ROUND_MAX_QUESTIONS (4) questions, so a chip the listing can answer
+    // (e.g. AC on annual-rent apartments, behind rnpl/furnished/age/bathrooms) is often only offered
+    // in ROUND 2. A customer who did not see it presses «خلّنا نحدد الطلب أكثر» again; so do we
+    // (2026-10-06: ksaaqar AC read UNKNOWN for that reason alone). Up to 3 rounds.
+    const answered = [];
+    let nAF = searches.length;
+    for (let round = 1; round <= 3 && !answered.length; round++) {
+    if (round > 1) {
+      // An all-skipped round may close without a new search (nothing changed), so the search is
+      // waited for but not required; the next round's own search is what gets judged.
+      step(`round ${round - 1} answered nothing; narrow again`);
+      await awaitNewMainSearch(nAF);
+      nAF = searches.length;
+    }
     // The narrow button renders at the END of the results turn and only once the reveal cascade
     // settles (agent.tsx resultsRowIsReady) — scroll every scrollable to its bottom and poll.
     const scrollToBottom = () => page.evaluate(() => {
@@ -388,19 +401,20 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
       await scrollToBottom();
       await page.waitForTimeout(1200);
       if (await narrow.count()) {
-        await narrow.first().scrollIntoViewIfNeeded().catch(() => {});
-        await narrow.first().click();
+        // .last(): after round 1 the earlier turn (and its button, dimmed) stays on screen.
+        await narrow.last().scrollIntoViewIfNeeded().catch(() => {});
+        await narrow.last().click();
         opened = true;
       } else {
         opened = await tap('خلّنا نحدد الطلب أكثر', 500).then(() => true)
           .catch(() => tap('نحدد الطلب أكثر', 500).then(() => true).catch(() => false));
       }
     }
+    if (!opened && round > 1) { step(`round ${round}: no further narrowing offered`); break; }
     if (!opened) throw new Error('AF entry (results-narrow / «خلّنا نحدد الطلب أكثر») never rendered');
-    step('AF entry clicked');
+    step(`AF entry clicked (round ${round})`);
     await page.waitForTimeout(3500);
 
-    const answered = [];
     const readQuestion = async (timeoutMs = 15000) => {   // the options wait on a live count probe
       const until = Date.now() + timeoutMs;
       let seen = { opts: [], title: '' };
@@ -434,6 +448,7 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
       step(clicked ? `answered «${seen.title}» (${clicked})` : `skipped «${seen.title}»`);
       await btn.click();
       await page.waitForTimeout(3500);
+    }
     }
     if (!answered.length) { result.status = 'UNKNOWN'; result.failedStep = `interview never offered a question for: ${targets.map((t) => t.kind === 'amenity' ? t.token : 'furnished').join(', ')}`; return result; }
 

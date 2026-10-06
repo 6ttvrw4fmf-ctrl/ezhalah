@@ -215,6 +215,15 @@ def _month_windows_ms(offsets=(1, 31, 61, 91, 121, 151)) -> list[tuple[int, int]
 
 FIND_Q = ("query($drf:DailyRentingFilter,$size:Int,$from:Int){ Search{ "
           "find(daily_renting_filter:$drf, size:$size, from:$from){ total listings{ id } } } }")
+# Parking lives in aqar's `extended_details` (special_parking), and Listing.get does NOT expose it — only
+# `has_extended_details` (introspected 2026-10-06; the detail query's schema probe dropped it, so aqarmonthly
+# stored parking for 0 units). The search result type (ElasticListing) DOES carry it, so discovery asks for
+# it alongside the id: live sample of 210 available units, special_parking true 40 / false 22 / null 148.
+# If the schema ever refuses it, discovery falls back to FIND_Q on the first page — never fewer ids.
+FIND_Q_EXT = ("query($drf:DailyRentingFilter,$size:Int,$from:Int){ Search{ "
+              "find(daily_renting_filter:$drf, size:$size, from:$from){ total listings{ id "
+              "extended_details { special_parking laundry_room } } } } }")
+_ext_by_id: dict[int, dict] = {}
 
 # Aqar's structured amenity flags (2026-10-05, 🔬 AF engineer). The same Listing object the aqar page
 # embeds — and scrapers/aqar/enrich_residential.py already reads for the annual inventory — carries
@@ -263,6 +272,22 @@ def settle_amenity_fields(answer, fields: tuple[str, ...] = AMENITY_GQL_FIELDS) 
         if not bad:
             return ()
         fields = tuple(f for f in fields if f not in bad)
+    return ()
+
+
+SETTLE_TRIES = 3
+
+
+def settle_across_units(answer_for, ids, tries: int = SETTLE_TRIES) -> tuple[str, ...]:
+    """settle_amenity_fields() on up to `tries` units, first non-empty answer wins (🔬 AF engineer,
+    2026-10-06). One unit is not proof: a unit that is gone, or a transient error, answers unreadable,
+    which settles to () — and that shard then crawled with no amenity fields at all (2026-10-05: 1,835
+    of ~2,368 fresh rows carried them; aqarmonthly_residential_listings:13906613 refreshed without).
+    `answer_for(query, unit_id)`. All `tries` failing still falls back to () — the old query."""
+    for lid in list(ids)[:tries]:
+        got = settle_amenity_fields(lambda q, lid=lid: answer_for(q, lid))
+        if got:
+            return got
     return ()
 
 
@@ -369,11 +394,15 @@ def discover_ids(max_listings: int | None = None) -> Discovery:
     declared: int | None = None
     truncated = capped = False
 
+    find_q = FIND_Q_EXT
     for _pass in range(MAX_PASSES):
         before = len(ids)
         frm, size = 0, 50
         while True:
-            d, _ = _gql(FIND_Q, {"drf": {"availability": {"eq": 1}}, "size": size, "from": frm})
+            d, errored = _gql(find_q, {"drf": {"availability": {"eq": 1}}, "size": size, "from": frm})
+            if find_q is FIND_Q_EXT and (errored or not d) and not ids:
+                find_q = FIND_Q        # the schema refused the extra block: discovery must not suffer
+                d, _ = _gql(find_q, {"drf": {"availability": {"eq": 1}}, "size": size, "from": frm})
             if not d:
                 truncated = True      # transport gave up: UNKNOWN, never "that was the last page"
                 break
@@ -382,6 +411,9 @@ def discover_ids(max_listings: int | None = None) -> Discovery:
             if declared is None:
                 declared = int(total)
             batch = [l["id"] for l in (fr.get("listings") or []) if l.get("id")]
+            for l in (fr.get("listings") or []):
+                if l.get("id") and isinstance(l.get("extended_details"), dict):
+                    _ext_by_id[int(l["id"])] = l["extended_details"]
             if not batch:
                 # An empty page BEFORE the declared total is a source-side hiccup, not the end of
                 # the catalogue — indistinguishable on the wire, so say UNKNOWN rather than guess.
@@ -548,6 +580,15 @@ def map_listing(g: dict, price: dict) -> dict | None:
     }
 
 
+def with_search_extended_details(g: dict | None, listing_id) -> dict | None:
+    """The detail object plus the `extended_details` discovery read for this unit (see FIND_Q_EXT). The
+    detail's own block wins if the schema ever serves one; a unit discovery saw no block for is unchanged."""
+    if not isinstance(g, dict) or "extended_details" in g:
+        return g
+    ext = _ext_by_id.get(int(listing_id))
+    return {**g, "extended_details": ext} if ext is not None else g
+
+
 def fetch_row(listing_id: int, windows: list[tuple[int, int]]) -> dict | None:
     """Fetch detail once, then price the first AVAILABLE 30-day window. Detail is window-independent,
     so we only re-issue the cheap price query per window until one is free."""
@@ -556,7 +597,7 @@ def fetch_row(listing_id: int, windows: list[tuple[int, int]]) -> dict | None:
         d, errored = _gql(detail_query(_amenity_fields), {"id": int(listing_id), "s": s_ms, "e": e_ms})
         if d:
             if g is None:
-                g = (d.get("Listing") or {}).get("get")
+                g = with_search_extended_details((d.get("Listing") or {}).get("get"), listing_id)
             p = (d.get("DailyRenting") or {}).get("getCalculatedBookingPriceWithDiscount")
             if g and p:
                 return map_listing(g, p)
@@ -633,11 +674,11 @@ def main() -> int:
         global _amenity_fields
         s0, e0 = windows[0]
 
-        def _answer(q: str) -> dict | None:
+        def _answer(q: str, lid) -> dict | None:
             _throttle()
-            return _post(_sess(), {"query": q, "variables": {"id": int(ids[0]), "s": s0, "e": e0}})[0]
+            return _post(_sess(), {"query": q, "variables": {"id": int(lid), "s": s0, "e": e0}})[0]
 
-        _amenity_fields = settle_amenity_fields(_answer)
+        _amenity_fields = settle_across_units(_answer, ids)
         print(f"  amenity fields accepted by the schema: {list(_amenity_fields) or 'none (query unchanged)'}")
 
         rows: list[dict] = []
