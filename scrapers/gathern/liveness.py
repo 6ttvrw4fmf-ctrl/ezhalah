@@ -53,6 +53,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+from scrapers.common.cleanup import _landed_on_home
 from scrapers.common.db import begin_run, end_run, sb
 from scrapers.common.liveness_contract import direct_alive_patch
 from scrapers.common.liveness_trust import (
@@ -246,6 +247,12 @@ def probe(s, url: str, retries: int = 3) -> int:
             time.sleep(2 * (attempt + 1)); continue
         if r.status_code == 429 or r.status_code >= 500:
             time.sleep(3 * (attempt + 1)); continue
+        if r.status_code == 200 and _landed_on_home(url, str(getattr(r, "url", "") or "")):
+            # gathern answers a removed unit, for some request shapes, with 307 -> /ar?error=500 and
+            # its home page serves 200 (2026-10-05, cleanup lesson). That 200 is the home page, not
+            # this unit: no verdict. It matters most to --recheck-dead, whose only write is a
+            # restore on a 200, now that it runs every day (2026-10-06).
+            return 0
         return r.status_code
     return 0
 
