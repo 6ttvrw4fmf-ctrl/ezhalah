@@ -217,7 +217,11 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # «عمر العقار جديد» is how aqar (and others) publish a new building; we store it as 0. Read as
         # the figure 0 both ways: stored 0 + «جديد» is a MATCH, stored 5 + «جديد» stays a MISMATCH
         # (aqar 15415047, 2026-10-05: spec block «عمر العقار جديد», stored 0, was scored wrong).
-        if kw == AGE_KW and NEW_BUILDING.search(" | ".join(lines[i] for i in kw_hits)):
+        # The live page renders the spec as label/value LINES («عمر العقار» / «جديد»), so the word can sit
+        # on the line after the label (aqar 15703930 / 15703349, 2026-10-06: stored 0, scored wrong
+        # because the previous row's bare «220 م²» read as a stated age).
+        if kw == AGE_KW and (NEW_BUILDING.search(" | ".join(lines[i] for i in kw_hits)) or any(
+                i + 1 < len(lines) and re.match(r"^\s*جديد\s*$", lines[i + 1]) for i in kw_hits)):
             return MATCH if float(stored) == 0 else MISMATCH
         page_states = page_states or any(
             0 <= j < len(lines) and re.match(r"^\s*[\d,.٬]+" + _UNIT_TAIL + r"$", lines[j])

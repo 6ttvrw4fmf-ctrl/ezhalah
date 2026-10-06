@@ -244,6 +244,14 @@ def test_new_building_word_reads_as_age_zero(age, want):
     assert got["area"] == MATCH          # the spec line's own area is still read as before
 
 
+@pytest.mark.parametrize("age,want", [(0, MATCH), (5, MISMATCH)])
+def test_new_building_word_on_the_line_after_its_label(age, want):
+    # the live page: label and value on separate lines, the previous row's bare area just above
+    # (aqar 15703930, 2026-10-06: «المساحة» / «220 م²» / «عمر العقار» / «جديد»)
+    got = compare_listing({"property_age": age}, page("المساحة", "220 م²", "عمر العقار", "جديد"))
+    assert got["property_age"] == want
+
+
 def test_new_building_word_never_answers_another_number_field():
     # bedrooms 0 is not «جديد» (its keyword line is the same spec line): the word is the age label's only
     got = compare_listing({"bedrooms": 0}, page(AQAR_SPEC))
