@@ -53,7 +53,6 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from scrapers.common.cleanup import _landed_on_home
 from scrapers.common.db import begin_run, end_run, sb
 from scrapers.common.liveness_contract import direct_alive_patch
 from scrapers.common.liveness_trust import (
@@ -235,6 +234,20 @@ def _throttle(_last: list[float] = [0.0]) -> None:
     if wait > 0:
         time.sleep(wait)
     _last[0] = time.monotonic()
+
+
+_HOME_PATHS = frozenset({"", "/ar", "/en"})
+
+
+def _landed_on_home(requested: str, final: str) -> bool:
+    """The same test as cleanup._landed_on_home, kept here so this checker does not import the
+    cleanup engine (and, through it, the wasalt browser)."""
+    from urllib.parse import urlsplit
+    if not final:
+        return False
+    want = urlsplit(requested).path.rstrip("/").lower()
+    got = urlsplit(final).path.rstrip("/").lower()
+    return got in _HOME_PATHS and got != want
 
 
 def probe(s, url: str, retries: int = 3) -> int:
