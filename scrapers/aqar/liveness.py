@@ -408,13 +408,11 @@ def main() -> None:
 
     def _cohort(q):
         q = q.eq("active", True)
-        if args.only_struck:
-            return q.gte("missing_count", args.grace)
-        if args.min_strikes > 0:
+        if args.min_strikes > 0 and not args.only_struck:
             # Three SEPARATE readings: a row looked at in the last RECHECK_MIN_GAP_HOURS waits.
-            return (q.gte("missing_count", args.min_strikes)
-                    .or_(f"last_liveness_probe_at.is.null,last_liveness_probe_at.lt.{recheck_cut}"))
-        return q
+            q = (q.gte("missing_count", args.min_strikes)
+                 .or_(f"last_liveness_probe_at.is.null,last_liveness_probe_at.lt.{recheck_cut}"))
+        return q.gte("missing_count", args.grace) if args.only_struck else q
 
     # ── PHASE 1: this shard's worklist, by id modulo (fix 2026-09-24, see shard_partition.py) ────
     # Ownership is `id % shards == shard` — a property of the ROW, so the sixteen parallel runners
