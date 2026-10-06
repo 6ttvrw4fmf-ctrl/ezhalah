@@ -83,7 +83,31 @@ const AF_PARAMS = [
 // legitimately carries nothing in AF_PARAMS and must not be flagged.
 const SCOPE_QUESTION_TITLES = ['أي نوع من العقارات تبحث عنه؟', 'أي نوع عقار تحديدًا؟'];
 
-const countCards = (page) => page.evaluate(() => (document.body.innerText.match(/الضغط على هذا الإعلان/g) || []).length);
+// A RESULT CARD IS ADDRESSED BY ITS OWN testID, NEVER BY ITS COPY (2026-10-05). This used to count
+// «الضغط على هذا الإعلان» in document.body.innerText. PR #5425 (2026-10-01, photo-first cards) moved
+// that sentence from visible text into the photo link's aria-label, so innerText held it 0 times and
+// from 2026-10-02 this journey read «0 cards» every night on a production that rendered 12 on
+// arrival and 100 after the first «عرض المزيد» — PAGINATION ×2 + PAGER-MISSING, a healthy pager
+// accused. ResultCard renders testID={`card-listing-${listing.id}`} (web: data-testid) on every card.
+const countCards = (page) => page.evaluate(() => document.querySelectorAll('[data-testid^="card-listing-"]').length);
+
+/**
+ * THE CASCADE WALK (src/lib/initialReveal.ts, owner 2026-09-20). A turn ARRIVES with CASCADE_MAX cards
+ * and reveals the rest as the user scrolls, so «no pager while N < total» is only a defect AFTER
+ * scrolling like a user until the count stops growing — read on arrival it is ops_incident #699's
+ * false dead end. Called only where the pager is absent; every press already reveals its batch whole.
+ */
+async function revealAll(page, { rounds = 60, stableFor = 3 } = {}) {
+  let last = -1, stable = 0;
+  for (let i = 0; i < rounds; i++) {
+    const n = await countCards(page);
+    if (n === last) { if (++stable >= stableFor) return n; } else { stable = 0; }
+    last = n;
+    await page.locator('[data-testid^="card-listing-"]').last().scrollIntoViewIfNeeded().catch(() => {});
+    await sleep(700);
+  }
+  return last;
+}
 
 /**
  * A CRASHED RENDERER IS A PRODUCT DEFECT, AND THE ORACLE MUST BE ABLE TO SAY SO (2026-09-12).
@@ -357,6 +381,7 @@ export async function showMoreJourney(plan) {
     for (let b = 1; b <= (plan.batches ?? 3); b++) {
       const btn = await pager(page);
       if (!btn) {
+        n = await revealAll(page);
         // Read the closing line and the AF-card state in ONE evaluate, so both describe the same
         // instant as the pager probe above.
         //
