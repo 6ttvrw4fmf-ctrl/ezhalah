@@ -345,8 +345,10 @@ Recompute every Sunday, and the day a website is added:
 
 - **What it is.** A fourth tier, `SOURCE_LIST_PRESENCE` (`liveness_policies.SOURCE_LIST_DAILY`): the
   daily crawl re-reads the site's own complete list, and every row it upserts as active is stamped
-  checked (`db._wasalt_batch` → `presence_patch`). Window 48 h. Hiding is unchanged: three complete
-  crawls without the ad.
+  checked (`db._wasalt_batch` → `presence_patch`). Window 48 h. Absence from three complete crawls
+  makes an ad a CANDIDATE only; it is hidden when its own page reads gone (`verify_gone`), never on
+  absence alone (LISTING_LIVENESS.md wins; owner decision 2026-10-05). A site whose crawler still
+  prunes without `verify_gone` is a hole to close, not this tier's rule.
 - **33 sites are in, by name.** Every crawler was read twice on 2026-10-02 (the second reader tried
   to break the first one's verdict), and 488 in-list ads were opened from a second network (none
   answered "gone"). The other sites are NOT in, each for a concrete hole written on its line in
