@@ -56,7 +56,7 @@ class _Res:
 class _Q:
     def __init__(self, t, log): self._t = t; self._log = log; self._head = False
     def select(self, *a, **k):
-        if k.get("head"): self._head = True
+        if k.get("head") or k.get("count"): self._head = True  # the breaker count: a count=exact GET since 2026-10-06
         return self
     def eq(self, *a): return self
     def like(self, *a): return self

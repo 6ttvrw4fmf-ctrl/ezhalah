@@ -218,10 +218,16 @@
       "active_rows": 53
     },
     "bossbih": {
-      "floor_pct": 65,
-      "today_pct": 72.7,
-      "active_rows": 99,
-      "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 72 of 99 rows carried photo_urls (the first 99 of 1,485). The office posts many cards with the site placeholder, which the scraper refuses; sample error ~±4.5 points, so the floor keeps that margin."
+      "floor_pct": 47,
+      "today_pct": 51.2,
+      "active_rows": 1481,
+      "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 72 of 99 rows carried photo_urls (the first 99 of 1,485). The office posts many cards with the site placeholder, which the scraper refuses; sample error ~±4.5 points, so the floor keeps that margin.",
+      "rebased": {
+        "from": 65,
+        "to": 47,
+        "why": "Scraping Engineer 2026-10-06: the 65 floor was declared from the FIRST 99 rows (page 0 of the index, 72.7%), not from the catalogue. The whole catalogue was measured at source the day before onboarding and carries photos on half its listings: the office posts many cards with only its logo placeholder, which the scraper refuses. Production has matched that source figure from the first sweep to today, so this is the source's own coverage, not a scraper regression. Floor = the source measurement minus a ~4-point margin.",
+        "evidence": "scrapers/bossbih/run.py docstring MEASURED COVERAGE: every one of 1,485 detail pages fetched live 2026-09-20 → photo_urls 735 of 1,448 mapped rows (50.8%) — a SOURCE measurement taken before any production row existed (not len(photo_urls) of our own rows). ops_image_coverage_latest() 2026-10-06 05:4x UTC: bossbih 758/1,481 = 51.2%; per-week active rows 09-21 47.3% (1,147), 09-28 31.8% (22), 10-05 87.5% (8)."
+      }
     },
     "dallali": {
       "floor_pct": 85,

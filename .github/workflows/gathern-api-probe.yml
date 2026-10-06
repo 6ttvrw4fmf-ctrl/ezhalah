@@ -14,7 +14,12 @@
 name: Gathern per-unit API probe
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "unit-api (per-unit endpoint discriminator) | app-link (does any web link open an app-only unit? 2026-10-06)"
+        required: false
+        default: "unit-api"
 
 concurrency:
   group: gathern-api-probe
@@ -35,4 +40,8 @@ jobs:
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
       - name: Probe (read-only, no DB credentials in scope)
-        run: exec python -m scrapers.gathern.probe_unit_api
+        run: |
+          if [ "${{ github.event.inputs.mode }}" = "app-link" ]; then
+            exec python -m scrapers.gathern.probe_app_only_link
+          fi
+          exec python -m scrapers.gathern.probe_unit_api

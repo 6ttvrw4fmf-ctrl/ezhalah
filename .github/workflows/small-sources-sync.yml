@@ -18,8 +18,15 @@ on:
         required: false
         default: ""
 
+# A TARGETED re-run (input `source` set) gets its own lane (2026-10-06, Scraping Engineer). With one
+# shared group a re-run of a site that failed at 04:3x waited behind the nightly run's longest job
+# (dwelleo ~4 h, muhaysini ~2 h) — on 10-05 the fixes for 4 failed sites could not be proven until
+# 07:30, and on 10-06 hasaad/eastabha would have waited until ~08:30, past the engineers' window.
+# The nightly (blank input) keeps the shared group; each distinct source list is its own group, so
+# two dispatches of the same list still queue (never cancel). Re-run only sites whose nightly job
+# has finished — a list naming a site that is still running would crawl it twice at once.
 concurrency:
-  group: small-sources-sync
+  group: small-sources-sync${{ github.event.inputs.source && format('-{0}', github.event.inputs.source) || '' }}
   cancel-in-progress: false
 
 jobs:
