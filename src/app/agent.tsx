@@ -95,6 +95,7 @@ import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryPr
 import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, resolveScopeOptionsInBackground, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, primeLiveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
 import { markSearchLeftBehind } from '@/lib/searchLeftBehind';
+import { PLATFORM_META, type LoaderPlatform } from '@/data/loaderPlatforms';
 
 // Property Age advanced-filter eligibility. Reached from the EXISTING «خلّنا نحدد الطلب أكثر» button
 // below a results block — NEVER before first results. Its gate is cohortAllows(q, 'property_age')
@@ -674,6 +675,29 @@ export default function Agent() {
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [typed, setTyped] = useState('');
+  // The landing Search chip is a compact source picker. It owns one optional source for the
+  // conversation; the real query receives the same `sources` field the agent already supports.
+  const [platformPickerOpen, setPlatformPickerOpen] = useState(false);
+  const [platformPickerSearch, setPlatformPickerSearch] = useState('');
+  const [selectedSource, setSelectedSource] = useState<string | null>(null);
+  const selectedPlatform = useMemo(
+    () => selectedSource ? PLATFORM_META.find((platform) => platform.name === selectedSource) ?? null : null,
+    [selectedSource],
+  );
+  const pickerPlatforms = useMemo(() => {
+    const needle = platformPickerSearch.trim().toLocaleLowerCase();
+    const unique = new Map<string, LoaderPlatform>();
+    for (const platform of PLATFORM_META) {
+      // `logoOnly` brands are intentionally advertised in the loader but have no searchable
+      // inventory. They must never be offered as a source restriction that would return nothing.
+      if (platform.logoOnly) continue;
+      if (!unique.has(platform.name)) unique.set(platform.name, platform);
+    }
+    return Array.from(unique.values()).filter((platform) => {
+      if (!needle) return true;
+      return `${platform.name} ${t(platform.i18nKey)}`.toLocaleLowerCase().includes(needle);
+    });
+  }, [platformPickerSearch, t]);
   const [loaderBottomInset, setLoaderBottomInset] = useState<number>();
   // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): a search that arrived via Normal Filter's
   // «بحث» (the `?filter=` param — see the effect below, the ONE place this flips true) shows its
@@ -2894,6 +2918,7 @@ export default function Agent() {
   const send = async (override?: string) => {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
+    const selectedSourceForTurn = selectedSource;
     // The user SENT something (typed or voice — sendVoice funnels in here): the small sign-in
     // card retires for the rest of this load (owner 2026-08-29). After the guard, so an empty or
     // busy-refused submit is not a send.
@@ -2913,7 +2938,12 @@ export default function Agent() {
     // merge it into the SAME filter, and re-search — never run it through the normal agent path. (user 2026-06-27.)
     if (pendingRefineRef.current) {
       const { q: baseQ, dim } = pendingRefineRef.current;
-      await runRefine(baseQ, dim, v, v);
+      await runRefine(
+        selectedSourceForTurn ? { ...baseQ, sources: [selectedSourceForTurn] } : baseQ,
+        dim,
+        v,
+        v,
+      );
       return;
     }
     // Sidebar Recent entry: title = the user's exact message. First send in a new chat creates the
@@ -2989,6 +3019,12 @@ export default function Agent() {
       askCount: askCountRef.current, userMessageId, historyTurnsRaw: historyAll.length,
     });
     if (run.cancelled) return;
+    // The website picker is a presentation layer over the existing canonical `sources` query field.
+    // Apply it after the agent has parsed the user's message so the model cannot widen the user's
+    // explicit choice, and so every downstream path (search, summary, history) sees one query.
+    if (selectedSourceForTurn && turn.kind !== 'interview' && turn.query) {
+      turn = { ...turn, query: { ...turn.query, sources: [selectedSourceForTurn] } };
+    }
     // The server is the single decision authority for askCount too (decide.ts) — store whatever it
     // last echoed back. Never reset mid-chat by the client (owner-confirmed default); a brand new
     // chat starts askCountRef at 0 by construction (a fresh screen mount / New Chat, not a reset here).
@@ -3275,6 +3311,9 @@ export default function Agent() {
   const resetConversationState = () => {
     setBusy(false);
     setStopped(false);
+    setPlatformPickerOpen(false);
+    setPlatformPickerSearch('');
+    setSelectedSource(null);
     setMsgs([]);
     setCompleted(false);      // terminality is per-conversation — never inherited (see openStatic/openSaved)
     chatIdRef.current = null; // new conversation → new sidebar chat (a restore re-sets it)
@@ -3723,6 +3762,18 @@ export default function Agent() {
   const introLanding = msgs.every((m) => m.role === 'agent' && !!m.greeting);
   const showIntroExamples =
     introLanding && !introInteracted && !typed && voiceState === 'idle' && !busy;
+  const openPlatformPicker = () => {
+    setPlatformPickerSearch('');
+    setPlatformPickerOpen(true);
+  };
+  const closePlatformPicker = () => {
+    setPlatformPickerOpen(false);
+    setPlatformPickerSearch('');
+  };
+  const choosePlatform = (source: string | null) => {
+    setSelectedSource(source);
+    closePlatformPicker();
+  };
 
   return (
     // DARK MODE IS GLOBAL AND STICKY (owner 2026-08-30, reverses the 2026-08-29 "white by design"
@@ -3813,6 +3864,107 @@ export default function Agent() {
       )}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
+      {platformPickerOpen && (
+        <View style={s.platformPickerOverlay} testID="platform-picker" pointerEvents="box-none">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('Close')}
+            onPress={closePlatformPicker}
+            style={s.platformPickerBackdrop}
+          />
+          <View style={s.platformPickerCard}>
+            <View style={s.platformPickerHeader}>
+              <View style={s.platformPickerHeading}>
+                <Text style={s.platformPickerTitle}>{t('Choose a website')}</Text>
+                <Text style={s.platformPickerSubtitle}>{t('Select a website to narrow your search.')}</Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('Close')}
+                onPress={closePlatformPicker}
+                hitSlop={8}
+                style={({ pressed }: any) => [s.platformPickerClose, pressed && s.platformPickerClosePressed]}
+              >
+                <Ionicons name="close" size={18} color={colors.body} />
+              </Pressable>
+            </View>
+
+            <View style={s.platformPickerSearchBox}>
+              <Ionicons name="search-outline" size={18} color={colors.muted} />
+              <TextInput
+                value={platformPickerSearch}
+                onChangeText={setPlatformPickerSearch}
+                placeholder={t('Search websites…')}
+                placeholderTextColor={colors.muted}
+                style={s.platformPickerSearchInput}
+                accessibilityLabel={t('Search websites…')}
+                returnKeyType="search"
+              />
+              {platformPickerSearch ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('Clear all')}
+                  onPress={() => setPlatformPickerSearch('')}
+                  hitSlop={8}
+                >
+                  <Ionicons name="close-circle" size={17} color={colors.muted} />
+                </Pressable>
+              ) : null}
+            </View>
+
+            <ScrollView
+              style={s.platformPickerList}
+              contentContainerStyle={s.platformPickerListContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <Pressable
+                testID="platform-picker-all"
+                accessibilityRole="button"
+                accessibilityLabel={t('All websites')}
+                onPress={() => choosePlatform(null)}
+                style={({ pressed }: any) => [s.platformPickerAll, !selectedSource && s.platformPickerSelected, pressed && s.platformPickerItemPressed]}
+              >
+                <View style={s.platformPickerAllMark}>
+                  <Ionicons name="globe-outline" size={19} color={colors.primary} />
+                </View>
+                <View style={s.platformPickerItemCopy}>
+                  <Text style={s.platformPickerItemName}>{t('All websites')}</Text>
+                  <Text style={s.platformPickerItemHint}>{t('Search one website')}</Text>
+                </View>
+                {!selectedSource ? <Ionicons name="checkmark-circle" size={19} color={colors.primary} /> : null}
+              </Pressable>
+
+              <View style={s.platformPickerRule} />
+              <View style={s.platformPickerGrid}>
+                {pickerPlatforms.map((platform) => {
+                  const selected = selectedSource === platform.name;
+                  return (
+                    <Pressable
+                      key={platform.name}
+                      testID={`platform-picker-${platform.name}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={t(platform.i18nKey)}
+                      accessibilityState={{ selected }}
+                      onPress={() => choosePlatform(platform.name)}
+                      style={({ pressed }: any) => [s.platformPickerItem, selected && s.platformPickerSelected, pressed && s.platformPickerItemPressed]}
+                    >
+                      <View style={s.platformPickerLogoFrame}>
+                        <Image source={platform.logo} style={s.platformPickerLogo} contentFit="contain" accessible={false} />
+                      </View>
+                      <Text style={[s.platformPickerItemName, s.platformPickerGridName]} numberOfLines={1}>
+                        {t(platform.i18nKey)}
+                      </Text>
+                      {selected ? <Ionicons name="checkmark-circle" size={16} color={colors.primary} /> : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {!pickerPlatforms.length ? <Text style={s.platformPickerEmpty}>{t('No matching websites')}</Text> : null}
+            </ScrollView>
+          </View>
+        </View>
+      )}
 
       <KeyboardAvoidingView
         // iOS-NATIVE does its own lifting and still needs this. On WEB the root is pinned to the
@@ -4418,23 +4570,28 @@ export default function Agent() {
                 <Pressable
                   testID="initial-chat-search"
                   accessibilityRole="button"
-                  accessibilityLabel={t('Search')}
-                  accessibilityState={{ disabled: !typed.trim() }}
-                  disabled={!typed.trim()}
-                  onPress={() => send()}
+                  accessibilityLabel={selectedPlatform ? `${t('Search')}: ${t(selectedPlatform.i18nKey)}` : t('Search')}
+                  onPress={openPlatformPicker}
                   hitSlop={5}
                   // @ts-expect-error web-only DOM props on the RNW host node
                   dataSet={{ ...TAP44 }}
                   style={({ pressed }: any) => [s.initialSearch, pressed && s.initialSearchPressed]}
                 >
-                  <Image
-                    source={require('../../assets/icons/eagle-search.svg')}
-                    style={s.initialSearchIcon}
-                    contentFit="contain"
-                    tintColor={colors.ink}
-                    accessible={false}
-                  />
-                  <Text style={s.initialSearchText}>{t('Search')}</Text>
+                  {selectedPlatform ? (
+                    <Image source={selectedPlatform.logo} style={s.selectedSearchLogo} contentFit="contain" accessible={false} />
+                  ) : (
+                    <Image
+                      source={require('../../assets/icons/eagle-search.svg')}
+                      style={s.initialSearchIcon}
+                      contentFit="contain"
+                      tintColor={colors.ink}
+                      accessible={false}
+                    />
+                  )}
+                  <Text style={s.initialSearchText} numberOfLines={1}>
+                    {selectedPlatform ? t(selectedPlatform.i18nKey) : t('Search')}
+                  </Text>
+                  <Ionicons name="chevron-down" size={13} color={colors.muted} />
                 </Pressable>
               )}
               <View style={s.composerInputColumn}>
@@ -4954,9 +5111,40 @@ const s = StyleSheet.create({
   initialSearch: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 7, height: 30, paddingHorizontal: 11, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
   initialSearchPressed: { backgroundColor: colors.segTrack },
   initialSearchIcon: { width: 17, height: 17 },
-  initialSearchText: { color: colors.ink, fontSize: 14, lineHeight: 20 },
+  selectedSearchLogo: { width: 21, height: 21, borderRadius: 5 },
+  initialSearchText: { color: colors.ink, fontSize: 14, lineHeight: 20, maxWidth: 148, flexShrink: 1 },
   micBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   micBtnPressed: { backgroundColor: colors.segTrack, transform: [{ scale: 0.96 }] },
+
+  // Website picker — a single focused sheet, rather than a second settings screen. The selected
+  // logo then stays in the landing chip, making the restriction visible before the user sends.
+  platformPickerOverlay: { ...StyleSheet.absoluteFill, zIndex: 80, alignItems: 'center', justifyContent: IS_WEB ? 'center' : 'flex-end', padding: IS_WEB ? 16 : 0 },
+  platformPickerBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(12, 26, 18, 0.34)' },
+  platformPickerCard: { width: '100%', maxWidth: 560, maxHeight: IS_WEB ? '72%' : '80%', backgroundColor: colors.surface, borderRadius: 24, padding: 18, paddingBottom: 20, ...cardShadow, shadowOpacity: 0.2, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 12 },
+  platformPickerHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 },
+  platformPickerHeading: { flex: 1, minWidth: 0 },
+  platformPickerTitle: { fontFamily: CHAT_FONT, fontSize: 20, lineHeight: 27, fontWeight: '700', color: colors.ink, textAlign: 'right' },
+  platformPickerSubtitle: { fontFamily: CHAT_FONT, fontSize: 12.5, lineHeight: 19, color: colors.muted, marginTop: 2, textAlign: 'right' },
+  platformPickerClose: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.tint },
+  platformPickerClosePressed: { backgroundColor: colors.segTrack },
+  platformPickerSearchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 42, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 13, backgroundColor: colors.paper, paddingHorizontal: 12, marginBottom: 12 },
+  platformPickerSearchInput: { flex: 1, minWidth: 0, fontFamily: CHAT_FONT, fontSize: 16, lineHeight: 22, color: colors.ink, paddingVertical: 8, textAlign: 'right', writingDirection: 'rtl', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  platformPickerList: { minHeight: 0 },
+  platformPickerListContent: { paddingBottom: 2 },
+  platformPickerAll: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 54, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 15, paddingHorizontal: 11, backgroundColor: colors.paper },
+  platformPickerAllMark: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.tint },
+  platformPickerItemCopy: { flex: 1, minWidth: 0 },
+  platformPickerItemHint: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 11.5, lineHeight: 17, marginTop: 1, textAlign: 'right' },
+  platformPickerRule: { height: 1, backgroundColor: colors.line, marginVertical: 13 },
+  platformPickerGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 9 },
+  platformPickerItem: { width: '48.5%', minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 15, paddingHorizontal: 9, backgroundColor: colors.surface },
+  platformPickerSelected: { borderColor: colors.primary, backgroundColor: colors.tint },
+  platformPickerItemPressed: { backgroundColor: colors.segTrack },
+  platformPickerLogoFrame: { width: 39, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.paper, flexShrink: 0, overflow: 'hidden' },
+  platformPickerLogo: { width: 32, height: 32 },
+  platformPickerItemName: { fontFamily: CHAT_FONT, flex: 1, minWidth: 0, color: colors.ink, fontSize: 13, lineHeight: 19, fontWeight: '600', textAlign: 'right' },
+  platformPickerGridName: { textAlign: 'right' },
+  platformPickerEmpty: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: 'center', paddingVertical: 28 },
   // The LTR pin that fixes the physical order lives INLINE on the row (Sidebar's LTR_PIN idiom —
   // RNW rejects `direction` inside StyleSheet.create but honours it as an inline style).
   voiceRow: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 8, paddingRight: 8 },
