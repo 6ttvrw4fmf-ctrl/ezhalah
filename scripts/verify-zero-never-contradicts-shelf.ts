@@ -129,7 +129,7 @@ const ONE_WORD = 'if (!out.length && new Set(typoHits.map((h) => h.word)).size =
 await mustCatch('spell-check "correcting" a word that exists', ONE_WORD, 'if (new Set(typoHits.map((h) => h.word)).size === 1)');
 await mustCatch('a typo fanning out to two different words', ONE_WORD, 'if (!out.length && new Set(typoHits.map((h) => h.word)).size >= 1)');
 const AGENT = readFileSync(join(ROOT, 'src/app/agent.tsx'), 'utf8');
-check('the chat\'s location-probe «no results» is noted too', /probe\.listings && probe\.listings\.length === 0\) logZeroResult\(probeQuery/.test(AGENT));
+check('the chat\'s location-probe «no results» is noted too', /probe\.listings && probe\.listings\.length === 0\) logZeroResult\(buildLocationProbeQuery\(turn\.query\)/.test(AGENT));
 const fetchLevel = STORE.replace('if (rows !== null && r.listings.length === 0 && !signal?.aborted) logZeroResult(q, shelf, shelfClash);', '')
   .replace('const r = runSearch(', 'if (rows && rows.length === 0) logZeroResult(q, shelf, shelfClash);\n        const r = runSearch(');
 const caughtFetchLevel = !wired(fetchLevel);

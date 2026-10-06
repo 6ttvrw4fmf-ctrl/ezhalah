@@ -3099,11 +3099,10 @@ export default function Agent() {
       // p_limit:1 knob if this ever measurably matters.
       let reply = turn.reply;
       if (turn.locationQuestion && turn.query) {
-        const probeQuery = buildLocationProbeQuery(turn.query);
-        const probe = await fetchListingsForQuery(probeQuery, { signal: run.ac.signal });
+        const probe = await fetchListingsForQuery(buildLocationProbeQuery(turn.query), { signal: run.ac.signal });
         if (run.cancelled) return;
         // This «no results» is shown too — the notebook notes it like any other (owner 2026-10-05).
-        if (probe.listings && probe.listings.length === 0) logZeroResult(probeQuery, null, false);
+        if (probe.listings && probe.listings.length === 0) logZeroResult(buildLocationProbeQuery(turn.query), null, false);
         reply = replyAfterLocationProbe(
           turn.reply,
           t('Sorry, no listings currently match your request. Try using the Filter to widen your search.'),
