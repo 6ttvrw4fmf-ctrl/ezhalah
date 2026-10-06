@@ -21,6 +21,7 @@ READ-ONLY BY CONSTRUCTION: no database credentials, no writes. Prints a table an
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -91,7 +92,13 @@ def main() -> int:
     s = api()
     print("gathern app-only link probe — READ ONLY, no database writes.\n", flush=True)
     sample: list[dict] = []
-    for city in CITIES:
+    # PROBE_UNITS="chalet:unit,…" tests units we already hold as web-404 (the app-only cohort) instead
+    # of page 1 of the search, which may list only web-visible units (2026-10-06: 8 of 8 opened).
+    for pair in filter(None, os.environ.get("PROBE_UNITS", "").replace(" ", "").split(",")):
+        c, _, u = pair.partition(":")
+        if c.isdigit() and u.isdigit():
+            sample.append({"chalet_id": int(c), "id": int(u)})
+    for city in (() if sample else CITIES):
         time.sleep(THROTTLE)
         try:
             r = s.get(SEARCH.format(city=city, page=1), timeout=30)

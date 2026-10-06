@@ -99,6 +99,14 @@ _DISTRICT_EN_AR = {
     ("khobar", "aqrabiyah"): "حي العقربية", ("khobar", "ulaya"): "حي العليا",
     ("khobar", "sadafa"): "حي الصدفة", ("khobar", "corniche"): "حي الكورنيش",
     ("dammam", "faisaliah"): "حي الفيصلية", ("dammam", "faisaliyah"): "حي الفيصلية",
+    # 2026-10-06 (Scraping Engineer): the spellings the source used on rows left NULL — the weekly
+    # field-fill check saw compoundin's new rows at 1 district in 18. Same rule: unambiguous
+    # transliteration, then find_district_in_text() against THIS city's catalog.
+    ("riyadh", "ishbilia"): "حي اشبيلية", ("riyadh", "ishbiliyah"): "حي اشبيلية",
+    ("riyadh", "qurtoba"): "حي قرطبة", ("riyadh", "qurtubah"): "حي قرطبة",
+    ("riyadh", "ghirnatah"): "حي غرناطة", ("riyadh", "mursalat"): "حي المرسلات",
+    ("riyadh", "rawabi"): "حي الروابي", ("riyadh", "muruj"): "حي المروج",
+    ("jeddah", "rehab"): "حي الرحاب", ("jeddah", "khalidiyah"): "حي الخالدية",
 }
 
 
@@ -108,6 +116,7 @@ def _norm_dist(name: Optional[str]) -> Optional[str]:
         return None
     n = re.sub(r"\bdistrict\b", " ", name.strip().lower())
     n = re.sub(r"[^a-z\s-]", " ", n)
+    n = re.sub(r"^\s*(?:well\s+)?located\s+in\s+", "", n)        # «Well located in AlRehab»
     n = re.sub(r"^\s*(?:al|an|ar|as|ad|ash)[\s-]+", "", n)
     n = re.sub(r"\s+", " ", n).strip()
     return n or None
@@ -212,7 +221,10 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
     district_ar = None
     nd = _norm_dist(district_en)
     if nd:
-        cand = _DISTRICT_EN_AR.get((city_en.strip().lower(), nd))
+        ck = city_en.strip().lower()
+        cand = _DISTRICT_EN_AR.get((ck, nd))
+        if cand is None and nd.startswith("al") and " " not in nd:   # «AlRehab» written as one word
+            cand = _DISTRICT_EN_AR.get((ck, nd[2:]))
         # Only write a district our own catalog already attests for THIS city.
         if cand:
             district_ar = find_district_in_text(cand, city_id)
