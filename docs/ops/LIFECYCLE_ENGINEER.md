@@ -171,6 +171,7 @@ your work.
 | per-site 30-day deletion rules (only 4 of 156 enabled on 2026-09-27: aqar, aqarcity, gathern, wasalt) | `platform_retention_policy`, engine `scrapers/common/cleanup.py`, workflow `platform-cleanup.yml` (inputs `platform`, `dry_run`) |
 | audit trail | `cleanup_runs`, `cleanup_deletion_log` |
 | brings back wrongly hidden listings | `auto_recover_false_inactive()` (daily 05:20 UTC) |
+| re-reads hidden gathern units and restores any whose own page is live (newest 1,500 kills a day) | workflow `gathern-recheck-dead.yml`, pg_cron `gh-gathern-recheck-dead` |
 | weekly spot-check of deletions | `verify-deletions.yml` (Sundays) |
 | fleet checklist: which sites are protected | `select * from ops_platform_protection_matrix();` |
 | check-by coverage per site | `ops_liveness_coverage_snapshot` (refreshed hourly), view `ops_platform_liveness_coverage` |
@@ -941,6 +942,19 @@ or rewrite another engineer's work, and never start a big change in another engi
   come back live the shard is report-only (`CONTROLS-QUARANTINED` in its run notes). Its strikes
   are all direct readings (the aqar crawl never bumps `missing_count`), so a struck-only recheck at
   13:00 UTC is the next step toward "removed ads leave in a day".
+
+- A guard against ABSENCE must not throw away a DIRECT reading (dealapp, 2026-10-06). Every dealapp
+  crawl shard ends on its time budget and re-sees ~60% of its slice, so `prune_unseen`'s coverage
+  guard tripped every night and the same run's `confirmed_absent()` (the ad's own page freshly
+  rendered as dealapp's no-listing page between two live-ad renders) was discarded: ~20 dealapp hides
+  in the 4 days after the 10-02 batches. `run.prune_table` now re-runs the prune counting every
+  active row as seen except the confirmed-absent ones, so only own-page readings strike.
+- A liveness checker's writes go through `db._execute` (dealapp, 2026-10-06): one ConnectionTerminated
+  on one update killed a 600-read run. aqar learned it on 2026-10-02; check every checker, not one.
+- A restore-only pass that never runs restores nothing (gathern, 2026-10-06). `--recheck-dead` was
+  dispatch-only, so unit 276709, hidden after three 404s, stayed hidden while its page answered 200.
+  `gathern-recheck-dead.yml` runs it daily from pg_cron (`gh-gathern-recheck-dead`), and gathern's
+  probe reads a 200 that landed on the home page as no verdict, since that pass restores on a 200.
 
 - An unattended run cannot apply a statement the database connector holds for a human (measured
   2026-10-05: `delete from public.ops_liveness_registry where false;` timed out at 60 s while
