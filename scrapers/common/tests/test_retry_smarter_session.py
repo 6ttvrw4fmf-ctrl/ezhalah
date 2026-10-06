@@ -90,3 +90,20 @@ def test_scraper_main_opens_with_retry_smarter_session(mod):
     m = importlib.import_module(f"scrapers.{mod}.run")
     assert m.retry_smarter_session is http.retry_smarter_session
     assert "retry_smarter_session(" in inspect.getsource(m.main)
+
+
+def test_direct_dead_proxy_answered_returns_the_proxy_session(monkeypatch):
+    """hasaad 2026-10-06 04:35: every DIRECT connect timed out, the proxy answered 404 for the probe
+    URL, and the old code handed back a fresh DIRECT session — every later fetch timed out on the
+    route already proven dead. A route that answered reaches the host: hand that one back."""
+    s, tried, _ = _run(monkeypatch, {("direct", p): TimeoutError("t") for p in ("chrome124", "safari17_0", "firefox133")}
+                       | {("proxy", p): 404 for p in ("chrome124", "safari17_0", "firefox133")},
+                       proxy_url="http://p.test:1")
+    assert tried[:3] == ["direct/chrome124:TimeoutError", "direct/safari17_0:TimeoutError", "direct/firefox133:TimeoutError"]
+    assert s.proxies is not None and s.impersonate == "chrome124"
+    assert s.__dict__["_impersonate_profile"] == "proxy/chrome124"
+
+
+def test_direct_answered_non_200_keeps_direct(monkeypatch):
+    s, _, _ = _run(monkeypatch, {}, proxy_url="http://p.test:1")   # everything 502
+    assert s.proxies is None and s.impersonate == "chrome124"

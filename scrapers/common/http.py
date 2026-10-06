@@ -156,6 +156,7 @@ def retry_smarter_session(probe_url: str, *, headers: Optional[dict] = None, tim
     if purl:
         routes.append(("proxy", {"http": purl, "https": purl}))
     tried: list[str] = []
+    answered: Optional[cc.Session] = None
     for route, proxies in routes:
         for prof in order:
             s = cc.Session(impersonate=prof, proxies=proxies)   # impersonate OWNS the User-Agent
@@ -170,6 +171,16 @@ def retry_smarter_session(probe_url: str, *, headers: Optional[dict] = None, tim
             if r.status_code == 200:
                 s.__dict__["_impersonate_profile"] = f"{route}/{prof}"
                 return s, tried
+            if answered is None:
+                s.__dict__["_impersonate_profile"] = f"{route}/{prof}"
+                answered = s
+    # 2026-10-06 (Scraping Engineer): hasaad's probe URL answered 404 through the proxy after every
+    # DIRECT connect timed out, and the old code then handed back a fresh DIRECT session — so every
+    # later fetch (the sitemap indexes, the list-page fallback) timed out on the one route already
+    # proven dead. A route that ANSWERED (any HTTP status) reaches the host; the probe URL alone was
+    # missing. Hand that session back; only when nothing answered at all is the plain DIRECT one used.
+    if answered is not None:
+        return answered, tried
     s = cc.Session(impersonate=order[0])
     if headers:
         s.headers.update(headers)

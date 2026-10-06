@@ -153,10 +153,13 @@ def _projects_sitemap(s: cc.Session) -> tuple[Optional[str], list[str]]:
     """(the projects sitemap's XML, a trace of every attempt). The fixed address first, then any
     child of a sitemap index whose own address names projects."""
     trace: list[str] = []
-    r = s.get(SITEMAP, timeout=40)
-    trace.append(f"{SITEMAP.rsplit('/', 1)[-1]}:HTTP {r.status_code}")
-    if r.status_code == 200 and "<loc>" in r.text:
-        return r.text, trace
+    try:
+        r = s.get(SITEMAP, timeout=40)
+        trace.append(f"{SITEMAP.rsplit('/', 1)[-1]}:HTTP {r.status_code}")
+        if r.status_code == 200 and "<loc>" in r.text:
+            return r.text, trace
+    except Exception as e:  # noqa: BLE001 — recorded, then the indexes
+        trace.append(f"{SITEMAP.rsplit('/', 1)[-1]}:{type(e).__name__}")
     for idx in SITEMAP_INDEXES:
         try:
             ri = s.get(idx, timeout=40)
@@ -169,19 +172,64 @@ def _projects_sitemap(s: cc.Session) -> tuple[Optional[str], list[str]]:
         for child in re.findall(r"<loc>([^<]+)</loc>", ri.text):
             if "project" not in child.lower() or not child.lower().split("?")[0].endswith(".xml"):
                 continue
-            rc = s.get(child.strip(), timeout=40)
+            try:
+                rc = s.get(child.strip(), timeout=40)
+            except Exception as e:  # noqa: BLE001
+                trace.append(f"{child.strip().rsplit('/', 1)[-1]}:{type(e).__name__}")
+                continue
             trace.append(f"{child.strip().rsplit('/', 1)[-1]}:HTTP {rc.status_code}")
             if rc.status_code == 200 and "<loc>" in rc.text:
                 return rc.text, trace
     return None, trace
 
 
+# 2026-10-06 (Scraping Engineer): every WordPress sitemap answered HTTP 404 on 10-05 and 10-06
+# (projects-sitemap.xml, sitemap_index.xml, sitemap.xml, wp-sitemap.xml) — the site switched its
+# sitemaps off. A sitemap is one way to FIND the project pages, never the only one: the site's own
+# pages link every project. These are read for /projects/<slug>/ links when no sitemap is served.
+LIST_PAGES = (f"{BASE}/projects/", f"{BASE}/")
+_PROJECT_HREF_RE = re.compile(r'href=["\'](?P<u>(?:https?://(?:www\.)?hasaadestate\.com)?/projects/[^"\'#?\s]+)["\']', re.I)
+
+
+def _projects_from_list_pages(s: cc.Session) -> tuple[list[str], list[str]]:
+    """(project page URLs linked from the site's own pages, a trace of every attempt)."""
+    found: list[str] = []
+    trace: list[str] = []
+    for page in LIST_PAGES:
+        try:
+            r = s.get(page, timeout=40)
+        except Exception as e:  # noqa: BLE001 — recorded, then the next page
+            trace.append(f"{page[len(BASE):] or '/'}:{type(e).__name__}")
+            continue
+        trace.append(f"{page[len(BASE):] or '/'}:HTTP {r.status_code}")
+        if r.status_code != 200:
+            continue
+        for m in _PROJECT_HREF_RE.finditer(r.text or ""):
+            u = m.group("u")
+            if u.startswith("/"):
+                u = BASE + u
+            u = u.replace("://www.", "://", 1).replace("http://", "https://", 1)
+            if not u.endswith("/"):
+                u += "/"
+            # WordPress writes its escapes lowercase («%d8%b4»); quote() writes raw Arabic upper.
+            found.append(re.sub(r"%[0-9A-Fa-f]{2}", lambda m: m.group(0).lower(), _encode(u)))
+    return found, trace
+
+
 def fetch_project_urls(s: cc.Session, limit: int = 0) -> list[str]:
     xml, trace = _projects_sitemap(s)
-    if xml is None:
-        raise RuntimeError("projects sitemap → " + "; ".join(trace))
-    urls = [u for u in re.findall(r"<loc>([^<]+)</loc>", xml)
-            if "/projects/" in u and "/en/" not in u and u.rstrip("/") != f"{BASE}/projects"]
+    if xml is not None:
+        cands = re.findall(r"<loc>([^<]+)</loc>", xml)
+    else:
+        cands, lt = _projects_from_list_pages(s)
+        trace += lt
+        if not cands:
+            raise RuntimeError("projects sitemap → " + "; ".join(trace))
+        print(f"{SOURCE}: no sitemap served ({'; '.join(trace)}) — {len(set(cands))} project links "
+              f"read from the site's own pages", flush=True)
+    urls = [u.strip() for u in cands
+            if "/projects/" in u and "/en/" not in u and u.strip().rstrip("/") != f"{BASE}/projects"
+            and "/projects/page/" not in u]
     urls = sorted(dict.fromkeys(urls))
     return urls[:limit] if limit else urls
 
