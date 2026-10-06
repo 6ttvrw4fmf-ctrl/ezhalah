@@ -23,7 +23,7 @@
 // as coverage of the class. This file is the class.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { zeroRendered, shippedNoResultsTemplates } from '../e2e/lib/resultsSentence.mjs';
+import { zeroRendered, shippedNoResultsTemplates, settledSource } from '../e2e/lib/resultsSentence.mjs';
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => {
@@ -74,6 +74,25 @@ mustCatch('a predicate so wide it calls a results screen a zero',
   zeroRendered(PROD_RESULTS) === false);
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
+console.log('\n§1c A NON-RESULT HINT IS NOT A ZERO, AND DOES NOT STOP THE CLOCK (2026-10-05)');
+// The district panel's per-row hint rendered «لا توجد إعلانات هنا حالياً» for a frame when «بحث» was
+// pressed; a bare «لا توجد إعلانات» in ZERO_RE matched it, runSearch() «settled» before the search
+// ran, and trending-district read the loader as «results with no sentence». Read from the product.
+const i18n = readFileSync('src/i18n.tsx', 'utf8');
+const arOf = (en: string) => new RegExp(`'${en.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}':\\s*'([^']+)'`).exec(i18n)?.[1] ?? '';
+const PANEL_HINT = arOf('No listings here right now');
+const DISTRICT_ZERO = arOf('No listings in that exact neighborhood — showing others in the same city.');
+const NO_EXACT = arOf('No exact matches — try broadening your search.');
+const settled = (t: string) => new RegExp(settledSource()).test(t);
+check('1c.1 the three strings are read from src/i18n.tsx (not retyped here)',
+  !!PANEL_HINT && !!DISTRICT_ZERO && !!NO_EXACT, `${PANEL_HINT} | ${DISTRICT_ZERO} | ${NO_EXACT}`);
+check('1c.2 the district panel hint is NOT a zero and does NOT settle the search clock',
+  !zeroRendered(PANEL_HINT) && !settled(PANEL_HINT), PANEL_HINT);
+check('1c.3 the MSA zero diagnoses still are (the narrowing dropped no terminal state)',
+  zeroRendered(DISTRICT_ZERO) && settled(DISTRICT_ZERO) && zeroRendered(NO_EXACT) && settled(NO_EXACT));
+mustCatch('the pre-2026-10-05 ZERO_RE, which settled on the panel hint',
+  /ما لقينا|ما لقيت|ما فيه نتائج|ما فيه إعلانات|لا توجد نتائج|لا توجد إعلانات/.test(PANEL_HINT) && !zeroRendered(PANEL_HINT));
+
 console.log('\n§2  THE CLASS — no suite may carry its own copy of the vocabulary');
 // Discovered BY SHAPE over e2e/, not from a list anyone has to remember to extend: any Arabic string
 // literal that is recognisably a zero-state phrase, in a file that is not the one place allowed to
