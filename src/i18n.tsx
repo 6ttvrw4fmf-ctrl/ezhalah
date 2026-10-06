@@ -191,6 +191,13 @@ const AR: Record<string, string> = {
   ' /yr': ' / سنوياً',
   'Max price': 'السعر الأقصى',
   'Search': 'بحث',
+  'Choose a website': 'اختر موقعاً',
+  'Search one website': 'ابحث في موقع واحد',
+  'Select a website to narrow your search.': 'حدّد موقعاً لتضييق البحث.',
+  'Search websites…': 'ابحث عن موقع…',
+  'All websites': 'كل المواقع',
+  'Clear website': 'مسح اختيار الموقع',
+  'No matching websites': 'لا توجد مواقع مطابقة',
   'Clear all': 'مسح الكل',
 
   // Deals + verbs
