@@ -48,6 +48,24 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  '20261005094209_aldarim_saas_unfilled_room_block_is_silence.sql':
+    'watched by its companion 20261006095236_aldarim_saas_unfilled_block_false_detector.sql, which creates ' +
+    'mon_detect_aldarim_saas_unfilled_block_false() over the same eight tables and predicate and needle-edits ' +
+    'it into the mon_run_all_detectors() roster (0 live on 563 active rows; a planted false is caught)',
+  // 🔬 AF engineer, 2026-10-06. Both became visible the day repairClassifier.ts learned format()
+  // placeholders (they always were repairs; the classifier could not read `update public.%I`).
+  // The first is watched by an existing detector that is not named mon_detect_*: the field-level
+  // safety barrier's detect_manufactured_negatives() (live in production; run by
+  // verify-safety-barrier.ts) fires on any (platform × column) holding false with true nowhere,
+  // exactly the fabricated negatives this migration retracted.
+  '20260911115757_retract_fabricated_count_derived_amenity_negatives.sql':
+    'watched by public.detect_manufactured_negatives() (field-level safety barrier, ' +
+    '20260810151116), which flags any platform x amenity column holding false with true nowhere',
+  // An owner REVERSAL that restores exactly the rows 20260919230553 hid (which itself ships a
+  // detector). Re-activating listings is not a value a scraper can decay back; liveness owns them.
+  '20260919231035_restore_the_four_down_sites_listings_owner_reversal.sql':
+    'owner reversal of 20260919230553 (guarded): restores exactly the rows it hid; no corrected value ' +
+    'exists for a re-scrape to undo, and liveness (LISTING_LIVENESS.md) owns those rows from here',
   // 🔬 AF engineer, 2026-10-05 (PR #6112). A one-shot BACK-FILL, not a correction of a value that could
   // drift: ksaaqar's map_listing() parsed «التكييف» but filed it only in additional_info.air_conditioning.
   // From this PR on, the column and that key are written by the SAME parse_tristate(page_text, "التكييف")
@@ -675,6 +693,20 @@ const mustCatch = (label: string, caught: boolean) => {
 mustCatch('a bare backfill is flagged as an unguarded repair',
   repairsData('update aqarmonthly_residential_listings set district_ar = x;') === true
   && isGuarded('update aqarmonthly_residential_listings set district_ar = x;') === false);
+mustCatch('a dynamic-SQL repair over a listing-table family counts (execute format … %I_listings)',
+  repairsData(`do $$ declare t text; begin foreach t in array array['aldarim_residential'] loop
+     execute format($q$ update public.%I_listings x set kitchen = null where x.kitchen is false $q$, t);
+     end loop; end $$;`) === true);
+mustCatch('a fully dynamic UPDATE over named listing tables counts',
+  repairsData(`do $$ declare v_tbl text; begin foreach v_tbl in array array['eastabha_residential_listings'] loop
+     execute format('update public.%I set active = true', v_tbl); end loop; end $$;`) === true);
+mustCatch('a fully dynamic UPDATE over a config table is still not a repair',
+  repairsData(`do $$ begin execute format('update public.%I set v = 1', 'mon_config'); end $$;`) === false);
+mustCatch('the aldarim-SaaS repair (20261005094209) is classified a repair, and it is guarded',
+  (() => { const f = files.find((x) => x.startsWith('20261005094209'));
+    return !!f && repairsData(readFileSync(join(MIGRATIONS, f), 'utf8'))
+      && files.some((x) => x.endsWith('_aldarim_saas_unfilled_block_false_detector.sql')
+        && /mon_detect_aldarim_saas_unfilled_block_false/.test(readFileSync(join(MIGRATIONS, x), 'utf8'))); })());
 mustCatch('a repair inside a do-block still counts as executed',
   repairsData('do $mig$ begin update search_listings_ar set district_ar = y; end $mig$;') === true);
 mustCatch('an UPDATE merely DEFINED in a function body is not a repair',
