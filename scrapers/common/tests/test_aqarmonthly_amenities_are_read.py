@@ -101,3 +101,28 @@ def test_settle_drops_only_the_field_the_schema_rejects():
 ])
 def test_settle_falls_back_to_the_old_query_when_it_cannot_prove_the_schema(answer):
     assert R.settle_amenity_fields(answer) == ()
+
+
+# ── one unit is not proof (🔬 2026-10-06): a gone first unit no longer strips a whole shard ──────────
+def _units(gone: set):
+    asked = []
+
+    def answer_for(q, lid):
+        asked.append(lid)
+        if lid in gone:
+            return {"data": {"Listing": {"get": None}}}      # the first unit of the shard is gone
+        return {"data": {"Listing": {"get": {"id": lid}}}}
+    return answer_for, asked
+
+
+def test_a_gone_first_unit_does_not_strip_the_shard():
+    answer_for, asked = _units(gone={101})
+    got = R.settle_across_units(answer_for, [101, 102, 103])
+    assert "lift" in got and "ketchen" in got
+    assert asked[0] == 101 and 102 in asked
+
+
+def test_three_unreadable_units_still_fall_back_to_the_old_query():
+    answer_for, asked = _units(gone={1, 2, 3, 4})
+    assert R.settle_across_units(answer_for, [1, 2, 3, 4]) == ()
+    assert 4 not in asked                                     # bounded: never more than SETTLE_TRIES units

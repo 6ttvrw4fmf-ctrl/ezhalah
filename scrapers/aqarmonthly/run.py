@@ -266,6 +266,22 @@ def settle_amenity_fields(answer, fields: tuple[str, ...] = AMENITY_GQL_FIELDS) 
     return ()
 
 
+SETTLE_TRIES = 3
+
+
+def settle_across_units(answer_for, ids, tries: int = SETTLE_TRIES) -> tuple[str, ...]:
+    """settle_amenity_fields() on up to `tries` units, first non-empty answer wins (🔬 AF engineer,
+    2026-10-06). One unit is not proof: a unit that is gone, or a transient error, answers unreadable,
+    which settles to () — and that shard then crawled with no amenity fields at all (2026-10-05: 1,835
+    of ~2,368 fresh rows carried them; aqarmonthly_residential_listings:13906613 refreshed without).
+    `answer_for(query, unit_id)`. All `tries` failing still falls back to () — the old query."""
+    for lid in list(ids)[:tries]:
+        got = settle_amenity_fields(lambda q, lid=lid: answer_for(q, lid))
+        if got:
+            return got
+    return ()
+
+
 def map_amenities(g: dict) -> dict:
     """aqar's 0/1/null flags → our tri-state columns, through the SAME tables and _tri_state the annual
     aqar parser uses (one reading of one payload). A key the payload does not carry is not emitted, and
@@ -633,11 +649,11 @@ def main() -> int:
         global _amenity_fields
         s0, e0 = windows[0]
 
-        def _answer(q: str) -> dict | None:
+        def _answer(q: str, lid) -> dict | None:
             _throttle()
-            return _post(_sess(), {"query": q, "variables": {"id": int(ids[0]), "s": s0, "e": e0}})[0]
+            return _post(_sess(), {"query": q, "variables": {"id": int(lid), "s": s0, "e": e0}})[0]
 
-        _amenity_fields = settle_amenity_fields(_answer)
+        _amenity_fields = settle_across_units(_answer, ids)
         print(f"  amenity fields accepted by the schema: {list(_amenity_fields) or 'none (query unchanged)'}")
 
         rows: list[dict] = []
