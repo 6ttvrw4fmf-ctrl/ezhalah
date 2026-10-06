@@ -89,7 +89,15 @@ const SCOPE_QUESTION_TITLES = ['أي نوع من العقارات تبحث عن�
 // from 2026-10-02 this journey read «0 cards» every night on a production that rendered 12 on
 // arrival and 100 after the first «عرض المزيد» — PAGINATION ×2 + PAGER-MISSING, a healthy pager
 // accused. ResultCard renders testID={`card-listing-${listing.id}`} (web: data-testid) on every card.
-const countCards = (page) => page.evaluate(() => document.querySelectorAll('[data-testid^="card-listing-"]').length);
+//
+// …AND ONLY THE TURN BEING PAGED (2026-10-06). Every results turn is its own ResultCardGrid
+// (testID result-card-grid) and the transcript keeps the earlier ones. Counted document-wide, the
+// AF cohort's pre-AF villa turn (24–36 cards) was added to the AF turn's 500 and reported as
+// CAP-EXCEEDED «536 cards» — while the turn itself stopped at exactly 500. Every check here
+// (PAGINATION, PAGER-MISSING, the cap, CARDS-EXCEED-SET, the closing «أول N») is about that turn.
+const countCards = (page) => page.evaluate(() =>
+  [...document.querySelectorAll('[data-testid="result-card-grid"]')].pop()
+    ?.querySelectorAll('[data-testid^="card-listing-"]').length ?? 0);
 
 /**
  * THE CASCADE WALK (src/lib/initialReveal.ts, owner 2026-09-20). A turn ARRIVES with CASCADE_MAX cards
