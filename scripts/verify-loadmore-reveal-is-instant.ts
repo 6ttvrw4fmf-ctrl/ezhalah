@@ -33,6 +33,7 @@ import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { liftSymbols } from './lib/liftSymbols.ts';
+import { windowBetween } from './lib/sourceWindow.ts';
 import { mutationTouchesPrompt } from '../src/lib/bottomPromptInset.ts';
 
 const root = join(import.meta.dirname, '..');
@@ -186,10 +187,10 @@ check('observePromptInsets routes its MutationObserver through mutationTouchesPr
   && !/new MutationObserver\(tick\)/.test(insetSrc));
 
 // ── 3. web CardIn is CSS, and still cards skip off-screen layout ────────────────────────────────
-const webBody = revealSrc.slice(revealSrc.indexOf('function CardInWeb'), revealSrc.indexOf('function CardInNative'));
+const webBody = windowBetween(revealSrc, 'function CardInWeb', 'function CardInNative', 'src/components/CardReveal.tsx');
 check('web CardIn uses CSS keyframes, not a reanimated shared value per card',
   /export const CardIn = Platform\.OS === 'web' \? CardInWeb : CardInNative;/.test(revealSrc)
-  && webBody.length > 0 && !/useSharedValue|withTiming|Animated\./.test(webBody) && /animationKeyframes/.test(revealSrc));
+  && !/useSharedValue|withTiming|Animated\./.test(webBody) && /animationKeyframes/.test(revealSrc));
 check('a still card mounts with content-visibility: auto and its placeholder height (no animation)',
   /stillHeight\s*\? \(\{ contentVisibility: 'auto', containIntrinsicSize: `auto \$\{stillHeight\}px` \}/.test(webBody));
 
