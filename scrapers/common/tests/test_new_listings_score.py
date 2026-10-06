@@ -244,6 +244,14 @@ def test_new_building_word_reads_as_age_zero(age, want):
     assert got["area"] == MATCH          # the spec line's own area is still read as before
 
 
+@pytest.mark.parametrize("age,want", [(0, MATCH), (5, MISMATCH)])
+def test_new_building_word_on_the_line_after_its_label(age, want):
+    # the live page: label and value on separate lines, the previous row's bare area just above
+    # (aqar 15703930, 2026-10-06: «المساحة» / «220 م²» / «عمر العقار» / «جديد»)
+    got = compare_listing({"property_age": age}, page("المساحة", "220 م²", "عمر العقار", "جديد"))
+    assert got["property_age"] == want
+
+
 def test_new_building_word_never_answers_another_number_field():
     # bedrooms 0 is not «جديد» (its keyword line is the same spec line): the word is the age label's only
     got = compare_listing({"bedrooms": 0}, page(AQAR_SPEC))
@@ -263,3 +271,13 @@ def test_annual_rent_is_compared_as_stored():
     stored = {"price_annual": 75456, "rent_period_ar": "سنوي"}
     assert compare_listing(stored, page("75,456 ريال سنوياً"))["price"] == MATCH
     assert compare_listing(stored, page("6288 ريال"))["price"] == MISMATCH
+
+
+# ── «اختر عدد الغرف» is a room picker, not a stated count (rakez 15742193, 2026-10-06) ─────────────
+
+def test_room_picker_prompt_is_not_a_room_count():
+    lines = ("اختر عدد الغرف", "2,600,000 ريال", "268.75 م²", "2,450,000 ريال", "332.46 م²")
+    assert compare_listing({"bedrooms": 4}, page(*lines))["bedrooms"] == PAGE_SILENT
+    # a real stated count on the same page still decides
+    assert compare_listing({"bedrooms": 4}, page(*lines, "غرف النوم 3"))["bedrooms"] == MISMATCH
+    assert compare_listing({"bedrooms": 3}, page(*lines, "غرف النوم 3"))["bedrooms"] == MATCH
