@@ -103,7 +103,7 @@ POLICIES: dict[str, _P] = {
         "Daily sharded sweep (16 shards, ~97k probes/day) covers the active population each day.",
     ),
     "gathern": _P(
-        _pol("gathern", 3, 96), DIRECT_REVISIT,
+        _pol("gathern", 3, 24), DIRECT_REVISIT,
         "hard 404 only — a booked-but-listed 200 is NOT death on this platform",
         "Source rate-limits detail pages globally (~2 req/s). Coverage rate is the binding "
         "constraint, not signal quality: at 1,500 probes/day against 29k active the cycle was "
@@ -118,7 +118,7 @@ POLICIES: dict[str, _P] = {
         # re-tested on every enum-strike run: 30 in-feed controls are read directly and the run
         # aborts its flips under 90% live. Reading all ~69k pages directly would cost ~12 GB/day of
         # paid proxy. Removal is unchanged: a row leaves search only on a DIRECT 404 (3 strikes).
-        LivenessPolicy(platform="wasalt", grace=3, max_verification_age_hours=96,
+        LivenessPolicy(platform="wasalt", grace=3, max_verification_age_hours=48,
                        presence_is_positive_evidence=True), DIRECT_REVISIT,
         "404 (shares aqar's marker set)",
         "Requires the Saudi residential proxy (WASALT_PROXY_URL); datacenter IPs get HTTP 403, "
@@ -126,7 +126,7 @@ POLICIES: dict[str, _P] = {
         "(owner 2026-10-02); the direct read is spent on rows the feed dropped and on controls.",
     ),
     "aqarmonthly": _P(
-        _pol("aqarmonthly", 3, 48), DIRECT_REVISIT,
+        _pol("aqarmonthly", 3, 24), DIRECT_REVISIT,
         "aqar's own: 404/410; DEAD_MARKERS phrases (the soft-close limb stays UNKNOWN, as on aqar)",
         "Its ads ARE sa.aqar.fm pages, so aqar's daily sweep reads them (scrapers/aqar/liveness.py, "
         "aqar-liveness.yml, one extra shard; owner 2026-09-28: «Aqar Monthly must work like Aqar»). "
@@ -134,7 +134,7 @@ POLICIES: dict[str, _P] = {
     ),
     # ── Tier 2: source-published candidate set, then a direct confirm ───────────────────────────
     "dealapp": _P(
-        _pol("dealapp", 3, 96), CANDIDATE_PLUS_DIRECT,
+        _pol("dealapp", 3, 48), CANDIDATE_PLUS_DIRECT,
         "sitemap absence selects candidates; deactivation needs a DIRECT confirm "
         "(redirected_away, or a hydrated ng-state with no listing schema, or offers.availability "
         "SoldOut/OutOfStock)",
@@ -1404,6 +1404,11 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     # live controls live. ksaaqar's one would-hide (cap 145) answered 404 from the second network,
     # 5 of 5 live controls live.
     "ksaaqar", "sadiqeltajer",
+    # 2026-10-06: shadow runs of 10-04..10-06 read 100% of rakez's ~3,600 active units with its own
+    # 3-argument oracle (07:29 UTC 10-06: alive 3,585, dead 37, unknown 9, would_hide 26).
+    # NEEDS INTERACTIVE APPLY: the registry reseed's DELETE clause is held by the DB connector for a
+    # human (LIFECYCLE_ENGINEER.md, 2026-10-05 lesson).
+    "rakez",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],

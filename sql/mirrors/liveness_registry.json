@@ -200,7 +200,7 @@
   {
     "platform": "aqarmonthly",
     "strategy": "DIRECT_REVISIT",
-    "sla_hours": 48,
+    "sla_hours": 24,
     "grace": 3
   },
   {
@@ -284,7 +284,7 @@
   {
     "platform": "dealapp",
     "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 96,
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -380,7 +380,7 @@
   {
     "platform": "gathern",
     "strategy": "DIRECT_REVISIT",
-    "sla_hours": 96,
+    "sla_hours": 24,
     "grace": 3
   },
   {
@@ -619,8 +619,8 @@
   },
   {
     "platform": "rakez",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -878,7 +878,7 @@
   {
     "platform": "wasalt",
     "strategy": "DIRECT_REVISIT",
-    "sla_hours": 96,
+    "sla_hours": 48,
     "grace": 3
   },
   {
