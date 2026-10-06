@@ -1642,11 +1642,18 @@ export default function Agent() {
     // network, so in practice it's already consumed → results morph in IMMEDIATELY on resolve.
     const since = searchingAtRef.current[statusId] ?? Date.now();
     searchingAtRef.current[statusId] = since;
-    const remaining = SEARCH_MIN_MS - (Date.now() - since);
-    if (remaining > 0) await waitRun(run, remaining);
-    // Presentation-only gate: each logo/name page must finish its actual visible dwell.
-    // The search has already completed; this changes only when its results are revealed.
-    while (!run.cancelled && loaderPresentedRef.current[statusId] !== true) await waitRun(run, 100);
+    // AN ADVANCED FILTER ROUND SKIPS THE PLATFORM SHOW (owner 2026-10-05: «the advanced filter takes
+    // time … should never ever have this»). Measured live: the round's own queries finish in ≤1.3 s,
+    // and the user then waited 12 s for the 10.6 s every-platform loader floor + its page dwell. That
+    // floor exists to show every platform being searched on a NEW search; a round narrows results the
+    // user is already looking at, so its results show the moment they are ready (exit fade only).
+    if (!afCompleted) {
+      const remaining = SEARCH_MIN_MS - (Date.now() - since);
+      if (remaining > 0) await waitRun(run, remaining);
+      // Presentation-only gate: each logo/name page must finish its actual visible dwell.
+      // The search has already completed; this changes only when its results are revealed.
+      while (!run.cancelled && loaderPresentedRef.current[statusId] !== true) await waitRun(run, 100);
+    }
     delete loaderPresentedRef.current[statusId];
     delete searchingAtRef.current[statusId];
     if (run.cancelled) return;
@@ -4835,7 +4842,12 @@ const s = StyleSheet.create({
 
   reply: { flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
   replyBrandMark: { width: 22, height: 22, marginTop: 3, flexShrink: 0 },
-  replyText: { fontFamily: CHAT_FONT, flex: 1, minWidth: 0, fontSize: IS_WEB ? 16 : 15.5, lineHeight: IS_WEB ? 28 : 26, color: colors.ink },
+  // NO flex here (owner 2026-10-05: «the sentences that say تم — sometimes no emoji shows»). Two of the
+  // three users sit in COLUMNS (the results sentence, the closing note), where flex: 1 is a vertical
+  // flex-basis 0% that iOS Safari resolves to 0 — the box collapsed, and a wrapped second line (often
+  // just the emoji: «…حسب مواصفات بحثك 🏡») slid under the cards. The one ROW user (reply bubble beside
+  // the eagle mark) passes flex: 1 itself. Same iOS class as s.inputGrow.
+  replyText: { fontFamily: CHAT_FONT, minWidth: 0, fontSize: IS_WEB ? 16 : 15.5, lineHeight: IS_WEB ? 28 : 26, color: colors.ink },
   introScroll: { flexGrow: 1, justifyContent: 'center' },
   greeting: { width: '100%', alignItems: 'center', gap: 8, paddingVertical: 24 },
   greetingText: { fontSize: 24, lineHeight: 36, fontWeight: '600', color: colors.dark, textAlign: 'center', writingDirection: 'rtl' as any },
