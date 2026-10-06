@@ -20,6 +20,10 @@ on:
         description: "unit-api (per-unit endpoint discriminator) | app-link (does any web link open an app-only unit? 2026-10-06)"
         required: false
         default: "unit-api"
+      units:
+        description: "app-link mode only: chalet:unit pairs to test (comma list) instead of sampling the search"
+        required: false
+        default: ""
 
 concurrency:
   group: gathern-api-probe
@@ -40,6 +44,8 @@ jobs:
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
       - name: Probe (read-only, no DB credentials in scope)
+        env:
+          PROBE_UNITS: ${{ github.event.inputs.units }}
         run: |
           if [ "${{ github.event.inputs.mode }}" = "app-link" ]; then
             exec python -m scrapers.gathern.probe_app_only_link
