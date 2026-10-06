@@ -1418,6 +1418,7 @@ for _p in FLEET_DAILY_DIRECT:
 
 # remal and shmoualshmal gained a prune-time oracle on the ad's OWN url on 2026-10-02 (until then
 # neither crawler removed anything), so "absence only" no longer describes them. Tier unchanged.
+# arkaan joined 2026-10-06 (its prune had no oracle; its own page answers 410 for a removed ad).
 for _p, _sig in (
     ("remal", "the ad's OWN url answering 404/410. Measured 2026-10-02: a never-existed slug, a "
               "wrong post id and the REST record all answer 404, while 12 of 12 live ads answer "
@@ -1431,6 +1432,11 @@ for _p, _sig in (
                      "ad existed to measure, so nothing but a hard 404/410 is read as gone: a "
                      "redirect, a block, a 5xx and every other 200 are UNKNOWN, and a removal is "
                      "believed only while an in-run known-live control still reads live"),
+    ("arkaan", "the ad's OWN /property/{id} url answering 404/410. Measured from CI 2026-10-06 "
+               "(oracle-feasibility-probe run 37456672928): 12 of 12 removed ads answer 410 and 12 "
+               "of 12 live ads answer 200 with the RealEstateListing JSON-LD (LIVE). A block, a 5xx, "
+               "a redirect and any other 200 are UNKNOWN, and a removal is believed only while an "
+               "in-run known-live control still reads live"),
 ):
     POLICIES[_p] = _P(POLICIES[_p]["policy"], POLICIES[_p]["strategy"], _sig,
                       "Removal is confirmed on the ad's own url at prune time (2026-10-02); the full "

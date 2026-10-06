@@ -382,6 +382,11 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         "area_m2": _num(f.get("المساحة")),
         "bedrooms": _num(f.get("عدد غرف النوم")),
         "bathrooms": _num(f.get("عدد دورات المياه")),
+        # «واجهة العقار» is a structured REM field (114 of 120 live rows publish it: جنوب / شمال / شرق /
+        # غرب, or two joined by «*»). It used to reach only additional_info, so every hajer listing was
+        # invisible to the Advanced Filter's direction question (🔬 AF engineer, 2026-10-06). Stored as
+        # published; canon_direction_ar() folds it for search, and a two-way «جنوب*غرب» stays unknown there.
+        "direction": (f.get("واجهة العقار") or "").strip() or None,
         # A per-metre rate is never a total and never an annual rent — see `rate_only` above.
         "price_total": None if (is_rent or rate_only) else price,
         "price_annual": price_annual,

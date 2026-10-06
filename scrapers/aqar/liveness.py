@@ -317,6 +317,9 @@ def is_price_refresh_artifact(new_price: int, area_m2, price_per_meter) -> bool:
 
 
 CONTROLS = 5
+# The recheck (--min-strikes) reads a struck row only if nothing looked at it for this long, so the
+# three strikes stay three SEPARATE readings (the fleet recheck uses 6 h too).
+RECHECK_MIN_GAP_HOURS = 6
 
 
 def _known_live_controls(client, tbl: str) -> list[dict]:
@@ -372,6 +375,12 @@ def main() -> None:
                          "which is why wasalt-liveness.yml is unscheduled (cost guard, 2026-06). "
                          "The struck backlog is ~3.4k rows, roughly 1.3 GB, which answers 'are "
                          "these actually dead?' without the full sweep's cost.")
+    ap.add_argument("--min-strikes", type=int, default=0,
+                    help="RECHECK: examine only active rows already carrying at least this many "
+                         "direct strikes (missing_count >= N). Strictly NARROWING, like "
+                         "--only-struck: the same reader, the same known-live controls, the same "
+                         "3-strike grace. It lets the second and third readings of an ad aqar "
+                         "removed land ~12 h apart instead of a day apart (fast confirm, 2026-10-06).")
     ap.add_argument("--report-only", action="store_true",
                     help="VERIFY without deactivating. Suppresses the dead path entirely — no "
                          "active=false, no missing_count increment — and reports the verdicts it "
@@ -382,7 +391,10 @@ def main() -> None:
     args = ap.parse_args()
 
     table = args.table
-    platform = f"aqar_liveness:{table}:{args.shard}/{args.shards}"
+    # A recheck gets its OWN run label (LISTING_LIVENESS.md §9: a liveness job needs its own label,
+    # or its silence hides inside the daily sweep's rows).
+    kind = "aqar_liveness_recheck" if args.min_strikes > 0 and not args.only_struck else "aqar_liveness"
+    platform = f"{kind}:{table}:{args.shard}/{args.shards}"
     client = sb()
     # Before opening our own run row: finalize any stub WE left behind on a previous day —
     # a timeout-killed job never reaches end_run, so its ok=NULL stub would sit silent forever.
@@ -392,8 +404,14 @@ def main() -> None:
 
     # --only-struck narrows the cohort. The id walk below and the row fetch must apply the
     # IDENTICAL filter, or the worklist is built over one population and probed over another.
+    recheck_cut = (datetime.now(timezone.utc) - timedelta(hours=RECHECK_MIN_GAP_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     def _cohort(q):
         q = q.eq("active", True)
+        if args.min_strikes > 0 and not args.only_struck:
+            # Three SEPARATE readings: a row looked at in the last RECHECK_MIN_GAP_HOURS waits.
+            q = (q.gte("missing_count", args.min_strikes)
+                 .or_(f"last_liveness_probe_at.is.null,last_liveness_probe_at.lt.{recheck_cut}"))
         return q.gte("missing_count", args.grace) if args.only_struck else q
 
     # ── PHASE 1: this shard's worklist, by id modulo (fix 2026-09-24, see shard_partition.py) ────
@@ -587,7 +605,9 @@ def main() -> None:
                         else:
                             pending_kill += 1
                     else:
-                        upd: dict = {"missing_count": new_missing}
+                        # last_liveness_probe_at = "we LOOKED" (never evidence of life); on a strike
+                        # it is what keeps the recheck's readings >= 6 h apart (--min-strikes).
+                        upd: dict = {"missing_count": new_missing, "last_liveness_probe_at": now_iso}
                         if new_missing >= args.grace:
                             upd["active"] = False
                             killed += 1

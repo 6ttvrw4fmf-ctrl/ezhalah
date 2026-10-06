@@ -68,6 +68,7 @@ from curl_cffi import requests as cc
 from scrapers.common import db
 from scrapers.common import normalize as N
 from scrapers.common.arabic_location import to_catalog
+from scrapers.common.http_liveness import LivenessProbe
 
 BASE = "https://arkaanalaqar.com"
 SOURCE = "Arkaan"
@@ -240,6 +241,43 @@ def fetch_detail(s: cc.Session, pid: str) -> dict[str, Any]:
         "ad_text": ad[0] if ad else None,
         "price_card": _text(pc.group(1)) if pc else None,
     }
+
+
+# ── LIVENESS ORACLE (wired 2026-10-06, ♻️) ─────────────────────────────────────────────────────
+# Measured from CI (oracle-feasibility-probe run 37456672928, 2026-10-06): 12 of 12 ads this site
+# removed answered HTTP 410 at their own /property/{id} URL, 12 of 12 live ads answered 200 with
+# distinct titles. Until now prune_unseen ran WITHOUT a verify_gone here, so an ad was hidden after
+# three crawls without it (absence alone: P1 unknown_treated_as_dead). Now only its own page hides
+# it: 404/410 → gone; 200 that renders this site's listing JSON-LD → live; anything else → no answer.
+def _signal(status, body, moved) -> Optional[str]:
+    if status in GONE_STATUSES:
+        return "gone"
+    if status == 200 and not moved and _listing_node(html.unescape(body or "")):
+        return "live"
+    return None
+
+
+def _url_for(ad_number: str) -> Optional[str]:
+    m = re.fullmatch(r"AK(\d+)", ad_number or "")
+    return f"{BASE}/property/{m.group(1)}" if m else None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """verify_gone for db.prune_unseen. A 410 is believed only while a known-live ad from this run
+    (`control`) still reads live through the same session."""
+    s = _session()
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform="arkaan", signal=_signal, session=lambda: s,
+                             url_for=_url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
 
 
 def _price_card(text: Optional[str]) -> dict[str, Any]:
@@ -557,9 +595,11 @@ def main() -> int:
             source=SOURCE)
 
         pruned = 0
+        verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
         for tbl, rows_seen in (("arkaan_residential_listings", res),
                                ("arkaan_commercial_listings", com)):
-            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE)
+            n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE,
+                                verify_gone=verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:

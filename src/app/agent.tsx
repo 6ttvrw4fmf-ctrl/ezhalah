@@ -1178,6 +1178,13 @@ export default function Agent() {
   //             ageFlowAskedRef in syncGuidedFromSteps, never mutated in place.)
   // Written on every tap before startAgeFlow, so a stale value can never be read.
   const afCarryRef = useRef<{ msgId: string; originQ: SearchQuery; facets: GuidedFacet[]; asked: string[] } | null>(null);
+  // SKIP-EVERYTHING ROUNDS, per results turn (2026-10-06, contract R6.2.2 / R8.1.3). A round that
+  // commits nothing returns early from finishGuided — no search, no new turn — so the turn it was
+  // opened from keeps «خلّنا نحدد الطلب أكثر», and that button's carry is built from the turn's
+  // guided record, which a skip-only round never writes. Without this record the next tap re-asked
+  // the SAME questions forever: on Annual Rent → Apartment (rnpl/furnished/age/bathrooms fill the
+  // 4-question round) a customer who only wanted AC or an elevator could never reach the amenities.
+  const afSkippedByMsgRef = useRef<Record<string, string[]>>({});
   // CONVERSATION IDENTITY (owner 2026-08-25 — «treat Ezhalah's chat like ChatGPT»). This screen owns
   // which sidebar chat the on-screen conversation belongs to. Every recorded turn passes it, so an
   // AF round / refine / follow-up UPDATES that one entry instead of minting a new one per narrowed
@@ -2513,7 +2520,12 @@ export default function Agent() {
   const finishGuided = (token: number) => {
     if (ageFlowTokenRef.current !== token) return;
     const q = ageFlowQueryRef.current;
-    if (!(q && ageFlowChangedRef.current)) { setAgeFlow(null); return; }
+    if (!(q && ageFlowChangedRef.current)) {
+      const from = afCarryRef.current?.msgId;
+      if (from) afSkippedByMsgRef.current[from] = [...ageFlowAskedRef.current];
+      setAgeFlow(null);
+      return;
+    }
     const startedAt = Date.now();
     // CUMULATIVE, ANCHORED TO THE TRUE PRE-AF ORIGIN (owner 2026-08-24). `ageFlowBaseQRef` stays the
     // ROUND's own start — deriveGuided rebuilds this round's query from it, and anchoring it to the
@@ -3240,6 +3252,7 @@ export default function Agent() {
     setCompleted(false);      // terminality is per-conversation — never inherited (see openStatic/openSaved)
     chatIdRef.current = null; // new conversation → new sidebar chat (a restore re-sets it)
     afCarryRef.current = null;   // the AF answered-set belongs to the conversation being left
+    afSkippedByMsgRef.current = {}; // …and so do its skip-everything rounds
     pendingScopeRef.current = null; // …and so does a half-answered clarifying question
     pendingCityRef.current = null;  // …including the plain-city question's subject
     lastQueryRef.current = null;    // …and the accumulated filters it narrowed
@@ -4252,7 +4265,7 @@ export default function Agent() {
                                           const q = m.result.query;
                                           const carried = guidedPills?.msgId === m.id ? guidedPills : null;
                                           afCarryRef.current = q
-                                            ? { msgId: m.id, originQ: carried?.baseQ ?? q, facets: carried?.facets ?? [], asked: carried?.asked ?? [] }
+                                            ? { msgId: m.id, originQ: carried?.baseQ ?? q, facets: carried?.facets ?? [], asked: [...new Set([...(carried?.asked ?? []), ...(afSkippedByMsgRef.current[m.id] ?? [])])] }
                                             : null;
                                           if (q && anyGuidedEligible(q)) void startAgeFlow(q);
                                           else startRefine(q);
