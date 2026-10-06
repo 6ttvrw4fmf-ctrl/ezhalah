@@ -15,10 +15,20 @@ const root = join(import.meta.dirname, '..');
 const sql = readFileSync(
   join(root, 'supabase/migrations/20261006135727_detector_crash_resolves_after_clean_runs.sql'), 'utf8');
 
+// Tag-generic body reader: reads the dollar tag after `as`, returns '' when it has no close.
+function bodyOf(src: string, start: number): string {
+  if (start < 0) return '';
+  const m = /\bas\s+(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)/.exec(src.slice(start));
+  if (!m) return '';
+  const open = start + m.index + m[0].length;
+  const close = src.indexOf(m[1], open);
+  return close < 0 ? '' : src.slice(start, close);
+}
+
 export function problems(s: string): string[] {
   const out: string[] = [];
   const start = s.indexOf('create or replace function public.mon_resolve_recovered_detector_crashes()');
-  const fn = start >= 0 ? s.slice(start, s.indexOf('$function$;', start)) : '';
+  const fn = bodyOf(s, start);
   if (!fn) { out.push('mon_resolve_recovered_detector_crashes() is not defined'); return out; }
   if (!/where e\.kind = 'detector_crash'\s+and e\.resolved_at is null/.test(fn)) out.push('the sweep no longer looks only at OPEN detector_crash alerts');
   const clean = fn.match(/t\.swept_at > r\.created_at\s+and not coalesce\(t\.crashed, false\) and not coalesce\(t\.skipped, false\)\) >= (\d+)/);

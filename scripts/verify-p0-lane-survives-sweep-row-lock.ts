@@ -21,6 +21,16 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const MIG = join(process.cwd(), 'supabase', 'migrations');
+// Tag-generic body reader: reads the dollar tag after `as`, returns '' when it has no close.
+function bodyOf(src: string, start: number): string {
+  if (start < 0) return '';
+  const m = /\bas\s+(\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)/.exec(src.slice(start));
+  if (!m) return '';
+  const open = start + m.index + m[0].length;
+  const close = src.indexOf(m[1], open);
+  return close < 0 ? '' : src.slice(start, close);
+}
+
 const DEF = /create\s+or\s+replace\s+function\s+public\.mon_run_p0_detectors\s*\(\s*\)/i;
 
 function newestDefinition(): { file: string; body: string } {
@@ -29,10 +39,9 @@ function newestDefinition(): { file: string; body: string } {
     const sql = readFileSync(join(MIG, files[i]), 'utf8');
     const m = DEF.exec(sql);
     if (!m) continue;
-    const start = m.index;
-    const end = sql.indexOf('$function$;', start);
-    if (end < 0) throw new Error(`${files[i]}: mon_run_p0_detectors() body has no closing $function$;`);
-    return { file: files[i], body: sql.slice(start, end) };
+    const body = bodyOf(sql, m.index);
+    if (!body) throw new Error(`${files[i]}: mon_run_p0_detectors() body has no closing dollar tag`);
+    return { file: files[i], body };
   }
   throw new Error('no committed migration defines public.mon_run_p0_detectors()');
 }
