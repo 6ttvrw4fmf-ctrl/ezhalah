@@ -46,6 +46,30 @@ wp = ns["wasalt_page"]("https://wasalt.sa/ar/property/1", fetch=lambda u: (nd, 2
 check("a live wasalt page is read, not unreadable", wp is not None and ns["page_says_yes"](L(*wp["evidence_lines"]), "elevator"))
 check("wasalt contact fields are never read", wp is not None and not any("0500" in x for x in wp["evidence_lines"]))
 check("a wasalt block stays unreadable", ns["wasalt_page"]("u", fetch=lambda u: (None, None, 0)) is None)
+T = ns["template_lines"]
+menu = L("أجهزة مطبخ", "مكيفات هواء")
+check("a line on every page of the site is its template, not the ad",
+      T([menu + L("مصعد"), menu + L("شقة"), menu + L("مطبخ راكب")]) == set(menu))
+check("two pages that agree are still ads (too few to call a template)", T([L("مطبخ"), L("مطبخ")]) == set())
+check("a line missing from one page is not template", T([L("مطبخ", "x"), L("مطبخ"), L("y")]) == set())
+class _Q:
+    def __init__(self, data): self.data = data
+    def select(self, *a): return self
+    def eq(self, *a): return self
+    def limit(self, *a): return self
+    def execute(self): return self
+class _C:
+    def table(self, name):
+        if name == "search_listings_ar":
+            return _Q([{"deal_ar": "بيع", "city_ar": "الرياض", "type_ar": "شقة"}])
+        return _Q([{"listing_url": "https://site/x"}])
+pages = iter([["أجهزة مطبخ", "شقة 1"], ["أجهزة مطبخ", "شقة 2"], ["أجهزة مطبخ", "شقة 3"]])
+ns["page_evidence"] = lambda body: {"evidence_lines": next(pages)}
+asked = []
+ns["ask"] = lambda anon, params: asked.append(params) or []
+ns["score_site"](_C(), object(), "site", [("t", 1), ("t", 2), ("t", 3)], night="n", pace=0,
+                 probe=lambda u: (200, "<html>"), wasalt=None)
+check("score_site never asks a customer question its website's template answered", asked == [])
 print(json.dumps(out))
 `;
 
@@ -70,6 +94,9 @@ mustCatch('furnished asked on Monthly', 'return [a for a in answers if a != FURN
 mustCatch('wasalt agent block read', 'if key and _WASALT_SKIP.search(key):', 'if False:');
 mustCatch('wasalt page dropped as unreadable', 'if status != 200 or not isinstance(pd, dict):\n        return None', 'return None');
 mustCatch('an empty label read as a yes', 'and not BARE_LABEL.match(x)]', ']');
+mustCatch('the site template read as the ad (no template filter)', 'ad_lines = [x for x in page_lines(page) if x not in chrome]', 'ad_lines = page_lines(page)');
+mustCatch('the template computed from too few pages', 'if len(readable) < TEMPLATE_MIN_PAGES:', 'if len(readable) < 1:');
+mustCatch('one page enough to call a line template', 'return set.intersection(*readable)', 'return set.union(*readable)');
 mustCatch('site navigation read as the ad', 'if x and not CHROME.match(x) and', 'if x and');
 
 const fail = (m: string) => { console.error(m); process.exit(1); };

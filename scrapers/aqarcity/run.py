@@ -115,6 +115,11 @@ SERVICE_COLS = {
     "تصريف الفيضانات": None, "غاز": None,
 }
 
+# Amenities the description may state. NOT the utilities: خدمات العقار publishes those structurally.
+PROSE_AMENITY_COLUMNS = frozenset({"elevator", "kitchen", "air_conditioner", "parking", "maid_room",
+                                   "driver_room", "laundry_room", "balcony_terrace", "private_entrance",
+                                   "car_entrance"})
+
 # Phone / contact patterns to REDACT from title+description (PDPL).
 _PHONE_RE = re.compile(
     r"(?:\+?9665\d{8}"            # +9665XXXXXXXX
@@ -854,6 +859,15 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     for ar, col in SERVICE_COLS.items():
         if col and ar in services_raw:
             amenities[col] = True
+    # ── Advanced Filter amenities from the ad's own description (🔬 AF engineer, 2026-10-06) ──
+    # 1,729 production listings stored 0 kitchen/elevator/parking/AC answers while the ads list them
+    # («3 غرف نوم · مطبخ · 4 دورات مياه · مستودع · مدخل سيارة», /property/30751). The details list
+    # (_pi_table) has NO amenity field — only خدمات العقار (utilities) — so the description is the
+    # source (ADVANCED_FILTER_SOURCE_TRUTH: prose only where nothing structured exists; four outcomes
+    # via the shared normalize matcher; silence stays NULL). Utilities stay structured-only.
+    for col, val in normalize.amenities_from_lines(description).items():
+        if col in PROSE_AMENITY_COLUMNS:
+            amenities[col] = val
 
     # ── additional_info: every remaining valuable field (NO name, NO phone) ──
     info: dict[str, Any] = {
@@ -931,7 +945,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "last_update": ld.get("dateModified") or None,
         "additional_info": info,
     }
-    row.update(amenities)  # electricity/water_supply/sanitation/optical_fibers booleans
+    row.update(amenities)  # utilities from خدمات العقار + description amenities (tri-state)
     return row, category
 
 

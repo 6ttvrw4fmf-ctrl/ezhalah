@@ -101,3 +101,63 @@ def test_settle_drops_only_the_field_the_schema_rejects():
 ])
 def test_settle_falls_back_to_the_old_query_when_it_cannot_prove_the_schema(answer):
     assert R.settle_amenity_fields(answer) == ()
+
+
+# ── one unit is not proof (🔬 2026-10-06): a gone first unit no longer strips a whole shard ──────────
+def _units(gone: set):
+    asked = []
+
+    def answer_for(q, lid):
+        asked.append(lid)
+        if lid in gone:
+            return {"data": {"Listing": {"get": None}}}      # the first unit of the shard is gone
+        return {"data": {"Listing": {"get": {"id": lid}}}}
+    return answer_for, asked
+
+
+def test_a_gone_first_unit_does_not_strip_the_shard():
+    answer_for, asked = _units(gone={101})
+    got = R.settle_across_units(answer_for, [101, 102, 103])
+    assert "lift" in got and "ketchen" in got
+    assert asked[0] == 101 and 102 in asked
+
+
+def test_three_unreadable_units_still_fall_back_to_the_old_query():
+    answer_for, asked = _units(gone={1, 2, 3, 4})
+    assert R.settle_across_units(answer_for, [1, 2, 3, 4]) == ()
+    assert 4 not in asked                                     # bounded: never more than SETTLE_TRIES units
+
+
+# ── parking from the search result's extended_details (🔬 2026-10-06, backlog 79b) ──────────────────
+def test_parking_from_discovery_reaches_the_column(monkeypatch):
+    monkeypatch.setattr(R, "_ext_by_id", {7: {"special_parking": True, "laundry_room": None},
+                                          8: {"special_parking": False}})
+    g7 = R.with_search_extended_details({"id": 7, "lift": 1}, 7)
+    assert R.map_amenities(g7)["parking"] is True
+    assert R.map_amenities(R.with_search_extended_details({"id": 8}, 8))["parking"] is False
+    assert "parking" not in R.map_amenities(R.with_search_extended_details({"id": 9}, 9))  # silent: unknown
+    assert R.with_search_extended_details(None, 7) is None
+
+
+def test_discovery_falls_back_when_the_schema_refuses_the_block(monkeypatch):
+    calls = []
+
+    def fake_gql(q, v, tries=3):
+        calls.append(q)
+        if q is R.FIND_Q_EXT:
+            return None, True
+        return {"Search": {"find": {"total": 2, "listings": [{"id": 1}, {"id": 2}]}}}, False
+    monkeypatch.setattr(R, "_gql", fake_gql)
+    d = R.discover_ids()
+    assert d.ids == [1, 2] and calls[0] is R.FIND_Q_EXT and R.FIND_Q in calls
+
+
+def test_discovery_records_each_units_block(monkeypatch):
+    monkeypatch.setattr(R, "_ext_by_id", {})
+
+    def fake_gql(q, v, tries=3):
+        return {"Search": {"find": {"total": 1, "listings": [
+            {"id": 5, "extended_details": {"special_parking": True}}]}}}, False
+    monkeypatch.setattr(R, "_gql", fake_gql)
+    R.discover_ids()
+    assert R._ext_by_id[5] == {"special_parking": True}
