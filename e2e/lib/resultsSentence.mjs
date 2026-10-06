@@ -160,9 +160,16 @@ export function hasResultsFoundSentence(text, pool = matchers()) {
 /** The zero-result statements. Unchanged by the rotation, but kept here so callers have one import. */
 // The i18n family of SPECIFIC zero diagnoses (not a rotation). «لا توجد …» are the MSA variants
 // src/i18n.tsx also renders; they are terminal states, so the clock must stop on them too.
-// Widening this can never mask a defect — it only decides when to STOP waiting, and the
-// six-layer assertChain still judges what was actually found.
-export const ZERO_RE = /ما لقينا|ما لقيت|ما فيه نتائج|ما فيه إعلانات|لا توجد نتائج|لا توجد إعلانات/;
+//
+// WIDENING THIS CAN MASK A DEFECT (2026-10-05). It was a bare «لا توجد إعلانات», which also matches
+// the district panel's per-row hint «لا توجد إعلانات هنا حالياً» ('No listings here right now',
+// src/app/index.tsx) — not a search result at all. Pressing «بحث» re-renders that panel for a frame
+// (measured on رنية: two hints at +0 ms, gone by +300 ms, results at ~8 s), so runSearch()'s clock
+// «settled» before the search ran and the journey read the LOADER: no summary, no sentence, zero
+// false — a false RPC→RENDERED on trending-district (رنية 2026-10-06, النعيرية 2026-10-02). The
+// same hint can also make zeroRendered() call a broken screen an honest zero. So the MSA district
+// diagnosis is named in full, and only it.
+export const ZERO_RE = /ما لقينا|ما لقيت|ما فيه نتائج|ما فيه إعلانات|لا توجد نتائج|لا توجد إعلانات في هذا الحي/;
 
 /**
  * "The product SAID there are none" — the zero state, over its whole shipped vocabulary.
