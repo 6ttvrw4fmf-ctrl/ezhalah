@@ -1726,18 +1726,45 @@ export default function Agent() {
   // QUERY_LIMIT) — those extra rows are still merged into the buffer, just not revealed yet, so the
   // NEXT tap reveals from what is already fetched before ever asking the network for more.
   // loadingMore guards a double-tap from double-fetching.
-  // «عرض المزيد» cascade cadence — inside the owner's 40–80ms stagger window; each mounting card also
-  // fades+rises via CardIn, so the reveal flows in instead of landing at once. (owner 2026-07-09.)
+  // «عرض المزيد» cascade cadence — inside the owner's 40–80ms stagger window; each card fades+rises
+  // via CardIn, so the reveal flows in instead of landing at once. (owner 2026-07-09.)
   const LOAD_MORE_STEP_MS = 55;
-  // Only the VISIBLE screenful cascades one-by-one (~0.8s); the rest mount together right after,
-  // below the fold, each still fading in via CardIn. Keeps the premium feel without one sequential
-  // re-render per card of the whole unvirtualized list (review perf fix 2026-07-09).
+  // Only the VISIBLE screenful cascades; the rest mount right after, below the fold, with no animation.
   const CASCADE_VISIBLE = 14;
+  // Which cards the latest press staggers and which it mounts still, per turn (read by CardIn at mount).
+  const cascadeWindowRef = useRef<Record<string, { from: number; animEnd: number }>>({});
+  const cardInMotion = (mid: string, i: number) => {
+    const w = cascadeWindowRef.current[mid];
+    if (!w || i < w.from) return {};
+    // A still card's placeholder height until it nears the screen: the median phone card / laptop row.
+    return i >= w.animEnd ? { stillHeight: cardRow ? 140 : 340 } : { delayMs: (i - w.from) * LOAD_MORE_STEP_MS };
+  };
+  // TWO RENDERS PER PRESS, NOT FOURTEEN (owner 2026-10-05: «عرض المزيد takes time … should never
+  // ever have this»). The drip re-rendered the whole unvirtualized list once per card, then mounted
+  // everything else in one more render — measured at 4× CPU on a production export, the first new
+  // card took seconds. Now the on-screen cards mount in ONE render and CardIn staggers them by
+  // index (same 55ms cascade, played by CSS on web), and the rest mount once that frame has painted.
+  // WHICH cards and in WHAT order are unchanged: the same slice of the same list reaches `target`.
+  // Ownership/teardown unchanged too: revealActiveRef + `revealing` hold until the rest is mounted,
+  // and finalizeReveal()/Stop/new turn take over exactly as they did from dripRange().
   const cascadeIn = (mid: string, from: number, target: number) => {
-    const animEnd = Math.min(from + CASCADE_VISIBLE, target);
-    dripRange(mid, from, animEnd, LOAD_MORE_STEP_MS, () => {
-      if (target > animEnd) setRevealCount((c) => ({ ...c, [mid]: target }));
-    });
+    if (target <= from) return;
+    // A scroll chunk may have mounted past `from` since this press's render; stagger from there.
+    const start = Math.max(from, revealCountRef.current[mid] ?? 0);
+    const animEnd = Math.min(start + CASCADE_VISIBLE, target);
+    cascadeWindowRef.current[mid] = { from: start, animEnd };
+    setRevealCount((c) => ({ ...c, [mid]: Math.max(c[mid] ?? 0, animEnd) }));   // never un-mounts a card
+    if (animEnd >= target) return;   // the whole press fit on screen: one render, nothing pending
+    revealActiveRef.current = { id: mid, count: target };
+    setRevealing(true);
+    const rest = () => {
+      if (revealActiveRef.current?.id !== mid) return;   // finalize/Stop/new turn owns it now
+      revealActiveRef.current = null;
+      setRevealCount((c) => ({ ...c, [mid]: target }));
+      setRevealing(false);
+    };
+    // rAF runs just before the on-screen batch paints; the timeout lands just after that paint.
+    requestAnimationFrame(() => { revealTimers.current.push(setTimeout(rest, 0)); });
   };
   // A defensive backstop against a pathological `hasMore` that never clears, and a bound on how many
   // search RPCs ONE tap may cost production — NOT a real product ceiling (the 2026-08-29
@@ -4004,7 +4031,7 @@ export default function Agent() {
                           // CardIn = soft mount-in (fade + slight rise). Keyed by source:id (ids are
                           // only unique per source table — matches the de-dup identity), so cards
                           // already on screen NEVER re-animate — only newly-revealed ones enter softly.
-                          <CardIn key={`${l.source}:${l.id}`}>
+                          <CardIn key={`${l.source}:${l.id}`} {...cardInMotion(m.id, i)}>
                             <MemoResultCard
                               listing={l}
                               variant="compact"
