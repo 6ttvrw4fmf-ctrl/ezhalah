@@ -52,7 +52,7 @@ const problems = (typo: Typo): string[] => {
 const real = problems(await lift(SRC_PATH));
 check('«الملك» is never a typo of الملقا/الملز/السلي/الأمل/المها/… and real typos still recover', real.length === 0, real.join('\n      '));
 check('liveDistrictLookup routes its word-level typo check through districtWordIsTypo',
-  /const fuzzyTokenHit = \(district: string\): boolean => \{[\s\S]{0,400}districtWordIsTypo\(probeF, tf\)/.test(SRC));
+  /const fuzzyTokenHit = \(district: string\): string \| null => \{[\s\S]{0,400}districtWordIsTypo\(probeF, tf\)/.test(SRC));
 
 // ── mutation proof ─────────────────────────────────────────────────────────────────────────────────
 const mustCatch = async (what: string, from: string, to: string) => {
