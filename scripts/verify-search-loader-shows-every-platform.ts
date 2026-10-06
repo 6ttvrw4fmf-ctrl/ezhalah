@@ -29,6 +29,7 @@
 //   node --experimental-strip-types scripts/verify-search-loader-shows-every-platform.ts   (npm test)
 
 import { readFileSync } from 'node:fs';
+import { windowBetween } from './lib/sourceWindow.ts';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -163,6 +164,17 @@ mustCatch('a deadline that forgets the wave still has to RISE and HOLD on the la
 // A roster that outgrows the reveal budget.
 mustCatch('a catalogue that outgrows the reveal budget',
   !everyPlatformSeen(SEARCH_MIN_MS, 200));
+
+// AN ADVANCED FILTER ROUND SKIPS THE PLATFORM SHOW (owner 2026-10-05: «the advanced filter takes time …
+// should never ever have this» — measured 12 s of which ≤1.3 s was the round's own queries). The floor and
+// the page-dwell gate above are for a NEW search; playListings must keep them for every non-AF search and
+// skip them only when afCompleted.
+{
+  const play = windowBetween(agentSrc, 'const playListings = async', '// 2) RESULTS: ONE consolidated bubble', 'src/app/agent.tsx playListings');
+  check('a NEW search still waits the full floor and the page-dwell gate', /if \(!afCompleted\) \{[\s\S]{0,200}SEARCH_MIN_MS - \(Date\.now\(\) - since\)[\s\S]{0,400}loaderPresentedRef\.current\[statusId\] !== true/.test(play));
+  check('…and only an Advanced Filter round (afCompleted) skips them — no other condition widens the skip',
+    (play.match(/if \(!afCompleted\) \{/g) ?? []).length === 1 && !/if \(!afCompleted \|\|/.test(play) && !/if \(!afCompleted &&/.test(play));
+}
 
 console.log(failures === 0
   ? '\n✓ ten seconds, and every platform both appears and is highlighted before the loader may leave\n'
