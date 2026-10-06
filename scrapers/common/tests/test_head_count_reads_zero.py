@@ -24,10 +24,7 @@ from postgrest.base_request_builder import APIResponse
 ROOT = Path(__file__).resolve().parents[3]
 
 # Shrink-only: remove a line when that call site is fixed; never add one.
-KNOWN_BLIND = {
-    "scrapers/wasalt/enrich.py",
-    "scrapers/wasalt/enrich_ar.py",
-}
+KNOWN_BLIND: set[str] = set()   # the wasalt enrichers were fixed 2026-10-06 (owner cap 15,000)
 
 
 def _resp(method: str, body: bytes) -> httpx.Response:

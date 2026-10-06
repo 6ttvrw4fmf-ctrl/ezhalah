@@ -139,15 +139,32 @@ def meter_fields_from_deep(deep: list[dict[str, Any]]) -> dict[str, bool]:
     return out
 
 
+# Proxy-spend SAFETY cap (owner decision 2026-10-05): 15,000 pending rows. It exists only to stop a
+# runaway re-crawl (a flag reset re-queuing ~57k rows), not to throttle ordinary new listings: on
+# 2026-10-05 ~13k genuinely new rows were pending, which the old 5,000 would have refused.
+MAX_PENDING_DEFAULT = 15000
+
+
+def pending_count(c, table: str, flag: str, sel: str) -> int:
+    """Active rows still waiting on `flag`. Counted as a GET with .limit(1), never a HEAD: on the pinned client
+    (supabase 2.10 / postgrest 0.18) a HEAD count reads 0, which left this breaker blind from the
+    day it was written (scrapers/common/tests/test_head_count_reads_zero.py). A count that cannot be
+    read is not zero: it raises, so the run stops before spending proxy bandwidth."""
+    res = (c.table(table).select(sel, count="exact")
+           .eq("active", True).eq(flag, False).limit(1).execute())
+    if res.count is None:
+        raise RuntimeError(f"circuit breaker: pending count for {table} unreadable — refusing to spend proxy")
+    return int(res.count)
+
+
 def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: int = 1,
-                 max_pending: int = 5000, allow_backfill: bool = False) -> dict[str, int]:
+                 max_pending: int = MAX_PENDING_DEFAULT, allow_backfill: bool = False) -> dict[str, int]:
     c = db.sb()
     # Circuit breaker (owner 2026-07-07): steady state is a few brand-new rows/day. A sudden large
     # un-enriched backlog means detail_enriched was reset or a bulk backfill is in play — auto-crawling
     # all of it through the metered Saudi proxy is exactly what exhausted the free tier (25-26 Jun). Refuse
     # unless explicitly authorised, so a stray flag reset can never silently re-crawl ~57k rows.
-    pending = ((c.table(table).select("ad_number", count="exact", head=True)
-                .eq("active", True).eq("detail_enriched", False).execute().count) or 0)
+    pending = pending_count(c, table, "detail_enriched", "ad_number")
     if pending > max_pending and not allow_backfill:
         print(f"⚠ CIRCUIT BREAKER: {pending} un-enriched rows in {table} (> {max_pending}). Steady state "
               f"is a few/day — this looks like a flag reset or a backfill. Refusing to crawl the backlog "
@@ -218,7 +235,7 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--shard", type=int, default=0, help="This job's shard index (0..shards-1).")
     ap.add_argument("--shards", type=int, default=1, help="Total shards (10 = cloud matrix by ad_number last digit).")
-    ap.add_argument("--max-pending", type=int, default=5000,
+    ap.add_argument("--max-pending", type=int, default=MAX_PENDING_DEFAULT,
                     help="Circuit breaker: abort (no proxy fetches) if more than this many un-enriched rows "
                          "exist — a mass backlog means a flag reset, not the normal daily trickle.")
     ap.add_argument("--allow-backfill", action="store_true",
