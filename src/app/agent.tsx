@@ -5129,7 +5129,7 @@ const s = StyleSheet.create({
   platformPickerClose: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.tint },
   platformPickerClosePressed: { backgroundColor: colors.segTrack },
   platformPickerSearchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 42, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 13, backgroundColor: colors.paper, paddingHorizontal: 12, marginBottom: 12 },
-  platformPickerSearchInput: { flex: 1, minWidth: 0, fontFamily: CHAT_FONT, fontSize: 15, lineHeight: 21, color: colors.ink, paddingVertical: 8, textAlign: 'right', writingDirection: 'rtl', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  platformPickerSearchInput: { flex: 1, minWidth: 0, fontFamily: CHAT_FONT, fontSize: 16, lineHeight: 22, color: colors.ink, paddingVertical: 8, textAlign: 'right', writingDirection: 'rtl', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
   platformPickerList: { minHeight: 0 },
   platformPickerListContent: { paddingBottom: 2 },
   platformPickerAll: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 54, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 15, paddingHorizontal: 11, backgroundColor: colors.paper },
