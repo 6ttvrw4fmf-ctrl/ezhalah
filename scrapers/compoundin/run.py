@@ -107,6 +107,11 @@ _DISTRICT_EN_AR = {
     ("riyadh", "ghirnatah"): "حي غرناطة", ("riyadh", "mursalat"): "حي المرسلات",
     ("riyadh", "rawabi"): "حي الروابي", ("riyadh", "muruj"): "حي المروج",
     ("jeddah", "rehab"): "حي الرحاب", ("jeddah", "khalidiyah"): "حي الخالدية",
+    # measured on the live NULL rows by the city in their own /compounds/<city>/ address:
+    ("khobar", "rawabi"): "حي الروابي", ("riyadh", "rabwah"): "حي الربوة",
+    ("riyadh", "safa"): "حي الصفا", ("riyadh", "sulimania"): "حي السليمانية",
+    # NOT mapped, on purpose: «King Abdullah Financial» (114 rows in riyadh, khobar AND makkah — the
+    # site's own template text, not each compound's district), «Saudi Arabia», «Al Khobar».
 }
 
 

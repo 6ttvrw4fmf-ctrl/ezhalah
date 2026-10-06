@@ -19,6 +19,10 @@ import scrapers.compoundin.run as C
     ("Al Mursalat District", "riyadh", "حي المرسلات"),
     ("Ghirnatah District", "riyadh", "حي غرناطة"),
     ("Well located in AlRehab", "jeddah", "حي الرحاب"),
+    ("Al Rawabi District", "khobar", "حي الروابي"),          # 9 live NULL rows, 10-06
+    ("Rabwah District", "riyadh", "حي الربوة"),
+    ("Al Safa District", "riyadh", "حي الصفا"),
+    ("Sulimania District", "riyadh", "حي السليمانية"),
     ("Al Narjis District", "riyadh", "حي النرجس"),          # unchanged behaviour
 ])
 def test_new_spellings_map(raw, city, expect):
@@ -31,7 +35,8 @@ def test_new_spellings_map(raw, city, expect):
 
 def test_unknown_or_other_city_stays_null():
     assert C._DISTRICT_EN_AR.get(("riyadh", C._norm_dist("Well located in AlRehab"))) is None
-    assert C._DISTRICT_EN_AR.get(("riyadh", C._norm_dist("King Abdullah Financial"))) is None
+    for city in ("riyadh", "khobar", "makkah"):   # the site's template text, not a district
+        assert C._DISTRICT_EN_AR.get((city, C._norm_dist("King Abdullah Financial"))) is None
 
 
 def test_map_units_writes_the_catalogued_district(monkeypatch):
