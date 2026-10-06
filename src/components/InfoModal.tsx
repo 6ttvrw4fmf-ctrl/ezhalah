@@ -21,11 +21,10 @@ import {
 import { centredDialogBox, useForeignPromptInsets } from '@/lib/bottomPromptInset';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { useAtLeast } from '@/lib/useAtLeast';
-import { ABOUT_ART_BREAKPOINT, DOCK_BREAKPOINT } from '@/lib/responsive';
+import { DOCK_BREAKPOINT } from '@/lib/responsive';
 import { canDragAuthPopup } from '@/lib/authPopupBehavior';
 import { attachCardDrag, clampOffsetOnScreen } from '@/lib/cardDrag';
 import { LEGAL_DOCS, hasLegalDocs } from '@/data/legal';
-import { PLATFORM_META } from '@/data/loaderPlatforms';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const IN = { duration: 240, easing: Easing.bezier(0.22, 1, 0.36, 1) };
@@ -64,16 +63,6 @@ const LEGAL_MAX_W = 640;
 const ABOUT_MAX_H = 700;
 
 const EAGLE = require('../../assets/images/eagle-mark.png');
-// «من نحن» artwork (owner 2026-08-30): the EXISTING Ezhalah eagle looking over the Kingdom's
-// properties — assets/images/eagle-night.jpg, 900×1317 (portrait). Owner 2026-09-03: it lives in
-// its OWN box now — never a background under text, never zoomed, cropped or stretched.
-const ABOUT_ART = require('../../assets/images/eagle-night.jpg');
-const ABOUT_ART_RATIO = 900 / 1317;
-
-// The only number «من نحن» shows. Derived from the shipped partner roster at compile time — never a
-// hardcoded count that goes stale, and never a dynamic listings/cities figure we'd have to fake.
-const PLATFORM_COUNT = PLATFORM_META.length;
-
 type Kind = 'support' | 'about' | 'legal';
 
 // In-app popup that hosts the Support / About / Terms & Privacy content as a centered dialog over a
@@ -133,8 +122,6 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
   // transform. No position memory: every open starts perfectly centered; only a move changes it.
   const docked = useAtLeast(DOCK_BREAKPOINT);
   const drag = about && canDragAuthPopup({ isWeb: IS_WEB, docked });
-  // Side-by-side art box vs stacked — an SSR-safe flag (useAtLeast), never a raw width compare.
-  const wide = useAtLeast(ABOUT_ART_BREAKPOINT);
   const hostRef = useRef<View | null>(null);
   const gripRef = useRef<View | null>(null);
   useEffect(() => {
@@ -211,7 +198,7 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
           )}
           <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
             {kind === 'support' ? <SupportBody t={t} />
-              : kind === 'about' ? <AboutBody t={t} reduced={reduced} gripRef={gripRef} drag={drag} wide={wide} />
+              : kind === 'about' ? <AboutBody t={t} reduced={reduced} gripRef={gripRef} drag={drag} />
               : <LegalBody t={t} initial={legalTab} />}
           </ScrollView>
         </Animated.View>
@@ -472,10 +459,11 @@ function Reveal({ shown, animate, delay, fadeOnly, style, children }: {
   );
 }
 
-function AboutBody({ t, reduced, gripRef, drag, wide }: {
-  t: Tr; reduced: boolean; gripRef: React.MutableRefObject<View | null>; drag: boolean; wide: boolean;
+function AboutBody({ t, reduced, gripRef, drag }: {
+  t: Tr; reduced: boolean; gripRef: React.MutableRefObject<View | null>; drag: boolean;
 }) {
-  // Literal palette for the themed surfaces (the About sheet is a factory, see makeAbout).
+  // A reading page, not a dashboard: one restrained column with the same rhythm as the legal
+  // reader. The copy is already approved in the dictionary; this component only controls hierarchy.
   const pal = useThemePalette();
   const dark = useResolvedTheme() === 'dark';
   const animate = IS_WEB && !reduced;
@@ -483,23 +471,8 @@ function AboutBody({ t, reduced, gripRef, drag, wide }: {
   const rev = { shown, animate };
   const a = useMemo(() => makeAbout(pal, dark), [pal, dark]);
 
-  const values: { icon: keyof typeof Ionicons.glyphMap; label: string; line: string }[] = [
-    { icon: 'albums-outline', label: t('We gather'), line: t('Property listings from the licensed platforms in the Kingdom, in one place.') },
-    { icon: 'grid-outline', label: t('We organize'), line: t('One organized screen that makes comparing fast and easy.') },
-    { icon: 'sparkles-outline', label: t('We help'), line: t('AI-powered search instead of browsing dozens of sites.') },
-    { icon: 'open-outline', label: t('We point you to the source'), line: t('We take you to the listing so you contact its original platform directly.') },
-  ];
-  const legal: { icon: keyof typeof Ionicons.glyphMap; label: string; text: string }[] = [
-    { icon: 'compass-outline', label: t('Our role'), text: t('Ezhalah is a search platform only. We do not own, list, sell, or rent properties, and we run no transactions and take no commission.') },
-    { icon: 'document-text-outline', label: t('Listing licensing'), text: t('Every listing is published by its source platform and remains subject to its licensing. Ezhalah does not issue or own listings.') },
-    { icon: 'alert-circle-outline', label: t('Disclaimer'), text: t('Listings come from external platforms and we do not verify them. Confirm the details with the original platform before any decision.') },
-    { icon: 'lock-closed-outline', label: t('Data & privacy'), text: t('We collect only what the service needs, and we do not sell user data.') },
-  ];
-
-  // The intro column: eyebrow + lockup are the drag grip (desktop) — the "safe upper area" — then
-  // the thesis sentence and the one statistic. On desktop the art box sits beside this column.
-  const intro = (
-    <View style={a.introCol}>
+  return (
+    <View style={a.body}>
       <View ref={gripRef} style={[a.head, drag && ({ cursor: 'grab', touchAction: 'none', userSelect: 'none' } as any)]}>
         <Reveal {...rev} delay={40}>
           <Text style={a.eyebrow}>{t('About Us')}</Text>
@@ -510,66 +483,14 @@ function AboutBody({ t, reduced, gripRef, drag, wide }: {
           </View>
         </Reveal>
       </View>
-      <Reveal {...rev} delay={90}>
+
+      <Reveal {...rev} delay={90} style={a.readingColumn}>
         <Text style={a.heroLine}>{t('Smarter property search, bringing the Saudi market together in one place.')}</Text>
-      </Reveal>
-      {/* One quiet statistic — the number leads, the sentence explains. */}
-      <Reveal {...rev} delay={130} style={a.statBand}>
-        <Text style={a.statNum}>+{String(PLATFORM_COUNT)}</Text>
-        <Text style={a.statLabel}>{t('Real-estate platforms, searched as one.')}</Text>
-      </Reveal>
-    </View>
-  );
-
-  // The artwork in its own box: the real image, its real aspect ratio, contained — never a
-  // wallpaper, never a crop, no text on top. (verify-about-premium-contract pins this.)
-  const art = (
-    <Reveal {...rev} delay={70} fadeOnly style={[a.artBox, wide ? a.artBoxWide : a.artBoxNarrow]}>
-      <RNImage source={ABOUT_ART} style={a.artImg} resizeMode="contain" />
-    </Reveal>
-  );
-
-  return (
-    <View style={a.body}>
-      {wide ? (
-        <View style={a.topRow}>
-          {intro}
-          {art}
-        </View>
-      ) : (
-        <>
-          {intro}
-          {art}
-        </>
-      )}
-
-      {/* The four verbs as a 2×2 of feature cards — short, scannable, never a wall of text. */}
-      <View style={a.vGrid}>
-        {values.map((v, i) => (
-          <Reveal key={v.label} {...rev} delay={170 + i * 30} style={a.vCard}>
-            <View style={a.vIcon}><Ionicons name={v.icon} size={16} color={pal.primary} /></View>
-            <Text style={a.vLabel}>{v.label}</Text>
-            <Text style={a.vLine}>{v.line}</Text>
-          </Reveal>
-        ))}
-      </View>
-
-      {/* Trust — present, readable, designed: one quiet card, four icon-led rows. */}
-      <Reveal {...rev} delay={310} fadeOnly style={a.trustCard}>
-        <Text style={a.trustTitle}>{t('Trust & transparency')}</Text>
-        {legal.map((l) => (
-          <View key={l.label} style={a.trustRow}>
-            <View style={a.trustIcon}><Ionicons name={l.icon} size={13} color={pal.primary} /></View>
-            <Text style={a.trustText}>
-              <Text style={a.trustLead}>{l.label + ': '}</Text>
-              {l.text}
-            </Text>
-          </View>
-        ))}
-      </Reveal>
-
-      <Reveal {...rev} delay={360} fadeOnly style={a.footer}>
-        <Text style={a.brandLine}>{t('Ezhalah, and may your luck be good.')}</Text>
+        <Text style={a.paragraph}>{t('Ezhalah is a Saudi, AI-powered property search platform. We help people find properties faster by searching Aqar, Wasalt, Aldarim and more in one place, and help those platforms reach more users by driving traffic directly to their listings.')}</Text>
+        <Text style={a.paragraph}>{t('Ezhalah is a search platform only. We do not own, list, sell, or rent properties, and we run no transactions and take no commission.')}</Text>
+        <View style={a.rule} />
+        <Text style={a.note}>{t('Every listing is published by its source platform and remains subject to its licensing. Ezhalah does not issue or own listings.')}</Text>
+        <Text style={a.note}>{t('We collect only what the service needs, and we do not sell user data.')}</Text>
       </Reveal>
     </View>
   );
@@ -756,50 +677,23 @@ const s = StyleSheet.create({
 
 // «من نحن» styles. Arabic typography rules: NO letterSpacing anywhere (Latin tracking mangles
 // Arabic script), weights carry the hierarchy, body leading stays generous (~1.7).
-// Palette-driven About styles: the dialog themes fully — dark mode gets a real dark composition,
-// not a light card in a dark app. (pinned by verify-about-premium-contract)
+// Keep this page intentionally close to the legal reader: one calm reading column, clear hierarchy,
+// and no decorative panels competing with the explanation.
 function makeAbout(pal: Record<string, string>, dark: boolean) {
+  void dark;
   return StyleSheet.create({
     body: { paddingHorizontal: BODY_PAD + 4, paddingTop: BODY_PAD, paddingBottom: BODY_PAD },
-    topRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 28 },
-    introCol: { flex: 1, minWidth: 0 },
-    head: { paddingBottom: 6 },
+    head: { paddingBottom: 12 },
     eyebrow: { fontSize: 12.5, lineHeight: 18, fontWeight: '700', color: pal.muted, marginBottom: 8 },
     lockup: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     eagle: { width: 30, height: 30, opacity: 0.9 },
     wordmark: { fontSize: 34, lineHeight: 42, fontWeight: '800', color: pal.ink },
     wordDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: pal.accentLeaf ?? pal.primary, alignSelf: 'flex-end', marginBottom: 8 },
-    heroLine: { fontSize: 16.5, lineHeight: 27, fontWeight: '500', color: pal.body, marginTop: 12 },
-
-    // The artwork's own box: rounded, hairline edge, a quiet ground, the image CONTAINED at its
-    // real aspect ratio (900×1317). Desktop: a fixed-width portrait card beside the intro; mobile:
-    // a centered portrait card. No opacity, no gradient, nothing painted on top.
-    artBox: { borderRadius: 16, borderWidth: 1, borderColor: pal.line, backgroundColor: dark ? pal.surface2 : pal.tint, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
-    artBoxWide: { width: 212, aspectRatio: ABOUT_ART_RATIO, marginTop: 4 },
-    artBoxNarrow: { alignSelf: 'center', width: '60%', maxWidth: 220, aspectRatio: ABOUT_ART_RATIO, marginTop: 20 },
-    artImg: { width: '100%', height: '100%' },
-
-    // The statistic: the number leads at display size, the sentence explains, hairlines frame it.
-    statBand: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 20, paddingVertical: 14, borderTopWidth: 1, borderBottomWidth: 1, borderColor: pal.line },
-    statNum: { fontSize: 36, lineHeight: 42, fontWeight: '800', color: pal.primary, fontVariant: ['tabular-nums'] },
-    statLabel: { flex: 1, fontSize: 14, lineHeight: 21, fontWeight: '600', color: pal.ink },
-
-    // Feature cards: real cards — padding, an icon well, a title, a line — light and simple.
-    vGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 24 },
-    vCard: { flexGrow: 1, flexBasis: '44%', minWidth: 200, backgroundColor: dark ? pal.surface2 : pal.tint, borderRadius: 14, borderWidth: 1, borderColor: dark ? pal.line : pal.tintLine, padding: 16 },
-    vIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: dark ? pal.tint : pal.surface, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-    vLabel: { fontSize: 15, lineHeight: 22, fontWeight: '800', color: pal.ink },
-    vLine: { fontSize: 13, lineHeight: 20, fontWeight: '400', color: pal.body, marginTop: 4 },
-
-    trustCard: { backgroundColor: dark ? pal.surface2 : pal.surface, borderRadius: 14, borderWidth: 1, borderColor: pal.line, padding: 16, marginTop: 20, gap: 12 },
-    trustTitle: { fontSize: 13.5, lineHeight: 20, fontWeight: '800', color: pal.dark ?? pal.ink },
-    trustRow: { flexDirection: 'row', gap: 10 },
-    trustIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: pal.tint, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-    trustText: { flex: 1, fontSize: 12.5, lineHeight: 20, fontWeight: '400', color: pal.body },
-    trustLead: { fontWeight: '800', color: pal.dark ?? pal.ink },
-
-    footer: { alignItems: 'center', marginTop: 20 },
-    brandLine: { fontSize: 13, fontWeight: '700', color: pal.dark ?? pal.ink },
+    readingColumn: { maxWidth: 640, width: '100%', alignSelf: 'center' },
+    heroLine: { fontSize: 19, lineHeight: 31, fontWeight: '700', color: pal.ink, textAlign: 'right', marginTop: 8, marginBottom: 18 },
+    paragraph: { fontSize: 15, lineHeight: 28, fontWeight: '400', color: pal.body, textAlign: 'right', marginBottom: 16 },
+    rule: { height: 1, backgroundColor: pal.line, marginTop: 4, marginBottom: 18 },
+    note: { fontSize: 13.5, lineHeight: 24, fontWeight: '400', color: pal.muted, textAlign: 'right', marginBottom: 12 },
   });
 }
 
