@@ -41,7 +41,7 @@ from typing import Optional
 
 from curl_cffi import requests as cc
 
-from scrapers.common.db import begin_run, end_run, sb
+from scrapers.common.db import _execute, begin_run, end_run, sb
 from scrapers.common.liveness_contract import (
     ALIVE, DEAD, UNKNOWN, EvidenceKind, decide, verification_patch,
 )
@@ -146,12 +146,13 @@ def _collect_candidates(client, limit: int) -> list[dict]:
     sampled render the same listing-less page as bogus id 999999999. The run re-read the same
     unresolvable rows daily and reported "560 of 600 UNKNOWN". last_liveness_probe_at moves on
     every verdict, so a probed row goes to the back for a full cycle."""
-    rows = (client.table(TABLE)
-            .select("id, ad_number, listing_url, missing_count, last_verified_alive_at")
-            .eq("active", True)
-            .order("last_liveness_probe_at", desc=False, nullsfirst=True)
-            .limit(max(limit * 4, limit) if limit else 20000)
-            .execute().data or [])
+    rows = (_execute(client.table(TABLE)
+                     .select("id, ad_number, listing_url, missing_count, last_verified_alive_at, "
+                             "last_liveness_probe_at")
+                     .eq("active", True)
+                     .order("last_liveness_probe_at", desc=False, nullsfirst=True)
+                     .limit(max(limit * 4, limit) if limit else 20000),
+                     what="dealapp candidates").data or [])
     return [r for r in rows if (r.get("listing_url") or "").strip()]
 
 
@@ -161,9 +162,10 @@ BOGUS_ADID = "999999999"
 def _canaries(client, s, budget: Optional[RequestBudget]) -> dict:
     """Positive: the 3 rows most recently proved alive; at least one must still read ALIVE.
     Negative: an id that cannot exist must NOT read ALIVE. Charged to the request budget."""
-    rows = (client.table(TABLE).select("listing_url, last_verified_alive_at")
-            .eq("active", True).not_.is_("last_verified_alive_at", "null")
-            .order("last_verified_alive_at", desc=True).limit(3).execute().data or [])
+    rows = (_execute(client.table(TABLE).select("listing_url, last_verified_alive_at")
+                     .eq("active", True).not_.is_("last_verified_alive_at", "null")
+                     .order("last_verified_alive_at", desc=True).limit(3),
+                     what="dealapp canaries").data or [])
     live = sum(probe_listing(s, r["listing_url"], budget)[0] == ALIVE for r in rows)
     bogus_alive = probe_listing(s, f"{BASE}/ar/ad-details/{BOGUS_ADID}", budget)[0] == ALIVE
     return {"live": live, "live_n": len(rows), "live_ok": live > 0, "bogus_alive": bogus_alive}
@@ -281,10 +283,18 @@ def main() -> int:
         # signal on the ad URL (a removed ad renders the same shell as a bogus id, which is
         # UNKNOWN), so leading with sitemap-absent rows only spent the budget on answers that can
         # never come. Probe order only, never a verdict; the rotation still reaches every row.
-        cands.sort(key=lambda r: -sitemap_candidate_rank(_adid(r["listing_url"]), sitemap)
-                   if sitemap else 0)
+        # NEVER-PROBED FIRST, then sitemap-present (2026-10-06). Sorting sitemap-present first alone
+        # cut the same never-probed rows off the end of every window: they keep a NULL
+        # last_liveness_probe_at, so they head every window and are dropped again — 567 active rows
+        # had never been opened once (backlog #84, unchanged 10-05 → 10-06).
+        cands.sort(key=lambda r: (r.get("last_liveness_probe_at") is not None,
+                                  -sitemap_candidate_rank(_adid(r["listing_url"]), sitemap)
+                                  if sitemap else 0))
         cands = cands[:args.limit] if args.limit else cands
 
+        # Every write goes through db._execute: a dropped HTTP/2 connection (ConnectionTerminated)
+        # on ONE update killed the 2026-10-06 06:49 run after 600 reads, so none of its verdicts
+        # landed. The updates are idempotent, so retrying them is safe (aqar learned it 2026-10-02).
         writes_ok = args.apply and not canary["bogus_alive"]
         pending: list[tuple[dict, str, int, int]] = []   # (row, action, strikes, http_status)
         for row in cands:
@@ -305,7 +315,7 @@ def main() -> int:
                 # never resolve (migration 20260924). Never evidence of life on its own.
                 patch = {"missing_count": 0, "last_liveness_probe_at": now_iso,
                          **verification_patch(d, now_iso=now_iso)}
-                client.table(TABLE).update(patch).eq("id", row["id"]).execute()
+                _execute(client.table(TABLE).update(patch).eq("id", row["id"]), what="dealapp verify")
                 stats["verified"] += 1
 
         # A run that verified almost nothing is being served shells; its deaths are not evidence.
@@ -320,19 +330,20 @@ def main() -> int:
             looked = [row["id"] for row, action, _s, _st in pending
                       if action not in ("reset",) and not (trusted and action in ("strike", "deactivate"))]
             for i in range(0, len(looked), 200):
-                client.table(TABLE).update({"last_liveness_probe_at": now_iso}) \
-                    .in_("id", looked[i:i + 200]).execute()
+                _execute(client.table(TABLE).update({"last_liveness_probe_at": now_iso})
+                         .in_("id", looked[i:i + 200]), what="dealapp looked")
 
         if writes_ok and trusted:
             for row, action, strikes, _status in pending:
                 if action == "strike":
-                    client.table(TABLE).update({"missing_count": strikes,
-                                                "last_liveness_probe_at": now_iso}).eq("id", row["id"]).execute()
+                    _execute(client.table(TABLE).update({"missing_count": strikes,
+                                                         "last_liveness_probe_at": now_iso})
+                             .eq("id", row["id"]), what="dealapp strike")
                     stats["struck"] += 1
                 elif action == "deactivate":
-                    client.table(TABLE).update(
+                    _execute(client.table(TABLE).update(
                         {"missing_count": strikes, "active": False,
-                         "last_liveness_probe_at": now_iso}).eq("id", row["id"]).execute()
+                         "last_liveness_probe_at": now_iso}).eq("id", row["id"]), what="dealapp kill")
                     stats["deactivated"] += 1
 
         # ── Per-row evidence (dealapp_liveness_detail, migration 20260831004139) ──────────────────
