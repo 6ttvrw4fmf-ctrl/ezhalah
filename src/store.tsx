@@ -10,7 +10,9 @@ import { dismissalOutlivesTransition } from '@/lib/authPopupBehavior';
 import { buildPools, type Listing } from '@/data/listings';
 import { fetchListingsForQuery, fetchListingById, getCachedListing } from '@/data/remote';
 import { newSearchSeed } from '@/lib/rotationSeed';
-import { resolveLocation, ensureLocationIndex } from '@/data/locations';
+import { resolveLocation, ensureLocationIndex, liveShelfCount } from '@/data/locations';
+import { shelfCount, zeroContradictsShelf } from '@/lib/shelfCheck';
+import { logZeroResult } from '@/data/zeroResultLog';
 import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
 import { mapSupabaseUser, signOutBackend, deleteAccountBackend } from '@/lib/auth';
@@ -21,7 +23,7 @@ import { beginSessionRestore } from '@/lib/sessionRestore';
 import { mergeOne, pickTranscript, mayPromoteTranscript, withFreshTranscript } from '@/lib/chatMerge';
 import { PROBE_FAILED, isProbeFailure } from '@/lib/afProbe';
 import { buildSyncedName, type BilingualName } from '@/lib/nameSync';
-import { identifyUser } from '@/lib/observability';
+import { identifyUser, reportMessage } from '@/lib/observability';
 import { forgetSupportDraft } from '@/lib/supportDraft';
 import { LOAD_MORE_PAGE_SIZE } from '@/data/resultCount';
 import { truncateGlyphs } from '@/lib/typedReveal';
@@ -977,8 +979,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // owed unfetched behind an advancing cursor. The seed belongs to the SET, so it travels with it.
         searchSeedRef.current = newSearchSeed();
         const searchSeed = searchSeedRef.current;
-        const { listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal, rotationSeed: searchSeedRef.current });
-        const r = runSearch(q, buildPools(rows ?? []), { fetchFailed: rows === null });
+        let { listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal, rotationSeed: searchSeedRef.current });
+        // CHECK THE SHELF BEFORE SAYING «NONE» (owner 2026-10-05 — src/lib/shelfCheck.ts). A zero for a
+        // place-only search whose place we KNOW holds listings is our failure, not an answer: ask once
+        // more, and if it is still zero, word it as a failure («try again»), report it, note it.
+        let shelfClash = false;
+        let shelf: number | null = null;
+        if (rows && rows.length === 0 && !signal?.aborted) {
+          const lm = q.locationMatch;
+          shelf = shelfCount(q, lm ? liveShelfCount(lm, q.districts) : null);
+          if (zeroContradictsShelf(shelf)) {
+            ({ listings: rows, pageCandidates: pageCand, pageTotal } = await fetchListingsForQuery(q, { signal, rotationSeed: searchSeed }));
+            shelfClash = !!rows && rows.length === 0;
+            if (shelfClash) reportMessage('zero_contradicts_shelf', { place: lm?.label, kind: lm?.kind, districts: q.districts?.length ?? 0, shelf });
+          }
+        }
+        const r = runSearch(q, buildPools(rows ?? []), { fetchFailed: rows === null || shelfClash });
+        // THE NOTEBOOK records the zero the USER SEES — measured live 2026-10-05: «فيلا … بسعر 5000» came
+        // back from the server with rows and the client's own filters emptied it, so a fetch-level hook
+        // never wrote it. A network failure is not «no results» (it reads «try again») and is not noted.
+        if (rows !== null && r.listings.length === 0 && !signal?.aborted) logZeroResult(q, shelf, shelfClash);
         // Attach the RESOLVED query so the caller renders the Search Summary from what actually ran
         // (the corrected city/region), not the raw pre-resolution text. (one-engine summary parity.)
         const result: SearchResult = { ...r, query: q, pageOffset: pageCand, hasMore: pageCand >= 1500, matchTotal: pageTotal, rotationSeed: searchSeed };
