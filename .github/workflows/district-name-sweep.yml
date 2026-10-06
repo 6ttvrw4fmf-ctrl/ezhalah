@@ -1,0 +1,72 @@
+# EVERY REAL DISTRICT NAME, TYPED, SEARCHES THAT DISTRICT — nightly (owner 2026-10-05: «never get
+# this issue — or anything like it»). Types each of ~3,200 real district names from the live index
+# into the REAL resolver (scripts/verify-every-district-name-resolves-live.ts). One anon read of
+# location_index_live, zero search load — safe to run every night.
+#
+# WHEN THIS JOB IS RED: a district name is being lost (searched as another town, nothing, or a
+# crash). The run log lists them, biggest first. Fix the resolver → barrier → deploy. Never raise a
+# ceiling to go green.
+
+name: District-name sweep (production index)
+
+on:
+  schedule:
+    - cron: '37 4 * * *'   # daily, off the hour, away from the live search sweep (02:23)
+  workflow_dispatch:
+
+concurrency:
+  group: district-name-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm ci
+      - name: Type every real district name into the real resolver
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_KEY }}
+        run: >-
+          node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON
+          scripts/verify-every-district-name-resolves-live.ts
+
+  # Failure→alert bridge — same shape as live-search-sweep.yml: a red run must reach a human
+  # (alert_event), and the service role stays out of the job that reads production.
+  alert:
+    needs: [sweep]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bridge this run's result to alert_event
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind search_live_check_failed
+          --workflow district-name-sweep.yml
+          --status ${{ contains(needs.*.result, 'failure') && 'failure' || (contains(needs.*.result, 'cancelled') && 'cancelled' || 'success') }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      # Report FIRST, gate AFTER: a sweep that is not «success» (incl. cancelled by its timeout)
+      # turns this run red, so the barrier homed here can never go dark.
+      - name: Gate — a sweep that is not «success» turns this run red
+        run: |
+          printf '%s\n' '${{ toJSON(needs) }}'
+          if ! printf '%s' '${{ toJSON(needs) }}' | grep -q '"result": *"success"'; then
+            echo "no needed job reported success — refusing to report this run as healthy"
+            exit 1
+          fi
+          if printf '%s' '${{ toJSON(needs) }}' | grep -qE '"result": *"(failure|cancelled|skipped)"'; then
+            echo "a needed job did not reach success — failing so the barrier cannot go dark"
+            exit 1
+          fi
