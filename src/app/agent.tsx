@@ -56,6 +56,7 @@ import { ResultCardGrid } from '@/components/ResultCardGrid';
 import { parseQuery, respond } from '@/data/agent';
 import { fetchListingsForQuery } from '@/data/remote';
 import { buildLocationProbeQuery, replyAfterLocationProbe } from '@/lib/agentLocationProbe';
+import { logZeroResult } from '@/data/zeroResultLog';
 import { resolveLocation, cityDisplay, topCitiesInRegion, topDistrictsForCity } from '@/data/locations';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { isGenericWholeAreaAnswer, regionOrCityChoice, scopedLocation, scopeNamedForTwin, twinNameFor, twinWholeAreaIsCity } from '@/lib/regionOrCityAnswer';
@@ -3100,6 +3101,8 @@ export default function Agent() {
       if (turn.locationQuestion && turn.query) {
         const probe = await fetchListingsForQuery(buildLocationProbeQuery(turn.query), { signal: run.ac.signal });
         if (run.cancelled) return;
+        // This «no results» is shown too — the notebook notes it like any other (owner 2026-10-05).
+        if (probe.listings && probe.listings.length === 0) logZeroResult(buildLocationProbeQuery(turn.query), null, false);
         reply = replyAfterLocationProbe(
           turn.reply,
           t('Sorry, no listings currently match your request. Try using the Filter to widen your search.'),

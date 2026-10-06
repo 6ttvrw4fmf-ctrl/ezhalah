@@ -104,7 +104,9 @@ check(`every one of the ${fields.length} SearchQuery fields is classified narrow
 
 // ── 3. wiring: the shared runner uses it, a clash is worded as a failure, every zero is noted ────
 const STORE = readFileSync(join(ROOT, 'src/store.tsx'), 'utf8');
-const wired = (s: string) => /zeroContradictsShelf\(shelf\)[\s\S]{0,900}fetchFailed: rows === null \|\| shelfClash/.test(s) && /logZeroResult\(q, shelf, shelfClash\)/.test(s);
+const wired = (s: string) => /zeroContradictsShelf\(shelf\)[\s\S]{0,900}fetchFailed: rows === null \|\| shelfClash/.test(s)
+  // the notebook notes the zero the USER SEES (after runSearch's client filters), not just an empty fetch
+  && /const r = runSearch\([\s\S]{0,600}if \(rows !== null && r\.listings\.length === 0 && !signal\?\.aborted\) logZeroResult\(q, shelf, shelfClash\)/.test(s);
 check('store.runQuery checks the shelf, words a clash as a failure and notes every zero', wired(STORE));
 
 // ── mutation proofs ──────────────────────────────────────────────────────────────────────────────
@@ -126,6 +128,13 @@ await mustCatch('a town found inside the text scoping away the district named ex
 const ONE_WORD = 'if (!out.length && new Set(typoHits.map((h) => h.word)).size === 1)';
 await mustCatch('spell-check "correcting" a word that exists', ONE_WORD, 'if (new Set(typoHits.map((h) => h.word)).size === 1)');
 await mustCatch('a typo fanning out to two different words', ONE_WORD, 'if (!out.length && new Set(typoHits.map((h) => h.word)).size >= 1)');
+const AGENT = readFileSync(join(ROOT, 'src/app/agent.tsx'), 'utf8');
+check('the chat\'s location-probe «no results» is noted too', /probe\.listings && probe\.listings\.length === 0\) logZeroResult\(buildLocationProbeQuery\(turn\.query\)/.test(AGENT));
+const fetchLevel = STORE.replace('if (rows !== null && r.listings.length === 0 && !signal?.aborted) logZeroResult(q, shelf, shelfClash);', '')
+  .replace('const r = runSearch(', 'if (rows && rows.length === 0) logZeroResult(q, shelf, shelfClash);\n        const r = runSearch(');
+const caughtFetchLevel = !wired(fetchLevel);
+if (!caughtFetchLevel) failed++;
+console.log(`${caughtFetchLevel ? 'PASS' : 'FAIL'}  (mutation) catches a notebook that only notes an EMPTY FETCH (missed «فيلا … بسعر 5000», 2026-10-05)`);
 const unwired = STORE.replace('fetchFailed: rows === null || shelfClash', 'fetchFailed: rows === null');
 const caughtWire = !wired(unwired);
 if (!caughtWire) failed++;
