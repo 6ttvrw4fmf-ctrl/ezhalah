@@ -772,7 +772,7 @@ export function interpretPrice(rawDigits: string, deal: Deal, sizeM2?: number, i
 // here, beside the cursor it is only meaningful next to, rather than in an app-level slot a later
 // (or CANCELLED) search can overwrite. Optional because a transcript persisted before this field
 // existed carries none; see loadMoreListings for what that falls back to.
-export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery; total?: number; pageOffset?: number; hasMore?: boolean; matchTotal?: number; rotationSeed?: string };
+export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery; total?: number; pageOffset?: number; hasMore?: boolean; matchTotal?: number; rotationSeed?: string; /** the backend fetch FAILED — an empty list is NOT «no matches» */ fetchFailed?: boolean };
 
 function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   // A clean TYPE or subcategory GROUP is selected → the server fetch already scoped the rows, so run
@@ -1565,7 +1565,7 @@ export function runSearch(q: SearchQuery, pools: Pools, opts?: { fetchFailed?: b
   // the MATCHING set, so «عرض جميع النتائج» must be able to reveal ALL of them (progressively), not just
   // the first 200. Matches the fetch cap so no matching listing is unreachable. [[filter-candidate-cap-underreturn-2026-07-08]]
   const SHOW_ALL_MAX = 1500;
-  return { heading: heading(q), notes: ns, listings: listings.slice(0, SHOW_ALL_MAX), sortNote, count, suggestion, total };
+  return { heading: heading(q), notes: ns, listings: listings.slice(0, SHOW_ALL_MAX), sortNote, count, suggestion, total, ...(opts?.fetchFailed && listings.length === 0 ? { fetchFailed: true } : {}) };
 }
 
 // Try relaxing one query field at a time and see which unlocks results. The order matters: we
