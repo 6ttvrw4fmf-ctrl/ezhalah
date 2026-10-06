@@ -3894,7 +3894,6 @@ export default function Agent() {
               <TextInput
                 value={platformPickerSearch}
                 onChangeText={setPlatformPickerSearch}
-                autoFocus={IS_WEB}
                 placeholder={t('Search websites…')}
                 placeholderTextColor={colors.muted}
                 style={s.platformPickerSearchInput}
