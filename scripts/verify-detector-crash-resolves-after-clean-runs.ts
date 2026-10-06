@@ -43,15 +43,15 @@ export function problems(s: string): string[] {
 }
 
 const fail = problems(sql);
-const mutate = (label: string, m: string) => {
+const mustCatch = (label: string, m: string) => {
   if (m === sql) { fail.push(`mutation «${label}» did not apply (stale needle)`); return; }
   if (problems(m).length === 0) fail.push(`mutation NOT caught: ${label}`);
 };
-mutate('one clean run is enough', sql.replace('coalesce(t.skipped, false)) >= 2', 'coalesce(t.skipped, false)) >= 1'));
-mutate('skipped runs count as clean', sql.replace(' and not coalesce(t.skipped, false)) >= 2', ') >= 2'));
-mutate('a new crash no longer blocks', sql.replace(/\s+and not exists \(select 1 from public\.ops_detector_timing t\s+where t\.detector = r\.det and t\.swept_at > r\.created_at\s+and coalesce\(t\.crashed, false\)\)/, ''));
-mutate('runs BEFORE the alert count', sql.replace('t.swept_at > r.created_at\n           and not coalesce', 't.swept_at > r.created_at - interval \'30 days\'\n           and not coalesce'));
-mutate('run_remediation no longer calls it', sql.replace("E'  perform public.mon_resolve_orphaned_escalations();\\n  perform public.mon_resolve_recovered_detector_crashes();\\n'", "E'  perform public.mon_resolve_orphaned_escalations();\\n'"));
+mustCatch('one clean run is enough', sql.replace('coalesce(t.skipped, false)) >= 2', 'coalesce(t.skipped, false)) >= 1'));
+mustCatch('skipped runs count as clean', sql.replace(' and not coalesce(t.skipped, false)) >= 2', ') >= 2'));
+mustCatch('a new crash no longer blocks', sql.replace(/\s+and not exists \(select 1 from public\.ops_detector_timing t\s+where t\.detector = r\.det and t\.swept_at > r\.created_at\s+and coalesce\(t\.crashed, false\)\)/, ''));
+mustCatch('runs BEFORE the alert count', sql.replace('t.swept_at > r.created_at\n           and not coalesce', 't.swept_at > r.created_at - interval \'30 days\'\n           and not coalesce'));
+mustCatch('run_remediation no longer calls it', sql.replace("E'  perform public.mon_resolve_orphaned_escalations();\\n  perform public.mon_resolve_recovered_detector_crashes();\\n'", "E'  perform public.mon_resolve_orphaned_escalations();\\n'"));
 
 if (fail.length) {
   console.error('❌ detector_crash resolution:\n  ' + fail.join('\n  '));

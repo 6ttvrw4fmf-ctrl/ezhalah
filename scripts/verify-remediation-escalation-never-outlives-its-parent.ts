@@ -46,15 +46,15 @@ export function problems(s: string): string[] {
 }
 
 const fail = problems(sql);
-const mutate = (label: string, m: string) => {
+const mustCatch = (label: string, m: string) => {
   if (m === sql) { fail.push(`mutation «${label}» did not apply (stale needle)`); return; }
   if (problems(m).length === 0) fail.push(`mutation NOT caught: ${label}`);
 };
-mutate('resolve every escalation regardless of parent', sql.replace(/if not exists \(select 1 from public\.alert_event p\s+where p\.kind = r\.pkind and p\.dedup_key = r\.pkey and p\.resolved_at is null\) then/, 'if true then'));
-mutate('parent matched on key only, not kind', sql.replace('where p.kind = r.pkind and p.dedup_key = r.pkey', 'where p.dedup_key = r.pkey'));
-mutate('closed escalations re-swept', sql.replace("where e.kind = 'remediation_exhausted'\n       and e.resolved_at is null", "where e.kind = 'remediation_exhausted'"));
-mutate('sweep only when the worker is enabled', sql.replace("perform public.mon_resolve_orphaned_escalations();\\n  if not v_enabled then", "if not v_enabled then"));
-mutate('edit not occurrence-guarded', sql.replace('length(needle) <> 1', 'length(needle) < 0'));
+mustCatch('resolve every escalation regardless of parent', sql.replace(/if not exists \(select 1 from public\.alert_event p\s+where p\.kind = r\.pkind and p\.dedup_key = r\.pkey and p\.resolved_at is null\) then/, 'if true then'));
+mustCatch('parent matched on key only, not kind', sql.replace('where p.kind = r.pkind and p.dedup_key = r.pkey', 'where p.dedup_key = r.pkey'));
+mustCatch('closed escalations re-swept', sql.replace("where e.kind = 'remediation_exhausted'\n       and e.resolved_at is null", "where e.kind = 'remediation_exhausted'"));
+mustCatch('sweep only when the worker is enabled', sql.replace("perform public.mon_resolve_orphaned_escalations();\\n  if not v_enabled then", "if not v_enabled then"));
+mustCatch('edit not occurrence-guarded', sql.replace('length(needle) <> 1', 'length(needle) < 0'));
 
 if (fail.length) {
   console.error('❌ remediation escalation outlives its parent:\n  ' + fail.join('\n  '));

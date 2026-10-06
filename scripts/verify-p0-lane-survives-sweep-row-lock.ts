@@ -83,15 +83,15 @@ const mutations: Array<[string, (s: string) => string]> = [
   ['excuse every deferral', (s) => s.replace(/jobid = 38 and status = 'running'/, 'true')],
   ['hide deferrals', (s) => s.replace(/'deferred', v_deferred/, "'x', 1")],
 ];
-for (const [name, mutate] of mutations) {
-  const m = mutate(body);
-  if (m === body) {
+function mustCatch(name: string, mutated: string): void {
+  if (mutated === body) {
     failed = true;
     console.error(`❌ mutation «${name}» did not apply — the proof is stale`);
-  } else if (problems(m).length === 0) {
+  } else if (problems(mutated).length === 0) {
     failed = true;
     console.error(`❌ mutation «${name}» was NOT caught`);
   }
 }
+for (const [name, mutate] of mutations) mustCatch(name, mutate(body));
 if (!failed) console.log(`✓ ${mutations.length}/${mutations.length} mutations caught`);
 process.exit(failed ? 1 : 0);
