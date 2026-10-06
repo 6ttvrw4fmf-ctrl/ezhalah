@@ -102,7 +102,8 @@ Work, biggest customer impact first, from `select * from ops_engineer_backlog wh
 and this standing list:
 - **0. FIRST, EVERY NIGHT: every «no results» a real user saw (owner 2026-10-05: «we should never get this — is this true?»).**
   `select at, entry from ops_zero_result_log where at > now() - interval '26 hours' order by at desc;` — one row per zero
-  shown (place, kind, city/cities, districts, deal, category, filters, AF answers; never free text, never who). For each
+  shown (place, kind, city/cities, districts, deal, category, filters, AF answers; never free text, never who). Rows with
+  `entry->>'robot' = 'true'` are our own CI journeys (they probe honest zeros on purpose) — real users first. For each
   distinct search, decide against the DATABASE whether «none» was TRUE: count the active, searchable listings for that
   place + deal + category + type(s) + filters. `clash = true` rows are already proven false by the app's own shelf check
   (the user was told «try again»): those are P1. A false zero is a bug in OUR search — wrong place resolved, a filter that

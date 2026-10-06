@@ -36,6 +36,9 @@ export function logZeroResult(q: SearchQuery, shelf: number | null, clash: boole
     place_only: placeOnly(q),
     shelf,
     clash,
+    // Our own CI journeys (Playwright sets navigator.webdriver) probe honest zeros on purpose — e.g.
+    // a 999,000,000-riyal price. Kept, but tagged, so the nightly 🔧 re-check reads real users first.
+    robot: typeof navigator !== 'undefined' && !!(navigator as { webdriver?: boolean }).webdriver,
   };
   boundedRpc(supabase.rpc('log_zero_result', { p_entry: entry })).then(() => {}, () => {});
 }
