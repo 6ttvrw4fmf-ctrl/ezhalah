@@ -47,6 +47,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
 API = "https://p1.dallali.com/listings/public"
@@ -54,7 +55,6 @@ SITE = "https://dallali.com/advertisements/property"
 SOURCE = "دلّالي"
 PREFIX = "DLL"
 SLUG = "dallali"
-IMPERSONATE = "chrome"
 
 # unit_type → the Arabic word the fleet's type map already knows.
 _UNIT_TYPE_AR = {"office": "مكتب", "apartment": "شقة", "villa": "فيلا", "residential_land": "ارض",
@@ -69,7 +69,7 @@ _NEVER_STORE = {"phoneNumber", "responsibleEmployeeName", "responsibleEmployeePh
 def get_json(s: cc.Session, url: str) -> Any:
     for attempt in range(3):
         try:
-            r = s.get(url, impersonate=IMPERSONATE, timeout=40)
+            r = s.get(url, timeout=40)
             r.raise_for_status()
             return r.json()
         except Exception:  # noqa: BLE001
@@ -221,7 +221,10 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(f"{API}?purpose=all&page=1", timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     listings, declared = walk(s)
     print(f"{SOURCE}: {len(listings)} listing(s) (API declares total={declared})", flush=True)
 

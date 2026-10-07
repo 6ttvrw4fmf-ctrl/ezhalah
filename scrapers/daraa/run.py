@@ -44,13 +44,13 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields  # noqa: E402
 
 BASE = "https://daraa.sa"
 SOURCE = "دارا للتطوير العقاري"
 PREFIX = "DRA"
 SLUG = "daraa"
-IMPERSONATE = "chrome"
 COOKIES = {"locale": "ar"}
 CITY_AR = "مكة المكرمة"
 _HARAM_KEY = "الحرم المكي"
@@ -65,7 +65,7 @@ _PRICE_RE = re.compile(r"ريال|ر\.س|SAR", re.I)
 def get(s: cc.Session, url: str) -> str:
     for attempt in range(3):
         try:
-            r = s.get(url, impersonate=IMPERSONATE, timeout=40, cookies=COOKIES)
+            r = s.get(url, timeout=40, cookies=COOKIES)
             r.raise_for_status()
             return r.text
         except Exception:  # noqa: BLE001
@@ -221,7 +221,10 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(f"{BASE}/projects?page=1", timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     cards, walked_all = walk(s)
     print(f"{SOURCE}: {len(cards)} project(s) on its list (all pages read: {walked_all})", flush=True)
 
