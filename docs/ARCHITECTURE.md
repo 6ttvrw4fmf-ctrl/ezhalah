@@ -185,7 +185,7 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). ~33 partner pl
   `results` (slogan + summary + intro + sort line + cards), `status` (thinking/searching, morphed in
   place).
 - **Typed message** → `send()`: guest-gate check (see §7.2) → refine intercept → `recordChatTurn` →
-  reply locale follows message language without changing the interface locale → build last-10-turn history (results
+  reply locale follows message language without changing the interface locale → build the last two raw history turns plus the accumulated query state (results
   restated as numbered facts so "the 2nd one"/"cheapest" resolve without inventing) → `respond(v,…)` →
   branch on `AgentTurn.kind` (`interview` | `listings` | `message`).
 - **Filter/interview** → a `SearchQuery` is passed directly and typed out as a natural-language bubble.

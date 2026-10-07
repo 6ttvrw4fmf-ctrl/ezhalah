@@ -1177,9 +1177,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const clean = truncateGlyphs((title ?? '').replace(/\s+/g, ' ').trim(), 120, '');
           const next = h.map((it) => {
             if (it.id !== id) return it;
+            const prompt = it.transcript?.msgs.filter(m => m.role === 'user').at(-1)?.text ?? it.label;
             return clean
               ? { ...it, title: clean, titleSource: 'manual' as TitleSource, titleUpdatedAt: Date.now() }
-              : { ...it, title: autoTitleForQuery(it.query, getLocale()), titleSource: 'auto' as TitleSource, titleUpdatedAt: Date.now() };
+              : { ...it, title: autoTitleForPrompt(prompt, detectLocale(prompt) ?? getLocale()) || autoTitleForQuery(it.query, getLocale()), titleSource: 'auto' as TitleSource, titleUpdatedAt: Date.now() };
           });
           if (user) try {
             if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(next));

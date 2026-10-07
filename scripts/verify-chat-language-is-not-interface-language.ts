@@ -74,13 +74,15 @@ for (const locale of ['ar', 'en']) {
 // Lift the actual store closures by AST; no copy of their title/update logic.
 const store = readFileSync(join(root, 'src/store.tsx'), 'utf8');
 const ast = ts.createSourceFile('store.tsx', store, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-let record = '', turn = '';
+let record = '', turn = '', rename = '';
 function visit(node: ts.Node) {
   if (ts.isVariableDeclaration(node) && node.name.getText(ast) === 'recordHistory') record = node.initializer!.getText(ast);
   if (ts.isPropertyAssignment(node) && node.name.getText(ast) === 'recordChatTurn') turn = node.initializer.getText(ast);
+  if (ts.isPropertyAssignment(node) && node.name.getText(ast) === 'renameHistory') rename = node.initializer.getText(ast);
   ts.forEachChild(node, visit);
 }
 visit(ast); assert.ok(record && turn);
+assert.ok(rename);
 const dir = mkdtempSync(join(tmpdir(), 'ez-language-history-'));
 const out = join(dir, 'history.mjs');
 writeFileSync(out, ts.transpileModule(`
@@ -93,8 +95,9 @@ const historyKey = () => 'test'; const serializeHistoryForDisk = (v) => JSON.str
 const emptyQuery = () => ({}); const queryLabel = () => 'Arabic UI query label';
 const sameQuery = () => false; const SNAPSHOT_CAP = 20; const SNAPSHOT_ENTRIES = 15;
 const recordHistory = ${record}; const recordChatTurn = ${turn};
-const rows = () => history; const rename = (title) => { history[0].title = title; history[0].titleSource = 'manual'; };
-export {recordHistory, recordChatTurn, rows, rename};
+const rows = () => history; const truncateGlyphs = (text: string) => text; const rename = ${rename};
+const transcript = (text: string) => { history[0].transcript = {msgs: [{role:'user',text}]}; };
+export {recordHistory, recordChatTurn, rows, rename, transcript};
 `, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText);
 const h = await import(pathToFileURL(out).href);
 const id = h.recordChatTurn('أبي شقة بالرياض');
@@ -105,8 +108,10 @@ assert.equal(english, autoTitleForPrompt('show me apartments in Riyadh', 'en'), 
 assert.ok(/[A-Za-z]/.test(english) && !/[\u0600-\u06ff]/.test(english));
 h.recordHistory({}, undefined, id);
 assert.equal(h.rows()[0].title, english, 'search arrival must retain latest-message title');
-h.rename('My own title'); h.recordChatTurn('أبي فيلا بجدة'); h.recordHistory({}, undefined, id);
+h.rename(id, 'My own title'); h.recordChatTurn('أبي فيلا بجدة'); h.recordHistory({}, undefined, id);
 assert.equal(h.rows()[0].title, 'My own title', 'manual rename must survive both paths');
+h.transcript('show me apartments in Riyadh'); h.rename(id, '');
+assert.equal(h.rows()[0].title, english, 'clearing a manual name restores the latest message language');
 const screen = readFileSync(join(root, 'src/app/agent.tsx'), 'utf8');
 assert.ok(!/\bsetLocale\s*\(/.test(screen), 'chat screen must never change interface locale');
 console.log('PASS: message/request/fallback languages are independent of UI; latest titles persist and manual names win.');
