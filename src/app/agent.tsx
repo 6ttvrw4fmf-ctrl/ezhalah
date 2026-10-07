@@ -4089,7 +4089,7 @@ export default function Agent() {
                     </View>
                   );
                 }
-                // Assistant stays on the left; each reply's text keeps its own reading direction.
+                // Per-message direction: text keeps its own reading direction; the assistant stays on the left.
                 const txt = m.text;
                 const rtl = msgRTL(txt);
                 return (
