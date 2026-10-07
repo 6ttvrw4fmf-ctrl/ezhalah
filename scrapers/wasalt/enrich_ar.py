@@ -378,7 +378,13 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
     # ad_number (WST…N). Server-side, ~even, zero overlap → no duplicate proxy fetches.
     if shards == 10:
         q = q.like("ad_number", f"%{shard}")
-    rows = q.order("id").limit(limit).execute().data or []
+    # NEWEST FIRST (New Listings Engineer, 2026-10-07). The pending queue holds ~12k rows and a run
+    # clears ~380 before its time budget, so `order("id")` (oldest first) meant a listing that
+    # arrived today waited behind thousands of older ones: 985 of 985 wasalt rows scraped in the
+    # last 3 days had ar_fetched=false, and the Arabic page is where their city/district come from
+    # (9 of 463 arrivals unsearchable for no city, 28 with no district). Today's arrivals go first;
+    # older pending rows drain behind them.
+    rows = q.order("id", desc=True).limit(limit).execute().data or []
     print(f"── {table} shard {shard}/{shards}: {len(rows)} un-fetched rows (cap {limit})", flush=True)
     stats = {"ok": 0, "empty": 0, "fail": 0, "skipped": 0}
     lock = threading.Lock()
