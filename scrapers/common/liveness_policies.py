@@ -991,11 +991,11 @@ POLICIES: dict[str, _P] = {
         "stock."),
     "wahadat": _P(
         _pol("wahadat", 3, 168), CRAWL_PRESENCE_ONLY,
-        "the crawl's OWN seen-set, and it is a genuine FULL-STATE fetch: every run re-reads the "
-        "sitemap's complete list of 100 project pages and re-parses every unit on each, so a unit "
-        "dropping out, or its project leaving the sitemap, is the complete liveness signal. "
-        "db.prune_unseen's 3-strike/coverage/collapse guards are the only additional protection, "
-        "the same shape ~40 other whole-catalogue platforms in this fleet already use.",
+        "the unit's OWN status in its project's record, read every run (2026-10-07): a unit the "
+        "source states as sold or reserved, in a project whose is_active is true, is gone and "
+        "takes a strike; a unit that merely drops out of the list, or whose project is unread, is "
+        "UNKNOWN and is never hidden (absence only selects candidates). prune_unseen's 3-strike, "
+        "coverage and collapse guards still apply.",
         "Not CANDIDATE_PLUS_DIRECT even though a project page can be re-fetched: the unit-level "
         "detail endpoint (pro.wahadat.sa/ar/unit/api/units/<uuid>/) answers 403 unauthenticated, so "
         "there is no per-unit surface to re-probe INDEPENDENTLY of the crawl — a 'direct' check "
@@ -1218,9 +1218,10 @@ POLICIES: dict[str, _P] = {
         "paging (/Property/_Properities, start=1..N, length=12) walked until a page is empty, checked "
         "against #TotalRecord (83 when measured), then every /Property/Details/<id> page re-read. "
         "run.py suppresses prune_unseen unless the walk reached TotalRecord and every page was readable.",
-        "An oracle is possible — a removed id's details page stops carrying the pd-overview licence "
-        "block — but it is not written yet, so this does not claim a direct check. The ads carry REGA "
-        "licence expiry dates (license_expiry) for a future oracle."),
+        "Measured 2026-10-07 (oracle-feasibility-probe 37618176662): a hidden ad's details page still "
+        "answers 200 like a live one, with no marker between them, so NO death signal exists and "
+        "prune_unseen's verify_gone answers UNKNOWN for every row: absence counts strikes and hides "
+        "nothing. The ads carry REGA licence expiry dates (license_expiry) for a future oracle."),
     "macsaib": _P(
         _pol("macsaib", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over Taearif's complete, self-declaring JSON feed: "
