@@ -386,6 +386,7 @@ or rewrite another engineer's work, and never start a big change in another engi
 11. **Log the end** in `ops_daily_engineer_run`, then write the report.
 
 ## Lessons from real breakages (use them)
+- **2026-10-07 (copied by 🔧 QA):** a crawl that dies before `begin_run` leaves no row — read the nightly run's failed jobs, not only `scrape_runs`. And write your clock from the database: the report said 110 min, `ops_engineer_review` said 102.
 - **2026-10-06 (copied by 🔧 QA):** a district map keyed by the city you ASSUME misses (compoundin: Rawabi is Khobar, Qurtoba is Jeddah). Group the NULL rows by the city in their own address first, then write the map.
 - The same block on several unrelated sites at once = one shared security wall, not several dead sites.
 - It gets *worse* the harder you retry = the browser failed to start, not a block.
