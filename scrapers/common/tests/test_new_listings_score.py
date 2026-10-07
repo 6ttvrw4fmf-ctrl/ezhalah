@@ -80,6 +80,12 @@ def test_an_area_figure_is_never_another_fields_value():
     assert compare_listing({"area_m2": 214}, page("المساحة", "214 م²"))["area"] == MATCH
 
 
+def test_one_written_as_a_word():
+    # gathern prints «دورة مياه واحدة» (one bathroom, as a word) — 3/3 false «mismatches» on 2026-10-07.
+    assert compare_listing({"bathrooms": 1}, page("دورات المياة", "دورة مياه واحدة"))["bathrooms"] == MATCH
+    assert compare_listing({"bathrooms": 2}, page("دورة مياه واحدة"))["bathrooms"] == MISMATCH
+
+
 def test_gathern_price_is_never_compared():
     r = compare_listing({"price_total": 999}, page("السعر 5 ريال"), skip_price=True)
     assert "price" not in r

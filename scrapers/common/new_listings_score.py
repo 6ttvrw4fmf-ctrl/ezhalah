@@ -207,6 +207,9 @@ CONTROL_PROMPT = re.compile(r"^\s*اختر\s")
 AREA_UNIT = re.compile(r"م²|م2|متر مربع")
 
 
+ONE_WORD = re.compile(r"(?<!\S)(?:واحد|واحده)(?!\S)")
+
+
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
     if not AREA_UNIT.search(kw):
@@ -233,6 +236,10 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # The live page renders the spec as label/value LINES («عمر العقار» / «جديد»), so the word can sit
         # on the line after the label (aqar 15703930 / 15703349, 2026-10-06: stored 0, scored wrong
         # because the previous row's bare «220 م²» read as a stated age).
+        # «دورة مياه واحدة» is gathern's way of printing ONE bathroom: the word, not the digit (af_score
+        # 2026-10-07: gathern 12857258 / 13191014 / 13971729 stored 1, scored «mismatch» 3/3).
+        if any(ONE_WORD.search(lines[i]) for i in kw_hits):
+            return MATCH if float(stored) == 1 else MISMATCH
         if kw == AGE_KW and (NEW_BUILDING.search(" | ".join(lines[i] for i in kw_hits)) or any(
                 i + 1 < len(lines) and re.match(r"^\s*جديد\s*$", lines[i + 1]) for i in kw_hits)):
             return MATCH if float(stored) == 0 else MISMATCH
