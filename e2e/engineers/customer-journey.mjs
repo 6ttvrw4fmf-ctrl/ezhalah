@@ -255,8 +255,10 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
     await tap(row.city_ar, 8000);
     await page.waitForSelector('[data-testid="selected-city-visual"]', { timeout: 8000 }).catch(() => {});
 
-    const districtBare = String(row.district_ar).replace(/^حي\s+/, '');
-    if (!opts.noDistrict) {
+    const districtBare = String(row.district_ar ?? '').replace(/^حي\s+/, '');
+    // A listing with no district (an explicit --listings pick) is searched at city level, the way a
+    // customer would: typing «null» into the district box is not a customer action (2026-10-07).
+    if (!opts.noDistrict && districtBare) {
       step(`district «${districtBare}»`);
       await page.click('[data-testid="district-input"]');
       await page.fill('[data-testid="district-input"]', districtBare);
