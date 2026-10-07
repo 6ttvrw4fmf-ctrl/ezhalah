@@ -53,6 +53,12 @@ const WAIVED: Record<string, string> = {
   // decay: the crawl's upsert drops an absent icon count instead of NULLing the column, and every detail
   // back-fill now writes the same count from the same section (scrapers/gathern/run.py
   // _bathrooms_from_sections), pinned by test_gathern_bathrooms_from_page_section.py.
+  // Same shape: a NULL-only fill of kitchen from the «المطابخ: N» count each ad's own stored text carries;
+  // the sakan and tuba parsers now read that count on every crawl (normalize.kitchen_from_count), and the
+  // crawl upsert drops an absent key, so it cannot decay. Pinned by test_floor_details_kitchen_count.py.
+  '20261007094958_af_sakan_tuba_kitchen_count_is_a_kitchen.sql':
+    'NULL-only back-fill from the floor-details kitchen count both parsers now read on every crawl; ' +
+    'pinned by test_floor_details_kitchen_count.py::test_sakan_stores_the_stated_kitchen_and_keeps_the_lift_unknown',
   '20261007093148_af_gathern_bathrooms_from_page_section.sql':
     'NULL-only back-fill from the page section the scraper now writes on every detail back-fill; ' +
     'pinned by test_gathern_bathrooms_from_page_section.py::test_backfill_fills_a_null_count_from_the_page',
