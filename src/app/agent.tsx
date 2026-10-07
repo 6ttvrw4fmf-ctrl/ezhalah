@@ -3191,8 +3191,8 @@ export default function Agent() {
       // — a «حي الملك» search that timed out was told «ما لقينا نتائج» while the same search returns
       // 16,874). runSearch already words a failure as «try again in a few seconds»; never overwrite it.
       const zeroMatch = result.listings.length === 0 && !result.fetchFailed
-        ? { ...result, suggestion: translate(replyLocale, 'Sorry, no listings currently match your request. Try using the Filter to widen your search.') }
-        : result;
+        ? { ...result, suggestion: t('Sorry, no listings currently match your request. Try using the Filter to widen your search.') }
+        : result.fetchFailed ? { ...result, suggestion: t('Loading listings — please try again in a few seconds.') } : result;
       await playListings(run, statusId, withNotice, zeroMatch, v);
       if (run.cancelled) return;
       void promptSignupSoon(run);
@@ -3385,10 +3385,10 @@ export default function Agent() {
     // the fields it named and for nothing else. Measured on main: `send()` reads NINE refs and this
     // list cleared FOUR. The three below are the rest of what `send()` consumes.
     //   • pendingRefineRef is the exact sibling of pendingScopeRef/pendingCityRef and the worst of
-    //     the three: send()'s REFINE INTERCEPT reads it BEFORE recordChatTurn and returns, so with a
+    //     the three: send()'s REFINE INTERCEPT returns before the ordinary agent path, so with a
     //     «نتائج أدق» question left unanswered in the chat being abandoned, the FIRST message typed
     //     in the next conversation is swallowed — merged into the OLD chat's SearchQuery, re-searched
-    //     under the old filter, no sidebar entry created, and the agent never called at all.
+    //     under the old filter instead of reaching the ordinary agent path.
     //   • saidRef/askCountRef are the attempt's accumulated context, sent to the agent as
     //     `attemptTexts`/knownState: without this, the next conversation's first message is
     //     interpreted on top of everything the user said in the one they just left.

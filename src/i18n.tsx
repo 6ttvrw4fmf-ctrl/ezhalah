@@ -1580,7 +1580,7 @@ export function t(en: string, vars?: Record<string, string | number>): string {
   return translate(_locale, en, vars);
 }
 
-// Detect the script the user is writing in so the whole UI can follow their keyboard:
+// Detect input/message script; callers decide how to use it. Chat replies never change UI locale:
 // any Arabic letter → 'ar', otherwise any Latin letter → 'en'. Returns null for
 // digit-only/empty/symbol input so we don't flip the language on a lone number.
 const _arScript = /[؀-ۿ]/;

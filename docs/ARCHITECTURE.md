@@ -36,7 +36,7 @@ across many partner platforms and shows them in one place. **It is a search engi
 - **Source fidelity.** Never rewrite, translate, round-trip, or invent source content (titles,
   descriptions, prices, areas, beds). The card shows scraped values verbatim.
 - **Gathern is rent-only** — must never appear in Buy results (monthly furnished).
-- **Arabic-first / Arabic-only** UI (RTL). English is a disabled latent code path, not user-selectable.
+- **Arabic-first UI with Arabic and English preferences.** Message language affects replies, never the chosen interface language.
 - **Compliance.** REGA FAL licensing + PDPL (Saudi data residency, no selling user data).
 
 ---
@@ -310,7 +310,7 @@ guests is their history isn't persisted. (This supersedes PRD §9's "first searc
 Centered popup. Exposes: **Display Name** (inline edit, bilingual auto-synced), **Account** row
 (phone → Change via WhatsApp-OTP re-verify; google/apple → email locked), **Logged-in device** (inferred
 from method, not real detection), **Log out**, **Delete my account** (wipes history/chat/storage). No
-language / units / currency / theme toggle (Arabic-only, SAR-only).
+language / units / currency / theme toggle (Arabic and English; SAR-only).
 
 ### 7.4 Sidebar (`src/components/Sidebar.tsx`)
 
@@ -408,11 +408,8 @@ save, Escape cancels and restores. A rename writes ONLY the three title keys —
 overwrite it (`canAutoRetitle`). Title is deliberately NOT coupled to `sameQuery()`. Barrier:
 `scripts/verify-chat-title.ts` (mutation-proven).
 
-**i18n (`src/i18n.tsx`):** EN-key → AR dictionary. **Arabic-only in production** — `readSavedLocale()`
-forces `'ar'` and deletes any saved `'en'`; `setLocale` early-returns unless `'ar'`. English is a latent
-disabled path. Default `'ar'` at module load (first paint RTL). `applyDirection` sets `dir/lang` on web,
-`I18nManager` on native. Value-localizers (`tPlace`, `tPrice`, `tDetailOption`, …) translate words but
-keep Western digits. `isLatinOnlyInput` + `ARABIC_ONLY_MSG` reject English search input.
+**i18n (`src/i18n.tsx`):** EN-key → AR dictionary. Arabic is the default; the user can select English. The saved interface preference controls page direction and controls. Chat reply language is explicit per turn and does not change that preference. Value-localizers accept an explicit locale for chat summaries and otherwise use the interface locale; Western digits stay unchanged. The Filter's Arabic catalog input guard remains separate from bilingual chat input.
+
 
 **Design tokens (`src/theme/tokens.ts`) — never hard-code hex/sizes in components:**
 - primary `#2f7247`, dark `#1d4a37`, tint `#eef6f0`, ink `#15201b`, body `#34403a`, muted `#7b8a82`,
