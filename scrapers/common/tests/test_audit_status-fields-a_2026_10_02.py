@@ -197,6 +197,7 @@ def _sqr(i, status_term, label):
 
 def test_squares_a_status_term_never_measured_is_kept_and_counted_with_the_pages_own_word(monkeypatch, capsys):
     posts = [_sqr(1, "90", "ل للبيع"), _sqr(2, "91", "مباع")]
+    monkeypatch.setattr(SQUARES, "walk_session", lambda: object())
     monkeypatch.setattr(SQUARES, "fetch_catalogue", lambda s: ([r for r, _ in posts], len(posts)))
     monkeypatch.setattr(SQUARES, "fetch_pages", lambda s, rows: {str(r["id"]): p for r, p in posts})
     monkeypatch.setattr(SQUARES, "stated_city", lambda text: (None, None, None))

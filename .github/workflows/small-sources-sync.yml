@@ -268,7 +268,7 @@ jobs:
           # wave 3. wahadat fetches 100 project pages (~56 MB of RSC payload) so it gets a wider
           # timeout; squares is one REST call plus 18 detail pages; rawaf is 11 projects + 11 unit calls.
           - { source: wahadat,      cmd: "python -m scrapers.wahadat.run --type all", tmo: 30 }
-          - { source: squares,      cmd: "python -m scrapers.squares.run --type all", tmo: 15 }
+          - { source: squares,      cmd: "python -m scrapers.squares.run --type all", tmo: 15, proxy: true }
           - { source: rawaf,        cmd: "python -m scrapers.rawaf.run --type all", tmo: 15 }
           # wave 3, batch 2. vmksa walks 11 index pages + 163 ad pages (RSC); macsaib is Taearif's JSON
           # feed: 4 list pages, 20 category walks and 77 detail records.
