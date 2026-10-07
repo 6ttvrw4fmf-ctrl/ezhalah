@@ -1218,9 +1218,10 @@ POLICIES: dict[str, _P] = {
         "paging (/Property/_Properities, start=1..N, length=12) walked until a page is empty, checked "
         "against #TotalRecord (83 when measured), then every /Property/Details/<id> page re-read. "
         "run.py suppresses prune_unseen unless the walk reached TotalRecord and every page was readable.",
-        "An oracle is possible — a removed id's details page stops carrying the pd-overview licence "
-        "block — but it is not written yet, so this does not claim a direct check. The ads carry REGA "
-        "licence expiry dates (license_expiry) for a future oracle."),
+        "Measured 2026-10-07 (oracle-feasibility-probe 37618176662): a hidden ad's details page still "
+        "answers 200 like a live one, with no marker between them, so NO death signal exists and "
+        "prune_unseen's verify_gone answers UNKNOWN for every row: absence counts strikes and hides "
+        "nothing. The ads carry REGA licence expiry dates (license_expiry) for a future oracle."),
     "macsaib": _P(
         _pol("macsaib", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over Taearif's complete, self-declaring JSON feed: "

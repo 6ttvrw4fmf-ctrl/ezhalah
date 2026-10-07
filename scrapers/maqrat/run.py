@@ -259,6 +259,18 @@ def map_listing(pid: str, card: dict, d: dict[str, Any]) -> tuple[Optional[tuple
     return (row, category), ""
 
 
+# ── NO OWN-PAGE REMOVAL SIGNAL EXISTS (measured 2026-10-07, ♻️) ─────────────────────────────────
+# prune_unseen ran without verify_gone, so an ad missing from three complete walks was hidden on
+# absence alone (P1 unknown_treated_as_dead: MQR36, MQR78, MQR51). Measured from CI the same day
+# (oracle-feasibility-probe run 37618176662, 10 live + the 3 hidden, interleaved): every page answers
+# 200 with its own title and size, no marker separates them — the hidden ads' pages still render.
+# LISTING_LIVENESS.md §1: absence never kills. Until the source publishes a status (an API record,
+# a feed membership test, the licence end date), absence only counts strikes and nothing is hidden.
+def no_removal_signal(ad_number: str):
+    return ("unknown", "maqrat has no own-page removal signal (probe 37618176662: removed and live "
+                       "pages indistinguishable); absence never hides")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", default="all")
@@ -313,7 +325,8 @@ def main() -> int:
         complete = unreadable == 0 and not a.limit and declared is not None and len(ids) >= declared
         for tbl, rr in (("maqrat_residential_listings", res), ("maqrat_commercial_listings", com)):
             if rr and complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE,
+                                    verify_gone=no_removal_signal)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:
