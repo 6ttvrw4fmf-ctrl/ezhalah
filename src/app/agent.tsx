@@ -2978,13 +2978,13 @@ export default function Agent() {
   const send = async (override?: string) => {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
-    const replyLocale = detectLocale(v) ?? locale;
-    const t = (key: string, vars?: Record<string, string | number>) => translate(replyLocale, key, vars);
     const selectedSourceForTurn = selectedSource;
     // The user SENT something (typed or voice — sendVoice funnels in here): the small sign-in
     // card retires for the rest of this load (owner 2026-08-29). After the guard, so an empty or
     // busy-refused submit is not a send.
     dismissSignInCard();
+    const replyLocale = detectLocale(v) ?? locale;
+    const t = (key: string, vars?: Record<string, string | number>) => translate(replyLocale, key, vars);
     // The CHAT agent accepts English as an input convenience: it normalizes any English place to the
     // canonical ARABIC location, searches in Arabic, and shows every location/result in Arabic (never an
     // English place name). The agent_notes location rules enforce the Arabic-canonical output. The FILTER
