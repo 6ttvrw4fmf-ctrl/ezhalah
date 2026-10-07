@@ -966,6 +966,11 @@ or rewrite another engineer's work, and never start a big change in another engi
   flapping. `run.earned_verify_gone` now needs two earlier applied 404s since the last live reading,
   and the sweep strikes only in a run where EVERY control at both ends read 200
   (`liveness.controls_all_alive`; the 60% gate let 6/10 through).
+- The dealapp guard lesson applies to every crawler that reads pages (muktamel, 2026-10-07): its
+  crawl read ~212 pages a run as redirect-to-/404, the coverage guard counted them as "not re-seen"
+  (488 of 618 < 80%) and dropped the prune, so ~575 rows at 3-19 strikes stayed shown for weeks.
+  `run._strike_read_gone` re-runs the prune with only the read-gone ids unseen. When a site's
+  `prune guard tripped` note repeats, look for direct readings thrown away with it.
 
 - An unattended run cannot apply a statement the database connector holds for a human (measured
   2026-10-05: `delete from public.ops_liveness_registry where false;` timed out at 60 s while
