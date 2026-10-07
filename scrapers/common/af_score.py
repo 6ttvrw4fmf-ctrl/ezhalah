@@ -9,7 +9,9 @@ ago (the 🆕 engineer owns the newer ones): 10 per big website, 5 per small one
   findability the customer's request: the listing's deal, city, district, type + up to two Advanced Filter
               answers its ad really states, sent through the PUBLIC anon RPC the app uses
               (location_search_candidates_ar). Found in the results = found.
-  parity      NOT measured by this module yet (customer-journey.mjs --mode af proves it per journey)
+  parity      on each one-amenity customer request: the number the Advanced Filter promises on that
+              option (apartment_guided_counts_ar cnt_<amenity>) == the results after the tap
+              (af_eligible_count with the amenity), both on the anon path the app uses
 
 A page we could not read and a field the ad does not state are never wrong (silent means unknown). A
 findability request whose result set was cut by the row cap is undecided, never a miss.
@@ -259,8 +261,33 @@ def ask(anon, params: dict) -> list[dict] | None:
         return None
 
 
+# The option count the screen prints for each amenity chip (apartment_guided_counts_ar), by anon slug.
+COUNT_COL = {"elevator": "cnt_elevator", "parking": "cnt_parking", "kitchen": "cnt_kitchen", "ac": "cnt_ac",
+             "maid_room": "cnt_maid_room", "driver_room": "cnt_driver_room",
+             "private_entrance": "cnt_private_entrance"}
+
+
+def parity(anon, params: dict) -> bool | None:
+    """Rulebook number 4: the count promised on an option == the results after the tap. None = not decided
+    (not a one-amenity request, or either read failed — a failed fetch is never a pass or a fail)."""
+    slugs = params.get("p_amenities") or []
+    if len(slugs) != 1 or params.get("p_furnished") is not None or slugs[0] not in COUNT_COL:
+        return None
+    base = {k: v for k, v in params.items() if k not in ("p_amenities", "p_limit", "p_offset")}
+    try:
+        rows = anon.rpc("apartment_guided_counts_ar", base).execute().data
+        after = anon.rpc("af_eligible_count", {**base, "p_amenities": slugs}).execute().data
+    except Exception:  # noqa: BLE001
+        return None
+    promised = (rows[0] if isinstance(rows, list) and rows else {}).get(COUNT_COL[slugs[0]])
+    if promised is None or isinstance(after, (list, dict)) or after is None:
+        return None
+    return int(promised) == int(after)
+
+
 def new_row(night: str, platform: str, **kw) -> dict:
-    row = empty_row(night, platform, find_tried=0, find_found=0, find_missed_ids=[], **kw)
+    row = empty_row(night, platform, find_tried=0, find_found=0, find_missed_ids=[], parity_tried=0,
+                    parity_ok=0, **kw)
     return row
 
 
@@ -344,6 +371,10 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
                     row["find_found"] += 1
                 else:
                     row["find_missed_ids"].append(key)
+            same = parity(anon, params)
+            if same is not None:
+                row["parity_tried"] += 1
+                row["parity_ok"] += int(same)
     if row["unreadable_pages"]:
         row["note"] = f"{row['unreadable_pages']} page(s) unreadable (never counted as wrong)"
     return row
@@ -360,7 +391,8 @@ def _pct(v: float | None) -> str:
 def _line(r: dict) -> str:
     return (f"{r['platform']}: sampled={r['sampled']} findability={_pct(findability(r))} "
             f"({r['find_found']}/{r['find_tried']}) precision={_pct(af_precision(r))} "
-            f"capture={_pct(af_recall(r))} parity=not-measured misses={len(r['find_missed_ids'])}"
+            f"capture={_pct(af_recall(r))} parity={r.get('parity_ok', 0)}/{r.get('parity_tried', 0)} "
+            f"misses={len(r['find_missed_ids'])}"
             + (f" | {r['note']}" if r["note"] else ""))
 
 
@@ -371,6 +403,7 @@ def write_rows(client, rows: list[dict]) -> str:
         "af_claimed": r["af_claimed"], "af_agree": r["af_agree"],
         "af_page_states": r["af_page_states"], "af_captured": r["af_captured"],
         "mismatch_ids": r["mismatch_ids"], "find_missed_ids": r["find_missed_ids"], "note": r["note"],
+        "parity_tried": r.get("parity_tried") or None, "parity_ok": r.get("parity_ok") if r.get("parity_tried") else None,
     } for r in rows]
     try:
         client.table(TABLE).upsert(payload, on_conflict="night,platform").execute()
@@ -387,7 +420,9 @@ def fleet_totals(rows: list[dict]) -> dict:
     r_ = lambda a, b: (a / b) if b else None  # noqa: E731
     return {"findability": r_(t("find_found"), t("find_tried")), "precision": r_(t("af_agree"), t("af_claimed")),
             "capture": r_(t("af_captured"), t("af_page_states")), "find_tried": t("find_tried"),
-            "find_found": t("find_found"), "sampled": t("sampled")}
+            "find_found": t("find_found"), "sampled": t("sampled"),
+            "parity_tried": sum(r.get("parity_tried") or 0 for r in rows),
+            "parity_ok": sum(r.get("parity_ok") or 0 for r in rows)}
 
 
 def main() -> int:
@@ -431,7 +466,8 @@ def main() -> int:
     else:
         f = out["fleet"]
         print(f"fleet: findability={_pct(f['findability'])} ({f['find_found']}/{f['find_tried']}) "
-              f"precision={_pct(f['precision'])} capture={_pct(f['capture'])} parity=not-measured")
+              f"precision={_pct(f['precision'])} capture={_pct(f['capture'])} "
+              f"parity={f['parity_ok']}/{f['parity_tried']}")
         print(out["written"])
     return 0
 

@@ -46,6 +46,19 @@ wp = ns["wasalt_page"]("https://wasalt.sa/ar/property/1", fetch=lambda u: (nd, 2
 check("a live wasalt page is read, not unreadable", wp is not None and ns["page_says_yes"](L(*wp["evidence_lines"]), "elevator"))
 check("wasalt contact fields are never read", wp is not None and not any("0500" in x for x in wp["evidence_lines"]))
 check("a wasalt block stays unreadable", ns["wasalt_page"]("u", fetch=lambda u: (None, None, 0)) is None)
+class _R:
+    def __init__(self, d): self.data = d
+    def execute(self): return self
+class _Anon:
+    def __init__(self, promised, after, fail=False): self.p, self.a, self.f = promised, after, fail
+    def rpc(self, name, params):
+        if self.f: raise RuntimeError("down")
+        return _R([{"cnt_elevator": self.p}] if name == "apartment_guided_counts_ar" else self.a)
+PQ = {"p_deal": "بيع", "p_cities": ["الرياض"], "p_types": ["شقة"], "p_amenities": ["elevator"], "p_limit": 5000, "p_offset": 0}
+check("parity: the promised option count equals the results after the tap", ns["parity"](_Anon(229, 229), PQ) is True)
+check("parity: a promise the tap does not keep is a parity failure", ns["parity"](_Anon(229, 228), PQ) is False)
+check("parity: a failed read is undecided, never a pass", ns["parity"](_Anon(1, 1, fail=True), PQ) is None)
+check("parity: only one-amenity requests are judged", ns["parity"](_Anon(1, 1), {**PQ, "p_amenities": ["elevator", "kitchen"]}) is None)
 SO = ns["structured_only"]
 check("a prose «موقف» is not a statement where aqar publishes parking structurally",
       SO("aqar", {"parking": "we_miss"}, {"parking": None}, {"jsonld": []})["parking"] == "page_silent")
@@ -113,6 +126,8 @@ mustCatch('an empty label read as a yes', 'and not BARE_LABEL.match(x)]', ']');
 mustCatch('the site template read as the ad (no template filter)', 'ad_lines = [x for x in page_lines(page) if x not in chrome]', 'ad_lines = page_lines(page)');
 mustCatch('the template computed from too few pages', 'if len(readable) < TEMPLATE_MIN_PAGES:', 'if len(readable) < 1:');
 mustCatch('one page enough to call a line template', 'return set.intersection(*readable)', 'return set.union(*readable)');
+mustCatch('parity compares the wrong count', 'return int(promised) == int(after)', 'return True');
+mustCatch('a failed parity read counted as a pass', 'except Exception:  # noqa: BLE001\n        return None\n    promised', 'except Exception:  # noqa: BLE001\n        return True\n    promised');
 mustCatch('prose read for a field the site publishes structurally', 'af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page)', 'af_only = {k: v for k, v in results.items() if k in AF_FIELDS}');
 mustCatch('aqar parking no longer structured-only', '"aqar": ("elevator", "parking",', '"aqar": ("elevator",');
 mustCatch('a silent structured block read as a miss', 'if says is None:\n        return PAGE_SILENT', 'if says is None:\n        return WE_MISS');
