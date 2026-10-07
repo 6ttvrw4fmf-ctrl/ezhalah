@@ -36,7 +36,11 @@ else problems.push(...gapProblems(readFileSync(join(DIR, latest), 'utf8')).map((
 // Self-test: the pre-2026-10-07 predicate must be caught, the fixed one must pass.
 const OLD = `where s.source_table = %2$L\n and s.city_id is null\n and r.additional_info->>'catalog_city_id' is not null`;
 const NEW = `where s.source_table = %2$L\n and s.city_id is distinct from (r.additional_info->>'catalog_city_id')::int`;
-if (gapProblems(OLD).length === 0) problems.push('self-test: the old NULL-only gap was not caught');
+const mustCatch = (label: string, mutant: string) => {
+  if (gapProblems(mutant).length === 0) problems.push(`mutation not caught: ${label}`);
+};
+mustCatch('the pre-2026-10-07 NULL-only gap', OLD);
+mustCatch('the fixed gap with the NULL clause added back', NEW + '\n and s.city_id is null');
 if (gapProblems(NEW).length !== 0) problems.push('self-test: the fixed gap was rejected');
 
 if (problems.length) {
