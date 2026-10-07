@@ -949,6 +949,11 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
                 after = t[m.end():m.end() + 14]
                 if any(_norm_ar(q) in after for q in _PREPARED_ONLY):
                     break          # "prepared for X" is not X — leave the column NULL
+                # …and the same qualifier BEFORE the token: «تأسيس مصعد», «مؤسس مصعد», «تأسيس
+                # مكيفات» are a prepared shaft / wiring, not the fixture (sakan 15854735, 2026-10-07:
+                # «* تأسيس مصعد» was served as elevator = yes). Same 12-char window as the negators.
+                if any(_norm_ar(q).lower() in before for q in _PREPARED_ONLY):
+                    break
                 near = t[max(0, m.start() - 22):m.start()]
                 if any(_norm_ar(q) in near for q in _PROXIMITY):
                     break          # the NEIGHBOURHOOD has it, not this property — stay NULL
