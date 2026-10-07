@@ -67,6 +67,9 @@ STOP → restore → fix → continue. Checklist: `ezhalah-app/docs/DEPLOY_REGRE
 
 ## 3. Frontend — navigation & screens
 
+The AI Agent’s empty composer hint aligns left in English and right in Arabic (owner, 2026-10-07). Typed messages keep their own language direction.
+
+
 **Shell (`src/app/_layout.tsx`):** a single expo-router `Stack`. Provider tree: `GestureHandlerRootView`
 → `SafeAreaProvider` → `LocaleProvider` → `AppProvider` → `StatusBar` → `Shell`. On web ≥ 900px a
 **persistent Sidebar column** renders beside the stack; on mobile/native the sidebar is a tap-to-open

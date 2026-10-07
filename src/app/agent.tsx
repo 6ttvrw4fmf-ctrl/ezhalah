@@ -4600,7 +4600,7 @@ export default function Agent() {
                 ref={inputRef}
                 // writingDirection RTL for Arabic (the parent col is LTR-pinned, so without this the
                 // placeholder's trailing «...» lands on the wrong side — it must read «…السعودية»). (owner 2026-07-09)
-                style={[s.input, { flex: 1, alignSelf: 'stretch', textAlign: typed.trim() ? (msgRTL(typed) ? 'right' : 'left') : 'right', writingDirection: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : 'rtl', direction: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : (getLocale() === 'en' ? 'ltr' : 'rtl'), paddingRight: 0, paddingLeft: 0, height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) } as any]}
+                style={[s.input, { flex: 1, alignSelf: 'stretch', textAlign: typed.trim() ? (msgRTL(typed) ? 'right' : 'left') : (locale === 'en' ? 'left' : 'right'), writingDirection: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : (locale === 'en' ? 'ltr' : 'rtl'), direction: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : (locale === 'en' ? 'ltr' : 'rtl'), paddingRight: 0, paddingLeft: 0, height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) } as any]}
                 // While the rotating examples occupy the placeholder slot, the input's own static
                 // placeholder yields (empty string) so the two never overlap; the moment the
                 // rotation stops (any interaction) the familiar static placeholder returns.
