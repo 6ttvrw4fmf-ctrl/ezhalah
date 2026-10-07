@@ -56,11 +56,13 @@ const sql = readFileSync(join(DIR, newest), 'utf8');
 const real = problems(sql);
 for (const p of real) { console.error(`❌ ${newest}: ${p}`); failures++; }
 
+const mustCatch = (label: string, caught: boolean) => {
+  if (!caught) { console.error(`❌ mutation proof: ${label} — NOT caught, this check is vacuous`); failures++; }
+};
 const mutant = sql.replace(/\n\s*and not exists \(select 1 from public\.platform_registry pr[\s\S]*?'dormant'\)/i, '');
-if (mutant === sql || problems(mutant).length === 0) {
-  console.error('❌ mutation proof: removing the dormant clause was not detected — this check is vacuous');
-  failures++;
-}
+mustCatch('the newest definition with the dormant clause removed fails', mutant !== sql && problems(mutant).length > 0);
+mustCatch('a body whose dollar tag never closes fails (no widening to the rest of the file)',
+  problems(sql.replace(/\$function\$;\s*$/m, '')).length > 0);
 
 if (failures === 0) console.log(`✅ searchability_collapse skips dormant platforms (${newest}); mutation without the clause is caught`);
 process.exit(failures === 0 ? 0 : 1);
