@@ -163,6 +163,12 @@ def log_lines(item: dict, n_evidence: int = 15) -> list[str]:
            f"   page title: {page.get('title')}",
            f"   page images (JSON-LD): {page_image_count(page)} | og:image: {bool((page.get('meta') or {}).get('og:image'))} "
            f"| we serve a photo: {st.get('has_photo')} | image at: {page_image_paths(page)}"]
+    og = (page.get("meta") or {}).get("og:image")
+    if og:
+        # The VALUE, not just its presence: a site-wide default og:image (logo, banner) and a real
+        # listing photo both read «og:image: True» (2026-10-07: aqarnajran 0% photos could not be
+        # told apart from source truth because only the boolean was printed).
+        out.append(f"   og:image value: {str(og)[:200]}")
     props = page_structured_props(page)
     if props:
         out.append("   page structured props: " + " | ".join(props))
