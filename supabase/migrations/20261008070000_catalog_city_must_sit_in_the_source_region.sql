@@ -72,3 +72,66 @@ update public.listings_arabic_locations l
    and r.additional_info->>'region_ar' is not null
    and public.normalize_ar(regexp_replace(cr.region_ar, '\s+', ' ', 'g'))
        not like public.normalize_ar(regexp_replace(btrim(r.additional_info->>'region_ar'), '\s+', ' ', 'g')) || '%';
+
+create or replace function public.mon_detect_catalog_city_outside_source_region()
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare
+  n      int := 0;
+  live   text[] := '{}';
+  v_seen bigint;
+  v_bad  bigint;
+begin
+  select count(*) into v_seen
+    from public.search_listings_ar where source_table in ('muktamel_residential_listings','muktamel_commercial_listings');
+  select count(*) into v_bad
+    from public.search_listings_ar s
+    join (select 'muktamel_residential_listings' t, id, additional_info from public.muktamel_residential_listings where active
+          union all
+          select 'muktamel_commercial_listings', id, additional_info from public.muktamel_commercial_listings where active) r
+      on s.source_table = r.t and s.listing_id = r.id
+    join public.loc_catalog_region cr on cr.region_id = s.region_id
+   where r.additional_info->>'region_ar' is not null
+     and s.city_id = (r.additional_info->>'catalog_city_id')::int
+     and public.normalize_ar(regexp_replace(cr.region_ar, '\s+', ' ', 'g'))
+         not like public.normalize_ar(regexp_replace(btrim(r.additional_info->>'region_ar'), '\s+', ' ', 'g')) || '%';
+
+  if v_seen = 0 then
+    live := live || 'catalog_city_outside_source_region:BLIND'::text;
+    n := n + public.mon_raise('P2', 'catalog_city_outside_source_region', 'muktamel',
+      'catalog_city_outside_source_region:BLIND',
+      jsonb_build_object('blind', true, 'why', 'No muktamel listing is served, so this detector cannot see anything.'));
+  elsif v_bad > 0 then
+    live := live || 'catalog_city_outside_source_region:wrong_region'::text;
+    n := n + public.mon_raise('P1', 'catalog_city_outside_source_region', 'muktamel',
+      'catalog_city_outside_source_region:wrong_region',
+      jsonb_build_object('rows', v_bad,
+        'why', 'A listing is served under a catalog city whose region is not the region the source published '
+            || '(muktamel «بحرة» in «منطقة مكة المكرمة» served under Jazan''s «بحرة»): the customer''s region/city pick misses it.',
+        'action', 'arabic_location._pick_candidate must refuse a lone out-of-region namesake (#6323); '
+            || 'resolve_small_platform_cities must require the source region; reset the location rows as 20261008 did.'));
+  end if;
+
+  perform public.mon_resolve_stale_keys('catalog_city_outside_source_region', live);
+  return n;
+end
+$function$;
+
+do $$
+declare src text; out_def text;
+begin
+  src := pg_get_functiondef('public.mon_run_all_detectors()'::regprocedure);
+  if position('mon_detect_catalog_city_outside_source_region' in src) > 0 then
+    return;
+  end if;
+  out_def := replace(src,
+    E'    ''mon_detect_aldarim_saas_unfilled_block_false'',',
+    E'    ''mon_detect_aldarim_saas_unfilled_block_false'',\n    ''mon_detect_catalog_city_outside_source_region'',');
+  if out_def = src then
+    raise exception 'roster anchor not found — refusing to guess where the entry belongs';
+  end if;
+  execute out_def;
+end $$;
