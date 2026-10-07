@@ -248,8 +248,10 @@ jobs:
           - { source: ego,           cmd: "python -m scrapers.ego.run --type all", tmo: 20 }
           # muhaysini: 180, not 45 — the catalogue went from ~3,260 to 7,470 listings on 2026-09-30 and each
           # one costs a detail read (~0.8 s), so the 45-minute job was cancelled two nights running
-          # with nothing recorded.
-          - { source: muhaysini,     cmd: "python -m scrapers.muhaysini.run --type all", tmo: 180 }
+          # with nothing recorded. 240, not 180 (2026-10-07, Scraping Engineer): the catalogue keeps
+          # growing (7,433 → 10,575 rows 10-03 → 10-06) and the walk with it (1h42 → 2h06 → 2h11 →
+          # 2h25), ~10 min a night — 180 would cut it within about four nights.
+          - { source: muhaysini,     cmd: "python -m scrapers.muhaysini.run --type all", tmo: 240 }
           #   nofodh raised 45 -> 90 after its first crawl was CANCELLED on the 45-minute budget:
           #   2,601 listings, each needing its own detail fetch to read the «حالة البيع» state.
           - { source: nofodh,        cmd: "python -m scrapers.nofodh.run --type all", tmo: 90 }
