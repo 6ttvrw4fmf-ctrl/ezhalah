@@ -991,11 +991,11 @@ POLICIES: dict[str, _P] = {
         "stock."),
     "wahadat": _P(
         _pol("wahadat", 3, 168), CRAWL_PRESENCE_ONLY,
-        "the crawl's OWN seen-set, and it is a genuine FULL-STATE fetch: every run re-reads the "
-        "sitemap's complete list of 100 project pages and re-parses every unit on each, so a unit "
-        "dropping out, or its project leaving the sitemap, is the complete liveness signal. "
-        "db.prune_unseen's 3-strike/coverage/collapse guards are the only additional protection, "
-        "the same shape ~40 other whole-catalogue platforms in this fleet already use.",
+        "the unit's OWN status in its project's record, read every run (2026-10-07): a unit the "
+        "source states as sold or reserved, in a project whose is_active is true, is gone and "
+        "takes a strike; a unit that merely drops out of the list, or whose project is unread, is "
+        "UNKNOWN and is never hidden (absence only selects candidates). prune_unseen's 3-strike, "
+        "coverage and collapse guards still apply.",
         "Not CANDIDATE_PLUS_DIRECT even though a project page can be re-fetched: the unit-level "
         "detail endpoint (pro.wahadat.sa/ar/unit/api/units/<uuid>/) answers 403 unauthenticated, so "
         "there is no per-unit surface to re-probe INDEPENDENTLY of the crawl — a 'direct' check "
