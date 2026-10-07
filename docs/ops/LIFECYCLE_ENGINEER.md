@@ -853,6 +853,7 @@ or rewrite another engineer's work, and never start a big change in another engi
    away at tonight's pace.
 
 ## Lessons from real breakages (use them)
+- **2026-10-07 (🔧 QA, no lesson line was given):** absence-only prunes hid LIVE ads on gathern, aqarmonthly and maqrat (22 restored tonight). Audit every platform that still prunes on absence alone; a «📚 Lesson» line is part of the report — write one.
 - **2026-10-06 (🔧 QA, no lesson line was given):** 13 found, 1 fixed. Finding is not the job. When the list is long, take the 3 with the biggest customer impact, fix and prove them, and route the rest with numbers. A fix rate that drops after a night going up means you should shrink the list, not lengthen it.
 - Gathern expresses blocking as a 404. One ad answered 200 and 404 within minutes. A single reading
   is never proof.
