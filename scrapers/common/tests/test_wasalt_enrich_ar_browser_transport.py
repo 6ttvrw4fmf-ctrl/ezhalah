@@ -224,7 +224,7 @@ def _stub_db(pending_rows, retry_rows=()):
         def like(self, *a): return self
         def lt(self, *a): return self
         def is_(self, *a): return self
-        def order(self, *a): return self
+        def order(self, *a, **k): return self
         def limit(self, n): return self
         def update(self, upd): state["updated"] += 1; return self
 
@@ -431,7 +431,7 @@ def test_the_salvaged_row_is_WRITTEN_without_arabic_location_columns(monkeypatch
         def like(self, *a): return self
         def lt(self, *a): return self
         def is_(self, *a): return self
-        def order(self, *a): return self
+        def order(self, *a, **k): return self
         def limit(self, n): return self
         def update(self, u): writes.append(u); return self
         @property
