@@ -341,6 +341,16 @@ def _note(reason: str) -> None:
         _outcomes[reason] = _outcomes.get(reason, 0) + 1
 
 
+# Ids whose OWN page this run answered 404/410 or redirected to /404 (the measured removal signal).
+_read_gone_ids: set[int] = set()
+
+
+def _note_gone(listing_id: int, reason: str) -> None:
+    _note(reason)
+    with _outcome_lock:
+        _read_gone_ids.add(listing_id)
+
+
 # ── Fetch ─────────────────────────────────────────────────────────────────────────
 def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
     """Fetch + eval one listing id. Returns (id, parsed_nuxt, own) for LIVE listings, else None.
@@ -360,14 +370,14 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
             continue
         if r.status_code != 200:
             if r.status_code in (404, 410):
-                _note("dead_404")
+                _note_gone(listing_id, "dead_404")
                 return None
             last_exc = None
             _note(f"http_{r.status_code}")
             time.sleep(1.0 * (attempt + 1))
             continue
         if "/404" in str(r.url):
-            _note("redirect_404")
+            _note_gone(listing_id, "redirect_404")
             return None
         html = r.text
         landed = re.search(r"/real-estates/(\d+)", str(r.url))
@@ -951,8 +961,8 @@ def main() -> int:
                                  verify_gone=_probe.verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
-            else:
-                pruned += n
+                n = _strike_read_gone(tbl, set(_read_gone_ids), args.shards, args.shard)
+            pruned += max(n, 0)
         print(f"✓ Muktamel: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
         print(f"  fetch outcomes: {dict(sorted(_outcomes.items(), key=lambda kv: -kv[1]))}", flush=True)
         healthy = db.end_run(
@@ -969,6 +979,47 @@ def main() -> int:
         import traceback
         traceback.print_exc()
         return 1
+
+
+def split_read_gone(active_ads: list[str], gone_ids: set[int]) -> tuple[list[str], set[str]]:
+    """(struck, kept): the active ad_numbers this run read gone on their own page, and the rest."""
+    def _id(ad: str) -> Optional[int]:
+        return int(ad[2:]) if ad.startswith("MK") and ad[2:].isdigit() else None
+    struck = [a for a in active_ads if _id(a) in gone_ids]
+    return struck, {a for a in active_ads if _id(a) not in gone_ids}
+
+
+def _strike_read_gone(tbl: str, gone_ids: set[int], shards: int, shard: int) -> int:
+    """Strike ONLY the ids whose own page this run read as removed, when the absence prune is guarded.
+
+    WHY (2026-10-07, the dealapp lesson of 2026-10-06 on a second site). prune_unseen's coverage
+    guard counts every active row this crawl did not upsert as LIVE as "not re-seen", and the dead
+    ones are exactly those: each run read ~212 pages as redirect_404 and ~575 as not-available, so
+    it "re-saw 488 of 618" (79% < 80%) and threw the whole prune away. ~575 active rows sat at 3-19
+    strikes, unseen since as early as 2026-09-03, still shown. A redirect to /404 is a DIRECT
+    reading, not absence. So the prune runs again with every active row counted as seen EXCEPT the
+    ones read gone: unread rows stay untouched (UNKNOWN), not-available stays UNKNOWN, a read-gone
+    row takes a strike and at grace verify_gone re-reads it behind the in-run canary. Every guard of
+    prune_unseen (collapse, grace, canary, evidence rows) still applies."""
+    if not gone_ids:
+        return 0
+    rows: list[str] = []
+    start = 0
+    while True:   # PostgREST caps a select at 1000 rows — page explicitly
+        page = db._execute(
+            db.sb().table(tbl).select("ad_number").eq("active", True).eq("source", "Muktamel")
+              .range(start, start + 999), what=tbl + ".read_gone_slice").data or []
+        rows += [r["ad_number"] for r in page if r.get("ad_number")]
+        if len(page) < 1000:
+            break
+        start += 1000
+    struck, kept = split_read_gone(rows, gone_ids)
+    if not struck:
+        return 0
+    print(f"  {tbl}: guard tripped, striking only the {len(struck)} row(s) whose own page read "
+          f"removed this run", flush=True)
+    return db.prune_unseen(tbl, kept, source="Muktamel", shards=shards, shard=shard,
+                           verify_gone=_probe.verify_gone)
 
 
 if __name__ == "__main__":
