@@ -202,6 +202,12 @@
       "today_pct": 99,
       "active_rows": 1762
     },
+    "aqarnajran": {
+      "imageless_at_source": true,
+      "today_pct": 0.0,
+      "active_rows": 39,
+      "reason": "THE SOURCE PUBLISHES NO LISTING PHOTO. Measured 2026-10-07 from CI (source-reread run 37580654658, which prints the og:image VALUE): a land plot (12390433) and a warehouse (12390455) carry the SAME og:image, https://aqarnajran.com/wp-content/uploads/2026/02/عقار-نجران-3-1.png — the site's brand image, also behind the three JSON-LD image entries. None of the 41 posts has a featured image (crawl 06:01 UTC: «featured photos read: 0»), and the post bodies carry no upload image the scraper accepts. 0% on every snapshot 09-30 … 10-07. Re-measure if the office starts attaching photos (run.py now reads featured_media too)."
+    },
     "arkaan": {
       "floor_pct": 97,
       "today_pct": 100,
