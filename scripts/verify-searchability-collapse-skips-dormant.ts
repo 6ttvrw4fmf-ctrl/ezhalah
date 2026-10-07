@@ -27,8 +27,18 @@ const newest = readdirSync(DIR)
 const problems = (sql: string): string[] => {
   const m = sql.match(FN);
   if (!m) return ['no definition of mon_detect_searchability_collapse found'];
-  const body = sql.slice(m.index!, sql.indexOf('$function$;', m.index!));
-  const loop = body.slice(body.search(/for\s+r\s+in/i), body.search(/\bloop\b/i));
+  // Read the body's own dollar tag; no matching close → no body (fail closed, never the rest of the file).
+  const rest = sql.slice(m.index!);
+  const tag = rest.match(/\$([A-Za-z_][A-Za-z0-9_]*)?\$/);
+  if (!tag) return ['the definition has no dollar-quoted body'];
+  const open = rest.indexOf(tag[0]);
+  const close = rest.indexOf(tag[0], open + tag[0].length);
+  if (close < 0) return [`the body opened with ${tag[0]} never closes`];
+  const body = rest.slice(open + tag[0].length, close);
+  const at = body.search(/for\s+r\s+in/i);
+  if (at < 0) return ['the detector has no `for r in … loop` that raises'];
+  const end = body.slice(at).search(/\bloop\b/i);
+  const loop = end < 0 ? '' : body.slice(at, at + end);
   const out: string[] = [];
   if (!/mon_searchability_alerts/i.test(loop)) out.push('the raising loop no longer reads mon_searchability_alerts');
   if (!/not\s+exists\s*\(\s*select\s+1\s+from\s+public\.platform_registry[\s\S]*?status\s*=\s*'dormant'/i.test(loop)) {
