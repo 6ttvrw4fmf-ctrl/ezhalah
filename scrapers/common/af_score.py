@@ -34,7 +34,8 @@ from datetime import datetime, timedelta, timezone
 from scrapers.common.cleanup import _probe
 from scrapers.common.db import sb
 from scrapers.common.new_listings_score import (
-    AF_FIELDS, FIELDS, MATCH, NEG, STORED, UNREADABLE, WE_MISS, af_precision, af_recall, compare_listing,
+    AF_FIELDS, FIELDS, MATCH, MISMATCH, NEG, PAGE_SILENT, STORED, UNREADABLE, WE_MISS, af_precision, af_recall,
+    compare_listing,
     empty_row, fold, norm,
 )
 from scrapers.common.source_reread import page_evidence
@@ -58,6 +59,68 @@ MONTHLY = "شهري"
 # Site chrome, not the ad: a short category link such as «مواقف سيارات للإيجار» / «شقق للبيع» sits in every
 # aqar page's navigation, so it says nothing about THIS listing (norm() has already folded hamza).
 CHROME = re.compile(r"^(?:\S+\s){0,3}(?:للايجار|للبيع)$")
+# Fields a website publishes STRUCTURALLY. The law (ADVANCED_FILTER_SOURCE_TRUTH §2): «a structured null
+# outranks any prose hit», so for these the page's own structured data (JSON-LD additionalProperty /
+# amenityFeature) is the only statement read, never the ad's prose. Measured 2026-10-07 (source-reread
+# 37600467768): aqar's 5/10 and tuba's 5/6 findability «misses» were prose («موقف سيارات» in the ad body)
+# against aqar's extended_details.special_parking / flat amenity keys and tuba's `garages` count, which
+# those ads leave unfilled — our NULL is the source's answer, not a trapped value.
+STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
+    "aqar": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room",
+             "private_entrance", "furnished"),
+    "tuba": ("parking",),
+    # gathern's unit page heads its appliance list «مرافق المطبخ» («ثلاجه غلايه», «فريزر مايكرويف …»):
+    # the header word is a label, and an appliance list is not the site saying «kitchen» (🔬 decision
+    # 2026-10-07, backlog 132, law §6). All 4 gathern «misses» of 2026-10-07 were exactly this.
+    "gathern": ("kitchen",),
+}
+COL = {n: c for n, _, c, _ in FIELDS}
+_YES = {"true", "1", "نعم", "يوجد", "متوفر"}
+_NO = {"false", "0", "لا", "لا يوجد", "لايوجد", "غير متوفر"}
+
+
+def structured_says(page: dict, field: str) -> bool | None:
+    """What the page's OWN structured data states for one field: True / False / None (silent)."""
+    kw = BOOL_KW[field]
+    said: list[bool] = []
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k in ("additionalProperty", "amenityFeature") and isinstance(v, list):
+                    for x in v:
+                        if isinstance(x, dict) and x.get("name") is not None and re.search(kw, norm(str(x["name"]))):
+                            val = norm(str(x.get("value"))).strip().lower()
+                            if val in _YES:
+                                said.append(True)
+                            elif val in _NO:
+                                said.append(False)
+                elif isinstance(v, (dict, list)):
+                    walk(v)
+        elif isinstance(node, list):
+            for x in node:
+                walk(x)
+
+    walk(page.get("jsonld") or [])
+    return said[0] if said else None
+
+
+def structured_result(stored, says: bool | None) -> str:
+    if says is None:
+        return PAGE_SILENT
+    if stored is None:
+        return WE_MISS
+    return MATCH if bool(stored) == says else MISMATCH
+
+
+def structured_only(platform: str, results: dict[str, str], stored: dict, page: dict) -> dict[str, str]:
+    out = dict(results)
+    for f in STRUCTURED_ONLY.get(platform, ()):
+        if f in out and out[f] != UNREADABLE:
+            out[f] = structured_result(stored.get(COL[f]), structured_says(page, f))
+    return out
+
+
 # An EMPTY label («موقف السيارة :», «التكييف :») is printed on every tuba / ksaaqar page whatever the
 # answer — the value sits elsewhere, or nowhere. A label is not a statement.
 BARE_LABEL = re.compile(r"^[^:]{1,30}:$")
@@ -268,7 +331,7 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
     for table, rid, stored, page in read:
         key = f"{table}:{rid}"
         results = compare_listing(stored, page, skip_price=False)
-        af_only = {k: v for k, v in results.items() if k in AF_FIELDS}
+        af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page)
         fold(row, key, af_only, stored)
         ad_lines = [x for x in page_lines(page) if x not in chrome]
         answers = offered(customer_answers(ad_lines, af_only), stored)

@@ -48,6 +48,14 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 🔬 AF engineer, 2026-10-07. A NULL-only fill (0 rewrites) of gathern bathrooms from the unit page's own
+  // «دورات المياة» section the scraper already stored verbatim (additional_info.extra_sections). It cannot
+  // decay: the crawl's upsert drops an absent icon count instead of NULLing the column, and every detail
+  // back-fill now writes the same count from the same section (scrapers/gathern/run.py
+  // _bathrooms_from_sections), pinned by test_gathern_bathrooms_from_page_section.py.
+  '20261007093148_af_gathern_bathrooms_from_page_section.sql':
+    'NULL-only back-fill from the page section the scraper now writes on every detail back-fill; ' +
+    'pinned by test_gathern_bathrooms_from_page_section.py::test_backfill_fills_a_null_count_from_the_page',
   // 🔬 AF engineer, 2026-10-06. Same shape as the ksaaqar back-fill below: a one-shot copy of a value
   // the scraper ALREADY captured verbatim (source_capture.rem_fields «واجهة العقار») into the column
   // the same scraper now writes from the same field on every crawl (scrapers/hajer/run.py map_listing),

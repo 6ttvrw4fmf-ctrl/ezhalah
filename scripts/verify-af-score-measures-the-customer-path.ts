@@ -46,6 +46,17 @@ wp = ns["wasalt_page"]("https://wasalt.sa/ar/property/1", fetch=lambda u: (nd, 2
 check("a live wasalt page is read, not unreadable", wp is not None and ns["page_says_yes"](L(*wp["evidence_lines"]), "elevator"))
 check("wasalt contact fields are never read", wp is not None and not any("0500" in x for x in wp["evidence_lines"]))
 check("a wasalt block stays unreadable", ns["wasalt_page"]("u", fetch=lambda u: (None, None, 0)) is None)
+SO = ns["structured_only"]
+check("a prose «موقف» is not a statement where aqar publishes parking structurally",
+      SO("aqar", {"parking": "we_miss"}, {"parking": None}, {"jsonld": []})["parking"] == "page_silent")
+check("aqar's own structured «مطبخ» still catches a trapped NULL",
+      SO("aqar", {"kitchen": "page_silent"}, {"kitchen": None},
+         {"jsonld": [{"amenityFeature": [{"name": "مطبخ", "value": True}]}]})["kitchen"] == "we_miss")
+check("aqar's structured «مصعد=false» against a stored yes is a mismatch",
+      SO("aqar", {"elevator": "match"}, {"elevator": True},
+         {"jsonld": [{"additionalProperty": [{"name": "مصعد", "value": False}]}]})["elevator"] == "mismatch")
+check("a site with no structured field keeps its prose answer",
+      SO("sakan", {"parking": "we_miss"}, {"parking": None}, {})["parking"] == "we_miss")
 T = ns["template_lines"]
 menu = L("أجهزة مطبخ", "مكيفات هواء")
 check("a line on every page of the site is its template, not the ad",
@@ -70,6 +81,11 @@ ns["ask"] = lambda anon, params: asked.append(params) or []
 ns["score_site"](_C(), object(), "site", [("t", 1), ("t", 2), ("t", 3)], night="n", pace=0,
                  probe=lambda u: (200, "<html>"), wasalt=None)
 check("score_site never asks a customer question its website's template answered", asked == [])
+pages = iter([["موقف سيارات خاص"], ["مدخل خاص", "موقف سيارات خاص"]])
+asked.clear()
+ns["score_site"](_C(), object(), "aqar", [("t", 1), ("t", 2)], night="n", pace=0,
+                 probe=lambda u: (200, "<html>"), wasalt=None)
+check("score_site never asks aqar's parking from the ad's prose", not any("parking" in (q.get("p_amenities") or []) for q in asked))
 print(json.dumps(out))
 `;
 
@@ -97,6 +113,9 @@ mustCatch('an empty label read as a yes', 'and not BARE_LABEL.match(x)]', ']');
 mustCatch('the site template read as the ad (no template filter)', 'ad_lines = [x for x in page_lines(page) if x not in chrome]', 'ad_lines = page_lines(page)');
 mustCatch('the template computed from too few pages', 'if len(readable) < TEMPLATE_MIN_PAGES:', 'if len(readable) < 1:');
 mustCatch('one page enough to call a line template', 'return set.intersection(*readable)', 'return set.union(*readable)');
+mustCatch('prose read for a field the site publishes structurally', 'af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page)', 'af_only = {k: v for k, v in results.items() if k in AF_FIELDS}');
+mustCatch('aqar parking no longer structured-only', '"aqar": ("elevator", "parking",', '"aqar": ("elevator",');
+mustCatch('a silent structured block read as a miss', 'if says is None:\n        return PAGE_SILENT', 'if says is None:\n        return WE_MISS');
 mustCatch('site navigation read as the ad', 'if x and not CHROME.match(x) and', 'if x and');
 
 const fail = (m: string) => { console.error(m); process.exit(1); };

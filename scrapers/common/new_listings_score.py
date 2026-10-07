@@ -201,8 +201,16 @@ _UNIT_TAIL = r"\s*(?:م2|م²|متر|ريال|ر\.س)?\s*"
 CONTROL_PROMPT = re.compile(r"^\s*اختر\s")
 
 
+# An area figure is never another field's value: tuba prints an EMPTY «عمر العقار :» label with the
+# next line «214.66 م²», which read as a stated age (af_score 2026-10-07: tuba property_age 10/10
+# «mismatch», source-reread 37600467768). Only the area field may take a neighbour carrying m².
+AREA_UNIT = re.compile(r"م²|م2|متر مربع")
+
+
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
+    if not AREA_UNIT.search(kw):
+        lines = [x if i in kw_hits or not AREA_UNIT.search(x) else "" for i, x in enumerate(lines)]
     page_states = any(re.search(r"\d", lines[i]) for i in kw_hits)
     if stored is None:
         return WE_MISS if page_states else PAGE_SILENT

@@ -69,6 +69,17 @@ def test_label_and_value_on_neighbouring_lines():
     assert compare_listing({"bedrooms": 4}, page("غرف النوم", "5"))["bedrooms"] == MISMATCH
 
 
+def test_an_area_figure_is_never_another_fields_value():
+    # tuba prints an EMPTY «عمر العقار :» with «214.66 م²» on the next line (source-reread 37600467768,
+    # 2026-10-07): that is the area, not a stated age — silent, never a mismatch against our stored 0.
+    assert compare_listing({"property_age": 0}, page("عمر العقار :", "214.66 م²"))["property_age"] == PAGE_SILENT
+    assert compare_listing({"bathrooms": 5}, page("الحمامات :", "159.06 م²"))["bathrooms"] == PAGE_SILENT
+    # …while a real bare value still counts, a street width in «متر» still counts, and the area keeps its m².
+    assert compare_listing({"bathrooms": 2}, page("الحمامات :", "2"))["bathrooms"] == MATCH
+    assert compare_listing({"street_width_m": 15}, page("عرض الشارع", "15 متر"))["street_width_m"] == MATCH
+    assert compare_listing({"area_m2": 214}, page("المساحة", "214 م²"))["area"] == MATCH
+
+
 def test_gathern_price_is_never_compared():
     r = compare_listing({"price_total": 999}, page("السعر 5 ريال"), skip_price=True)
     assert "price" not in r
