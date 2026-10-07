@@ -365,7 +365,10 @@ or rewrite another engineer's work, and never start a big change in another engi
    listings and its logo, and lowers the site count.
    **Not down:** a block the proxy gets past, one empty run, a slow site, a changed layout (that's a
    scraper fix).
-7. **Try to bring back every dormant site, every day.** Its daily crawl re-checks it. If it serves real,
+7. **Try to bring back every dormant site, every day.** Its daily crawl re-checks it. Since 2026-10-07
+   the cron `reactivate-recovered-dormant-platforms` (hourly :15, migration `20261007051614`) flips a
+   dormant site back to `active` by itself once its latest crawl, started after it went dormant, is ok
+   and saved ≥ 3 rows; you still prove the full chain the next night. If it serves real,
    *different* listings again (not one placeholder repeated), make sure it is back to `active` (flip it
    with the switch if the crawl job hasn't already), and prove the full chain.
 8. **New sites:** a site whose first successful crawl was since your last run gets the full chain
