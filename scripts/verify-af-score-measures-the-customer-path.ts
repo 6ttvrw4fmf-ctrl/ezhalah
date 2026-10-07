@@ -69,6 +69,10 @@ check("aqar's own structured «مطبخ» still catches a trapped NULL",
 check("aqar's structured «مصعد=false» against a stored yes is a mismatch",
       SO("aqar", {"elevator": "match"}, {"elevator": True},
          {"jsonld": [{"additionalProperty": [{"name": "مصعد", "value": False}]}]})["elevator"] == "mismatch")
+check("dealapp bathrooms in prose are not its structured count",
+      SO("dealapp", {"bathrooms": "we_miss"}, {"bathrooms": None}, {"evidence_lines": ["3 دورات مياه"]})["bathrooms"] == "page_silent")
+check("dealapp's own «عدد الحمامات» row still catches a trapped NULL",
+      SO("dealapp", {"bathrooms": "page_silent"}, {"bathrooms": None}, {"evidence_lines": ["عدد الحمامات", "3"]})["bathrooms"] == "we_miss")
 check("a site with no structured field keeps its prose answer",
       SO("sakan", {"parking": "we_miss"}, {"parking": None}, {})["parking"] == "we_miss")
 T = ns["template_lines"]
@@ -128,6 +132,7 @@ mustCatch('the site template read as the ad (no template filter)', 'ad_lines = [
 mustCatch('the template computed from too few pages', 'if len(readable) < TEMPLATE_MIN_PAGES:', 'if len(readable) < 1:');
 mustCatch('one page enough to call a line template', 'return set.intersection(*readable)', 'return set.union(*readable)');
 mustCatch('a lift shaft read as a lift', 'hit = [x for x in (unprepared(y, kw) for y in lines) if re.search(kw, x)]', 'hit = [x for x in lines if re.search(kw, x)]');
+mustCatch('dealapp bathrooms judged from prose again', 'STRUCTURED_LABEL: dict[tuple[str, str], str] = {("dealapp", "bathrooms"): r"عدد الحمامات"}', 'STRUCTURED_LABEL: dict[tuple[str, str], str] = {}');
 mustCatch('parity compares the wrong count', 'return int(promised) == int(after)', 'return True');
 mustCatch('a failed parity read counted as a pass', 'except Exception:  # noqa: BLE001\n        return None\n    promised', 'except Exception:  # noqa: BLE001\n        return True\n    promised');
 mustCatch('prose read for a field the site publishes structurally', 'af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page)', 'af_only = {k: v for k, v in results.items() if k in AF_FIELDS}');

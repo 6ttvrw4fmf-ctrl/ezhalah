@@ -37,7 +37,7 @@ from scrapers.common.cleanup import _probe
 from scrapers.common.db import sb
 from scrapers.common.new_listings_score import (
     AF_FIELDS, FIELDS, MATCH, MISMATCH, NEG, PAGE_SILENT, STORED, UNREADABLE, WE_MISS, af_precision, af_recall,
-    compare_listing, unprepared,
+    _cmp_number, compare_listing, unprepared,
     empty_row, fold, norm,
 )
 from scrapers.common.source_reread import page_evidence
@@ -115,8 +115,27 @@ def structured_result(stored, says: bool | None) -> str:
     return MATCH if bool(stored) == says else MISMATCH
 
 
+# Number fields a website publishes under ONE structured label: only that label's line is the statement.
+# dealapp's spec table prints «عدد الحمامات»; its «we miss» 5/10 on 2026-10-07 were all ad prose
+# («3 دورات مياه») on ads whose table has no bathroom row (source-reread 37604551104).
+STRUCTURED_LABEL: dict[tuple[str, str], str] = {("dealapp", "bathrooms"): r"عدد الحمامات"}
+
+
+def labelled_number(stored, lines: list[str], label: str) -> str:
+    """The label's own row states a figure (on its line, or as the bare next line); prose never does."""
+    if stored is not None:
+        return _cmp_number(stored, lines, "", label)
+    hits = [i for i, x in enumerate(lines) if re.search(label, x)]
+    states = any(re.search(r"\d", lines[i]) or (i + 1 < len(lines) and re.match(r"^\s*\d+\s*$", lines[i + 1]))
+                 for i in hits)
+    return WE_MISS if states else PAGE_SILENT
+
+
 def structured_only(platform: str, results: dict[str, str], stored: dict, page: dict) -> dict[str, str]:
     out = dict(results)
+    for (site, f), label in STRUCTURED_LABEL.items():
+        if site == platform and f in out and out[f] != UNREADABLE:
+            out[f] = labelled_number(stored.get(COL[f]), page_lines(page), label)
     for f in STRUCTURED_ONLY.get(platform, ()):
         if f in out and out[f] != UNREADABLE:
             out[f] = structured_result(stored.get(COL[f]), structured_says(page, f))
