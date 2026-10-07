@@ -127,6 +127,7 @@ const PRELUDE = [
   // same drain it always did. That it must be declared at all is the point: the lift
   // runs the REAL loadMore, so a guard added to production code cannot be invisible here.
   'const conversationEpochRef = { current: 0 };',
+  'const prefetchRef = { current: new Map() }; // no saved-chat pre-load in this fixture (2026-10-07)',
   // Real shape: revealCount[mid] ?? initialReveal(m.result). Seeding it here — not by faking
   // initialReveal's return value — is what lets alreadyExpandedOnce read exactly as it does in the
   // real component: a first press has no entry (falls through to the floor), a later press has one.
@@ -445,9 +446,12 @@ mustCatch('M-first-overreveals — a first press revealing past the 100-boundary
 // reasons rather than on an unrelated signature change. (It threw `mutation anchor missing` when the
 // argument landed — loud and fail-closed, which is the right way round.)
 const LOADMORE_CALL_ARGS = 'q, pageOffset, m.result.rotationSeed';
+// 2026-10-07: the page can come from a saved chat's pre-load (prefetchNextPage) or the live fetch, so
+// the destructure now reads `page`; the live call keeps LOADMORE_CALL_ARGS, asserted just below.
+if (!agentSrc.includes(`page = await loadMoreListings(${LOADMORE_CALL_ARGS});`)) throw new Error('loadMore no longer pages with the set\'s own seed');
 const mDrop = mutantOf(agentSrc,
-  `const { listings: more, nextOffset, hasMore, failed } = await loadMoreListings(${LOADMORE_CALL_ARGS});`,
-  `const { listings: more, nextOffset, hasMore } = await loadMoreListings(${LOADMORE_CALL_ARGS});\n        const failed = undefined;`);
+  `const { listings: more, nextOffset, hasMore, failed } = page;`,
+  `const { listings: more, nextOffset, hasMore } = page;\n        const failed = undefined;`);
 const dropBus = await runLoadMore(mDrop, [{ listings: [], nextOffset: 0, hasMore: true, failed: true }], PAGE(10));
 mustCatch('M-drop — ignoring `failed` reproduces the silent dead tap (no message, no cards)',
   dropBus.appended.length === 0 && dropBus.merged.length === 10,

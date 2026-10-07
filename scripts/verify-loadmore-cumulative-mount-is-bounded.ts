@@ -89,6 +89,7 @@ const PRELUDE = [
   // same drain it always did. That it must be declared at all is the point: the lift
   // runs the REAL loadMore, so a guard added to production code cannot be invisible here.
   'const conversationEpochRef = { current: 0 };',
+  'const prefetchRef = { current: new Map() }; // no saved-chat pre-load in this fixture (2026-10-07)',
   'const revealCount: any = bus.seedRevealCount != null ? { mid: bus.seedRevealCount } : {};',
   'const loadingMore: any = {};',
   'const initialReveal = (_r: any) => 10;',

@@ -1808,6 +1808,60 @@ export default function Agent() {
   // was 25,000 and the two biggest cities sit past it. See drainPageBudget()'s note for the live
   // measurement; the arithmetic lives there now so the constant and its justification cannot drift.
   const MAX_DRAIN_PAGES = drainPageBudget(LOAD_MORE_PAGE_SIZE);
+  // A SAVED CHAT PRE-LOADS ITS NEXT PAGE (owner 2026-10-07: «show me more from a saved chat loads so
+  // long — this should never happen»). A reopened chat keeps only its first cards (TRANSCRIPT_LISTING_CAP
+  // in the transcript, SNAPSHOT_CAP in a legacy snapshot), so its first «عرض المزيد» used to start a
+  // 500-row page AT TAP TIME — seconds under load — while a live chat already holds that page. The open
+  // path now starts the exact page the tap would ask for (same query, offset and seed) the moment the chat
+  // is restored, and loadMore consumes it instead of fetching. Never trusted across conversations (epoch)
+  // or offsets, and a failed prefetch is never used: the tap then fetches live, exactly as before.
+  const prefetchRef = useRef(new Map<string, { epoch: number; offset: number; p: Promise<Awaited<ReturnType<typeof loadMoreListings>> | null> }>());
+  // ONE AT A TIME, ADVANCED FILTER FIRST (the #3420 lesson: heavy calls fired together slow each other).
+  // The «تحديد أكثر» probe starts first — the passive effect claims it by key, so the button shows as soon
+  // as on a live search — and the page fetch only starts once that probe has answered.
+  const prefetchNextPage = (list: ChatMsg[], asked: readonly string[] = []) => {
+    const last = [...list].reverse().find((mm) => mm.role === 'results') as Extract<ChatMsg, { role: 'results' }> | undefined;
+    const r = last?.result;
+    if (!last || !r?.query) return;
+    if ((r.matchTotal ?? r.listings.length) > INTERVIEW_STOP_AT) prefetchNarrowing(r.query, asked);
+    if (!r.hasMore || r.listings.length >= SECOND_PAGE_CAP) return;
+    const offset = r.pageOffset ?? 0;
+    const q = r.query;
+    const afFirst: Promise<unknown> = afPrefetchRef.current?.p ?? Promise.resolve();
+    prefetchRef.current.set(last.id, {
+      epoch: conversationEpochRef.current, offset,
+      p: afFirst.catch(() => null).then(() => loadMoreListings(q, offset, r.rotationSeed)).catch(() => null),
+    });
+  };
+
+  // A SAVED CHAT REOPENS EXACTLY AS IT WAS LEFT (owner 2026-10-07: «after the user is done and goes back,
+  // it shows what he did — signed in or not, the same»). The transcript keeps only the first cards; when
+  // the user had more on screen it records how many (restoreTo). This brings the rest back with no tap:
+  // it takes the page prefetchNextPage already started, merges it, re-reveals up to restoreTo and, if the
+  // chat had finished, finishes it again. A failed page leaves the honest pager in place instead.
+  const restoreLeftState = async (list: ChatMsg[]) => {
+    const last = [...list].reverse().find((mm) => mm.role === 'results') as Extract<ChatMsg, { role: 'results' }> | undefined;
+    const r = last?.result;
+    if (!last || !r?.restoreTo || r.restoreTo <= r.listings.length) return;
+    const pre = prefetchRef.current.get(last.id);
+    if (!pre) return;
+    prefetchRef.current.delete(last.id);
+    const epoch = conversationEpochRef.current;
+    const page = await pre.p;
+    if (conversationEpochRef.current !== epoch) return;
+    if (!page || page.failed) return;
+    const seen = new Set(r.listings.map((l) => `${l.source}:${l.id}`));
+    const add = page.listings.filter((l) => { const k = `${l.source}:${l.id}`; if (seen.has(k)) return false; seen.add(k); return true; });
+    const mergedLen = r.listings.length + add.length;
+    setMsgs((prev) => prev.map((mm) => (mm.id !== last.id || mm.role !== 'results' || !mm.result) ? mm
+      : { ...mm, result: { ...mm.result, listings: [...mm.result.listings, ...add], pageOffset: page.nextOffset, hasMore: page.hasMore } }));
+    const to = Math.min(r.restoreTo, mergedLen);
+    setRevealCount((c) => ({ ...c, [last.id]: Math.max(c[last.id] ?? 0, to) }));
+    // The same named terminal gate loadMore uses: the restored reveal reached the terminal it had when saved.
+    const revealIsTerminal = r.restoreCompleted === true && to >= r.restoreTo;
+    if (revealIsTerminal) setCompleted(true);
+  };
+
   const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>) => {
     const mid = m.id;
     const q = m.result.query;
@@ -1869,7 +1923,13 @@ export default function Agent() {
         // and never claim completion for a reveal that did not actually finish.
         // THE SEED THIS SET WAS CUT FROM (ops_incident #796) — never the app's latest. m.result is the
         // block being paged, so its own rotationSeed is the only one whose `pageOffset` means anything.
-        const { listings: more, nextOffset, hasMore, failed } = await loadMoreListings(q, pageOffset, m.result.rotationSeed);
+        // The page a saved chat started loading when it was opened (prefetchNextPage) — used only for
+        // this exact conversation and offset, and only if it succeeded; otherwise fetch live as before.
+        const pre = prefetchRef.current.get(mid);
+        if (pre) prefetchRef.current.delete(mid);
+        let page = pre && pre.epoch === epoch && pre.offset === pageOffset ? await pre.p : null;
+        if (!page || page.failed) page = await loadMoreListings(q, pageOffset, m.result.rotationSeed);
+        const { listings: more, nextOffset, hasMore, failed } = page;
         // THE USER LEFT THIS CONVERSATION WHILE THE PAGE WAS IN FLIGHT — every write below belongs
         // to a chat that no longer exists, and this screen is now showing a different one
         // (router.replace to the SAME route: same component instance, nothing remounted).
@@ -3406,6 +3466,13 @@ export default function Agent() {
     const restored = t ? restoreChat(t) : null;
     if (restored) {
       setMsgs(restored.msgs as unknown as ChatMsg[]);
+      {
+        // The same asked-set the passive «تحديد أكثر» effect will key on, so it claims this probe.
+        const rgp0 = restored.guidedPills as { msgId?: string; asked?: string[] } | null | undefined;
+        const lastRes = [...(restored.msgs as unknown as ChatMsg[])].reverse().find((mm) => mm.role === 'results');
+        prefetchNextPage(restored.msgs as unknown as ChatMsg[], rgp0 && lastRes && rgp0.msgId === lastRes.id ? rgp0.asked ?? [] : []);
+        void restoreLeftState(restored.msgs as unknown as ChatMsg[]);
+      }
       setDoneTyping(restored.doneTyping);
       setRevealCount(restored.revealCount);
       setAfReceipt(restored.afReceipt);
@@ -3442,10 +3509,12 @@ export default function Agent() {
     // no "searching…" beat of any kind (owner 2026-08-14: "it should already show him the property
     // because he already listed it. This is just saved."). «عرض المزيد» still pages live from here.
     if (snapshot) {
-      setMsgs([
+      const snapMsgs: ChatMsg[] = [
         { id: userId, role: 'user', text: bubble },
         { id: resultsId, role: 'results', text: sub, result: snapshot },
-      ]);
+      ];
+      setMsgs(snapMsgs);
+      prefetchNextPage(snapMsgs);
       setDoneTyping((d) => ({ ...d, [resultsId]: true }));
       // NOT afCompleted-aware on purpose: a snapshot restored from the sidebar carries no record of
       // whether an AF round produced it (afCompleted lives on the live ChatMsg, not in the saved

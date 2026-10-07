@@ -75,7 +75,12 @@ export function serializeChat(live: LiveChatState): PersistedChat | null {
       lastResultsTruncated = keep < r.listings.length; // the LAST results turn's value is the one that stands
       if (keep < r.listings.length) {
         // Truncated ⇒ restart paging (store.tsx snapshot precedent): loadMore de-dups, gap-free.
-        rest.result = { ...r, listings: r.listings.slice(0, keep), pageOffset: 0, hasMore: true };
+        // …and remember what the user HAD on screen, so reopening brings exactly that back without a tap
+        // (owner 2026-10-07: «after the user is done and goes back, it shows what he did»). agent.tsx's
+        // restoreLeftState() refetches the missing cards and re-reveals up to this number.
+        rest.result = { ...r, listings: r.listings.slice(0, keep), pageOffset: 0, hasMore: true,
+          ...(revealed > keep ? { restoreTo: revealed } : {}),
+          ...(revealed > keep && live.completed ? { restoreCompleted: true as const } : {}) };
       }
     }
     msgs.push(rest as PersistedMsg);
