@@ -54,3 +54,11 @@ def test_structured_props_reach_the_log_without_the_seller():
     assert "facing=North" in props and "Kitchen=True" in props
     assert not any("phone" in p or "0500" in p for p in props)
     assert any("page structured props: facing=North" in x for x in log_lines({"page": page, "stored": {}}))
+
+
+def test_the_og_image_value_reaches_the_log_not_only_its_presence():
+    # 2026-10-07: «og:image: True» could not tell a site-wide default image from a listing photo.
+    page = {"meta": {"og:image": "https://example.invalid/wp-content/uploads/2025/11/default-share.jpg"}}
+    lines = log_lines({"table": "t", "id": 1, "url": "u", "stored": {}, "page": page})
+    assert "   og:image value: https://example.invalid/wp-content/uploads/2025/11/default-share.jpg" in lines
+    assert not any("og:image value" in x for x in log_lines({"table": "t", "id": 1, "url": "u", "stored": {}, "page": {}}))
