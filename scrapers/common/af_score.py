@@ -9,7 +9,9 @@ ago (the 🆕 engineer owns the newer ones): 10 per big website, 5 per small one
   findability the customer's request: the listing's deal, city, district, type + up to two Advanced Filter
               answers its ad really states, sent through the PUBLIC anon RPC the app uses
               (location_search_candidates_ar). Found in the results = found.
-  parity      NOT measured by this module yet (customer-journey.mjs --mode af proves it per journey)
+  parity      on each one-amenity customer request: the number the Advanced Filter promises on that
+              option (apartment_guided_counts_ar cnt_<amenity>) == the results after the tap
+              (af_eligible_count with the amenity), both on the anon path the app uses
 
 A page we could not read and a field the ad does not state are never wrong (silent means unknown). A
 findability request whose result set was cut by the row cap is undecided, never a miss.
@@ -34,7 +36,8 @@ from datetime import datetime, timedelta, timezone
 from scrapers.common.cleanup import _probe
 from scrapers.common.db import sb
 from scrapers.common.new_listings_score import (
-    AF_FIELDS, FIELDS, MATCH, NEG, STORED, UNREADABLE, WE_MISS, af_precision, af_recall, compare_listing,
+    AF_FIELDS, FIELDS, MATCH, MISMATCH, NEG, PAGE_SILENT, STORED, UNREADABLE, WE_MISS, af_precision, af_recall,
+    _cmp_number, compare_listing, unprepared,
     empty_row, fold, norm,
 )
 from scrapers.common.source_reread import page_evidence
@@ -58,6 +61,87 @@ MONTHLY = "شهري"
 # Site chrome, not the ad: a short category link such as «مواقف سيارات للإيجار» / «شقق للبيع» sits in every
 # aqar page's navigation, so it says nothing about THIS listing (norm() has already folded hamza).
 CHROME = re.compile(r"^(?:\S+\s){0,3}(?:للايجار|للبيع)$")
+# Fields a website publishes STRUCTURALLY. The law (ADVANCED_FILTER_SOURCE_TRUTH §2): «a structured null
+# outranks any prose hit», so for these the page's own structured data (JSON-LD additionalProperty /
+# amenityFeature) is the only statement read, never the ad's prose. Measured 2026-10-07 (source-reread
+# 37600467768): aqar's 5/10 and tuba's 5/6 findability «misses» were prose («موقف سيارات» in the ad body)
+# against aqar's extended_details.special_parking / flat amenity keys and tuba's `garages` count, which
+# those ads leave unfilled — our NULL is the source's answer, not a trapped value.
+STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
+    "aqar": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room",
+             "private_entrance", "furnished"),
+    "tuba": ("parking",),
+    # gathern's unit page heads its appliance list «مرافق المطبخ» («ثلاجه غلايه», «فريزر مايكرويف …»):
+    # the header word is a label, and an appliance list is not the site saying «kitchen» (🔬 decision
+    # 2026-10-07, backlog 132, law §6). All 4 gathern «misses» of 2026-10-07 were exactly this.
+    "gathern": ("kitchen",),
+}
+COL = {n: c for n, _, c, _ in FIELDS}
+_YES = {"true", "1", "نعم", "يوجد", "متوفر"}
+_NO = {"false", "0", "لا", "لا يوجد", "لايوجد", "غير متوفر"}
+
+
+def structured_says(page: dict, field: str) -> bool | None:
+    """What the page's OWN structured data states for one field: True / False / None (silent)."""
+    kw = BOOL_KW[field]
+    said: list[bool] = []
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k in ("additionalProperty", "amenityFeature") and isinstance(v, list):
+                    for x in v:
+                        if isinstance(x, dict) and x.get("name") is not None and re.search(kw, norm(str(x["name"]))):
+                            val = norm(str(x.get("value"))).strip().lower()
+                            if val in _YES:
+                                said.append(True)
+                            elif val in _NO:
+                                said.append(False)
+                elif isinstance(v, (dict, list)):
+                    walk(v)
+        elif isinstance(node, list):
+            for x in node:
+                walk(x)
+
+    walk(page.get("jsonld") or [])
+    return said[0] if said else None
+
+
+def structured_result(stored, says: bool | None) -> str:
+    if says is None:
+        return PAGE_SILENT
+    if stored is None:
+        return WE_MISS
+    return MATCH if bool(stored) == says else MISMATCH
+
+
+# Number fields a website publishes under ONE structured label: only that label's line is the statement.
+# dealapp's spec table prints «عدد الحمامات»; its «we miss» 5/10 on 2026-10-07 were all ad prose
+# («3 دورات مياه») on ads whose table has no bathroom row (source-reread 37604551104).
+STRUCTURED_LABEL: dict[tuple[str, str], str] = {("dealapp", "bathrooms"): r"عدد الحمامات"}
+
+
+def labelled_number(stored, lines: list[str], label: str) -> str:
+    """The label's own row states a figure (on its line, or as the bare next line); prose never does."""
+    if stored is not None:
+        return _cmp_number(stored, lines, "", label)
+    hits = [i for i, x in enumerate(lines) if re.search(label, x)]
+    states = any(re.search(r"\d", lines[i]) or (i + 1 < len(lines) and re.match(r"^\s*\d+\s*$", lines[i + 1]))
+                 for i in hits)
+    return WE_MISS if states else PAGE_SILENT
+
+
+def structured_only(platform: str, results: dict[str, str], stored: dict, page: dict) -> dict[str, str]:
+    out = dict(results)
+    for (site, f), label in STRUCTURED_LABEL.items():
+        if site == platform and f in out and out[f] != UNREADABLE:
+            out[f] = labelled_number(stored.get(COL[f]), page_lines(page), label)
+    for f in STRUCTURED_ONLY.get(platform, ()):
+        if f in out and out[f] != UNREADABLE:
+            out[f] = structured_result(stored.get(COL[f]), structured_says(page, f))
+    return out
+
+
 # An EMPTY label («موقف السيارة :», «التكييف :») is printed on every tuba / ksaaqar page whatever the
 # answer — the value sits elsewhere, or nowhere. A label is not a statement.
 BARE_LABEL = re.compile(r"^[^:]{1,30}:$")
@@ -87,7 +171,7 @@ def template_lines(pages: list[list[str]]) -> set[str]:
 def page_says_yes(lines: list[str], field: str) -> bool:
     """The ad itself names the amenity and does not negate it («مصعد» yes, «لا يوجد مصعد» no)."""
     kw = BOOL_KW[field]
-    hit = [x for x in lines if re.search(kw, x)]
+    hit = [x for x in (unprepared(y, kw) for y in lines) if re.search(kw, x)]
     return bool(hit) and not all(re.search(NEG + "(?:" + kw + ")", x) for x in hit)
 
 
@@ -196,8 +280,33 @@ def ask(anon, params: dict) -> list[dict] | None:
         return None
 
 
+# The option count the screen prints for each amenity chip (apartment_guided_counts_ar), by anon slug.
+COUNT_COL = {"elevator": "cnt_elevator", "parking": "cnt_parking", "kitchen": "cnt_kitchen", "ac": "cnt_ac",
+             "maid_room": "cnt_maid_room", "driver_room": "cnt_driver_room",
+             "private_entrance": "cnt_private_entrance"}
+
+
+def parity(anon, params: dict) -> bool | None:
+    """Rulebook number 4: the count promised on an option == the results after the tap. None = not decided
+    (not a one-amenity request, or either read failed — a failed fetch is never a pass or a fail)."""
+    slugs = params.get("p_amenities") or []
+    if len(slugs) != 1 or params.get("p_furnished") is not None or slugs[0] not in COUNT_COL:
+        return None
+    base = {k: v for k, v in params.items() if k not in ("p_amenities", "p_limit", "p_offset")}
+    try:
+        rows = anon.rpc("apartment_guided_counts_ar", base).execute().data
+        after = anon.rpc("af_eligible_count", {**base, "p_amenities": slugs}).execute().data
+    except Exception:  # noqa: BLE001
+        return None
+    promised = (rows[0] if isinstance(rows, list) and rows else {}).get(COUNT_COL[slugs[0]])
+    if promised is None or isinstance(after, (list, dict)) or after is None:
+        return None
+    return int(promised) == int(after)
+
+
 def new_row(night: str, platform: str, **kw) -> dict:
-    row = empty_row(night, platform, find_tried=0, find_found=0, find_missed_ids=[], **kw)
+    row = empty_row(night, platform, find_tried=0, find_found=0, find_missed_ids=[], parity_tried=0,
+                    parity_ok=0, **kw)
     return row
 
 
@@ -268,7 +377,7 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
     for table, rid, stored, page in read:
         key = f"{table}:{rid}"
         results = compare_listing(stored, page, skip_price=False)
-        af_only = {k: v for k, v in results.items() if k in AF_FIELDS}
+        af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page)
         fold(row, key, af_only, stored)
         ad_lines = [x for x in page_lines(page) if x not in chrome]
         answers = offered(customer_answers(ad_lines, af_only), stored)
@@ -281,6 +390,10 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
                     row["find_found"] += 1
                 else:
                     row["find_missed_ids"].append(key)
+            same = parity(anon, params)
+            if same is not None:
+                row["parity_tried"] += 1
+                row["parity_ok"] += int(same)
     if row["unreadable_pages"]:
         row["note"] = f"{row['unreadable_pages']} page(s) unreadable (never counted as wrong)"
     return row
@@ -297,7 +410,8 @@ def _pct(v: float | None) -> str:
 def _line(r: dict) -> str:
     return (f"{r['platform']}: sampled={r['sampled']} findability={_pct(findability(r))} "
             f"({r['find_found']}/{r['find_tried']}) precision={_pct(af_precision(r))} "
-            f"capture={_pct(af_recall(r))} parity=not-measured misses={len(r['find_missed_ids'])}"
+            f"capture={_pct(af_recall(r))} parity={r.get('parity_ok', 0)}/{r.get('parity_tried', 0)} "
+            f"misses={len(r['find_missed_ids'])}"
             + (f" | {r['note']}" if r["note"] else ""))
 
 
@@ -308,6 +422,7 @@ def write_rows(client, rows: list[dict]) -> str:
         "af_claimed": r["af_claimed"], "af_agree": r["af_agree"],
         "af_page_states": r["af_page_states"], "af_captured": r["af_captured"],
         "mismatch_ids": r["mismatch_ids"], "find_missed_ids": r["find_missed_ids"], "note": r["note"],
+        "parity_tried": r.get("parity_tried") or None, "parity_ok": r.get("parity_ok") if r.get("parity_tried") else None,
     } for r in rows]
     try:
         client.table(TABLE).upsert(payload, on_conflict="night,platform").execute()
@@ -324,7 +439,9 @@ def fleet_totals(rows: list[dict]) -> dict:
     r_ = lambda a, b: (a / b) if b else None  # noqa: E731
     return {"findability": r_(t("find_found"), t("find_tried")), "precision": r_(t("af_agree"), t("af_claimed")),
             "capture": r_(t("af_captured"), t("af_page_states")), "find_tried": t("find_tried"),
-            "find_found": t("find_found"), "sampled": t("sampled")}
+            "find_found": t("find_found"), "sampled": t("sampled"),
+            "parity_tried": sum(r.get("parity_tried") or 0 for r in rows),
+            "parity_ok": sum(r.get("parity_ok") or 0 for r in rows)}
 
 
 def main() -> int:
@@ -368,7 +485,8 @@ def main() -> int:
     else:
         f = out["fleet"]
         print(f"fleet: findability={_pct(f['findability'])} ({f['find_found']}/{f['find_tried']}) "
-              f"precision={_pct(f['precision'])} capture={_pct(f['capture'])} parity=not-measured")
+              f"precision={_pct(f['precision'])} capture={_pct(f['capture'])} "
+              f"parity={f['parity_ok']}/{f['parity_tried']}")
         print(out["written"])
     return 0
 

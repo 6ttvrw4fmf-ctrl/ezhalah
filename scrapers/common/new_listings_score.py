@@ -201,8 +201,19 @@ _UNIT_TAIL = r"\s*(?:م2|م²|متر|ريال|ر\.س)?\s*"
 CONTROL_PROMPT = re.compile(r"^\s*اختر\s")
 
 
+# An area figure is never another field's value: tuba prints an EMPTY «عمر العقار :» label with the
+# next line «214.66 م²», which read as a stated age (af_score 2026-10-07: tuba property_age 10/10
+# «mismatch», source-reread 37600467768). Only the area field may take a neighbour carrying m².
+AREA_UNIT = re.compile(r"م²|م2|متر مربع")
+
+
+ONE_WORD = re.compile(r"(?<!\S)(?:واحد|واحده)(?!\S)")
+
+
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
+    if not AREA_UNIT.search(kw):
+        lines = [x if i in kw_hits or not AREA_UNIT.search(x) else "" for i, x in enumerate(lines)]
     page_states = any(re.search(r"\d", lines[i]) for i in kw_hits)
     if stored is None:
         return WE_MISS if page_states else PAGE_SILENT
@@ -225,6 +236,10 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # The live page renders the spec as label/value LINES («عمر العقار» / «جديد»), so the word can sit
         # on the line after the label (aqar 15703930 / 15703349, 2026-10-06: stored 0, scored wrong
         # because the previous row's bare «220 م²» read as a stated age).
+        # «دورة مياه واحدة» is gathern's way of printing ONE bathroom: the word, not the digit (af_score
+        # 2026-10-07: gathern 12857258 / 13191014 / 13971729 stored 1, scored «mismatch» 3/3).
+        if any(ONE_WORD.search(lines[i]) for i in kw_hits):
+            return MATCH if float(stored) == 1 else MISMATCH
         if kw == AGE_KW and (NEW_BUILDING.search(" | ".join(lines[i] for i in kw_hits)) or any(
                 i + 1 < len(lines) and re.match(r"^\s*جديد\s*$", lines[i + 1]) for i in kw_hits)):
             return MATCH if float(stored) == 0 else MISMATCH
@@ -234,8 +249,17 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     return MISMATCH if page_states else PAGE_SILENT
 
 
+# «تأسيس مصعد» is a lift SHAFT, prepared for a lift that is not there: it states nothing about having one
+# (sakan 12612200, 2026-10-07: scored a «we miss» on a correctly-NULL elevator).
+PREPARED = r"تاسيس\s*"
+
+
+def unprepared(x: str, kw: str) -> str:
+    return re.sub(PREPARED + "(?:" + kw + ")", " ", x)
+
+
 def _cmp_bool(stored, lines: list[str], kw: str) -> str:
-    hit = [x for x in lines if re.search(kw, x)]
+    hit = [x for x in (unprepared(y, kw) for y in lines) if re.search(kw, x)]
     if not hit:
         return PAGE_SILENT
     page_yes = not all(re.search(NEG + "(?:" + kw + ")", x) for x in hit)

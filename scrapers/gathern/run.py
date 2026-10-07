@@ -704,7 +704,7 @@ def backfill_details(s: cc.Session, limit: int = 0, shard: Optional[int] = None,
         # fillable work so a partial/interrupted run captures the valuable rows and the dead tail sinks
         # to the end. (id is the tie-breaker for a stable total order across the paged .range() calls.)
         res = (client.table("gathern_residential_listings")
-               .select("ad_number, listing_url, additional_info")
+               .select("ad_number, listing_url, additional_info, bathrooms")
                .eq("source", SOURCE).eq("active", True)
                .or_("description.is.null,additional_info->reviews_count.is.null")
                .order("last_seen_at", desc=True).order("id")
@@ -729,6 +729,9 @@ def backfill_details(s: cc.Session, limit: int = 0, shard: Optional[int] = None,
             info = {}
         info.update(d)  # suitability, house_rules, check_in/out, guest_capacity, booking/views, rate_text, rating, reviews_count, extra_sections
         payload: dict[str, Any] = {"additional_info": info}
+        # The page's own count fills a bathroom count the list's icon never gave; a stored value stays.
+        if r.get("bathrooms") is None and (n := _bathrooms_from_sections(d.get("extra_sections"))):
+            payload["bathrooms"] = n
         if desc:
             payload["description"] = desc
         try:
@@ -831,6 +834,29 @@ def _bathrooms(amenities: Optional[list]) -> Optional[int]:
             if isinstance(c, (int, float)) and c > 0:
                 return int(c)
             return None
+    return None
+
+
+# The unit page's own «دورات المياة» section states the count in words: «دورة مياه واحدة» (one) or
+# «N دورات المياة». Measured 2026-10-07 over 4,745 active units: it agrees with the list's bathtub icon
+# on 2,002 of 2,009 units that carry both, and it is the ONLY statement on 2,722 units whose list item
+# has no bathtub icon — they stored NULL and no customer asking «كم دورة مياه» could find them
+# (🔬 backlog 135). Read only that exact header (never «مرافق دورات المياة», the toiletries list);
+# anything else in it — an empty block, a new wording — is silence → None, never a guess.
+_BATH_SECTION = "دورات المياة"
+_BATH_ONE = "دورة مياه واحدة"
+_BATH_N_RE = re.compile(r"^(\d{1,2})\s+دورات المياة$")
+
+
+def _bathrooms_from_sections(secs: Optional[list]) -> Optional[int]:
+    for sec in secs or []:
+        if not isinstance(sec, dict) or (sec.get("header") or "").strip() != _BATH_SECTION:
+            continue
+        c = " ".join(str(sec.get("content") or "").split())
+        if c == _BATH_ONE:
+            return 1
+        m = _BATH_N_RE.match(c)
+        return int(m.group(1)) if m and int(m.group(1)) > 0 else None
     return None
 
 

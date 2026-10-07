@@ -403,6 +403,14 @@ def _amenities(p: dict[str, Any], specs: dict[str, str]) -> dict[str, bool]:
     for svc in p.get("services") or []:            # «✓ خدمة …» rows: affirmative, structured
         if svc in _SERVICE_COL:
             struct[_SERVICE_COL[svc]] = True
+    # The floor-details block's labelled «المطابخ: N» count (normalize.kitchen_from_count): a stated
+    # count joins the prose side; a prose «بدون مطبخ» against a count ≥1 is a contradiction → dropped.
+    kc = normalize.kitchen_from_count(p.get("description"))
+    if kc is not None:
+        if "kitchen" in prose and prose["kitchen"] != kc:
+            prose.pop("kitchen")
+        else:
+            prose["kitchen"] = kc
     out = dict(prose)
     for k, v in struct.items():
         if k in out and out[k] != v:

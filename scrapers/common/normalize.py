@@ -915,6 +915,21 @@ def amenities_from_text(raw: Optional[str]) -> dict[str, bool]:
     return {col: vals.pop() for col, vals in seen.items() if len(vals) == 1}
 
 
+# «المطابخ: 1» — a labelled kitchen COUNT, printed per floor in the «تفاصيل الدور …» block of one broker
+# template that both sakan and tuba carry («دورات المياه: 2 ، الصالات: 1 ، … ، المطابخ: 1»). The plural
+# shares no substring with «مطبخ», so amenities_from_text never saw it: 2,619 sakan and 273 tuba ads
+# stated a kitchen while storing NULL (🔬 AF engineer 2026-10-07). A count is a statement both ways:
+# any floor with ≥1 → True; every stated count 0 → False; no count → None (silence).
+_KITCHEN_COUNT_RE = re.compile(r"المطابخ\s*:\s*(\d{1,2})")
+
+
+def kitchen_from_count(raw: Optional[str]) -> Optional[bool]:
+    counts = [int(n) for n in _KITCHEN_COUNT_RE.findall(str(raw or ""))]
+    if not counts:
+        return None
+    return any(n > 0 for n in counts)
+
+
 def amenities_from_lines(raw: Optional[str]) -> dict[str, bool]:
     """amenities_from_text() per LINE of the source's own text, merged. The matcher's negation window
     reaches ~12 characters back, so across a line break «الشقة غير مؤثثة\nمطبخ مغلق» read kitchen=False

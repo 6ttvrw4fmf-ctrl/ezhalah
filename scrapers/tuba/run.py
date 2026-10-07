@@ -447,6 +447,19 @@ def rega(rec: dict[str, Any]) -> dict[str, Any]:
     return out if isinstance(out, dict) else {}
 
 
+def _prose_amenities(utilities: list[str], desc: Optional[str]) -> dict[str, bool]:
+    """amenities_from_text over the utilities + ad body, plus the floor-details block's labelled
+    «المطابخ: N» count (normalize.kitchen_from_count); prose that contradicts a count drops the key."""
+    out = normalize.amenities_from_text(f"{'، '.join(utilities)}\n{desc or ''}")
+    kc = normalize.kitchen_from_count(desc)
+    if kc is not None:
+        if "kitchen" in out and out["kitchen"] != kc:
+            out.pop("kitchen")
+        else:
+            out["kitchen"] = kc
+    return out
+
+
 def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     """(row, category, skip_reason) for ONE property record. row is None exactly when a reason is set."""
     pid = _clean(rec.get("id"))
@@ -521,7 +534,7 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "title": _scrub(title, names),
         "description": desc,
         # Prose amenities FIRST so the structured REGA utilities below always win.
-        **normalize.amenities_from_text(f"{'، '.join(utilities)}\n{desc or ''}"),
+        **_prose_amenities(utilities, desc),
         # Positive-only: a utility the source omits stays NULL. «لايوجد خدمات» names no specific
         # service, so it sets nothing False (open question).
         **{_UTILITY_COLS[w]: True for w in utilities if w in _UTILITY_COLS},
