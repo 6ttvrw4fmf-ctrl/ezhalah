@@ -125,7 +125,6 @@ function anyGuidedEligible(q: SearchQuery): boolean {
 }
 
 const IS_WEB = Platform.OS === 'web';
-const EAGLE_MARK = require('../../assets/images/eagle-mark.png');
 // ChatGPT's own font list (system UI face), with the platform Arabic faces named so Arabic renders in
 // the system's modern Arabic type instead of a browser fallback. Native keeps the platform default.
 const CHAT_FONT = IS_WEB ? 'ui-sans-serif, -apple-system, system-ui, "Segoe UI", "SF Arabic", "Noto Sans Arabic", Helvetica, Arial, sans-serif' : undefined;
@@ -4033,7 +4032,7 @@ export default function Agent() {
                 return (
                   <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: IS_WEB ? '76%' : '88%' }}>
                     <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row' }]}>
-                      <Image source={EAGLE_MARK} style={s.replyBrandMark} resizeMode="contain" accessible={false} />
+                      <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />
                       <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
                         {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
                       </Text>
@@ -4135,11 +4134,11 @@ export default function Agent() {
                   {m.slogan ? (
                     <View style={[s.reply, { flexDirection: 'row', alignItems: 'center' }]}>
                       {!msgRTL(m.slogan) && (
-                        <Image source={EAGLE_MARK} style={s.replyBrandMark} resizeMode="contain" accessible={false} />
+                        <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />
                       )}
                       <Text style={[s.sloganText, { writingDirection: msgRTL(m.slogan) ? 'rtl' : 'ltr', textAlign: msgRTL(m.slogan) ? 'right' : 'left' }]}>{m.slogan}</Text>
                       {msgRTL(m.slogan) && (
-                        <Image source={EAGLE_MARK} style={s.replyBrandMark} resizeMode="contain" accessible={false} />
+                        <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />
                       )}
                     </View>
                   ) : null}
@@ -4915,7 +4914,7 @@ const s = StyleSheet.create({
   fbToastText: { fontSize: 12.5, fontWeight: '600', color: colors.ink },
   iconBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   hamb: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { cursor: 'pointer' as any } : {}) },
-  title: { fontSize: 22, fontWeight: '800', color: colors.ink },
+  title: { fontSize: 22, fontWeight: '800', color: colors.dark },
   // Note #5 — share icon sits beside the Filter pill in the agent header.
   // Matches the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius, soft lift) so
   // the pill + share read as one cluster across both screens (owner redesign 2026-07-24 r2).
@@ -5044,7 +5043,7 @@ const s = StyleSheet.create({
   summaryText: { fontFamily: CHAT_FONT, fontSize: IS_WEB ? 15 : 14, color: colors.body, lineHeight: IS_WEB ? 26 : 24, marginTop: 4 },
 
   reply: { flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
-  replyBrandMark: { width: 22, height: 22, marginTop: 3, flexShrink: 0 },
+  replyBrandMark: { marginTop: 3, flexShrink: 0 },
   // NO flex here (owner 2026-10-05: «the sentences that say تم — sometimes no emoji shows»). Two of the
   // three users sit in COLUMNS (the results sentence, the closing note), where flex: 1 is a vertical
   // flex-basis 0% that iOS Safari resolves to 0 — the box collapsed, and a wrapped second line (often

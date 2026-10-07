@@ -67,6 +67,8 @@ STOP → restore → fix → continue. Checklist: `ezhalah-app/docs/DEPLOY_REGRE
 
 ## 3. Frontend — navigation & screens
 
+The header and sidebar Ezhalah name uses dark green. Assistant replies and result slogans keep the same green sparkle stars as the thinking state (owner, 2026-10-07).
+
 The AI Agent’s empty composer hint aligns left in English and right in Arabic (owner, 2026-10-07). Typed messages keep their own language direction.
 
 

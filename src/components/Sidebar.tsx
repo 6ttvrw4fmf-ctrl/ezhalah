@@ -1055,7 +1055,7 @@ const s = StyleSheet.create({
   logo: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   // Bigger brand name (owner 2026-10-04: «make Ezhalah big»). Letter-spacing only on the Latin wordmark —
   // it pulls Arabic letters apart and breaks their joining.
-  word: { fontSize: 22, fontWeight: '800', color: colors.ink },
+  word: { fontSize: 22, fontWeight: '800', color: colors.dark },
   wordLatin: { letterSpacing: 2 },
 
   // Owner 2026-08-24: LIGHT green default (dark-green text) → DARK green with white text only on
