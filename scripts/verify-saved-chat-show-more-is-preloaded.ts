@@ -11,7 +11,7 @@ function wiring(a: string): string[] {
   if (!/setMsgs\(restored\.msgs as unknown as ChatMsg\[\]\);\n\s*\{[\s\S]{0,600}?prefetchNextPage\(restored\.msgs as unknown as ChatMsg\[\], /.test(a)) bad.push('restoring a saved transcript does not pre-load the next page');
   if (!/setMsgs\(snapMsgs\);\n\s*prefetchNextPage\(snapMsgs\);/.test(a)) bad.push('reopening a legacy snapshot chat does not pre-load the next page');
   const helper = /const prefetchNextPage = [\s\S]*?\n  \};\n/.exec(a)?.[0] ?? '';
-  if (!/loadMoreListings\(q, offset, r\.rotationSeed\)/.test(helper)) bad.push('the pre-load does not ask for the exact page the tap would (query, offset, the set\'s own seed)');
+  if (!/loadMoreListings\(q, offset, last\.result\.rotationSeed\)/.test(helper)) bad.push('the pre-load does not ask for the exact page the tap would (query, offset, the set\'s own seed)');
   if (!/afFirst\.catch\(\(\) => null\)\.then\(\(\) => loadMoreListings\(/.test(helper)) bad.push('the page pre-load no longer waits for the Advanced Filter probe (two heavy calls at once slow both: #3420)');
   if (!/prefetchNarrowing\(r\.query, asked\)/.test(helper)) bad.push('a reopened chat no longer starts the «تحديد أكثر» probe first');
   if (!/epoch: conversationEpochRef\.current/.test(helper)) bad.push('the pre-load is not tied to its conversation');

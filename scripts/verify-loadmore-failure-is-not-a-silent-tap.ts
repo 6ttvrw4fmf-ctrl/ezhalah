@@ -506,9 +506,11 @@ const mUnboundedReveal = mutantOf(agentSrc,
 
 // M-no-finish: a successful complete drain that forgets to call setCompleted would leave the user
 // stuck — everything shown, but the composer still live and no New Chat offered.
+// Anchored on loadMore's OWN terminal predicate (2026-10-07: restoreLeftState has its own
+// `if (revealIsTerminal) setCompleted(true);`, so the bare line no longer names loadMore's).
 const mNoFinish = mutantOf(agentSrc,
-  'if (revealIsTerminal) setCompleted(true);',
-  'if (false) setCompleted(true);');
+  'revealTo >= Math.min(SECOND_PAGE_CAP, totalForCap) || (!hasMoreNow && revealTo >= mergedLen);',
+  'false;');
 const noFinishBus = await runLoadMore(mNoFinish, [{ listings: PAGE(10, 10), nextOffset: 20, hasMore: false }], PAGE(10));
 mustCatch('M-no-finish — a drain that reached the end but never finishes the chat is caught',
   noFinishBus.completed !== true, `completed: ${noFinishBus.completed}`);

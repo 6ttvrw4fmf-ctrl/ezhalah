@@ -1830,7 +1830,7 @@ export default function Agent() {
     const afFirst: Promise<unknown> = afPrefetchRef.current?.p ?? Promise.resolve();
     prefetchRef.current.set(last.id, {
       epoch: conversationEpochRef.current, offset,
-      p: afFirst.catch(() => null).then(() => loadMoreListings(q, offset, r.rotationSeed)).catch(() => null),
+      p: afFirst.catch(() => null).then(() => loadMoreListings(q, offset, last.result.rotationSeed)).catch(() => null),
     });
   };
 
