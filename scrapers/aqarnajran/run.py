@@ -246,11 +246,40 @@ def map_listing(post: dict) -> tuple[Optional[dict], str, str]:
 _IMG_RE = re.compile(r'<img[^>]+src="([^"]+)"')
 
 
+# THE PHOTO LIVES IN THE FEATURED IMAGE (measured 2026-10-07). All 39 active rows carried no photo
+# while every re-read page (source-reread 37577198963, 4/4) shows one: og:image and three JSON-LD
+# image entries. The posts keep their photo as the WordPress featured image (`featured_media`),
+# which the body-only read never asked for. It is now fetched per post from /wp/v2/media/<id>
+# (41 posts, so 41 small reads) and put first; body images still follow. A media read that fails is
+# simply absent — never a guess, never the site logo.
+def _usable_photo(u: Optional[str]) -> bool:
+    return bool(u) and "/wp-content/uploads/" in u and "logo" not in u.lower()
+
+
 def photos(post: dict) -> Optional[list[str]]:
-    urls = [u for u in dict.fromkeys(_IMG_RE.findall(post.get("content", {}).get("rendered", "")))
-            if "/wp-content/uploads/" in u and "logo" not in u.lower()
-            and not re.search(r"-\d{2,3}x\d{2,3}\.(?:png|jpe?g|webp)$", u)]
+    body = [u for u in _IMG_RE.findall(post.get("content", {}).get("rendered", ""))
+            if _usable_photo(u) and not re.search(r"-\d{2,3}x\d{2,3}\.(?:png|jpe?g|webp)$", u)]
+    featured = post.get("_featured_photo")
+    urls = list(dict.fromkeys(([featured] if _usable_photo(featured) else []) + body))
     return urls[:20] or None
+
+
+def attach_featured_photos(s: cc.Session, posts: list[dict]) -> int:
+    """Set post['_featured_photo'] from each post's featured_media; returns how many were read."""
+    got = 0
+    for post in posts:
+        mid = post.get("featured_media")
+        if not isinstance(mid, int) or mid <= 0:
+            continue
+        try:
+            r = s.get(f"{BASE}/wp-json/wp/v2/media/{mid}", params={"_fields": "source_url"}, timeout=40)
+            url = (r.json() or {}).get("source_url") if r.status_code == 200 else None
+        except Exception:  # noqa: BLE001 — a failed media read leaves the post without that photo
+            url = None
+        if _usable_photo(url):
+            post["_featured_photo"] = url
+            got += 1
+    return got
 
 
 # Why a REST walk may not be the whole catalogue. Non-empty → no prune this run.
@@ -305,7 +334,7 @@ def fetch_posts(s: cc.Session, limit: int = 0) -> list[dict]:
     while True:
         r = s.get(f"{BASE}/wp-json/wp/v2/posts",
                   params={"per_page": 50, "page": page,
-                          "_fields": "id,link,title,content,date_gmt,modified_gmt"}, timeout=40)
+                          "_fields": "id,link,title,content,date_gmt,modified_gmt,featured_media"}, timeout=40)
         if r.status_code != 200:
             if page == 1:
                 # Page 1 refused is a fact about our access, never "the site has no posts": say what
@@ -344,6 +373,7 @@ def main() -> int:
         if not posts:
             raise RuntimeError("wp-json returned no posts")
         print(f"{SOURCE}: {len(posts)} posts discovered", flush=True)
+        print(f"  featured photos read: {attach_featured_photos(s, posts)}", flush=True)
         skipped: dict[str, int] = {}
         for p in posts:
             row, cat, why = map_listing(p)
