@@ -86,7 +86,7 @@ import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
-import { useI18n, detectLocale, getLocale, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
+import { useI18n, detectLocale, getLocale, translate, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { listingLocationAr, listingPrice } from '@/lib/listingDisplay';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
@@ -648,7 +648,7 @@ function IntroExampleRotator({ reducedMotion }: { reducedMotion: boolean }) {
 export default function Agent() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { t, locale, setLocale } = useI18n();
+  const { t, locale } = useI18n();
   const { seed, filter, chatBubble, chatSub, replay, fresh, hid } = useLocalSearchParams<{
     seed?: string;
     filter?: string;
@@ -1635,7 +1635,7 @@ export default function Agent() {
   // can see we understood, right before "Ezhalah is searching…". (user request.)
   // The structured "Search Summary" of exactly what we parsed — now shown WITH the results (under the
   // professional header), NOT with the slogan. The slogan lives only in the transient searching status.
-  const buildScrapeIntro = (q: SearchQuery) => searchSummary(q);
+  const buildScrapeIntro = (q: SearchQuery, replyLocale: Locale = locale) => searchSummary(q, replyLocale);
 
   // When each status bubble's SEARCHING phase became visible — playListings only waits out the
   // REMAINDER of SEARCH_MIN_MS from this moment, so the beat overlaps the real network time instead
@@ -1658,7 +1658,8 @@ export default function Agent() {
     // 1) SEARCHING phase: status bubble shows the slogan + summary. Slogan language follows the
     // user's MESSAGE text (English message → English slogan) instead of the UI locale, so users
     // who chat in one language and have their UI in the other still get the matching slogan.
-    const slogan = hypePhrase(getLocale(), messageText);
+    const replyLocale = (messageText ? detectLocale(messageText) : null) ?? locale;
+    const slogan = hypePhrase(replyLocale, messageText);
     // The searching status renders the platform-checking ANIMATION (SearchLoader), not the slogan.
     // We still carry slogan + summary through so they appear in the RESULTS bubble below (unchanged).
     // `resultSources` only lets result-present platforms LEAD the (frozen) pill order — it is NOT a
@@ -1700,7 +1701,7 @@ export default function Agent() {
     setMsgs((m) =>
       m.map((x) =>
         x.id === statusId
-          ? { id: statusId, role: 'results', text: resultDone(getLocale()), result, typing: true, slogan, summary, afCompleted }
+          ? { id: statusId, role: 'results', text: resultDone(replyLocale), result, typing: true, slogan, summary, afCompleted }
           : x,
       ),
     );
@@ -2977,6 +2978,8 @@ export default function Agent() {
   const send = async (override?: string) => {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
+    const replyLocale = detectLocale(v) ?? locale;
+    const t = (key: string, vars?: Record<string, string | number>) => translate(replyLocale, key, vars);
     const selectedSourceForTurn = selectedSource;
     // The user SENT something (typed or voice — sendVoice funnels in here): the small sign-in
     // card retires for the rest of this load (owner 2026-08-29). After the guard, so an empty or
@@ -2996,6 +2999,7 @@ export default function Agent() {
     // REFINE INTERCEPT: if we just asked a «نتائج أدق» clarifying question, read THIS message as the answer,
     // merge it into the SAME filter, and re-search — never run it through the normal agent path. (user 2026-06-27.)
     if (pendingRefineRef.current) {
+      { const rid = recordChatTurn(v); if (rid) chatIdRef.current = rid; }
       const { q: baseQ, dim } = pendingRefineRef.current;
       await runRefine(
         selectedSourceForTurn ? { ...baseQ, sources: [selectedSourceForTurn] } : baseQ,
@@ -3011,11 +3015,6 @@ export default function Agent() {
     { const rid = recordChatTurn(v); if (rid) chatIdRef.current = rid; } // keep this screen's conversation id aligned with the store's entry
     const run = makeRun();
     runRef.current = run;
-    // Switch the whole app to the language of THIS message — on Send, not per keystroke. An English
-    // message flips the UI to English and the reply comes back in English; an Arabic message to
-    // Arabic. (setLocale syncs the data-layer locale immediately, so respond() answers in kind.)
-    const loc = detectLocale(v);
-    if (loc && loc !== locale) setLocale(loc);
     pinModeRef.current = 'bottom';
     // First beat: "Ezhalah is thinking…" — the real respond() round-trip fills this pause.
     const statusId = uid();
@@ -3074,7 +3073,7 @@ export default function Agent() {
     // everything the user already said — «شهرية» came back as RentAnnual and a 9.5 rating vanished
     // after one more question (owner-reported 2026-08-29). Explicit changes in the new turn still win.
     let turn = await respond(v, {
-      loggedIn: !!user, history, attemptTexts: saidRef.current, prevQuery: lastQueryRef.current,
+      locale: replyLocale, loggedIn: !!user, history, attemptTexts: saidRef.current, prevQuery: lastQueryRef.current,
       askCount: askCountRef.current, userMessageId, historyTurnsRaw: historyAll.length,
     });
     if (run.cancelled) return;
@@ -3169,10 +3168,10 @@ export default function Agent() {
       const result = await runQuery(turn.query, true, run.ac.signal, ensureChatId());
       if (!run.cancelled) prefetchNarrowing(result.query ?? turn.query);  // AFTER the search — see prefetchNarrowing
       const reply = forcedBroad
-        ? `${getLocale() !== 'en'
+        ? `${replyLocale !== 'en'
             ? 'ما قدرت أحدد الموقع بدقة، فبحثت في نطاق أوسع — هذي اللي لقيتها.'
-            : "I couldn't narrow the location, so I searched a broader scope — here's what I found."}\n\n${buildScrapeIntro(result.query ?? turn.query)}`
-        : buildScrapeIntro(result.query ?? turn.query);
+            : "I couldn't narrow the location, so I searched a broader scope — here's what I found."}\n\n${buildScrapeIntro(result.query ?? turn.query, replyLocale)}`
+        : buildScrapeIntro(result.query ?? turn.query, replyLocale);
       // A rejection/honesty caveat (turn.notice) is a SEPARATE channel from turn.reply on purpose —
       // this deterministic `reply` headline can only ever say what actually ran (anti-hallucination:
       // buildScrapeIntro reflects result.query, never the model's own words) — but a real caveat the
@@ -3192,7 +3191,7 @@ export default function Agent() {
       // — a «حي الملك» search that timed out was told «ما لقينا نتائج» while the same search returns
       // 16,874). runSearch already words a failure as «try again in a few seconds»; never overwrite it.
       const zeroMatch = result.listings.length === 0 && !result.fetchFailed
-        ? { ...result, suggestion: t('Sorry, no listings currently match your request. Try using the Filter to widen your search.') }
+        ? { ...result, suggestion: translate(replyLocale, 'Sorry, no listings currently match your request. Try using the Filter to widen your search.') }
         : result;
       await playListings(run, statusId, withNotice, zeroMatch, v);
       if (run.cancelled) return;
@@ -4090,17 +4089,12 @@ export default function Agent() {
                     </View>
                   );
                 }
-                // Per-message direction: each AI reply renders in its OWN language's direction and
-                // stays put even if the next message flips. ARABIC reply → the whole row is RTL and
-                // anchored to the RIGHT (Ezhalah mark on far right, Arabic text flows right → left to its
-                // left). ENGLISH reply → row is LTR and anchored to the LEFT (mark on far left,
-                // English text flows left → right to its right). Earlier rows never move when a new
-                // message in the other language arrives. (user request.)
+                // Assistant stays on the left; each reply's text keeps its own reading direction.
                 const txt = m.text;
                 const rtl = msgRTL(txt);
                 return (
-                  <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: IS_WEB ? '76%' : '88%' }}>
-                    <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row' }]}>
+                  <View key={m.id} style={{ gap: 10, alignSelf: 'flex-start', maxWidth: IS_WEB ? '76%' : '88%' }}>
+                    <View style={[s.reply, { alignSelf: 'flex-start', flexDirection: 'row' }]}>
                       <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />
                       <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
                         {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
@@ -4149,7 +4143,7 @@ export default function Agent() {
               // the guest pool and no name substitution runs. The retired fixed sentence
               // «لقينا {n} إعلان يطابق طلبك.» has no baked/DB fallback: the picker rotates from
               // search #1.
-              const rfLang: 'ar' | 'en' = getLocale() === 'en' ? 'en' : 'ar';
+              const rfLang: 'ar' | 'en' = msgRTL(m.summary || m.text) ? 'ar' : 'en';
               // pickName = the SAME function the sidebar and account menu print the name with. The
               // old fallback (nameAr, else the raw name) printed the Latin name whenever nameAr was not filled
               // yet, so an Arabic sentence greeted «يا Yusuf Saleh …» while the sidebar said «يوسف» (owner
@@ -4178,11 +4172,7 @@ export default function Agent() {
                     })
                   : m.text;
               return (
-                // ARABIC: the whole assistant response (slogan + summary + intro) sits on the RIGHT,
-                // directly under the user's right-aligned message — so alignItems flex-end clusters the
-                // text blocks to the right edge with the sparkle on the right. ENGLISH: flex-start (left).
-                // The property-cards View below opts back out with alignSelf:'stretch' so cards stay
-                // full-width regardless. (user request: Arabic assistant reply on the right, not left.)
+                // Assistant side is stable across message languages; cards remain full width.
                 <View
                   key={m.id}
                   ref={(n: any) => { msgNodeRef.current[m.id] = n; }}
@@ -4194,21 +4184,17 @@ export default function Agent() {
                   // threw them to the top — and when they came back above the new turn the view jumped
                   // again. Dimming keeps #5400's purpose (the old count is plainly the old one) with no
                   // layout change at all, so the reader stays exactly where they were.
-                  style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%', opacity: searchingVisibleRef.current || (latestResult?.id !== m.id && latestResult?.typing && !doneTyping[latestResult.id]) ? 0.35 : 1 }}
+                  style={{ gap: 6, alignItems: 'flex-start', width: '100%', opacity: searchingVisibleRef.current || (latestResult?.id !== m.id && latestResult?.typing && !doneTyping[latestResult.id]) ? 0.35 : 1 }}
                 >
                   {/* 1) BRANDED SLOGAN — the Ezhalah mark + its personality line. The row sizes to its
                       content and is pushed to the correct edge by the parent's alignItems. ENGLISH →
                       mark then text (reads left-to-right, clustered left). ARABIC → text then mark
-                      (icon on the far right, clustered right). */}
+                      (text keeps its reading direction; the sparkle stays on the assistant side). */}
                   {m.slogan ? (
                     <View style={[s.reply, { flexDirection: 'row', alignItems: 'center' }]}>
-                      {!msgRTL(m.slogan) && (
-                        <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />
-                      )}
+                      <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />
                       <Text style={[s.sloganText, { writingDirection: msgRTL(m.slogan) ? 'rtl' : 'ltr', textAlign: msgRTL(m.slogan) ? 'right' : 'left' }]}>{m.slogan}</Text>
-                      {msgRTL(m.slogan) && (
-                        <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />
-                      )}
+
                     </View>
                   ) : null}
                   {/* 2) SEARCH SUMMARY — what Ezhalah understood, directly under the slogan. */}
@@ -4481,7 +4467,7 @@ export default function Agent() {
                                   absolute overlay, so without this gate the two buttons stayed rendered
                                   (and reachable) underneath it. */}
                               {showActionsRow ? (
-                                <View testID="results-actions" style={[s.mBtnRow, { flexDirection: rtl ? 'row-reverse' : 'row', marginTop: 4 }]}>
+                                <View testID="results-actions" style={[s.mBtnRow, { flexDirection: locale === 'ar' ? 'row-reverse' : 'row', marginTop: 4 }]}>
                                   {hasMore ? (
                                     // Secondary now (owner 2026-09-20: gold primary is the narrow
                                     // button below). Dots go colors.primary — the fill is white now.
@@ -4692,7 +4678,7 @@ export default function Agent() {
                 onFocus={() => { setComposerFocused(true); setIntroInteracted(true); }}
                 onBlur={() => setComposerFocused(false)}
                 // The language does NOT flip while typing a chat message — it switches only when the
-                // message is SENT (see send(): an English message → English UI, Arabic → Arabic).
+                // message is SENT: replies follow its language while the interface stays unchanged.
                 // Live per-character switching is reserved for the Home filter's location field.
                 // (user request.)
                 multiline

@@ -67,6 +67,8 @@ STOP → restore → fix → continue. Checklist: `ezhalah-app/docs/DEPLOY_REGRE
 
 ## 3. Frontend — navigation & screens
 
+**Chat language (owner, 2026-10-07):** reply in the latest user message’s language without changing the interface language, sidebar, controls, or page layout. Assistant messages stay on the assistant side; text keeps its own reading direction. Save original messages/replies verbatim. Automatic saved titles follow the latest user message and its language, including when search results arrive; manually renamed titles remain unchanged.
+
 The header and sidebar Ezhalah name uses dark green. Assistant replies and result slogans keep the same green sparkle stars as the thinking state (owner, 2026-10-07).
 
 The AI Agent’s empty composer hint aligns left in English and right in Arabic (owner, 2026-10-07). Typed messages keep their own language direction.
@@ -183,7 +185,7 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). ~33 partner pl
   `results` (slogan + summary + intro + sort line + cards), `status` (thinking/searching, morphed in
   place).
 - **Typed message** → `send()`: guest-gate check (see §7.2) → refine intercept → `recordChatTurn` →
-  locale follows message language (per message, not per keystroke) → build last-10-turn history (results
+  reply locale follows message language without changing the interface locale → build last-10-turn history (results
   restated as numbered facts so "the 2nd one"/"cheapest" resolve without inventing) → `respond(v,…)` →
   branch on `AgentTurn.kind` (`interview` | `listings` | `message`).
 - **Filter/interview** → a `SearchQuery` is passed directly and typed out as a natural-language bubble.

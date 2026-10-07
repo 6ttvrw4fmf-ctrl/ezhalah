@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useI18n, LOCALE_KEY, getLocale, setLocalePersistence, type Locale } from '@/i18n';
+import { useI18n, LOCALE_KEY, getLocale, detectLocale, setLocalePersistence, type Locale } from '@/i18n';
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
 import { HOME_DEFAULT_QUERY, migrateGroups } from '@/lib/searchDefaults';
 import { isSameSavedSearch } from '@/lib/savedSearchIdentity';
@@ -752,7 +752,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // name: canAutoRetitle() is the single place that rule lives, so re-running a renamed search
       // refreshes its results and timestamp WITHOUT reverting the title the user chose.
       const keepTitle = prior && !canAutoRetitle(prior);
-      const title = keepTitle ? prior!.title : autoTitleForQuery(q, getLocale());
+      const title = keepTitle ? prior!.title : chatId && prior?.title ? prior.title
+        : autoTitleForQuery(q, getLocale());
       const titleSource: TitleSource = keepTitle ? 'manual' : 'auto';
       const next: HistoryItem = {
         id, label, query: q, ts: Date.now(), starred,
@@ -1237,7 +1238,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // message (owner 2026-08-21: «ابي شقة بالرياض قريبة من المترو وتكون تحت 5000 بالشهر» →
           // «شقة بالرياض قرب المترو»). `label` keeps the raw text so nothing that reads the legacy
           // field loses information; only the displayed title is summarized.
-          const auto = autoTitleForPrompt(v, getLocale());
+          const auto = autoTitleForPrompt(v, detectLocale(v) ?? getLocale());
           if (idx >= 0) {
             const prev = h[idx];
             const keep = !canAutoRetitle(prev);
