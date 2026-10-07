@@ -62,7 +62,7 @@ class _Q:
     def like(self, *a): return self
     def lt(self, *a): return self
     def is_(self, *a): return self
-    def order(self, *a): return self
+    def order(self, *a, **k): return self
     def limit(self, n): self._limit = n; return self
     def update(self, upd): self._log["updated"] += 1; return self
     @property
