@@ -183,17 +183,13 @@ for (const [k, ar] of [
 
 
 // ── THE LIFTED ROW'S TITLE MUST STAY VISIBLE ────────────────────────────────────────────────────
-// The row under the pointer is ALWAYS hovered while dragging, and hover paints the label white
-// (histLabelHot). The first ship force-painted the lifted card white too — white-on-white, so the
-// title vanished for the whole drag (seen in a production screenshot). The pair must be owned by
-// ONE place: the dragging row uses the SAME dark-card/white-label pair as hover.
+// Owner 2026-10-01: drag and hover share the neutral surface and readable ink label.
+// Keep the pair together so a lifted row can never lose its title against its fill.
 check('the drag styling never force-paints the card a raw color (no node.style.background)',
   !/style\.background = '/.test(sidebar));
-check('the dragged row gets the dark card via React state (histRowDragging on the row)',
-  // 2026-09-03: the dragged row wears the sidebar's ONE interaction fill (colors.hoverRow — the dark
-  // green in light, the muted deep green in dark), exactly like hover; never the bright dark-theme green.
-  /drag\?\.id === c\.id && s\.histRowDragging/.test(sidebar) && /histRowDragging: \{ backgroundColor: colors\.hoverRow \}/.test(sidebar));
-check('…and the label goes white for the SAME condition (hover OR dragging — never one without the other)',
+check('the dragged row gets the neutral card via React state (histRowDragging on the row)',
+  /drag\?\.id === c\.id && s\.histRowDragging/.test(sidebar) && /histRowDragging: \{ backgroundColor: colors\.segTrack \}/.test(sidebar));
+check('…and the readable label style follows the SAME condition (hover OR dragging)',
   /\(hot \|\| drag\?\.id === c\.id\) && s\.histLabelHot/.test(sidebar));
 
 console.log(failures === 0
