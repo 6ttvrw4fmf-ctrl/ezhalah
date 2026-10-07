@@ -922,7 +922,9 @@ def test_a_town_in_another_region_is_not_the_town_the_source_meant(monkeypatch) 
     monkeypatch.setattr(AL, "_CITY", {AL.norm_ar("اليمامة"): [(1062, 1)],
                                       AL.norm_ar("الاحساء"): [(3677, 5)]})
     monkeypatch.setattr(R, "to_catalog", AL.to_catalog)
-    assert AL.to_catalog("اليمامة", region_hint=5) == (1062, 1), "the trap this guards is real"
+    # Since 2026-10-07 to_catalog itself refuses a lone namesake outside the hinted region (the trap
+    # this test was written around is closed centrally); alshawaf's own guard below must still hold.
+    assert AL.to_catalog("اليمامة", region_hint=5)[0] is None, "a lone namesake in another region is unknown"
     _city_ar, city_id, region_id, _d, basis = R._district_and_city("الخرس والشهاب ، اليمامة")
     assert basis != "source_states_town" and city_id != 1062 and region_id == 5
 
