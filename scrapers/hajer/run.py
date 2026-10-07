@@ -314,6 +314,14 @@ def _image(p: dict, html_text: str) -> list[str]:
     return out
 
 
+def _body_lines(p: dict) -> str:
+    """The ad body as plain text, one line per block/bullet — so a negation never crosses a line."""
+    raw = ((p.get("content") or {}).get("rendered") or "")
+    raw = re.sub(r"(?i)<br\s*/?>|</(?:p|li|div|h\d)>", "\n", raw)
+    txt = ihtml.unescape(re.sub(r"<[^>]+>", " ", raw))
+    return "\n".join(x.strip() for x in re.split(r"[\n•▪️]+", txt) if x.strip())
+
+
 def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
     """Return (row, category, gone). gone=True → sold/rented, mark inactive."""
     f = rem_fields(html_text)
@@ -387,6 +395,11 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         # invisible to the Advanced Filter's direction question (🔬 AF engineer, 2026-10-06). Stored as
         # published; canon_direction_ar() folds it for search, and a two-way «جنوب*غرب» stays unknown there.
         "direction": (f.get("واجهة العقار") or "").strip() or None,
+        # Amenities from the ad's own body (WordPress `content`): «مطبخ مغلق», «غرفة خادمة», «غرفة غسيل».
+        # hajer's REM block has NO amenity field (its 20 labels are rooms/area/facade/street/age/…), so
+        # the law allows prose here, four outcomes, line by line (🔬 AF engineer 2026-10-07: 0/4 hajer
+        # findability, source-reread 37608383084). The body itself is not stored (PDPL: free text).
+        **normalize.amenities_from_lines(_body_lines(p)),
         # A per-metre rate is never a total and never an annual rent — see `rate_only` above.
         "price_total": None if (is_rent or rate_only) else price,
         "price_annual": price_annual,
