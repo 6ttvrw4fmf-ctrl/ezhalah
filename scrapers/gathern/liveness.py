@@ -1029,7 +1029,9 @@ def main() -> int:
     canary_ok: Optional[bool] = None
     if args.canaries:
         p_ok, p_alive, p_probed, p_hist = _run_canary(s, client, args.canaries)
-        canary_ok = bool(c_ok and p_ok) and controls_all_alive(c_alive, c_probed, p_alive, p_probed)
+        canary_ok = bool(c_ok and p_ok)
+        if not controls_all_alive(c_alive, c_probed, p_alive, p_probed):
+            canary_ok = False   # gathern: one control 404 voids this run's 404s (2026-10-07)
         if not p_ok:
             print(f"✗ CLOSING CANARY FAILED {p_alive}/{p_probed} statuses[{p_hist}] — "
                   f"{canary_diagnosis_from_hist(p_hist)}. The environment degraded DURING this run, "
