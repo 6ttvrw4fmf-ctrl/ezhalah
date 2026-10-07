@@ -397,6 +397,12 @@ def _pick_candidate(
     if not cands:
         return None
     if len(cands) == 1:
+        # A lone catalog namesake in ANOTHER region than the one the source published is a different
+        # place, not this one (muktamel, 2026-10-07: «بحرة» in «منطقة مكة المكرمة» resolved to the
+        # only exact «بحرة» in the catalog, which is in Jazan, and ~21 listings were served under
+        # منطقة جازان). With a region hint, the city must be inside it; otherwise unknown.
+        if hint is not None and cands[0][1] is not None and cands[0][1] != hint:
+            return None
         return cands[0]
     regions = {rid for _, rid in cands}
     if hint is not None:
