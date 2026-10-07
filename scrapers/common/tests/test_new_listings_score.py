@@ -86,6 +86,11 @@ def test_one_written_as_a_word():
     assert compare_listing({"bathrooms": 2}, page("دورة مياه واحدة"))["bathrooms"] == MISMATCH
 
 
+def test_a_prepared_lift_shaft_is_not_a_lift():
+    assert compare_listing({"elevator": None}, page("نوافذ زجاج ، تأسيس مصعد"))["elevator"] == PAGE_SILENT
+    assert compare_listing({"elevator": None}, page("يوجد مصعد"))["elevator"] == WE_MISS
+
+
 def test_gathern_price_is_never_compared():
     r = compare_listing({"price_total": 999}, page("السعر 5 ريال"), skip_price=True)
     assert "price" not in r

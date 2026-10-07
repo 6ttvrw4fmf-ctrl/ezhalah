@@ -21,6 +21,7 @@ def check(name, ok): out.append((name, bool(ok)))
 L = lambda *x: [ns["norm"](s) for s in x]
 check("negated amenity is not a yes", not ns["page_says_yes"](L("لا يوجد مصعد"), "elevator"))
 check("named amenity is a yes", ns["page_says_yes"](L("مصعد"), "elevator"))
+check("a prepared lift shaft is not a lift", not ns["page_says_yes"](L("تأسيس مصعد"), "elevator"))
 check("found", ns["findable"]([{"source_table": "t", "listing_id": 5}], "t", 5) is True)
 check("absent is a miss", ns["findable"]([{"source_table": "t", "listing_id": 6}], "t", 5) is False)
 check("failed request is undecided", ns["findable"](None, "t", 5) is None)
@@ -126,6 +127,7 @@ mustCatch('an empty label read as a yes', 'and not BARE_LABEL.match(x)]', ']');
 mustCatch('the site template read as the ad (no template filter)', 'ad_lines = [x for x in page_lines(page) if x not in chrome]', 'ad_lines = page_lines(page)');
 mustCatch('the template computed from too few pages', 'if len(readable) < TEMPLATE_MIN_PAGES:', 'if len(readable) < 1:');
 mustCatch('one page enough to call a line template', 'return set.intersection(*readable)', 'return set.union(*readable)');
+mustCatch('a lift shaft read as a lift', 'hit = [x for x in (unprepared(y, kw) for y in lines) if re.search(kw, x)]', 'hit = [x for x in lines if re.search(kw, x)]');
 mustCatch('parity compares the wrong count', 'return int(promised) == int(after)', 'return True');
 mustCatch('a failed parity read counted as a pass', 'except Exception:  # noqa: BLE001\n        return None\n    promised', 'except Exception:  # noqa: BLE001\n        return True\n    promised');
 mustCatch('prose read for a field the site publishes structurally', 'af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page)', 'af_only = {k: v for k, v in results.items() if k in AF_FIELDS}');

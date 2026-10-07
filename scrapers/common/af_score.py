@@ -37,7 +37,7 @@ from scrapers.common.cleanup import _probe
 from scrapers.common.db import sb
 from scrapers.common.new_listings_score import (
     AF_FIELDS, FIELDS, MATCH, MISMATCH, NEG, PAGE_SILENT, STORED, UNREADABLE, WE_MISS, af_precision, af_recall,
-    compare_listing,
+    compare_listing, unprepared,
     empty_row, fold, norm,
 )
 from scrapers.common.source_reread import page_evidence
@@ -152,7 +152,7 @@ def template_lines(pages: list[list[str]]) -> set[str]:
 def page_says_yes(lines: list[str], field: str) -> bool:
     """The ad itself names the amenity and does not negate it («مصعد» yes, «لا يوجد مصعد» no)."""
     kw = BOOL_KW[field]
-    hit = [x for x in lines if re.search(kw, x)]
+    hit = [x for x in (unprepared(y, kw) for y in lines) if re.search(kw, x)]
     return bool(hit) and not all(re.search(NEG + "(?:" + kw + ")", x) for x in hit)
 
 

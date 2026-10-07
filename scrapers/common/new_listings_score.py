@@ -249,8 +249,17 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     return MISMATCH if page_states else PAGE_SILENT
 
 
+# «تأسيس مصعد» is a lift SHAFT, prepared for a lift that is not there: it states nothing about having one
+# (sakan 12612200, 2026-10-07: scored a «we miss» on a correctly-NULL elevator).
+PREPARED = r"تاسيس\s*"
+
+
+def unprepared(x: str, kw: str) -> str:
+    return re.sub(PREPARED + "(?:" + kw + ")", " ", x)
+
+
 def _cmp_bool(stored, lines: list[str], kw: str) -> str:
-    hit = [x for x in lines if re.search(kw, x)]
+    hit = [x for x in (unprepared(y, kw) for y in lines) if re.search(kw, x)]
     if not hit:
         return PAGE_SILENT
     page_yes = not all(re.search(NEG + "(?:" + kw + ")", x) for x in hit)
