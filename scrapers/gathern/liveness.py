@@ -412,6 +412,19 @@ def _run_canary(s, client, n: int) -> tuple[bool, int, int, str]:
     return ok, alive, probed, hist
 
 
+def controls_all_alive(c_alive: int, c_probed: int, p_alive: int, p_probed: int) -> bool:
+    """Gathern only: did EVERY known-live control answer 200 at both ends of the run?
+
+    WHY (2026-10-07). Gathern answers a block with its own 404, and it does so intermittently: the
+    11:49 UTC run of 2026-10-06 passed the 60% gate with controls 9/10 and 6/10, so up to 4 in 10
+    known-live units read 404 inside the same window as the worklist, and that run applied 11 page
+    strikes. Unit 276709 read 200, 404, 200 within an hour; 8 of 25 units hidden in that window read
+    200 the same day, and the sweep was quarantined. A 404 on gathern is only evidence when not one
+    live control read 404 in the same run (rulebook: «A 404 only counts as "gone" if known-live
+    control listings answered 200 in the same run»). Restorative 200s are not gated by this."""
+    return c_probed > 0 and p_probed > 0 and c_alive == c_probed and p_alive == p_probed
+
+
 def trust_quarantine_reason(canary_ok: bool, canary_alive: int, canary_probed: int) -> str:
     """Why this run's AGGREGATE alive-rate fell short — and it is not always the source.
 
@@ -1016,7 +1029,7 @@ def main() -> int:
     canary_ok: Optional[bool] = None
     if args.canaries:
         p_ok, p_alive, p_probed, p_hist = _run_canary(s, client, args.canaries)
-        canary_ok = bool(c_ok and p_ok)
+        canary_ok = bool(c_ok and p_ok) and controls_all_alive(c_alive, c_probed, p_alive, p_probed)
         if not p_ok:
             print(f"✗ CLOSING CANARY FAILED {p_alive}/{p_probed} statuses[{p_hist}] — "
                   f"{canary_diagnosis_from_hist(p_hist)}. The environment degraded DURING this run, "

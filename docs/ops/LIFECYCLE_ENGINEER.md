@@ -960,6 +960,13 @@ or rewrite another engineer's work, and never start a big change in another engi
   `gathern-recheck-dead.yml` runs it daily from pg_cron (`gh-gathern-recheck-dead`), and gathern's
   probe reads a 200 that landed on the home page as no verdict, since that pass restores on a 200.
 
+- Every path that can hide must count the ad's OWN page readings, not the shared counter (gathern,
+  2026-10-07). The sweep learned it on 10-03 (`demote_unearned_kills`); the crawl's cross-shard
+  prune did not, and hid 9 units on ONE page 404 after a 200 while the sweep was quarantined for
+  flapping. `run.earned_verify_gone` now needs two earlier applied 404s since the last live reading,
+  and the sweep strikes only in a run where EVERY control at both ends read 200
+  (`liveness.controls_all_alive`; the 60% gate let 6/10 through).
+
 - An unattended run cannot apply a statement the database connector holds for a human (measured
   2026-10-05: `delete from public.ops_liveness_registry where false;` timed out at 60 s while
   SELECT/INSERT returned at once; UPDATE is held too, which is why backlog items close through

@@ -525,6 +525,54 @@ _probe = http_liveness.LivenessProbe(
     canary=_canary,
 )
 
+# ── A PRUNE KILL MUST BE EARNED BY THE AD'S OWN PAGE (2026-10-07) ─────────────────────────────────
+# prune_unseen() calls verify_gone when the SHARED missing_count reaches grace, and that counter is
+# bumped by feed absence as well as by page 404s. So one 404 read by verify_gone hid units whose only
+# other "strikes" were feed misses: 2026-10-07 04:50 UTC the cross-shard prune hid 21 units, six of
+# them (15482651, 10265545, 735574, 11062475, 11709792, 7058697) on ONE page 404 after a 200 hours
+# earlier, while gathern was flapping live units 200<->404 (the hourly sweep was quarantined for it).
+# LISTING_LIVENESS.md §2: three consecutive DIRECT readings hide; absence is a candidate, never a vote.
+# The sweep already enforces this (liveness.demote_unearned_kills); this is the same rule for the
+# prune: verify_gone's own 404 counts as one reading, and the ad needs PRUNE_GRACE - 1 more applied
+# 404/410 readings in gathern_liveness_detail since its last live one. History unreadable = withheld.
+PRUNE_GRACE = 3
+
+
+def prune_kill_is_earned(prior_readings: Optional[int], grace: int = PRUNE_GRACE) -> bool:
+    """True when this verify_gone 404 plus the ad's earlier applied direct readings reach grace."""
+    return prior_readings is not None and prior_readings + 1 >= grace
+
+
+def _prior_direct_readings(ad_number: str) -> Optional[int]:
+    """Applied direct 404/410 readings since the ad's last alive one; None if unreadable."""
+    from scrapers.gathern import liveness as _L  # lazy: liveness imports this module
+    try:
+        r = (db.sb().table("gathern_residential_listings").select("id")
+             .eq("ad_number", ad_number).limit(1).execute())
+        if not r.data:
+            return None
+        lid = r.data[0]["id"]
+        h = (db.sb().table("gathern_liveness_detail")
+             .select("listing_id, run_at, verdict, http_status, applied")
+             .eq("listing_id", lid).order("run_at", desc=True).limit(200).execute())
+        return _L.direct_strikes_since_alive(h.data or []).get(lid, 0)
+    except Exception:  # noqa: BLE001 — unreadable history withholds the kill, never grants it
+        return None
+
+
+def earned_verify_gone(ad_number: str):
+    """`_probe.verify_gone`, but a "gone" stands only when the ad's own page earned it."""
+    got = _probe.verify_gone(ad_number)
+    verdict = (got[0] if isinstance(got, (tuple, list)) else got) or "unknown"
+    if str(verdict).lower() != "gone":
+        return got
+    prior = _prior_direct_readings(ad_number)
+    if prune_kill_is_earned(prior):
+        return got
+    return ("unknown", f"removal withheld — {prior if prior is not None else 'unreadable'} earlier "
+                       f"own-page 404 reading(s) since last live; a prune kill needs "
+                       f"{PRUNE_GRACE - 1} plus this one")
+
 
 def held_strikes(rows: list[dict]) -> dict[str, tuple[int, bool]]:
     """Feed rows whose OWN PAGE is under strike and still does not answer live: {ad: (strikes, active)}.
@@ -1139,7 +1187,7 @@ def main() -> int:
         # has no other source of a known-live control.
         arm_liveness_canaries(sorted(seen))
         pruned = db.prune_unseen("gathern_residential_listings", seen, source=SOURCE,
-                                 verify_gone=_probe.verify_gone)
+                                 verify_gone=earned_verify_gone)
         if pruned < 0:
             print("⚠ gathern prune guard tripped (collapse/coverage) — kept existing active")
             pruned = 0
@@ -1262,7 +1310,7 @@ def main() -> int:
             arm_liveness_canaries([r["ad_number"] for r in rows])
             pruned = db.prune_unseen("gathern_residential_listings",
                                      {r["ad_number"] for r in rows}, source=SOURCE,
-                                     verify_gone=_probe.verify_gone)
+                                     verify_gone=earned_verify_gone)
             if pruned < 0:
                 print("⚠ gathern prune guard tripped (0 scraped or collapse) — kept existing active")
                 pruned = 0
