@@ -2150,7 +2150,7 @@ export default function Agent() {
   useEffect(() => {
     const id = chatIdRef.current;
     if (!id) return;
-    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed });
+    const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow });
     if (!t) return;
     const j = JSON.stringify(t);
     if (j === lastCapturedRef.current) return;
@@ -2172,7 +2172,7 @@ export default function Agent() {
     // `completed` was missing from these deps: a chat that ENDED (Advanced Filter narrowed it to the
     // final set) could keep a transcript that never recorded the ending, so it reopened with a live
     // composer on a finished search.
-  }, [busy, msgs, revealCount, afReceipt, guidedPills, completed]);
+  }, [busy, msgs, revealCount, afReceipt, guidedPills, completed, afCanNarrow]);
   // A refresh/close inside the debounce window must not lose the last settled state either.
   // saveTranscript writes localStorage synchronously up front (store.tsx), so this flush lands on
   // disk even during unload. pagehide, not beforeunload: it also covers bfcache navigations.
@@ -3475,6 +3475,9 @@ export default function Agent() {
       setDoneTyping(restored.doneTyping);
       setRevealCount(restored.revealCount);
       setAfReceipt(restored.afReceipt);
+      // The «تحديد أكثر» verdict this chat already earned shows its button at once (owner 2026-10-07);
+      // the offer probe still re-runs for the restored turn and overwrites it with today's answer.
+      if (restored.afCanNarrow) setAfCanNarrow((c) => ({ ...c, ...restored.afCanNarrow }));
       setCompleted(restored.completed === true);
       // Dedup on restore too (owner audit, 2026-08-27): a chat saved before this fix shipped could
       // have a stray duplicate pill baked into its serialized transcript — restoring it verbatim

@@ -127,7 +127,7 @@ console.log("\n── mutation proof — the barrier must actually catch a regre
 console.log("\n── Back / reopen / New Chat ──");
 check("restore reinstates completed from the transcript", /setCompleted\(restored\.completed === true\);/.test(agent));
 check("New Chat (fresh) clears it", /setCompleted\(false\);/.test(agent));
-check("the capture persists it", /serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed \}\)/.test(agent));
+check("the capture persists it", /serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow \}\)/.test(agent));
 
 console.log("\n── i18n contract ──");
 check("the closed-composer placeholder has an Arabic entry",

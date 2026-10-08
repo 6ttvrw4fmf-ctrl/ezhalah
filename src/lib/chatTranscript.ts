@@ -36,6 +36,11 @@ export type PersistedChat = {
   // active composer. Optional and only ever `true`, so older transcripts and the persistence barrier's
   // literal round-trip are byte-identical when unset.
   completed?: true;
+  // Results turns the «تحديد أكثر» offer probe already said YES for (owner 2026-10-07: «I change the
+  // chat, go back later, and the Advanced Filter button takes a few seconds to show»). Restored so the
+  // button shows at once; the probe still re-runs in the background and corrects it. Optional and only
+  // ever `true` values, so older transcripts round-trip byte-identically.
+  afCanNarrow?: Record<string, true>;
 };
 
 // Bounds. Listings dominate transcript size (a card is ~1-2KB of JSON); everything else is text.
@@ -54,6 +59,7 @@ type LiveChatState = {
   afReceipt: Record<string, string>;
   guidedPills: { msgId: string; baseQ: unknown; facets: unknown[]; asked: string[]; total: number | null } | null;
   completed?: boolean;
+  afCanNarrow?: Record<string, boolean>;
 };
 
 // Serialize the live screen state into a persistable transcript. Returns null when there is no
@@ -92,6 +98,8 @@ export function serializeChat(live: LiveChatState): PersistedChat | null {
   for (const [id, n] of Object.entries(live.revealCount)) if (kept.has(id) && n > 0) revealCount[id] = Math.min(n, TRANSCRIPT_LISTING_CAP);
   const afReceipt: Record<string, string> = {};
   for (const [id, s] of Object.entries(live.afReceipt)) if (kept.has(id) && s) afReceipt[id] = s;
+  const afCanNarrow: Record<string, true> = {};
+  for (const [id, yes] of Object.entries(live.afCanNarrow ?? {})) if (kept.has(id) && yes === true) afCanNarrow[id] = true;
   const gp = live.guidedPills;
   return {
     v: 1,
@@ -127,6 +135,7 @@ export function serializeChat(live: LiveChatState): PersistedChat | null {
     msgs,
     revealCount,
     afReceipt,
+    ...(Object.keys(afCanNarrow).length ? { afCanNarrow } : {}),
     guidedPills: gp && kept.has(gp.msgId)
       ? { msgId: gp.msgId, baseQ: gp.baseQ, facets: gp.facets, asked: gp.asked, total: gp.total }
       : null,
@@ -156,6 +165,9 @@ export function restoreChat(raw: unknown): (PersistedChat & { doneTyping: Record
       ? p.guidedPills
       : null,
     ...(p.completed === true ? { completed: true as const } : {}),
+    ...(p.afCanNarrow && typeof p.afCanNarrow === 'object'
+      ? { afCanNarrow: Object.fromEntries(Object.entries(p.afCanNarrow).filter(([, v]) => v === true)) as Record<string, true> }
+      : {}),
     doneTyping,
   };
 }
