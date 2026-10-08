@@ -45,10 +45,16 @@ if (!newest) {
 }
 const sql = readFileSync(join(DIR, newest), 'utf8');
 const found = problems(sql);
-const mutant = problems(sql.replace(GUARD, '(select count(*) from search_listings_ar'));
-if (found.length || !mutant.length) {
+// Mutation proof: the same predicate on this definition with the guard removed must FAIL.
+const mustCatch = (what: string, brokenSql: string): boolean => {
+  const caught = problems(brokenSql).length > 0;
+  if (!caught) console.error(`✗ mutation proof: ${what} still passed — the check is vacuous`);
+  return caught;
+};
+const proven = mustCatch('removing the re-saw-half guard',
+  sql.replace(GUARD, '(select count(*) from search_listings_ar'));
+if (found.length || !proven) {
   for (const p of found) console.error(`✗ ${newest}: ${p}`);
-  if (!mutant.length) console.error('✗ mutation proof: removing the guard still passed — the check is vacuous');
   process.exit(1);
 }
 console.log(`✓ ${newest}: a dormant site returns only when its crawl re-saw half its held rows (mutation caught)`);
