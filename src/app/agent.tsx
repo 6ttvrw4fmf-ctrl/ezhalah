@@ -4090,9 +4090,6 @@ export default function Agent() {
               </View>
               {!pickerPlatforms.length ? <Text style={s.platformPickerEmpty}>{t('No matching websites')}</Text> : null}
             </ScrollView>
-            <Pressable testID="platform-picker-done" accessibilityRole="button" accessibilityLabel={t('Done')} onPress={closePlatformPicker} style={{ padding: 12, borderRadius: 16, backgroundColor: colors.primary, alignItems: 'center', marginTop: 10 }}>
-              <Text style={{ color: '#fff', fontWeight: '700' }}>{t('Done')}{selectedSources.length ? ` (${selectedSources.length})` : ''}</Text>
-            </Pressable>
           </Animated.View>
         </Animated.View>
       )}
