@@ -981,6 +981,16 @@ or rewrite another engineer's work, and never start a big change in another engi
   session with a human present. Do not spend three timeouts rediscovering it: prepare the code, the
   mirror and the evidence, and leave the exact change in a `lifecycle:followup` row.
 
+- An oracle only the crawl can build is no daily check (2026-10-08): goldendeal, maqam, yameen,
+  mustqr and shatri each had a working own-record oracle, but it needed the crawl run's state, so
+  1,628 ads were never checked in time. Bind every new oracle as a one-argument
+  `_make_verify_gone(control)` the day it is written. And a crawl that already reads an ad's own
+  status (abeea) records it with `db.mark_direct_alive`, or the reading is thrown away.
+- A measured dead shape the oracle cannot see keeps dead ads shown (muktamel, 2026-10-08): its
+  docstring has recorded «200, isAvailable false, price null» since 09-03, but the probe read only
+  status and /404, so 603 withdrawn ads at 3+ strikes stayed up and every grace re-read said «no
+  opinion». When a site's evidence rows are all `UNKNOWN … had no opinion`, read what the page says.
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
