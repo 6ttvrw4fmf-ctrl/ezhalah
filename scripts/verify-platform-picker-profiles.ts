@@ -14,7 +14,7 @@ function load(text: string, symbol: string, helperText = helper) {
   new Function('require', 'exports', js)((path: string) => {
     if (path.endsWith('platformPickerCoverage.json')) return coverage;
     if (path.endsWith('platformPickerLogoLayout.json')) return JSON.parse(read('../src/data/platformPickerLogoLayout.json'));
-    if (path.endsWith('platformCoverageSentence')) return { platformCoverageSentence: load(helperText, 'platformCoverageSentence') };
+    if (path.endsWith('platformCoverageSentence')) return { platformCoverageSentence: load(helperText, 'platformCoverageSentence'), platformCoverageGroup: load(helperText, 'platformCoverageGroup') };
     return path;
   }, exports);
   return exports[symbol];
@@ -64,16 +64,25 @@ function verifyRendering(text: string) {
   assert.ok(map, 'picker render map exists');
   const js = ts.transpileModule(`const cards = ${map};`, { compilerOptions: { jsx: ts.JsxEmit.React, jsxFactory: 'h' } }).outputText;
   const profiles = load(source, 'PLATFORM_PICKER_PROFILES');
+  let itemStyle = '';
+  function styleVisit(n: ts.Node) {
+    if (ts.isPropertyAssignment(n) && n.name.getText(ast) === 'platformPickerItem') itemStyle = n.initializer.getText(ast);
+    ts.forEachChild(n, styleVisit);
+  }
+  styleVisit(ast);
+  const actualItemStyle = new Function('colors', `return (${itemStyle});`)({});
+  assert.equal(actualItemStyle.width, '100%', 'every desktop/phone row uses the full list width');
   const h = (type: string, props: any, ...children: any[]) => ({ type, props, children });
   const render = new Function('pickerPlatforms', 'PLATFORM_PICKER_PROFILES', 'locale', 'selectedSources', 'choosePlatform', 't', 's', 'pickerTwoColumns', 'colors', 'h', 'Pressable', 'View', 'Text', 'Image', 'Ionicons', js + '\nreturn cards;');
   for (const locale of ['ar', 'en']) {
     for (const twoColumns of [true, false]) {
-      const cards = render(roster, profiles, locale, [], () => {}, (key: string) => key, {}, twoColumns, {}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons');
+      const cards = render(roster, profiles, locale, [], () => {}, (key: string) => key, { platformPickerItem: actualItemStyle }, twoColumns, {}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons');
       for (let i = 0; i < cards.length; i++) {
-        const card = cards[i]; const profile = profiles[roster[i].name];
+        const root = cards[i]; const profile = profiles[roster[i].name];
         const nodes: any[] = [];
         function flatten(n: any) { if (n && typeof n === 'object') { nodes.push(n); n.children?.forEach(flatten); } }
-        flatten(card);
+        flatten(root);
+        const card = nodes.find(n => n.type === 'Pressable');
         assert.equal(nodes.find(n => n.type === 'Image').props.source, profile.logo);
         assert.ok(nodes.some(n => n.type === 'Text' && n.children.includes(profile[locale])), 'description visible');
         assert.ok(card.props.accessibilityLabel.includes(profile[locale]), 'description accessible');
@@ -165,3 +174,16 @@ const summaryNames = new Function('q', 't', 'sourceName', `return ${namesExpress
 const translateName = (key: string) => key === 'AQAR' ? 'عقار' : key === 'Wasalt' ? 'وصلت' : key;
 assert.equal(summaryNames({sources:selectedSlugs}, translateName, sourceLabel), 'عقار، وصلت');
 console.log('PASS: selected website summary reuses card naming and deduplicates Aqar monthly without leaking raw slugs.');
+
+const group = load(helper, 'platformCoverageGroup');
+assert.equal(group(coverage.platforms.Aqar, 'ar').key, 'nationwide');
+assert.equal(group(coverage.platforms.Aldarim, 'ar').label, 'منطقة الرياض');
+assert.equal(group(undefined, 'ar').key, 'other');
+const ordered = (names as string[]).slice().sort((a,b)=>group(coverage.platforms[a],'ar').order-group(coverage.platforms[b],'ar').order);
+assert.equal(group(coverage.platforms[ordered[0]],'ar').key, 'nationwide');
+assert.deepEqual(ordered.slice().sort(), names);
+for (const name of names as string[]) {
+  const layout = load(source, 'PLATFORM_PICKER_PROFILES')[name].layout;
+  assert.ok(Math.abs(Math.max(layout.visibleWidth, layout.visibleHeight) - 36) <= 0.02, `${name}: same maximum visible logo dimension`);
+}
+console.log('PASS: nationwide-first regional sections preserve every site; full-width rows and equal 36px maximum artwork dimensions.');

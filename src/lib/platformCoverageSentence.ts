@@ -65,3 +65,20 @@ export function platformCoverageSentence(coverage: PickerCoverage | undefined, l
     : location.startsWith('Listings ') ? location.replace('Listings ', `${focus} `)
     : `${focus}; location coverage is currently unavailable.`;
 }
+
+export function platformCoverageGroup(coverage: PickerCoverage | undefined, locale: 'ar' | 'en') {
+  const ar = locale === 'ar';
+  if (coverage?.state === 'known' && coverage.total && coverage.regions.length) {
+    const first = coverage.regions.slice().sort((a, b) => b.count - a.count)[0];
+    if (coverage.regions.length >= 6 && first.count / coverage.total < 0.7) {
+      return { key: 'nationwide', order: 0, label: ar ? 'في مختلف مناطق المملكة' : 'Across Saudi Arabia' };
+    }
+    if (first.count > coverage.total / 2) {
+      return { key: `region-${first.id}`, order: first.id, label: ar ? first.name : `${first.en} Region` };
+    }
+  }
+  if (coverage?.state === 'source-examples' || coverage?.regions.length) {
+    return { key: 'multiple-regions', order: 100, label: ar ? 'عدة مناطق' : 'Several regions' };
+  }
+  return { key: 'other', order: 101, label: ar ? 'مواقع أخرى' : 'Other websites' };
+}

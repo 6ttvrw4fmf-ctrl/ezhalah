@@ -692,7 +692,7 @@ export default function Agent() {
       if (platform.logoOnly) continue;
       if (!unique.has(platform.name)) unique.set(platform.name, platform);
     }
-    return Array.from(unique.values()).filter((platform) => {
+    return Array.from(unique.values()).sort((a, b) => PLATFORM_PICKER_PROFILES[a.name].group.ar.order - PLATFORM_PICKER_PROFILES[b.name].group.ar.order).filter((platform) => {
       if (!needle) return true;
       return `${platform.name} ${t(platform.i18nKey)}`.toLocaleLowerCase().includes(needle);
     });
@@ -1005,7 +1005,6 @@ export default function Agent() {
   // Same pattern as the home screen: on mobile the sidebar isn't docked, so a hamburger opens it.
   // On desktop it's a permanent column → no button. (user: couldn't see the burger on the phone.)
   const docked = useDocked();
-  const pickerTwoColumns = useAtLeast(560);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // IN-APP AD VIEWER, v2 (owner 2026-10-03, revised after review): a listing from an allowlisted
   // site (lib/inAppViewer.ts) opens INSIDE Ezhalah — a tabbed mini-browser beside the results at/
@@ -4029,7 +4028,7 @@ export default function Agent() {
               style={s.platformPickerList}
               contentContainerStyle={s.platformPickerListContent}
               keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
+              showsVerticalScrollIndicator={true}
             >
               <Pressable
                 testID="platform-picker-all"
@@ -4039,7 +4038,7 @@ export default function Agent() {
                 style={({ pressed }: any) => [s.platformPickerAll, !selectedSources.length && s.platformPickerSelected, pressed && s.platformPickerItemPressed]}
               >
                 <View style={s.platformPickerAllMark}>
-                  <Image source={require('../../assets/icons/eagle-search.svg')} style={{ width: 24, height: 24 }} contentFit="contain" tintColor={colors.primary} accessible={false} />
+                  <Image source={require('../../assets/icons/eagle-search.svg')} style={{ width: 36, height: 36 }} contentFit="contain" tintColor={colors.primary} accessible={false} />
                 </View>
                 <View style={s.platformPickerItemCopy}>
                   <Text style={s.platformPickerItemName}>{t('All websites')}</Text>
@@ -4050,19 +4049,22 @@ export default function Agent() {
 
               <View style={s.platformPickerRule} />
               <View style={s.platformPickerGrid}>
-                {pickerPlatforms.map((platform) => {
+                {pickerPlatforms.map((platform, index) => {
                   const selected = selectedSources.includes(platform.name);
                   const profile = PLATFORM_PICKER_PROFILES[platform.name];
                   const description = profile[locale];
+                  const group = profile.group[locale];
+                  const startsGroup = index === 0 || PLATFORM_PICKER_PROFILES[pickerPlatforms[index - 1].name].group[locale].key !== group.key;
                   return (
+                    <View key={platform.name} style={{ width: '100%' }}>
+                      {startsGroup ? <Text accessibilityRole="header" style={[s.platformPickerSectionTitle, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>{group.label}</Text> : null}
                     <Pressable
-                      key={platform.name}
                       testID={`platform-picker-${platform.name}`}
                       accessibilityRole="button"
                       accessibilityLabel={`${t(platform.i18nKey)}. ${description}`}
                       accessibilityState={{ selected }}
                       onPress={() => choosePlatform(platform.name)}
-                      style={({ pressed }: any) => [s.platformPickerItem, !pickerTwoColumns && { width: '100%' }, selected && s.platformPickerSelected, pressed && s.platformPickerItemPressed]}
+                      style={({ pressed }: any) => [s.platformPickerItem, selected && s.platformPickerSelected, pressed && s.platformPickerItemPressed]}
                     >
                       <View style={[s.platformPickerLogoFrame, { backgroundColor: profile.layout.dark ? '#163a2c' : '#f4f7f5' }]}>
                         <Image source={profile.logo} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" accessible={false} />
@@ -4077,6 +4079,7 @@ export default function Agent() {
                       </View>
                       {selected ? <Ionicons name="checkmark-circle" size={16} color={colors.primary} /> : null}
                     </Pressable>
+                    </View>
                   );
                 })}
               </View>
@@ -5249,18 +5252,19 @@ const s = StyleSheet.create({
   platformPickerSearchInput: { flex: 1, minWidth: 0, fontFamily: CHAT_FONT, fontSize: 16, lineHeight: 22, color: colors.ink, paddingVertical: 8, textAlign: 'right', writingDirection: 'rtl', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
   platformPickerList: { minHeight: 0 },
   platformPickerListContent: { paddingBottom: 2 },
-  platformPickerAll: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 54, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 15, paddingHorizontal: 11, backgroundColor: colors.paper },
-  platformPickerAllMark: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.tint },
+  platformPickerAll: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 68, borderWidth: 0, borderColor: colors.fieldLine, borderRadius: 12, paddingHorizontal: 11, backgroundColor: colors.paper },
+  platformPickerAllMark: { width: 44, height: 44, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.tint },
   platformPickerItemCopy: { flex: 1, minWidth: 0 },
   platformPickerItemHint: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 11.5, lineHeight: 17, marginTop: 1, textAlign: 'right' },
-  platformPickerRule: { height: 1, backgroundColor: colors.line, marginVertical: 13 },
-  platformPickerGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 9 },
-  platformPickerItem: { width: '48.5%', minHeight: 88, flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 15, paddingHorizontal: 10, paddingVertical: 10, backgroundColor: colors.surface },
+  platformPickerRule: { height: 1, backgroundColor: colors.line, marginTop: 12, marginBottom: 0 },
+  platformPickerGrid: { width: '100%' },
+  platformPickerSectionTitle: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 18, fontWeight: '600', paddingHorizontal: 10, paddingTop: 17, paddingBottom: 7 },
+  platformPickerItem: { width: '100%', minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 0, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 10, backgroundColor: colors.surface },
   platformPickerSelected: { borderColor: colors.primary, backgroundColor: colors.tint },
   platformPickerItemPressed: { backgroundColor: colors.segTrack },
-  platformPickerLogoFrame: { width: 72, height: 54, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', flexShrink: 0, overflow: 'hidden' },
+  platformPickerLogoFrame: { width: 44, height: 44, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', flexShrink: 0, overflow: 'hidden' },
   platformPickerLogo: { width: 58, height: 44 },
-  platformPickerItemName: { fontFamily: CHAT_FONT, flex: 1, minWidth: 0, color: colors.ink, fontSize: 13, lineHeight: 19, fontWeight: '600', textAlign: 'right' },
+  platformPickerItemName: { fontFamily: CHAT_FONT, flex: 1, minWidth: 0, color: colors.ink, fontSize: 15, lineHeight: 21, fontWeight: '600', textAlign: 'right' },
   platformPickerGridName: { flex: 0, textAlign: 'right' },
   platformPickerEmpty: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: 'center', paddingVertical: 28 },
   // The LTR pin that fixes the physical order lives INLINE on the row (Sidebar's LTR_PIN idiom —

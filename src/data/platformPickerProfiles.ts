@@ -1,8 +1,8 @@
 // Official picker artwork; location copy derives from the measured listing coverage.
 import logoLayout from './platformPickerLogoLayout.json';
 import coverageSnapshot from './platformPickerCoverage.json';
-import { platformCoverageSentence, type PickerCoverage } from '../lib/platformCoverageSentence';
-export type PlatformPickerProfile = { logo: number; ar: string; en: string; layout: { width: number; height: number; left: number; top: number; dark: boolean } };
+import { platformCoverageSentence, platformCoverageGroup, type PickerCoverage } from '../lib/platformCoverageSentence';
+export type PlatformPickerProfile = { logo: number; ar: string; en: string; group: { ar: {key: string; order: number; label: string}; en: {key: string; order: number; label: string} }; layout: { width: number; height: number; left: number; top: number; dark: boolean } };
 const LOGOS: Record<string, number> = {
   "Aqar": require("../../assets/images/platform-logos/sa-aqar-fm.png"),
   "Wasalt": require("../../assets/images/platform-logos/wasalt-sa.png"),
@@ -157,7 +157,7 @@ const LOGOS: Record<string, number> = {
 const coverage = coverageSnapshot.platforms as Record<string, PickerCoverage>;
 export const PLATFORM_PICKER_PROFILES: Record<string, PlatformPickerProfile> = Object.fromEntries(
   Object.entries(LOGOS).map(([name, logo]) => [name, {
-    logo, layout: logoLayout[name as keyof typeof logoLayout], ar: platformCoverageSentence(coverage[name], 'ar'), en: platformCoverageSentence(coverage[name], 'en'),
+    logo, group: { ar: platformCoverageGroup(coverage[name], 'ar'), en: platformCoverageGroup(coverage[name], 'en') }, layout: logoLayout[name as keyof typeof logoLayout], ar: platformCoverageSentence(coverage[name], 'ar'), en: platformCoverageSentence(coverage[name], 'en'),
   }]),
 );
 
