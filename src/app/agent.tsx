@@ -4089,12 +4089,12 @@ export default function Agent() {
                     </View>
                   );
                 }
-                // Per-message direction: text keeps its own reading direction; the assistant stays on the left.
+                // Each reply follows its own language: Arabic on the right with the sparkle on the right; English on the left.
                 const txt = m.text;
                 const rtl = msgRTL(txt);
                 return (
-                  <View key={m.id} style={{ gap: 10, alignSelf: 'flex-start', maxWidth: IS_WEB ? '76%' : '88%' }}>
-                    <View style={[s.reply, { alignSelf: 'flex-start', flexDirection: 'row' }]}>
+                  <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: IS_WEB ? '76%' : '88%' }}>
+                    <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row' }]}>
                       <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />
                       <Text style={[s.replyText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left', flex: 1 }]}>
                         {m.typing ? <Typer text={txt} onDone={() => markTyped(m.id)} /> : txt}
@@ -4184,14 +4184,14 @@ export default function Agent() {
                   // threw them to the top — and when they came back above the new turn the view jumped
                   // again. Dimming keeps #5400's purpose (the old count is plainly the old one) with no
                   // layout change at all, so the reader stays exactly where they were.
-                  style={{ gap: 6, alignItems: 'flex-start', width: '100%', opacity: searchingVisibleRef.current || (latestResult?.id !== m.id && latestResult?.typing && !doneTyping[latestResult.id]) ? 0.35 : 1 }}
+                  style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%', opacity: searchingVisibleRef.current || (latestResult?.id !== m.id && latestResult?.typing && !doneTyping[latestResult.id]) ? 0.35 : 1 }}
                 >
                   {/* 1) BRANDED SLOGAN — the Ezhalah mark + its personality line. The row sizes to its
                       content and is pushed to the correct edge by the parent's alignItems. ENGLISH →
                       mark then text (reads left-to-right, clustered left). ARABIC → text then mark
-                      (text keeps its reading direction; the sparkle stays on the assistant side). */}
+                      (sparkle on the far right). */}
                   {m.slogan ? (
-                    <View style={[s.reply, { flexDirection: 'row', alignItems: 'center' }]}>
+                    <View style={[s.reply, { flexDirection: msgRTL(m.slogan) ? 'row-reverse' : 'row', alignItems: 'center' }]}>
                       <Ionicons name="sparkles" size={15} color={colors.primary} style={s.replyBrandMark} accessible={false} />
                       <Text style={[s.sloganText, { writingDirection: msgRTL(m.slogan) ? 'rtl' : 'ltr', textAlign: msgRTL(m.slogan) ? 'right' : 'left' }]}>{m.slogan}</Text>
 
@@ -4999,9 +4999,8 @@ const s = StyleSheet.create({
   // Tight, connected vertical rhythm — the whole search flow (summary → phrase → searching →
   // results header → ranking → cards) reads as ONE section, not separated blocks. (user request.)
   // Chat column is LTR-pinned so flex alignment is consistent regardless of the UI language: user
-  // bubbles (alignSelf: 'flex-end') always end up on the RIGHT, AI replies (alignSelf: 'flex-start')
-  // always on the LEFT. Only the text INSIDE each bubble follows its own writingDirection. (user
-  // request: bubble position never changes per language; only text direction does.)
+  // bubbles always end up on the RIGHT. Assistant replies follow their own text: Arabic on the
+  // RIGHT, English on the LEFT, independently of the interface language or later messages.
   // LOAD-BEARING: the whole message column is pinned to LTR cross-axis so `alignSelf:'flex-end'` reliably
   // resolves to the RIGHT (user bubble + Arabic agent replies), regardless of the app's RTL root. RN-web
   // DROPS a raw `direction` style (it only warns), so we use `writingDirection:'ltr'`, which RN-web maps
