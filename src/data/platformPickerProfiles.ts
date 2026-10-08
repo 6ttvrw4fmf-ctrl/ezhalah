@@ -1,7 +1,8 @@
 // Official picker artwork; location copy derives from the measured listing coverage.
+import logoLayout from './platformPickerLogoLayout.json';
 import coverageSnapshot from './platformPickerCoverage.json';
 import { platformCoverageSentence, type PickerCoverage } from '../lib/platformCoverageSentence';
-export type PlatformPickerProfile = { logo: number; ar: string; en: string };
+export type PlatformPickerProfile = { logo: number; ar: string; en: string; layout: { width: number; height: number; left: number; top: number; dark: boolean } };
 const LOGOS: Record<string, number> = {
   "Aqar": require("../../assets/images/platform-logos/sa-aqar-fm.png"),
   "Wasalt": require("../../assets/images/platform-logos/wasalt-sa.png"),
@@ -156,6 +157,17 @@ const LOGOS: Record<string, number> = {
 const coverage = coverageSnapshot.platforms as Record<string, PickerCoverage>;
 export const PLATFORM_PICKER_PROFILES: Record<string, PlatformPickerProfile> = Object.fromEntries(
   Object.entries(LOGOS).map(([name, logo]) => [name, {
-    logo, ar: platformCoverageSentence(coverage[name], 'ar'), en: platformCoverageSentence(coverage[name], 'en'),
+    logo, layout: logoLayout[name as keyof typeof logoLayout], ar: platformCoverageSentence(coverage[name], 'ar'), en: platformCoverageSentence(coverage[name], 'en'),
   }]),
 );
+
+export function pickerSourceSlugs(names: string[]): string[] {
+  return [...new Set(names.flatMap(name => {
+    const entry = coverageSnapshot.platforms[name as keyof typeof coverageSnapshot.platforms];
+    if (!entry?.slugs.length) throw new Error(`Unknown picker source: ${name}`);
+    return entry.slugs;
+  }))];
+}
+export function togglePickerSource(names: string[], name: string): string[] {
+  return names.includes(name) ? names.filter(value => value !== name) : [...names, name];
+}

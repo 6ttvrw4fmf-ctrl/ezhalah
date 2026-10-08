@@ -4,10 +4,11 @@ export type PickerCoverage = {
   total: number | null;
   regions: { id: number; name: string; en: string; count: number }[];
   topCity?: { name: string; en?: string; count: number } | null;
+  focusCounts?: { Residential: number | null; Commercial: number | null };
   examples?: { ar: string; en: string }[];
 };
 
-export function platformCoverageSentence(coverage: PickerCoverage | undefined, locale: 'ar' | 'en'): string {
+function locationSentence(coverage: PickerCoverage | undefined, locale: 'ar' | 'en'): string {
   const ar = locale === 'ar';
   if (coverage?.state === 'source-examples' && coverage.examples?.length) {
     const areas = coverage.examples.map(area => area[locale]);
@@ -41,4 +42,26 @@ export function platformCoverageSentence(coverage: PickerCoverage | undefined, l
   return ar
     ? `عقارات في ${areas.join('، ')}${regions.length > 3 ? ' ومناطق أخرى' : ''}.`
     : `Listings in ${areas.join(', ')}${regions.length > 3 ? ' and other regions' : ''}.`;
+}
+
+export function platformCoverageSentence(coverage: PickerCoverage | undefined, locale: 'ar' | 'en'): string {
+  const location = locationSentence(coverage, locale);
+  const residential = coverage?.focusCounts?.Residential ?? 0;
+  const commercial = coverage?.focusCounts?.Commercial ?? 0;
+  if (!residential && !commercial) return location;
+  const sum = coverage?.total;
+  if (!sum) return location;
+  const ar = locale === 'ar';
+  const focus = residential / sum >= 0.7 ? (ar ? (residential === sum ? 'عقارات سكنية' : 'عقارات سكنية بالدرجة الأولى') : (residential === sum ? 'Residential listings' : 'Primarily residential listings'))
+    : commercial / sum >= 0.7 ? (ar ? (commercial === sum ? 'عقارات تجارية' : 'عقارات تجارية بالدرجة الأولى') : (commercial === sum ? 'Commercial listings' : 'Primarily commercial listings'))
+    : residential && commercial ? (ar ? 'عقارات سكنية وتجارية' : 'Residential and commercial listings')
+    : (ar ? 'عقارات' : 'Listings');
+  if (ar) {
+    if (location.startsWith('أغلب العقارات في ')) return `${focus}، أغلبها في ${location.slice('أغلب العقارات في '.length)}`;
+    if (location.startsWith('عقارات في ')) return location.replace('عقارات في ', `${focus} في `);
+    return `${focus}؛ نطاقها الجغرافي غير متاح حالياً.`;
+  }
+  return location.startsWith('Most listings are in ') ? `${focus}, mostly in ${location.slice('Most listings are in '.length)}`
+    : location.startsWith('Listings ') ? location.replace('Listings ', `${focus} `)
+    : `${focus}; location coverage is currently unavailable.`;
 }

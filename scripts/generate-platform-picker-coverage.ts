@@ -40,6 +40,22 @@ for (const [name, old] of Object.entries(previous.platforms) as [string, any][])
       regions: Object.values(regions).sort((a: any, b: any) => b.count - a.count), cityCount: rows.length,
       topCity: { name: top.city_ar, en: cityEn.get(top.city_ar), count: Number(top.listing_count) } };
   }
+  const focusCounts: Record<string, number | null> = {};
+  for (const category of ['Residential', 'Commercial']) {
+    await new Promise(resolve => setTimeout(resolve, 750));
+    const focusResponse = await fetch(`${url}/rest/v1/rpc/top_cities_by_deal_ar`, {
+      method: 'POST', headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_deal: null, p_platforms: old.slugs, p_category: category }), signal: AbortSignal.timeout(15000),
+    });
+    if (!focusResponse.ok) throw new Error(`${name}: focus HTTP ${focusResponse.status}; snapshot unchanged`);
+    const focusRows = await focusResponse.json();
+    if (!Array.isArray(focusRows)) throw new Error(`${name}: invalid focus response; snapshot unchanged`);
+    focusCounts[category] = focusRows.length ? Number(focusRows[0].total_in_cohort) : null;
+    if (focusCounts[category] !== null && (!Number.isFinite(focusCounts[category]) || focusCounts[category]! <= 0)) {
+      throw new Error(`${name}: invalid focus count; snapshot unchanged`);
+    }
+  }
+  platforms[name].focusCounts = focusCounts;
   // Below the canonical 1.5 searches/second sustained ceiling; one request at a time.
   await new Promise(resolve => setTimeout(resolve, Math.max(0, 750 - (Date.now() - started))));
 }

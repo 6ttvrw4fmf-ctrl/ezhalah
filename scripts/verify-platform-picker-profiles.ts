@@ -13,6 +13,7 @@ function load(text: string, symbol: string, helperText = helper) {
   const exports: any = {};
   new Function('require', 'exports', js)((path: string) => {
     if (path.endsWith('platformPickerCoverage.json')) return coverage;
+    if (path.endsWith('platformPickerLogoLayout.json')) return JSON.parse(read('../src/data/platformPickerLogoLayout.json'));
     if (path.endsWith('platformCoverageSentence')) return { platformCoverageSentence: load(helperText, 'platformCoverageSentence') };
     return path;
   }, exports);
@@ -46,7 +47,7 @@ function mustCatch(mutant: string) {
   assert.notEqual(mutant, source, 'mutation target exists');
   assert.throws(() => verify(mutant), assert.AssertionError);
 }
-const emptyCopy = helper.replace("return ar ? 'عقارات في مختلف مناطق المملكة.'", "return ar ? ''");
+const emptyCopy = helper.replace("export function platformCoverageSentence(coverage: PickerCoverage | undefined, locale: 'ar' | 'en'): string {", "export function platformCoverageSentence(coverage: PickerCoverage | undefined, locale: 'ar' | 'en'): string { return '';");
 assert.notEqual(emptyCopy, helper);
 assert.throws(() => verify(source, emptyCopy), assert.AssertionError);
 mustCatch(source.replace('wasalt-sa.png', 'sa-aqar-fm.png'));
@@ -64,10 +65,10 @@ function verifyRendering(text: string) {
   const js = ts.transpileModule(`const cards = ${map};`, { compilerOptions: { jsx: ts.JsxEmit.React, jsxFactory: 'h' } }).outputText;
   const profiles = load(source, 'PLATFORM_PICKER_PROFILES');
   const h = (type: string, props: any, ...children: any[]) => ({ type, props, children });
-  const render = new Function('pickerPlatforms', 'PLATFORM_PICKER_PROFILES', 'locale', 'selectedSource', 'choosePlatform', 't', 's', 'pickerTwoColumns', 'colors', 'h', 'Pressable', 'View', 'Text', 'Image', 'Ionicons', js + '\nreturn cards;');
+  const render = new Function('pickerPlatforms', 'PLATFORM_PICKER_PROFILES', 'locale', 'selectedSources', 'choosePlatform', 't', 's', 'pickerTwoColumns', 'colors', 'h', 'Pressable', 'View', 'Text', 'Image', 'Ionicons', js + '\nreturn cards;');
   for (const locale of ['ar', 'en']) {
     for (const twoColumns of [true, false]) {
-      const cards = render(roster, profiles, locale, null, () => {}, (key: string) => key, {}, twoColumns, {}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons');
+      const cards = render(roster, profiles, locale, [], () => {}, (key: string) => key, {}, twoColumns, {}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons');
       for (let i = 0; i < cards.length; i++) {
         const card = cards[i]; const profile = profiles[roster[i].name];
         const nodes: any[] = [];
@@ -101,9 +102,9 @@ assert.equal(sentence(nationwide, 'ar'), 'عقارات في مختلف مناط�
 assert.equal(sentence({state:'unknown'}, 'ar'), 'بيانات نطاق العقارات غير متاحة حالياً.');
 assert.equal(sentence(fixture([], 0), 'ar'), 'بيانات نطاق العقارات غير متاحة حالياً.');
 assert.equal(sentence(undefined, 'ar'), 'بيانات نطاق العقارات غير متاحة حالياً.');
-assert.equal(sentence(coverage.platforms.Aqar, 'ar'), 'عقارات في مختلف مناطق المملكة.');
-assert.equal(sentence(coverage.platforms.Wasalt, 'ar'), 'عقارات في مختلف مناطق المملكة.');
-assert.equal(sentence(coverage.platforms.Satel, 'ar'), 'عقارات في الرياض.');
+assert.equal(sentence({ ...coverage.platforms.Aqar, focusCounts: undefined }, 'ar'), 'عقارات في مختلف مناطق المملكة.');
+assert.equal(sentence({ ...coverage.platforms.Wasalt, focusCounts: undefined }, 'ar'), 'عقارات في مختلف مناطق المملكة.');
+assert.equal(sentence({ ...coverage.platforms.Satel, focusCounts: undefined }, 'ar'), 'عقارات في الرياض.');
 // Watch a fabricated nationwide fallback and a services biography fail the measured coverage contract.
 function mustCatchCoverage(mutant: string) {
   assert.notEqual(mutant, helper);
@@ -114,3 +115,44 @@ mustCatchCoverage(helper.replace("if (first.count / total >= 0.7)", 'if (false)'
   .replace("if (first.count > total / 2)", 'if (false)'));
 mustCatchCoverage(helper.replace('أغلب العقارات في ${place}.', 'وساطة وتسويق وإدارة أملاك.'));
 console.log('PASS: location-only sentences reflect cities, regions, nationwide coverage and unknown data; fabricated/service-copy mutations rejected.');
+
+const slugs = load(source, 'pickerSourceSlugs');
+const toggle = load(source, 'togglePickerSource');
+assert.deepEqual(slugs(['Aqar', 'Wasalt']), ['aqar', 'aqarmonthly', 'wasalt']);
+assert.deepEqual(slugs([]), []);
+assert.throws(() => slugs(['nonexistent']), /Unknown picker source/);
+let selected = toggle([], 'Aqar');
+selected = toggle(selected, 'Wasalt');
+assert.deepEqual(selected, ['Aqar', 'Wasalt']);
+assert.deepEqual(toggle(selected, 'Aqar'), ['Wasalt']);
+assert.deepEqual(slugs(['Aqar', 'Aqar']), ['aqar', 'aqarmonthly']);
+for (const name of names as string[]) {
+  const profile = load(source, 'PLATFORM_PICKER_PROFILES')[name];
+  assert.ok(profile.layout.width > 0 && profile.layout.height > 0);
+  assert.ok(Number.isFinite(profile.layout.left) && Number.isFinite(profile.layout.top));
+}
+assert.equal(load(source, 'PLATFORM_PICKER_PROFILES')['ودود العقارية'].layout.dark, true);
+console.log('PASS: multi-selection toggles, canonical source restrictions, duplicate removal, unknown-source refusal and logo visibility layouts.');
+
+assert.equal(sentence({ ...nationwide, focusCounts: { Residential: 90, Commercial: 10 } }, 'ar'), 'عقارات سكنية بالدرجة الأولى في مختلف مناطق المملكة.');
+assert.equal(sentence({ ...fixture([region(1, 'منطقة الرياض', 80), region(2, 'منطقة مكة المكرمة', 20)]), focusCounts: { Residential: 50, Commercial: 50 } }, 'ar'), 'عقارات سكنية وتجارية، أغلبها في منطقة الرياض.');
+assert.equal(sentence({ ...nationwide, focusCounts: { Residential: 10, Commercial: null } }, 'ar'), 'عقارات في مختلف مناطق المملكة.');
+function queryRestriction(text: string) {
+  const ast = ts.createSourceFile('agent.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let body = '';
+  function visit(n: ts.Node) {
+    if (ts.isIfStatement(n) && n.expression.getText(ast).startsWith('selectedSourcesForTurn.length &&')) body = n.getText(ast);
+    ts.forEachChild(n, visit);
+  }
+  visit(ast);
+  assert.ok(body);
+  return new Function('turn', 'selectedSourcesForTurn', body + '\nreturn turn;');
+}
+const selectedSlugs = slugs(['Aqar', 'Wasalt']);
+const restrict = queryRestriction(agent);
+const parsed = { kind: 'search', query: { sources: ['other'], location: 'الرياض' } };
+assert.deepEqual(restrict(parsed, selectedSlugs).query.sources, selectedSlugs);
+assert.equal(restrict(parsed, []).query, parsed.query);
+const badRestriction = queryRestriction(agent.replace('sources: selectedSourcesForTurn } };', 'sources: [] } };'));
+assert.throws(() => assert.deepEqual(badRestriction(parsed, selectedSlugs).query.sources, selectedSlugs), assert.AssertionError);
+console.log('PASS: short focus/location sentences and the actual parsed query restriction; widened-source mutation caught.');
