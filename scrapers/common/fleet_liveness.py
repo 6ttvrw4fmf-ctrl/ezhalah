@@ -86,7 +86,10 @@ SITES: dict[str, str] = {
         "goldendeal", "maqam", "yameen",
         # 2026-10-08: its crawl reads the API from CI daily (1,290 records); the old "403 CONNECT"
         # note was this container's egress. 1,283 ads, never checked.
-        "mustqr")},
+        "mustqr",
+        # 2026-10-08: its own-page oracle (node 404 / retired title) was callable only by its crawl,
+        # so a removed ad waited three crawl misses; dead-visible had it over the line (2 of 10).
+        "aqalemhajer")},
 }
 
 # NOT here, and why (shadow run 36490769167, 2026-09-28): mizlaj, nowaisiry, eastabha and muktamel —
