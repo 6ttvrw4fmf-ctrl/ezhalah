@@ -27,6 +27,12 @@ def test_bare_region_names_resolve_twin_cities(monkeypatch):
     assert al.to_catalog("الجبيل", "الشرقية") == (500, 5)
 
 
+def test_an_administrative_centre_is_its_seat_town(monkeypatch):
+    _catalog(monkeypatch)
+    assert al.to_catalog("مركز قصيباء", "القصيم") == (950, 4)
+    assert al.to_catalog("مركز السيح والحجازية", "القصيم") == (None, 4)   # two towns: never guessed
+
+
 def test_the_prefixed_label_and_no_hint_behave_as_before(monkeypatch):
     _catalog(monkeypatch)
     assert al.to_catalog("الطرفية", "منطقة القصيم") == (941, 4)

@@ -455,6 +455,10 @@ def to_catalog(city_ar: Optional[str], region_hint: Union[int, str, None] = None
     stripped = n
     if n.startswith("محافظه "):
         stripped = n[len("محافظه "):]
+    elif n.startswith("مركز "):
+        # «مركز X» (an administrative centre, sadiqeltajer «القصيم - مركز قصيباء - …», 2026-10-08) is
+        # named after its seat town exactly as a governorate is; the same exact-name + hint rules apply.
+        stripped = n[len("مركز "):]
     if stripped != n:
         hit = _pick_candidate(stripped, hint)
         if hit:
