@@ -226,7 +226,7 @@ def main() -> int:
             item["page"] = page_evidence(body or "")
             import re as _re
             _b = body or ""
-            for _kw in ("مطبخ", "الوصف", "المزايا", "الخدمات", "مصعد"):
+            for _kw in ("سائق", "مسبح", "حديقة", "مصعد"):
                 for _m in list(_re.finditer(_kw, _b))[:3]:
                     print(f"HTMLPROBE {table}:{rid} kw={_kw} @{_m.start()}: " + _b[max(0, _m.start() - 700):_m.start() + 300].replace("\n", "⏎"), flush=True)
         out.append(item)
