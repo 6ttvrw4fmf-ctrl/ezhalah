@@ -93,7 +93,8 @@ def test_a_shard_interleaves_its_off_sitemap_tail_so_every_dead_ad_gets_live_nei
     new = ["24000", "24012"]                                # in the sitemap, not held
     monkeypatch.setattr(run, "_sitemap_entries", lambda s: (known + new, []))
     monkeypatch.setattr(run, "_active_ids_for_reconfirm", lambda shards=1, shard=0: set(known + tail))
-    monkeypatch.setenv("DEALAPP_MAX_LISTINGS", "150")       # < the shard's own 200: no room for new
+    monkeypatch.setenv("DEALAPP_MAX_LISTINGS", "150")       # < the shard's own 200
+    monkeypatch.setenv("DEALAPP_NEW_RESERVE", "0")          # this test is about the tail only
     run.random.seed(5)
 
     ids = run.enumerate_ids(s=None, cap_pages=0, shards=12, shard=0)
@@ -145,3 +146,24 @@ def test_only_a_current_read_counts_a_days_old_edge_copy_does_not(monkeypatch):
     run._fresh_reads.clear()
     assert _fetch(monkeypatch, [lambda u: _Resp(_PRICED, u, cache="Hit from cloudfront", age=200000)])[0]
     assert "7" not in run._fresh_reads                                                 # 2-day-old copy
+
+
+def test_a_full_shard_still_fetches_its_newest_new_ads_first(monkeypatch):
+    """2026-10-08: a shard's own active slice (1,315) outgrew its cap (1,200), and «keep the whole
+    slice, drop new ids only» fetched ZERO new ads (3,374 new sitemap ids on shard 3; arrivals fell
+    from ~1,780/day to ~200). The newest new ids now take a reserved slice at the front; the whole
+    own slice is still kept behind them."""
+    known = [str(i) for i in range(0, 1200, 12)]
+    tail = [str(i) for i in range(12000, 13200, 12)]
+    new = [str(i) for i in range(24000, 24600, 12)]          # 50 new ids, oldest first in the sitemap
+    monkeypatch.setattr(run, "_sitemap_entries", lambda s: (known + new, []))
+    monkeypatch.setattr(run, "_active_ids_for_reconfirm", lambda shards=1, shard=0: set(known + tail))
+    monkeypatch.setenv("DEALAPP_MAX_LISTINGS", "150")         # < the shard's own 200
+    monkeypatch.setenv("DEALAPP_NEW_RESERVE", "10")
+    run.random.seed(5)
+
+    ids = run.enumerate_ids(s=None, cap_pages=0, shards=12, shard=0)
+
+    newest10 = sorted(new, key=int, reverse=True)[:10]
+    assert ids[:10] == newest10                               # the newest ads, first
+    assert sorted(ids) == sorted(newest10 + known + tail)     # and the whole own slice kept
