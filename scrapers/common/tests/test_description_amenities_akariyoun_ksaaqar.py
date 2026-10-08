@@ -55,7 +55,7 @@ def test_akariyoun_negation_and_prepared_are_not_yes():
     prepared = AK.parse_description_amenities(AK_PAGE.replace("- مصعد", "- تأسيس مصعد"))
     assert prepared.get("elevator") is None, "«تأسيس مصعد» is a prepared shaft: unknown, never yes"
     negated = AK.parse_description_amenities(AK_PAGE.replace("- مصعد", "- لا يوجد مصعد"))
-    assert negated.get("elevator") is False, "«لا يوجد مصعد» is the source saying no"
+    assert negated.get("elevator") is None, "prose only ever says yes or nothing (SOURCE_TRUTH §2), never no"
 
 
 def test_akariyoun_services_stay_structured():

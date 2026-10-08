@@ -433,7 +433,8 @@ def parse_description_amenities(page_html: str) -> dict[str, bool]:
     if not m:
         return {}
     said = normalize.amenities_from_lines(normalize.html_block_lines(m.group(1)))
-    return {k: v for k, v in said.items() if k not in _PROSE_SKIP}
+    # Prose only ever says YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2): «لا يوجد مصعد» stays NULL here.
+    return {k: True for k, v in said.items() if v is True and k not in _PROSE_SKIP}
 
 
 def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], str, Optional[str]]:
