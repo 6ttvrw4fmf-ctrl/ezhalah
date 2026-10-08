@@ -346,8 +346,12 @@ function resolveDistrictsFromText(userText: string, city: string): string[] {
   // «العزيزية في الرياض». (audit #6: was a single .match() — only the first حي was kept.)
   const arHiRe = /حي\s+([؀-ۿ]+(?:\s+(?!في|و|أو|منطقة|مدينة)[؀-ۿ]+)?)/g;
   for (const m of ar.matchAll(arHiRe)) out.push(m[1].trim());
-  const enHiRe = /\b(?:in|district\s+of|neighborhood\s+of)\s+(?:al[-\s])?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s*(?:district|neighborhood)?/g;
-  for (const m of userText.matchAll(enHiRe)) out.push(`Al ${m[1]}`);
+  // English needs the WORD «district»/«neighborhood»: a bare «in X» names a CITY far more often
+  // («apartment for sale in Riyadh»), and treating it as a district turned the city into a district
+  // filter «Al Riyadh» that no listing carries — a false «no results» (ops_zero_result_log
+  // 2026-10-08, Buy·شقة·الرياض = 0 vs thousands). The place itself is still resolved from q.location.
+  const enHiRe = /\b(?:(?:district|neighbou?rhood)\s+of\s+(?:[Aa]l[-\s])?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})|in\s+(?:[Aa]l[-\s])?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:district|neighbou?rhood)\b)/g;
+  for (const m of userText.matchAll(enHiRe)) out.push(`Al ${m[1] ?? m[2]}`);
 
   return Array.from(new Set(out));
 }

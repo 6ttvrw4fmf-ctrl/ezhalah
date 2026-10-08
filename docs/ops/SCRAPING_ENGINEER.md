@@ -229,6 +229,7 @@ These cost your first runs a lot of time. Use them instead of working them out a
 - **Image hosts are blocked from this container**, so a journey card reading «لا توجد صورة» is not a customer bug.
 - **`source-reread.yml` prints `og:image: True/False` but not its value.** Compare it card by card with our `photo_urls`
   (alshawaf: 8/8 matched, so the coverage was the source's own).
+- **2026-10-08 (⚡, copied by 🔧):** before you edit a shared line, grep `scripts/` for that exact line. The «مركز» loop rewrote a line `verify-aqarmonthly-district-suffix-guard` anchors on, and it cost a CI cycle.
 
 ## Lessons from 2026-10-04 (your first night-shift report: honest, every number matched the database — and still a 7, not a 9)
 1. **A site that fails twice in a week gets its root cause fixed THAT night.** gudai timed out on its sitemap on 2 of 6

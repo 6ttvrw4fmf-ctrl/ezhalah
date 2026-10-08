@@ -981,6 +981,30 @@ or rewrite another engineer's work, and never start a big change in another engi
   session with a human present. Do not spend three timeouts rediscovering it: prepare the code, the
   mirror and the evidence, and leave the exact change in a `lifecycle:followup` row.
 
+- An oracle only the crawl can build is no daily check (2026-10-08): goldendeal, maqam, yameen,
+  mustqr and shatri each had a working own-record oracle, but it needed the crawl run's state, so
+  1,628 ads were never checked in time. Bind every new oracle as a one-argument
+  `_make_verify_gone(control)` the day it is written. And a crawl that already reads an ad's own
+  status (abeea) records it with `db.mark_direct_alive`, or the reading is thrown away.
+- A measured dead shape the oracle cannot see keeps dead ads shown (muktamel, 2026-10-08): its
+  docstring has recorded «200, isAvailable false, price null» since 09-03, but the probe read only
+  status and /404, so 603 withdrawn ads at 3+ strikes stayed up and every grace re-read said «no
+  opinion». When a site's evidence rows are all `UNKNOWN … had no opinion`, read what the page says.
+
+- Every reader of one site must share its "no answer" rules (gathern, 2026-10-08): the sweep and
+  the cleanup learned on 10-05 that a 200 on gathern's HOME page is no answer, but the crawl's prune
+  oracle still read it as live. At 04:50 UTC it stamped 18 feed-missing units verified alive; they
+  were the freshest rows, so they became the sweep's controls and every sweep from 05:37 read 0/10
+  and checked nothing. When a sweep quarantines on controls the crawl just saw, look at what stamped
+  those controls first. A control that lands home is now skipped, never counted.
+
+- A cap that quarantines a whole batch never drains a real backlog (justsa, 2026-10-08): 24 of 97
+  ads read gone on their own page three runs running with live controls, and every run hid none
+  because 24 > the cap of 10, so a quarter of the site stayed dead on screen. fleet_liveness now
+  hides the cap's worth when every control is live at both ends (gathern's drain), else quarantines
+  as before. The cap never moves. A `hides > cap` note two nights running is a stuck site, not a safe one.
+- **2026-10-08 (♻️, copied by 🔧):** every reader of one site must share that site's «no answer» rules. Gathern's prune oracle still read a home-page landing as live, so those rows became the sweep's controls, and the sweep checked nothing for ~16 h.
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a

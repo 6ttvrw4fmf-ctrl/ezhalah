@@ -316,6 +316,31 @@ def _verify_gone(ad_number: str, url: Optional[str] = None) -> tuple[str, str]:
     return "unknown", f"no believable answer after 2 attempts ({last})"
 
 
+def _make_verify_gone(control: Optional[dict] = None):
+    """The one-argument oracle the daily direct check calls (fleet_liveness.SITES, 2026-10-08).
+
+    `_verify_gone` reads module state the crawl arms (its session, the JWT it discovered, ids it just
+    fetched as canaries), so the daily check could not call it and 1,283 ads were never checked. This
+    arms the SAME oracle the same way, lazily on the first ad: a fresh session, the JWT, and the
+    caller's control row as the canary. A JWT that cannot be discovered makes every answer UNKNOWN."""
+    armed: dict[str, Any] = {}
+
+    def verify(ad_number: str) -> tuple[str, str]:
+        if not armed:
+            s = session()
+            try:
+                jwt = fetch_jwt(s)
+            except Exception as e:  # noqa: BLE001 — no key, no reading, never a death
+                armed["err"] = f"{type(e).__name__}: {e}"[:160]
+                return "unknown", f"mustqr JWT discovery failed ({armed['err']})"
+            set_liveness_oracle(s, jwt, [_pid((control or {}).get("ad_number") or "")])
+            armed["ok"] = True
+        if "err" in armed:
+            return "unknown", f"mustqr JWT discovery failed ({armed['err']})"
+        return _verify_gone(ad_number)
+    return verify
+
+
 def fetch_neighborhoods(s: cc.Session, jwt: str) -> dict[str, str]:
     """name → region (north|south|east|west). Used for an additional_info hint only."""
     _throttle()
