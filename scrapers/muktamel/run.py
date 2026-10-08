@@ -400,7 +400,9 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
     offer = parsed["offer"]
     # Liveness gate: only fully-hydrated, available listings carry real data.
     if not offer.get("isAvailable") or offer.get("price") in (None, 0):
-        _note("not_available_or_zero_price")
+        # The measured dead shape (module docstring) is counted on its own, so each run's notes say
+        # how many own pages read as the hollow shell; the rest of the disjunction stays UNKNOWN.
+        _note("hollow_shell" if _is_hollow_offer(offer) else "not_available_or_zero_price")
         return None
     _note("live")
     return listing_id, parsed, own
@@ -455,12 +457,40 @@ def _landed_on_404(landed: str) -> bool:
     return http_liveness._path_of(landed) == "/404"
 
 
+# THE HOLLOW SHELL (2026-10-08). The module docstring's measured dead shape, «HTTP 200 with a hollow
+# shell where isAvailable === false and price === null», was never read by this oracle: it saw only a
+# status and a /404 landing. So every ad muktamel withdrew in place stayed shown for weeks: 603 active
+# rows at 3+ strikes on 2026-10-08, and all 1,433 grace re-reads of the previous 3 days ended
+# "HTTP 200, but this platform's signal had no opinion". The CONJUNCTION is the signal; an available
+# offer with a zero price, or anything unparseable, stays no-opinion.
+# SHADOW FIRST (LIFECYCLE_ENGINEER.md protection 2): while HOLLOW_SHELL_KILLS is False the probe
+# records «SHADOW hollow_shell … would be gone» on the evidence row and still answers UNKNOWN.
+HOLLOW_SHELL_KILLS = False
+
+
+def _is_hollow_offer(offer: dict) -> bool:
+    return offer.get("isAvailable") is False and offer.get("price") is None
+
+
+def _hollow_shell(body: str) -> Optional[bool]:
+    """True: this page's hydrated offer is the measured dead shape. False: an offer that is not.
+    None: no offer could be read (never evidence either way)."""
+    src = _extract_nuxt(body or "")
+    parsed = _nuxt_via_node(src) if src else None
+    offer = (parsed or {}).get("offer")
+    if not isinstance(offer, dict):
+        return None
+    return _is_hollow_offer(offer)
+
+
 def _liveness_signal(status: Optional[int], body: str, landed_on_404: bool) -> Optional[str]:
     """muktamel's affirmative removal signal, and nothing else. None == no opinion.
     The third argument is `_landed_on_404`, NOT the shared law's "the path changed" (see _MuktamelProbe)."""
     if status in (404, 410):
         return "gone"
     if landed_on_404:
+        return "gone"
+    if HOLLOW_SHELL_KILLS and status == 200 and _hollow_shell(body) is True:
         return "gone"
     return None
 
@@ -513,11 +543,32 @@ class _MuktamelProbe(http_liveness.LivenessProbe):
     changed" — on muktamel every live id's path changes (it gains a slug). The law is untouched."""
 
     def fetch(self, url: str) -> tuple[Optional[int], str, bool]:
+        self.last_hollow = False
         try:
             r = self.session().get(url, timeout=self.timeout, allow_redirects=True)
-            return r.status_code, (r.text or ""), _landed_on_404(str(getattr(r, "url", url) or url))
+            landed = str(getattr(r, "url", url) or url)
+            status, body = r.status_code, (r.text or "")
         except Exception:  # noqa: BLE001 — an unreachable source is never proof of death
             return None, "", False
+        if status == 200 and not HOLLOW_SHELL_KILLS and _same_listing(url, landed):
+            self.last_hollow = _hollow_shell(body) is True
+        if HOLLOW_SHELL_KILLS and status == 200 and not _same_listing(url, landed) \
+                and not _landed_on_404(landed):
+            return None, "", False      # landed on another listing: its shell says nothing of this one
+        return status, body, _landed_on_404(landed)
+
+    def verify_gone(self, ad_number: str):
+        verdict, why = super().verify_gone(ad_number)
+        if verdict == "unknown" and getattr(self, "last_hollow", False):
+            why = ("SHADOW hollow_shell (isAvailable false, price null) — would be gone; " + why)[:300]
+        return verdict, why
+
+
+def _same_listing(url: str, landed: str) -> bool:
+    """The read landed on THIS id's own page (/real-estates/<id>, with or without its slug)."""
+    want = re.search(r"/real-estates/(\d+)", url)
+    got = re.search(r"/real-estates/(\d+)", landed)
+    return bool(want and got and want.group(1) == got.group(1))
 
 
 _probe = _MuktamelProbe(

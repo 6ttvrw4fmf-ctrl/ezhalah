@@ -250,8 +250,13 @@ def _landed_on_home(requested: str, final: str) -> bool:
     return got in _HOME_PATHS and got != want
 
 
-def probe(s, url: str, retries: int = 3) -> int:
-    """Return the real HTTP status (200/404/410/…), retrying only transient 429/5xx; 0 = no verdict."""
+HOME_LANDED = -1     # probe(..., home_status=HOME_LANDED): the read landed on gathern's home page
+
+
+def probe(s, url: str, retries: int = 3, home_status: int = 0) -> int:
+    """Return the real HTTP status (200/404/410/…), retrying only transient 429/5xx; 0 = no verdict.
+    A 200 that landed on the home page returns `home_status` (0 = no verdict, for every caller but
+    the canary, which needs to tell it apart)."""
     for attempt in range(retries):
         _throttle()
         try:
@@ -265,7 +270,7 @@ def probe(s, url: str, retries: int = 3) -> int:
             # its home page serves 200 (2026-10-05, cleanup lesson). That 200 is the home page, not
             # this unit: no verdict. It matters most to --recheck-dead, whose only write is a
             # restore on a 200, now that it runs every day (2026-10-06).
-            return 0
+            return home_status
         return r.status_code
     return 0
 
@@ -391,19 +396,31 @@ def _run_canary(s, client, n: int) -> tuple[bool, int, int, str]:
     Measured 2026-09-03: without this, a failed proxied run said "0/10" and the next question —
     is gathern blocking the proxy, or is the proxy broken? — could not be answered from our own
     logs at all."""
-    canaries = _collect_canaries(client, n)
+    # A CONTROL THAT LANDS ON THE HOME PAGE IS NOT A CONTROL (2026-10-08). gathern answers some
+    # removed units with a redirect home, so such a row is a dead ad, not a block: it is skipped (not
+    # counted in either half) and the next candidate is read, until n controls answered. If EVERY
+    # candidate lands home, nothing is probed and the gate fails CLOSED (canary_environment_ok(0, 0)).
+    # On 2026-10-08 18 home-landing units became the freshest rows and every sweep from 05:37 UTC
+    # read its controls 0/10 and checked nothing.
+    pool = _collect_canaries(client, max(n * 3, n + 10))
     alive = 0
+    home = 0
     statuses: dict[int, int] = {}
-    for row in canaries:
+    for row in pool:
+        if sum(statuses.values()) >= n:
+            break
         url = (row.get("listing_url") or "").strip()
         if not url:
             continue
-        st = probe(s, url)
+        st = probe(s, url, home_status=HOME_LANDED)
+        if st == HOME_LANDED:
+            home += 1
+            continue
         statuses[st] = statuses.get(st, 0) + 1
         if st == 200:
             alive += 1
     probed = sum(statuses.values())
-    hist = ",".join(f"{k}x{v}" for k, v in sorted(statuses.items())) or "none"
+    hist = (",".join(f"{k}x{v}" for k, v in sorted(statuses.items())) or "none") + (f",homex{home}" if home else "")
     ok = canary_environment_ok(alive, probed)
     verdict = "PASS" if ok else "FAIL"
     print(f"CANARY {verdict}: {alive}/{probed} known-alive controls returned 200 "

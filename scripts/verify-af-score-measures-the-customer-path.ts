@@ -75,6 +75,27 @@ check("dealapp's own «عدد الحمامات» row still catches a trapped NUL
       SO("dealapp", {"bathrooms": "page_silent"}, {"bathrooms": None}, {"evidence_lines": ["عدد الحمامات", "3"]})["bathrooms"] == "we_miss")
 check("a site with no structured field keeps its prose answer",
       SO("sakan", {"parking": "we_miss"}, {"parking": None}, {})["parking"] == "we_miss")
+SS = ns["sanadak_says"]
+check("sanadak: «نعم - راكب» kitchen and an installed split are yes",
+      SS({"kitchenStatusText": "نعم - راكب", "acTypeText": "6 سبليت راكب"}) == {"kitchen": True, "air_conditioner": True})
+check("sanadak: «لا» kitchen and «لا يوجد» AC are a stated no",
+      SS({"kitchenStatusText": "لا", "acTypeText": "لا يوجد"}) == {"kitchen": False, "air_conditioner": False})
+check("sanadak: a prepared kitchen / split foundation is silent, never yes",
+      SS({"kitchenStatusText": "نعم - تأسيس فقط", "acTypeText": "تأسيس سبليت"}) == {})
+check("sanadak: blank fields and an unticked driver box are silent",
+      SS({"kitchenStatusText": "", "acTypeText": "", "isDriverRoomAvailable": False}) == {})
+check("sanadak: counts state yes, isFurnished false is a stated no",
+      SS({"numberElevators": 1, "numberParkingAreas": "2", "numberMaidRooms": 1, "isFurnished": False})
+      == {"elevator": True, "parking": True, "maid_room": True, "furnished": False})
+sp = ns["sanadak_page"]("https://sanadak.sa/property-details/x-1",
+                        fetch=lambda u: ({"title": "شقة للإيجار", "description": "مطبخ راكب\nموقف خاص",
+                                          "kitchenStatusText": "", "numberElevators": 1}, "", u))
+check("sanadak page: its structured elevator is read, its prose kitchen is not",
+      sp is not None and ns["structured_says"](sp, "elevator") is True and ns["structured_says"](sp, "kitchen") is None)
+check("sanadak page: a failed fetch is unreadable", ns["sanadak_page"]("u", fetch=lambda u: None) is None)
+check("sanadak: prose «مطبخ راكب» is not asked where the structured kitchen is blank",
+      ns["customer_answers"](L("مطبخ راكب"), {"kitchen": "we_miss"}, "sanadak", sp) == [])
+check("sanadak: the structured lift IS asked", ns["customer_answers"]([], {"elevator": "match"}, "sanadak", sp) == ["elevator"])
 T = ns["template_lines"]
 menu = L("أجهزة مطبخ", "مكيفات هواء")
 check("a line on every page of the site is its template, not the ad",
@@ -101,9 +122,11 @@ ns["score_site"](_C(), object(), "site", [("t", 1), ("t", 2), ("t", 3)], night="
 check("score_site never asks a customer question its website's template answered", asked == [])
 pages = iter([["موقف سيارات خاص"], ["مدخل خاص", "موقف سيارات خاص"]])
 asked.clear()
-ns["score_site"](_C(), object(), "aqar", [("t", 1), ("t", 2)], night="n", pace=0,
-                 probe=lambda u: (200, "<html>"), wasalt=None)
+ar = ns["score_site"](_C(), object(), "aqar", [("t", 1), ("t", 2)], night="n", pace=0,
+                      probe=lambda u: (200, "<html>"), wasalt=None)
 check("score_site never asks aqar's parking from the ad's prose", not any("parking" in (q.get("p_amenities") or []) for q in asked))
+check("score_site never scores aqar's prose parking as a capture miss",
+      ar["fields"].get("parking", {}).get("we_miss", 0) == 0)
 print(json.dumps(out))
 `;
 
@@ -118,10 +141,15 @@ const mustCatch = (what: string, find: string, repl: string) => {
   if (!real.includes(find)) { console.error(`mutation anchor missing: ${what}`); process.exit(1); }
   if (!run(real.replace(find, repl)).some(([, ok]) => !ok)) { console.error(`NOT CAUGHT: ${what}`); process.exit(1); }
 };
+mustCatch('sanadak prose read again (not structured-only)', '"sanadak": ("elevator", "parking", "kitchen",', '"sanadak_off": ("elevator", "parking", "kitchen",');
+mustCatch('a prepared sanadak kitchen read as a kitchen', 'if k.startswith("نعم") and "تأسيس" not in k', 'if k.startswith("نعم")');
+mustCatch('an unticked sanadak driver box read as a no', '"driver_room": True if o.get("isDriverRoomAvailable") is True else None,', '"driver_room": bool(o.get("isDriverRoomAvailable")),');
+mustCatch('customer request built from prose the score refused', 'return structured_says(page or {}, field) is True', 'return page_says_yes(lines, field)');
+mustCatch('a failed sanadak fetch read as a page', 'if not got:\n        return None', 'if not got:\n        got = ({}, "", url)');
 mustCatch('a NULL read as a miss when the list was capped', 'return None if len(rows) >= RPC_LIMIT else False', 'return False');
 mustCatch('a failed request read as not found', 'if rows is None:\n        return None', 'if rows is None:\n        return False');
 mustCatch('a negated amenity read as a yes', 'and not all(re.search(NEG', 'and not any(re.search(r"^$"');
-mustCatch('stored NULL no longer asked for', 'in (MATCH, WE_MISS) and page_says_yes', 'in (MATCH,) and page_says_yes');
+mustCatch('stored NULL no longer asked for', 'in (MATCH, WE_MISS) and says_yes', 'in (MATCH,) and says_yes');
 mustCatch('amenity sent as Arabic', 'p["p_amenities"] = slugs', 'p["p_amenities"] = answers');
 mustCatch('rent period dropped for «إيجار»', 'RENT = ("إيجار", "ايجار")', 'RENT = ("ايجار",)');
 mustCatch('furnished asked on Monthly', 'return [a for a in answers if a != FURNISHED]', 'return answers');

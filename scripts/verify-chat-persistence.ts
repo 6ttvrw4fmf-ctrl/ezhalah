@@ -276,7 +276,7 @@ check('agent: EVERY conversation-abandonment path flushes first (startFresh, ope
 check('agent: a web unload flushes too (pagehide covers refresh, close and bfcache)', /window\.addEventListener\('pagehide', flush\);/.test(agent));
 check('store: saveTranscript writes disk DIRECTLY before setState — an unload-time flush cannot depend on React processing an update', /const direct = cur\.slice\(\);/.test(store) && /localStorage\.setItem\(historyKey\(user\.sub\), serializeHistoryForDisk\(direct\)\);/.test(store));
 check('agent: the sidebar replay path routes through openSaved (transcript first, snapshot fallback)',
-  /if \(replay === '0'\) savedOpenGateRef\.current = openSaved\(hid, q, override\)\.catch\(\(\) => \{\}\);/.test(agent));
+  /if \(replay === '0'\) void openSaved\(hid, q, override\);/.test(agent));
 
 // ── 3d. Sidebar routing ─────────────────────────────────────────────────────────────────────────
 const sidebar = readFileSync(new URL('../src/components/Sidebar.tsx', import.meta.url), 'utf8');

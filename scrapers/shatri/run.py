@@ -362,6 +362,30 @@ def _make_verify_gone(terms: dict[str, dict[int, str]]):
     return verify_gone
 
 
+def _fleet_verify_gone(control: Optional[dict] = None):
+    """The one-argument oracle the daily direct check calls (fleet_liveness.SITES, 2026-10-08).
+
+    `_make_verify_gone(terms)` needs the label taxonomy only the crawl had read, so the daily check
+    could not call it and 50 ads were never checked. This reads that taxonomy once, lazily, the way
+    the crawl does, and hands back the crawl's own oracle. A taxonomy that cannot be read, or that no
+    longer names «تم البيع», makes every answer UNKNOWN: a sold label we cannot resolve would
+    otherwise read as live. The daily check brings its own controls (`control` is not needed)."""
+    cache: dict[str, Any] = {}
+
+    def verify(ad_number: str) -> tuple[str, str]:
+        if "v" not in cache:
+            try:
+                s, _ = retry_smarter_session(f"{BASE}/wp-json/wp/v2/property_type?per_page=1", headers=HEADERS)
+                terms = fetch_terms(s)
+            except Exception as e:  # noqa: BLE001 — an unread taxonomy is no verdict, never a death
+                return "unknown", f"shatri label taxonomy unreadable ({type(e).__name__}: {str(e)[:100]})"
+            if SOLD_LABEL not in (terms.get("property_label") or {}).values():
+                return "unknown", f"shatri label taxonomy no longer names «{SOLD_LABEL}»"
+            cache["v"] = _make_verify_gone(terms)
+        return cache["v"](ad_number)
+    return verify
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")

@@ -824,14 +824,30 @@ export default function Agent() {
   // is untouched — modeGone still starts false, so its intentional collapse-on-first-message plays
   // exactly as before.
   const [modeGone, setModeGone] = useState(() => replay === '0');
+  // A SAVED CHAT IS OPENING (owner 2026-10-08: «when a logged-in user changes between chats, the empty
+  // home shows for a bit then goes away»). turnToSavedChat clears the old conversation and keeps the
+  // view invisible for a moment while the saved one restores (longer when its transcript comes from the
+  // server). In that gap `msgs` is empty and `?replay=0` has already been consumed, so
+  // every "is this a brand-new chat?" test said yes and painted the new-chat landing around the
+  // invisible conversation: the Filter / AI pill, the «بحث» chip and the rotating example text.
+  // True from the sidebar tap until the opened chat starts fading in; the ref is for effects.
+  const [openingSaved, setOpeningSavedState] = useState(false);
+  // The results turn whose saved cards are still coming back (restoreLeftState). Its closing line and
+  // buttons wait; a quiet loading line stands in, so nothing appears and then rearranges.
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const openingSavedRef = useRef(false);
+  const setOpeningSaved = (v: boolean) => { openingSavedRef.current = v; setOpeningSavedState(v); };
   useEffect(() => {
+    // A restored saved chat lands settled, with no collapse animation (same rule as replay === '0').
+    if (modeSearched && !modeGone && openingSavedRef.current) { setModeGone(true); return; }
     if (modeSearched && !modeGone) {
       // Let the CSS collapse (MODE_EASE, 200ms) finish, then unmount. setTimeout, not an animation
       // callback — hidden tabs freeze rAF, and unmount must never hang on one (see afterAnimation).
       const id = setTimeout(() => setModeGone(true), 220);
       return () => clearTimeout(id);
     }
-    if (!modeSearched && modeGone) setModeGone(false); // new chat — pill returns settled
+    // …but a saved chat in the middle of opening is not a new chat: its messages are about to land.
+    if (!modeSearched && modeGone && !openingSavedRef.current) setModeGone(false); // new chat — pill returns settled
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modeSearched]);
   // ChatGPT-style feedback confirmation: a small «شكراً على ملاحظتك» toast at the TOP of the chat
@@ -1851,8 +1867,10 @@ export default function Agent() {
     if (!pre) return;
     prefetchRef.current.delete(last.id);
     const epoch = conversationEpochRef.current;
+    setRestoringId(last.id);
     const page = await pre.p;
     if (conversationEpochRef.current !== epoch) return;
+    setRestoringId(null);
     if (!page || page.failed) return;
     const seen = new Set(r.listings.map((l) => `${l.source}:${l.id}`));
     const add = page.listings.filter((l) => { const k = `${l.source}:${l.id}`; if (seen.has(k)) return false; seen.add(k); return true; });
@@ -3376,6 +3394,7 @@ export default function Agent() {
     setPlatformPickerSearch('');
     setSelectedSource(null);
     setMsgs([]);
+    setRestoringId(null);
     setCompleted(false);      // terminality is per-conversation — never inherited (see openStatic/openSaved)
     chatIdRef.current = null; // new conversation → new sidebar chat (a restore re-sets it)
     afCarryRef.current = null;   // the AF answered-set belongs to the conversation being left
@@ -3490,9 +3509,10 @@ export default function Agent() {
       const rgp = restored.guidedPills as { facets?: GuidedFacet[] } | null | undefined;
       setGuidedPills((rgp && rgp.facets ? { ...rgp, facets: dedupeFacetsByLabel(rgp.facets) } : rgp) as any);
       lastCapturedRef.current = JSON.stringify(t); // what's on screen IS what's stored — no echo write
-      // ONE STEP, NEVER AN IN-BETWEEN SCREEN (owner 2026-10-07: «it shows «عرض المزيد» and the Advanced
-      // Filter, then it changes by itself and shows more below»). The chat is still invisible here
-      // (turnToSavedChat waits on savedOpenGateRef); land only once the cards it had are back.
+      // NEVER BLANK, NEVER A BUTTON THAT THEN VANISHES (owner 2026-10-07/08). The chat shows at once;
+      // while its remaining cards come back, its closing line and buttons wait behind a quiet loading
+      // line (restoringId), and it lands again once they are in.
+      landAtLatest();
       await restoringDone;
       if (conversationEpochRef.current !== epoch) return;
       landAtLatest();
@@ -3701,7 +3721,7 @@ export default function Agent() {
         const open = () => {
           startFresh();
           setFilterOrigin(true); // this whole screen instance came from «بحث» — no composer (see the flag's own comment above)
-          if (replay === '0') savedOpenGateRef.current = openSaved(hid, q, override).catch(() => {});
+          if (replay === '0') void openSaved(hid, q, override);
           else sendFilter(q, override);
         };
         if (replay !== '0') open();
@@ -3741,11 +3761,6 @@ export default function Agent() {
   const freshRise = useRef(new Animated.Value(0)).current;
   const freshMountRef = useRef(true);
   const savedOpenTokenRef = useRef(0); // counts sidebar chat-opens; only the latest may swap/fade in (see the replay branch)
-  // Resolves when the saved chat being opened is in its FINAL state (cards back, buttons settled).
-  // turnToSavedChat keeps the chat invisible until then (at most SAVED_OPEN_MAX_WAIT_MS), so a reopened
-  // chat never shows its first cards + «عرض المزيد» + «تحديد أكثر» and then rearranges itself.
-  const savedOpenGateRef = useRef<Promise<void> | null>(null);
-  const SAVED_OPEN_MAX_WAIT_MS = 4000;
   const turnToSavedChat = (open: () => void) => {
     // OPENING A SAVED CHAT FROM THE SIDEBAR IS A PAGE TURN, NOT A HARD CUT (owner 2026-10-03: «the
     // animation feels too tough, it doesn't feel smooth»). It used to wipe the old chat in one
@@ -3758,6 +3773,7 @@ export default function Agent() {
     // the fade drops this open instead of loading it over the newer screen.
     const token = ++savedOpenTokenRef.current;
     const epochAtTap = conversationEpochRef.current;
+    setOpeningSaved(true);
     runAfterAnimation(
       (onFinished) => Animated.timing(freshFade, { toValue: 0, duration: 110, useNativeDriver: true }).start(onFinished),
       () => {
@@ -3766,14 +3782,14 @@ export default function Agent() {
         open(); // startFresh bumps conversationEpochRef; this open owns the new value
         const mine = conversationEpochRef.current;
         freshRise.setValue(8);
-        const gate = savedOpenGateRef.current ?? Promise.resolve();
-        void Promise.race([gate, new Promise<void>((r) => setTimeout(r, SAVED_OPEN_MAX_WAIT_MS))]).then(() => setTimeout(() => {
+        setTimeout(() => {
           if (token !== savedOpenTokenRef.current || mine !== conversationEpochRef.current) return;
+          setOpeningSaved(false);
           Animated.parallel([
             Animated.timing(freshFade, { toValue: 1, duration: 220, useNativeDriver: true }),
             Animated.timing(freshRise, { toValue: 0, duration: 220, useNativeDriver: true }),
           ]).start();
-        }, 180));
+        }, 180);
       },
       180,
     );
@@ -3798,6 +3814,7 @@ export default function Agent() {
         // opened its first round already believing those questions were resolved — the exact bug
         // startFresh's own comment describes, live on the other path. (routine #8, 2026-09-14.)
         resetConversationState();
+        setOpeningSaved(false); // New Chat supersedes a saved chat still opening — its landing is real
         // Forget the last-handled filter/seed so a re-search AFTER New Chat re-runs even if it's
         // identical to a previous one (otherwise the change-detection would skip it and leave just
         // the greeting).
@@ -3844,7 +3861,7 @@ export default function Agent() {
   // replayed history are all excluded structurally), the composer is empty, the user hasn't
   // interacted, no recording, no turn in flight. Filter mode is a different screen (index.tsx) and
   // never renders this component at all.
-  const introLanding = msgs.every((m) => m.role === 'agent' && !!m.greeting);
+  const introLanding = !openingSaved && msgs.every((m) => m.role === 'agent' && !!m.greeting);
   const showIntroExamples =
     introLanding && !introInteracted && !typed && voiceState === 'idle' && !busy;
   const openPlatformPicker = () => {
@@ -3942,7 +3959,7 @@ export default function Agent() {
           pill, owner 2026-08-16: "it stays in the middle, not far right"). Fades + collapses away
           the moment a search happens, in either mode; the wrapper's animated height keeps the chat
           area from snapping up when it leaves. */}
-      {shouldRenderModeSwitch(modeGone, replay) && (
+      {shouldRenderModeSwitch(modeGone, replay, openingSaved) && (
         <View style={[s.modeWrap, MODE_EASE, modeSearched && s.modeWrapHidden]}>
           <ModeSwitch active="agent" onSwitch={() => router.replace('/')} t={t} />
         </View>
@@ -4313,6 +4330,14 @@ export default function Agent() {
                         // `[data-testid="results-load-more"]` matched zero elements anywhere. 20 cards, no way
                         // to reach the other 6,703. The decision now lives in one pure, exhaustively-tested
                         // predicate that withholds only while THIS turn's cascade is genuinely still running.
+                        if (restoringId === m.id) {
+                          return (
+                            <View testID="results-restoring" style={{ flexDirection: rtl ? 'row-reverse' : 'row', alignItems: 'center', gap: 8, marginTop: 14 }}>
+                              <ActivityIndicator size="small" color={colors.muted} />
+                              <Text style={[s.replyText, { color: colors.muted }]}>{t('Loading the rest of your listings…')}</Text>
+                            </View>
+                          );
+                        }
                         if (!resultsRowIsReady({
                           introStillTyping: !!(m.typing && !doneTyping[m.id]),
                           shown,

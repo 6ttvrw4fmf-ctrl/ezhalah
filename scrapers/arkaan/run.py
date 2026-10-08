@@ -476,6 +476,13 @@ def map_listing(item: dict[str, Any], detail: dict[str, Any]) -> Optional[tuple[
         "bedrooms": N.to_int(specs.get("غرف النوم")),
         "reception_rooms_majlis": N.to_int(specs.get("المجلس")),
         "street_width_m": _street_width(specs.get("الشارع")),
+        # The facade is stated ONLY in the ad's own text («شارع 15 م شمالًا»): the spec cell «الشارع» holds
+        # the width alone and the site has no facade field, so the prose bearing is the source's statement.
+        # One street only — a corner plot («15 × 15 م», or two streets in the text) stays NULL. 1,079 of
+        # 1,482 live ads state a bearing and 0 were stored (🔬 AF engineer 2026-10-08, ops_af_score
+        # arkaan direction we_miss 8/10).
+        "direction": (N.street_from_prose(detail.get("ad_text"))[1]
+                      if "×" not in (specs.get("الشارع") or "") else None),
         # db.AUTHORITATIVE_NULL is deliberately falsy, so it must be selected by an explicit
         # conditional — `absent or price` would silently fall through to the price.
         "price_total": (db.AUTHORITATIVE_NULL if on_request else price)
