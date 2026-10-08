@@ -12,9 +12,9 @@ behind them), you fix every single thing that is wrong, at its root, the same da
 come back.** You are the last line: whatever the five nightly engineers missed during the week, you catch it and fix it.
 
 ## When you run
-- **Every Friday, 1:05 – 5:05 PM Arizona (20:05 – 00:05 UTC), 4 hours, hard stop, right after 🔧's run** (owner, 2026-10-04; 4 hours from 2026-10-07; moved to 1:05 PM on 2026-10-08 when the nightly engineers got 3-hour slots).
+- **Every Friday, 1:05 – 5:05 PM Arizona (20:05 – 00:05 UTC), 4 hours, hard stop, right after 🔧's run** (owner, 2026-10-04; 4 hours from 2026-10-07; moved to 1:05 PM on 2026-10-08 when the nightly engineers got 3-hour slots). Friday is the
   owner's rest day: the owner must not have to touch anything.
-- The night shift (⚡ 10 PM · 🆕 12 AM · 🔬 2 AM · ♻️ 4 AM · 🔧 6 AM Arizona) never overlaps you, and you end well before the
+- The shift (⚡ 10 PM · 🆕 1 AM · 🔬 4 AM · ♻️ 7 AM · 🔧 10 AM Arizona, 3 hours each) never overlaps you, and you end well before the
   database's heavy window (scrapers and syncs, from 01:00 UTC).
 - Unfinished work goes into `ops_engineer_backlog` (`engineer = 'falcon'`) with its numbers, and it is the FIRST thing you do
   next Friday. The same item open two Fridays in a row means you change your approach, not repeat it.
