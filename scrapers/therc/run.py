@@ -148,6 +148,21 @@ def _text(fragment: str) -> str:
     return re.sub(r"[ \t]+", " ", html_mod.unescape(t)).strip()
 
 
+# The office publishes NO amenity field (see «NOT PUBLISHED» above), so the ad's own «الوصف» block is the
+# only statement of kitchen / lift / parking / maid room and prose is lawful there — YES or nothing, never
+# no (ADVANCED_FILTER_SOURCE_TRUTH §2). Its bullets («*», «•», «✔️», «✅») are statements of their own, so a
+# negation in one never reaches the next. 236 of 447 live descriptions name a kitchen; 0 were stored
+# (ops_af_score 2026-10-08 therc 0 of 5 findable, 🔬 AF engineer).
+_BULLETS = re.compile(r"\s[*•]\s|[✔✅☑]\ufe0f?")
+
+
+def description_amenities(description: Optional[str]) -> dict[str, bool]:
+    if not description:
+        return {}
+    said = N.amenities_from_lines(_BULLETS.sub("\n", description))
+    return {k: True for k, v in said.items() if v is True}
+
+
 def _jsonld_listing(page: str) -> dict:
     """The per-listing RealEstateListing block. The page also carries a site-level RealEstateAgent
     block (office name/phone) and a BreadcrumbList — both deliberately ignored."""
@@ -267,6 +282,7 @@ def map_listing(url: str, page: str, lastmod: Optional[str]) -> Optional[tuple[d
         price_total = price
 
     description = _redact(_text(_DESC.search(body).group(1))) if _DESC.search(body) else None
+    said = description_amenities(description)
     photos = _gallery(body)
     if not photos and isinstance(ld.get("image"), str):
         photos = [ld["image"]]
@@ -329,6 +345,7 @@ def map_listing(url: str, page: str, lastmod: Optional[str]) -> Optional[tuple[d
         "photo_urls": photos,
         "title": _redact(title),
         "description": description,
+        **said,
         "additional_info": extra,
         "source_capture": capture,
         "price_evidence": N.price_evidence(
