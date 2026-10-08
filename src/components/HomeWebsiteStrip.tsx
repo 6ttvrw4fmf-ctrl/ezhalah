@@ -29,10 +29,10 @@ export default function HomeWebsiteStrip() {
       Animated.delay(3200),
       Animated.timing(motion, { toValue: 0, duration: 350, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
     ]);
-    animation.start(({ finished }) => {
-      if (finished) setOffset(value => (value + 1) % roster.names.length);
-    });
-    return () => animation.stop();
+    animation.start();
+    // The roster advances independently of rAF, which browsers can suspend in background tabs.
+    const rotation = setTimeout(() => setOffset(value => (value + 1) % roster.names.length), 3900);
+    return () => { clearTimeout(rotation); animation.stop(); };
   }, [offset, reduced, roster.names.length, motion]);
   const visible = Array.from({ length: Math.min(5, roster.names.length) }, (_, index) => roster.names[(offset + index) % roster.names.length]);
   return (
