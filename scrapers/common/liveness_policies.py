@@ -1412,9 +1412,9 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     "rakez",
     # 2026-10-08: shadow runs read 100% with controls right and nothing to hide — goldendeal
     # 37769087242 (293/293 live), mustqr 37770177620 (1,282 live, 1 first strike), maqam
-    # 37772746090 (42/42), yameen 37773056567 (10/10). Their oracles became callable by the daily
-    # check that night (#6436).
-    "goldendeal", "maqam", "mustqr", "yameen",
+    # 37772746090 (42/42), yameen 37773056567 (10/10), shatri 11:55 UTC (50/50). Their oracles
+    # became callable by the daily check that night (#6436).
+    "goldendeal", "maqam", "mustqr", "yameen", "shatri",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
