@@ -105,7 +105,7 @@ export function auditCapture(agentSrc: string): string[] {
   if (guardAt < 0) bad.push('the busy guard is gone — the debounced write would fire once per revealed card');
   if (stageAt > -1 && guardAt > -1 && stageAt > guardAt)
     bad.push('the busy guard sits ABOVE the staging: leaving mid-search stages nothing and loses the whole turn');
-  if (!/\}, \[busy, msgs, revealCount, afReceipt, guidedPills, completed\]\);/.test(agentSrc))
+  if (!/\}, \[busy, msgs, revealCount, afReceipt, guidedPills, completed, afCanNarrow\]\);/.test(agentSrc))
     bad.push('`completed` is missing from the capture deps — a finished chat can reopen with a live composer');
   if ((agentSrc.match(/flushPendingCapture\(\)/g) ?? []).length < 4)
     bad.push('an abandon path no longer flushes before leaving');
@@ -125,7 +125,7 @@ mustCatch('the staging is deleted, so a flush has nothing to write',
 mustCatch('the busy guard is deleted, so the write fires once per revealed card',
   auditCapture(src.replace('if (busy) return;\n    const timer', 'const timer')));
 mustCatch('`completed` drops out of the capture deps',
-  auditCapture(src.replace(', guidedPills, completed]);', ', guidedPills]);')));
+  auditCapture(src.replace(', guidedPills, completed, afCanNarrow]);', ', guidedPills, afCanNarrow]);')));
 mustCatch('reopening stops preferring the stored transcript',
   auditCapture(src.replace('restoreChat(t)', 'null')));
 check('the audit passes on the real, unmodified source', auditCapture(src).length === 0,
