@@ -159,8 +159,7 @@ _BULLETS = re.compile(r"\s[*•]\s|[✔✅☑]\ufe0f?")
 def description_amenities(description: Optional[str]) -> dict[str, bool]:
     if not description:
         return {}
-    said = N.amenities_from_lines(_BULLETS.sub("\n", description))
-    return {k: True for k, v in said.items() if v is True}
+    return N.prose_amenities_yes(_BULLETS.sub("\n", description))
 
 
 def _jsonld_listing(page: str) -> dict:

@@ -425,16 +425,14 @@ def parse_services(page_html: str) -> dict[str, Any]:
 # Never the whole page: every page also carries the site's ad-creation form and the district's services.
 _DESC_PANEL = re.compile(r'property_block_title">\s*الوصف\s*</h4>.*?<div class="block-body">(.*?)</div>', re.S)
 # Structured elsewhere on the page (parse_services) — never re-read from prose.
-_PROSE_SKIP = {"optical_fibers"}
+_PROSE_SKIP = ("optical_fibers",)
 
 
 def parse_description_amenities(page_html: str) -> dict[str, bool]:
     m = _DESC_PANEL.search(page_html or "")
     if not m:
         return {}
-    said = normalize.amenities_from_lines(normalize.html_block_lines(m.group(1)))
-    # Prose only ever says YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2): «لا يوجد مصعد» stays NULL here.
-    return {k: True for k, v in said.items() if v is True and k not in _PROSE_SKIP}
+    return normalize.prose_amenities_yes(normalize.html_block_lines(m.group(1)), skip=_PROSE_SKIP)
 
 
 def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], str, Optional[str]]:

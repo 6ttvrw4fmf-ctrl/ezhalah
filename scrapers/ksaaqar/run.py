@@ -601,16 +601,14 @@ def _retire_abroad(table: str, abroad: dict[str, str]) -> list[str]:
 # above, re-checked 2026-10-08 on 12226455 and 12226526), so for those the description is the only statement
 # and prose is lawful, four outcomes, line by line. AC and furnished stay structured-only.
 _DESC_BOX = re.compile(r'id="adt-ad-description-box"[^>]*>.*?<p>(.*?)</p>', re.S)
-_PROSE_SKIP = {"air_conditioner", "furnished"}
+_PROSE_SKIP = ("air_conditioner", "furnished")
 
 
 def parse_description_amenities(page_html: str) -> dict[str, bool]:
     m = _DESC_BOX.search(page_html or "")
     if not m:
         return {}
-    said = normalize.amenities_from_lines(normalize.html_block_lines(m.group(1)))
-    # Prose only ever says YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2): «لا يوجد مصعد» stays NULL here.
-    return {k: True for k, v in said.items() if v is True and k not in _PROSE_SKIP}
+    return normalize.prose_amenities_yes(normalize.html_block_lines(m.group(1)), skip=_PROSE_SKIP)
 
 
 def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Optional[dict], str, str]:

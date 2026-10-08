@@ -944,6 +944,13 @@ def amenities_from_lines(raw: Optional[str]) -> dict[str, bool]:
     return {col: next(iter(vals)) for col, vals in seen.items() if len(vals) == 1}
 
 
+def prose_amenities_yes(raw: Optional[str], skip: tuple[str, ...] = ()) -> dict[str, bool]:
+    """Amenities an ad's own PROSE states, for a site with NO structured field for them. Prose only ever
+    says YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2): «لا يوجد مصعد» and a contradiction both stay
+    NULL here, never False. `skip` = columns the site publishes structurally (never read from prose)."""
+    return {k: True for k, v in amenities_from_lines(raw).items() if v is True and k not in skip}
+
+
 def html_block_lines(fragment: Optional[str]) -> str:
     """An HTML fragment (an ad's own description block) as plain text, one line per <br>/<p>/<li>, so a
     negation never crosses into the next statement when it is read by amenities_from_lines()."""
