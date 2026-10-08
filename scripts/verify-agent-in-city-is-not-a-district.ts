@@ -56,8 +56,8 @@ const dir = mkdtempSync(join(tmpdir(), "ezhalah-mut-"));
 const mutFile = join(dir, "agent.ts");
 writeFileSync(mutFile, src.replace(line, "  " + OLD).replace("out.push(`Al ${m[1] ?? m[2]}`)", "out.push(`Al ${m[1]}`)"));
 const mutant = (await liftSymbols(mutFile, SYMBOLS, ["resolveDistrictsFromText"])).resolveDistrictsFromText as Fn;
-if (problems(mutant).length === 0) {
-  console.error("✗ mutation proof failed: the old «in X» regex was not caught");
-  process.exit(1);
-}
+const mustCatch = (label: string, caught: boolean) => {
+  if (!caught) { console.error(`✗ mutation proof failed: ${label} was not caught`); process.exit(1); }
+};
+mustCatch("the 2026-10-08 «in X» regex (a city read as a district)", problems(mutant).length > 0);
 console.log("✓ an English city is never a district filter (7 cases; old regex caught)");

@@ -52,9 +52,12 @@ const mutants: Array<[string, (s: string) => string]> = [
   ['digit guard dropped', (s) => s.replace("if v2 <> v and v2 <> '' and v2 !~ '[0-9٠-٩]'", "if v2 <> v and v2 <> '' and v2 !~ 'ZZZ'")],
   ['strip removed', (s) => s.replace(/-- 2026-10-08: a lone trailing block letter[^\n]*\n[^\n]*\n\s*v2 := regexp_replace\(v2, '[^']+', ''\);\n/, '')],
 ];
+const mustCatch = (label: string, caught: boolean) => {
+  if (!caught) { console.error(`✗ ${label} was NOT caught`); process.exit(1); }
+};
 for (const [name, mut] of mutants) {
   const m = mut(sql);
   if (m === sql) { console.error(`✗ mutant «${name}» did not apply — anchors drifted`); process.exit(1); }
-  if (problems(m).length === 0) { console.error(`✗ mutant «${name}» was NOT caught`); process.exit(1); }
+  mustCatch(`mutant «${name}»`, problems(m).length > 0);
 }
 console.log(`✓ spaced block-letter strip intact in ${newest} (9 cases, 3 mutants caught)`);
