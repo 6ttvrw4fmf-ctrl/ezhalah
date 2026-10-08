@@ -824,14 +824,27 @@ export default function Agent() {
   // is untouched — modeGone still starts false, so its intentional collapse-on-first-message plays
   // exactly as before.
   const [modeGone, setModeGone] = useState(() => replay === '0');
+  // A SAVED CHAT IS OPENING (owner 2026-10-08: «when a logged-in user changes between chats, the empty
+  // home shows for a bit then goes away»). turnToSavedChat clears the old conversation and keeps the
+  // view invisible until the saved one has restored — up to SAVED_OPEN_MAX_WAIT_MS when its transcript
+  // comes from the server. In that gap `msgs` is empty and `?replay=0` has already been consumed, so
+  // every "is this a brand-new chat?" test said yes and painted the new-chat landing around the
+  // invisible conversation: the Filter / AI pill, the «بحث» chip and the rotating example text.
+  // True from the sidebar tap until the opened chat starts fading in; the ref is for effects.
+  const [openingSaved, setOpeningSavedState] = useState(false);
+  const openingSavedRef = useRef(false);
+  const setOpeningSaved = (v: boolean) => { openingSavedRef.current = v; setOpeningSavedState(v); };
   useEffect(() => {
+    // A restored saved chat lands settled, with no collapse animation (same rule as replay === '0').
+    if (modeSearched && !modeGone && openingSavedRef.current) { setModeGone(true); return; }
     if (modeSearched && !modeGone) {
       // Let the CSS collapse (MODE_EASE, 200ms) finish, then unmount. setTimeout, not an animation
       // callback — hidden tabs freeze rAF, and unmount must never hang on one (see afterAnimation).
       const id = setTimeout(() => setModeGone(true), 220);
       return () => clearTimeout(id);
     }
-    if (!modeSearched && modeGone) setModeGone(false); // new chat — pill returns settled
+    // …but a saved chat in the middle of opening is not a new chat: its messages are about to land.
+    if (!modeSearched && modeGone && !openingSavedRef.current) setModeGone(false); // new chat — pill returns settled
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modeSearched]);
   // ChatGPT-style feedback confirmation: a small «شكراً على ملاحظتك» toast at the TOP of the chat
@@ -3758,6 +3771,7 @@ export default function Agent() {
     // the fade drops this open instead of loading it over the newer screen.
     const token = ++savedOpenTokenRef.current;
     const epochAtTap = conversationEpochRef.current;
+    setOpeningSaved(true);
     runAfterAnimation(
       (onFinished) => Animated.timing(freshFade, { toValue: 0, duration: 110, useNativeDriver: true }).start(onFinished),
       () => {
@@ -3769,6 +3783,7 @@ export default function Agent() {
         const gate = savedOpenGateRef.current ?? Promise.resolve();
         void Promise.race([gate, new Promise<void>((r) => setTimeout(r, SAVED_OPEN_MAX_WAIT_MS))]).then(() => setTimeout(() => {
           if (token !== savedOpenTokenRef.current || mine !== conversationEpochRef.current) return;
+          setOpeningSaved(false);
           Animated.parallel([
             Animated.timing(freshFade, { toValue: 1, duration: 220, useNativeDriver: true }),
             Animated.timing(freshRise, { toValue: 0, duration: 220, useNativeDriver: true }),
@@ -3798,6 +3813,7 @@ export default function Agent() {
         // opened its first round already believing those questions were resolved — the exact bug
         // startFresh's own comment describes, live on the other path. (routine #8, 2026-09-14.)
         resetConversationState();
+        setOpeningSaved(false); // New Chat supersedes a saved chat still opening — its landing is real
         // Forget the last-handled filter/seed so a re-search AFTER New Chat re-runs even if it's
         // identical to a previous one (otherwise the change-detection would skip it and leave just
         // the greeting).
@@ -3844,7 +3860,7 @@ export default function Agent() {
   // replayed history are all excluded structurally), the composer is empty, the user hasn't
   // interacted, no recording, no turn in flight. Filter mode is a different screen (index.tsx) and
   // never renders this component at all.
-  const introLanding = msgs.every((m) => m.role === 'agent' && !!m.greeting);
+  const introLanding = !openingSaved && msgs.every((m) => m.role === 'agent' && !!m.greeting);
   const showIntroExamples =
     introLanding && !introInteracted && !typed && voiceState === 'idle' && !busy;
   const openPlatformPicker = () => {
@@ -3942,7 +3958,7 @@ export default function Agent() {
           pill, owner 2026-08-16: "it stays in the middle, not far right"). Fades + collapses away
           the moment a search happens, in either mode; the wrapper's animated height keeps the chat
           area from snapping up when it leaves. */}
-      {shouldRenderModeSwitch(modeGone, replay) && (
+      {shouldRenderModeSwitch(modeGone, replay, openingSaved) && (
         <View style={[s.modeWrap, MODE_EASE, modeSearched && s.modeWrapHidden]}>
           <ModeSwitch active="agent" onSwitch={() => router.replace('/')} t={t} />
         </View>

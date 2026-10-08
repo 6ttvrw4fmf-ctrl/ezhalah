@@ -50,7 +50,8 @@ check('1c. fresh greeting is created without typing',
 // ── 2. Rotation ONLY on the empty AI landing screen ─────────────────────────────────────────────
 // The predicate is the single gate: greeting-only chat AND untouched AND empty AND idle AND no turn.
 const predicateOk = (src: string) =>
-  /const introLanding = msgs\.every\(\(m\) => m\.role === 'agent' && !!m\.greeting\);/.test(src) &&
+  // `!openingSaved &&` only narrows it: a saved chat mid-open is never the clean entry screen (2026-10-08).
+  /const introLanding = !openingSaved && msgs\.every\(\(m\) => m\.role === 'agent' && !!m\.greeting\);/.test(src) &&
   /introLanding && !introInteracted && !typed && voiceState === 'idle' && !busy/.test(src);
 check('2. visibility predicate = greeting-only chat ∧ untouched ∧ empty ∧ mic idle ∧ not busy', predicateOk(agent));
 check(
