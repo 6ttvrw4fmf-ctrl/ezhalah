@@ -846,6 +846,8 @@ const setMsgs = (u: any) => {
 };
 const setCompleted = (_v: boolean) => { probe.completed++; };
 const conversationEpochRef = { get current() { return world.epoch; } };
+// No saved-chat pre-load in this fixture (2026-10-07): the press must reach loadMoreListings itself.
+const prefetchRef = { current: new Map<string, any>() };
 // THE EXIT, inside the await: the user tapped another chat while the page was in flight.
 const loadMoreListings = async (_q: any, offset: number) => {
   if (world.exitDuringFetch) world.epoch++;

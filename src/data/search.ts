@@ -772,7 +772,7 @@ export function interpretPrice(rawDigits: string, deal: Deal, sizeM2?: number, i
 // here, beside the cursor it is only meaningful next to, rather than in an app-level slot a later
 // (or CANCELLED) search can overwrite. Optional because a transcript persisted before this field
 // existed carries none; see loadMoreListings for what that falls back to.
-export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery; total?: number; pageOffset?: number; hasMore?: boolean; matchTotal?: number; rotationSeed?: string; /** the backend fetch FAILED — an empty list is NOT «no matches» */ fetchFailed?: boolean };
+export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery; total?: number; pageOffset?: number; hasMore?: boolean; matchTotal?: number; rotationSeed?: string; /** the backend fetch FAILED — an empty list is NOT «no matches» */ fetchFailed?: boolean; /** saved chat only: how many cards the user had on screen when it was saved (chatTranscript.ts) */ restoreTo?: number; /** saved chat only: the chat had finished when it was saved */ restoreCompleted?: true };
 
 function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   // A clean TYPE or subcategory GROUP is selected → the server fetch already scoped the rows, so run
