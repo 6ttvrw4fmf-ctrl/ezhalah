@@ -375,6 +375,24 @@ def discover_urls(s: cc.Session) -> tuple[list[str], dict[str, set[str]]]:
     return sitemap_urls(s), {}
 
 
+def status_measured(row: dict) -> bool:
+    """Every term of the page's own «Property Status» cell is one we have measured."""
+    status_raw = (row.get("additional_info") or {}).get("status_raw") or ""
+    return not any(t.strip() not in MEASURED_STATUS for t in status_raw.lower().split(",") if t.strip())
+
+
+def certify_read_alive(row: dict, gone: Optional[bool]) -> dict:
+    """The crawl just read THIS listing's own page and its «Property Status» cell says on offer:
+    that is a direct live reading (db.mark_direct_alive), recorded instead of thrown away
+    (2026-10-08: 175 active, 0 ever verified, while every crawl read every page). Only an
+    affirmative available reading counts: a cell not read (gone None), sold/rented (gone True) or a
+    status term nobody measured certifies nothing. The ad_number comes from the page's own
+    «Property ID», so a page for another listing cannot certify this one."""
+    if gone is False and status_measured(row):
+        db.mark_direct_alive(row, oracle="abeea.detail_page.property_status")
+    return row
+
+
 def fetch_one(url: str) -> Optional[tuple[str, str]]:
     """Fetch a detail page. Returns (body, url) or None."""
     s = _session()
@@ -876,14 +894,14 @@ def main() -> int:
             if gone is None:
                 status_unread.append(u)
                 continue
-            status_raw = (row.get("additional_info") or {}).get("status_raw") or ""
-            if any(t.strip() not in MEASURED_STATUS for t in status_raw.lower().split(",") if t.strip()):
+            if not status_measured(row):
                 unmeasured += 1
             if gone:
                 gone_ct += 1
                 # remember the id so any EXISTING row is pinned inactive after the upserts
                 (sold_com if cat == "commercial" else sold_res).append(row["ad_number"])
                 continue  # don't list sold/rented
+            certify_read_alive(row, gone)
             if args.type != "all" and cat != args.type:
                 continue
             (com_buf if cat == "commercial" else res_buf).append(row)
