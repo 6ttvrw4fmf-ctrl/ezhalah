@@ -4089,7 +4089,7 @@ export default function Agent() {
                     </View>
                   );
                 }
-                // Each reply follows its own language: Arabic on the right with the sparkle on the right; English on the left.
+                // Per-message direction: each reply follows its own language: Arabic on the right with the sparkle on the right; English on the left.
                 const txt = m.text;
                 const rtl = msgRTL(txt);
                 return (
