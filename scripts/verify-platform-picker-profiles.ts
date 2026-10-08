@@ -86,6 +86,7 @@ function verifyRendering(text: string) {
         assert.equal(nodes.find(n => n.type === 'Image').props.source, profile.logo);
         assert.ok(nodes.some(n => n.type === 'Text' && n.children.includes(profile[locale])), 'description visible');
         assert.ok(card.props.accessibilityLabel.includes(profile[locale]), 'description accessible');
+        assert.equal(card.props['aria-pressed'], false, 'unselected toggle communicates its state');
         if (!twoColumns) assert.ok(card.props.style({ pressed: false }).some((v: any) => v?.width === '100%'), 'phone cards use readable full width');
       }
     }

@@ -4063,6 +4063,7 @@ export default function Agent() {
                       accessibilityRole="button"
                       accessibilityLabel={`${t(platform.i18nKey)}. ${description}`}
                       accessibilityState={{ selected }}
+                      aria-pressed={selected}
                       onPress={() => choosePlatform(platform.name)}
                       style={({ pressed }: any) => [s.platformPickerItem, selected && s.platformPickerSelected, pressed && s.platformPickerItemPressed]}
                     >
