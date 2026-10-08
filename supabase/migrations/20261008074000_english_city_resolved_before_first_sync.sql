@@ -1,16 +1,21 @@
 -- New Listings Engineer, 2026-10-08 (owner order 10-07 22:32 UTC): an English-city arrival must carry
--- its city on its FIRST search-index sync.
+-- its city (and its district) on its FIRST search-index sync.
 --
--- Measured: wasalt publishes «Riyadh»/«Jeddah»; listing_native_location_v2's catchall arm finds a city
--- only through listings_arabic_locations. resolve_english_city_overlay() (job 35, :50) writes that row
--- but reads candidates FROM search_listings_ar, so a row inserted city-less by the :22 sync waits for
--- :50 and then the NEXT :22 sync: 1-2 h unfindable by city (3,468 wasalt rows on 10-07 22:35 UTC).
+-- Measured: the hourly chain is :10 district recovery (job 45) -> :20 v1/active matviews (job 17) ->
+-- :22 sync (job 28) -> :50 English-city overlay (job 35). The overlay reads its candidates FROM
+-- search_listings_ar, so an arrival at 05:16 (arkaan 16136653 «Hofuf», muktamel 16138487 «Riyadh») is
+-- served city-less at 05:22, gets its city row at 05:50, reaches v1 at 06:20 and search at 06:22; job
+-- 45 needs v1's city, so its district is recovered at 07:10 and served at 07:22. Two hours unfindable
+-- by district, 1-2 h by city (3,468 wasalt rows on 10-07 22:35 UTC).
 --
--- Fix: resolve_english_city_before_sync() applies the SAME pin (one canonical city, unique inside the
--- region loc_city_map assigns) to raw rows scraped in the last 3 days that have no matched city yet,
--- whether or not they are in search, and job 28 runs it right before sync_search_listings_ar().
--- Job 35 stays as the backstop. mon_detect_english_city_arrival_lag() pages if a served row older
--- than 70 min still has no city although its English city has a unique pin.
+-- Fix, inside job 17 (it already holds the location-pipeline lock the sync waits on):
+--   1. resolve_english_city_before_sync(): the SAME pin as the overlay (one canonical city, unique
+--      inside the region loc_city_map assigns) on raw rows scraped in the last 3 days with no matched
+--      city yet, whether or not they are in search - BEFORE the matviews refresh;
+--   2. refresh_district_recovery() right AFTER listing_native_location_v1 refreshes, so the :22 sync
+--      reads a district recovered from this hour's v1. Job 45 (:10) and job 35 (:50) stay as backstops.
+-- mon_detect_english_city_arrival_lag() pages if a served row older than 70 min still has no city
+-- although its English city pins uniquely.
 CREATE OR REPLACE FUNCTION public.resolve_english_city_before_sync()
  RETURNS integer
  LANGUAGE plpgsql
@@ -105,7 +110,7 @@ begin
     n := n + public.mon_raise('P1', 'english_city_arrival_lag', 'fleet', 'english_city_arrival_lag:unresolved',
       jsonb_build_object('rows', v_bad, 'by_table', v_ex,
         'why', 'Served arrivals older than 70 min still have no city although their English city has one unique catalog pin: no customer can find them by city.',
-        'action', 'Job 28 must run resolve_english_city_before_sync() before sync_search_listings_ar(); check it ran and that the table has id/city/active/scraped_at/transaction_type.'));
+        'action', 'Job 17 must run resolve_english_city_before_sync() before its matview refresh; check it ran and that the table has id/city/active/scraped_at/transaction_type.'));
   end if;
   perform public.mon_resolve_stale_keys('english_city_arrival_lag', live);
   return n;
@@ -129,22 +134,33 @@ begin
 end $$;
 
 do $$
-declare cmd text;
+declare cmd text; out_cmd text;
 begin
-  select command into cmd from cron.job where jobid = 28;
-  if position('resolve_english_city_before_sync' in cmd) = 0 then
-    if position('select * from public.sync_search_listings_ar();' in cmd) = 0 then
-      raise exception 'job 28 anchor not found';
-    end if;
-    perform cron.alter_job(28, command => replace(cmd, 'select * from public.sync_search_listings_ar();',
-      'select public.resolve_english_city_before_sync(); select * from public.sync_search_listings_ar();'));
+  select command into cmd from cron.job where jobid = 17;
+  if position('resolve_english_city_before_sync' in cmd) > 0 then
+    return;
   end if;
+  out_cmd := replace(cmd,
+    'select pg_advisory_xact_lock(hashtext(''location_pipeline:v1_refresh'')); set statement_timeout to ''900s''; ',
+    'select pg_advisory_xact_lock(hashtext(''location_pipeline:v1_refresh'')); set statement_timeout to ''900s''; select public.resolve_english_city_before_sync(); ');
+  out_cmd := replace(out_cmd,
+    'analyze public.listing_native_location_v1; ',
+    'analyze public.listing_native_location_v1; select public.refresh_district_recovery(); ');
+  if out_cmd = cmd or position('resolve_english_city_before_sync' in out_cmd) = 0
+     or position('refresh_district_recovery' in out_cmd) = 0 then
+    raise exception 'job 17 anchors not found - refusing to guess';
+  end if;
+  perform cron.alter_job(17, command => out_cmd);
 end $$;
 
 do $$
+declare cmd text;
 begin
-  if position('resolve_english_city_before_sync' in (select command from cron.job where jobid = 28)) = 0 then
-    raise exception 'job 28 does not run resolve_english_city_before_sync';
+  select command into cmd from cron.job where jobid = 17;
+  if position('resolve_english_city_before_sync' in cmd) = 0
+     or position('resolve_english_city_before_sync' in cmd) > position('refresh materialized view concurrently public.active_listing_ids_v2' in cmd)
+     or position('refresh_district_recovery' in cmd) < position('refresh materialized view concurrently public.listing_native_location_v1' in cmd) then
+    raise exception 'job 17 does not resolve English cities before, and districts after, the v1 refresh';
   end if;
   if position('mon_detect_english_city_arrival_lag' in pg_get_functiondef('public.mon_run_all_detectors()'::regprocedure)) = 0 then
     raise exception 'detector not in roster';
