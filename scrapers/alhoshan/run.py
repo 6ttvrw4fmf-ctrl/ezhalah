@@ -156,17 +156,24 @@ def _items(payload: dict) -> list[dict]:
 
 
 def fetch_page(s: cc.Session, page: int) -> tuple[list[dict], dict]:
+    """(items, meta) of one search page. Raises when the page never answers 200: a failed fetch is
+    not an empty catalogue (2026-10-08: the API answered Cloudflare 502 three nights' runs in a row
+    and the run read «None listings across 1 pages», a 0-row source, instead of the outage)."""
     _throttle()
+    last = "no answer"
     for attempt in range(3):
         try:
             r = s.post(SEARCH, timeout=30, json={"page": page, "limit": PAGE_SIZE})
-        except Exception:
+        except Exception as e:  # noqa: BLE001 — retried below, reported if every try fails
+            last = f"{type(e).__name__}"
             time.sleep(2 * (attempt + 1)); continue
         if r.status_code != 200:
+            last = f"HTTP {r.status_code}"
             time.sleep(2 * (attempt + 1)); continue
         j = r.json()
         return _items(j), (j.get("meta") or {})
-    return [], {}
+    raise RuntimeError(f"search page {page} answered {last} on 3 tries — the source API is failing, "
+                       "not empty")
 
 
 def fetch_media(s: cc.Session, guid: Any) -> Optional[list[str]]:
@@ -356,17 +363,17 @@ def main() -> int:
     args = ap.parse_args()
 
     s = session()
-    items, meta = fetch_page(s, 1)
-    total = meta.get("total")
-    pages = meta.get("totalPages") or 1
-    print(f"Al Hoshan: {total} listings across {pages} pages")
-
+    # begin_run BEFORE the first fetch: a crawl that dies on page 1 must still leave its failure row.
     run_id = None if args.limit_test else db.begin_run("alhoshan")
     res: list[dict] = []
     com: list[dict] = []
     seen = 0
     status: dict[str, int] = {}   # source_status() tally of every item carrying a publicId
     try:
+        items, meta = fetch_page(s, 1)
+        total = meta.get("total")
+        pages = meta.get("totalPages") or 1
+        print(f"Al Hoshan: {total} listings across {pages} pages")
         page = 1
         while True:
             for p in items:
@@ -386,7 +393,7 @@ def main() -> int:
             if not meta.get("hasNext") or page >= pages:
                 break
             page += 1
-            items, meta = fetch_page(s, page)
+            items, meta = fetch_page(s, page)     # raises on a page that never answers
             if not items:
                 # The page before said hasNext. A half-read catalogue is not a complete one.
                 raise RuntimeError(f"search page {page} unreadable after hasNext — refusing a partial catalogue")
