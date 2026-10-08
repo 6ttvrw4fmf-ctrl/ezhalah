@@ -156,3 +156,12 @@ assert.equal(restrict(parsed, []).query, parsed.query);
 const badRestriction = queryRestriction(agent.replace('sources: selectedSourcesForTurn } };', 'sources: [] } };'));
 assert.throws(() => assert.deepEqual(badRestriction(parsed, selectedSlugs).query.sources, selectedSlugs), assert.AssertionError);
 console.log('PASS: short focus/location sentences and the actual parsed query restriction; widened-source mutation caught.');
+
+const sourceLabel = load(read('../src/lib/listingDisplay.ts'), 'sourceName');
+const searchSource = read('../src/data/search.ts');
+const namesExpression = searchSource.match(/const names = (.*);/m)?.[1];
+assert.ok(namesExpression);
+const summaryNames = new Function('q', 't', 'sourceName', `return ${namesExpression};`);
+const translateName = (key: string) => key === 'AQAR' ? 'عقار' : key === 'Wasalt' ? 'وصلت' : key;
+assert.equal(summaryNames({sources:selectedSlugs}, translateName, sourceLabel), 'عقار، وصلت');
+console.log('PASS: selected website summary reuses card naming and deduplicates Aqar monthly without leaking raw slugs.');

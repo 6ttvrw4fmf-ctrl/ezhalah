@@ -1,3 +1,4 @@
+import { sourceName } from '@/lib/listingDisplay';
 import type { Category, Deal } from './taxonomy';
 import type { LocationResolution } from './locations';
 import type { ProximityIntent } from './proximity';
@@ -616,16 +617,6 @@ function locationLines(q: SearchQuery, loc: Locale = getLocale()): string[] {
 // Platform table-prefix → human display name, for the Search Summary's "Platform" line.
 // Values are the i18n KEYS (full display forms, same as the card's sourceName) so searchSummary can t()
 // them → Arabic. (owner 2026-07-08: no English platform names anywhere in the UI.)
-const SOURCE_LABELS: Record<string, string> = {
-  aqar: 'AQAR', wasalt: 'Wasalt', aldarim: 'Aldarim Real Estate', aqargate: 'Aqar Gate', alhoshan: 'Al Hoshan',
-  hajer: 'Hajer Houses Real Estate', sanadak: 'Sanadak', eastabha: 'East Abha Real Estate', aqarcity: 'Aqar City', raghdan: 'Raghdan Real Estate',
-  eaqartabuk: 'Eqar Tabuk', satel: 'Satel', sadin: 'Sadin for Real Estate', toor: 'TOOR', mustqr: 'Mustaqarr Real Estate',
-  ramzalqasim: 'Ramz Al Qassim Real Estate Investment', fursaghyr: 'Fursa Ghyr Real Estate', jazwtn: 'Jazan Watan', mizlaj: 'Mizlaj Real Estate',
-  muktamel: 'Muktamel', aqaratikom: 'Nawait', awal: 'Awal United for Real Estate', alta: 'Alta Real Estate Services', abwbna: 'Abwbna Real Estate', bahadhabab: 'Bahadhabab Real Estate', alobid: 'Alobid Office Real Estate', remal: 'Remal Real Estate', amaall: 'Amaall Real Estate Services', amlakalahsa: 'Amlak Al-Ahsa Real Estate', aqaralsaudia: 'Aqar Al Saudia Real Estate', shmoualshmal: 'Shmou Al Shmal Real Estate', alkhaas: 'Al Khaas', azdad: 'Azdad Al Aqariah',
-  abeea: 'Abeea Real Estate', jurash: 'Jurash Real Estate', alnokhba: 'Al Nokhba', dealapp: 'Deal App',
-  ksaaqar: 'KSA Aqar Real Estate', sadiqeltajer: 'Sadiq Eltajer Real Estate',
-  erapulse: 'Era Pulse', nowaisiry: 'Al Nowaisiry Real Estate', october: '1 October Real Estate', gathern: 'Gathern',
-};
 
 export function searchSummary(q: SearchQuery, loc: Locale = getLocale()): string {
   const { t, tWord, tPlace, tDetailOption, getLocale, arabicOrUnresolved, arabicOrTypeUnresolved } = summaryLanguage(loc);
@@ -646,7 +637,7 @@ export function searchSummary(q: SearchQuery, loc: Locale = getLocale()): string
   // Platform filter line — when the user restricted to specific platforms ("Aqar only"), show which,
   // so the filter is visibly confirmed. (user: "when I type alkhaas it must be al khaas, not aqar".)
   if (q.sources && q.sources.length) {
-    const names = q.sources.map((s) => t(SOURCE_LABELS[s] ?? s)).join('، ');
+    const names = [...new Set(q.sources.map((source) => t(sourceName(source))))].join('، ');
     lines.push(`• ${t('Platform')}: ${names}`);
   }
   // Always show a location line. If nothing was typed/inferred, the search covers the whole Kingdom,
