@@ -453,8 +453,11 @@ def to_catalog(city_ar: Optional[str], region_hint: Union[int, str, None] = None
     # gave, against the exact-location-only rule (honest unknown, never invent). A region label must
     # fall through to the region-only branch below: (None, region_id).
     stripped = n
-    if n.startswith("محافظه "):
-        stripped = n[len("محافظه "):]
+    # «مركز X» (an administrative centre, 2026-10-08 sadiqeltajer «القصيم - مركز قصيباء - …») is named
+    # after its seat town exactly as a governorate is; the same exact-name + region-hint rules apply.
+    for prefix in ("محافظه ", "مركز "):
+        if n.startswith(prefix):
+            stripped = n[len(prefix):]
     if stripped != n:
         hit = _pick_candidate(stripped, hint)
         if hit:
