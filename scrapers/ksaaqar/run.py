@@ -596,6 +596,22 @@ def _retire_abroad(table: str, abroad: dict[str, str]) -> list[str]:
 
 
 # ── map ──────────────────────────────────────────────────────────────────────────────────────────
+# The ad's own description box: <div id="adt-ad-description-box"><h4>الوصف:</h4><p>…</p>. ksaaqar's
+# structured spec list has «التكييف» and «التأثيث» but no kitchen / lift / parking / maid room (30-page census
+# above, re-checked 2026-10-08 on 12226455 and 12226526), so for those the description is the only statement
+# and prose is lawful, four outcomes, line by line. AC and furnished stay structured-only.
+_DESC_BOX = re.compile(r'id="adt-ad-description-box"[^>]*>.*?<p>(.*?)</p>', re.S)
+_PROSE_SKIP = {"air_conditioner", "furnished"}
+
+
+def parse_description_amenities(page_html: str) -> dict[str, bool]:
+    m = _DESC_BOX.search(page_html or "")
+    if not m:
+        return {}
+    said = normalize.amenities_from_lines(normalize.html_block_lines(m.group(1)))
+    return {k: v for k, v in said.items() if k not in _PROSE_SKIP}
+
+
 def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Optional[dict], str, str]:
     """(row, category, skip_reason) — every skip names its own reason for the run notes."""
     link = post.get("link")
@@ -665,6 +681,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         # additional_info.air_conditioning, so the Advanced Filter's AC chip — which reads the column —
         # never saw 393 published «yes» and 89 published «no» (🔬 AF engineer, 2026-10-05).
         "air_conditioner": parse_tristate(page_text, "التكييف"),
+        **parse_description_amenities(page_html),
         "title": title or None,
         "photo_urls": own_photos(page_html),
     }

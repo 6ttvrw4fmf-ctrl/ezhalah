@@ -6,6 +6,7 @@ canonical names the app's search engine knows.
 """
 from __future__ import annotations
 
+import html
 import re
 from typing import Any, Optional
 
@@ -941,6 +942,14 @@ def amenities_from_lines(raw: Optional[str]) -> dict[str, bool]:
         for col, val in amenities_from_text(line).items():
             seen.setdefault(col, set()).add(val)
     return {col: next(iter(vals)) for col, vals in seen.items() if len(vals) == 1}
+
+
+def html_block_lines(fragment: Optional[str]) -> str:
+    """An HTML fragment (an ad's own description block) as plain text, one line per <br>/<p>/<li>, so a
+    negation never crosses into the next statement when it is read by amenities_from_lines()."""
+    raw = re.sub(r"(?i)<br\s*/?>|</(?:p|li|div|h\d)>", "\n", str(fragment or ""))
+    txt = html.unescape(re.sub(r"<[^>]+>", " ", raw))
+    return "\n".join(x.strip() for x in re.split(r"[\n•▪️✅]+", txt) if x.strip())
 
 
 # A clause break ends a fact. «الشقة غير مؤثثة\nمطبخ مغلق» is two statements, and the «غير» of the

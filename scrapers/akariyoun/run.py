@@ -418,6 +418,24 @@ def parse_services(page_html: str) -> dict[str, Any]:
 
 
 
+# The ad's own «الوصف» panel: <h4 class="property_block_title">الوصف</h4> … <div class="block-body"><p>…</p>.
+# akariyoun publishes NO structured amenity field (its spec table is rooms/area/age/facade/street and the
+# «خدمات العقار» services cell), so this panel is the only statement of kitchen / lift / parking / maid room,
+# and prose is lawful there — read with the four outcomes, line by line (ADVANCED_FILTER_SOURCE_TRUTH §2).
+# Never the whole page: every page also carries the site's ad-creation form and the district's services.
+_DESC_PANEL = re.compile(r'property_block_title">\s*الوصف\s*</h4>.*?<div class="block-body">(.*?)</div>', re.S)
+# Structured elsewhere on the page (parse_services) — never re-read from prose.
+_PROSE_SKIP = {"optical_fibers"}
+
+
+def parse_description_amenities(page_html: str) -> dict[str, bool]:
+    m = _DESC_PANEL.search(page_html or "")
+    if not m:
+        return {}
+    said = normalize.amenities_from_lines(normalize.html_block_lines(m.group(1)))
+    return {k: v for k, v in said.items() if k not in _PROSE_SKIP}
+
+
 def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], str, Optional[str]]:
     """(row, category, raw_price_text). row is None when the page is not a real listing."""
     t = _txt(page_html)
@@ -514,6 +532,7 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
         "neighborhood": district,
         "title": title,
         "photo_urls": photos or None,
+        **parse_description_amenities(page_html),
         **parse_services(page_html),
     }
     if is_rent:
