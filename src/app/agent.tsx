@@ -3984,7 +3984,7 @@ export default function Agent() {
             onPress={closePlatformPicker}
             style={s.platformPickerBackdrop}
           />
-          <Animated.View style={[s.platformPickerCard, { opacity: pickerProgress, transform: [{ translateY: pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }, { scale: pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) }] }]}>
+          <Animated.View style={[s.platformPickerCard, { opacity: pickerProgress, transform: [{ translateY: pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }] }]}>
             <View style={s.platformPickerHeader}>
               <View style={s.platformPickerHeading}>
                 <Text style={s.platformPickerTitle}>{t('Choose websites')}</Text>
