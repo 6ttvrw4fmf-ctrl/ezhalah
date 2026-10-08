@@ -991,6 +991,13 @@ or rewrite another engineer's work, and never start a big change in another engi
   status and /404, so 603 withdrawn ads at 3+ strikes stayed up and every grace re-read said «no
   opinion». When a site's evidence rows are all `UNKNOWN … had no opinion`, read what the page says.
 
+- Every reader of one site must share its "no answer" rules (gathern, 2026-10-08): the sweep and
+  the cleanup learned on 10-05 that a 200 on gathern's HOME page is no answer, but the crawl's prune
+  oracle still read it as live. At 04:50 UTC it stamped 18 feed-missing units verified alive; they
+  were the freshest rows, so they became the sweep's controls and every sweep from 05:37 read 0/10
+  and checked nothing. When a sweep quarantines on controls the crawl just saw, look at what stamped
+  those controls first. A control that lands home is now skipped, never counted.
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
