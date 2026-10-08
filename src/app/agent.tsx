@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource } from '@/data/platformPickerProfiles';
+import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources } from '@/data/platformPickerProfiles';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { COMPOSER_INPUT, TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
@@ -679,6 +679,7 @@ export default function Agent() {
   const [platformPickerOpen, setPlatformPickerOpen] = useState(false);
   const [platformPickerSearch, setPlatformPickerSearch] = useState('');
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
+  const [pickerSourceExplicit, setPickerSourceExplicit] = useState(false);
   const selectedPlatforms = useMemo(
     () => PLATFORM_META.filter((platform, index, all) => selectedSources.includes(platform.name) && all.findIndex(p => p.name === platform.name) === index),
     [selectedSources],
@@ -3000,6 +3001,7 @@ export default function Agent() {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
     const selectedSourcesForTurn = pickerSourceSlugs(selectedSources);
+    const sourceChoiceForTurn = pickerSourceExplicit;
     // The user SENT something (typed or voice — sendVoice funnels in here): the small sign-in
     // card retires for the rest of this load (owner 2026-08-29). After the guard, so an empty or
     // busy-refused submit is not a send.
@@ -3023,7 +3025,7 @@ export default function Agent() {
       { const rid = recordChatTurn(v); if (rid) chatIdRef.current = rid; }
       const { q: baseQ, dim } = pendingRefineRef.current;
       await runRefine(
-        selectedSourcesForTurn.length ? { ...baseQ, sources: selectedSourcesForTurn } : baseQ,
+        applyPickerSources(baseQ, selectedSourcesForTurn, sourceChoiceForTurn),
         dim,
         v,
         v,
@@ -3094,15 +3096,15 @@ export default function Agent() {
     // everything the user already said — «شهرية» came back as RentAnnual and a 9.5 rating vanished
     // after one more question (owner-reported 2026-08-29). Explicit changes in the new turn still win.
     let turn = await respond(v, {
-      locale: replyLocale, loggedIn: !!user, history, attemptTexts: saidRef.current, prevQuery: lastQueryRef.current,
+      locale: replyLocale, loggedIn: !!user, history, attemptTexts: saidRef.current, prevQuery: lastQueryRef.current ? applyPickerSources(lastQueryRef.current, selectedSourcesForTurn, sourceChoiceForTurn) : null,
       askCount: askCountRef.current, userMessageId, historyTurnsRaw: historyAll.length,
     });
     if (run.cancelled) return;
     // The website picker is a presentation layer over the existing canonical `sources` query field.
     // Apply it after the agent has parsed the user's message so the model cannot widen the user's
     // explicit choice, and so every downstream path (search, summary, history) sees one query.
-    if (selectedSourcesForTurn.length && turn.kind !== 'interview' && turn.query) {
-      turn = { ...turn, query: { ...turn.query, sources: selectedSourcesForTurn } };
+    if (turn.kind !== 'interview' && turn.query) {
+      turn = { ...turn, query: applyPickerSources(turn.query, selectedSourcesForTurn, sourceChoiceForTurn) };
     }
     // The server is the single decision authority for askCount too (decide.ts) — store whatever it
     // last echoed back. Never reset mid-chat by the client (owner-confirmed default); a brand new
@@ -3393,6 +3395,7 @@ export default function Agent() {
     setPlatformPickerOpen(false);
     setPlatformPickerSearch('');
     setSelectedSources([]);
+    setPickerSourceExplicit(false);
     setMsgs([]);
     setRestoringId(null);
     setCompleted(false);      // terminality is per-conversation — never inherited (see openStatic/openSaved)
@@ -3884,6 +3887,7 @@ export default function Agent() {
     setPlatformPickerSearch('');
   };
   const choosePlatform = (source: string | null) => {
+    setPickerSourceExplicit(true);
     setSelectedSources(names => source === null ? [] : togglePickerSource(names, source));
   };
 

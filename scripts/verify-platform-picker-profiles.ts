@@ -151,20 +151,22 @@ function queryRestriction(text: string) {
   const ast = ts.createSourceFile('agent.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let body = '';
   function visit(n: ts.Node) {
-    if (ts.isIfStatement(n) && n.expression.getText(ast).startsWith('selectedSourcesForTurn.length &&')) body = n.getText(ast);
+    if (ts.isIfStatement(n) && n.expression.getText(ast) === "turn.kind !== 'interview' && turn.query" && n.thenStatement.getText(ast).includes('applyPickerSources(')) body = n.getText(ast);
     ts.forEachChild(n, visit);
   }
   visit(ast);
   assert.ok(body);
-  return new Function('turn', 'selectedSourcesForTurn', body + '\nreturn turn;');
+  return new Function('turn', 'selectedSourcesForTurn', 'sourceChoiceForTurn', 'applyPickerSources', body + '\nreturn turn;');
 }
 const selectedSlugs = slugs(['Aqar', 'Wasalt']);
 const restrict = queryRestriction(agent);
+const applySources = load(source, 'applyPickerSources');
 const parsed = { kind: 'search', query: { sources: ['other'], location: 'الرياض' } };
-assert.deepEqual(restrict(parsed, selectedSlugs).query.sources, selectedSlugs);
-assert.equal(restrict(parsed, []).query, parsed.query);
-const badRestriction = queryRestriction(agent.replace('sources: selectedSourcesForTurn } };', 'sources: [] } };'));
-assert.throws(() => assert.deepEqual(badRestriction(parsed, selectedSlugs).query.sources, selectedSlugs), assert.AssertionError);
+assert.deepEqual(restrict(parsed, selectedSlugs, true, applySources).query.sources, selectedSlugs);
+assert.equal(restrict(parsed, [], false, applySources).query, parsed.query);
+assert.deepEqual(restrict(parsed, [], true, applySources).query.sources, []);
+const badRestriction = queryRestriction(agent.replace('applyPickerSources(turn.query, selectedSourcesForTurn, sourceChoiceForTurn)', 'applyPickerSources(turn.query, selectedSourcesForTurn, false)'));
+assert.throws(() => assert.deepEqual(badRestriction(parsed, selectedSlugs, true, applySources).query.sources, selectedSlugs), assert.AssertionError);
 console.log('PASS: short focus/location sentences and the actual parsed query restriction; widened-source mutation caught.');
 
 const sourceLabel = load(read('../src/lib/listingDisplay.ts'), 'sourceName');
@@ -188,3 +190,12 @@ for (const name of names as string[]) {
   assert.ok(Math.abs(Math.max(layout.visibleWidth, layout.visibleHeight) - 36) <= 0.02, `${name}: same maximum visible logo dimension`);
 }
 console.log('PASS: nationwide-first regional sections preserve every site; full-width rows and equal 36px maximum artwork dimensions.');
+
+assert.deepEqual(applySources({sources:['aqar'],location:'الرياض'},[],true), {sources:[],location:'الرياض'});
+assert.deepEqual(applySources({sources:['aqar']},['wasalt'],true), {sources:['wasalt']});
+assert.equal(applySources(parsed.query,[],false),parsed.query);
+console.log('PASS: all-sites clears inherited restrictions, new explicit choices replace them, and untouched free-text choices remain supported.');
+
+const retainsOldScope = source.replace('return explicit ? { ...query, sources: slugs.slice() } : query;', 'return explicit && slugs.length ? { ...query, sources: slugs.slice() } : query;');
+assert.notEqual(retainsOldScope,source);
+assert.throws(() => assert.deepEqual(load(retainsOldScope,'applyPickerSources')({sources:['aqar']},[],true).sources, []), assert.AssertionError);

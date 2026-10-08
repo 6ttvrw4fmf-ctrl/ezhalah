@@ -171,3 +171,7 @@ export function pickerSourceSlugs(names: string[]): string[] {
 export function togglePickerSource(names: string[], name: string): string[] {
   return names.includes(name) ? names.filter(value => value !== name) : [...names, name];
 }
+
+export function applyPickerSources<Q extends { sources?: string[] }>(query: Q, slugs: string[], explicit: boolean): Q {
+  return explicit ? { ...query, sources: slugs.slice() } : query;
+}

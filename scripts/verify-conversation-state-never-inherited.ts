@@ -77,6 +77,7 @@ const mustCatch = (label: string, caught: boolean, detail = "") =>
 // could only express "null or false or []" and would have silently mis-judged the two fields added
 // on 2026-09-18 whose cleared value is neither (`askCountRef` → 0, `ageFlowTokenRef` → *incremented*).
 const CONVERSATION_SCOPED = [
+  { name: "pickerSourceExplicit", kind: "probe", cleared: (v: any) => v === false, why: "a new conversation accepts source requests from free text until the picker is explicitly used" },
   { name: "selectedSources", kind: "probe", cleared: (v: any) => Array.isArray(v) && v.length === 0, why: "website choices belong to this conversation" },
   { name: "completed", kind: "probe", cleared: (v: any) => v === false, why: "locks the composer AND withholds the «عرض المزيد» row" },
   { name: "restoringId", kind: "probe", cleared: (v: any) => v === null, why: "a saved chat's restore loading line would stand over the NEXT conversation's buttons (2026-10-08)" },
@@ -121,6 +122,7 @@ const setStopped = rec("stopped");
 const setPlatformPickerOpen = rec("platformPickerOpen");
 const setPlatformPickerSearch = rec("platformPickerSearch");
 const setSelectedSources = rec("selectedSources");
+const setPickerSourceExplicit = rec("pickerSourceExplicit");
 const setMsgs = rec("msgs");
 const setCompleted = rec("completed");
 const setRestoringId = rec("restoringId");
