@@ -1828,7 +1828,10 @@ export default function Agent() {
     if (!r.hasMore || r.listings.length >= SECOND_PAGE_CAP) return;
     const offset = r.pageOffset ?? 0;
     const q = r.query;
-    const afFirst: Promise<unknown> = afPrefetchRef.current?.p ?? Promise.resolve();
+    // A chat that must bring back cards it had on screen fetches them first (the user is waiting on
+    // that); otherwise the «تحديد أكثر» probe goes first.
+    const restoring = (r.restoreTo ?? 0) > r.listings.length;
+    const afFirst: Promise<unknown> = restoring ? Promise.resolve() : (afPrefetchRef.current?.p ?? Promise.resolve());
     prefetchRef.current.set(last.id, {
       epoch: conversationEpochRef.current, offset,
       p: afFirst.catch(() => null).then(() => loadMoreListings(q, offset, last.result.rotationSeed)).catch(() => null),
@@ -3464,13 +3467,14 @@ export default function Agent() {
     if (conversationEpochRef.current !== epoch) return;
     const restored = t ? restoreChat(t) : null;
     if (restored) {
+      let restoringDone: Promise<void> = Promise.resolve();
       setMsgs(restored.msgs as unknown as ChatMsg[]);
       {
         // The same asked-set the passive «تحديد أكثر» effect will key on, so it claims this probe.
         const rgp0 = restored.guidedPills as { msgId?: string; asked?: string[] } | null | undefined;
         const lastRes = [...(restored.msgs as unknown as ChatMsg[])].reverse().find((mm) => mm.role === 'results');
         prefetchNextPage(restored.msgs as unknown as ChatMsg[], rgp0 && lastRes && rgp0.msgId === lastRes.id ? rgp0.asked ?? [] : []);
-        void restoreLeftState(restored.msgs as unknown as ChatMsg[]);
+        restoringDone = restoreLeftState(restored.msgs as unknown as ChatMsg[]);
       }
       setDoneTyping(restored.doneTyping);
       setRevealCount(restored.revealCount);
@@ -3486,6 +3490,11 @@ export default function Agent() {
       const rgp = restored.guidedPills as { facets?: GuidedFacet[] } | null | undefined;
       setGuidedPills((rgp && rgp.facets ? { ...rgp, facets: dedupeFacetsByLabel(rgp.facets) } : rgp) as any);
       lastCapturedRef.current = JSON.stringify(t); // what's on screen IS what's stored — no echo write
+      // ONE STEP, NEVER AN IN-BETWEEN SCREEN (owner 2026-10-07: «it shows «عرض المزيد» and the Advanced
+      // Filter, then it changes by itself and shows more below»). The chat is still invisible here
+      // (turnToSavedChat waits on savedOpenGateRef); land only once the cards it had are back.
+      await restoringDone;
+      if (conversationEpochRef.current !== epoch) return;
       landAtLatest();
       return;
     }
@@ -3692,7 +3701,7 @@ export default function Agent() {
         const open = () => {
           startFresh();
           setFilterOrigin(true); // this whole screen instance came from «بحث» — no composer (see the flag's own comment above)
-          if (replay === '0') void openSaved(hid, q, override);
+          if (replay === '0') savedOpenGateRef.current = openSaved(hid, q, override).catch(() => {});
           else sendFilter(q, override);
         };
         if (replay !== '0') open();
@@ -3732,6 +3741,11 @@ export default function Agent() {
   const freshRise = useRef(new Animated.Value(0)).current;
   const freshMountRef = useRef(true);
   const savedOpenTokenRef = useRef(0); // counts sidebar chat-opens; only the latest may swap/fade in (see the replay branch)
+  // Resolves when the saved chat being opened is in its FINAL state (cards back, buttons settled).
+  // turnToSavedChat keeps the chat invisible until then (at most SAVED_OPEN_MAX_WAIT_MS), so a reopened
+  // chat never shows its first cards + «عرض المزيد» + «تحديد أكثر» and then rearranges itself.
+  const savedOpenGateRef = useRef<Promise<void> | null>(null);
+  const SAVED_OPEN_MAX_WAIT_MS = 4000;
   const turnToSavedChat = (open: () => void) => {
     // OPENING A SAVED CHAT FROM THE SIDEBAR IS A PAGE TURN, NOT A HARD CUT (owner 2026-10-03: «the
     // animation feels too tough, it doesn't feel smooth»). It used to wipe the old chat in one
@@ -3752,13 +3766,14 @@ export default function Agent() {
         open(); // startFresh bumps conversationEpochRef; this open owns the new value
         const mine = conversationEpochRef.current;
         freshRise.setValue(8);
-        setTimeout(() => {
+        const gate = savedOpenGateRef.current ?? Promise.resolve();
+        void Promise.race([gate, new Promise<void>((r) => setTimeout(r, SAVED_OPEN_MAX_WAIT_MS))]).then(() => setTimeout(() => {
           if (token !== savedOpenTokenRef.current || mine !== conversationEpochRef.current) return;
           Animated.parallel([
             Animated.timing(freshFade, { toValue: 1, duration: 220, useNativeDriver: true }),
             Animated.timing(freshRise, { toValue: 0, duration: 220, useNativeDriver: true }),
           ]).start();
-        }, 180);
+        }, 180));
       },
       180,
     );

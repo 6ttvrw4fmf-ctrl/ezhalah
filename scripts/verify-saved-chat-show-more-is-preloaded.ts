@@ -19,12 +19,17 @@ function wiring(a: string): string[] {
   if (!/pre\.epoch === epoch && pre\.offset === pageOffset \? await pre\.p : null/.test(lm)) bad.push('loadMore does not consume the pre-loaded page (or trusts it across chats / offsets)');
   if (!/if \(!page \|\| page\.failed\) page = await loadMoreListings\(q, pageOffset, m\.result\.rotationSeed\);/.test(lm)) bad.push('a failed or missing pre-load no longer falls back to a live fetch');
   // Reopens EXACTLY as left (owner 2026-10-07): the cards the user had on screen come back with no tap.
-  if (!/prefetchNextPage\(restored\.msgs[^\n]*\n\s*void restoreLeftState\(restored\.msgs as unknown as ChatMsg\[\]\);/.test(a)) bad.push('a reopened chat no longer brings back the cards the user had on screen');
+  if (!/prefetchNextPage\(restored\.msgs[^\n]*\n\s*restoringDone = restoreLeftState\(restored\.msgs as unknown as ChatMsg\[\]\);/.test(a)) bad.push('a reopened chat no longer brings back the cards the user had on screen');
   const rl = /const restoreLeftState = async [\s\S]*?\n  \};\n/.exec(a)?.[0] ?? '';
   if (!/if \(conversationEpochRef\.current !== epoch\) return;/.test(rl)) bad.push('the restore can write into a chat the user already left');
   if (!/if \(!page \|\| page\.failed\) return;/.test(rl)) bad.push('a failed restore page is treated as data');
   if (!/Math\.min\(r\.restoreTo, mergedLen\)/.test(rl)) bad.push('the restore no longer re-reveals up to what the user had on screen');
   if (!/const revealIsTerminal = r\.restoreCompleted === true && to >= r\.restoreTo;\n\s*if \(revealIsTerminal\) setCompleted\(true\);/.test(rl)) bad.push('a finished chat no longer reopens finished');
+  // ONE STEP (owner 2026-10-07): the chat stays invisible until its cards are back, then lands once.
+  if (!/await restoringDone;\n\s*if \(conversationEpochRef\.current !== epoch\) return;\n\s*landAtLatest\(\);/.test(a)) bad.push('a reopened chat lands (and can be shown) before its cards are back');
+  if (!/if \(replay === '0'\) savedOpenGateRef\.current = openSaved\(/.test(a)) bad.push('the sidebar open no longer hands its completion to the fade-in');
+  const turn = /const turnToSavedChat = [\s\S]*?\n  \};\n/.exec(a)?.[0] ?? '';
+  if (!/Promise\.race\(\[gate, new Promise<void>\(\(r\) => setTimeout\(r, SAVED_OPEN_MAX_WAIT_MS\)\)\]\)/.test(turn)) bad.push('the fade-in no longer waits (bounded) for the reopened chat to be final');
   return bad;
 }
 
@@ -52,7 +57,9 @@ const mustCatch = (label: string, bad: string[]) => { if (!bad.length) failed++;
 console.log('\nSaved chat «عرض المزيد» is pre-loaded at open (owner 2026-10-07)\n');
 check('wiring', wiring(src));
 check('transcript remembers what was on screen (executed)', remembers(serializeChat));
-mustCatch('a reopened chat that forgets the cards on screen', wiring(src.replace(/\n\s*void restoreLeftState\(restored\.msgs as unknown as ChatMsg\[\]\);/, '')));
+mustCatch('a chat that shows its in-between screen again', wiring(src.replace('      await restoringDone;\n', '')));
+mustCatch('a fade-in that no longer waits for the chat to be final', wiring(src.replace('Promise.race([gate, new Promise<void>((r) => setTimeout(r, SAVED_OPEN_MAX_WAIT_MS))])', 'Promise.resolve()')));
+mustCatch('a reopened chat that forgets the cards on screen', wiring(src.replace(/\n\s*restoringDone = restoreLeftState\(restored\.msgs as unknown as ChatMsg\[\]\);/, '')));
 mustCatch('a restore that writes into a chat the user left', wiring(src.replace(/(const restoreLeftState[\s\S]*?)if \(conversationEpochRef\.current !== epoch\) return;/, '$1')));
 mustCatch('a finished chat reopening unfinished', wiring(src.replace('const revealIsTerminal = r.restoreCompleted === true && to >= r.restoreTo;', 'const revealIsTerminal = false;')));
 mustCatch('a restored chat that waits for the tap again', wiring(src.replace(/prefetchNextPage\(restored\.msgs as unknown as ChatMsg\[\], /, 'void (')));
