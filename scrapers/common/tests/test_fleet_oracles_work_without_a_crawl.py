@@ -186,3 +186,31 @@ def test_shatri_without_a_readable_sold_label_answers_nothing(monkeypatch):
     assert SH._fleet_verify_gone(None)("SHT2")[0] == "unknown"
     _shatri(monkeypatch, {}, posts, fail=RuntimeError("/wp/v2/property_label → HTTP 403"))
     assert SH._fleet_verify_gone(None)("SHT2")[0] == "unknown"
+
+
+# aqalemhajer (2026-10-08): its oracle took the crawl's own live node id as the canary.
+from scrapers.aqalemhajer import run as AQH
+
+
+def _aqh(monkeypatch, pages):
+    class _S:
+        def get(self, url, **_k):
+            nid = url.rstrip("/").rsplit("/", 1)[1] if url.rstrip("/") != AQH.BASE else ""
+            status, live = pages.get(nid, (404, False))
+            body = (f'<html data-history-node-id="{nid}"><h1>شقة</h1>' if live else "<html>") + "x" * 3000
+            return _R(status, body, url)
+    monkeypatch.setattr(AQH, "session", lambda: _S())
+    monkeypatch.setattr(AQH, "parse_detail", lambda body: {"title": "شقة", "fields": {}})
+    import scrapers.common.http_liveness as HL
+    monkeypatch.setattr(HL.time, "sleep", lambda *_: None)
+
+
+def test_aqalemhajer_is_callable_by_the_daily_check_with_its_control_as_canary(monkeypatch):
+    assert F.SITES["aqalemhajer"] == "scrapers.aqalemhajer.run:_make_verify_gone()"
+    _aqh(monkeypatch, {"9": (200, True), "1": (200, True), "2": (404, False)})
+    p = AQH.PREFIX
+    verify = AQH._make_verify_gone({"ad_number": f"{p}9"})
+    assert verify(f"{p}1")[0] == "live" and verify(f"{p}2")[0] == "gone"
+    # no control: a live page still reads live, but no removal is believed
+    blind = AQH._make_verify_gone(None)
+    assert blind(f"{p}1")[0] == "live" and blind(f"{p}2")[0] == "unknown"
