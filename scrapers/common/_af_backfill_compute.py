@@ -16,6 +16,17 @@ def rows(c, table, sel):
         lo += 1000
 
 
+BATCH = "af-2026-10-08-prose"
+OUT: list[dict] = []
+SKIP = {("therc_residential_listings", 10283466, "air_conditioner")}   # «تمديدات … المكيفات جاهزة» = prepared
+
+
+def emit(table, rid, col, val):
+    if (table, int(rid), col) in SKIP:
+        return
+    OUT.append({"batch": BATCH, "src_table": table, "listing_id": int(rid), "col": col, "val": val})
+
+
 def main():
     c = sb()
     n = 0
@@ -24,7 +35,7 @@ def main():
         for r in rows(c, table, "id,description," + COLS):
             for col, v in fn(r).items():
                 if v is True and r.get(col) is None:
-                    print(f"BF|{table}|{r['id']}|{col}|t"); n += 1
+                    emit(table, r["id"], col, "t"); n += 1
     for r in rows(c, "arkaan_residential_listings", "id,direction,source_capture,additional_info"):
         if r.get("direction") is not None:
             continue
@@ -34,8 +45,10 @@ def main():
             continue
         d = N.street_from_prose(ad)[1]
         if d:
-            print(f"BF|arkaan_residential_listings|{r['id']}|direction|{d}"); n += 1
-    print(f"BF_TOTAL {n}")
+            emit("arkaan_residential_listings", r["id"], "direction", d); n += 1
+    for i in range(0, len(OUT), 500):
+        c.table("ops_af_backfill_staging").upsert(OUT[i:i + 500], on_conflict="batch,src_table,listing_id,col").execute()
+    print(f"BF_TOTAL computed={n} staged={len(OUT)}")
 
 
 if __name__ == "__main__":
