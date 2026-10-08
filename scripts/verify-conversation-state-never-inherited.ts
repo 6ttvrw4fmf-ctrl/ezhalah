@@ -78,6 +78,7 @@ const mustCatch = (label: string, caught: boolean, detail = "") =>
 // on 2026-09-18 whose cleared value is neither (`askCountRef` → 0, `ageFlowTokenRef` → *incremented*).
 const CONVERSATION_SCOPED = [
   { name: "completed", kind: "probe", cleared: (v: any) => v === false, why: "locks the composer AND withholds the «عرض المزيد» row" },
+  { name: "restoringId", kind: "probe", cleared: (v: any) => v === null, why: "a saved chat's restore loading line would stand over the NEXT conversation's buttons (2026-10-08)" },
   { name: "msgs", kind: "probe", cleared: (v: any) => Array.isArray(v) && v.length === 0, why: "the previous conversation's bubbles" },
   { name: "busy", kind: "probe", cleared: (v: any) => v === false, why: "a spinner owned by a search that is being abandoned" },
   { name: "stopped", kind: "probe", cleared: (v: any) => v === false, why: "a Stop pressed in the previous conversation" },
@@ -121,6 +122,7 @@ const setPlatformPickerSearch = rec("platformPickerSearch");
 const setSelectedSource = rec("selectedSource");
 const setMsgs = rec("msgs");
 const setCompleted = rec("completed");
+const setRestoringId = rec("restoringId");
 const setFilterOrigin = rec("filterOrigin");
 const setAgeFlow = rec("ageFlow");
 const chatIdRef = { current: "PREVIOUS-CHAT" as unknown };
