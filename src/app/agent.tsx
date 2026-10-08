@@ -4172,7 +4172,7 @@ export default function Agent() {
                     })
                   : m.text;
               return (
-                // Assistant side is stable across message languages; cards remain full width.
+                // Assistant text follows each message language; cards remain full width.
                 <View
                   key={m.id}
                   ref={(n: any) => { msgNodeRef.current[m.id] = n; }}
@@ -4188,7 +4188,7 @@ export default function Agent() {
                 >
                   {/* 1) BRANDED SLOGAN — the Ezhalah mark + its personality line. The row sizes to its
                       content and is pushed to the correct edge by the parent's alignItems. ENGLISH →
-                      mark then text (reads left-to-right, clustered left). ARABIC → text then mark
+                      mark then text (reads left-to-right, clustered left). ARABIC → reversed row
                       (sparkle on the far right). */}
                   {m.slogan ? (
                     <View style={[s.reply, { flexDirection: msgRTL(m.slogan) ? 'row-reverse' : 'row', alignItems: 'center' }]}>
