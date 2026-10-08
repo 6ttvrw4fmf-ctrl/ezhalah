@@ -75,3 +75,25 @@ def test_transport_errors_to_the_end_name_the_error():
     s = _Stub([ConnectionError("reset")] * R._JSON_ATTEMPTS)
     with pytest.raises(RuntimeError, match="no response .*reset"):
         R._json(s, "u", what="roster page 1")
+
+
+class _ByPageSize:
+    """The big one-page roster answers 500 on every try; pages of 100 answer (10-08 04:32–05:20)."""
+
+    def __init__(self):
+        self.urls: list[str] = []
+
+    def get(self, url, timeout=None):
+        self.urls.append(url)
+        if "per_page=1000" in url:
+            return _Resp(500)
+        page = int(url.rsplit("page=", 1)[1])
+        nxt = f"{R.API}?per_page=100&page={page + 1}" if page < 2 else None
+        return _Resp(200, {"data": [{"slug": f"ad-{page}-{i}"} for i in range(3)], "links": {"next": nxt}})
+
+
+def test_a_roster_whose_big_page_keeps_failing_is_walked_in_small_pages():
+    s = _ByPageSize()
+    rows = R.fetch_roster(s)
+    assert sorted(r["slug"] for r in rows) == sorted(f"ad-{p}-{i}" for p in (1, 2) for i in range(3))
+    assert any("per_page=100&page=2" in u for u in s.urls)

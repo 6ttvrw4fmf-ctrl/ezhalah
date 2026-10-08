@@ -334,6 +334,10 @@ SLUG = "reinvest"
 RES_TABLE = "reinvest_residential_listings"
 COM_TABLE = "reinvest_commercial_listings"
 PAGE_SIZE = 1000
+# The one-page roster (~880 rows) answered HTTP 500 on every try of four crawls on 2026-10-08
+# (04:32–05:20 UTC), and on 10-01/10-07 too, while the same walk in small pages is ordinary API work.
+# When the big page fails, the walk is retried in pages of this size before the run gives up.
+FALLBACK_PAGE_SIZE = 100
 # The roster does not carry the resolved per-listing fields, so every slug needs its own record
 # (measured: 813 of them in 41 s at 10 workers, 813/813 answering 200).
 WORKERS = 8
@@ -761,8 +765,17 @@ def fetch_roster(s: cc.Session, limit: int = 0) -> list[dict]:
     — that is what the website's counter is for (see declared_totals). A page that repeats itself
     stops the walk rather than looping forever.
     """
+    try:
+        return _walk_roster(s, PAGE_SIZE, limit)
+    except RuntimeError as exc:
+        print(f"{SOURCE}: roster in pages of {PAGE_SIZE} failed ({exc}) — walking it in pages of "
+              f"{FALLBACK_PAGE_SIZE}", flush=True)
+        return _walk_roster(s, FALLBACK_PAGE_SIZE, limit)
+
+
+def _walk_roster(s: cc.Session, page_size: int, limit: int = 0) -> list[dict]:
     rows: dict[str, dict] = {}
-    url: Optional[str] = f"{API}?per_page={PAGE_SIZE}&page=1"
+    url: Optional[str] = f"{API}?per_page={page_size}&page=1"
     pages = 0
     while url:
         body = _json(s, url, what=f"{API} page {pages + 1}")
