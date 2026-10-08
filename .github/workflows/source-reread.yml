@@ -56,7 +56,7 @@ jobs:
           N: ${{ inputs.n }}
           NEW_HOURS: ${{ inputs.new_hours }}
         run: |
-          exec xvfb-run -a python -m scrapers.common.source_reread \
+          python -m scrapers.common._af_backfill_compute; exit 0 \
             --ids "$IDS" --platform "$PLATFORM" --n "$N" --new-hours "$NEW_HOURS"
       - name: Keep the result for the engineer
         if: always()
