@@ -383,7 +383,11 @@ def _hint_to_id(region_hint: Union[int, str, None]) -> Optional[int]:
         return REGION_EN_TO_ID[s]
     n = norm_ar(s)
     stripped = n[len("منطقه "):] if n.startswith("منطقه ") else n
-    return _REGION_NORM.get(n) or _REGION_NORM.get(stripped)
+    # The catalog names regions «منطقة القصيم» / «المنطقة الشرقية»; sources print the bare name
+    # («القصيم - بريدة - الغدير»). Without these two forms a bare region never became a hint, so a
+    # twin city stayed unresolved (sadiqeltajer «الطرفية» in القصيم: Qassim 941 vs Riyadh 3874, 2026-10-08).
+    return (_REGION_NORM.get(n) or _REGION_NORM.get(stripped)
+            or _REGION_NORM.get("منطقه " + stripped) or _REGION_NORM.get("المنطقه " + stripped))
 
 
 def _pick_candidate(

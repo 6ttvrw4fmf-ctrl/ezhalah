@@ -791,7 +791,11 @@ def _walk_roster(s: cc.Session, page_size: int, limit: int = 0) -> list[dict]:
             break                       # page repeated itself
         if limit and len(rows) >= limit:
             return list(rows.values())[:limit]
-        url = _clean((body.get("links") or {}).get("next"))
+        # The endpoint's own `links.next` drops per_page (10-08: pages of 100 → page 2 came back at
+        # the default size, every row a repeat, and the walk stopped at 100 of ~900). The page size
+        # is ours, so is the next URL; `links.next` only says whether there is one.
+        nxt = _clean((body.get("links") or {}).get("next"))
+        url = f"{API}?per_page={page_size}&page={pages + 1}" if nxt and len(batch) >= page_size else None
     print(f"{SOURCE}: roster {len(rows)} listings over {pages} page(s)", flush=True)
     return list(rows.values())
 

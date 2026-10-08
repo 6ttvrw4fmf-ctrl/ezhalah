@@ -87,13 +87,17 @@ class _ByPageSize:
         self.urls.append(url)
         if "per_page=1000" in url:
             return _Resp(500)
+        assert "per_page=100" in url, url        # the page size must survive every page
         page = int(url.rsplit("page=", 1)[1])
-        nxt = f"{R.API}?per_page=100&page={page + 1}" if page < 2 else None
-        return _Resp(200, {"data": [{"slug": f"ad-{page}-{i}"} for i in range(3)], "links": {"next": nxt}})
+        # the live endpoint's links.next DROPS per_page (10-08), so following it verbatim reads
+        # page 2 at the default size and stops on repeats
+        nxt = f"{R.API}?page={page + 1}" if page < 2 else None
+        return _Resp(200, {"data": [{"slug": f"ad-{page}-{i}"} for i in range(100 if page < 2 else 3)],
+                           "links": {"next": nxt}})
 
 
 def test_a_roster_whose_big_page_keeps_failing_is_walked_in_small_pages():
     s = _ByPageSize()
     rows = R.fetch_roster(s)
-    assert sorted(r["slug"] for r in rows) == sorted(f"ad-{p}-{i}" for p in (1, 2) for i in range(3))
+    assert len(rows) == 103 and {"ad-2-0", "ad-2-2"} <= {r["slug"] for r in rows}
     assert any("per_page=100&page=2" in u for u in s.urls)
