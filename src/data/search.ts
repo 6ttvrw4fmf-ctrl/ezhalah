@@ -439,12 +439,14 @@ export const grouped = (n: number) => n.toLocaleString('en-US');
 // Explicit language for a chat summary; never mutates the interface locale.
 function summaryLanguage(loc: Locale) {
   const tx = (key: string, vars?: Record<string, string | number>) => translate(loc, key, vars);
+  const arabicOrUnresolved = (key: string) => arabicOrPlaceholder(key, loc, LOCATION_UNRESOLVED_AR);
+  const arabicOrTypeUnresolved = (key: string) => arabicOrPlaceholder(key, loc, TYPE_UNRESOLVED_AR);
   return {
     t: tx, getLocale: () => loc,
-    tWord: (key: string) => tWord(key, loc), tPlace: (key: string) => tPlace(key, loc),
+    tWord: (key: string) => arabicOrTypeUnresolved(tWord(key, loc)), tPlace: (key: string) => arabicOrUnresolved(tPlace(key, loc)),
     tPriceTab: (key: string) => tPriceTab(key, loc), tDetailOption: (key: string) => tDetailOption(key, loc),
-    arabicOrUnresolved: (key: string) => arabicOrPlaceholder(key, loc, LOCATION_UNRESOLVED_AR),
-    arabicOrTypeUnresolved: (key: string) => arabicOrPlaceholder(key, loc, TYPE_UNRESOLVED_AR),
+    arabicOrUnresolved,
+    arabicOrTypeUnresolved,
     budgetWords: () => ({ buy: tx('Buy budget'), rent: tx('Rent budget (yearly basis)'), from: tx('From'), to: tx('To'), sar: tx('SAR') }),
   };
 }
