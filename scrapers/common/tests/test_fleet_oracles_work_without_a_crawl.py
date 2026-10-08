@@ -144,3 +144,45 @@ def test_mustqr_without_a_control_or_a_key_removes_nothing(monkeypatch):
     _mustqr(monkeypatch, {}, jwt=RuntimeError("bundle moved"))
     v, why = M._make_verify_gone({"ad_number": "MQ9"})("MQ4")
     assert v == "unknown" and "JWT" in why
+
+
+# shatri (2026-10-08): its oracle needs the label taxonomy only the crawl read.
+from scrapers.shatri import run as SH
+
+
+def _shatri(monkeypatch, labels, posts, fail=None):
+    monkeypatch.setattr(SH, "retry_smarter_session", lambda *a, **k: ("S", []))
+
+    def terms(s):
+        if fail:
+            raise fail
+        return {"property_label": labels}
+    monkeypatch.setattr(SH, "fetch_terms", terms)
+
+    class _P:
+        def __init__(self, platform, signal, session, url_for, **k):
+            self.signal, self.url_for = signal, url_for
+
+        def verify_gone(self, ad):
+            status, body = posts[int(self.url_for(ad).rsplit("/", 1)[1])]
+            v = self.signal(status, _json.dumps(body), False)
+            return (v, "x") if v else ("unknown", "x")
+    monkeypatch.setattr(SH, "LivenessProbe", _P)
+
+
+def test_shatri_is_callable_by_the_daily_check_and_reads_sold_labels(monkeypatch):
+    assert F.SITES["shatri"] == "scrapers.shatri.run:_fleet_verify_gone()"
+    _shatri(monkeypatch, {7: SH.SOLD_LABEL},
+            {1: (200, {"id": 1, "status": "publish", "property_label": []}),
+             2: (200, {"id": 2, "status": "publish", "property_label": [7]}),
+             3: (404, {"code": "rest_post_invalid_id"})})
+    verify = SH._fleet_verify_gone(None)
+    assert [verify(f"SHT{i}")[0] for i in (1, 2, 3)] == ["live", "gone", "gone"]
+
+
+def test_shatri_without_a_readable_sold_label_answers_nothing(monkeypatch):
+    posts = {2: (200, {"id": 2, "status": "publish", "property_label": [7]})}
+    _shatri(monkeypatch, {7: "مميز"}, posts)                  # «تم البيع» no longer in the taxonomy
+    assert SH._fleet_verify_gone(None)("SHT2")[0] == "unknown"
+    _shatri(monkeypatch, {}, posts, fail=RuntimeError("/wp/v2/property_label → HTTP 403"))
+    assert SH._fleet_verify_gone(None)("SHT2")[0] == "unknown"
