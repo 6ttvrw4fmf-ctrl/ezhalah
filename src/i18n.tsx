@@ -573,6 +573,7 @@ const AR: Record<string, string> = {
   'Reload': 'إعادة تحميل',
   'Loading listings — please try again in a few seconds.':
     'يجري تحميل الإعلانات — حاول مرة ثانية بعد لحظات.',
+  'Loading the rest of your listings…': 'جاري تحميل بقية إعلاناتك…',
 
   // Agent chat chrome
   'Ezhalah is searching…': 'إزهله يبحث…',
