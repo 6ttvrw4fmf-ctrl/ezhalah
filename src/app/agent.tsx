@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
+import { PLATFORM_PICKER_PROFILES } from '@/data/platformPickerProfiles';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { COMPOSER_INPUT, TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
@@ -1005,6 +1006,7 @@ export default function Agent() {
   // Same pattern as the home screen: on mobile the sidebar isn't docked, so a hamburger opens it.
   // On desktop it's a permanent column → no button. (user: couldn't see the burger on the phone.)
   const docked = useDocked();
+  const pickerTwoColumns = useAtLeast(560);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // IN-APP AD VIEWER, v2 (owner 2026-10-03, revised after review): a listing from an allowlisted
   // site (lib/inAppViewer.ts) opens INSIDE Ezhalah — a tabbed mini-browser beside the results at/
@@ -4041,22 +4043,29 @@ export default function Agent() {
               <View style={s.platformPickerGrid}>
                 {pickerPlatforms.map((platform) => {
                   const selected = selectedSource === platform.name;
+                  const profile = PLATFORM_PICKER_PROFILES[platform.name];
+                  const description = profile[locale];
                   return (
                     <Pressable
                       key={platform.name}
                       testID={`platform-picker-${platform.name}`}
                       accessibilityRole="button"
-                      accessibilityLabel={t(platform.i18nKey)}
+                      accessibilityLabel={`${t(platform.i18nKey)}. ${description}`}
                       accessibilityState={{ selected }}
                       onPress={() => choosePlatform(platform.name)}
-                      style={({ pressed }: any) => [s.platformPickerItem, selected && s.platformPickerSelected, pressed && s.platformPickerItemPressed]}
+                      style={({ pressed }: any) => [s.platformPickerItem, !pickerTwoColumns && { width: '100%' }, selected && s.platformPickerSelected, pressed && s.platformPickerItemPressed]}
                     >
                       <View style={s.platformPickerLogoFrame}>
-                        <Image source={platform.logo} style={s.platformPickerLogo} contentFit="contain" accessible={false} />
+                        <Image source={profile.logo} style={s.platformPickerLogo} contentFit="contain" accessible={false} />
                       </View>
-                      <Text style={[s.platformPickerItemName, s.platformPickerGridName]} numberOfLines={1}>
-                        {t(platform.i18nKey)}
-                      </Text>
+                      <View style={s.platformPickerItemCopy}>
+                        <Text style={[s.platformPickerItemName, s.platformPickerGridName, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>
+                          {t(platform.i18nKey)}
+                        </Text>
+                        <Text style={[s.platformPickerItemHint, { textAlign: locale === 'ar' ? 'right' : 'left', writingDirection: locale === 'ar' ? 'rtl' : 'ltr' }]}>
+                          {description}
+                        </Text>
+                      </View>
                       {selected ? <Ionicons name="checkmark-circle" size={16} color={colors.primary} /> : null}
                     </Pressable>
                   );
@@ -5233,13 +5242,13 @@ const s = StyleSheet.create({
   platformPickerItemHint: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 11.5, lineHeight: 17, marginTop: 1, textAlign: 'right' },
   platformPickerRule: { height: 1, backgroundColor: colors.line, marginVertical: 13 },
   platformPickerGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 9 },
-  platformPickerItem: { width: '48.5%', minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 15, paddingHorizontal: 9, backgroundColor: colors.surface },
+  platformPickerItem: { width: '48.5%', minHeight: 88, flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 15, paddingHorizontal: 10, paddingVertical: 10, backgroundColor: colors.surface },
   platformPickerSelected: { borderColor: colors.primary, backgroundColor: colors.tint },
   platformPickerItemPressed: { backgroundColor: colors.segTrack },
-  platformPickerLogoFrame: { width: 39, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.paper, flexShrink: 0, overflow: 'hidden' },
-  platformPickerLogo: { width: 32, height: 32 },
+  platformPickerLogoFrame: { width: 60, height: 46, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', flexShrink: 0, overflow: 'hidden' },
+  platformPickerLogo: { width: 58, height: 44 },
   platformPickerItemName: { fontFamily: CHAT_FONT, flex: 1, minWidth: 0, color: colors.ink, fontSize: 13, lineHeight: 19, fontWeight: '600', textAlign: 'right' },
-  platformPickerGridName: { textAlign: 'right' },
+  platformPickerGridName: { flex: 0, textAlign: 'right' },
   platformPickerEmpty: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: 'center', paddingVertical: 28 },
   // The LTR pin that fixes the physical order lives INLINE on the row (Sidebar's LTR_PIN idiom —
   // RNW rejects `direction` inside StyleSheet.create but honours it as an inline style).
