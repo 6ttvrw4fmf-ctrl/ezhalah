@@ -611,6 +611,24 @@ def verify_gone_for(tenant: Tenant, canary: Callable[[], tuple[bool, str]],
     return _verify
 
 
+def make_verify_gone(tenant: Tenant, session_factory: Optional[Callable[[], Any]] = None):
+    """The one-argument oracle the daily direct check calls (fleet_liveness.SITES `_make_verify_gone()`):
+    the crawl's own verify_gone_for + make_canary, with the caller's control row as the canary. The
+    crawl builds the same pair inside its run, so this tenant's ads went unread by the daily check
+    (0 of 293 goldendeal, 42 maqam, 10 yameen checked in time on 2026-10-08)."""
+    sf = session_factory or (lambda: session(tenant))     # the tenant's own Origin/Referer
+
+    def factory(control: Optional[dict] = None):
+        ad = str((control or {}).get("ad_number") or "")
+        pid = ad[len(tenant.prefix):]
+        pid_ok = ad.startswith(tenant.prefix) and pid.isdigit()
+        return verify_gone_for(tenant, make_canary(tenant, int(pid) if pid_ok else None, sf), sf)
+    return factory
+
+
+_make_verify_gone = make_verify_gone(TENANT)
+
+
 def print_dry(source: str, res: list[dict], com: list[dict]) -> None:
     print(f"✓ {source} VALIDATION: {len(res)} residential + {len(com)} commercial (nothing written)")
     for r0 in (res + com)[:12]:
