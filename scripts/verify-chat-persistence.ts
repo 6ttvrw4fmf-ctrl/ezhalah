@@ -248,7 +248,7 @@ check(`agent: a fresh chat clears the conversation id (all ${RESET_EXITS.length}
 // 2026-08-30: the capture also carries `completed` (AF narrowed the search to its final set — see
 // verify-completed-chat-state.ts). The invariant pinned here is unchanged: debounced, content-keyed.
 check('agent: capture serializes the settled state, debounced and content-keyed',
-  /const t = serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed \}\);/.test(agent)
+  /const t = serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow \}\);/.test(agent)
   && /if \(j === lastCapturedRef\.current\) return;/.test(agent)
   && /if \(busy\) return;/.test(agent));
 check('agent: restore reinstates ALL FIVE state slices (msgs, doneTyping, revealCount, afReceipt, guidedPills)',
