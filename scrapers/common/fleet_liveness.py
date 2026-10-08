@@ -23,7 +23,9 @@ PER SITE, EVERY RUN (one matrix job per site, its own run label fleet_liveness:<
      anything else → UNKNOWN, nothing written but "we looked".
   4. Closing controls, and a per-site cap: more hides than max(KILL_FLOOR, KILL_FRAC × active) in
      one run is a broken checker or a block, not a mass delisting. Either failing, no strike and no
-     hide is written (ALIVE stamps stand: a block cannot fabricate a live page, §5.4).
+     hide is written (ALIVE stamps stand: a block cannot fabricate a live page, §5.4). Exception
+     (2026-10-08): when EVERY control read live at both ends, an over-cap batch hides the cap's
+     worth and carries the rest (gathern's capped drain); the cap itself never moves.
   5. Every hide first writes its evidence row (ops_stale_inactivation_probe, verdict GONE, the
      oracle's own reason) so mon_detect_prune_kill_without_source_verdict can account for it.
 
@@ -194,13 +196,20 @@ def controls(client, tables) -> list[dict]:
 
 
 def controls_ok(ctl, oracle) -> tuple[bool, str]:
+    ok, why, _all = _controls_read(ctl, oracle)
+    return ok, why
+
+
+def _controls_read(ctl, oracle) -> tuple[bool, str, bool]:
+    """(gate passed, why, EVERY control read live). The third value gates the capped drain."""
     reads = [read(oracle, r["ad_number"]) for r in ctl]
     alive = sum(v == ALIVE for v, _ in reads)
     # The first two misses, in the oracle's own words: a quarantine must say WHY (block, timeout,
     # redesign) or the next engineer re-runs it blind.
     miss = "; ".join([f"{r['ad_number']}: {why[:120]}" for r, (v, why) in zip(ctl, reads) if v != ALIVE][:2])
     return (canary_environment_ok(alive, len(ctl)),
-            f"controls {alive}/{len(ctl)} live" + (f" ({miss})" if miss else ""))
+            f"controls {alive}/{len(ctl)} live" + (f" ({miss})" if miss else ""),
+            len(ctl) >= MIN_CANARIES and alive == len(ctl))
 
 
 def _fresh(r: dict, since: datetime) -> bool:
@@ -232,7 +241,7 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
         st["active"] = sum(tables.values())
         ctl = controls(client, tables)
         oracle = oracle_for(spec, ctl[0] if ctl else None)
-        ok, why = controls_ok(ctl, oracle)
+        ok, why, open_all = _controls_read(ctl, oracle)
         if not ok:
             st["quarantined"] = f"opening {why}: the site is not answering truthfully, nothing read"
         else:
@@ -293,11 +302,25 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
             st["covered"] = round(100.0 * done / due, 1) if due else 100.0
             kills = [x for x in dead_side if x[1].action == "deactivate"]
             st["would_hide"] = [f"{r['_table']}:{r['id']} {r.get('listing_url')} — {why}" for r, _, why in kills]
-            ok, why = controls_ok(ctl, oracle)
+            ok, why, close_all = _controls_read(ctl, oracle)
+            cap = kill_cap(st["active"])
             if not ok:
                 st["quarantined"] = f"closing {why}: no strike or hide written"
-            elif len(kills) > kill_cap(st["active"]):
-                st["quarantined"] = f"{len(kills)} hides > cap {kill_cap(st['active'])}: no strike or hide written"
+            elif len(kills) > cap and open_all and close_all:
+                # CAPPED DRAIN (2026-10-08, gathern's design: «one run hides at most the kill cap; a
+                # bigger backlog hides the cap's worth and carries the rest»). The cap is unchanged
+                # and never raised. Before, an over-cap batch hid nothing, every run, forever: justsa
+                # read the same 24 ads gone on their own page in three separate runs (10-07 daily,
+                # recheck, 10-08 daily) with its controls live, and kept them on screen because 24 > 10.
+                # Only when EVERY known-live control read live at BOTH ends of the run; otherwise the
+                # over-cap batch is quarantined exactly as before. The carried rows keep their strikes.
+                carried = kills[cap:]
+                dead_side = [x for x in dead_side if not any(x is k for k in carried)]
+                looked += [r for r, _, _ in carried]
+                st["drained"] = f"{len(kills)} hides > cap {cap}: every control live at both ends, " \
+                                f"hiding {cap}, {len(carried)} carried to the next run"
+            elif len(kills) > cap:
+                st["quarantined"] = f"{len(kills)} hides > cap {cap}: no strike or hide written"
             if st["quarantined"]:
                 looked += [r for r, _, _ in dead_side]
             flush()
@@ -325,7 +348,8 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
                 f"covered={st['covered']}% fresh={st['fresh']} alive={st[ALIVE]} dead={st[DEAD]} unknown={st[UNKNOWN]} "
                 f"verified={st['verified']} struck={st['struck']} hidden={st['hidden']} "
                 f"would_hide={len(st['would_hide'])}"
-                + (f" | QUARANTINED: {st['quarantined']}" if st["quarantined"] else ""))
+                + (f" | QUARANTINED: {st['quarantined']}" if st["quarantined"] else "")
+                + (f" | DRAIN: {st['drained']}" if st.get("drained") else ""))
         print(f"{site}: {note}", flush=True)
         for line in st["would_hide"][:20]:
             print(f"  would hide: {line}", flush=True)

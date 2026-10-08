@@ -998,6 +998,12 @@ or rewrite another engineer's work, and never start a big change in another engi
   and checked nothing. When a sweep quarantines on controls the crawl just saw, look at what stamped
   those controls first. A control that lands home is now skipped, never counted.
 
+- A cap that quarantines a whole batch never drains a real backlog (justsa, 2026-10-08): 24 of 97
+  ads read gone on their own page three runs running with live controls, and every run hid none
+  because 24 > the cap of 10, so a quarter of the site stayed dead on screen. fleet_liveness now
+  hides the cap's worth when every control is live at both ends (gathern's drain), else quarantines
+  as before. The cap never moves. A `hides > cap` note two nights running is a stuck site, not a safe one.
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
