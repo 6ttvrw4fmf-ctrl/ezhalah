@@ -4698,14 +4698,14 @@ export default function Agent() {
                   hitSlop={5}
                   // @ts-expect-error web-only DOM props on the RNW host node
                   dataSet={{ ...TAP44 }}
-                  style={({ pressed }: any) => [s.initialSearch, pressed && s.initialSearchPressed]}
+                  style={({ pressed }: any) => [s.initialSearch, selectedPlatforms.length > 0 && s.initialSearchSelected, pressed && s.initialSearchPressed]}
                 >
                   {selectedPlatforms.length ? (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxWidth: 150, height: 28 }} contentContainerStyle={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
                       {selectedPlatforms.map(platform => {
                         const profile = PLATFORM_PICKER_PROFILES[platform.name];
-                        return <View key={platform.name} style={{ width: 30, height: 26, borderRadius: 5, overflow: 'hidden', backgroundColor: profile.layout.dark ? '#163a2c' : '#f4f7f5' }}>
-                          <Image source={profile.logo} style={{ width: 28, height: 24, margin: 1 }} contentFit="contain" accessible={false} />
+                        return <View key={platform.name} style={{ width: 30, height: 26, overflow: 'hidden', backgroundColor: 'transparent' }}>
+                          <Image source={profile.logo} style={{ width: 28, height: 24, margin: 1 }} contentFit="contain" tintColor={profile.layout.dark ? colors.ink : undefined} accessible={false} />
                         </View>;
                       })}
                     </ScrollView>
@@ -5232,6 +5232,7 @@ const s = StyleSheet.create({
   // (wrapped) text simply fills the row, and the buttons stay bottom-aligned.
   composerInputColumn: { flex: 1, minWidth: 0, alignItems: 'stretch', position: 'relative', alignSelf: 'center' },
   initialSearch: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 7, height: 30, paddingHorizontal: 11, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
+  initialSearchSelected: { borderWidth: 0, backgroundColor: 'transparent', paddingHorizontal: 4 },
   initialSearchPressed: { backgroundColor: colors.segTrack },
   initialSearchIcon: { width: 17, height: 17 },
   selectedSearchLogo: { width: 21, height: 21, borderRadius: 5 },
