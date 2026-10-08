@@ -236,3 +236,29 @@ def test_photos_are_captured():
     assert row["photo_urls"] == ["https://suwar.sa/wp-content/uploads/2026/07/708-01.jpg"]
     bare, _ = R.map_listing(_post(photo=False), _detail())
     assert bare["photo_urls"] == [], "no photo at source stays empty, never a placeholder"
+
+
+# ── «مؤسس مصعد» is a prepared shaft, not a lift (🔬 AF engineer, 2026-10-08) ─────────────────────
+# It was mapped to elevator=True: 22 live listings answered «مصعد: نعم» to a customer who filtered for
+# a lift. And «مصعدين» (two lifts) was not mapped at all, so 3 real lifts stayed NULL.
+def test_a_prepared_lift_shaft_is_not_a_lift_and_clears_the_stale_yes(monkeypatch):
+    AUTHORITATIVE_NULL = getattr(R.db, "AUTHORITATIVE_NULL", None) or object()   # db is stubbed above
+    monkeypatch.setattr(R.db, "AUTHORITATIVE_NULL", AUTHORITATIVE_NULL, raising=False)
+    row, _ = R.map_listing(_post(features=("مؤسس مصعد", "موقف خاص")), _detail())
+    assert row["elevator"] is AUTHORITATIVE_NULL, "a shaft is unknown, and the old True must be cleared"
+    assert row["parking"] is True
+
+
+def test_two_lifts_is_a_lift():
+    row, _ = R.map_listing(_post(features=("مصعدين",)), _detail())
+    assert row["elevator"] is True
+
+
+def test_a_real_lift_beside_a_shaft_term_is_still_a_lift():
+    row, _ = R.map_listing(_post(features=("مصعد", "مؤسس مصعد")), _detail())
+    assert row["elevator"] is True
+
+
+def test_no_lift_term_writes_nothing():
+    row, _ = R.map_listing(_post(features=("موقف خاص",)), _detail())
+    assert "elevator" not in row or row["elevator"] is None
