@@ -109,3 +109,38 @@ def test_nuzul_oracle_withholds_removal_when_the_control_no_longer_echoes():
     sf, _ = _stub({2: (404, None), 9: (404, None)})
     verdict, why = G.make_verify_gone(G.TENANT, sf)({"ad_number": f"{p}9"})(f"{p}2")
     assert verdict == "unknown" and "withheld" in why
+
+
+# mustqr (2026-10-08): its oracle reads module state the crawl arms; the daily check arms it itself.
+from scrapers.mustqr import run as M
+
+
+def _mustqr(monkeypatch, table, jwt="eyJ.a.b"):
+    M.set_liveness_oracle(None, "", [])
+    monkeypatch.setattr(M, "session", lambda: "S")
+    if isinstance(jwt, Exception):
+        monkeypatch.setattr(M, "fetch_jwt", lambda s: (_ for _ in ()).throw(jwt))
+    else:
+        monkeypatch.setattr(M, "fetch_jwt", lambda s: jwt)
+    monkeypatch.setattr(M, "_oracle_fetch", lambda pid: (200, table.get(pid, [])))
+
+
+def test_mustqr_oracle_is_armed_by_the_daily_check_with_its_control_as_canary(monkeypatch):
+    assert F.SITES["mustqr"] == "scrapers.mustqr.run:_make_verify_gone()"
+    _mustqr(monkeypatch, {"9": [{"id": 9, "status": "متاح"}], "1": [{"id": 1, "status": "متاح"}],
+                          "3": [{"id": 3, "status": "مؤجر"}]})
+    verify = M._make_verify_gone({"ad_number": "MQ9"})
+    assert verify("MQ1")[0] == "live"
+    assert verify("MQ3")[0] == "gone"                         # retired in place, control 9 available
+    assert verify("MQ4")[0] == "gone"                         # no longer in the source's table
+    assert M._oracle["canary_pids"] == ["9"] and M._oracle["jwt"] == "eyJ.a.b"
+
+
+def test_mustqr_without_a_control_or_a_key_removes_nothing(monkeypatch):
+    # 9 is available at the source: only a control the CALLER handed in may vouch for a removal
+    _mustqr(monkeypatch, {"1": [{"id": 1, "status": "متاح"}], "9": [{"id": 9, "status": "متاح"}]})
+    blind = M._make_verify_gone(None)
+    assert blind("MQ1")[0] == "live" and blind("MQ4")[0] == "unknown"
+    _mustqr(monkeypatch, {}, jwt=RuntimeError("bundle moved"))
+    v, why = M._make_verify_gone({"ad_number": "MQ9"})("MQ4")
+    assert v == "unknown" and "JWT" in why

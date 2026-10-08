@@ -79,13 +79,15 @@ SITES: dict[str, str] = {
         "sakan", "sanadak", "sodasyat", "sokok", "sukna", "tamyaz", "tuba", "villassa",
         # 2026-10-08: the Nuzul tenants (goldendeal engine). Their oracle used to be built only
         # inside the crawl, so 345 ads (goldendeal 293, maqam 42, yameen 10) were never checked.
-        "goldendeal", "maqam", "yameen")},
+        "goldendeal", "maqam", "yameen",
+        # 2026-10-08: its crawl reads the API from CI daily (1,290 records); the old "403 CONNECT"
+        # note was this container's egress. 1,283 ads, never checked.
+        "mustqr")},
 }
 
 # NOT here, and why (shadow run 36490769167, 2026-09-28): mizlaj, nowaisiry, eastabha and muktamel —
 # their oracles have no "live" answer by design (a 200 is UNKNOWN), so no control can ever pass and
-# nothing could be verified; alrifai — its "live" needs the crawl's own catalogue of that run;
-# mustqr — its API refuses GitHub Actions egress; masar — one listing, and the control gate needs five.
+# nothing could be verified; alrifai — its "live" needs the crawl's own catalogue of that run; masar — one listing, and the control gate needs five.
 
 # Sites whose shadow run was read and found right (liveness_policies.FLEET_DAILY_DIRECT — the same
 # list makes them DIRECT_REVISIT). Everything else only decides.
