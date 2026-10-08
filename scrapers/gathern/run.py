@@ -396,15 +396,38 @@ def detail_session() -> cc.Session:
 _ORACLE_UNIT_RE = re.compile(r"/view/\d+/unit/(\d+)")
 
 
-def _oracle_signal(status: Optional[int], body: str, path_changed: bool) -> Optional[str]:
+_HOME_PATHS = frozenset({"", "/ar", "/en"})
+
+
+def _landed_on_home(requested: str, final: Optional[str]) -> bool:
+    """The read was redirected to gathern's home page (the same test as liveness._landed_on_home and
+    cleanup._landed_on_home; copied, because liveness imports this module)."""
+    from urllib.parse import urlsplit
+    if not final:
+        return False
+    want = urlsplit(requested).path.rstrip("/").lower()
+    got = urlsplit(final).path.rstrip("/").lower()
+    return got in _HOME_PATHS and got != want
+
+
+def _oracle_signal(status: Optional[int], body: str, landed_on_home: bool) -> Optional[str]:
     """gathern's affirmative signals, and nothing else. None == no opinion.
 
-    Mirrors `liveness.py::looks_dead`/`classify` exactly so the crawl and the sweep cannot drift
+    Mirrors `liveness.py::looks_dead`/`classify`/`probe` so the crawl and the sweep cannot drift
     into two different opinions about the same source. The universal law — a 403/429/5xx/timeout is
     never a death — is applied on top of this by `http_liveness.decide()` and is not restatable here.
+
+    The third argument is `_landed_on_home` (see _GathernProbe), not "the path changed". A 200 that
+    is gathern's HOME page is not this unit: gathern answers some removed units with a redirect home
+    (2026-10-05). The sweep and the cleanup learned that on 10-05; this prune did not, so on
+    2026-10-08 04:50 UTC it "self-healed" 18 feed-missing units whose page lands home as verified
+    alive, and those became the sweep's freshest controls: every sweep from 05:37 read its controls
+    0/10 and quarantined itself (no Gathern check for a day).
     """
     if status in (404, 410):
         return "gone"
+    if landed_on_home:
+        return None
     if status == 200:
         # Measured 2026-07-21 (77/80) and unchanged since: gathern serves a HARD 404 for a delisted
         # unit and has no 200-with-dead-marker page, so a 200 is the source still serving it. The
@@ -517,7 +540,19 @@ def _oracle_session():
     return _oracle_session_memo[0]
 
 
-_probe = http_liveness.LivenessProbe(
+class _GathernProbe(http_liveness.LivenessProbe):
+    """The shared direct read, except its third value is `_landed_on_home` instead of "the path
+    changed" (a live unit may gain a locale prefix; only a landing on the home page is no answer)."""
+
+    def fetch(self, url: str) -> tuple[Optional[int], str, bool]:
+        try:
+            r = self.session().get(url, timeout=self.timeout, allow_redirects=True)
+        except Exception:  # noqa: BLE001 — an unreachable source is never proof of death
+            return None, "", False
+        return r.status_code, (r.text or ""), _landed_on_home(url, str(getattr(r, "url", "") or ""))
+
+
+_probe = _GathernProbe(
     platform="gathern",
     signal=_oracle_signal,
     session=_oracle_session,
