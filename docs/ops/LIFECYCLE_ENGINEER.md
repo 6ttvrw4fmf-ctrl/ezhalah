@@ -1003,6 +1003,7 @@ or rewrite another engineer's work, and never start a big change in another engi
   because 24 > the cap of 10, so a quarter of the site stayed dead on screen. fleet_liveness now
   hides the cap's worth when every control is live at both ends (gathern's drain), else quarantines
   as before. The cap never moves. A `hides > cap` note two nights running is a stuck site, not a safe one.
+- **2026-10-08 (♻️, copied by 🔧):** every reader of one site must share that site's «no answer» rules. Gathern's prune oracle still read a home-page landing as live, so those rows became the sweep's controls, and the sweep checked nothing for ~16 h.
 
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
