@@ -4042,13 +4042,13 @@ export default function Agent() {
                 style={({ pressed }: any) => [s.platformPickerAll, !selectedSources.length && s.platformPickerSelected, pressed && s.platformPickerItemPressed]}
               >
                 <View style={s.platformPickerAllMark}>
-                  <Image source={require('../../assets/icons/eagle-search.svg')} style={{ width: 36, height: 36 }} contentFit="contain" tintColor={colors.primary} accessible={false} />
+                  <Image source={require('../../assets/icons/eagle-search.svg')} style={{ width: 26, height: 26 }} contentFit="contain" tintColor={colors.primary} accessible={false} />
                 </View>
                 <View style={s.platformPickerItemCopy}>
                   <Text style={s.platformPickerItemName}>{t('All websites')}</Text>
                   <Text style={s.platformPickerItemHint}>{t('Search across Saudi Arabia')}</Text>
                 </View>
-                {!selectedSources.length ? <Ionicons name="checkmark-circle" size={19} color={colors.primary} /> : null}
+                {!selectedSources.length ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
               </Pressable>
 
               <View style={s.platformPickerRule} />
@@ -4071,7 +4071,7 @@ export default function Agent() {
                       onPress={() => choosePlatform(platform.name)}
                       style={({ pressed }: any) => [s.platformPickerItem, selected && s.platformPickerSelected, pressed && s.platformPickerItemPressed]}
                     >
-                      <View style={[s.platformPickerLogoFrame, { backgroundColor: profile.layout.dark ? '#163a2c' : '#f4f7f5' }]}>
+                      <View style={[s.platformPickerLogoFrame, { backgroundColor: profile.layout.dark ? '#163a2c' : 'transparent' }]}>
                         <Image source={profile.logo} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" accessible={false} />
                       </View>
                       <View style={s.platformPickerItemCopy}>
@@ -4082,7 +4082,7 @@ export default function Agent() {
                           {description}
                         </Text>
                       </View>
-                      {selected ? <Ionicons name="checkmark-circle" size={16} color={colors.primary} /> : null}
+                      {selected ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
                     </Pressable>
                     </View>
                   );
@@ -5241,32 +5241,32 @@ const s = StyleSheet.create({
 
   // Website picker — a single focused sheet, rather than a second settings screen. The selected
   // logo then stays in the landing chip, making the restriction visible before the user sends.
-  platformPickerOverlay: { ...StyleSheet.absoluteFill, zIndex: 80, alignItems: 'center', justifyContent: IS_WEB ? 'center' : 'flex-end', padding: IS_WEB ? 16 : 0 },
+  platformPickerOverlay: { ...StyleSheet.absoluteFill, zIndex: 80, alignItems: 'center', justifyContent: 'flex-end', padding: IS_WEB ? 16 : 0 },
   platformPickerBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(12, 26, 18, 0.34)' },
   platformPickerCard: { width: '100%', maxWidth: 560, maxHeight: IS_WEB ? '72%' : '80%', backgroundColor: colors.surface, borderRadius: 24, padding: 18, paddingBottom: 20, ...cardShadow, shadowOpacity: 0.2, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 12 },
   platformPickerHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 },
   platformPickerHeading: { flex: 1, minWidth: 0 },
-  platformPickerTitle: { fontFamily: CHAT_FONT, fontSize: 20, lineHeight: 27, fontWeight: '700', color: colors.ink, textAlign: 'right' },
+  platformPickerTitle: { fontFamily: CHAT_FONT, fontSize: 18, lineHeight: 26, fontWeight: '600', color: colors.ink, textAlign: 'right' },
   platformPickerSubtitle: { fontFamily: CHAT_FONT, fontSize: 12.5, lineHeight: 19, color: colors.muted, marginTop: 2, textAlign: 'right' },
-  platformPickerClose: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.tint },
+  platformPickerClose: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
   platformPickerClosePressed: { backgroundColor: colors.segTrack },
   platformPickerSearchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 42, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 13, backgroundColor: colors.paper, paddingHorizontal: 12, marginBottom: 12 },
   platformPickerSearchInput: { flex: 1, minWidth: 0, fontFamily: CHAT_FONT, fontSize: 16, lineHeight: 22, color: colors.ink, paddingVertical: 8, textAlign: 'right', writingDirection: 'rtl', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
   platformPickerList: { minHeight: 0 },
   platformPickerListContent: { paddingBottom: 2 },
-  platformPickerAll: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 68, borderWidth: 0, borderColor: colors.fieldLine, borderRadius: 12, paddingHorizontal: 11, backgroundColor: colors.paper },
-  platformPickerAllMark: { width: 44, height: 44, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.tint },
+  platformPickerAll: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 62, borderWidth: 0, borderColor: colors.fieldLine, borderRadius: 10, paddingHorizontal: 10, backgroundColor: colors.surface },
+  platformPickerAllMark: { width: 32, height: 32, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
   platformPickerItemCopy: { flex: 1, minWidth: 0 },
   platformPickerItemHint: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 11.5, lineHeight: 17, marginTop: 1, textAlign: 'right' },
   platformPickerRule: { height: 1, backgroundColor: colors.line, marginTop: 12, marginBottom: 0 },
   platformPickerGrid: { width: '100%' },
   platformPickerSectionTitle: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 18, fontWeight: '600', paddingHorizontal: 10, paddingTop: 17, paddingBottom: 7 },
-  platformPickerItem: { width: '100%', minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 0, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 10, backgroundColor: colors.surface },
-  platformPickerSelected: { borderColor: colors.primary, backgroundColor: colors.tint },
+  platformPickerItem: { width: '100%', minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 14, borderWidth: 0, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 10, backgroundColor: colors.surface },
+  platformPickerSelected: { borderColor: colors.primary, backgroundColor: colors.paper },
   platformPickerItemPressed: { backgroundColor: colors.segTrack },
-  platformPickerLogoFrame: { width: 44, height: 44, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', flexShrink: 0, overflow: 'hidden' },
+  platformPickerLogoFrame: { width: 32, height: 32, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', flexShrink: 0, overflow: 'hidden' },
   platformPickerLogo: { width: 58, height: 44 },
-  platformPickerItemName: { fontFamily: CHAT_FONT, flex: 1, minWidth: 0, color: colors.ink, fontSize: 15, lineHeight: 21, fontWeight: '600', textAlign: 'right' },
+  platformPickerItemName: { fontFamily: CHAT_FONT, flex: 1, minWidth: 0, color: colors.ink, fontSize: 16, lineHeight: 23, fontWeight: '400', textAlign: 'right' },
   platformPickerGridName: { flex: 0, textAlign: 'right' },
   platformPickerEmpty: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: 'center', paddingVertical: 28 },
   // The LTR pin that fixes the physical order lives INLINE on the row (Sidebar's LTR_PIN idiom —

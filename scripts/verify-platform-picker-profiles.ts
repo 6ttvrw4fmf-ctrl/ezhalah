@@ -187,9 +187,9 @@ assert.equal(group(coverage.platforms[ordered[0]],'ar').key, 'nationwide');
 assert.deepEqual(ordered.slice().sort(), names);
 for (const name of names as string[]) {
   const layout = load(source, 'PLATFORM_PICKER_PROFILES')[name].layout;
-  assert.ok(Math.abs(Math.max(layout.visibleWidth, layout.visibleHeight) - 36) <= 0.02, `${name}: same maximum visible logo dimension`);
+  assert.ok(Math.abs(Math.max(layout.visibleWidth, layout.visibleHeight) - 26) <= 0.02, `${name}: same maximum visible logo dimension`);
 }
-console.log('PASS: nationwide-first regional sections preserve every site; full-width rows and equal 36px maximum artwork dimensions.');
+console.log('PASS: nationwide-first regional sections preserve every site; full-width rows and equal 26px maximum artwork dimensions.');
 
 assert.deepEqual(applySources({sources:['aqar'],location:'الرياض'},[],true), {sources:[],location:'الرياض'});
 assert.deepEqual(applySources({sources:['aqar']},['wasalt'],true), {sources:['wasalt']});
