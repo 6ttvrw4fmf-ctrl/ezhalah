@@ -6,16 +6,22 @@ import ts from 'typescript';
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 const source = read('../src/data/platformPickerProfiles.ts');
-function load(text: string, symbol: string) {
+const coverage = JSON.parse(read('../src/data/platformPickerCoverage.json'));
+const helper = read('../src/lib/platformCoverageSentence.ts');
+function load(text: string, symbol: string, helperText = helper) {
   const js = ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
   const exports: any = {};
-  new Function('require', 'exports', js)((path: string) => path, exports);
+  new Function('require', 'exports', js)((path: string) => {
+    if (path.endsWith('platformPickerCoverage.json')) return coverage;
+    if (path.endsWith('platformCoverageSentence')) return { platformCoverageSentence: load(helperText, 'platformCoverageSentence') };
+    return path;
+  }, exports);
   return exports[symbol];
 }
 const roster = load(read('../src/data/loaderPlatforms.ts'), 'PLATFORM_META').filter((p: any) => !p.logoOnly);
 const names = [...new Set(roster.map((p: any) => p.name))].sort();
-function verify(text: string) {
-  const profiles = load(text, 'PLATFORM_PICKER_PROFILES');
+function verify(text: string, helperText = helper) {
+  const profiles = load(text, 'PLATFORM_PICKER_PROFILES', helperText);
   assert.deepEqual(Object.keys(profiles).sort(), names, 'every searchable picker entry has a profile');
   const files = new Set<string>();
   for (const [name, profile] of Object.entries(profiles) as [string, any][]) {
@@ -40,7 +46,9 @@ function mustCatch(mutant: string) {
   assert.notEqual(mutant, source, 'mutation target exists');
   assert.throws(() => verify(mutant), assert.AssertionError);
 }
-mustCatch(source.replace('منصة للبحث عن عقارات للبيع والإيجار في السعودية.', ''));
+const emptyCopy = helper.replace("return ar ? 'عقارات في مختلف مناطق المملكة.'", "return ar ? ''");
+assert.notEqual(emptyCopy, helper);
+assert.throws(() => verify(source, emptyCopy), assert.AssertionError);
 mustCatch(source.replace('wasalt-sa.png', 'sa-aqar-fm.png'));
 // Execute the actual JSX map: the displayed image and sentence must come from the profile.
 const agent = read('../src/app/agent.tsx');
@@ -81,3 +89,28 @@ function mustCatchRender(mutant: string) {
 mustCatchRender(agent.replace('source={profile.logo}', 'source={platform.logo}'));
 mustCatchRender(agent.replace('{description}\n', '{""}\n'));
 console.log(`PASS: ${names.length} bilingual descriptions; 142 original ZIP logos; missing copy and wrong artwork mutations rejected.`);
+
+const sentence = load(helper, 'platformCoverageSentence');
+const region = (id: number, name: string, count: number) => ({ id, name, en: `Region ${id}`, count });
+const fixture = (regions: any[], total = 100, cities: any[] = []) => ({ state: 'known', total, regions, topCity: cities[0] ?? null });
+assert.equal(sentence(fixture([region(1, 'منطقة الرياض', 100)], 100, [{name:'الرياض',en:'Riyadh',count:100}]), 'ar'), 'عقارات في الرياض.');
+assert.equal(sentence(fixture([region(1, 'منطقة الرياض', 100)]), 'ar'), 'عقارات في منطقة الرياض.');
+assert.equal(sentence(fixture([region(1, 'منطقة الرياض', 80), region(2, 'منطقة مكة المكرمة', 20)]), 'ar'), 'أغلب العقارات في منطقة الرياض.');
+const nationwide = fixture(Array.from({length: 6}, (_, i) => region(i+1, `منطقة ${i}`, i === 0 ? 50 : 10)));
+assert.equal(sentence(nationwide, 'ar'), 'عقارات في مختلف مناطق المملكة.');
+assert.equal(sentence({state:'unknown'}, 'ar'), 'بيانات نطاق العقارات غير متاحة حالياً.');
+assert.equal(sentence(fixture([], 0), 'ar'), 'بيانات نطاق العقارات غير متاحة حالياً.');
+assert.equal(sentence(undefined, 'ar'), 'بيانات نطاق العقارات غير متاحة حالياً.');
+assert.equal(sentence(coverage.platforms.Aqar, 'ar'), 'عقارات في مختلف مناطق المملكة.');
+assert.equal(sentence(coverage.platforms.Wasalt, 'ar'), 'عقارات في مختلف مناطق المملكة.');
+assert.equal(sentence(coverage.platforms.Satel, 'ar'), 'عقارات في الرياض.');
+// Watch a fabricated nationwide fallback and a services biography fail the measured coverage contract.
+function mustCatchCoverage(mutant: string) {
+  assert.notEqual(mutant, helper);
+  const broken = load(mutant, 'platformCoverageSentence');
+  assert.throws(() => assert.equal(broken(fixture([region(1, 'منطقة الرياض', 80), region(2, 'منطقة مكة المكرمة', 20)]), 'ar'), 'أغلب العقارات في منطقة الرياض.'), assert.AssertionError);
+}
+mustCatchCoverage(helper.replace("if (first.count / total >= 0.7)", 'if (false)')
+  .replace("if (first.count > total / 2)", 'if (false)'));
+mustCatchCoverage(helper.replace('أغلب العقارات في ${place}.', 'وساطة وتسويق وإدارة أملاك.'));
+console.log('PASS: location-only sentences reflect cities, regions, nationwide coverage and unknown data; fabricated/service-copy mutations rejected.');
