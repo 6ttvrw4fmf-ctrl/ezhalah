@@ -161,12 +161,30 @@ def test_failed_closing_controls_write_no_strike_or_hide_but_keep_live_stamps(si
     assert not [e for e in c.log if e[0] == "insert"]
 
 
-def test_more_hides_than_the_cap_hide_nothing(site):
-    rows = [_row(i, mc=2) for i in range(1, 6)] + _controls()       # 10 active → cap 3
-    c = site(rows, {f"A{i}": "gone" for i in range(1, 6)})
+def test_more_hides_than_the_cap_hide_nothing_unless_every_control_is_live(site):
+    # 10 active → cap 3. One closing control reads unknown: the over-cap batch is quarantined whole.
+    rows = [_row(i, mc=2) for i in range(1, 6)] + _controls()
+    ans = {f"A{i}": "gone" for i in range(1, 6)}
+    c = site(rows, lambda ad, n: ans.get(ad, "unknown" if (ad == "A100" and n > 6) else "live"))
     st = F.run_site("testsite", shadow=False)
     assert "cap" in st["quarantined"] and st["hidden"] == 0
     assert not [u for i in range(1, 6) for u in _updates(c, i) if "active" in u or "missing_count" in u]
+
+
+def test_more_hides_than_the_cap_drain_the_cap_when_every_control_is_live(site):
+    """2026-10-08 (justsa: 24 ads read gone three runs running, cap 10, nothing hidden for days):
+    with every control live at both ends, the run hides the cap's worth and carries the rest with
+    their strikes untouched. The cap itself never moves."""
+    rows = [_row(i, mc=2) for i in range(1, 6)] + _controls()       # 10 active → cap 3
+    c = site(rows, {f"A{i}": "gone" for i in range(1, 6)})
+    st = F.run_site("testsite", shadow=False)
+    assert st["quarantined"] is None and st["hidden"] == F.kill_cap(10) == 3
+    assert "carried" in st["drained"]
+    hidden = [i for i in range(1, 6) if any(u.get("active") is False for u in _updates(c, i))]
+    carried = [i for i in range(1, 6) if i not in hidden]
+    assert len(hidden) == 3 and len(carried) == 2
+    assert all("active" not in u and "missing_count" not in u for i in carried for u in _updates(c, i))
+    assert len([e for e in c.log if e[0] == "insert"]) == 3          # evidence row for each hide
 
 
 def test_a_site_outside_apply_is_shadow_and_writes_nothing(site):

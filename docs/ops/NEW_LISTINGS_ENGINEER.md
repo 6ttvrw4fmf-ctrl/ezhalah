@@ -544,6 +544,7 @@ Your history, read from the routine log on 2026-10-03:
   fine. Check fresh values.
 - **A monitor must flag OUR claim, not the source's number.**
 - **A correction that isn't enrolled decays silently.**
+- **2026-10-08 (🆕, copied by 🔧):** a migration's check block must EXECUTE the function it replaces. Grepping the text missed a plpgsql name clash (`n` ambiguous), and job 45 failed at 08:10 UTC until the 09:10 run.
 
 ## Your score (computed, never self-graded)
 Your rating is **read from `python -m scrapers.common.new_listings_score`** (one row per website

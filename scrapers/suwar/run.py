@@ -98,7 +98,10 @@ _OWNERSHIP_TOKENS = ("تمليك", "للتمليك", "للبيع")
 # they describe the CONTRACT, not the unit, and no column means "has a plumbing warranty".
 _FEATURE_COLUMNS: dict[str, str] = {
     "مصعد": "elevator",
-    "مؤسس مصعد": "elevator",          # lift shaft built and prepared — the source's own wording
+    "مصعدين": "elevator",             # «two lifts» (3 live listings were left NULL, 2026-10-08)
+    # «مؤسس مصعد» is a lift SHAFT that has been prepared — there is no lift, so it is NOT elevator=yes
+    # (normalize._PREPARED_ONLY; sakan «تأسيس مصعد» 2026-10-07). It served «مصعد: نعم» on 22 live
+    # listings until 2026-10-08 (🔬 AF engineer). It stays verbatim in additional_info.features_ar.
     "موقف خاص": "parking",
     "مواقف خاصة": "parking",
     "غرفة سائق": "driver_room",
@@ -108,6 +111,8 @@ _FEATURE_COLUMNS: dict[str, str] = {
     # «كاميرات مراقبه» (CCTV) and «حوش» (yard) have NO column in the shared listing shape and are
     # deliberately NOT forced into a neighbouring one — they stay verbatim in additional_info.
 }
+
+_SHAFT_ONLY = ("مؤسس مصعد",)
 
 LAST_FETCH_NOTE = "no pages attempted"
 
@@ -361,6 +366,10 @@ def map_listing(post: dict, detail: Optional[dict]) -> tuple[Optional[dict], str
 
     features = _terms(post)
     feature_cols = {col: True for name, col in _FEATURE_COLUMNS.items() if name in features}
+    if "elevator" not in feature_cols and any(f in _SHAFT_ONLY for f in features):
+        # The source published its feature list and named only a prepared shaft: unknown, and a stale
+        # True written by the old mapping must clear (a None-dropping upsert would keep it).
+        feature_cols["elevator"] = db.AUTHORITATIVE_NULL
 
     status = detail.get("status") or ""
     # «غير متاح» must be checked BEFORE «متاح» — it CONTAINS it.
