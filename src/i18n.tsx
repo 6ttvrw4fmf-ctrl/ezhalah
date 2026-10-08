@@ -1580,7 +1580,7 @@ export function t(en: string, vars?: Record<string, string | number>): string {
   return translate(_locale, en, vars);
 }
 
-// Detect the script the user is writing in so the whole UI can follow their keyboard:
+// Detect input/message script; callers decide how to use it. Chat replies never change UI locale:
 // any Arabic letter → 'ar', otherwise any Latin letter → 'en'. Returns null for
 // digit-only/empty/symbol input so we don't flip the language on a lone number.
 const _arScript = /[؀-ۿ]/;
@@ -1645,23 +1645,23 @@ export const ATTRIBUTE_UNRESOLVED_AR = 'بيان غير محدد';
 
 // A property type or category — Arabic translation, or lowercased English (matches the prior
 // "here are villas" phrasing).
-export function tWord(en: string): string {
-  return _locale === 'ar' ? AR[en] ?? en : en.toLowerCase();
+export function tWord(en: string, loc: Locale = _locale): string {
+  return loc === 'ar' ? AR[en] ?? en : en.toLowerCase();
 }
 
 // A stored location string ("Riyadh, Al Malqa District") — translate each comma-separated part.
-export function tPlace(s: string): string {
+export function tPlace(s: string, loc: Locale = _locale): string {
   if (!s) return s;
   return s
     .split(',')
-    .map((p) => t(p.trim()))
+    .map((p) => translate(loc, p.trim()))
     .join('، ');
 }
 
 // A bedrooms / size-band option ("Under 100 m²", "100–300 m²", "600+ m²"). Numbers + unit stay;
 // only the words localize. Bedroom counts (plain digits) pass through untouched.
-export function tDetailOption(opt: string): string {
-  if (_locale !== 'ar') return opt;
+export function tDetailOption(opt: string, loc: Locale = _locale): string {
+  if (loc !== 'ar') return opt;
   if (/^\d+\+?$/.test(opt)) return opt; // bedroom counts
   let s = opt.replace(/^Under\s*/, 'أقل من ');
   s = s.replace(/m²/g, 'م²');
@@ -1670,8 +1670,8 @@ export function tDetailOption(opt: string): string {
 
 // A preset price-tab band ("Under SAR 75k", "SAR 75k–150k", "SAR 3M+"). Localize the words only —
 // Western digits, "k"/"M" abbreviations, the en-dash and "+" all stay.
-export function tPriceTab(opt: string): string {
-  if (_locale !== 'ar') return opt;
+export function tPriceTab(opt: string, loc: Locale = _locale): string {
+  if (loc !== 'ar') return opt;
   let s = opt.replace(/^Under\s*/, 'أقل من ');
   s = s.replace(/SAR/g, 'ر.س');
   return s;

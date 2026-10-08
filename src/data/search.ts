@@ -9,7 +9,7 @@ import { supports } from './platforms';
 // The app's single Arabic folding helper — it documents itself as mirroring the RPC's normalize_ar,
 // so district matching on the client and in the RPC stay one definition. (listingInDistricts)
 import { normalizeArabic } from '../lib/chatSearch';
-import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
+import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, translate, type Locale, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { combinedBudgetParts } from '@/lib/combinedBudget';
 import { withAdvancedLines, type AfFacet } from '@/lib/afSummary';
@@ -436,7 +436,23 @@ export const grouped = (n: number) => n.toLocaleString('en-US');
 // its annual equivalent (×12); a small Buy figure is read as a price PER m² and, when an exact size is
 // known, multiplied to a calculated total. An explicit annual (agent-converted) or a preset band is
 // shown verbatim. Returns the bullet text(s) WITHOUT the leading "• ". (user spec: Filter Price Intelligence.)
-function budgetLines(q: SearchQuery): string[] {
+// Explicit language for a chat summary; never mutates the interface locale.
+function summaryLanguage(loc: Locale) {
+  const tx = (key: string, vars?: Record<string, string | number>) => translate(loc, key, vars);
+  const arabicOrUnresolved = (key: string) => arabicOrPlaceholder(key, loc, LOCATION_UNRESOLVED_AR);
+  const arabicOrTypeUnresolved = (key: string) => arabicOrPlaceholder(key, loc, TYPE_UNRESOLVED_AR);
+  return {
+    t: tx, getLocale: () => loc,
+    tWord: (key: string) => arabicOrTypeUnresolved(tWord(key, loc)), tPlace: (key: string) => arabicOrUnresolved(tPlace(key, loc)),
+    tPriceTab: (key: string) => tPriceTab(key, loc), tDetailOption: (key: string) => tDetailOption(key, loc),
+    arabicOrUnresolved,
+    arabicOrTypeUnresolved,
+    budgetWords: () => ({ buy: tx('Buy budget'), rent: tx('Rent budget (yearly basis)'), from: tx('From'), to: tx('To'), sar: tx('SAR') }),
+  };
+}
+
+function budgetLines(q: SearchQuery, loc: Locale = getLocale()): string[] {
+  const { t, tPriceTab, budgetWords } = summaryLanguage(loc);
   const sar = t('SAR');
   // If the user gave a foreign currency, lead with their original figure so both are visible:
   // "Your budget: USD 100,000" then the SAR line(s) used for the actual search. (user request.)
@@ -522,7 +538,8 @@ function arabicOrTypeUnresolved(s: string): string {
   return arabicOrPlaceholder(s, getLocale(), TYPE_UNRESOLVED_AR);
 }
 
-function locationLines(q: SearchQuery): string[] {
+function locationLines(q: SearchQuery, loc: Locale = getLocale()): string[] {
+  const { t, tPlace, getLocale, arabicOrUnresolved } = summaryLanguage(loc);
   const lm = q.locationMatch;
   if (!lm || lm.kind === 'none') {
     return q.location.trim() ? [`${t('City')}: ${arabicOrUnresolved(tPlace(q.location.trim()))}`] : [];
@@ -610,7 +627,8 @@ const SOURCE_LABELS: Record<string, string> = {
   erapulse: 'Era Pulse', nowaisiry: 'Al Nowaisiry Real Estate', october: '1 October Real Estate', gathern: 'Gathern',
 };
 
-export function searchSummary(q: SearchQuery): string {
+export function searchSummary(q: SearchQuery, loc: Locale = getLocale()): string {
+  const { t, tWord, tPlace, tDetailOption, getLocale, arabicOrUnresolved, arabicOrTypeUnresolved } = summaryLanguage(loc);
   const lines: string[] = [];
   // English keeps the canonical capitalized type ("Villa", "Rest House"); Arabic uses the translation.
   // If the user didn't pick a SPECIFIC type, fall back to the CATEGORY they have selected (Residential/
@@ -633,13 +651,13 @@ export function searchSummary(q: SearchQuery): string {
   }
   // Always show a location line. If nothing was typed/inferred, the search covers the whole Kingdom,
   // so the summary says "City: Saudi Arabia". (user request: empty region → Saudi Arabia.)
-  const locLines = locationLines(q);
+  const locLines = locationLines(q, loc);
   if (locLines.length) for (const l of locLines) lines.push(`• ${l}`);
   else lines.push(`• ${t('City')}: ${t('Saudi Arabia')}`);
   // Filter path: the District field's pick is carried in districtLabel (the location match here is the
   // CITY), so add an explicit District line so the summary reflects the chosen neighborhood. (owner UI request.)
   if (q.districtLabel?.trim()) lines.push(`• ${t('District')}: ${arabicOrUnresolved(tPlace(q.districtLabel.trim()))}`);
-  for (const b of budgetLines(q)) lines.push(`• ${b}`);
+  for (const b of budgetLines(q, loc)) lines.push(`• ${b}`);
   // Category/group-level refinements (filter UI). Each has its own field, so the labels are unambiguous.
   const summaryBeds = effectiveBeds(q);
   if (summaryBeds.length) lines.push(`• ${t('Bedrooms')}: ${summaryBeds.join('، ')}`);
