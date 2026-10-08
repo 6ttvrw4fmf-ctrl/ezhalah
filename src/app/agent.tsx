@@ -685,7 +685,7 @@ export default function Agent() {
     [selectedSources],
   );
   const pickerPlatforms = useMemo(() => {
-    const needle = platformPickerSearch.trim().toLocaleLowerCase();
+    const needle = platformPickerSearch.replace(/\s+/g, '').toLocaleLowerCase();
     const unique = new Map<string, LoaderPlatform>();
     for (const platform of PLATFORM_META) {
       // `logoOnly` brands are intentionally advertised in the loader but have no searchable
@@ -695,7 +695,7 @@ export default function Agent() {
     }
     return Array.from(unique.values()).sort((a, b) => PLATFORM_PICKER_PROFILES[a.name].group.ar.order - PLATFORM_PICKER_PROFILES[b.name].group.ar.order).filter((platform) => {
       if (!needle) return true;
-      return `${platform.name} ${t(platform.i18nKey)}`.toLocaleLowerCase().includes(needle);
+      return `${platform.name} ${t(platform.i18nKey)}`.replace(/\s+/g, '').toLocaleLowerCase().includes(needle);
     });
   }, [platformPickerSearch, t]);
   const [loaderBottomInset, setLoaderBottomInset] = useState<number>();
@@ -4042,13 +4042,13 @@ export default function Agent() {
                 style={({ pressed }: any) => [s.platformPickerAll, !selectedSources.length && s.platformPickerSelected, pressed && s.platformPickerItemPressed]}
               >
                 <View style={s.platformPickerAllMark}>
-                  <Image source={require('../../assets/icons/eagle-search.svg')} style={{ width: 26, height: 26 }} contentFit="contain" tintColor={colors.primary} accessible={false} />
+                  <Image source={require('../../assets/icons/eagle-search.svg')} style={{ width: 26, height: 26 }} contentFit="contain" tintColor={!selectedSources.length ? '#fff' : colors.primary} accessible={false} />
                 </View>
                 <View style={s.platformPickerItemCopy}>
-                  <Text style={s.platformPickerItemName}>{t('All websites')}</Text>
-                  <Text style={s.platformPickerItemHint}>{t('Search across Saudi Arabia')}</Text>
+                  <Text style={[s.platformPickerItemName, !selectedSources.length && { color: '#fff' }]}>{t('All websites')}</Text>
+                  <Text style={[s.platformPickerItemHint, !selectedSources.length && { color: '#e2eee7' }]}>{t('Search across Saudi Arabia')}</Text>
                 </View>
-                {!selectedSources.length ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
+                {!selectedSources.length ? <Ionicons name="checkmark" size={20} color="#fff" /> : null}
               </Pressable>
 
               <View style={s.platformPickerRule} />
@@ -4071,18 +4071,18 @@ export default function Agent() {
                       onPress={() => choosePlatform(platform.name)}
                       style={({ pressed }: any) => [s.platformPickerItem, selected && s.platformPickerSelected, pressed && s.platformPickerItemPressed]}
                     >
-                      <View style={[s.platformPickerLogoFrame, { backgroundColor: profile.layout.dark ? '#163a2c' : 'transparent' }]}>
-                        <Image source={profile.logo} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" accessible={false} />
+                      <View style={s.platformPickerLogoFrame}>
+                        <Image source={profile.logo} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" tintColor={selected ? '#fff' : profile.layout.dark ? colors.ink : undefined} accessible={false} />
                       </View>
                       <View style={s.platformPickerItemCopy}>
-                        <Text style={[s.platformPickerItemName, s.platformPickerGridName, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>
+                        <Text style={[s.platformPickerItemName, s.platformPickerGridName, selected && { color: '#fff' }, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>
                           {t(platform.i18nKey)}
                         </Text>
-                        <Text style={[s.platformPickerItemHint, { textAlign: locale === 'ar' ? 'right' : 'left', writingDirection: locale === 'ar' ? 'rtl' : 'ltr' }]}>
+                        <Text style={[s.platformPickerItemHint, selected && { color: '#e2eee7' }, { textAlign: locale === 'ar' ? 'right' : 'left', writingDirection: locale === 'ar' ? 'rtl' : 'ltr' }]}>
                           {description}
                         </Text>
                       </View>
-                      {selected ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
+                      {selected ? <Ionicons name="checkmark" size={20} color="#fff" /> : null}
                     </Pressable>
                     </View>
                   );
@@ -5263,9 +5263,9 @@ const s = StyleSheet.create({
   platformPickerGrid: { width: '100%' },
   platformPickerSectionTitle: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 18, fontWeight: '600', paddingHorizontal: 10, paddingTop: 17, paddingBottom: 7 },
   platformPickerItem: { width: '100%', minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 14, borderWidth: 0, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 10, backgroundColor: colors.surface },
-  platformPickerSelected: { borderColor: colors.primary, backgroundColor: colors.paper },
+  platformPickerSelected: { borderColor: colors.primary, backgroundColor: colors.primary },
   platformPickerItemPressed: { backgroundColor: colors.segTrack },
-  platformPickerLogoFrame: { width: 32, height: 32, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', flexShrink: 0, overflow: 'hidden' },
+  platformPickerLogoFrame: { width: 56, height: 32, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', flexShrink: 0, overflow: 'hidden' },
   platformPickerLogo: { width: 58, height: 44 },
   platformPickerItemName: { fontFamily: CHAT_FONT, flex: 1, minWidth: 0, color: colors.ink, fontSize: 16, lineHeight: 23, fontWeight: '400', textAlign: 'right' },
   platformPickerGridName: { flex: 0, textAlign: 'right' },

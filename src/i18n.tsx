@@ -191,6 +191,8 @@ const AR: Record<string, string> = {
   ' /yr': ' / سنوياً',
   'Max price': 'السعر الأقصى',
   'Search': 'بحث',
+  'Real-estate websites in one search': 'مواقع عقارية في بحث واحد',
+  'Search across {count} real-estate websites': 'نبحث عبر {count} موقع عقاري',
   'Choose websites': 'اختر المواقع',
   'Choose one or more websites to search only their listings.': 'اختر موقعاً أو أكثر للبحث في عقاراتها فقط.',
   'Search across Saudi Arabia': 'ابحث في جميع المواقع داخل المملكة',

@@ -187,9 +187,10 @@ assert.equal(group(coverage.platforms[ordered[0]],'ar').key, 'nationwide');
 assert.deepEqual(ordered.slice().sort(), names);
 for (const name of names as string[]) {
   const layout = load(source, 'PLATFORM_PICKER_PROFILES')[name].layout;
-  assert.ok(Math.abs(Math.max(layout.visibleWidth, layout.visibleHeight) - 26) <= 0.02, `${name}: same maximum visible logo dimension`);
+  assert.ok(layout.visibleWidth <= 48.02 && layout.visibleHeight <= 26.02, `${name}: bounded readable logo dimensions`);
+  assert.ok(Math.abs(layout.visibleHeight - 26) <= 0.02 || Math.abs(layout.visibleWidth - 26) <= 0.02 || Math.abs(layout.visibleWidth - 48) <= 0.02, `${name}: measured icon or wordmark sizing`);
 }
-console.log('PASS: nationwide-first regional sections preserve every site; full-width rows and equal 26px maximum artwork dimensions.');
+console.log('PASS: nationwide-first regional sections preserve every site; full-width rows and compact icons and readable wordmarks in uniform slots.');
 
 assert.deepEqual(applySources({sources:['aqar'],location:'الرياض'},[],true), {sources:[],location:'الرياض'});
 assert.deepEqual(applySources({sources:['aqar']},['wasalt'],true), {sources:['wasalt']});
@@ -199,3 +200,11 @@ console.log('PASS: all-sites clears inherited restrictions, new explicit choices
 const retainsOldScope = source.replace('return explicit ? { ...query, sources: slugs.slice() } : query;', 'return explicit && slugs.length ? { ...query, sources: slugs.slice() } : query;');
 assert.notEqual(retainsOldScope,source);
 assert.throws(() => assert.deepEqual(load(retainsOldScope,'applyPickerSources')({sources:['aqar']},[],true).sources, []), assert.AssertionError);
+
+const homeRoster = load(source, 'homeWebsiteRoster');
+assert.equal(homeRoster(null).count, null);
+assert.equal(homeRoster(new Set()).count, 149);
+assert.ok(homeRoster(new Set()).names.includes('Deal App'));
+assert.equal(homeRoster(new Set(['Deal App'])).count, 148);
+assert.ok(!homeRoster(new Set(['Deal App'])).names.includes('Deal App'));
+console.log('PASS: homepage count and logos share the complete picker roster; unknown registry remains numberless.');
