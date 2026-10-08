@@ -92,8 +92,15 @@ export const STAY_LENGTH_PRICED = new Set(['gathern', 'aqarmonthly']);
  *  the range is built AROUND the stored value, never written over it. */
 export const priceOf = (row) => {
   if (STAY_LENGTH_PRICED.has(String(row.platform || '').toLowerCase())) return null;
+  // Rent: the search filters on price_annual (a monthly budget is ×12'd on the SERVER), and the card
+  // prints a monthly rent as price_annual ÷ 12 — so that is the figure a customer budgets around. The
+  // old order typed price_annual into the MONTHLY box whenever price_total was null (muktamel 16138529:
+  // 900,000 «a month» for a 75,000/month showroom → total 0, a false «can't find» on 2026-10-08).
+  const annual = Number(row.price_annual);
   const p = row.deal_ar === 'إيجار'
-    ? (row.rent_period_ar === 'شهري' ? row.price_total ?? row.price_annual : row.price_annual ?? row.price_total)
+    ? (Number.isFinite(annual) && annual > 0
+        ? (row.rent_period_ar === 'شهري' ? annual / 12 : annual)
+        : row.price_total)
     : row.price_total ?? row.price_total_effective;
   return Number.isFinite(Number(p)) && Number(p) > 0 ? Number(p) : null;
 };

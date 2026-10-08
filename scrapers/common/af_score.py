@@ -75,6 +75,11 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # the header word is a label, and an appliance list is not the site saying «kitchen» (🔬 decision
     # 2026-10-07, backlog 132, law §6). All 4 gathern «misses» of 2026-10-07 were exactly this.
     "gathern": ("kitchen",),
+    # sanadak's listing object (the RSC payload its page renders) carries kitchenStatusText, acTypeText,
+    # numberElevators / numberMaidRooms / numberParkingAreas, isDriverRoomAvailable and isFurnished. Its
+    # 2026-10-08 «misses» (5 of 8) were all prose («مطبخ راكب», «موقف خاص» in the description) on ads whose
+    # own structured fields are blank: our NULL is the source's answer (law §2). Read by sanadak_page().
+    "sanadak": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "furnished"),
 }
 COL = {n: c for n, _, c, _ in FIELDS}
 _YES = {"true", "1", "نعم", "يوجد", "متوفر"}
@@ -175,11 +180,22 @@ def page_says_yes(lines: list[str], field: str) -> bool:
     return bool(hit) and not all(re.search(NEG + "(?:" + kw + ")", x) for x in hit)
 
 
-def customer_answers(lines: list[str], results: dict[str, str]) -> list[str]:
+def says_yes(lines: list[str], field: str, platform: str = "", page: dict | None = None) -> bool:
+    """The ad states YES. For a field the website publishes structurally, only its structured data can
+    say so (law §2) — the same reading structured_only() scored it by, so a request is never built
+    from prose the score itself refused to believe."""
+    if field in STRUCTURED_ONLY.get(platform, ()):
+        return structured_says(page or {}, field) is True
+    return page_says_yes(lines, field)
+
+
+def customer_answers(lines: list[str], results: dict[str, str], platform: str = "",
+                     page: dict | None = None) -> list[str]:
     """Advanced Filter answers the ad really states as YES: the ones a customer would ask for. Both a stored
     true (does the filter find it) and a stored NULL (the trapping failure) qualify; a stored false never
     does, the customer asking for it would be excluding the ad correctly or the ad disagrees (precision)."""
-    cols = [c for c in (*AMENITY_SLUG, FURNISHED) if results.get(c) in (MATCH, WE_MISS) and page_says_yes(lines, c)]
+    cols = [c for c in (*AMENITY_SLUG, FURNISHED)
+            if results.get(c) in (MATCH, WE_MISS) and says_yes(lines, c, platform, page)]
     return cols[:MAX_ANSWERS]
 
 
@@ -265,6 +281,66 @@ def is_wasalt(url: str) -> bool:
     return "wasalt.sa" in url or "wasalt.com" in url
 
 
+# sanadak's own structured statement per field, read from the listing object its page renders (the scraper's
+# object EXTRACTOR is reused; its mapping is not). A value the object leaves blank says nothing.
+#   kitchenStatusText «نعم - راكب» yes · «لا» no · «نعم - تأسيس فقط» (a prepared point) silent
+#   acTypeText «… راكب» (split/central/window/duct installed) yes · «لا يوجد» no · «تأسيس سبليت» silent
+#   numberElevators / numberMaidRooms / numberParkingAreas: a stated count, ≥1 yes, 0 no
+#   isDriverRoomAvailable: true yes; false is an unticked box on every ad, so silent
+#   isFurnished: present only when the advertiser answered — true yes, false no
+SANADAK_NAMES = {"elevator": "مصعد", "parking": "موقف", "kitchen": "مطبخ", "air_conditioner": "مكيف",
+                 "maid_room": "غرفة خادمة", "driver_room": "غرفة سائق", "furnished": "مفروش"}
+
+
+def _count_says(v) -> bool | None:
+    if isinstance(v, bool) or v in (None, ""):
+        return None
+    try:
+        return int(float(v)) > 0
+    except (TypeError, ValueError):
+        return None
+
+
+def sanadak_says(o: dict) -> dict[str, bool]:
+    k = str(o.get("kitchenStatusText") or "").strip()
+    ac = str(o.get("acTypeText") or "").strip()
+    said = {
+        "kitchen": True if k.startswith("نعم") and "تأسيس" not in k else (False if k == "لا" else None),
+        "air_conditioner": True if "راكب" in ac else (False if ac == "لا يوجد" else None),
+        "elevator": _count_says(o.get("numberElevators")),
+        "maid_room": _count_says(o.get("numberMaidRooms")),
+        "parking": _count_says(o.get("numberParkingAreas")),
+        "driver_room": True if o.get("isDriverRoomAvailable") is True else None,
+        "furnished": o.get("isFurnished") if isinstance(o.get("isFurnished"), bool) else None,
+    }
+    return {f: v for f, v in said.items() if v is not None}
+
+
+def sanadak_page(url: str, fetch=None) -> dict | None:
+    """A sanadak ad read from its own listing object: the structured fields as JSON-LD-shaped
+    additionalProperty rows (what structured_says() reads), the ad's text as evidence lines. None =
+    unreadable (a failed fetch is never wrong)."""
+    if fetch is None:
+        from scrapers.sanadak.run import fetch_one as fetch
+    try:
+        got = fetch(url)
+    except Exception:  # noqa: BLE001
+        return None
+    if not got:
+        return None
+    o = got[0] or {}
+    props = [{"name": SANADAK_NAMES[f], "value": "نعم" if v else "لا"} for f, v in sanadak_says(o).items()]
+    texts = [str(o.get(x)).strip() for x in ("title", "city", "district", "description", "propertyTypeText",
+                                               "listingTypeText") if o.get(x)]
+    lines = [y.strip() for t in texts for y in t.splitlines() if y.strip()]
+    return {"title": o.get("title"), "meta": {}, "jsonld": [{"additionalProperty": props}],
+            "evidence_lines": lines[:200], "text_head": " | ".join(lines)[:1500]}
+
+
+def is_sanadak(url: str) -> bool:
+    return "sanadak.sa" in url
+
+
 def anon_client():
     """The customer's path: the public anon key, never the service key (trap 10)."""
     from supabase import create_client
@@ -344,7 +420,7 @@ def sample_size(n: int, per_site: int | None) -> int:
 
 
 def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, night: str,
-               pace: float = PACE_S, probe=None, wasalt=wasalt_page) -> dict:
+               pace: float = PACE_S, probe=None, wasalt=wasalt_page, sanadak=sanadak_page) -> dict:
     probe = probe or _probe
     row = new_row(night, platform)
     last = 0.0
@@ -361,6 +437,8 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
         last = time.monotonic()
         if is_wasalt(url) and wasalt is not None:
             page = wasalt(url)
+        elif is_sanadak(url) and sanadak is not None:
+            page = sanadak(url)
         else:
             try:
                 status, body = probe(url)
@@ -380,7 +458,7 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
         af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page)
         fold(row, key, af_only, stored)
         ad_lines = [x for x in page_lines(page) if x not in chrome]
-        answers = offered(customer_answers(ad_lines, af_only), stored)
+        answers = offered(customer_answers(ad_lines, af_only, platform, page), stored)
         params = rpc_params(stored, answers) if anon is not None and answers else None
         if params:
             verdict = findable(ask(anon, params), table, rid)
