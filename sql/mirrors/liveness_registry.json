@@ -385,8 +385,8 @@
   },
   {
     "platform": "goldendeal",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -499,8 +499,8 @@
   },
   {
     "platform": "maqam",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -559,8 +559,8 @@
   },
   {
     "platform": "mustqr",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -733,8 +733,8 @@
   },
   {
     "platform": "shatri",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   },
   {
@@ -889,8 +889,8 @@
   },
   {
     "platform": "yameen",
-    "strategy": "CANDIDATE_PLUS_DIRECT",
-    "sla_hours": 168,
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
     "grace": 3
   }
 ]
