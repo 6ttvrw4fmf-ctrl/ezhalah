@@ -175,3 +175,8 @@ export function togglePickerSource(names: string[], name: string): string[] {
 export function applyPickerSources<Q extends { sources?: string[] }>(query: Q, slugs: string[], explicit: boolean): Q {
   return explicit ? { ...query, sources: slugs.slice() } : query;
 }
+
+export function homeWebsiteRoster(hidden: ReadonlySet<string> | null): { names: string[]; count: number | null } {
+  const names = Object.keys(PLATFORM_PICKER_PROFILES).filter(name => !hidden?.has(name));
+  return { names, count: hidden === null ? null : names.length };
+}

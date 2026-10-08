@@ -14,16 +14,16 @@ for name, relative in re.findall(r'"([^"]+)": require\("([^"]+)"\)', profiles):
         raise ValueError(f'{name}: empty artwork')
     left, top, right, bottom = bounds
     width, height = right - left, bottom - top
-    scale = min(26 / width, 26 / height)
+    scale = min((48 if width / height > 2 else 26) / width, 26 / height)
     pixels = [pixel for pixel in image.get_flattened_data() if pixel[3] > 128]
     light = sum(min(pixel[:3]) > 205 for pixel in pixels) / max(1, len(pixels))
     layouts[name] = {
         'width': round(image.width * scale, 2), 'height': round(image.height * scale, 2),
-        'left': round((32 - width * scale) / 2 - left * scale, 2),
+        'left': round((56 - width * scale) / 2 - left * scale, 2),
         'top': round((32 - height * scale) / 2 - top * scale, 2),
         'visibleWidth': round(width * scale, 2), 'visibleHeight': round(height * scale, 2),
         'dark': light > 0.75,
     }
 records = ',\n'.join('  ' + json.dumps(name, ensure_ascii=False) + ': ' + json.dumps(layout, separators=(',', ':')) for name, layout in layouts.items())
 (root / 'src/data/platformPickerLogoLayout.json').write_text('{\n' + records + '\n}\n')
-print(f'Measured {len(layouts)} original logos: 26px visible extent inside equal 32px slots.')
+print(f'Measured {len(layouts)} original logos: compact icons and readable wordmarks inside equal 56×32px slots.')
