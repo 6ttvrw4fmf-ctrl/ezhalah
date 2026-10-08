@@ -8,13 +8,13 @@ Descriptions were checked against official homepage titles, descriptions and vis
 
 | Catalog name | Official source | Arabic description | Logo | Source check |
 | --- | --- | --- | --- | --- |
-| Aqar | https://sa.aqar.fm | منصة للبحث عن عقارات للبيع والإيجار في السعودية. | sa-aqar-fm.png | not captured; identity-only copy / recheck needed for more detail |
-| Wasalt | https://wasalt.sa | منصة للعقارات والمزادات في السعودية. | wasalt-sa.png | not captured; identity-only copy / recheck needed for more detail |
+| Aqar | https://sa.aqar.fm | منصة للبحث عن عقارات للبيع والإيجار في السعودية. | sa-aqar-fm.png | Official web page read, 2026-10-08 |
+| Wasalt | https://wasalt.sa | منصة للعقارات والمزادات في السعودية. | wasalt-sa.png | Official web page read, 2026-10-08 |
 | Aldarim | https://aldarim.sa | وساطة وتسويق للعقارات السكنية والتجارية. | aldarim-sa.png | 200; title/meta/text read |
 | Aqargate | https://aqargate.com | بوابة لاستعراض العروض العقارية. | aqargate-com.png | 200; identity-only copy / recheck needed for more detail |
-| Alhoshan | https://alhoshan.sa | وساطة وإدارة أملاك في المذنب بالقصيم. | alhoshan-sa.png | 200; title/meta/text read |
+| Alhoshan | https://alhoshan.sa | وساطة وإدارة أملاك في المذنب بالقصيم. | alhoshan-sa.png | Official web page read, 2026-10-08 |
 | Hajer | https://hajerhouses.com | تسويق وإدارة أملاك في المنطقة الشرقية. | hajerhouses-com.png | 200; title/meta/text read |
-| Sanadak | https://sanadak.sa | منصة لعقارات البيع والإيجار في السعودية. | sanadak-sa.png | 200; title/meta/text read |
+| Sanadak | https://sanadak.sa | منصة لعقارات البيع والإيجار في السعودية. | sanadak-sa.png | Official web page read, 2026-10-08 |
 | Eastabha | https://eastabha.sa | بيع وتأجير وتسويق وإدارة أملاك. | eastabha-sa.png | 200; title/meta/text read |
 | Aqarcity | https://aqarcity.net | منصة إعلانات عقارية تربط الباحثين بالمعلنين. | aqarcity-net.png | 200; title/meta/text read |
 | Raghdan | https://raghdan.sa | عروض للبيع والإيجار في مدن السعودية. | raghdan-sa.png | 200; title/meta/text read |
@@ -79,7 +79,7 @@ Descriptions were checked against official homepage titles, descriptions and vis
 | نفوذ | https://nufouth.com | تطوير عقاري وإدارة أملاك في السعودية. | nufouth-com.png | 200; title/meta/text read |
 | دويليو | https://dwelleo.sa | منصة لاستعراض العقارات في السعودية. | dwelleo-sa.png | 200; title/meta/text read |
 | مكتب أقاليم هجر للخدمات العقارية | https://aqalemhajer.com | مكتب للخدمات العقارية في الهفوف بالأحساء. | aqalemhajer-com.png | 200; title/meta/text read |
-| سكني | https://sakani.sa | منصة سكني للخيارات والخدمات السكنية. | Existing artwork (absent from ZIP) | not captured; identity-only copy / recheck needed for more detail |
+| سكني | https://sakani.sa | منصة سكني للخيارات والخدمات السكنية. | Existing artwork (absent from ZIP) | Official web page read, 2026-10-08 |
 | الشاطري للتطوير العقاري | https://shatrirealestate.com | تطوير مبانٍ سكنية وتجارية في جدة. | shatri.png | 200; title/meta/text read |
 | القاسم العقارية | https://alqasem.com.sa | بيع وتأجير وإدارة عقارات في السعودية. | alqasem.png | 200; title/meta/text read |
 | فكر الإعمار | https://fkralemar.com | تطوير مشاريع وشقق سكنية. | fkralemar.png | 200; title/meta/text read |
