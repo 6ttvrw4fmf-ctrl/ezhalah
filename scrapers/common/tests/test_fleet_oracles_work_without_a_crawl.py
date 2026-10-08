@@ -42,3 +42,70 @@ def test_sanadak_oracle_takes_the_callers_control_as_its_canary():
         assert S._canary["urls"] == [], "no control, no canary: every removal stays withheld"
     finally:
         S.set_liveness_canaries([])
+
+
+# ── 2026-10-08: the Nuzul tenants (goldendeal engine) ───────────────────────────────────────────
+# goldendeal, maqam and yameen built their oracle only inside the crawl (verify_gone_for +
+# make_canary with an id that run mapped), so the daily check could not call them: 345 ads, 0 checked
+# in time. `_make_verify_gone(control)` is that same pair, the control row becoming the canary.
+import json as _json
+
+from scrapers.common import fleet_liveness as F
+from scrapers.goldendeal import run as G
+
+
+class _R:
+    def __init__(self, status, body, url):
+        self.status_code, self.text, self.url = status, body, url
+
+    def json(self):
+        return _json.loads(self.text)
+
+
+def _stub(answers):
+    """A session whose GET answers per record id; records which hosts/headers were used."""
+    seen = []
+
+    class _S:
+        headers = {}
+
+        def get(self, url, timeout=None, allow_redirects=True):
+            pid = int(url.rsplit("/", 1)[1])
+            seen.append(url)
+            status, data = answers[pid]
+            body = _json.dumps({"data": data}) if status == 200 else '{"message":"No query results for model"}'
+            return _R(status, body, url)
+    return (lambda: _S()), seen
+
+
+LIVE = {"availability_status": "available", "published_on_website": 1}
+
+
+@pytest.mark.parametrize("site", ["goldendeal", "maqam", "yameen"])
+def test_nuzul_tenant_is_callable_by_the_daily_check_with_only_a_control_row(site):
+    assert F.SITES[site] == f"scrapers.{site}.run:_make_verify_gone()"
+    mod = __import__(f"scrapers.{site}.run", fromlist=["_make_verify_gone"])
+    assert callable(mod._make_verify_gone(None)), "the daily check hands a control row or None"
+
+
+def test_nuzul_oracle_reads_live_gone_and_withholds_without_its_control():
+    p = G.TENANT.prefix
+    sf, seen = _stub({1: (200, {"id": 1, **LIVE}), 2: (404, None),
+                      3: (200, {"id": 3, "availability_status": "sold"}), 9: (200, {"id": 9, **LIVE})})
+    verify = G.make_verify_gone(G.TENANT, sf)({"ad_number": f"{p}9"})
+    assert verify(f"{p}1")[0] == "live"
+    assert verify(f"{p}2")[0] == "gone"                 # the record's own 404, control 9 echoed
+    assert verify(f"{p}3")[0] == "gone"                 # retired in place («sold»)
+    assert all(G.TENANT.api_host in u for u in seen)
+    # no control row: a live answer still stands, but no removal can be testified
+    blind = G.make_verify_gone(G.TENANT, sf)(None)
+    assert blind(f"{p}1")[0] == "live" and blind(f"{p}2")[0] == "unknown"
+    # a control from another site's numbering is no control
+    assert G.make_verify_gone(G.TENANT, sf)({"ad_number": "XYZ9"})(f"{p}2")[0] == "unknown"
+
+
+def test_nuzul_oracle_withholds_removal_when_the_control_no_longer_echoes():
+    p = G.TENANT.prefix
+    sf, _ = _stub({2: (404, None), 9: (404, None)})
+    verdict, why = G.make_verify_gone(G.TENANT, sf)({"ad_number": f"{p}9"})(f"{p}2")
+    assert verdict == "unknown" and "withheld" in why

@@ -76,7 +76,10 @@ SITES: dict[str, str] = {
         # 2026-10-02: removal oracles written that day (measured on each site's own pages), shadow
         # until their first run is read.
         "aqarnajran", "fahadalshahri", "remal", "shmoualshmal", "wslnaa",
-        "sakan", "sanadak", "sodasyat", "sokok", "sukna", "tamyaz", "tuba", "villassa")},
+        "sakan", "sanadak", "sodasyat", "sokok", "sukna", "tamyaz", "tuba", "villassa",
+        # 2026-10-08: the Nuzul tenants (goldendeal engine). Their oracle used to be built only
+        # inside the crawl, so 345 ads (goldendeal 293, maqam 42, yameen 10) were never checked.
+        "goldendeal", "maqam", "yameen")},
 }
 
 # NOT here, and why (shadow run 36490769167, 2026-09-28): mizlaj, nowaisiry, eastabha and muktamel —
