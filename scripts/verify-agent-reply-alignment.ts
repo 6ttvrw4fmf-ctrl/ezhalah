@@ -41,5 +41,8 @@ verify(source);
 // Watch the barrier reject the original left-pinned row, without modifying the checkout.
 const mutant = source.replace("alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row'", "alignSelf: 'flex-start', flexDirection: 'row'");
 assert.notEqual(mutant, source, 'mutation target exists');
-assert.throws(() => verify(mutant), assert.AssertionError);
+function mustCatch(brokenSource: string) {
+  assert.throws(() => verify(brokenSource), assert.AssertionError);
+}
+mustCatch(mutant);
 console.log('PASS: Arabic replies/results/sparkles align right, English left; original defect mutation rejected.');
