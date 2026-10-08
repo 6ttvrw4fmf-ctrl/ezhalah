@@ -1410,6 +1410,10 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     # NEEDS INTERACTIVE APPLY: the registry reseed's DELETE clause is held by the DB connector for a
     # human (LIFECYCLE_ENGINEER.md, 2026-10-05 lesson).
     "rakez",
+    # 2026-10-08: shadow runs read 100% with controls right and nothing to hide — goldendeal
+    # 37769087242 (293/293 live), mustqr 37770177620 (1,282 live, 1 first strike), maqam
+    # 37772746090 (42/42). Their oracles became callable by the daily check that night (#6436).
+    "goldendeal", "maqam", "mustqr",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
