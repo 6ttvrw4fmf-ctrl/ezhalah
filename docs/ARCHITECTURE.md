@@ -408,7 +408,7 @@ save, Escape cancels and restores. A rename writes ONLY the three title keys —
 overwrite it (`canAutoRetitle`). Title is deliberately NOT coupled to `sameQuery()`. Barrier:
 `scripts/verify-chat-title.ts` (mutation-proven).
 
-**i18n (`src/i18n.tsx`):** EN-key → AR dictionary. Arabic is the default; the user can select English. The saved interface preference controls page direction and controls. Chat reply language is explicit per turn and does not change that preference. Value-localizers accept an explicit locale for chat summaries and otherwise use the interface locale; Western digits stay unchanged. The Filter's Arabic catalog input guard remains separate from bilingual chat input.
+**i18n (`src/i18n.tsx`):** EN-key → AR dictionary. Arabic is the default; the user can select English. The saved interface preference controls page direction and controls. Chat reply language is explicit per turn and does not change that preference. Assistant replies align right with the sparkle on the right for Arabic, and left with the sparkle on the left for English (owner, 2026-10-07); each existing reply keeps its own placement when the conversation switches languages. Value-localizers accept an explicit locale for chat summaries and otherwise use the interface locale; Western digits stay unchanged. The Filter's Arabic catalog input guard remains separate from bilingual chat input.
 
 
 **Design tokens (`src/theme/tokens.ts`) — never hard-code hex/sizes in components:**
