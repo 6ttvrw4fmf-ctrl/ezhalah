@@ -33,6 +33,9 @@ function verify(text: string, helperText = helper) {
     assert.equal(bytes.subarray(1, 4).toString(), 'PNG', `${name}: PNG asset loads`);
     if (profile.logo.includes('/platform-logos/')) files.add(profile.logo);
   }
+  // Preserve the collected ZIP pack, including variants replaced by an owner-approved original asset.
+  for (const match of text.matchAll(/require\("([^"]*\/platform-logos\/[^"]+)"\)/g)) files.add(match[1]);
+  assert.equal(profiles['Deal App'].logo, roster.find((p: any) => p.name === 'Deal App').logo, 'Deal uses its original yellow listing-card asset');
   // Immutable collected artwork: guard the complete used pack with one aggregate fingerprint.
   const fingerprint = createHash('sha256');
   for (const file of [...files].sort()) {
@@ -84,6 +87,8 @@ function verifyRendering(text: string) {
         flatten(root);
         const card = nodes.find(n => n.type === 'Pressable');
         assert.equal(nodes.find(n => n.type === 'Image').props.source, profile.logo);
+        assert.equal(nodes.find(n => n.type === 'Image').props.tintColor, undefined, 'original logo colors are never tinted');
+        assert.ok(nodes.some(n => n.type === 'View' && Array.isArray(n.props?.style) && n.props.style.some((v: any) => v?.backgroundColor === '#263D32')) === profile.layout.dark, 'only pale logos receive a contrast backing');
         assert.ok(nodes.some(n => n.type === 'Text' && n.children.includes(profile[locale])), 'description visible');
         assert.ok(card.props.accessibilityLabel.includes(profile[locale]), 'description accessible');
         assert.equal(card.props['aria-pressed'], false, 'unselected toggle communicates its state');
@@ -98,6 +103,7 @@ function mustCatchRender(mutant: string) {
   assert.throws(() => verifyRendering(mutant), assert.AssertionError);
 }
 mustCatchRender(agent.replace('source={profile.logo}', 'source={platform.logo}'));
+mustCatchRender(agent.replace('source={profile.logo}', 'source={profile.logo} tintColor="#000"'));
 mustCatchRender(agent.replace('{description}\n', '{""}\n'));
 console.log(`PASS: ${names.length} bilingual descriptions; 142 original ZIP logos; missing copy and wrong artwork mutations rejected.`);
 
@@ -187,8 +193,8 @@ assert.equal(group(coverage.platforms[ordered[0]],'ar').key, 'nationwide');
 assert.deepEqual(ordered.slice().sort(), names);
 for (const name of names as string[]) {
   const layout = load(source, 'PLATFORM_PICKER_PROFILES')[name].layout;
-  assert.ok(layout.visibleWidth <= 48.02 && layout.visibleHeight <= 26.02, `${name}: bounded readable logo dimensions`);
-  assert.ok(Math.abs(layout.visibleHeight - 26) <= 0.02 || Math.abs(layout.visibleWidth - 26) <= 0.02 || Math.abs(layout.visibleWidth - 48) <= 0.02, `${name}: measured icon or wordmark sizing`);
+  assert.ok(layout.visibleWidth <= 88.02 && layout.visibleHeight <= 40.02, `${name}: bounded readable logo dimensions`);
+  assert.ok(Math.abs(layout.visibleHeight - 40) <= 0.02 || Math.abs(layout.visibleWidth - 88) <= 0.02, `${name}: measured icon or wordmark sizing`);
 }
 console.log('PASS: nationwide-first regional sections preserve every site; full-width rows and compact icons and readable wordmarks in uniform slots.');
 
@@ -205,3 +211,12 @@ const homepageCatalog = load(source, 'PLATFORM_PICKER_PROFILES');
 assert.equal(Object.keys(homepageCatalog).length, 149);
 assert.ok(Object.keys(homepageCatalog).includes('Deal App'));
 console.log('PASS: the complete website catalog includes all 149 original logo profiles, including Dealapp.');
+
+const chooseMatch = agent.match(/const choosePlatform = \(source: string \| null\) => \{([\s\S]*?)\n  \};/);
+assert.ok(chooseMatch);
+const chooseJS = ts.transpile(chooseMatch[1], { target: ts.ScriptTarget.ES2022 });
+let chosen: string[] = []; let closed = 0; let explicit = false;
+const choose = new Function('source', 'setPickerSourceExplicit', 'setSelectedSources', 'togglePickerSource', 'closePlatformPicker', chooseJS);
+choose('Aqar', (v: boolean) => explicit = v, (fn: any) => chosen = fn(chosen), load(source, 'togglePickerSource'), () => closed++);
+assert.equal(explicit, true); assert.deepEqual(chosen, ['Aqar']); assert.equal(closed, 1, 'a selection saves immediately and closes the sheet');
+console.log('PASS: original logo colors, pale-logo contrast, and immediate selection/close.');

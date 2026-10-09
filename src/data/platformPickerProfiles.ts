@@ -154,6 +154,8 @@ const LOGOS: Record<string, number> = {
   "تطبيق أرض": require("../../assets/images/platform-logos/earthapp.png"),
   "نوافذ الوطن": require("../../assets/images/platform-logos/nawafeth.png"),
 };
+// Deal uses the same original yellow brand asset as listing cards (owner, 2026-10-08).
+LOGOS["Deal App"] = require("../../assets/images/dealapp.png");
 const coverage = coverageSnapshot.platforms as Record<string, PickerCoverage>;
 export const PLATFORM_PICKER_PROFILES: Record<string, PlatformPickerProfile> = Object.fromEntries(
   Object.entries(LOGOS).map(([name, logo]) => [name, {
