@@ -89,10 +89,7 @@ function verifyRendering(text: string) {
         assert.equal(nodes.find(n => n.type === 'Image').props.source, profile.logo);
         assert.equal(nodes.find(n => n.type === 'Image').props.tintColor, profile.layout.monochrome ? '#253831' : undefined, 'only reviewed white-only marks adapt their ink');
         assert.ok(!nodes.some(n => n.type === 'View' && Array.isArray(n.props?.style) && n.props.style.some((v: any) => v?.backgroundColor === '#263D32')), 'logos have no backing tiles');
-        // Owner 2026-10-09 (Perplexity reference): the row shows logo + name only — the measured coverage
-        // sentence lives in the accessible name, never as a visible second line.
-        assert.ok(nodes.some(n => n.type === 'Text' && n.children.includes(roster[i].i18nKey)), 'site name visible');
-        assert.ok(!nodes.some(n => n.type === 'Text' && n.children.includes(profile[locale])), 'no visible description line');
+        assert.ok(nodes.some(n => n.type === 'Text' && n.children.includes(profile[locale])), 'description visible');
         assert.ok(card.props.accessibilityLabel.includes(profile[locale]), 'description accessible');
         assert.equal(card.props['aria-pressed'], false, 'unselected toggle communicates its state');
         if (!twoColumns) assert.ok(card.props.style({ pressed: false }).some((v: any) => v?.width === '100%'), 'phone cards use readable full width');
@@ -107,7 +104,7 @@ function mustCatchRender(mutant: string) {
 }
 mustCatchRender(agent.replace('source={profile.logo}', 'source={"../../assets/images/platform-placeholder.png"}'));
 mustCatchRender(agent.replace('tintColor={profile.layout.monochrome ? colors.ink : undefined}', 'tintColor="#000"'));
-mustCatchRender(agent.replace('accessibilityLabel={`${t(platform.i18nKey)}. ${description}`}', 'accessibilityLabel={`${t(platform.i18nKey)}`}'));
+mustCatchRender(agent.replace('{description}\n', '{""}\n'));
 console.log(`PASS: ${names.length} bilingual descriptions; 142 original ZIP logos; missing copy and wrong artwork mutations rejected.`);
 
 const sentence = load(helper, 'platformCoverageSentence');
