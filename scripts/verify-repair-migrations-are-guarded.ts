@@ -48,6 +48,13 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // Owner session 2026-10-09 (owner: «make the call yourself»), for the 🦅 Falcon's repair below. The class it
+  // fixes — a searchable listing served at exactly 0 for its own deal — is already watched fleet-wide.
+  '20261009204020_bossbih_per_metre_ads_stale_zero_total_to_null.sql':
+    'watched by the fleet-wide mon_detect_zero_price_served() (in the mon_run_all_detectors() roster, every ' +
+    'platform but ramzalqasim), the very detector that raised zero_price_served #4565 on these six rows; a ' +
+    're-seen that wrote 0 back would re-raise it. The cause is fixed too: the per-metre branch now emits ' +
+    'AUTHORITATIVE_NULL (scrapers/bossbih/run.py), pinned by test_bossbih_price_basis_and_traps.py',
   // 🔬 AF engineer, 2026-10-08. Each of tonight's three repairs is watched by its own companion or pinned the
   // same way as the 2026-10-07 entries below.
   '20261008095541_sanadak_unticked_feature_box_is_silence_not_no.sql':

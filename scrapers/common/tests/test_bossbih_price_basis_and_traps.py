@@ -20,10 +20,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-sys.modules.setdefault("scrapers.common.db", types.ModuleType("scrapers.common.db"))
+# The REAL db module: the per-metre branch names db.AUTHORITATIVE_NULL and the test below hands it
+# to db._unknown_must_not_overwrite_known, so an empty stub would prove nothing (Falcon 2026-10-09).
 
 import scrapers.common.arabic_location as _al  # noqa: E402
 from scrapers.bossbih import run as R  # noqa: E402
+from scrapers.common import db  # noqa: E402
 
 # Real Al-Ahsa catalog districts, and the towns they really sit under (src/data/sa-locations.json).
 _HOFUF, _MUBARRAZ, _UYUN, _JAFR = 12, 2748, 2038, 2764
@@ -147,8 +149,33 @@ def test_a_per_metre_rate_with_no_site_total_leaves_price_total_null():
                                      ("als-r2", "list-string", label)],
                              price=1500)
         assert row["price_per_meter"] == 1500, label
-        assert row["price_total"] is None, f"{label}: 1500*500 must NOT be synthesised here"
+        # Repointed 2026-10-09 (Falcon), same strength: still never 1500*500, and now the source's own
+        # silence is written as AUTHORITATIVE_NULL so a stale stored total cannot survive the upsert.
+        assert row["price_total"] is not None and not isinstance(row["price_total"], int), \
+            f"{label}: 1500*500 must NOT be synthesised here"
+        assert row["price_total"] is db.AUTHORITATIVE_NULL, f"{label}: the read page printed no total"
         assert row["additional_info"]["price_basis"] == "per_sqm", label
+
+
+def test_a_per_metre_ad_with_no_site_total_clears_a_stale_stored_total():
+    """Falcon 2026-10-09: live nids 12209, 13994, 14173 (res) and 10372, 14144, 14199 (com) were served
+    at «0 ر.س» for 18 days. An older adapter had stored price_total = 0; the current per-metre branch
+    returned None, and db drops None so the 0 survived every daily re-seen. The source settled this
+    (a rate, no «الإجمالي»), so the branch names AUTHORITATIVE_NULL — which db writes as NULL even
+    over a stored value — and ONLY when the detail page was actually read. Mutation: the old
+    `price_total = detail.get("site_total")` alone fails the first assertion."""
+    row, _c, _w = mapped("أرض    للبيع في حرض    ",
+                         fields=[("als-r2", "list-string", "المتر")], price=1)
+    assert row["price_per_meter"] == 1
+    assert row["price_total"] is db.AUTHORITATIVE_NULL
+    assert db._unknown_must_not_overwrite_known.__doc__  # the writer this sentinel is addressed to
+    r = {"price_total": row["price_total"], "price_per_meter": 1}
+    db._unknown_must_not_overwrite_known(r)
+    assert "price_total" in r and r["price_total"] is None, "db must WRITE the NULL, not drop the key"
+    # A FAILED detail fetch is not the source speaking: the index card alone keeps None (dropped).
+    ix = R.parse_index(card(title="أرض    للبيع في حرض    ", price_text="المتر 1"))[0]
+    row2, _c2, _w2 = R.map_listing(ix, None)
+    assert row2["price_per_meter"] == 1 and row2["price_total"] is None
 
 
 # The 17 distinct price labels measured across ALL 1,485 listings, with their counts. Anything the
