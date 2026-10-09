@@ -1242,6 +1242,23 @@ def prune_unseen(
 
 
 OWN_PAGE_ORACLE = "own_page_status.default"
+
+# Ads whose OWN page or record THIS process read as sold or rented, ad_number → the words it printed.
+# A crawler that drops such an ad from its rows (rather than storing it) calls note_read_gone(), so
+# the default oracle above can tell "the crawl read it sold" from "the crawl did not see it": the
+# first is a direct reading, the second is absence (2026-10-09, backlog 300).
+_READ_GONE: dict[str, str] = {}
+_SOLD_OR_RENTED = ("مباع", "تم البيع", "بيعت", "مؤجر", "تم التأجير", "تم تأجير")
+
+
+def note_read_gone(ad_number: Optional[str], status_text: Optional[str]) -> bool:
+    """Record that this ad's own page/record says sold or rented. Any other status (reserved, coming
+    soon, missing, unreadable) records nothing: it is not a removal. Returns whether it was recorded."""
+    s = (status_text or "").strip()
+    if not ad_number or not s or not any(w in s for w in _SOLD_OR_RENTED):
+        return False
+    _READ_GONE[str(ad_number)] = s[:80]
+    return True
 _OWN_PAGE_CONTROLS = 3
 _OWN_PAGE_MAX_READS = 300
 
@@ -1336,6 +1353,9 @@ def own_page_status_oracle(c, table: str, seen, *, session=None):
         # cost; a row past it is UNKNOWN (kept, shown), never a kill.
         if reads[0] >= _OWN_PAGE_MAX_READS:
             return "unknown", f"{OWN_PAGE_ORACLE}: read budget of {_OWN_PAGE_MAX_READS} spent this run"
+        said = _READ_GONE.get(str(ad_number))     # the crawl read its own page as sold/rented
+        if said:
+            return "gone", f"{OWN_PAGE_ORACLE}: its own page read «{said}» this run"
         # The ad's OWN published end date (licence / ad end, as the source printed it and the crawl
         # stored it) has passed: the source itself says the ad is over, which is why its complete
         # list stopped serving it (shomou, earthapp, maktab, opensooq …: 2026-10-09, 15 of 31 such
