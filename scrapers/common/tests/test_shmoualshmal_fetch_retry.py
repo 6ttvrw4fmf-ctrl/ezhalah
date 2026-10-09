@@ -93,3 +93,48 @@ def test_a_deliberate_non_200_is_a_hard_stop_and_is_not_retried():
     assert run.fetch_listings(_Blocked()) == [], "a 503 yields no rows"
     assert len(calls) == 1, f"a deliberate 503 must not be retried — made {len(calls)} calls"
     assert "503" in run.LAST_FETCH_NOTE, f"the status must be recorded: {run.LAST_FETCH_NOTE!r}"
+
+
+class _Refusing:
+    """Answers HTTP `status` on the first N calls (the 2026-10-09 shape: page 1 → 403), then serves."""
+
+    def __init__(self, refuse_times, status=403, payload=ONE_PAGE):
+        self.refuse_times, self.status, self.payload, self.calls = refuse_times, status, payload, 0
+
+    def get(self, url, timeout=None):
+        self.calls += 1
+        if self.calls <= self.refuse_times:
+            return _Resp(None, status=self.status)
+        return _Resp(self.payload)
+
+
+@pytest.mark.parametrize("status", [403, 429, 503])
+@pytest.mark.parametrize("refusals", [1, 2])
+def test_a_refused_page_is_retried_on_a_fresh_session(status, refusals):
+    # 2026-10-09: page 1 answered 403 once and the whole run failed as «REST returned no listings»;
+    # the automatic re-crawl 14 minutes later read all 6 posts. A refusal must be retried, on a fresh
+    # session with the next browser profile, before the walk gives up.
+    s = _Refusing(refusals, status)
+    rotated: list[int] = []
+
+    def fresh(attempt):
+        rotated.append(attempt)
+        return s
+
+    rows = run.fetch_listings(s, fresh=fresh)
+    assert len(rows) == 1, f"a refused page must be retried — got {rows!r} ({run.LAST_FETCH_NOTE})"
+    assert rotated == list(range(1, refusals + 1)), f"each retry needs a fresh session: {rotated}"
+
+
+def test_a_refusal_that_persists_gives_up_bounded_and_names_the_status():
+    s = _Refusing(99, 403)
+    assert run.fetch_listings(s, fresh=lambda _a: s) == []
+    assert s.calls == 3, f"must give up after 3 attempts — made {s.calls}"
+    assert "HTTP 403" in run.LAST_FETCH_NOTE, run.LAST_FETCH_NOTE
+
+
+def test_a_real_not_found_is_not_retried():
+    # 404/400 is an answer, not a refusal: the walk ends on it without burning retries.
+    s = _Refusing(99, 400)
+    assert run.fetch_listings(s, fresh=lambda _a: s) == []
+    assert s.calls == 1, s.calls
