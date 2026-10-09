@@ -30,10 +30,11 @@ function badge(source: string) {
   const constants = [...source.matchAll(/^const \w+_LOGO = require\([^\n]+/gm)].map(m => m[0]).join('\n');
   return execute(`const PlatformLogo = 'PlatformLogo';\n${constants}\n${source.slice(start, end)}`).SourceBadge;
 }
-function verify(cardSource = card, imageSource = renderer) {
+function verify(cardSource = card, imageSource = renderer, theme = 'light') {
   const SourceBadge = badge(cardSource);
   const PlatformLogo = execute(imageSource, {
     'expo-image': { Image: 'Image' }, 'react-native': { View: 'View' },
+    '@/lib/appearance': { useResolvedTheme: () => theme },
     './platform-logo-bounds': execute(read('src/components/platform-logo-bounds.ts')),
     '@/data/platformPickerProfiles': { PLATFORM_PICKER_PROFILES: profiles },
   }).PlatformLogo;
@@ -51,7 +52,7 @@ function verify(cardSource = card, imageSource = renderer) {
       assert.equal(node.type, 'View');
       assert.equal(node.props.style.width, 96);
       assert.equal(node.props.style.height, 48);
-      assert.equal(node.props.style.backgroundColor, profile.layout.dark ? '#263D32' : 'transparent');
+      assert.equal(node.props.style.backgroundColor, profile.layout.dark ? '#263D32' : theme === 'dark' ? '#FFFFFF' : 'transparent');
       const image = node.props.children[0];
       assert.equal(image.props.source, profile.logo, `${source}: original colors reach the rendered image`);
       assert.equal(image.props.style.width, profile.layout.width);
@@ -65,6 +66,7 @@ function verify(cardSource = card, imageSource = renderer) {
   assert.equal(profiles['Deal App'].logo, '../../assets/images/dealapp.png', 'Deal is the original yellow asset');
 }
 verify();
+verify(card, renderer, 'dark');
 assert.equal(profiles['نفوذ'].layout.dark, true, 'Nufouth white lettering needs contrast even beside a colored symbol');
 // Watch the actual previous failures fail: missing brand, old favicon, and black Deal variant.
 for (const [name, mutatedCard, mutatedRenderer] of [

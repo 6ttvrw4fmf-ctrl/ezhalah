@@ -2,17 +2,19 @@ import { Image, type ImageProps } from 'expo-image';
 import { View } from 'react-native';
 import { platformLogoBounds } from './platform-logo-bounds';
 import { PLATFORM_PICKER_PROFILES } from '@/data/platformPickerProfiles';
+import { useResolvedTheme } from '@/lib/appearance';
 
 const originalLayouts = new Map(Object.values(PLATFORM_PICKER_PROFILES).map(profile => [profile.logo, profile.layout]));
 
 /** The same transparent slot and optical sizing on every platform surface. */
 export function PlatformLogo({ source }: { source: ImageProps['source'] }) {
+  const theme = useResolvedTheme();
   const frameWidth = 96;
   const frameHeight = 48;
   const layout = originalLayouts.get(source as number);
   if (layout) {
     return (
-      <View style={{ width: frameWidth, height: frameHeight, flexShrink: 0, overflow: 'hidden', direction: 'ltr', borderRadius: 5, backgroundColor: layout.dark ? '#263D32' : 'transparent' }}>
+      <View style={{ width: frameWidth, height: frameHeight, flexShrink: 0, overflow: 'hidden', direction: 'ltr', borderRadius: 5, backgroundColor: layout.dark ? '#263D32' : theme === 'dark' ? '#FFFFFF' : 'transparent' }}>
         <Image source={source} contentFit="contain" style={{ position: 'absolute', width: layout.width, height: layout.height, left: layout.left, top: layout.top }} />
       </View>
     );
