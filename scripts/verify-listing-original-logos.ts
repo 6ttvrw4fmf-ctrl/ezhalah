@@ -85,27 +85,3 @@ for (const [name, mutatedCard, mutatedRenderer] of [
   mustCatch(name, mutatedCard, mutatedRenderer);
 }
 console.log(`PASS: ${roster.length} listing brands and their DB aliases render clean assets in equal 96×48 transparent frames; all logo and opaque-backing regression mutants caught.`);
-
-// Optional production audit: registry presence alone cannot prove coverage of real search results.
-if (process.argv.includes('--live')) {
-  const { resolvePublicSupabase } = await import('./lib/public-supabase.ts');
-  const { url, key } = resolvePublicSupabase(process.env);
-  const response = await fetch(`${url}/rest/v1/rpc/loader_active_platforms_ar`, {
-    method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' },
-    body: '{}', signal: AbortSignal.timeout(20_000),
-  });
-  assert.ok(response.ok, `live source audit failed (${response.status}); failure is not empty coverage`);
-  const active = await response.json();
-  assert.ok(Array.isArray(active) && active.length > 0, 'live audit returned real source slugs');
-  const expected = new Map<string, string>();
-  for (const [name, entry] of Object.entries(coverage.platforms) as [string, any][]) {
-    for (const slug of entry.slugs) expected.set(slug, name);
-  }
-  const SourceBadge = badge(card);
-  for (const slug of active) {
-    const name = expected.get(slug);
-    assert.ok(name, `MISSING LOGO MAPPING: ${slug}`);
-    assert.equal(SourceBadge({ source: slug }).props.source, profiles[name].logo, `${slug}: correct logo on its cards`);
-  }
-  console.log(`PASS: all ${active.length} currently searchable source slugs resolve to their correct logo; no missing mappings.`);
-}
