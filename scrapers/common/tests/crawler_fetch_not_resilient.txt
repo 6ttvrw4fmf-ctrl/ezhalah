@@ -46,7 +46,6 @@ eaqartabuk
 earthapp
 ebriza
 ego
-eightfloor
 eilmalriyada
 erapulse
 expattrusted
@@ -59,7 +58,6 @@ goldendeal
 gomenassat
 hajer
 hazim
-holoul
 ibaax
 jawher
 jazwtn
@@ -74,7 +72,6 @@ maqrat
 marksa
 masar
 mizlaj
-mobasher
 moftah
 muajarh
 muhaysini
@@ -113,7 +110,6 @@ sokok
 souq24
 sqcc
 sukna
-superoffice
 suwar
 tamyaz
 tawia
