@@ -435,9 +435,20 @@ def enumerate_ids(s: cc.Session, cap_pages: int, shards: int = 1, shard: int = 0
         # when the shard's own slice filled the cap nothing came after the tail — those shards
         # confirmed 0–60 removals a night against ~400 dead, and the time budget cut the same tail
         # every night. Interleaving gives every dead ad live neighbours and spreads the cut evenly.
+        #
+        # NEWEST NEW IDS GET A RESERVED SLICE AT THE FRONT (2026-10-08). With re-confirm strictly
+        # first, a shard's own active slice (~1,315) outgrew its cap (1,200) and its time budget, so
+        # «keeping the full active slice and dropping new ids only» fetched ZERO new ads: 3,374 new
+        # sitemap ids on shard 3 alone, and dealapp arrivals fell from ~1,780/day (10-02) to ~200.
+        # Dealapp ids rise with time, so the highest ids are the ads published since the last run;
+        # DEALAPP_NEW_RESERVE of them (default 150 a shard, ~1,800 a night against ~650 new a day)
+        # go first, and the shuffled re-confirm slice follows unchanged.
+        reserve_n = max(0, int(os.environ.get("DEALAPP_NEW_RESERVE", "150")))
+        newest = sorted(new_ids, key=int, reverse=True)
+        reserve = newest[:reserve_n]
         head = known_ids + tail
         random.shuffle(head)
-        ids = head + new_ids
+        ids = reserve + head + newest[len(reserve):]
     else:
         ids = new_ids + known_ids + tail
 
@@ -463,7 +474,7 @@ def enumerate_ids(s: cc.Session, cap_pages: int, shards: int = 1, shard: int = 0
         # prune_unseen will measure coverage against, so truncating it would re-create the
         # under-coverage that stopped pruning in the first place. The cap only ever trims NEW ids.
         if shards > 1:
-            must_keep = len(known_ids) + len(tail)
+            must_keep = len(reserve) + len(known_ids) + len(tail)
             if max_listings < must_keep:
                 print(f"  ⚠ cap {max_listings} < {must_keep} active ids owned by shard "
                       f"{shard}/{shards}; keeping the full active slice and dropping new ids only",
@@ -474,7 +485,7 @@ def enumerate_ids(s: cc.Session, cap_pages: int, shards: int = 1, shard: int = 0
     print(f"Deal App: {len(ids)} ids to scrape "
           f"({'shard %d/%d, ' % (shard, shards) if shards > 1 else ''}"
           f"{len(new_ids)} new-from-sitemap, {len(known_ids)} re-confirm, {len(tail)} off-sitemap"
-          f"{', RE-CONFIRM FIRST' if shards > 1 else ' (new first)'}"
+          f"{f', {len(reserve)} NEWEST NEW FIRST, THEN RE-CONFIRM' if shards > 1 else ' (new first)'}"
           f"{'' if not max_listings else f', capped at {max_listings}'})", flush=True)
     return ids
 

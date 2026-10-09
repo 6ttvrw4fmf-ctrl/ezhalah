@@ -21,6 +21,7 @@ def check(name, ok): out.append((name, bool(ok)))
 L = lambda *x: [ns["norm"](s) for s in x]
 check("negated amenity is not a yes", not ns["page_says_yes"](L("لا يوجد مصعد"), "elevator"))
 check("named amenity is a yes", ns["page_says_yes"](L("مصعد"), "elevator"))
+check("a prepared lift shaft is not a lift", not ns["page_says_yes"](L("تأسيس مصعد"), "elevator"))
 check("found", ns["findable"]([{"source_table": "t", "listing_id": 5}], "t", 5) is True)
 check("absent is a miss", ns["findable"]([{"source_table": "t", "listing_id": 6}], "t", 5) is False)
 check("failed request is undecided", ns["findable"](None, "t", 5) is None)
@@ -46,6 +47,55 @@ wp = ns["wasalt_page"]("https://wasalt.sa/ar/property/1", fetch=lambda u: (nd, 2
 check("a live wasalt page is read, not unreadable", wp is not None and ns["page_says_yes"](L(*wp["evidence_lines"]), "elevator"))
 check("wasalt contact fields are never read", wp is not None and not any("0500" in x for x in wp["evidence_lines"]))
 check("a wasalt block stays unreadable", ns["wasalt_page"]("u", fetch=lambda u: (None, None, 0)) is None)
+class _R:
+    def __init__(self, d): self.data = d
+    def execute(self): return self
+class _Anon:
+    def __init__(self, promised, after, fail=False): self.p, self.a, self.f = promised, after, fail
+    def rpc(self, name, params):
+        if self.f: raise RuntimeError("down")
+        return _R([{"cnt_elevator": self.p}] if name == "apartment_guided_counts_ar" else self.a)
+PQ = {"p_deal": "بيع", "p_cities": ["الرياض"], "p_types": ["شقة"], "p_amenities": ["elevator"], "p_limit": 5000, "p_offset": 0}
+check("parity: the promised option count equals the results after the tap", ns["parity"](_Anon(229, 229), PQ) is True)
+check("parity: a promise the tap does not keep is a parity failure", ns["parity"](_Anon(229, 228), PQ) is False)
+check("parity: a failed read is undecided, never a pass", ns["parity"](_Anon(1, 1, fail=True), PQ) is None)
+check("parity: only one-amenity requests are judged", ns["parity"](_Anon(1, 1), {**PQ, "p_amenities": ["elevator", "kitchen"]}) is None)
+SO = ns["structured_only"]
+check("a prose «موقف» is not a statement where aqar publishes parking structurally",
+      SO("aqar", {"parking": "we_miss"}, {"parking": None}, {"jsonld": []})["parking"] == "page_silent")
+check("aqar's own structured «مطبخ» still catches a trapped NULL",
+      SO("aqar", {"kitchen": "page_silent"}, {"kitchen": None},
+         {"jsonld": [{"amenityFeature": [{"name": "مطبخ", "value": True}]}]})["kitchen"] == "we_miss")
+check("aqar's structured «مصعد=false» against a stored yes is a mismatch",
+      SO("aqar", {"elevator": "match"}, {"elevator": True},
+         {"jsonld": [{"additionalProperty": [{"name": "مصعد", "value": False}]}]})["elevator"] == "mismatch")
+check("dealapp bathrooms in prose are not its structured count",
+      SO("dealapp", {"bathrooms": "we_miss"}, {"bathrooms": None}, {"evidence_lines": ["3 دورات مياه"]})["bathrooms"] == "page_silent")
+check("dealapp's own «عدد الحمامات» row still catches a trapped NULL",
+      SO("dealapp", {"bathrooms": "page_silent"}, {"bathrooms": None}, {"evidence_lines": ["عدد الحمامات", "3"]})["bathrooms"] == "we_miss")
+check("a site with no structured field keeps its prose answer",
+      SO("sakan", {"parking": "we_miss"}, {"parking": None}, {})["parking"] == "we_miss")
+SS = ns["sanadak_says"]
+check("sanadak: «نعم - راكب» kitchen and an installed split are yes",
+      SS({"kitchenStatusText": "نعم - راكب", "acTypeText": "6 سبليت راكب"}) == {"kitchen": True, "air_conditioner": True})
+check("sanadak: «لا» kitchen and «لا يوجد» AC are a stated no",
+      SS({"kitchenStatusText": "لا", "acTypeText": "لا يوجد"}) == {"kitchen": False, "air_conditioner": False})
+check("sanadak: a prepared kitchen / split foundation is silent, never yes",
+      SS({"kitchenStatusText": "نعم - تأسيس فقط", "acTypeText": "تأسيس سبليت"}) == {})
+check("sanadak: blank fields and an unticked driver box are silent",
+      SS({"kitchenStatusText": "", "acTypeText": "", "isDriverRoomAvailable": False}) == {})
+check("sanadak: counts state yes, isFurnished false is a stated no",
+      SS({"numberElevators": 1, "numberParkingAreas": "2", "numberMaidRooms": 1, "isFurnished": False})
+      == {"elevator": True, "parking": True, "maid_room": True, "furnished": False})
+sp = ns["sanadak_page"]("https://sanadak.sa/property-details/x-1",
+                        fetch=lambda u: ({"title": "شقة للإيجار", "description": "مطبخ راكب\nموقف خاص",
+                                          "kitchenStatusText": "", "numberElevators": 1}, "", u))
+check("sanadak page: its structured elevator is read, its prose kitchen is not",
+      sp is not None and ns["structured_says"](sp, "elevator") is True and ns["structured_says"](sp, "kitchen") is None)
+check("sanadak page: a failed fetch is unreadable", ns["sanadak_page"]("u", fetch=lambda u: None) is None)
+check("sanadak: prose «مطبخ راكب» is not asked where the structured kitchen is blank",
+      ns["customer_answers"](L("مطبخ راكب"), {"kitchen": "we_miss"}, "sanadak", sp) == [])
+check("sanadak: the structured lift IS asked", ns["customer_answers"]([], {"elevator": "match"}, "sanadak", sp) == ["elevator"])
 T = ns["template_lines"]
 menu = L("أجهزة مطبخ", "مكيفات هواء")
 check("a line on every page of the site is its template, not the ad",
@@ -70,6 +120,13 @@ ns["ask"] = lambda anon, params: asked.append(params) or []
 ns["score_site"](_C(), object(), "site", [("t", 1), ("t", 2), ("t", 3)], night="n", pace=0,
                  probe=lambda u: (200, "<html>"), wasalt=None)
 check("score_site never asks a customer question its website's template answered", asked == [])
+pages = iter([["موقف سيارات خاص"], ["مدخل خاص", "موقف سيارات خاص"]])
+asked.clear()
+ar = ns["score_site"](_C(), object(), "aqar", [("t", 1), ("t", 2)], night="n", pace=0,
+                      probe=lambda u: (200, "<html>"), wasalt=None)
+check("score_site never asks aqar's parking from the ad's prose", not any("parking" in (q.get("p_amenities") or []) for q in asked))
+check("score_site never scores aqar's prose parking as a capture miss",
+      ar["fields"].get("parking", {}).get("we_miss", 0) == 0)
 print(json.dumps(out))
 `;
 
@@ -84,10 +141,15 @@ const mustCatch = (what: string, find: string, repl: string) => {
   if (!real.includes(find)) { console.error(`mutation anchor missing: ${what}`); process.exit(1); }
   if (!run(real.replace(find, repl)).some(([, ok]) => !ok)) { console.error(`NOT CAUGHT: ${what}`); process.exit(1); }
 };
+mustCatch('sanadak prose read again (not structured-only)', '"sanadak": ("elevator", "parking", "kitchen",', '"sanadak_off": ("elevator", "parking", "kitchen",');
+mustCatch('a prepared sanadak kitchen read as a kitchen', 'if k.startswith("نعم") and "تأسيس" not in k', 'if k.startswith("نعم")');
+mustCatch('an unticked sanadak driver box read as a no', '"driver_room": True if o.get("isDriverRoomAvailable") is True else None,', '"driver_room": bool(o.get("isDriverRoomAvailable")),');
+mustCatch('customer request built from prose the score refused', 'return structured_says(page or {}, field) is True', 'return page_says_yes(lines, field)');
+mustCatch('a failed sanadak fetch read as a page', 'if not got:\n        return None', 'if not got:\n        got = ({}, "", url)');
 mustCatch('a NULL read as a miss when the list was capped', 'return None if len(rows) >= RPC_LIMIT else False', 'return False');
 mustCatch('a failed request read as not found', 'if rows is None:\n        return None', 'if rows is None:\n        return False');
 mustCatch('a negated amenity read as a yes', 'and not all(re.search(NEG', 'and not any(re.search(r"^$"');
-mustCatch('stored NULL no longer asked for', 'in (MATCH, WE_MISS) and page_says_yes', 'in (MATCH,) and page_says_yes');
+mustCatch('stored NULL no longer asked for', 'in (MATCH, WE_MISS) and says_yes', 'in (MATCH,) and says_yes');
 mustCatch('amenity sent as Arabic', 'p["p_amenities"] = slugs', 'p["p_amenities"] = answers');
 mustCatch('rent period dropped for «إيجار»', 'RENT = ("إيجار", "ايجار")', 'RENT = ("ايجار",)');
 mustCatch('furnished asked on Monthly', 'return [a for a in answers if a != FURNISHED]', 'return answers');
@@ -97,6 +159,13 @@ mustCatch('an empty label read as a yes', 'and not BARE_LABEL.match(x)]', ']');
 mustCatch('the site template read as the ad (no template filter)', 'ad_lines = [x for x in page_lines(page) if x not in chrome]', 'ad_lines = page_lines(page)');
 mustCatch('the template computed from too few pages', 'if len(readable) < TEMPLATE_MIN_PAGES:', 'if len(readable) < 1:');
 mustCatch('one page enough to call a line template', 'return set.intersection(*readable)', 'return set.union(*readable)');
+mustCatch('a lift shaft read as a lift', 'hit = [x for x in (unprepared(y, kw) for y in lines) if re.search(kw, x)]', 'hit = [x for x in lines if re.search(kw, x)]');
+mustCatch('dealapp bathrooms judged from prose again', 'STRUCTURED_LABEL: dict[tuple[str, str], str] = {("dealapp", "bathrooms"): r"عدد الحمامات"}', 'STRUCTURED_LABEL: dict[tuple[str, str], str] = {}');
+mustCatch('parity compares the wrong count', 'return int(promised) == int(after)', 'return True');
+mustCatch('a failed parity read counted as a pass', 'except Exception:  # noqa: BLE001\n        return None\n    promised', 'except Exception:  # noqa: BLE001\n        return True\n    promised');
+mustCatch('prose read for a field the site publishes structurally', 'af_only = structured_only(platform, {k: v for k, v in results.items() if k in AF_FIELDS}, stored, page)', 'af_only = {k: v for k, v in results.items() if k in AF_FIELDS}');
+mustCatch('aqar parking no longer structured-only', '"aqar": ("elevator", "parking",', '"aqar": ("elevator",');
+mustCatch('a silent structured block read as a miss', 'if says is None:\n        return PAGE_SILENT', 'if says is None:\n        return WE_MISS');
 mustCatch('site navigation read as the ad', 'if x and not CHROME.match(x) and', 'if x and');
 
 const fail = (m: string) => { console.error(m); process.exit(1); };

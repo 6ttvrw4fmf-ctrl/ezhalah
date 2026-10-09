@@ -36,7 +36,7 @@ across many partner platforms and shows them in one place. **It is a search engi
 - **Source fidelity.** Never rewrite, translate, round-trip, or invent source content (titles,
   descriptions, prices, areas, beds). The card shows scraped values verbatim.
 - **Gathern is rent-only** — must never appear in Buy results (monthly furnished).
-- **Arabic-first / Arabic-only** UI (RTL). English is a disabled latent code path, not user-selectable.
+- **Arabic-first UI with Arabic and English preferences.** Message language affects replies, never the chosen interface language.
 - **Compliance.** REGA FAL licensing + PDPL (Saudi data residency, no selling user data).
 
 ---
@@ -66,6 +66,13 @@ STOP → restore → fix → continue. Checklist: `ezhalah-app/docs/DEPLOY_REGRE
 ---
 
 ## 3. Frontend — navigation & screens
+
+**Chat language (owner, 2026-10-07):** reply in the latest user message’s language without changing the interface language, sidebar, controls, or page layout. Assistant messages stay on the assistant side; text keeps its own reading direction. Save original messages/replies verbatim. Automatic saved titles follow the latest user message and its language, including when search results arrive; manually renamed titles remain unchanged.
+
+The header and sidebar Ezhalah name uses dark green. Assistant replies and result slogans keep the same green sparkle stars as the thinking state (owner, 2026-10-07).
+
+The AI Agent’s empty composer hint aligns left in English and right in Arabic (owner, 2026-10-07). Typed messages keep their own language direction.
+
 
 **Shell (`src/app/_layout.tsx`):** a single expo-router `Stack`. Provider tree: `GestureHandlerRootView`
 → `SafeAreaProvider` → `LocaleProvider` → `AppProvider` → `StatusBar` → `Shell`. On web ≥ 900px a
@@ -165,8 +172,7 @@ problems via backend mapping only (see §16), never by editing the card.
 **Card behaviors:** cards pop in staggered (`PopIn`). English-UI place names get client-side
 transliteration for display only (Arabic UI passes through). `listed` date is cleaned to `DD/MM/YYYY`
 or a localized "recently"; junk scraped strings are suppressed. Tapping the card opens the real source
-listing (§7 browser) and fires `trackOpen` (CPC click tracking). ~33 partner platforms have logos
-(`SourceBadge`); unknown source falls back to the Aqar logo.
+listing (§7 browser) and fires `trackOpen` (CPC click tracking). All registered searchable sources have logos (`SourceBadge`). The canonical asset, transparent-frame, sizing and original-color contract is in `docs/ops/PLATFORM_PICKER_PROFILES.md`; its live audit verifies every source currently returning results.
 
 ---
 
@@ -174,11 +180,22 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). ~33 partner pl
 
 ### 6.1 `src/app/agent.tsx` — chat + inline results
 
+- **Model selector (owner, 2026-10-08):** a subtle label below the microphone area opens two
+  Claude-style options: **شاهين 2.2 / Shaheen 2.2** (default) and **حُر 4.4 / Hurr 4.4**.
+  Hurr is visible in light gray and disabled, like the unavailable Haiku option in the owner's reference.
+  Keep the menu compact: two name/version rows, then a separated «عن النماذج / About models» row
+  opening the descriptions within the same popup.
+  Arabic descriptions are «سرعة خاطفة ودقة متناهية للإجابات السريعة» and
+  «قوة وتحمل فائق لأصعب المهام والمعالجات»; English descriptions are
+  “Lightning-fast precision for instant answers” and “Unmatched endurance for your toughest challenges”.
+  Shaheen labels the existing agent engine; Hurr has no backend route while disabled. The version
+  labels are product display names and must never be passed as provider API IDs. Enabling Hurr
+  requires an approved provider/model mapping.
 - One conversational surface. Message roles: `user`, `agent` (reply / clarify with answer chips),
   `results` (slogan + summary + intro + sort line + cards), `status` (thinking/searching, morphed in
   place).
 - **Typed message** → `send()`: guest-gate check (see §7.2) → refine intercept → `recordChatTurn` →
-  locale follows message language (per message, not per keystroke) → build last-10-turn history (results
+  reply locale follows message language without changing the interface locale → build the last two raw history turns plus the accumulated query state (results
   restated as numbered facts so "the 2nd one"/"cheapest" resolve without inventing) → `respond(v,…)` →
   branch on `AgentTurn.kind` (`interview` | `listings` | `message`).
 - **Filter/interview** → a `SearchQuery` is passed directly and typed out as a natural-language bubble.
@@ -303,7 +320,7 @@ guests is their history isn't persisted. (This supersedes PRD §9's "first searc
 Centered popup. Exposes: **Display Name** (inline edit, bilingual auto-synced), **Account** row
 (phone → Change via WhatsApp-OTP re-verify; google/apple → email locked), **Logged-in device** (inferred
 from method, not real detection), **Log out**, **Delete my account** (wipes history/chat/storage). No
-language / units / currency / theme toggle (Arabic-only, SAR-only).
+language / units / currency / theme toggle (Arabic and English; SAR-only).
 
 ### 7.4 Sidebar (`src/components/Sidebar.tsx`)
 
@@ -401,11 +418,8 @@ save, Escape cancels and restores. A rename writes ONLY the three title keys —
 overwrite it (`canAutoRetitle`). Title is deliberately NOT coupled to `sameQuery()`. Barrier:
 `scripts/verify-chat-title.ts` (mutation-proven).
 
-**i18n (`src/i18n.tsx`):** EN-key → AR dictionary. **Arabic-only in production** — `readSavedLocale()`
-forces `'ar'` and deletes any saved `'en'`; `setLocale` early-returns unless `'ar'`. English is a latent
-disabled path. Default `'ar'` at module load (first paint RTL). `applyDirection` sets `dir/lang` on web,
-`I18nManager` on native. Value-localizers (`tPlace`, `tPrice`, `tDetailOption`, …) translate words but
-keep Western digits. `isLatinOnlyInput` + `ARABIC_ONLY_MSG` reject English search input.
+**i18n (`src/i18n.tsx`):** EN-key → AR dictionary. Arabic is the default; the user can select English. The saved interface preference controls page direction and controls. Chat reply language is explicit per turn and does not change that preference. Assistant replies align right with the sparkle on the right for Arabic, and left with the sparkle on the left for English (owner, 2026-10-07); each existing reply keeps its own placement when the conversation switches languages. Value-localizers accept an explicit locale for chat summaries and otherwise use the interface locale; Western digits stay unchanged. The Filter's Arabic catalog input guard remains separate from bilingual chat input.
+
 
 **Design tokens (`src/theme/tokens.ts`) — never hard-code hex/sizes in components:**
 - primary `#2f7247`, dark `#1d4a37`, tint `#eef6f0`, ink `#15201b`, body `#34403a`, muted `#7b8a82`,
@@ -898,6 +912,8 @@ migration-drift-guard rule in `AGENTS.md`).
 ## 20. Permanent rules (the non-negotiables)
 
 - **Response feedback (owner 2026-10-01):** selecting either thumb moves both visible thumbs together until they touch, then fades the unselected thumb, leaving one selected thumb; tapping it again restores both choices. Keep share/read-aloud stationary, mirror the layout for Arabic/English, and skip motion when reduced motion is enabled. Keep the existing top-of-chat confirmation popup. Feedback storage and response scope remain unchanged.
+
+**Website picker profiles (owner, 2026-10-08, clarified):** Arabic-first website selection supports one or more searchable websites. A brief single sentence describes the site's listing locations and residential/commercial focus from measured inventory; never infer location from its office address or invent a specialty. `src/data/platformPickerCoverage.json` records the public production cohort measurements and observed source examples; `scripts/generate-platform-picker-coverage.ts` refreshes bounded, paced reads and refuses to overwrite evidence on failure. `src/lib/platformCoverageSentence.ts` derives the copy. Use a compact bottom sheet with a full-width scrollable list, nationwide first then regional headers. Choices apply immediately and slide the sheet down; reopen to add more websites, with no «تم» confirmation button. Use the collected original logos with uniform 96×48 slots with visible artwork fitting 88×40, and measured positioning (`platformPickerLogoLayout.json`); original brand colors remain unchanged; pale/white artwork uses a small dark green backing for contrast, and Deal uses the original yellow listing-card asset; selected rows stay plain, with only a dark green checkmark; no filled highlight, border or logo recoloring (owner clarification, 2026-10-08). The control displays selected logos, reopening retains checked choices, and the all-sites mark is the eagle magnifier. `pickerSourceSlugs()` maps display names to canonical source slugs, including Aqar's monthly vertical; the selected sources constrain every actual search/refinement. Closing has smooth motion with reduced-motion support. An explicit all-sites choice clears inherited source restrictions before parsing and refinement; untouched picker state accepts free-text source requests. The complete selection resets with a new conversation.
 
 **Search loader viewport (owner 2026-10-01, approved named-grid preview):** keep every name beneath its equal-size logo frame in a responsive, fixed-height grid. Replace one logo/name tile at a time with a gentle fade, without arrows, page counters, or swipe navigation (owner continuous-animation revision, 2026-10-01). Keep every occupied slot filled through the last partial batch; use the measured space below the loader heading and above the footer for as many complete rows as fit, without a four-row cap (owner revision, 2026-10-01). Measure the actual footer height rather than reserving a guessed inset, and distribute spare vertical space between the rows so the last row ends just above the footer; do not leave the unused fraction of a row as a blank band (owner follow-up, 2026-10-01). Equal logo frames and visible names remain unchanged. Hold the first and last sets for one second, distributing the intermediate tile updates over the remaining eight seconds so the full cycle stays at ten seconds on every screen size; complete the entire roster cycle before revealing results, even when this exceeds the existing minimum loading beat. Names stay visible on phones. Previous result bubbles are visually hidden during the searching presentation and until the new results introduction finishes typing so stale counts cannot read as the new answer; their data is retained. Never auto-scroll the thread to follow the loader, including delayed scroll callbacks. Logo frames retain the responsive sizing used by property cards; highlights must not scale or translate them.
 

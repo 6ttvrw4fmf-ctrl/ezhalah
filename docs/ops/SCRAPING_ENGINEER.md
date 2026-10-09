@@ -130,24 +130,13 @@ diagnostic workflow, or `loader-active-platforms-check.yml`. Cleanup and livenes
 and that is not your job.
 
 ## The owner's open requests (do these first, then delete each line when it's done and proven)
-> **🏕️ GATHERN: ALL ~37,000 UNITS (owner, 2026-10-04: «let's scrape all those 37,000 … searchable by Advanced Filter and normal filter, that note is important, lifecycle … a very very very close eye»).**
-**What we know (measured 2026-10-04):** Gathern's own search (`msapi.gathern.co/search/api/v1/search-units`, no
-`calendar_type`) lists **~37,251 units in 165 cities** (Riyadh 12,775, Jeddah 6,145, Madinah 2,357, Khobar 2,107, Taif
-1,795, Abha 1,685); almost all also accept a 30-night stay (Riyadh: 12,709 of 12,775). We show **~4,775**, because the rest
-answer **«الصفحة غير موجودة» (HTTP 404) on the website** (`gathern.co/view/<chalet>/unit/<unit>`) and only open in Gathern's
-phone app. Sample: 800 Riyadh units Gathern lists → we had seen 679, only 112 live (the rest were hidden as web-404, correctly).
-**The rule that does not move: a customer never lands on a dead page.** A unit is shown only with a link proven to open it.
-**Your part, in order (it is your first open request until done):**
-1. **Tonight: find a link that opens an app-only unit for a customer.** Test on a phone-size browser AND a laptop: Gathern's
-   universal/app links, any share link the app produces, the web search page with the unit filter, `gathern.co/unit/<id>`
-   style redirects (they 404 today), `?check_in=&check_out=` (404 today). PASS = the unit's own page or the app opens on it.
-   Write what you tried and what opened into `ops_engineer_backlog` (`engineer = 'scraping-engineer'`, item «gathern app-only
-   link») with the evidence. **No working link → stop here, report it in one line, keep the ~4,775; that is a correct answer.**
-   A link that works on phones only is acceptable: record it, and the plan becomes «show app-only units on phones only».
-2. **Nights 2–3: crawl every unit** through the search API city by city, every page (pages go deep: Riyadh has ~1,271 pages
-   of 10), paced, `has_available` NOT required for listing, each unit with its own link from step 1. Same reader, same fields,
-   same tables as today; stored link = the proven link. Daily-stay units are the same units (they accept 30 nights).
-3. Hand off: a `new_listings_engineer:followup` and a `lifecycle:followup` row the night the first app-only units land.
+> **🏕️ GATHERN: ALL ~37,000 UNITS — ANSWERED NO (2026-10-06, CI probe run 37422977475; backlog 13/29).**
+No web link opens an app-only unit: 8 of 9 units we hold as web-404 answer 404 on `/view`, `/ar/view`,
+`/link/view`, `/r` and `/unit`, on a phone profile and a laptop profile, from the crawl's own egress;
+search records carry no share-link field. `/link/view/*` and `/r/*` are app-association paths that open
+only inside the installed app. Per the owner's rule (a customer never lands on a dead page) we keep the
+web-proven units (~4,945 active). Re-open only if Gathern ships a web share link or its web view grows
+back (the weekly check below).
 
 - **Gathern monthly coverage (owner, 2026-09-28: «we are not scraping much of Gathern monthly
   data»).** Measured the same day: Gathern's full catalogue has about 31,445 homes (Riyadh 11,011),
@@ -226,6 +215,21 @@ These cost your first runs a lot of time. Use them instead of working them out a
   dispatch `source-reread.yml` with `ids: table:id,…` and read its job log with `get_job_logs` (the
   artifact's download host is blocked from the cloud; the log prints the same comparison). It shows
   what the page itself says next to what we store.
+
+## Lessons from 2026-10-07 (facts that cost time tonight)
+- **A crawl that dies before `db.begin_run()` writes NO `scrape_runs` row.** nafithh (domain gone, 2 nights), squares
+  and ryadah failed this way and looked healthy. Read the nightly `small-sources-sync` run's FAILED JOBS too, not only
+  `scrape_runs`. The early-warning robot now flags a nightly site with no row in 20 h (`20261007054542`).
+- **A dormant flip shows to customers after the :22 search sync, and the cron's transaction commits only when its whole
+  chain ends (~3–4 min later).** A count taken at :24 can still read the old value; re-read at :26.
+- **The Supabase tool asks a human to confirm an `UPDATE`** (like `DROP`) and times out after 60 s. Close backlog items
+  with `select ops_close_backlog_item(<id>, 'done'|'wontfix', '<evidence>')`.
+- **Use `e2e/engineers/customer-journey.mjs --phone --listings '[…]'`** for proofs: it narrows by price and area like a
+  customer, so big districts work (full-chain.mjs lost sukna among 5,471 results).
+- **Image hosts are blocked from this container**, so a journey card reading «لا توجد صورة» is not a customer bug.
+- **`source-reread.yml` prints `og:image: True/False` but not its value.** Compare it card by card with our `photo_urls`
+  (alshawaf: 8/8 matched, so the coverage was the source's own).
+- **2026-10-08 (⚡, copied by 🔧):** before you edit a shared line, grep `scripts/` for that exact line. The «مركز» loop rewrote a line `verify-aqarmonthly-district-suffix-guard` anchors on, and it cost a CI cycle.
 
 ## Lessons from 2026-10-04 (your first night-shift report: honest, every number matched the database — and still a 7, not a 9)
 1. **A site that fails twice in a week gets its root cause fixed THAT night.** gudai timed out on its sitemap on 2 of 6
@@ -365,7 +369,10 @@ or rewrite another engineer's work, and never start a big change in another engi
    listings and its logo, and lowers the site count.
    **Not down:** a block the proxy gets past, one empty run, a slow site, a changed layout (that's a
    scraper fix).
-7. **Try to bring back every dormant site, every day.** Its daily crawl re-checks it. If it serves real,
+7. **Try to bring back every dormant site, every day.** Its daily crawl re-checks it. Since 2026-10-07
+   the cron `reactivate-recovered-dormant-platforms` (hourly :15, migration `20261007051614`) flips a
+   dormant site back to `active` by itself once its latest crawl, started after it went dormant, is ok
+   and saved ≥ 3 rows; you still prove the full chain the next night. If it serves real,
    *different* listings again (not one placeholder repeated), make sure it is back to `active` (flip it
    with the switch if the crawl job hasn't already), and prove the full chain.
 8. **New sites:** a site whose first successful crawl was since your last run gets the full chain
@@ -380,6 +387,8 @@ or rewrite another engineer's work, and never start a big change in another engi
 11. **Log the end** in `ops_daily_engineer_run`, then write the report.
 
 ## Lessons from real breakages (use them)
+- **2026-10-07 (copied by 🔧 QA):** a crawl that dies before `begin_run` leaves no row — read the nightly run's failed jobs, not only `scrape_runs`. And write your clock from the database: the report said 110 min, `ops_engineer_review` said 102.
+- **2026-10-06 (copied by 🔧 QA):** a district map keyed by the city you ASSUME misses (compoundin: Rawabi is Khobar, Qurtoba is Jeddah). Group the NULL rows by the city in their own address first, then write the map.
 - The same block on several unrelated sites at once = one shared security wall, not several dead sites.
 - It gets *worse* the harder you retry = the browser failed to start, not a block.
 - Never override the browser identity (User-Agent) when using impersonate profiles.

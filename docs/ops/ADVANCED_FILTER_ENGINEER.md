@@ -214,3 +214,9 @@ lists you with your 120-minute cap.
    'advanced_filter:proof', true, '<what you tested, the listing keys, PASS/FAIL>')`.
 3. Waiting for a crawl, a sync or a deploy → say «PROPAGATION PENDING» with the number that must move, and prove it the next night.
 4. 🔧 Quality re-tests a sample of your proof rows every morning. A proof that does not reproduce is RED.
+
+## Lessons from real breakages (use them)
+- **2026-10-07 (copied by 🔧 QA):** mutate a COPY to prove a barrier (`cp` → restore), never `git checkout <file>` — it threw away uncommitted work. Most findability «misses» were the measuring tool reading prose: check the tool on 3–4 re-read ads before chasing a site. And a self-rating of 10 with findability at 58.7% and 3 bugs open is not computed — rate from the numbers.
+- **2026-10-06:** a back-fill that does not move `last_updated` never reaches search through the incremental :22 sync. Plan the proof on the next crawl, or bump the row the sanctioned way, before you promise it tonight.
+- **2026-10-06 (🔧 QA):** do not park a question the law already answers (backlog 77). A site WITH a structured field is structured-only, and an unfilled block is silence → NULL. Decide and close.
+- **2026-10-08 (🔬, copied by 🔧):** the :22 sync re-derives any served row whose AF value differs from the source view. So a NULL-only backfill computed in CI by the PR's own readers, then applied through a guarded migration, makes the data half of a parser fix live the same night, with no data pasted into a tool call. Every listing repair needs its detector, or a waiver, in the same push, or `npm test` fails.

@@ -1,3 +1,4 @@
+import { sourceName } from '@/lib/listingDisplay';
 import type { Category, Deal } from './taxonomy';
 import type { LocationResolution } from './locations';
 import type { ProximityIntent } from './proximity';
@@ -9,7 +10,7 @@ import { supports } from './platforms';
 // The app's single Arabic folding helper — it documents itself as mirroring the RPC's normalize_ar,
 // so district matching on the client and in the RPC stay one definition. (listingInDistricts)
 import { normalizeArabic } from '../lib/chatSearch';
-import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
+import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, translate, type Locale, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { combinedBudgetParts } from '@/lib/combinedBudget';
 import { withAdvancedLines, type AfFacet } from '@/lib/afSummary';
@@ -436,7 +437,23 @@ export const grouped = (n: number) => n.toLocaleString('en-US');
 // its annual equivalent (×12); a small Buy figure is read as a price PER m² and, when an exact size is
 // known, multiplied to a calculated total. An explicit annual (agent-converted) or a preset band is
 // shown verbatim. Returns the bullet text(s) WITHOUT the leading "• ". (user spec: Filter Price Intelligence.)
-function budgetLines(q: SearchQuery): string[] {
+// Explicit language for a chat summary; never mutates the interface locale.
+function summaryLanguage(loc: Locale) {
+  const tx = (key: string, vars?: Record<string, string | number>) => translate(loc, key, vars);
+  const arabicOrUnresolved = (key: string) => arabicOrPlaceholder(key, loc, LOCATION_UNRESOLVED_AR);
+  const arabicOrTypeUnresolved = (key: string) => arabicOrPlaceholder(key, loc, TYPE_UNRESOLVED_AR);
+  return {
+    t: tx, getLocale: () => loc,
+    tWord: (key: string) => arabicOrTypeUnresolved(tWord(key, loc)), tPlace: (key: string) => arabicOrUnresolved(tPlace(key, loc)),
+    tPriceTab: (key: string) => tPriceTab(key, loc), tDetailOption: (key: string) => tDetailOption(key, loc),
+    arabicOrUnresolved,
+    arabicOrTypeUnresolved,
+    budgetWords: () => ({ buy: tx('Buy budget'), rent: tx('Rent budget (yearly basis)'), from: tx('From'), to: tx('To'), sar: tx('SAR') }),
+  };
+}
+
+function budgetLines(q: SearchQuery, loc: Locale = getLocale()): string[] {
+  const { t, tPriceTab, budgetWords } = summaryLanguage(loc);
   const sar = t('SAR');
   // If the user gave a foreign currency, lead with their original figure so both are visible:
   // "Your budget: USD 100,000" then the SAR line(s) used for the actual search. (user request.)
@@ -522,7 +539,8 @@ function arabicOrTypeUnresolved(s: string): string {
   return arabicOrPlaceholder(s, getLocale(), TYPE_UNRESOLVED_AR);
 }
 
-function locationLines(q: SearchQuery): string[] {
+function locationLines(q: SearchQuery, loc: Locale = getLocale()): string[] {
+  const { t, tPlace, getLocale, arabicOrUnresolved } = summaryLanguage(loc);
   const lm = q.locationMatch;
   if (!lm || lm.kind === 'none') {
     return q.location.trim() ? [`${t('City')}: ${arabicOrUnresolved(tPlace(q.location.trim()))}`] : [];
@@ -599,18 +617,9 @@ function locationLines(q: SearchQuery): string[] {
 // Platform table-prefix → human display name, for the Search Summary's "Platform" line.
 // Values are the i18n KEYS (full display forms, same as the card's sourceName) so searchSummary can t()
 // them → Arabic. (owner 2026-07-08: no English platform names anywhere in the UI.)
-const SOURCE_LABELS: Record<string, string> = {
-  aqar: 'AQAR', wasalt: 'Wasalt', aldarim: 'Aldarim Real Estate', aqargate: 'Aqar Gate', alhoshan: 'Al Hoshan',
-  hajer: 'Hajer Houses Real Estate', sanadak: 'Sanadak', eastabha: 'East Abha Real Estate', aqarcity: 'Aqar City', raghdan: 'Raghdan Real Estate',
-  eaqartabuk: 'Eqar Tabuk', satel: 'Satel', sadin: 'Sadin for Real Estate', toor: 'TOOR', mustqr: 'Mustaqarr Real Estate',
-  ramzalqasim: 'Ramz Al Qassim Real Estate Investment', fursaghyr: 'Fursa Ghyr Real Estate', jazwtn: 'Jazan Watan', mizlaj: 'Mizlaj Real Estate',
-  muktamel: 'Muktamel', aqaratikom: 'Nawait', awal: 'Awal United for Real Estate', alta: 'Alta Real Estate Services', abwbna: 'Abwbna Real Estate', bahadhabab: 'Bahadhabab Real Estate', alobid: 'Alobid Office Real Estate', remal: 'Remal Real Estate', amaall: 'Amaall Real Estate Services', amlakalahsa: 'Amlak Al-Ahsa Real Estate', aqaralsaudia: 'Aqar Al Saudia Real Estate', shmoualshmal: 'Shmou Al Shmal Real Estate', alkhaas: 'Al Khaas', azdad: 'Azdad Al Aqariah',
-  abeea: 'Abeea Real Estate', jurash: 'Jurash Real Estate', alnokhba: 'Al Nokhba', dealapp: 'Deal App',
-  ksaaqar: 'KSA Aqar Real Estate', sadiqeltajer: 'Sadiq Eltajer Real Estate',
-  erapulse: 'Era Pulse', nowaisiry: 'Al Nowaisiry Real Estate', october: '1 October Real Estate', gathern: 'Gathern',
-};
 
-export function searchSummary(q: SearchQuery): string {
+export function searchSummary(q: SearchQuery, loc: Locale = getLocale()): string {
+  const { t, tWord, tPlace, tDetailOption, getLocale, arabicOrUnresolved, arabicOrTypeUnresolved } = summaryLanguage(loc);
   const lines: string[] = [];
   // English keeps the canonical capitalized type ("Villa", "Rest House"); Arabic uses the translation.
   // If the user didn't pick a SPECIFIC type, fall back to the CATEGORY they have selected (Residential/
@@ -628,18 +637,18 @@ export function searchSummary(q: SearchQuery): string {
   // Platform filter line — when the user restricted to specific platforms ("Aqar only"), show which,
   // so the filter is visibly confirmed. (user: "when I type alkhaas it must be al khaas, not aqar".)
   if (q.sources && q.sources.length) {
-    const names = q.sources.map((s) => t(SOURCE_LABELS[s] ?? s)).join('، ');
+    const names = [...new Set(q.sources.map((source) => t(sourceName(source))))].join('، ');
     lines.push(`• ${t('Platform')}: ${names}`);
   }
   // Always show a location line. If nothing was typed/inferred, the search covers the whole Kingdom,
   // so the summary says "City: Saudi Arabia". (user request: empty region → Saudi Arabia.)
-  const locLines = locationLines(q);
+  const locLines = locationLines(q, loc);
   if (locLines.length) for (const l of locLines) lines.push(`• ${l}`);
   else lines.push(`• ${t('City')}: ${t('Saudi Arabia')}`);
   // Filter path: the District field's pick is carried in districtLabel (the location match here is the
   // CITY), so add an explicit District line so the summary reflects the chosen neighborhood. (owner UI request.)
   if (q.districtLabel?.trim()) lines.push(`• ${t('District')}: ${arabicOrUnresolved(tPlace(q.districtLabel.trim()))}`);
-  for (const b of budgetLines(q)) lines.push(`• ${b}`);
+  for (const b of budgetLines(q, loc)) lines.push(`• ${b}`);
   // Category/group-level refinements (filter UI). Each has its own field, so the labels are unambiguous.
   const summaryBeds = effectiveBeds(q);
   if (summaryBeds.length) lines.push(`• ${t('Bedrooms')}: ${summaryBeds.join('، ')}`);
@@ -772,7 +781,7 @@ export function interpretPrice(rawDigits: string, deal: Deal, sizeM2?: number, i
 // here, beside the cursor it is only meaningful next to, rather than in an app-level slot a later
 // (or CANCELLED) search can overwrite. Optional because a transcript persisted before this field
 // existed carries none; see loadMoreListings for what that falls back to.
-export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery; total?: number; pageOffset?: number; hasMore?: boolean; matchTotal?: number; rotationSeed?: string; /** the backend fetch FAILED — an empty list is NOT «no matches» */ fetchFailed?: boolean };
+export type SearchResult = { heading: string; notes: string[]; listings: Listing[]; sortNote?: string; count?: number; suggestion?: string; query?: SearchQuery; total?: number; pageOffset?: number; hasMore?: boolean; matchTotal?: number; rotationSeed?: string; /** the backend fetch FAILED — an empty list is NOT «no matches» */ fetchFailed?: boolean; /** saved chat only: how many cards the user had on screen when it was saved (chatTranscript.ts) */ restoreTo?: number; /** saved chat only: the chat had finished when it was saved */ restoreCompleted?: true };
 
 function pickPool(q: SearchQuery, pools: Pools): Listing[] {
   // A clean TYPE or subcategory GROUP is selected → the server fetch already scoped the rows, so run

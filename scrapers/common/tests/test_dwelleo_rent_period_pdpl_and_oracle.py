@@ -414,6 +414,9 @@ def _run_main(monkeypatch, items, *, complete, total, argv=("run.py",)):
     monkeypatch.setattr(sys, "argv", list(argv))
     monkeypatch.setattr(R, "session", lambda: None)
     monkeypatch.setattr(R, "fetch_catalogue", lambda s, limit=0: (items, total, complete))
+    # The site's own sitemap names every listing's public page (new path shape since 2026-10-07).
+    monkeypatch.setattr(R, "fetch_public_urls", lambda s: {
+        it["slug"]: f"{R.BASE}/ar/properties/for-sale/x/y/z/{it['slug']}" for it in items.values() if it.get("slug")})
     monkeypatch.setattr(R, "fetch_detail", lambda s, key: {**D18630, "id": 18630} if key == R18630["slug"] else None)
     monkeypatch.setattr(R.time, "sleep", lambda *_: None)
     monkeypatch.setattr(R.db, "begin_run", lambda src: 1)
@@ -435,6 +438,7 @@ def test_the_skip_tally_reaches_end_run_and_prune_waits_for_a_complete_walk(monk
     assert calls["prune"] == []                              # an incomplete walk never prunes
     res = calls["batches"]["dwelleo_residential_listings"]
     assert res[0]["ad_number"] == "DWL18630" and res[0].get("_direct_alive_oracle")   # detail read
+    assert res[0]["listing_url"] == f"{R.BASE}/ar/properties/for-sale/x/y/z/{R18630['slug']}"
     assert calls["batches"]["dwelleo_commercial_listings"][0]["property_type"] == "Commercial Land"
 
 

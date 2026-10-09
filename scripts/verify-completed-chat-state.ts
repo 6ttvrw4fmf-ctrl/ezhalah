@@ -127,7 +127,7 @@ console.log("\n── mutation proof — the barrier must actually catch a regre
 console.log("\n── Back / reopen / New Chat ──");
 check("restore reinstates completed from the transcript", /setCompleted\(restored\.completed === true\);/.test(agent));
 check("New Chat (fresh) clears it", /setCompleted\(false\);/.test(agent));
-check("the capture persists it", /serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed \}\)/.test(agent));
+check("the capture persists it", /serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow \}\)/.test(agent));
 
 console.log("\n── i18n contract ──");
 check("the closed-composer placeholder has an Arabic entry",
@@ -151,7 +151,7 @@ console.log("\n── §TERMINALITY: a reopened chat never withholds BOTH the pa
 
 const rows = (n: number) => Array.from({ length: n }, (_, i) => ({ source: "aqar", id: `L${i}` }));
 /** A finished chat: `n` matches, all revealed, optionally preceded by a larger earlier turn. */
-const finishedChat = (n: number, earlierBigTurn = false) => ({
+const finishedChat = (n: number, earlierBigTurn = false, earlierReveal = 100) => ({
   msgs: [
     { id: "u1", role: "user", text: "شقق للإيجار في الرياض" },
     ...(earlierBigTurn
@@ -159,7 +159,7 @@ const finishedChat = (n: number, earlierBigTurn = false) => ({
       : []),
     { id: "mid", role: "results", result: { listings: rows(n), pageOffset: 0, hasMore: false, matchTotal: n, query: {} } },
   ],
-  revealCount: { ...(earlierBigTurn ? { old: 100 } : {}), mid: n },
+  revealCount: { ...(earlierBigTurn ? { old: earlierReveal } : {}), mid: n },
   afReceipt: {}, guidedPills: null, completed: true,
 });
 
@@ -192,12 +192,21 @@ check(`a finished chat at the cap (${TRANSCRIPT_LISTING_CAP} matches) keeps its 
   JSON.stringify(atCap));
 const pastCap = reopen(finishedChat(TRANSCRIPT_LISTING_CAP + 1));
 check(`one row past the cap (${TRANSCRIPT_LISTING_CAP + 1}) is NOT terminal on reopen — the claim "every match is already revealed" is false once a row is dropped`,
-  pastCap.deadEnd === false && pastCap.pager === true,
+  pastCap.deadEnd === false && pastCap.completed === false,
   JSON.stringify(pastCap));
-for (const n of [100, 1_200, 2_060]) {
+// A chat saved whole (≤ the cap) reopens EXACTLY as it was left (owner 2026-10-08): everything on screen, and a
+// finished search stays finished — locked, nothing withheld that was not already withheld live.
+for (const n of [100, 340]) {
   const r = reopen(finishedChat(n));
-  check(`a ${n.toLocaleString("en-US")}-match search browsed to its end reopens browsable, not stranded (${r.shown} on screen, pager=${r.pager})`,
-    r.deadEnd === false && r.pager === true, JSON.stringify(r));
+  check(`a ${n.toLocaleString("en-US")}-match search browsed to its end reopens as it was left: ${n} on screen, finished (shown=${r.shown}, completed=${r.completed})`,
+    r.shown === n && r.completed === true && r.deadEnd === false, JSON.stringify(r));
+}
+// Past the cap a search cannot be shown whole (the product itself stops at 500), so it must never strand:
+// the claim «everything is revealed» is dropped and the composer stays alive.
+for (const n of [1_200, 2_060]) {
+  const r = reopen(finishedChat(n));
+  check(`a ${n.toLocaleString("en-US")}-match search (past the display cap) reopens browsable, not stranded (${r.shown} on screen, completed=${r.completed})`,
+    r.deadEnd === false && r.completed === false, JSON.stringify(r));
 }
 // The AF completions (R11.1/R11.2) are ≤ INTERVIEW_STOP_AT rows and so can never truncate — their
 // lock is owner rule 2026-08-30 and must survive untouched, INCLUDING inside a chat whose earlier,
@@ -205,7 +214,8 @@ for (const n of [100, 1_200, 2_060]) {
 const afSmall = reopen(finishedChat(20));
 check("an AF-completed chat (20 rows, ≤ INTERVIEW_STOP_AT) still reopens LOCKED — owner rule 2026-08-30 untouched",
   afSmall.completed === true && afSmall.pager === false && afSmall.deadEnd === false, JSON.stringify(afSmall));
-const afAfterBigTurn = reopen(finishedChat(20, true));
+// (earlier turn revealed 600 > the 500 cap ⇒ it IS truncated on save — the case this check exists for)
+const afAfterBigTurn = reopen(finishedChat(20, true, 600));
 check("...and still locked when an EARLIER turn in the same chat was truncated — only the LAST results turn decides",
   afAfterBigTurn.completed === true && afAfterBigTurn.pager === false, JSON.stringify(afAfterBigTurn));
 
@@ -253,18 +263,20 @@ const mutantModule = async (from: string, to: string) => {
     "...(live.completed && !lastResultsTruncated ? { completed: true as const } : {}),",
     "...(live.completed ? { completed: true as const } : {}),",
   );
+  // Past the 500 display cap the product itself stops, so carrying `completed` is no longer a dead end; the
+  // CLAIM is still false once a row the user revealed is dropped, and that is what must not be carried.
   const r = reopen(finishedChat(1_200), m.serializeChat, m.restoreChat);
-  mustCatch("M-carry — carrying `completed` across truncation strands the user (1,140 of 1,200 unreachable)",
-    r.deadEnd === true, JSON.stringify(r));
+  mustCatch("M-carry — carrying `completed` across truncation claims «everything is revealed» after a row was dropped",
+    r.completed === true, JSON.stringify(r));
 }
 {
   // The "LAST results turn" precision is load-bearing, not incidental: widening it to ANY turn
   // silently unlocks an AF-completed chat, breaking owner rule 2026-08-30 in the other direction.
   const m = await mutantModule(
-    "lastResultsTruncated = keep < r.listings.length;",
-    "lastResultsTruncated = lastResultsTruncated || keep < r.listings.length;",
+    "lastResultsTruncated = keep < Math.min(revealed, r.listings.length);",
+    "lastResultsTruncated = lastResultsTruncated || keep < Math.min(revealed, r.listings.length);",
   );
-  const r = reopen(finishedChat(20, true), m.serializeChat, m.restoreChat);
+  const r = reopen(finishedChat(20, true, 600), m.serializeChat, m.restoreChat);
   mustCatch("M-any-turn — deciding terminality from ANY turn unlocks an AF-completed chat",
     r.completed === false, JSON.stringify(r));
 }

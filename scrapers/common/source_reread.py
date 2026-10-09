@@ -163,6 +163,12 @@ def log_lines(item: dict, n_evidence: int = 15) -> list[str]:
            f"   page title: {page.get('title')}",
            f"   page images (JSON-LD): {page_image_count(page)} | og:image: {bool((page.get('meta') or {}).get('og:image'))} "
            f"| we serve a photo: {st.get('has_photo')} | image at: {page_image_paths(page)}"]
+    og = (page.get("meta") or {}).get("og:image")
+    if og:
+        # The VALUE, not just its presence: a site-wide default og:image (logo, banner) and a real
+        # listing photo both read «og:image: True» (2026-10-07: aqarnajran 0% photos could not be
+        # told apart from source truth because only the boolean was printed).
+        out.append(f"   og:image value: {str(og)[:200]}")
     props = page_structured_props(page)
     if props:
         out.append("   page structured props: " + " | ".join(props))
@@ -181,6 +187,36 @@ def parse_ids(spec: str) -> list[tuple[str, int]]:
     return out
 
 
+# Which KEY of wasalt's page JSON states a fact (trap 1: «the site doesn't publish it» must be proven from the
+# raw payload). The score flattens propertyDetailsV3 into text lines and loses the key; this prints the path.
+_WASALT_FACT = re.compile(r"elevat|lift|مصعد|kitchen|مطبخ|bath|حمام|دورات|amenit|feature|facing|direction|واجهة", re.I)
+
+
+def wasalt_fact_paths(data, limit: int = 60) -> list[str]:
+    from scrapers.common.af_score import _WASALT_SKIP
+    pd = (((data or {}).get("props") or {}).get("pageProps") or {}).get("propertyDetailsV3")
+    out: list[str] = []
+
+    def walk(node, path: str, key: str = "") -> None:
+        if len(out) >= limit or (key and _WASALT_SKIP.search(key)):
+            return
+        if isinstance(node, dict):
+            leaves = {k: v for k, v in node.items() if isinstance(v, (str, int, float, bool)) and not _WASALT_SKIP.search(str(k))}
+            if 0 < len(node) <= 6 and len(leaves) == len(node) and any(_WASALT_FACT.search(str(v)) for v in leaves.values()):
+                out.append(f"{path} = {json.dumps(leaves, ensure_ascii=False)[:200]}")   # a small {key, label, value} row
+                return
+            for k, v in node.items():
+                walk(v, f"{path}.{k}", str(k))
+        elif isinstance(node, list):
+            for i, x in enumerate(node[:30]):
+                walk(x, f"{path}[{i}]", key)
+        elif node not in (None, "") and (_WASALT_FACT.search(path) or _WASALT_FACT.search(str(node)[:200])):
+            out.append(f"{path} = {str(node)[:160]}")
+
+    walk(pd, "propertyDetailsV3")
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ids", default="", help="table:id,… exactly these listings")
@@ -188,6 +224,7 @@ def main() -> int:
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--new-hours", type=int, default=24)
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--around", default="", help="print the page HTML around this word (markup diagnostic)")
     a = ap.parse_args()
     client = sb()
 
@@ -218,6 +255,20 @@ def main() -> int:
             item["verdict"] = classify_response(status, body or "",
                                                 dead_marker=PLATFORMS.get(platform, {}).get("dead_marker"))
             item["page"] = page_evidence(body or "")
+            if a.around and body:
+                for m in list(re.finditer(re.escape(a.around), body))[:3]:
+                    snip = body[max(0, m.start() - 400):m.end() + 200]
+                    snip = re.sub(r"(?:\+?966|0)?5\d{8}|\d{9,}", "<num>", snip)   # PDPL: no phone ever printed
+                    print(f"   around «{a.around}»: {snip!r}", flush=True)
+            if "wasalt" in table:
+                try:
+                    from scrapers.common.cleanup import _wasalt_browser, _wasalt_browser_enabled
+                    if _wasalt_browser_enabled():
+                        data, _st, _n = _wasalt_browser().page_data(url)
+                        for line in wasalt_fact_paths(data):
+                            print(f"   wasalt key: {line}", flush=True)
+                except Exception as e:  # noqa: BLE001 — a diagnostic never fails the re-read
+                    print(f"   wasalt key probe failed: {e!r}", flush=True)
         out.append(item)
 
     text = json.dumps(out, ensure_ascii=False, indent=1, default=str)

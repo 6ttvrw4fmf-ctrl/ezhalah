@@ -248,8 +248,10 @@ jobs:
           - { source: ego,           cmd: "python -m scrapers.ego.run --type all", tmo: 20 }
           # muhaysini: 180, not 45 — the catalogue went from ~3,260 to 7,470 listings on 2026-09-30 and each
           # one costs a detail read (~0.8 s), so the 45-minute job was cancelled two nights running
-          # with nothing recorded.
-          - { source: muhaysini,     cmd: "python -m scrapers.muhaysini.run --type all", tmo: 180 }
+          # with nothing recorded. 240, not 180 (2026-10-07, Scraping Engineer): the catalogue keeps
+          # growing (7,433 → 10,575 rows 10-03 → 10-06) and the walk with it (1h42 → 2h06 → 2h11 →
+          # 2h25), ~10 min a night — 180 would cut it within about four nights.
+          - { source: muhaysini,     cmd: "python -m scrapers.muhaysini.run --type all", tmo: 240 }
           #   nofodh raised 45 -> 90 after its first crawl was CANCELLED on the 45-minute budget:
           #   2,601 listings, each needing its own detail fetch to read the «حالة البيع» state.
           - { source: nofodh,        cmd: "python -m scrapers.nofodh.run --type all", tmo: 90 }
@@ -268,7 +270,7 @@ jobs:
           # wave 3. wahadat fetches 100 project pages (~56 MB of RSC payload) so it gets a wider
           # timeout; squares is one REST call plus 18 detail pages; rawaf is 11 projects + 11 unit calls.
           - { source: wahadat,      cmd: "python -m scrapers.wahadat.run --type all", tmo: 30 }
-          - { source: squares,      cmd: "python -m scrapers.squares.run --type all", tmo: 15 }
+          - { source: squares,      cmd: "python -m scrapers.squares.run --type all", tmo: 15, proxy: true }
           - { source: rawaf,        cmd: "python -m scrapers.rawaf.run --type all", tmo: 15 }
           # wave 3, batch 2. vmksa walks 11 index pages + 163 ad pages (RSC); macsaib is Taearif's JSON
           # feed: 4 list pages, 20 category walks and 77 detail records.
@@ -277,10 +279,10 @@ jobs:
           # wave 3, batch 3. maqrat pages its own POST index (/Property/_Properities) then reads 83 details pages.
           - { source: maqrat,       cmd: "python -m scrapers.maqrat.run --type all", tmo: 20 }
           # wave 3, batch 6: arsh is a hand-built Duda site (1 index + 23 pages).
-          - { source: arsh,         cmd: "python -m scrapers.arsh.run --type all", tmo: 10 }
+          - { source: arsh,         cmd: "python -m scrapers.arsh.run --type all", tmo: 10, proxy: true }
           # batch 7 (2026-09-27): the owner's 15-site list.
           - { source: sirdab,      cmd: "python -m scrapers.sirdab.run --type all", tmo: 15 }
-          - { source: ashab,       cmd: "python -m scrapers.ashab.run --type all", tmo: 45 }
+          - { source: ashab,       cmd: "python -m scrapers.ashab.run --type all", tmo: 45, proxy: true }
           - { source: manafe,      cmd: "python -m scrapers.manafe.run --type all", tmo: 25 }
           - { source: wajaf,       cmd: "python -m scrapers.wajaf.run --type all", tmo: 10 }
           - { source: albukaeri,   cmd: "python -m scrapers.albukaeri.run --type all", tmo: 10 }
@@ -288,7 +290,7 @@ jobs:
           #   profiles DIRECT before the proxy, so the proxy is only used when DIRECT is refused.
           - { source: ryadah,      cmd: "python -m scrapers.ryadah.run --type all", tmo: 10, proxy: true }
           - { source: sqcc,        cmd: "python -m scrapers.sqcc.run --type all", tmo: 10 }
-          - { source: daraa,       cmd: "python -m scrapers.daraa.run --type all", tmo: 10 }
+          - { source: daraa,       cmd: "python -m scrapers.daraa.run --type all", tmo: 10, proxy: true }
           - { source: tawia,       cmd: "python -m scrapers.tawia.run --type all", tmo: 10 }
           # SuperOffice (2026-09-27): owner-approved — available private offices only.
           - { source: superoffice, cmd: "python -m scrapers.superoffice.run --type all", tmo: 10 }
@@ -305,7 +307,7 @@ jobs:
           - { source: nafithh,      cmd: "python -m scrapers.nafithh.run --type all", tmo: 15 }
           - { source: mobasher,     cmd: "python -m scrapers.mobasher.run --type all", tmo: 15 }
           - { source: muajarh,      cmd: "python -m scrapers.muajarh.run --type all", tmo: 10 }
-          - { source: dallali,      cmd: "python -m scrapers.dallali.run --type all", tmo: 10 }
+          - { source: dallali,      cmd: "python -m scrapers.dallali.run --type all", tmo: 10, proxy: true }
           # wave 3b (2026-09-27): maqam is a Nuzul tenant feed (130 records, only `available` kept); earthapp and
           # nawafeth are small complete feeds (54 / 20 ads).
           - { source: maqam,        cmd: "python -m scrapers.maqam.run --type all", tmo: 15 }

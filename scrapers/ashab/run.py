@@ -63,6 +63,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
 BASE = "https://ashab.sa/"
@@ -70,7 +71,6 @@ LIST = BASE + "properties?page={}"
 SOURCE = "عشاب العقارية"
 PREFIX = "ASB"
 SLUG = "ashab"
-IMPERSONATE = "chrome"
 SLEEP = 0.4
 
 _DEAL = {"بيع": "Buy", "إيجار": "Rent", "ايجار": "Rent"}
@@ -107,7 +107,7 @@ _LAND_PPM_MAX = 10_000   # a land sale below this is a per-m² figure (no plot h
 def get(s: cc.Session, url: str) -> str:
     for attempt in range(3):
         try:
-            r = s.get(url, impersonate=IMPERSONATE, timeout=40)
+            r = s.get(url, timeout=40)
             r.raise_for_status()
             return r.text
         except Exception:  # noqa: BLE001
@@ -206,6 +206,7 @@ def map_page(d: dict[str, Any], ad_id: str, url: str, unit_of: Optional[str] = N
     if re.search(r"مزاد", blob):
         return None, "auction"
     if status != AVAILABLE:
+        db.note_read_gone(f"{PREFIX}{ad_id}", status)   # its own page says sold/rented: a reading
         return None, f"status_{status or 'missing'}"
     deal = _DEAL.get(deal_ar)
     if not deal:
@@ -342,7 +343,10 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     dry = ap.parse_args().dry_run
 
-    s = cc.Session()
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(LIST.format(1), timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     ids = walk(s)
     print(f"{SOURCE}: {len(ids)} ad(s) on its own list", flush=True)
 

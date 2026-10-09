@@ -341,6 +341,16 @@ def _note(reason: str) -> None:
         _outcomes[reason] = _outcomes.get(reason, 0) + 1
 
 
+# Ids whose OWN page this run answered 404/410 or redirected to /404 (the measured removal signal).
+_read_gone_ids: set[int] = set()
+
+
+def _note_gone(listing_id: int, reason: str) -> None:
+    _note(reason)
+    with _outcome_lock:
+        _read_gone_ids.add(listing_id)
+
+
 # ── Fetch ─────────────────────────────────────────────────────────────────────────
 def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
     """Fetch + eval one listing id. Returns (id, parsed_nuxt, own) for LIVE listings, else None.
@@ -360,14 +370,14 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
             continue
         if r.status_code != 200:
             if r.status_code in (404, 410):
-                _note("dead_404")
+                _note_gone(listing_id, "dead_404")
                 return None
             last_exc = None
             _note(f"http_{r.status_code}")
             time.sleep(1.0 * (attempt + 1))
             continue
         if "/404" in str(r.url):
-            _note("redirect_404")
+            _note_gone(listing_id, "redirect_404")
             return None
         html = r.text
         landed = re.search(r"/real-estates/(\d+)", str(r.url))
@@ -390,7 +400,15 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
     offer = parsed["offer"]
     # Liveness gate: only fully-hydrated, available listings carry real data.
     if not offer.get("isAvailable") or offer.get("price") in (None, 0):
-        _note("not_available_or_zero_price")
+        # The measured dead shape (module docstring) is counted on its own, so each run's notes say
+        # how many own pages read as the hollow shell; the rest of the disjunction stays UNKNOWN.
+        # Armed (2026-10-09): the hollow shell on THIS id's own page is a direct removal reading, so it
+        # strikes like redirect_404 even when the coverage guard trips (_strike_read_gone). A shell on
+        # another listing's page, or the rest of the disjunction, says nothing about this id.
+        if HOLLOW_SHELL_KILLS and own and _is_hollow_offer(offer):
+            _note_gone(listing_id, "hollow_shell")
+        else:
+            _note("hollow_shell" if _is_hollow_offer(offer) else "not_available_or_zero_price")
         return None
     _note("live")
     return listing_id, parsed, own
@@ -445,12 +463,43 @@ def _landed_on_404(landed: str) -> bool:
     return http_liveness._path_of(landed) == "/404"
 
 
+# THE HOLLOW SHELL (2026-10-08). The module docstring's measured dead shape, «HTTP 200 with a hollow
+# shell where isAvailable === false and price === null», was never read by this oracle: it saw only a
+# status and a /404 landing. So every ad muktamel withdrew in place stayed shown for weeks: 603 active
+# rows at 3+ strikes on 2026-10-08, and all 1,433 grace re-reads of the previous 3 days ended
+# "HTTP 200, but this platform's signal had no opinion". The CONJUNCTION is the signal; an available
+# offer with a zero price, or anything unparseable, stays no-opinion.
+# SHADOW FIRST (LIFECYCLE_ENGINEER.md protection 2): while HOLLOW_SHELL_KILLS is False the probe
+# records «SHADOW hollow_shell … would be gone» on the evidence row and still answers UNKNOWN.
+# ARMED 2026-10-09 after the shadow: 517 SHADOW readings (10-09 05:04-09:54 UTC) fell on 517 rows, every
+# one active at 3-20 strikes and unseen by the crawl since 09-05..09-24; none on a row the crawl read
+# live. Each kill still needs grace (3 strikes) and the in-run live control (_canary).
+HOLLOW_SHELL_KILLS = True
+
+
+def _is_hollow_offer(offer: dict) -> bool:
+    return offer.get("isAvailable") is False and offer.get("price") is None
+
+
+def _hollow_shell(body: str) -> Optional[bool]:
+    """True: this page's hydrated offer is the measured dead shape. False: an offer that is not.
+    None: no offer could be read (never evidence either way)."""
+    src = _extract_nuxt(body or "")
+    parsed = _nuxt_via_node(src) if src else None
+    offer = (parsed or {}).get("offer")
+    if not isinstance(offer, dict):
+        return None
+    return _is_hollow_offer(offer)
+
+
 def _liveness_signal(status: Optional[int], body: str, landed_on_404: bool) -> Optional[str]:
     """muktamel's affirmative removal signal, and nothing else. None == no opinion.
     The third argument is `_landed_on_404`, NOT the shared law's "the path changed" (see _MuktamelProbe)."""
     if status in (404, 410):
         return "gone"
     if landed_on_404:
+        return "gone"
+    if HOLLOW_SHELL_KILLS and status == 200 and _hollow_shell(body) is True:
         return "gone"
     return None
 
@@ -503,11 +552,32 @@ class _MuktamelProbe(http_liveness.LivenessProbe):
     changed" — on muktamel every live id's path changes (it gains a slug). The law is untouched."""
 
     def fetch(self, url: str) -> tuple[Optional[int], str, bool]:
+        self.last_hollow = False
         try:
             r = self.session().get(url, timeout=self.timeout, allow_redirects=True)
-            return r.status_code, (r.text or ""), _landed_on_404(str(getattr(r, "url", url) or url))
+            landed = str(getattr(r, "url", url) or url)
+            status, body = r.status_code, (r.text or "")
         except Exception:  # noqa: BLE001 — an unreachable source is never proof of death
             return None, "", False
+        if status == 200 and not HOLLOW_SHELL_KILLS and _same_listing(url, landed):
+            self.last_hollow = _hollow_shell(body) is True
+        if HOLLOW_SHELL_KILLS and status == 200 and not _same_listing(url, landed) \
+                and not _landed_on_404(landed):
+            return None, "", False      # landed on another listing: its shell says nothing of this one
+        return status, body, _landed_on_404(landed)
+
+    def verify_gone(self, ad_number: str):
+        verdict, why = super().verify_gone(ad_number)
+        if verdict == "unknown" and getattr(self, "last_hollow", False):
+            why = ("SHADOW hollow_shell (isAvailable false, price null) — would be gone; " + why)[:300]
+        return verdict, why
+
+
+def _same_listing(url: str, landed: str) -> bool:
+    """The read landed on THIS id's own page (/real-estates/<id>, with or without its slug)."""
+    want = re.search(r"/real-estates/(\d+)", url)
+    got = re.search(r"/real-estates/(\d+)", landed)
+    return bool(want and got and want.group(1) == got.group(1))
 
 
 _probe = _MuktamelProbe(
@@ -951,8 +1021,8 @@ def main() -> int:
                                  verify_gone=_probe.verify_gone)
             if n < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
-            else:
-                pruned += n
+                n = _strike_read_gone(tbl, set(_read_gone_ids), args.shards, args.shard)
+            pruned += max(n, 0)
         print(f"✓ Muktamel: {len(res)} residential + {len(com)} commercial upserted, {pruned} stale pruned")
         print(f"  fetch outcomes: {dict(sorted(_outcomes.items(), key=lambda kv: -kv[1]))}", flush=True)
         healthy = db.end_run(
@@ -970,6 +1040,79 @@ def main() -> int:
         traceback.print_exc()
         return 1
 
+
+def split_read_gone(active_ads: list[str], gone_ids: set[int]) -> tuple[list[str], set[str]]:
+    """(struck, kept): the active ad_numbers this run read gone on their own page, and the rest."""
+    def _id(ad: str) -> Optional[int]:
+        return int(ad[2:]) if ad.startswith("MK") and ad[2:].isdigit() else None
+    struck = [a for a in active_ads if _id(a) in gone_ids]
+    return struck, {a for a in active_ads if _id(a) not in gone_ids}
+
+
+def _strike_read_gone(tbl: str, gone_ids: set[int], shards: int, shard: int) -> int:
+    """Strike ONLY the ids whose own page this run read as removed, when the absence prune is guarded.
+
+    WHY (2026-10-07, the dealapp lesson of 2026-10-06 on a second site). prune_unseen's coverage
+    guard counts every active row this crawl did not upsert as LIVE as "not re-seen", and the dead
+    ones are exactly those: each run read ~212 pages as redirect_404 and ~575 as not-available, so
+    it "re-saw 488 of 618" (79% < 80%) and threw the whole prune away. ~575 active rows sat at 3-19
+    strikes, unseen since as early as 2026-09-03, still shown. A redirect to /404 is a DIRECT
+    reading, not absence. So the prune runs again with every active row counted as seen EXCEPT the
+    ones read gone: unread rows stay untouched (UNKNOWN), not-available stays UNKNOWN, a read-gone
+    row takes a strike and at grace verify_gone re-reads it behind the in-run canary. Every guard of
+    prune_unseen (collapse, grace, canary, evidence rows) still applies."""
+    if not gone_ids:
+        return 0
+    rows: list[str] = []
+    start = 0
+    while True:   # PostgREST caps a select at 1000 rows — page explicitly
+        page = db._execute(
+            db.sb().table(tbl).select("ad_number").eq("active", True).eq("source", "Muktamel")
+              .range(start, start + 999), what=tbl + ".read_gone_slice").data or []
+        rows += [r["ad_number"] for r in page if r.get("ad_number")]
+        if len(page) < 1000:
+            break
+        start += 1000
+    struck, kept = split_read_gone(rows, gone_ids)
+    if not struck:
+        return 0
+    print(f"  {tbl}: guard tripped, striking only the {len(struck)} row(s) whose own page read "
+          f"removed this run", flush=True)
+    # min_coverage=0: every row missing from `kept` was READ gone, so the absence floor has nothing to
+    # measure (2026-10-09: with the hollow shell armed, ~130 of a 622-row slice read gone and the floor
+    # would discard the rerun too). The collapse guard (30%) still holds.
+    return db.prune_unseen(tbl, kept, source="Muktamel", shards=shards, shard=shard,
+                           verify_gone=_probe.verify_gone, min_coverage=0.0)
+
+
+
+def page_verdict(url: str) -> str:
+    """ALIVE / DEAD / UNKNOWN for one muktamel ad URL, read the way this crawl and its oracle read it.
+
+    WHY (2026-10-09): the nightly dead-visible score and the spot-check judged muktamel by HTTP status
+    alone. A withdrawn ad answers 200 with a hollow shell, and a removed one 302s to /404 which then
+    answers 200, so status-only read every dead muktamel ad as live: 10/10 "live" three nights running
+    while 512 shown rows read hollow on their own page. ALIVE needs this id's own page with an
+    available, priced offer; anything unread or ambiguous is UNKNOWN."""
+    from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN
+    try:
+        r = _session().get(url, timeout=45, allow_redirects=True)
+    except Exception:  # noqa: BLE001 — unreachable is never evidence
+        return UNKNOWN
+    landed = str(getattr(r, "url", url) or url)
+    if r.status_code in (404, 410) or (r.status_code == 200 and _landed_on_404(landed)):
+        return DEAD
+    if r.status_code != 200 or not _same_listing(url, landed):
+        return UNKNOWN
+    src = _extract_nuxt(r.text or "")
+    offer = ((_nuxt_via_node(src) if src else None) or {}).get("offer")
+    if not isinstance(offer, dict):
+        return UNKNOWN
+    if _is_hollow_offer(offer):
+        return DEAD if HOLLOW_SHELL_KILLS else UNKNOWN
+    if offer.get("isAvailable") and offer.get("price") not in (None, 0):
+        return ALIVE
+    return UNKNOWN
 
 if __name__ == "__main__":
     raise SystemExit(main())

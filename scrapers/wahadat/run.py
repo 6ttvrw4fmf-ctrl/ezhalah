@@ -201,6 +201,32 @@ def resolve_type(proj: dict[str, Any]) -> tuple[Optional[str], str]:
     return en, ""
 
 
+def unit_uid(u: dict) -> str:
+    """The unit id our ad_number carries (PREFIX + this)."""
+    return str(u.get("id") or "").replace("-", "")[:12]
+
+
+# ── PRUNE ORACLE: the unit's OWN status (2026-10-07, ♻️) ─────────────────────────────────────────
+# prune_unseen ran without verify_gone, so a unit missing from three crawls was hidden on absence
+# alone (P1 unknown_treated_as_dead; 4 hides in 30 days, one on 2026-10-07 with no GONE row). But
+# the source states every unit's status in its project's own record (available / reserved / sold,
+# measured 2026-09-26), and a unit it marks sold or reserved is an affirmative statement about THAT
+# unit, not an absence. So a kill now needs this run to have read the unit's own record, in a
+# project whose is_active is true, saying sold or reserved; a unit that merely vanished is UNKNOWN
+# and stays. A unit that turns available again is re-upserted active by the next crawl.
+OFF_MARKET_STATUSES = ("sold", "reserved")
+
+
+def off_market_oracle(off_market: dict[str, str]):
+    """verify_gone for prune_unseen: gone only for units this run read as sold/reserved."""
+    def verify_gone(ad_number: str):
+        st = off_market.get(ad_number)
+        if st:
+            return "gone", f"the unit's own record in its project page states status={st}"
+        return "unknown", "not read as sold/reserved this run (absence is never a death)"
+    return verify_gone
+
+
 def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[str, Any], str]:
     """(row, category) for ONE unit already proven `status == available` and type-resolved."""
     category = normalize.category_for_type(ptype).lower()
@@ -220,7 +246,7 @@ def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[
     area = u.get("area")
     area = area if isinstance(area, (int, float)) and area > 0 else None
 
-    uid = str(u.get("id") or "").replace("-", "")[:12]
+    uid = unit_uid(u)
     title = redact_pii(" ".join(x for x in [proj.get("name_ar") or proj.get("name"),
                                             u.get("name_ar") or u.get("name")] if x)) or None
 
@@ -310,6 +336,7 @@ def main() -> int:
     com: list[dict] = []
     skipped: dict[str, int] = {}
     held: set[str] = set()      # units of a project whose own is_active is not True — see below
+    off_market: dict[str, str] = {}   # ad_number -> sold/reserved, read from the unit's own record
     seen_projects = 0
     try:
         for u in urls:
@@ -335,6 +362,8 @@ def main() -> int:
                 if st != READY_STATUS:                  # owner rule: ready units only
                     k = f"not_ready_{st or 'unstated'}"
                     skipped[k] = skipped.get(k, 0) + 1
+                    if st in OFF_MARKET_STATUSES and proj.get("is_active") is True and unit_uid(unit):
+                        off_market[f"{PREFIX}{unit_uid(unit)}"] = st
                     continue
                 row, cat = map_unit(proj, unit, ptype)
                 if not row["ad_number"].strip(PREFIX):
@@ -378,7 +407,8 @@ def main() -> int:
         for tbl, rows in (("wahadat_residential_listings", res),
                           ("wahadat_commercial_listings", com)):
             if rows:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows} | held, source=SOURCE)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows} | held, source=SOURCE,
+                                    verify_gone=off_market_oracle(off_market))
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:

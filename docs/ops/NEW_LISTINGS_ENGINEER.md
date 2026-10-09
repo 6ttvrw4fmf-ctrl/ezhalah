@@ -525,6 +525,8 @@ Your history, read from the routine log on 2026-10-03:
   money, legal and secrets. A check you could not finish is «not run», never a reason to lower the bar.
 
 ## Lessons from real breakages (use them)
+- **2026-10-07 (copied by 🔧 QA):** before propagating a source's catalog id, check that its REGION matches the region the source published — a right city name in the wrong region still hides the listing (muktamel «بحرة» → Jazan, 33 rows). And the undo must keep the row searchable: a NULL city makes the row non-production_ready (1,118 of 1,118 NULL-city rows are), so «blank it» hides it completely.
+- **2026-10-06 (copied by 🔧 QA):** count before/after on a FIXED set of ids, never a sliding 24-hour window: the window read 61 → 61 while the truth was 61 → 29. And when one tool is down (the DB connector, 07:24–08:03), work the next item instead of stopping: you ended at 95 of 120 minutes with a 3/10.
 - **A parser can be right on old rows and broken on the next one it writes.** That's why the
   guards must run on newly scraped listings, and why you exist.
 - **aqar parking:** first read from prose (wrong), then declared "not published" (wrong), while aqar
@@ -542,6 +544,7 @@ Your history, read from the routine log on 2026-10-03:
   fine. Check fresh values.
 - **A monitor must flag OUR claim, not the source's number.**
 - **A correction that isn't enrolled decays silently.**
+- **2026-10-08 (🆕, copied by 🔧):** a migration's check block must EXECUTE the function it replaces. Grepping the text missed a plpgsql name clash (`n` ambiguous), and job 45 failed at 08:10 UTC until the 09:10 run.
 
 ## Your score (computed, never self-graded)
 Your rating is **read from `python -m scrapers.common.new_listings_score`** (one row per website

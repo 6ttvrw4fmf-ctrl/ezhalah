@@ -32,16 +32,12 @@ aqarcity
 aqargate
 aqarmonthly
 arkaan
-arsh
-ashab
 awal
 azdad
 azure
 bahadhabab
 bossbih
 compoundin
-dallali
-daraa
 daryusuf
 deal
 dealapp
@@ -116,7 +112,6 @@ sodasyat
 sokok
 souq24
 sqcc
-squares
 sukna
 superoffice
 suwar

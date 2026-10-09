@@ -121,3 +121,27 @@ def test_similar_properties_strip_cannot_leak_into_the_row():
     assert (r["price_total"], r["price_annual"], r["rent_period"]) == (680000, None, None)
     assert r["city"] == "Riyadh" and r["region"] == "Riyadh"
     assert r["neighborhood"] == "حي الرمال"
+
+
+# ── amenities from the ad's own «الوصف» (🔬 AF engineer, 2026-10-08) ───────────────────────────────
+# therc publishes no amenity field; 236 of 447 live descriptions named a kitchen and 0 were stored.
+# Verbatim shapes from live therc_residential_listings 10283567 / 10283466 (2026-10-08).
+from scrapers.therc.run import description_amenities  # noqa: E402
+
+
+def test_bulleted_description_states_kitchen_and_maid_room():
+    d = ("🟧الفيلا تتكون من * حوش * ⁠مدخل سيارة * ⁠مشب * ⁠ملحق * ⁠مطبخ * ⁠غرفة خادمة * ⁠مجلس")
+    out = description_amenities(d)
+    assert out.get("kitchen") is True and out.get("maid_room") is True
+
+
+def test_check_mark_bullets_are_separate_statements():
+    d = "تفاصيل الشقة: ✔️ 3 غرف نوم ✔️ صالة ✔️ لا يوجد مصعد ✔️ مطبخ راكب"
+    out = description_amenities(d)
+    assert out.get("kitchen") is True
+    assert "elevator" not in out, "prose says yes or nothing — «لا يوجد مصعد» is never stored as no"
+
+
+def test_neighbourhood_is_not_the_unit_and_silence_is_nothing():
+    assert description_amenities("قريب من مواقف عامة وجميع الخدمات") == {}
+    assert description_amenities(None) == {}

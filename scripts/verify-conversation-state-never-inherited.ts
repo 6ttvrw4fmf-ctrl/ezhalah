@@ -77,7 +77,10 @@ const mustCatch = (label: string, caught: boolean, detail = "") =>
 // could only express "null or false or []" and would have silently mis-judged the two fields added
 // on 2026-09-18 whose cleared value is neither (`askCountRef` → 0, `ageFlowTokenRef` → *incremented*).
 const CONVERSATION_SCOPED = [
+  { name: "pickerSourceExplicit", kind: "probe", cleared: (v: any) => v === false, why: "a new conversation accepts source requests from free text until the picker is explicitly used" },
+  { name: "selectedSources", kind: "probe", cleared: (v: any) => Array.isArray(v) && v.length === 0, why: "website choices belong to this conversation" },
   { name: "completed", kind: "probe", cleared: (v: any) => v === false, why: "locks the composer AND withholds the «عرض المزيد» row" },
+  { name: "restoringId", kind: "probe", cleared: (v: any) => v === null, why: "a saved chat's restore loading line would stand over the NEXT conversation's buttons (2026-10-08)" },
   { name: "msgs", kind: "probe", cleared: (v: any) => Array.isArray(v) && v.length === 0, why: "the previous conversation's bubbles" },
   { name: "busy", kind: "probe", cleared: (v: any) => v === false, why: "a spinner owned by a search that is being abandoned" },
   { name: "stopped", kind: "probe", cleared: (v: any) => v === false, why: "a Stop pressed in the previous conversation" },
@@ -116,8 +119,13 @@ const calls: string[] = [];
 const rec = (k: string) => (v: unknown) => { probe[k] = typeof v === "function" ? "(updater)" : v; };
 const setBusy = rec("busy");
 const setStopped = rec("stopped");
+const setPlatformPickerOpen = rec("platformPickerOpen");
+const setPlatformPickerSearch = rec("platformPickerSearch");
+const setSelectedSources = rec("selectedSources");
+const setPickerSourceExplicit = rec("pickerSourceExplicit");
 const setMsgs = rec("msgs");
 const setCompleted = rec("completed");
+const setRestoringId = rec("restoringId");
 const setFilterOrigin = rec("filterOrigin");
 const setAgeFlow = rec("ageFlow");
 const chatIdRef = { current: "PREVIOUS-CHAT" as unknown };
@@ -843,6 +851,8 @@ const setMsgs = (u: any) => {
 };
 const setCompleted = (_v: boolean) => { probe.completed++; };
 const conversationEpochRef = { get current() { return world.epoch; } };
+// No saved-chat pre-load in this fixture (2026-10-07): the press must reach loadMoreListings itself.
+const prefetchRef = { current: new Map<string, any>() };
 // THE EXIT, inside the await: the user tapped another chat while the page was in flight.
 const loadMoreListings = async (_q: any, offset: number) => {
   if (world.exitDuringFetch) world.epoch++;

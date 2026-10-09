@@ -15,6 +15,7 @@ import { useAtLeast } from '@/lib/useAtLeast';
 import { SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
 import ShareSheet from '@/components/ShareSheet';
 import ModeSwitch from '@/components/ModeSwitch';
+import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
 import { CATEGORIES, detailFor, detailForContext, priceTabsFor, type Category } from '@/data/taxonomy';
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
@@ -1276,6 +1277,7 @@ export default function Home() {
           </View>
 
           {/* Hero — title then subtitle rise in, staggered (user request). */}
+          <HomeWebsiteStrip />
           <View style={s.hero}>
             <RNAnimated.Text style={[s.heroTitle, reveal(titleAnim, 20)]}>{t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
             <RNAnimated.Text style={[s.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>
@@ -2155,7 +2157,7 @@ const s = StyleSheet.create({
   top: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 4 },
   topLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   // Note #4 — mobile brand text next to the hamburger.
-  topBrand: { fontSize: 18, fontWeight: '800', color: colors.primary, letterSpacing: -0.4 },
+  topBrand: { fontSize: 18, fontWeight: '800', color: colors.dark, letterSpacing: -0.4 },
   // AI Agent badge + Share icon, grouped and pushed to the far-right edge (marginStart:auto) so they
   // sit together in the top-right corner in BOTH languages. (user request.)
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 6, marginStart: 'auto' },

@@ -48,6 +48,9 @@ Accept-Language: ar is sent; city/area/type names come back Arabic («الريا
 «شقة»). The public page https://www.dwelleo.sa/ar/properties/<slug> renders the listing
 (verified: title, «السعر 1,400,000», «227 م²», the ad licence «7200899466» all on the page).
 /ar/properties itself client-redirects to the homepage, so listing_url is ALWAYS the detail page.
+2026-10-07 the site moved its pages to /ar/properties/for-{rent|sale}/{type}/{city}/{district}/{slug}
+and the old /ar/properties/<slug> answers 404: listing_url now comes from sitemaps/properties.xml
+(the site's own list of live pages) and a record with no page there is skipped (no_public_page).
 
 Catalogue on 2026-09-24 (second walk, 479 s): 11,480 rows / 11,480 ids, site total 11,481.
 listing_type.key: for-sale + re-sale → Buy, for-rent → Rent, short-term-rental 1 (→ skipped,
@@ -162,6 +165,12 @@ from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
 BASE = "https://www.dwelleo.sa"
 API = "https://api.dwelleo.sa/api/v1/properties"
+# The site's own list of public listing pages. Since 2026-10-07 a listing lives at
+# /ar/properties/for-{rent|sale}/{type}/{city}/{district}/{slug}; the old /ar/properties/{slug}
+# answers 404 (8/8 sampled). The path parts are the site's own English slugs, which the API does
+# not hand us, so the URL is TAKEN from the sitemap, never assembled: a card must open a live page.
+SITEMAP = f"{BASE}/sitemaps/properties.xml"
+_LOC_RE = re.compile(r"<loc>\s*([^<\s]+)\s*</loc>")
 SOURCE = "دويليو"
 PREFIX = "DWL"
 _PAUSE = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
@@ -281,6 +290,49 @@ def fetch_catalogue(s: cc.Session, limit: int = 0) -> tuple[dict[int, dict], int
     return items, total, complete
 
 
+def parse_sitemap(xml: str) -> tuple[dict[str, str], list[str]]:
+    """({slug: public page URL}, [child sitemap URLs]) from one sitemap document.
+
+    A listing page is any <loc> under /properties/ with a slug after it; the Arabic page wins over
+    the English one for the same slug. A <sitemapindex> yields its children instead."""
+    locs = _LOC_RE.findall(xml or "")
+    if "<sitemapindex" in (xml or ""):
+        return {}, locs
+    urls: dict[str, str] = {}
+    for loc in locs:
+        path = loc.split("#", 1)[0].split("?", 1)[0].rstrip("/")
+        if "/properties/" not in path:
+            continue
+        slug = path.rsplit("/", 1)[-1]
+        if slug and (slug not in urls or "/ar/" in path and "/ar/" not in urls[slug]):
+            urls[slug] = path
+    return urls, []
+
+
+def fetch_public_urls(s: cc.Session) -> dict[str, str]:
+    """{slug: public page URL} for every listing page the site publishes. Raises when the sitemap
+    cannot be read: without it no listing has a known page, and a guessed URL is a dead card."""
+    def get(url: str) -> str:
+        for attempt in range(_CATALOGUE_ATTEMPTS):
+            try:
+                r = s.get(url, timeout=40, headers={"Accept": "application/xml,text/xml,*/*"})
+                if r.status_code == 200 and "<loc>" in r.text:
+                    return r.text
+                if r.status_code < 500 and r.status_code != 429:
+                    break
+            except Exception:  # noqa: BLE001 — retried below
+                pass
+            time.sleep(1.5 * (attempt + 1))
+        raise RuntimeError(f"the properties sitemap {url} did not answer with listing pages")
+
+    urls, children = parse_sitemap(get(SITEMAP))
+    for child in children[:50]:
+        found, _ = parse_sitemap(get(child))
+        for slug, url in found.items():
+            urls.setdefault(slug, url)
+    return urls
+
+
 def fetch_detail(s: cc.Session, key: Any) -> Optional[dict]:
     """The full record for a slug or id, or None (a miss is never an empty record)."""
     _status, payload = _get_json(s, f"{API}/{quote(str(key))}")
@@ -359,8 +411,12 @@ def _clean_info(d: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def map_listing(rec: dict, *, this_year: Optional[int] = None) -> tuple[Optional[dict], str, str]:
-    """One API record (list item, or list item merged with its detail) → (row|None, category, why)."""
+def map_listing(rec: dict, *, this_year: Optional[int] = None,
+                public_urls: Optional[dict[str, str]] = None) -> tuple[Optional[dict], str, str]:
+    """One API record (list item, or list item merged with its detail) → (row|None, category, why).
+
+    `public_urls` is the sitemap's {slug: page}. A record whose slug has no public page is skipped
+    (no_public_page): the card would open a 404. None (tests only) keeps the record's slug path."""
     this_year = this_year or datetime.now(timezone.utc).year
     dwl_id = _pos(rec.get("id"))
     if not dwl_id:
@@ -368,6 +424,8 @@ def map_listing(rec: dict, *, this_year: Optional[int] = None) -> tuple[Optional
     slug = (rec.get("slug") or "").strip()
     if not slug:
         return None, "residential", "no_slug"
+    if public_urls is not None and slug not in public_urls:
+        return None, "residential", "no_public_page"
     owner_name = str((rec.get("owner") or {}).get("name") or "") if isinstance(rec.get("owner"), dict) else ""
     if slug.startswith("test-") or _TEST_TITLE in (rec.get("title") or "") or _TEST_OWNER_RE.search(owner_name):
         return None, "residential", "site_test_row"
@@ -416,7 +474,7 @@ def map_listing(rec: dict, *, this_year: Optional[int] = None) -> tuple[Optional
 
     row: dict[str, Any] = {
         "ad_number": f"{PREFIX}{dwl_id}",
-        "listing_url": f"{BASE}/ar/properties/{slug}",
+        "listing_url": public_urls[slug] if public_urls is not None else f"{BASE}/ar/properties/{slug}",
         "source": SOURCE,
         "active": True,
         "title": title,
@@ -576,6 +634,8 @@ def main() -> int:
         if not items:
             raise RuntimeError("the catalogue API answered with no properties")
         print(f"{SOURCE}: {len(items)} listings enumerated (site total {site_total})", flush=True)
+        public_urls = fetch_public_urls(s)
+        print(f"{SOURCE}: {len(public_urls)} public listing pages in {SITEMAP}", flush=True)
         for dwl_id, item in items.items():
             seen += 1
             detail = None
@@ -585,7 +645,7 @@ def main() -> int:
                 if detail is None or _pos(detail.get("id")) != dwl_id:
                     skipped["detail_miss"] = skipped.get("detail_miss", 0) + 1   # the card still maps
                     detail = None
-            row, cat, why = map_listing({**item, **(detail or {})})
+            row, cat, why = map_listing({**item, **(detail or {})}, public_urls=public_urls)
             if not row:
                 skipped[why] = skipped.get(why, 0) + 1
                 continue

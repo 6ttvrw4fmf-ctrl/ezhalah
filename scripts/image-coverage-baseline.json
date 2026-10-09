@@ -14,6 +14,12 @@
       "active_rows": 9,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 9 of 9 rows carried photo_urls (the whole catalogue). TINY: one listing is ~11 points; floor set one listing below the observation."
     },
+    "abaad": {
+      "floor_pct": 91,
+      "today_pct": 94.6,
+      "active_rows": 406,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 8-day range 94.3–94.8. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
+    },
     "abeea": {
       "floor_pct": 97,
       "today_pct": 100,
@@ -102,11 +108,23 @@
       "active_rows": 17,
       "reason": "PHOTOS ARE BROKEN AT THE SOURCE (run.py docstring): every image is app/thumbnail.php?i=…, which answers 200 with a body that is not an image (naturalWidth 0 in a real Chrome, 5/5), so run.py writes photo_urls NULL and keeps the count in additional_info. Measured 2026-09-24 over a live crawl: 0 of 17 mapped rows. Re-measure when the thumbnail endpoint serves real images."
     },
+    "alsaedan": {
+      "floor_pct": 90,
+      "today_pct": 93.2,
+      "active_rows": 323,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 8-day range 93.2–93.3. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
+    },
     "alshawaf": {
-      "floor_pct": 55,
-      "today_pct": 62.0,
-      "active_rows": 100,
-      "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 62 of 100 rows carried photo_urls (the first 100 of 987). Placeholder thumbnails are refused, not published; sample error ~±5 points, so the floor keeps that margin."
+      "floor_pct": 44,
+      "today_pct": 47.9,
+      "active_rows": 1004,
+      "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 62 of 100 rows carried photo_urls (the first 100 of 987). Placeholder thumbnails are refused, not published; sample error ~±5 points, so the floor keeps that margin.",
+      "rebased": {
+        "from": 55,
+        "to": 44,
+        "why": "Scraping Engineer 2026-10-07: the 55 floor came from the FIRST 100 index rows (62%), not the catalogue. The office posts about half its cards with only its shared «logos.png» placeholder (515 of 987 index rows, scrapers/alshawaf/run.py PLACEHOLDER_IMG), which the scraper refuses. A CI re-read of 8 cards matches our capture exactly: every page with an og:image is a card we hold a photo for (5/5), every page without one is a card we hold none for (3/3). So 47.9% is the source's own coverage, not a capture loss. Floor = today minus a ~4-point margin.",
+        "evidence": "source-reread run 37576833704 (2026-10-07 05:33 UTC): alshawaf 12605043/12605316/12605389/12605402/12605985 og:image True and photo_urls 1 each; 12605187/12605510/12605610 og:image False, no page image, photo_urls empty. ops_image_coverage_latest() 2026-10-07: alshawaf 481/1,004 = 47.9%."
+      }
     },
     "alsidra": {
       "floor_pct": 90,
@@ -164,9 +182,15 @@
       "active_rows": 136
     },
     "aqarcity": {
-      "floor_pct": 96,
+      "floor_pct": 95,
       "today_pct": 99.6,
-      "active_rows": 1784
+      "active_rows": 1784,
+      "rebased": {
+        "from": 96,
+        "to": 95,
+        "why": "Scraping Engineer 2026-10-07: 95.6–95.7% on every daily snapshot 09-30 … 10-07 (1,767/1,846 today): flat, never once at 96 in that window — the 96 floor sat a hair above the platform's steady level, so the gate has been red on a number that does not move, not on a regression. Floor = the steady level minus margin.",
+        "evidence": "mon_image_coverage / ops_image_coverage_latest() daily snapshots 2026-09-30 … 10-07 (queried 2026-10-07 05:40 UTC)."
+      }
     },
     "aqargate": {
       "floor_pct": 95,
@@ -177,6 +201,12 @@
       "floor_pct": 96,
       "today_pct": 99,
       "active_rows": 1762
+    },
+    "aqarnajran": {
+      "imageless_at_source": true,
+      "today_pct": 0.0,
+      "active_rows": 39,
+      "reason": "THE SOURCE PUBLISHES NO LISTING PHOTO. Measured 2026-10-07 from CI (source-reread run 37580654658, which prints the og:image VALUE): a land plot (12390433) and a warehouse (12390455) carry the SAME og:image, https://aqarnajran.com/wp-content/uploads/2026/02/عقار-نجران-3-1.png — the site's brand image, also behind the three JSON-LD image entries. None of the 41 posts has a featured image (crawl 06:01 UTC: «featured photos read: 0»), and the post bodies carry no upload image the scraper accepts. 0% on every snapshot 09-30 … 10-07. Re-measure if the office starts attaching photos (run.py now reads featured_media too)."
     },
     "arkaan": {
       "floor_pct": 97,
@@ -229,6 +259,12 @@
         "evidence": "scrapers/bossbih/run.py docstring MEASURED COVERAGE: every one of 1,485 detail pages fetched live 2026-09-20 → photo_urls 735 of 1,448 mapped rows (50.8%) — a SOURCE measurement taken before any production row existed (not len(photo_urls) of our own rows). ops_image_coverage_latest() 2026-10-06 05:4x UTC: bossbih 758/1,481 = 51.2%; per-week active rows 09-21 47.3% (1,147), 09-28 31.8% (22), 10-05 87.5% (8)."
       }
     },
+    "compoundin": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 266,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 100% every day. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
+    },
     "dallali": {
       "floor_pct": 85,
       "today_pct": 100.0,
@@ -280,6 +316,12 @@
       "active_rows": 204,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 203 of 204 rows carried photo_urls (the whole catalogue). Floor follows today-minus-about-three."
     },
+    "ego": {
+      "floor_pct": 88,
+      "today_pct": 92.6,
+      "active_rows": 27,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 8-day range 92.6–94.1; TINY (one listing ≈3.7 pts), floor one listing below the low. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
+    },
     "eightfloor": {
       "floor_pct": 50,
       "today_pct": 100.0,
@@ -308,6 +350,12 @@
       "today_pct": 100.0,
       "active_rows": 2,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 2 of 2 rows carried photo_urls (the whole catalogue). TINY: one listing is ~50 points; floor set one listing below the observation."
+    },
+    "fahadalshahri": {
+      "floor_pct": 80,
+      "today_pct": 100.0,
+      "active_rows": 5,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 100% every day; TINY (one listing = 20 pts), floor one listing below. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
     },
     "fkralemar": {
       "floor_pct": 90,
@@ -342,6 +390,12 @@
       "today_pct": 98.9,
       "active_rows": 92,
       "note": "Declared 2026-09-21 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 91 of 92 rows carried photo_urls (the first 92 mapped of ~145). Floor follows today-minus-about-three."
+    },
+    "gudai": {
+      "floor_pct": 91,
+      "today_pct": 100.0,
+      "active_rows": 12,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 100% every day; TINY (one listing ≈8.3 pts), floor one listing below. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
     },
     "hajer": {
       "floor_pct": 57,
@@ -399,6 +453,12 @@
       "today_pct": 100.0,
       "active_rows": 78,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 78 of 78 rows carried photo_urls (the whole catalogue). Floor follows today-minus-about-three."
+    },
+    "ksaaqar": {
+      "floor_pct": 79,
+      "today_pct": 81.9,
+      "active_rows": 1442,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 8-day range 81.9–82.0. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
     },
     "livingcompound": {
       "floor_pct": 90,
@@ -483,6 +543,12 @@
       "active_rows": 11,
       "note": "Declared 2026-09-27 (wave-3 batch 4). MEASURED ON THE PRODUCTION ROWS THEMSELVES after the first crawl: 11 of 11 active rows carry photo_urls (100.0%). TINY: one listing is ~9.1 points; floor set one listing below the observation."
     },
+    "muhaysini": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 10575,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 8-day range 99.9–100. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
+    },
     "muktamel": {
       "floor_pct": 97,
       "today_pct": 100,
@@ -505,6 +571,12 @@
       "active_rows": 9,
       "note": "Declared 2026-09-27 (wave 3b). MEASURED ON THE PRODUCTION ROWS after the first crawl: 3 of 9 carry photo_urls. Checked on source: the other ads have no #big gallery; images elsewhere on the page are the «إعلانات مشابهة» strip and dot thumbnails (e.g. #157, #151), correctly excluded. TINY: one listing is ~11.1 points; floor set one listing below."
     },
+    "nofodh": {
+      "floor_pct": 49,
+      "today_pct": 52.3,
+      "active_rows": 2555,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 52.3% flat all 8 days — flat, so not a capture regression; source-side coverage not yet re-measured. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
+    },
     "nowaisiry": {
       "floor_pct": 97,
       "today_pct": 100,
@@ -522,16 +594,28 @@
       "active_rows": 12
     },
     "opensooq": {
-      "floor_pct": 97,
+      "floor_pct": 95,
       "today_pct": 98.6,
       "active_rows": 72,
-      "note": "Declared 2026-09-27 (wave-3 batch 4). MEASURED ON THE PRODUCTION ROWS THEMSELVES after the first crawl: 71 of 72 active rows carry photo_urls (98.6%). TINY: one listing is ~1.4 points; floor set one listing below the observation."
+      "note": "Declared 2026-09-27 (wave-3 batch 4). MEASURED ON THE PRODUCTION ROWS THEMSELVES after the first crawl: 71 of 72 active rows carry photo_urls (98.6%). TINY: one listing is ~1.4 points; floor set one listing below the observation.",
+      "rebased": {
+        "from": 97,
+        "to": 95,
+        "why": "Scraping Engineer 2026-10-07: 96.1–96.4% on every daily snapshot 09-30 … 10-07 (80/83 today): flat; at 83 rows one listing is 1.2 points, and 97 required 81/83. Floor one listing under the observed low.",
+        "evidence": "mon_image_coverage / ops_image_coverage_latest() daily snapshots 2026-09-30 … 10-07 (queried 2026-10-07 05:40 UTC)."
+      }
     },
     "qmra": {
-      "floor_pct": 83,
+      "floor_pct": 60,
       "today_pct": 100.0,
       "active_rows": 6,
-      "note": "Declared 2026-09-26 at onboarding. MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: read back through the anon REST key the client uses, 6 of 6 active rows carry photo_urls (100%). TINY: one listing is ~17 points; floor set one listing below the observation. 6 of the site's 19 posts mapped — the other 13 are not-ready (8 sold, 3 under construction, 1 sold, 1 rented) and skipped by run.py's own gate per the owner's ready-only rule."
+      "note": "Declared 2026-09-26 at onboarding. MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: read back through the anon REST key the client uses, 6 of 6 active rows carry photo_urls (100%). TINY: one listing is ~17 points; floor set one listing below the observation. 6 of the site's 19 posts mapped — the other 13 are not-ready (8 sold, 3 under construction, 1 sold, 1 rented) and skipped by run.py's own gate per the owner's ready-only rule.",
+      "rebased": {
+        "from": 83,
+        "to": 60,
+        "why": "Scraping Engineer 2026-10-07: 80% (4/5) on every daily snapshot 09-30 … 10-07: TINY — at 5 rows one listing is 20 points, so 83 demanded 5/5 and was red on the first photo-less card. Floor one listing under the observed level.",
+        "evidence": "mon_image_coverage / ops_image_coverage_latest() daily snapshots 2026-09-30 … 10-07 (queried 2026-10-07 05:40 UTC)."
+      }
     },
     "raghdan": {
       "floor_pct": 88,
@@ -560,6 +644,18 @@
       "today_pct": 70.3,
       "active_rows": 101
     },
+    "razre": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 94,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 100% every day. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
+    },
+    "reinvest": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 855,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 100% every day. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
+    },
     "remal": {
       "floor_pct": 89,
       "today_pct": 91.7,
@@ -587,6 +683,24 @@
       "floor_pct": 84,
       "today_pct": 87.1,
       "active_rows": 85
+    },
+    "sadiqeltajer": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 1685,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 8-day range 99.8–100. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
+    },
+    "safa": {
+      "floor_pct": 53,
+      "today_pct": 55.8,
+      "active_rows": 43,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 8-day range 55.8–57.1; TINY (one listing ≈2.3 pts), floor one listing below the low. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
+    },
+    "safera": {
+      "floor_pct": 88,
+      "today_pct": 100.0,
+      "active_rows": 9,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 100% every day; TINY (one listing ≈11 pts), floor one listing below. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
     },
     "sakan": {
       "floor_pct": 90,
@@ -651,6 +765,12 @@
       "active_rows": 8,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 8 of 8 rows carried photo_urls (8 mapped of the 11 the site itself counts; the rest are skipped by run.py's own gates). TINY: one listing is ~12 points; floor set one listing below the observation."
     },
+    "sokok": {
+      "imageless_at_source": true,
+      "today_pct": 0.0,
+      "active_rows": 400,
+      "reason": "PHOTOS ARE PRESIGNED AND EXPIRE IN ONE HOUR (scrapers/sokok/run.py trap 6): images[].url carries a signature, the same path without it answers 404, so a stored URL would be dead within the hour. photo_urls stays NULL by design; object keys are kept in additional_info. Declared 2026-10-07; 0% on every snapshot 09-30 … 10-07."
+    },
     "souq24": {
       "floor_pct": 28,
       "today_pct": 31.8,
@@ -667,6 +787,12 @@
       "today_pct": 100.0,
       "active_rows": 16,
       "note": "Declared 2026-09-26 (missed at onboarding in PR #4578). MEASURED ON THE PRODUCTION ROWS THEMSELVES, not a stubbed crawl: 16 of 16 active rows carry photo_urls (100%). TINY: one listing is ~6 points; floor set one listing below the observation."
+    },
+    "sukna": {
+      "floor_pct": 69,
+      "today_pct": 72.0,
+      "active_rows": 286,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 8-day range 72.0–72.1. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
     },
     "superoffice": {
       "floor_pct": 75,
@@ -703,6 +829,12 @@
       "active_rows": 104,
       "note": "Declared 2026-09-24 at onboarding, before the first production sweep, from the REAL map_listing over a live crawl (network live, database stubbed): 19 of 104 rows carried photo_urls (the whole catalogue) (86 of the site's 105 cards show only an Unsplash stock photo, which run.py refuses as a listing photo — those rows honestly carry none). Floor follows today-minus-about-three."
     },
+    "tuba": {
+      "floor_pct": 97,
+      "today_pct": 100.0,
+      "active_rows": 4142,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 100% every day. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
+    },
     "villassa": {
       "floor_pct": 90,
       "today_pct": 100.0,
@@ -737,6 +869,12 @@
       "floor_pct": 90,
       "today_pct": 93.3,
       "active_rows": 51500
+    },
+    "wslnaa": {
+      "floor_pct": 96,
+      "today_pct": 100.0,
+      "active_rows": 64,
+      "note": "Declared 2026-10-07 by the Scraping Engineer: live in search without a baseline row (owner 10-05: «declare a minimum for the sites without one»). Measured from production, mon_image_coverage daily snapshots 2026-09-30 … 10-07: 100% every day; one listing ≈1.6 pts. Floor ≈ the observed low minus ~3 points (or one listing, for tiny sites), so the gate fires on a capture regression, not on churn."
     },
     "yameen": {
       "floor_pct": 90,

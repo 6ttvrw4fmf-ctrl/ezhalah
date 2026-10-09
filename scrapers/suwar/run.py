@@ -98,7 +98,10 @@ _OWNERSHIP_TOKENS = ("تمليك", "للتمليك", "للبيع")
 # they describe the CONTRACT, not the unit, and no column means "has a plumbing warranty".
 _FEATURE_COLUMNS: dict[str, str] = {
     "مصعد": "elevator",
-    "مؤسس مصعد": "elevator",          # lift shaft built and prepared — the source's own wording
+    "مصعدين": "elevator",             # «two lifts» (3 live listings were left NULL, 2026-10-08)
+    # «مؤسس مصعد» is a lift SHAFT that has been prepared — there is no lift, so it is NOT elevator=yes
+    # (normalize._PREPARED_ONLY; sakan «تأسيس مصعد» 2026-10-07). It served «مصعد: نعم» on 22 live
+    # listings until 2026-10-08 (🔬 AF engineer). It stays verbatim in additional_info.features_ar.
     "موقف خاص": "parking",
     "مواقف خاصة": "parking",
     "غرفة سائق": "driver_room",
@@ -108,6 +111,14 @@ _FEATURE_COLUMNS: dict[str, str] = {
     # «كاميرات مراقبه» (CCTV) and «حوش» (yard) have NO column in the shared listing shape and are
     # deliberately NOT forced into a neighbouring one — they stay verbatim in additional_info.
 }
+
+_SHAFT_ONLY = ("مؤسس مصعد",)
+
+# Columns suwar publishes STRUCTURALLY (its property_feature taxonomy: the mapped terms above, plus
+# «مؤسس اسبليت» for AC). Prose is never read for these (ADVANCED_FILTER_SOURCE_TRUTH §2). Everything
+# else — above all the kitchen, which no term covers (23 terms measured over all 154 ads, 2026-10-09)
+# — is read from the ad's own description: yes or nothing, never no.
+_STRUCTURED_COLS = tuple(sorted(set(_FEATURE_COLUMNS.values()) | {"air_conditioner"}))
 
 LAST_FETCH_NOTE = "no pages attempted"
 
@@ -355,12 +366,19 @@ def map_listing(post: dict, detail: Optional[dict]) -> tuple[Optional[dict], str
     text = detail.get("text") or ""
     area_m2, area_extras = _area(text)
     bedrooms = _to_int(m.group(1)) if (m := _RE_ROOMS.search(text)) else None
-    bathrooms = _to_int(m.group(1)) if (m := _RE_BATHS.search(text)) else None
+    bathrooms = _to_int(m.group(1)) if (m := _RE_BATHS.search(text)) else normalize.baths_from_leading_count(text)
     living = _to_int(m.group(1)) if (m := _RE_LIVING.search(text)) else None
     majlis = _to_int(m.group(1)) if (m := _RE_MAJLIS.search(text)) else None
 
     features = _terms(post)
     feature_cols = {col: True for name, col in _FEATURE_COLUMNS.items() if name in features}
+    prose_cols = normalize.prose_amenities_yes(
+        normalize.html_block_lines((post.get("content") or {}).get("rendered", "")), skip=_STRUCTURED_COLS)
+    feature_cols = {**prose_cols, **feature_cols}
+    if "elevator" not in feature_cols and any(f in _SHAFT_ONLY for f in features):
+        # The source published its feature list and named only a prepared shaft: unknown, and a stale
+        # True written by the old mapping must clear (a None-dropping upsert would keep it).
+        feature_cols["elevator"] = db.AUTHORITATIVE_NULL
 
     status = detail.get("status") or ""
     # «غير متاح» must be checked BEFORE «متاح» — it CONTAINS it.

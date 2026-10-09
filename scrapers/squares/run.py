@@ -69,6 +69,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, stated_city, to_catalog  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
 BASE = "https://squares.com.sa"
@@ -76,7 +77,6 @@ LIST = f"{BASE}/wp-json/wp/v2/property"
 SOURCE = "شركة المربعات العقارية"
 PREFIX = "SQR"
 SLUG = "squares"
-IMPERSONATE = "chrome"
 TIMEOUT = 40
 
 _TAG = re.compile(r"<[^>]+>")
@@ -108,8 +108,17 @@ def _term_id(rec: dict, tax: str) -> Optional[str]:
     return None
 
 
+def walk_session() -> cc.Session:
+    """3 browser profiles DIRECT, then the residential proxy (when the job has it), each a fresh
+    session; the first that the catalogue answers is used for the whole walk. 2026-10-07: one
+    connect timeout on the single chrome session failed the night (job 112629728613)."""
+    s, tried = retry_smarter_session(f"{LIST}?per_page=1", timeout=TIMEOUT)
+    print(f"  route: {' · '.join(tried)}", flush=True)
+    return s
+
+
 def fetch_catalogue(s: cc.Session) -> tuple[list[dict], Optional[int]]:
-    r = s.get(f"{LIST}?per_page=100&_embed=1", impersonate=IMPERSONATE, timeout=TIMEOUT)
+    r = s.get(f"{LIST}?per_page=100&_embed=1", timeout=TIMEOUT)   # the session owns the profile
     r.raise_for_status()
     declared = r.headers.get("X-WP-Total") or r.headers.get("x-wp-total")
     return r.json(), (int(declared) if declared and declared.isdigit() else None)
@@ -163,7 +172,7 @@ def fetch_pages(s: cc.Session, rows: list[dict]) -> dict[str, str]:
         if not link:
             continue
         try:
-            r = s.get(link, impersonate=IMPERSONATE, timeout=TIMEOUT)
+            r = s.get(link, timeout=TIMEOUT)
             if r.status_code == 200:
                 pages[str(rec.get("id"))] = r.text
         except Exception:  # noqa: BLE001
@@ -316,21 +325,24 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
-    rows, declared = fetch_catalogue(s)
-    if a.limit:
-        rows = rows[: a.limit]
-    print(f"{SOURCE}: {len(rows)} posts (X-WP-Total={declared})", flush=True)
-    pages = fetch_pages(s, rows)
-    tmap, smap = learn_type_map(pages, rows)
-    print(f"  learned {len(tmap)} type term(s), {len(smap)} status term(s)", flush=True)
-
+    # The run is registered BEFORE the first request: a fetch that dies (DNS, connect timeout) is a
+    # failed run on record, never a night with no row (2026-10-07: squares and nafithh vanished
+    # from scrape_runs that way and the early-warning robot could not see them).
     run_id = None if dry else db.begin_run(SLUG)
+    rows: list[dict] = []
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
     kept: dict[str, int] = {}
     try:
+        s = walk_session()
+        rows, declared = fetch_catalogue(s)
+        if a.limit:
+            rows = rows[: a.limit]
+        print(f"{SOURCE}: {len(rows)} posts (X-WP-Total={declared})", flush=True)
+        pages = fetch_pages(s, rows)
+        tmap, smap = learn_type_map(pages, rows)
+        print(f"  learned {len(tmap)} type term(s), {len(smap)} status term(s)", flush=True)
         for rec in rows:
             tid = _term_id(rec, "property_type")
             ptype_ar = tmap.get(tid or "")

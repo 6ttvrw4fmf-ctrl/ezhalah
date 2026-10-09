@@ -46,6 +46,7 @@ from typing import Any, Optional
 from curl_cffi import requests as cc
 
 from scrapers.common import db
+from scrapers.common.http_liveness import LivenessProbe
 from scrapers.common import normalize as N
 from scrapers.common.pii import redact_capture, redact_pii
 
@@ -263,6 +264,42 @@ def _parse_index(rec: dict) -> dict:
             "title_cell": _flat(title_cell),
         },
     }
+
+
+# ── LIVENESS ORACLE (wired 2026-10-07, ♻️) ─────────────────────────────────────────────────────
+# prune_unseen ran WITHOUT a verify_gone here, so an ad missing from three crawls was hidden with no
+# reading of its own page (P1 unknown_treated_as_dead, 1 hide on 2026-10-07 05:00 UTC). The crawl
+# itself already reads a removed ad's own page as 404/410 (`_detail` → {"gone": status}, crawler
+# audit 2026-10-02), so the same reading now decides the kill: 404/410 → gone; 200 on the ad's own
+# /{nid} whose <article> carries this nid → live; anything else → no answer. Same shape as arkaan
+# (2026-10-06, proven in production 2026-10-07: 7 of 7 hides carried a GONE row).
+def _oracle_signal(status, body, moved) -> Optional[str]:
+    if status in GONE_STATUSES:
+        return "gone"
+    return "live" if status == 200 and not moved and _ARTICLE.search(body or "") else None
+
+
+def _oracle_url_for(ad_number: str) -> Optional[str]:
+    m = re.fullmatch(r"ABR(\d+)", ad_number or "")
+    return f"{BASE}/{m.group(1)}" if m else None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """verify_gone for db.prune_unseen. A 404/410 is believed only while a known-live ad from this
+    run (`control`) still reads live through the same session."""
+    s = _session()
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform="abralosol", signal=_oracle_signal, session=lambda: s,
+                             url_for=_oracle_url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
 
 
 # ── detail page ─────────────────────────────────────────────────────────────────────────────────
@@ -640,9 +677,11 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
+        verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
         for tbl, rows_seen in (("abralosol_residential_listings", res),
                                ("abralosol_commercial_listings", com)):
-            nn = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE)
+            nn = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE,
+                                 verify_gone=verify_gone)
             if nn < 0:
                 print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
             else:

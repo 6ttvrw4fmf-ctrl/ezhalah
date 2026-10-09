@@ -422,6 +422,25 @@ function readPromptRects(selector: string = DOCKED_PROMPT_SELECTOR): PromptRect[
 }
 
 /**
+ * Can this mutation batch change a prompt's presence, rect or visibility? True when a prompt node
+ * (or a subtree holding one) was ADDED, a watched node was REMOVED (or sits in a removed subtree),
+ * or a `style`/`class` change landed ON a watched node or an ANCESTOR of one (an ancestor can hide,
+ * move or re-anchor it). Everything else — a card mounting, an animation frame — cannot.
+ * Exported so `verify-bottom-prompt-inset.ts` executes it.
+ */
+export function mutationTouchesPrompt(
+  records: ArrayLike<Pick<MutationRecord, 'type' | 'target' | 'addedNodes' | 'removedNodes'>>,
+  selector: string,
+  watched: readonly Node[],
+): boolean {
+  const holdsWatched = (n: Node) => watched.some((w) => n === w || n.contains(w));
+  return Array.from(records).some((r) => r.type === 'childList'
+    ? Array.from(r.addedNodes).some((n) => n.nodeType === 1 && ((n as Element).matches(selector) || !!(n as Element).querySelector(selector)))
+      || Array.from(r.removedNodes).some(holdsWatched)
+    : holdsWatched(r.target));
+}
+
+/**
  * Watch the bottom-docked prompt and report its inset whenever it changes.
  *
  * The sheet ARRIVES late (~1.3 s after load here) and then ANIMATES its height from 0 to 144 px, so
@@ -466,7 +485,13 @@ export function observePromptInsets(
 
   const tick = () => { retarget(); emit(); };
 
-  const mo = typeof MutationObserver === 'function' ? new MutationObserver(tick) : null;
+  // Only mutations that CAN change a prompt re-measure (owner 2026-10-05: «عرض المزيد takes time»).
+  // Measured on a production export at 4× CPU, 100 → 500 cards: 12.6 s of 15.6 s main-thread time
+  // was this observer — every card mount and every animation frame (reanimated writes `style`)
+  // re-ran two document-wide querySelectorAll over ~50k nodes, so cards arrived seconds late.
+  const mo = typeof MutationObserver === 'function'
+    ? new MutationObserver((records) => { if (mutationTouchesPrompt(records, selector, watched)) tick(); })
+    : null;
   mo?.observe(document.documentElement, {
     childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'],
   });

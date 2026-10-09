@@ -853,6 +853,8 @@ or rewrite another engineer's work, and never start a big change in another engi
    away at tonight's pace.
 
 ## Lessons from real breakages (use them)
+- **2026-10-07 (🔧 QA, no lesson line was given):** absence-only prunes hid LIVE ads on gathern, aqarmonthly and maqrat (22 restored tonight). Audit every platform that still prunes on absence alone; a «📚 Lesson» line is part of the report — write one.
+- **2026-10-06 (🔧 QA, no lesson line was given):** 13 found, 1 fixed. Finding is not the job. When the list is long, take the 3 with the biggest customer impact, fix and prove them, and route the rest with numbers. A fix rate that drops after a night going up means you should shrink the list, not lengthen it.
 - Gathern expresses blocking as a 404. One ad answered 200 and 404 within minutes. A single reading
   is never proof.
 - Gathern's alive-rate fell from ~75% to 0.5% overnight. That was the source blocking us, not
@@ -959,6 +961,18 @@ or rewrite another engineer's work, and never start a big change in another engi
   `gathern-recheck-dead.yml` runs it daily from pg_cron (`gh-gathern-recheck-dead`), and gathern's
   probe reads a 200 that landed on the home page as no verdict, since that pass restores on a 200.
 
+- Every path that can hide must count the ad's OWN page readings, not the shared counter (gathern,
+  2026-10-07). The sweep learned it on 10-03 (`demote_unearned_kills`); the crawl's cross-shard
+  prune did not, and hid 9 units on ONE page 404 after a 200 while the sweep was quarantined for
+  flapping. `run.earned_verify_gone` now needs two earlier applied 404s since the last live reading,
+  and the sweep strikes only in a run where EVERY control at both ends read 200
+  (`liveness.controls_all_alive`; the 60% gate let 6/10 through).
+- The dealapp guard lesson applies to every crawler that reads pages (muktamel, 2026-10-07): its
+  crawl read ~212 pages a run as redirect-to-/404, the coverage guard counted them as "not re-seen"
+  (488 of 618 < 80%) and dropped the prune, so ~575 rows at 3-19 strikes stayed shown for weeks.
+  `run._strike_read_gone` re-runs the prune with only the read-gone ids unseen. When a site's
+  `prune guard tripped` note repeats, look for direct readings thrown away with it.
+
 - An unattended run cannot apply a statement the database connector holds for a human (measured
   2026-10-05: `delete from public.ops_liveness_registry where false;` timed out at 60 s while
   SELECT/INSERT returned at once; UPDATE is held too, which is why backlog items close through
@@ -966,6 +980,45 @@ or rewrite another engineer's work, and never start a big change in another engi
   (verify-liveness-registry-mirror.ts), so a tier change (rakez, sanadak, the owner's windows) needs a
   session with a human present. Do not spend three timeouts rediscovering it: prepare the code, the
   mirror and the evidence, and leave the exact change in a `lifecycle:followup` row.
+
+- An oracle only the crawl can build is no daily check (2026-10-08): goldendeal, maqam, yameen,
+  mustqr and shatri each had a working own-record oracle, but it needed the crawl run's state, so
+  1,628 ads were never checked in time. Bind every new oracle as a one-argument
+  `_make_verify_gone(control)` the day it is written. And a crawl that already reads an ad's own
+  status (abeea) records it with `db.mark_direct_alive`, or the reading is thrown away.
+- A measured dead shape the oracle cannot see keeps dead ads shown (muktamel, 2026-10-08): its
+  docstring has recorded «200, isAvailable false, price null» since 09-03, but the probe read only
+  status and /404, so 603 withdrawn ads at 3+ strikes stayed up and every grace re-read said «no
+  opinion». When a site's evidence rows are all `UNKNOWN … had no opinion`, read what the page says.
+
+- Every reader of one site must share its "no answer" rules (gathern, 2026-10-08): the sweep and
+  the cleanup learned on 10-05 that a 200 on gathern's HOME page is no answer, but the crawl's prune
+  oracle still read it as live. At 04:50 UTC it stamped 18 feed-missing units verified alive; they
+  were the freshest rows, so they became the sweep's controls and every sweep from 05:37 read 0/10
+  and checked nothing. When a sweep quarantines on controls the crawl just saw, look at what stamped
+  those controls first. A control that lands home is now skipped, never counted.
+
+- A cap that quarantines a whole batch never drains a real backlog (justsa, 2026-10-08): 24 of 97
+  ads read gone on their own page three runs running with live controls, and every run hid none
+  because 24 > the cap of 10, so a quarter of the site stayed dead on screen. fleet_liveness now
+  hides the cap's worth when every control is live at both ends (gathern's drain), else quarantines
+  as before. The cap never moves. A `hides > cap` note two nights running is a stuck site, not a safe one.
+- A score that reads a site by status alone can only ever say "live" (muktamel, 2026-10-09): its
+  withdrawn ads answer 200 with a hollow offer and removed ones 302 to a 200 `/404`, so the nightly
+  dead-visible score read it 10/10 live three nights running while 512 shown rows read hollow on their
+  own page. Every site whose removal is not a status gets its own reader in
+  `lifecycle_spot_check._reader_for` (muktamel: `run.page_verdict`). Before trusting a site's 0 gone,
+  check its `method`: `status-only` on a site whose oracle reads the body is a blind measurement.
+- A caller with no oracle must not be able to hide (2026-10-09). `db.prune_unseen` without
+  `verify_gone` still deactivated on three crawl misses: abwbna and shomou hid 4 rows that day with
+  no source reading, 31 such hides in 7 days on 6 sites, while 46 sites sat in
+  `scrapers/absence-only-prune.txt`. The default is now `db.own_page_status_oracle`: the row's own
+  stored URL must answer 404/410 while a page the same crawl saw answers 200, else UNKNOWN (kept,
+  shown). A site whose removed ads answer 200 now holds its strikes until it gets a measured oracle;
+  that ledger is still the backlog. `mon_unverified_inactivations_24h` reads 0 on such hides by
+  design (absence tiers at `missing_count >= 3` are graded by `mon_detect_unknown_treated_as_dead`),
+  so "0 unverified" is only half the answer: read the open `unknown_treated_as_dead` alerts too.
+- **2026-10-08 (♻️, copied by 🔧):** every reader of one site must share that site's «no answer» rules. Gathern's prune oracle still read a home-page landing as live, so those rows became the sweep's controls, and the sweep checked nothing for ~16 h.
 
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the

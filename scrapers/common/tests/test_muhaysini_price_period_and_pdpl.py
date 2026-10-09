@@ -2099,8 +2099,10 @@ def test_the_region_hint_uses_the_licence_spelling_so_a_twin_resolves():
     """loc_catalog_region stores «منطقة القصيم»; the platform's own `Region.name` is the BARE
     «القصيم», which the shared hint resolver cannot match (it strips a «منطقة » prefix, it never
     adds one). Passing the bare form first left 33 real rows unresolved. البدائع is a genuine twin
-    (Hail 2358 / Qassim 2481), so only the licence spelling separates them."""
-    assert al._hint_to_id("القصيم") is None, "the bare region name is not a resolvable hint"
+    (Hail 2358 / Qassim 2481), so only the licence spelling separates them.
+    Since 2026-10-08 the shared resolver also adds the «منطقة» prefix (sadiqeltajer's bare «القصيم»
+    left 9 twins unresolved), so BOTH spellings must resolve to the same region."""
+    assert al._hint_to_id("القصيم") == 4, "the bare region name is a resolvable hint"
     assert al._hint_to_id("منطقة القصيم") == 4
     assert mhs._land_total({}, "Buy") is None       # unrelated key absent → None, never a KeyError
 

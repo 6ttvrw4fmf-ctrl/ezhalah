@@ -3,8 +3,8 @@
 // the button melts into calm pulsing dots while Ezhalah prepares the next batch). Motion is
 // MOUNT-ONLY: existing cards never re-animate, transforms only → zero layout shift, no bounce.
 // Reduced motion → fade only / static dots.
-import { useEffect } from 'react';
-import { Pressable, StyleSheet, View, type GestureResponderEvent, type StyleProp, type ViewStyle } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Platform, Pressable, StyleSheet, View, type GestureResponderEvent, type StyleProp, type ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   Easing,
@@ -21,21 +21,44 @@ import { useThemePalette } from '@/lib/appearance';
 
 const EASE_OUT = Easing.bezier(0.22, 1, 0.36, 1);
 
-// Soft entry for a newly-mounted property card: fade + ~10px rise over 260ms. The reveal drip mounts
-// cards ~55ms apart, so the cadence itself provides the stagger the owner asked for (40–80ms).
-export function CardIn({ children }: { children: React.ReactNode }) {
+// Soft entry for a newly-mounted property card: fade + ~10px rise over 260ms. `delayMs` staggers a
+// batch mounted in ONE render (the 40–80ms cascade the owner asked for, without one re-render of
+// the whole list per card); `stillHeight` mounts a card with no animation — «عرض المزيد» uses it
+// for the cards placed below the fold, which nobody sees arrive. Both are read once, at mount.
+type CardInProps = { children: React.ReactNode; delayMs?: number; stillHeight?: number };
+
+// WEB = a CSS keyframe (owner 2026-10-05: «عرض المزيد takes time»). Reanimated on web drives every
+// frame from JS, so 400 cards meant 400 mappers per frame plus a reduce-motion listener each, and
+// the fade froze whenever React was busy mounting. CSS runs on the compositor and costs no JS.
+const prefersReducedMotion = () =>
+  typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+// A still card skips layout + paint until it nears the viewport (content-visibility), holding
+// `stillHeight` until then; once rendered its real height is remembered (`auto`). Cards have no
+// shadow or overflow, so the paint containment this implies clips nothing.
+function CardInWeb({ children, delayMs = 0, stillHeight }: CardInProps) {
+  const [style] = useState(() => (stillHeight
+    ? ({ contentVisibility: 'auto', containIntrinsicSize: `auto ${stillHeight}px` } as object)
+    : [prefersReducedMotion() ? s.cardFade : s.cardRise, delayMs > 0 ? { animationDelay: `${delayMs}ms` } : null]));
+  return <View style={style}>{children}</View>;
+}
+
+function CardInNative({ children, delayMs = 0, stillHeight }: CardInProps) {
   const reduced = useReducedMotion();
-  const v = useSharedValue(0);
+  const [mount] = useState({ delayMs, still: !!stillHeight });
+  const v = useSharedValue(mount.still ? 1 : 0);
   useEffect(() => {
-    v.value = withTiming(1, { duration: reduced ? 150 : 260, easing: EASE_OUT });
+    if (mount.still) return;
+    v.value = withDelay(mount.delayMs, withTiming(1, { duration: reduced ? 150 : 260, easing: EASE_OUT }));
     return () => cancelAnimation(v);
-  }, [v, reduced]);
+  }, [v, reduced, mount]);
   const a = useAnimatedStyle(() => ({
     opacity: v.value,
     transform: reduced ? [] : [{ translateY: (1 - v.value) * 10 }],
   }));
   return <Animated.View style={a}>{children}</Animated.View>;
 }
+
+export const CardIn = Platform.OS === 'web' ? CardInWeb : CardInNative;
 
 // Three calm pulsing dots — the «عرض المزيد» button's active state (replaces a static text swap).
 // Same breathe pattern as the search loader's thinking dots; premium, not a generic spinner.
@@ -164,4 +187,13 @@ const s = StyleSheet.create({
   // animated translateX travel distance is itself a fixed px figure — the two must agree in the same
   // unit for the parked/off-screen positions to land where the comment above claims they do.
   shineBand: { position: 'absolute', top: -20, bottom: -20, left: -70, width: 34 },
+  // CardInWeb's keyframes — the same 260ms fade + 10px rise (150ms fade only on reduced motion).
+  cardRise: {
+    animationKeyframes: [{ from: { opacity: 0, transform: [{ translateY: 10 }] }, to: { opacity: 1, transform: [{ translateY: 0 }] } }],
+    animationDuration: '260ms', animationTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)', animationFillMode: 'both',
+  } as object,
+  cardFade: {
+    animationKeyframes: [{ from: { opacity: 0 }, to: { opacity: 1 } }],
+    animationDuration: '150ms', animationTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)', animationFillMode: 'both',
+  } as object,
 });

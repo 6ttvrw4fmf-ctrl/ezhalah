@@ -6,6 +6,7 @@ canonical names the app's search engine knows.
 """
 from __future__ import annotations
 
+import html
 import re
 from typing import Any, Optional
 
@@ -915,6 +916,21 @@ def amenities_from_text(raw: Optional[str]) -> dict[str, bool]:
     return {col: vals.pop() for col, vals in seen.items() if len(vals) == 1}
 
 
+# «المطابخ: 1» — a labelled kitchen COUNT, printed per floor in the «تفاصيل الدور …» block of one broker
+# template that both sakan and tuba carry («دورات المياه: 2 ، الصالات: 1 ، … ، المطابخ: 1»). The plural
+# shares no substring with «مطبخ», so amenities_from_text never saw it: 2,619 sakan and 273 tuba ads
+# stated a kitchen while storing NULL (🔬 AF engineer 2026-10-07). A count is a statement both ways:
+# any floor with ≥1 → True; every stated count 0 → False; no count → None (silence).
+_KITCHEN_COUNT_RE = re.compile(r"المطابخ\s*:\s*(\d{1,2})")
+
+
+def kitchen_from_count(raw: Optional[str]) -> Optional[bool]:
+    counts = [int(n) for n in _KITCHEN_COUNT_RE.findall(str(raw or ""))]
+    if not counts:
+        return None
+    return any(n > 0 for n in counts)
+
+
 def amenities_from_lines(raw: Optional[str]) -> dict[str, bool]:
     """amenities_from_text() per LINE of the source's own text, merged. The matcher's negation window
     reaches ~12 characters back, so across a line break «الشقة غير مؤثثة\nمطبخ مغلق» read kitchen=False
@@ -926,6 +942,21 @@ def amenities_from_lines(raw: Optional[str]) -> dict[str, bool]:
         for col, val in amenities_from_text(line).items():
             seen.setdefault(col, set()).add(val)
     return {col: next(iter(vals)) for col, vals in seen.items() if len(vals) == 1}
+
+
+def prose_amenities_yes(raw: Optional[str], skip: tuple[str, ...] = ()) -> dict[str, bool]:
+    """Amenities an ad's own PROSE states, for a site with NO structured field for them. Prose only ever
+    says YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2): «لا يوجد مصعد» and a contradiction both stay
+    NULL here, never False. `skip` = columns the site publishes structurally (never read from prose)."""
+    return {k: True for k, v in amenities_from_lines(raw).items() if v is True and k not in skip}
+
+
+def html_block_lines(fragment: Optional[str]) -> str:
+    """An HTML fragment (an ad's own description block) as plain text, one line per <br>/<p>/<li>, so a
+    negation never crosses into the next statement when it is read by amenities_from_lines()."""
+    raw = re.sub(r"(?i)<br\s*/?>|</(?:p|li|div|h\d)>", "\n", str(fragment or ""))
+    txt = html.unescape(re.sub(r"<[^>]+>", " ", raw))
+    return "\n".join(x.strip() for x in re.split(r"[\n•▪️✅]+", txt) if x.strip())
 
 
 # A clause break ends a fact. «الشقة غير مؤثثة\nمطبخ مغلق» is two statements, and the «غير» of the
@@ -949,6 +980,11 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
                 after = t[m.end():m.end() + 14]
                 if any(_norm_ar(q) in after for q in _PREPARED_ONLY):
                     break          # "prepared for X" is not X — leave the column NULL
+                # …and the same qualifier BEFORE the token: «تأسيس مصعد», «مؤسس مصعد», «تأسيس
+                # مكيفات» are a prepared shaft / wiring, not the fixture (sakan 15854735, 2026-10-07:
+                # «* تأسيس مصعد» was served as elevator = yes). Same 12-char window as the negators.
+                if any(_norm_ar(q).lower() in before for q in _PREPARED_ONLY):
+                    break
                 near = t[max(0, m.start() - 22):m.start()]
                 if any(_norm_ar(q) in near for q in _PROXIMITY):
                     break          # the NEIGHBOURHOOD has it, not this property — stay NULL
@@ -957,6 +993,16 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
             if col in out:
                 break
     return out
+
+
+# «4 غرف + 3 دورات مياه + مطبخ» — the bathroom count written BEFORE the noun (مياه / مياة / المياه). A page that
+# states several different counts (a project listing several layouts) has stated no one count: None, never a pick.
+_BATHS_LEADING_RE = re.compile(r"([\d٠-٩]{1,2})\s*(?:دورات|دورة|حمامات)\s*(?:ال)?مي[اآ][هة]")
+
+
+def baths_from_leading_count(raw: Optional[str]) -> Optional[int]:
+    counts = {n for g in _BATHS_LEADING_RE.findall(str(raw or "")) if (n := to_int(g)) and 1 <= n <= 15}
+    return counts.pop() if len(counts) == 1 else None
 
 
 # «3 غرف وصالة ومطبخ», «غرفتين وصالة» — the Saudi listing idiom for a unit's layout. The leading

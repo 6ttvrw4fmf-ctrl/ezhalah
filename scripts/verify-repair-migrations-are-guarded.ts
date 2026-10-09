@@ -48,6 +48,34 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 🔬 AF engineer, 2026-10-08. Each of tonight's three repairs is watched by its own companion or pinned the
+  // same way as the 2026-10-07 entries below.
+  '20261008095541_sanadak_unticked_feature_box_is_silence_not_no.sql':
+    'watched by its companion 20261008095825_mon_detect_sanadak_unticked_box_as_no.sql, which creates ' +
+    'mon_detect_sanadak_unticked_box_as_no() over the served rows AND both views and splices it into the ' +
+    'mon_run_all_detectors() roster (0 live after the repair; a planted false is caught, 0 -> 1)',
+  '20261008102944_suwar_prepared_shaft_is_not_an_elevator.sql':
+    'watched by its companion 20261008103334_mon_detect_suwar_prepared_shaft_as_lift.sql, which creates ' +
+    'mon_detect_suwar_prepared_shaft_as_lift() over the same predicate and splices it into the ' +
+    'mon_run_all_detectors() roster (0 live after the repair; a planted shaft-only yes is caught, 0 -> 1)',
+  '20261008100625_af_prose_backfill_therc_shomou_arkaan.sql':
+    'NULL-only back-fill (writes only where the column is NULL, never a rewrite) of values the therc, shomou ' +
+    'and arkaan parsers now read from the same stored text on every crawl; pinned by ' +
+    'test_therc_source_truth.py, test_shomou_in_date_ads_only.py and test_arkaan_price_period_and_type.py',
+  // 🔬 AF engineer, 2026-10-07. A NULL-only fill (0 rewrites) of gathern bathrooms from the unit page's own
+  // «دورات المياة» section the scraper already stored verbatim (additional_info.extra_sections). It cannot
+  // decay: the crawl's upsert drops an absent icon count instead of NULLing the column, and every detail
+  // back-fill now writes the same count from the same section (scrapers/gathern/run.py
+  // _bathrooms_from_sections), pinned by test_gathern_bathrooms_from_page_section.py.
+  // Same shape: a NULL-only fill of kitchen from the «المطابخ: N» count each ad's own stored text carries;
+  // the sakan and tuba parsers now read that count on every crawl (normalize.kitchen_from_count), and the
+  // crawl upsert drops an absent key, so it cannot decay. Pinned by test_floor_details_kitchen_count.py.
+  '20261007094958_af_sakan_tuba_kitchen_count_is_a_kitchen.sql':
+    'NULL-only back-fill from the floor-details kitchen count both parsers now read on every crawl; ' +
+    'pinned by test_floor_details_kitchen_count.py::test_sakan_stores_the_stated_kitchen_and_keeps_the_lift_unknown',
+  '20261007093148_af_gathern_bathrooms_from_page_section.sql':
+    'NULL-only back-fill from the page section the scraper now writes on every detail back-fill; ' +
+    'pinned by test_gathern_bathrooms_from_page_section.py::test_backfill_fills_a_null_count_from_the_page',
   // 🔬 AF engineer, 2026-10-06. Same shape as the ksaaqar back-fill below: a one-shot copy of a value
   // the scraper ALREADY captured verbatim (source_capture.rem_fields «واجهة العقار») into the column
   // the same scraper now writes from the same field on every crawl (scrapers/hajer/run.py map_listing),

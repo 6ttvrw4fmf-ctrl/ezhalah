@@ -24,6 +24,7 @@ import argparse
 import html as ihtml
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -256,16 +257,41 @@ def _make_verify_gone(control: Optional[dict]):
     return lambda ad_number: probe(ad_number, canary=canary)
 
 
+_PAGE_ATTEMPTS = 4
+_BACKOFF_S = 5.0
+
+
+def _store_page(s: cc.Session, page: int) -> tuple[cc.Session, Any]:
+    """(session, response) for one Store API page, answered 200. A transport error, 5xx or 429 is
+    retried with a growing pause and a FRESH bare session; a page that never answers raises with what
+    it got. 2026-10-07 («store api returned no products», a non-200 read as an empty shop) and
+    2026-10-08 (connect timeout after 45 s) each failed the night on a single request; the
+    early-warning re-crawl 30 minutes later read all 26 products both times."""
+    last = "no answer"
+    for attempt in range(_PAGE_ATTEMPTS):
+        try:
+            r = s.get(f"{BASE}/wp-json/wc/store/products",
+                      params={"per_page": 100, "page": page}, timeout=45)
+            if r.status_code == 200:
+                return s, r
+            last = f"HTTP {r.status_code}"
+            if r.status_code < 500 and r.status_code != 429:
+                break                        # a 4xx is the shop's own answer — believed at once
+        except Exception as e:  # noqa: BLE001 — retried below, reported if every try fails
+            last = type(e).__name__
+        if attempt + 1 < _PAGE_ATTEMPTS:
+            time.sleep(_BACKOFF_S * (attempt + 1))
+            s = session()
+    raise RuntimeError(f"store api page {page} answered {last} — the shop is failing, not empty")
+
+
 def fetch_products(s: cc.Session, limit: int = 0) -> list[dict]:
     INCOMPLETE.clear()
     out: list[dict] = []
     page = 1
     total = None        # the source's own count of its catalogue (x-wp-total: 26 on 2026-10-02)
     while True:
-        r = s.get(f"{BASE}/wp-json/wc/store/products",
-                  params={"per_page": 100, "page": page}, timeout=45)
-        if r.status_code != 200:
-            break
+        s, r = _store_page(s, page)
         total = r.headers.get("x-wp-total")
         batch = r.json()
         if not batch:

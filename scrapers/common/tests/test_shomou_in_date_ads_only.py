@@ -74,3 +74,16 @@ def test_the_related_table_and_the_page_chrome_never_reach_the_row():
     blob = json.dumps(row, ensure_ascii=False)
     assert "22,000" not in blob and "592" not in blob
     assert "0553928287" not in blob and "hotmail" not in blob
+
+
+# ── amenities from the ad's own description, yes or nothing (🔬 AF engineer, 2026-10-08) ─────────
+def test_the_description_states_a_kitchen_and_a_negation_is_not_a_no(monkeypatch):
+    page = _page().replace("ثلاث غرف ومجلس للتواصل", "ثلاث غرف ومجلس ومطبخ راكب لا يوجد مصعد للتواصل")
+    row, _cat, _why = R.map_detail(R.parse_detail("8395", page), T)
+    assert row["kitchen"] is True
+    assert row.get("elevator") is None, "prose never says no (SOURCE_TRUTH §2)"
+
+
+def test_no_amenity_words_write_nothing():
+    row, _cat, _why = _map()
+    assert "kitchen" not in row and "elevator" not in row

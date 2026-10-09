@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useI18n, LOCALE_KEY, getLocale, setLocalePersistence, type Locale } from '@/i18n';
+import { useI18n, LOCALE_KEY, getLocale, detectLocale, setLocalePersistence, type Locale } from '@/i18n';
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
 import { HOME_DEFAULT_QUERY, migrateGroups } from '@/lib/searchDefaults';
 import { isSameSavedSearch } from '@/lib/savedSearchIdentity';
@@ -17,7 +17,7 @@ import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
 import { mapSupabaseUser, signOutBackend, deleteAccountBackend } from '@/lib/auth';
 import { setThemeAuthState, resetThemeForSignOut } from '@/theme/theme';
-import { restoreChat, persistedOnly, LOCAL_TRANSCRIPT_ENTRIES, type PersistedChat } from '@/lib/chatTranscript';
+import { restoreChat, persistedOnly, pickLocalTranscripts, type PersistedChat } from '@/lib/chatTranscript';
 import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, chatsToDelete, type ChatMeta } from '@/lib/chatSync';
 import { beginSessionRestore } from '@/lib/sessionRestore';
 import { mergeOne, pickTranscript, mayPromoteTranscript, withFreshTranscript } from '@/lib/chatMerge';
@@ -210,9 +210,19 @@ const historyKey = (sub: string) => 'history:' + sub;
 // hydrateTranscript() refetches a pruned one when its chat is opened. Pruning happens ONLY at the
 // serialization boundary — in-memory state keeps every transcript, so switching between chats in
 // one session never loses anything regardless of age.
+// A BYTE BUDGET ON TOP OF THE COUNT (2026-10-08). A saved chat now keeps everything the user saw — up to 500
+// cards, ~1.3 MB — and a browser gives localStorage ~5 MB for the WHOLE history. One write over the quota
+// fails for ALL of it (the catch below swallows it), so the heavy part must never be able to take the chat
+// list down with it: pickLocalTranscripts keeps transcripts newest-first until the budget is spent (the
+// newest is always kept), the rest stay on the server and hydrate on open. Metas are never pruned.
+const transcriptSize = new WeakMap<object, number>();
+const sizeOfTranscript = (t: object): number => {
+  let n = transcriptSize.get(t);
+  if (n === undefined) { n = JSON.stringify(t).length; transcriptSize.set(t, n); }
+  return n;
+};
 const serializeHistoryForDisk = (items: HistoryItem[]): string => {
-  const byActivity = items.slice().sort((a, b) => (b.tRev ?? b.ts) - (a.tRev ?? a.ts));
-  const keep = new Set(byActivity.filter((it) => it.transcript).slice(0, LOCAL_TRANSCRIPT_ENTRIES).map((it) => it.id));
+  const keep = pickLocalTranscripts(items, sizeOfTranscript);
   return JSON.stringify(items.map((it) => (it.transcript && !keep.has(it.id) ? { ...it, transcript: undefined } : it)));
 };
 
@@ -752,7 +762,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // name: canAutoRetitle() is the single place that rule lives, so re-running a renamed search
       // refreshes its results and timestamp WITHOUT reverting the title the user chose.
       const keepTitle = prior && !canAutoRetitle(prior);
-      const title = keepTitle ? prior!.title : autoTitleForQuery(q, getLocale());
+      const title = keepTitle ? prior!.title : chatId && prior?.title ? prior.title
+        : autoTitleForQuery(q, getLocale());
       const titleSource: TitleSource = keepTitle ? 'manual' : 'auto';
       const next: HistoryItem = {
         id, label, query: q, ts: Date.now(), starred,
@@ -1176,9 +1187,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const clean = truncateGlyphs((title ?? '').replace(/\s+/g, ' ').trim(), 120, '');
           const next = h.map((it) => {
             if (it.id !== id) return it;
+            const lastText = it.transcript?.msgs.filter(m => m.role === 'user').at(-1)?.text;
+            const prompt = typeof lastText === 'string' ? lastText : it.label;
             return clean
               ? { ...it, title: clean, titleSource: 'manual' as TitleSource, titleUpdatedAt: Date.now() }
-              : { ...it, title: autoTitleForQuery(it.query, getLocale()), titleSource: 'auto' as TitleSource, titleUpdatedAt: Date.now() };
+              : { ...it, title: autoTitleForPrompt(prompt, detectLocale(prompt) ?? getLocale()) || autoTitleForQuery(it.query, getLocale()), titleSource: 'auto' as TitleSource, titleUpdatedAt: Date.now() };
           });
           if (user) try {
             if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(next));
@@ -1237,7 +1250,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // message (owner 2026-08-21: «ابي شقة بالرياض قريبة من المترو وتكون تحت 5000 بالشهر» →
           // «شقة بالرياض قرب المترو»). `label` keeps the raw text so nothing that reads the legacy
           // field loses information; only the displayed title is summarized.
-          const auto = autoTitleForPrompt(v, getLocale());
+          const auto = autoTitleForPrompt(v, detectLocale(v) ?? getLocale());
           if (idx >= 0) {
             const prev = h[idx];
             const keep = !canAutoRetitle(prev);

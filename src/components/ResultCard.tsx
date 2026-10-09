@@ -231,7 +231,7 @@ export function ResultCard({
       <Pressable onPress={onOpen} style={[card.midCol, row && card.midColRow]}>
         <View style={card.sourceRow}>
           <View style={card.hostHead}>
-            <View style={[card.hostBadge, row && card.hostBadgeRow]}><View style={[card.hostBadgeArt, row && card.hostBadgeArtRow]}><SourceBadge source={listing.source} /></View></View>
+            <View style={card.hostBadge}><SourceBadge source={listing.source} /></View>
             <Text style={card.hostedOn}>{t('Hosted on {name}', { name: t(sourceName(listing.source)) })}</Text>
           </View>
           <Text style={card.typeLabel}>{typeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
@@ -561,113 +561,157 @@ function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
   );
 }
 
-// Source-aware brand badge — same square shape for every platform, just swaps the logo art.
-// Both PNGs are pre-baked with their own background + rounded shape, so contentFit="contain"
-// shows the whole logo without halos. Defaults to Aqar (the original source) for unknown values.
-// (user request: replace Aqar with Wasalt cleanly, both rendered identical shape.)
-const AQAR_LOGO = require('../../assets/images/aqar-logo.png');
-const WASALT_LOGO = require('../../assets/images/wasalt-logo.png');
-const ALDARIM_LOGO = require('../../assets/images/aldarim.png');
-const AQARGATE_LOGO = require('../../assets/images/aqargate-logo.png');
-const ALHOSHAN_LOGO = require('../../assets/images/alhoshan.png');
-const HAJER_LOGO = require('../../assets/images/hajer-logo.png');
-const SANADAK_LOGO = require('../../assets/images/sanadak-logo.png');
-const EASTABHA_LOGO = require('../../assets/images/eastabha-logo.png');
+// Original brand artwork shared with the website picker. Source aliases remain explicit below.
+const AQAR_LOGO = require('../../assets/images/platform-logos/sa-aqar-fm.png');
+const WASALT_LOGO = require('../../assets/images/platform-logos/wasalt-sa.png');
+const ALDARIM_LOGO = require('../../assets/images/platform-logos/aldarim-sa.png');
+const AQARGATE_LOGO = require('../../assets/images/platform-logos/aqargate-com.png');
+const ALHOSHAN_LOGO = require('../../assets/images/platform-logos/alhoshan-sa.png');
+const HAJER_LOGO = require('../../assets/images/platform-logos/hajerhouses-com.png');
+const SANADAK_LOGO = require('../../assets/images/platform-logos/sanadak-sa.png');
+const EASTABHA_LOGO = require('../../assets/images/platform-logos/eastabha-sa.png');
 const AQARCITY_LOGO = require('../../assets/images/aqarcity-logo.png');
-const RAGHDAN_LOGO = require('../../assets/images/raghdan.png');
-const EAQARTABUK_LOGO = require('../../assets/images/eaqartabuk.png');
-const SATEL_LOGO = require('../../assets/images/satel.png');
+const RAGHDAN_LOGO = require('../../assets/images/platform-logos/raghdan-sa.png');
+const EAQARTABUK_LOGO = require('../../assets/images/platform-logos/eaqartabuk-com.png');
+const SATEL_LOGO = require('../../assets/images/platform-logos/satel-sa.png');
 const SADIN_LOGO = require('../../assets/images/sadin.png');
 const TOOR_LOGO = require('../../assets/images/toor.png');
-const MUSTQR_LOGO = require('../../assets/images/mustaqr.png');
+const MUSTQR_LOGO = require('../../assets/images/platform-logos/mustqr-sa.png');
 const RAMZALQASIM_LOGO = require('../../assets/images/ramzalqassim.png');
-const FURSAGHYR_LOGO = require('../../assets/images/fursaghyr.png');
-const JAZWTN_LOGO = require('../../assets/images/jazan-watan.png');
-const MUKTAMEL_LOGO = require('../../assets/images/muktamel.png');
-const MIZLAJ_LOGO = require('../../assets/images/mizlaj.png');
+const FURSAGHYR_LOGO = require('../../assets/images/platform-logos/fursaghyr-com.png');
+const JAZWTN_LOGO = require('../../assets/images/platform-logos/jazwtn-sa.png');
+const MUKTAMEL_LOGO = require('../../assets/images/platform-logos/muktamel-com.png');
+const MIZLAJ_LOGO = require('../../assets/images/platform-logos/mizlaj-com-sa.png');
 const DEALAPP_LOGO = require('../../assets/images/dealapp.png');
-const GATHERN_LOGO = require('../../assets/images/gathern.png');
-const OCTOBER_LOGO = require('../../assets/images/october.png');
-const ARKAAN_LOGO = require('../../assets/images/arkaan.png');
-const ABRALOSOL_LOGO = require('../../assets/images/abralosol.png');
-const THERC_LOGO = require('../../assets/images/therc.png');
-const RAWASIDARK_LOGO = require('../../assets/images/rawasidark.png');
-const AOUJ_LOGO = require('../../assets/images/aouj.png');
-const AQARATIKOM_LOGO = require('../../assets/images/aqaratikom.png');
-const BAHADHABAB_LOGO = require('../../assets/images/bahadhabab.png');
-const ALOBID_LOGO = require('../../assets/images/alobid.png');
-const ABWBNA_LOGO = require('../../assets/images/abwbna.png');
-const REMAL_LOGO = require('../../assets/images/remal.png');
+const GATHERN_LOGO = require('../../assets/images/platform-logos/gathern-co.png');
+const OCTOBER_LOGO = require('../../assets/images/platform-logos/1october-com-sa.png');
+const ARKAAN_LOGO = require('../../assets/images/platform-logos/arkaanalaqar-com.png');
+const ABRALOSOL_LOGO = require('../../assets/images/platform-logos/abralosol-com.png');
+const THERC_LOGO = require('../../assets/images/platform-logos/therc-sa.png');
+const RAWASIDARK_LOGO = require('../../assets/images/platform-logos/rawasi-dark-com.png');
+const AOUJ_LOGO = require('../../assets/images/platform-logos/aoujestates-com.png');
+const AQARATIKOM_LOGO = require('../../assets/images/platform-logos/nawait-sa.png');
+const BAHADHABAB_LOGO = require('../../assets/images/platform-logos/bahadhabab-res-com.png');
+const ALOBID_LOGO = require('../../assets/images/platform-logos/alobidoffice-com.png');
+const ABWBNA_LOGO = require('../../assets/images/platform-logos/abwbna-com.png');
+const REMAL_LOGO = require('../../assets/images/platform-logos/remalre-com.png');
 const AMAALL_LOGO = require('../../assets/images/amaall.png');
 const AQARALSAUDIA_LOGO = require('../../assets/images/aqaralsaudia.png');
-const SUWAR_LOGO = require('../../assets/images/suwar.png');
-const GUDAI_LOGO = require('../../assets/images/gudai.png');
-const SAFERA_LOGO = require('../../assets/images/safera.png');
+const SUWAR_LOGO = require('../../assets/images/platform-logos/suwar-sa.png');
+const GUDAI_LOGO = require('../../assets/images/platform-logos/gudai-inblaj-net.png');
+const SAFERA_LOGO = require('../../assets/images/platform-logos/safera-inblaj-net.png');
 const ALHUMAIDAN_LOGO = require('../../assets/images/alhumaidan.png');
-const AQARNAJRAN_LOGO = require('../../assets/images/aqarnajran.png');
-const FAHADALSHAHRI_LOGO = require('../../assets/images/fahadalshahri.png');
-const COMPOUNDIN_LOGO = require('../../assets/images/compoundin.png');
+const AQARNAJRAN_LOGO = require('../../assets/images/platform-logos/aqarnajran-com.png');
+const FAHADALSHAHRI_LOGO = require('../../assets/images/platform-clean/maqam.png');
+const COMPOUNDIN_LOGO = require('../../assets/images/platform-logos/compoundin-com.png');
 const WSLNAA_LOGO = require('../../assets/images/wslnaa.png');
-const RAKEZ_LOGO = require('../../assets/images/rakez.png');
-const AKARIYOUN_LOGO = require('../../assets/images/akariyoun.png');
-// NEUTRAL placeholder for platforms whose own marks the owner is still supplying — today the 35
-// onboarded 2026-09-24 (batch 36) plus Al Sidra of 2026-09-21. It is a plain building glyph
-// and belongs to no company. The branches below MUST
-// exist even while they render this: the fallback at the end of SourceBadge returns عقار's logo,
-// so a missing branch stamps another company's mark on their listings — the misattribution the
-// owner called a legal problem, not a cosmetic one.
-const MOFTAH_LOGO = require('../../assets/images/moftah.png');
-const MASAR_LOGO = require('../../assets/images/masar.png');
-const GOMENASSAT_LOGO = require('../../assets/images/gomenassat.png');
-const SAKAN_LOGO = require('../../assets/images/sakan.png');
-const BOSSBIH_LOGO = require('../../assets/images/bossbih.png');
-const ALSHAWAF_LOGO = require('../../assets/images/alshawaf.png');
-const IALQARAWI_LOGO = require('../../assets/images/ialqarawi.png');
-const ALJASSIM_LOGO = require('../../assets/images/aljassim.png');
-const ALMOTMKENAH_LOGO = require('../../assets/images/almotmkenah.png');
+const RAKEZ_LOGO = require('../../assets/images/platform-logos/rakez-sa.png');
+const AKARIYOUN_LOGO = require('../../assets/images/platform-logos/akariyoun-sa.png');
+// Owner-supplied logos replace the former generic office placeholders.
+const MOFTAH_LOGO = require('../../assets/images/platform-logos/moftah-aleaqar-com.png');
+const MASAR_LOGO = require('../../assets/images/platform-logos/masaraqarat-com.png');
+const GOMENASSAT_LOGO = require('../../assets/images/platform-clean/menassat.png');
+const SAKAN_LOGO = require('../../assets/images/platform-logos/sa-sakan-co.png');
+const BOSSBIH_LOGO = require('../../assets/images/platform-logos/bossbihoffice-com-sa.png');
+const ALSHAWAF_LOGO = require('../../assets/images/platform-logos/alshawaf-com-sa.png');
+const IALQARAWI_LOGO = require('../../assets/images/platform-logos/ialqarawi-com.png');
+const ALJASSIM_LOGO = require('../../assets/images/platform-logos/aljassimaqar-com.png');
+const ALMOTMKENAH_LOGO = require('../../assets/images/platform-logos/almotmkenah-com.png');
 const NUFOUTH_LOGO = require('../../assets/images/nufouth.png');
-const PLATFORM_PLACEHOLDER_LOGO = require('../../assets/images/platform-placeholder.png');
-const DWELLEO_LOGO = require('../../assets/images/dwelleo.png');
-const MUHAYSINI_LOGO = require('../../assets/images/muhaysini.png');
-const TUBA_LOGO = require('../../assets/images/tuba.png');
-const NOFODH_LOGO = require('../../assets/images/nofodh.png');
-const AQALEMHAJER_LOGO = require('../../assets/images/aqalemhajer.png');
-const WAHADAT_LOGO = require('../../assets/images/wahadat.png');
-const ASHAB_LOGO = require('../../assets/images/ashab.png');
-const REINVEST_LOGO = require('../../assets/images/reinvest.png');
-const SIRDAB_LOGO = require('../../assets/images/sirdab.png');
-const SOKOK_LOGO = require('../../assets/images/sokok.png');
-const ABAAD_LOGO = require('../../assets/images/abaad.png');
+const ALSIDRA_LOGO = require('../../assets/images/platform-logos/alsidra.png');
+const SHATRI_LOGO = require('../../assets/images/platform-logos/shatri.png');
+const ALQASEM_LOGO = require('../../assets/images/platform-logos/alqasem.png');
+const FKRALEMAR_LOGO = require('../../assets/images/platform-logos/fkralemar.png');
+const WADOD_LOGO = require('../../assets/images/platform-logos/wadod.png');
+const ALMUTEB_LOGO = require('../../assets/images/platform-clean/almuteb.png');
+const AALBARRAK_LOGO = require('../../assets/images/platform-logos/aalbarrak.png');
+const ALRIFAI_LOGO = require('../../assets/images/platform-clean/alrifai-small.png');
+const SODASYAT_LOGO = require('../../assets/images/platform-logos/sodasyat.png');
+const HASAAD_LOGO = require('../../assets/images/platform-logos/hasaad.png');
+const AQARALRIYADH_LOGO = require('../../assets/images/platform-logos/aqaralriyadh.png');
+const SNAM_LOGO = require('../../assets/images/platform-logos/snam.png');
+const JAWHER_LOGO = require('../../assets/images/platform-logos/jawher.png');
+const M3TMD_LOGO = require('../../assets/images/platform-logos/m3tmd.png');
+const SENAN_LOGO = require('../../assets/images/platform-logos/senan.png');
+const YAMEEN_LOGO = require('../../assets/images/platform-logos/yameen.png');
+const ALBDAH_LOGO = require('../../assets/images/platform-logos/albdah.png');
+const EYDAH_LOGO = require('../../assets/images/platform-logos/eydah.png');
+const TAMYAZ_LOGO = require('../../assets/images/platform-logos/tamyaz.png');
+const HAZIM_LOGO = require('../../assets/images/platform-logos/hazim.png');
+const VILLASSA_LOGO = require('../../assets/images/platform-logos/villassa.png');
+const MARKSA_LOGO = require('../../assets/images/platform-logos/marksa.png');
+const LIVINGCOMPOUND_LOGO = require('../../assets/images/platform-logos/livingcompound.png');
+const AZURE_LOGO = require('../../assets/images/platform-logos/azure.png');
+const EXPATTRUSTED_LOGO = require('../../assets/images/platform-logos/expattrusted.png');
+const FLOW_LOGO = require('../../assets/images/platform-clean/flow.png');
+const SQUARES_LOGO = require('../../assets/images/platform-logos/squares.png');
+const RAWAF_LOGO = require('../../assets/images/platform-logos/rawaf.png');
+const MACSAIB_LOGO = require('../../assets/images/platform-logos/macsaib.png');
+const ARSHGLOBAL_LOGO = require('../../assets/images/platform-logos/arsh.png');
+const SUPEROFFICE_LOGO = require('../../assets/images/platform-logos/superoffice.png');
+const MAKTAB_LOGO = require('../../assets/images/platform-logos/maktab.png');
+const WAJAF_LOGO = require('../../assets/images/platform-logos/wajaf.png');
+const ALBUKAERI_LOGO = require('../../assets/images/platform-logos/albukaeri.png');
+const RYADAH_LOGO = require('../../assets/images/platform-logos/ryadah.png');
+const SQCC_LOGO = require('../../assets/images/platform-logos/sqcc.png');
+const DARAA_LOGO = require('../../assets/images/platform-logos/daraa.png');
+const TAWIA_LOGO = require('../../assets/images/platform-logos/tawia.png');
+const MANZO_LOGO = require('../../assets/images/platform-logos/manzo.png');
+const EIGHTFLOOR_LOGO = require('../../assets/images/platform-logos/eightfloor.png');
+const HOLOUL_LOGO = require('../../assets/images/platform-logos/holoul.png');
+const NAFITHH_LOGO = require('../../assets/images/platform-logos/nafithh.png');
+const MOBASHER_LOGO = require('../../assets/images/platform-logos/mobasher.png');
+const MUAJARH_LOGO = require('../../assets/images/platform-logos/muajarh.png');
+const DALLALI_LOGO = require('../../assets/images/platform-logos/dallali.png');
+const MAQAMCO_LOGO = require('../../assets/images/platform-logos/maqam.png');
+const EARTHAPP_LOGO = require('../../assets/images/platform-logos/earthapp.png');
+const NAWAFETH_LOGO = require('../../assets/images/platform-logos/nawafeth.png');
+const REMAX_LOGO = require('../../assets/images/platform-logos/remaxsa.png');
+const QMRA_LOGO = require('../../assets/images/platform-logos/qmra.png');
+const ALAJLAN_LOGO = require('../../assets/images/platform-logos/alajlan.png');
+const EGO_LOGO = require('../../assets/images/platform-logos/ego.png');
+const SAFA_LOGO = require('../../assets/images/platform-logos/safa.png');
+const DWELLEO_LOGO = require('../../assets/images/platform-logos/dwelleo-sa.png');
+const MUHAYSINI_LOGO = require('../../assets/images/platform-logos/aqaralmuhaysini-com.png');
+const TUBA_LOGO = require('../../assets/images/platform-logos/tuba-com-sa.png');
+const NOFODH_LOGO = require('../../assets/images/platform-logos/nofodh-sa.png');
+const AQALEMHAJER_LOGO = require('../../assets/images/platform-logos/aqalemhajer-com.png');
+const WAHADAT_LOGO = require('../../assets/images/platform-logos/wahadat-sa.png');
+const ASHAB_LOGO = require('../../assets/images/platform-logos/ashab-sa.png');
+const REINVEST_LOGO = require('../../assets/images/platform-logos/reinvest-sa.png');
+const SIRDAB_LOGO = require('../../assets/images/platform-logos/marketplace-sirdab-co.png');
+const SOKOK_LOGO = require('../../assets/images/platform-logos/sokok-sa.png');
+const ABAAD_LOGO = require('../../assets/images/platform-logos/app-abaadapp-sa.png');
 const ALSAEDAN_LOGO = require('../../assets/images/alsaedan.png');
 const SAKANI_LOGO = require('../../assets/images/sakani.png');
-const SUKNA_LOGO = require('../../assets/images/sukna.png');
-const DARYUSUF_LOGO = require('../../assets/images/daryusuf.png');
+const SUKNA_LOGO = require('../../assets/images/platform-logos/sukna-app.png');
+const DARYUSUF_LOGO = require('../../assets/images/platform-logos/daryusuf-com.png');
 const EILMALRIYADA_LOGO = require('../../assets/images/eilmalriyada.png');
-const GOLDENDEAL_LOGO = require('../../assets/images/goldendeal.png');
-const EBRIZA_LOGO = require('../../assets/images/ebriza.png');
-const SHOMOU_LOGO = require('../../assets/images/shomou.png');
-const VMKSA_LOGO = require('../../assets/images/vmksa.png');
-const IBAAX_LOGO = require('../../assets/images/ibaax.png');
-const THOUSAND_LOGO = require('../../assets/images/thousand.png');
-const RAZRE_LOGO = require('../../assets/images/razre.png');
-const MAQRAT_LOGO = require('../../assets/images/maqrat.png');
-const OPENSOOQ_LOGO = require('../../assets/images/opensooq.png');
-const JUSTSA_LOGO = require('../../assets/images/justsa.png');
-const MANAFE_LOGO = require('../../assets/images/manafe.png');
-const RIGHTCOMPOUND_LOGO = require('../../assets/images/rightcompound.png');
-const KSAAQAR_LOGO = require('../../assets/images/ksaaqar.png');
-const SADIQELTAJER_LOGO = require('../../assets/images/sadiq-eltajer.png');
-const AMLAKALAHSA_LOGO = require('../../assets/images/amlakalahsa.png');
+const GOLDENDEAL_LOGO = require('../../assets/images/platform-logos/goldendeal-sa.png');
+const EBRIZA_LOGO = require('../../assets/images/platform-logos/ebriza-com-sa.png');
+const SHOMOU_LOGO = require('../../assets/images/platform-logos/shomoalaqar-com-sa.png');
+const VMKSA_LOGO = require('../../assets/images/platform-logos/vm-ksa-com.png');
+const IBAAX_LOGO = require('../../assets/images/platform-logos/ibaax-sa.png');
+const THOUSAND_LOGO = require('../../assets/images/platform-logos/1000-com-sa.png');
+const RAZRE_LOGO = require('../../assets/images/platform-clean/raz.png');
+const MAQRAT_LOGO = require('../../assets/images/platform-clean/maqrat.png');
+const OPENSOOQ_LOGO = require('../../assets/images/platform-logos/sa-opensooq-com.png');
+const JUSTSA_LOGO = require('../../assets/images/platform-logos/just-sa.png');
+const MANAFE_LOGO = require('../../assets/images/platform-logos/manafe-com-sa.png');
+const RIGHTCOMPOUND_LOGO = require('../../assets/images/platform-logos/rightcompound-com.png');
+const KSAAQAR_LOGO = require('../../assets/images/platform-logos/ksaaqar-com.png');
+const SADIQELTAJER_LOGO = require('../../assets/images/platform-logos/sadiq-eltajer-sa.png');
+const AMLAKALAHSA_LOGO = require('../../assets/images/platform-logos/amlakalahsa-com.png');
 const ALTA_LOGO = require('../../assets/images/alta.png');
-const SHMOUALSHMAL_LOGO = require('../../assets/images/shmoualshmal.png');
+const SHMOUALSHMAL_LOGO = require('../../assets/images/platform-logos/shmoua-alshmal-com.png');
 const AWAL_LOGO = require('../../assets/images/awal.png');
-const AZDAD_LOGO = require('../../assets/images/azdad.png');
-const ALKHAAS_LOGO = require('../../assets/images/alkhaas.png');
-const ABEEA_LOGO = require('../../assets/images/abeea.png');
-const JURASH_LOGO = require('../../assets/images/jurash.png');
+const AZDAD_LOGO = require('../../assets/images/platform-logos/azdadalaqaria-com.png');
+const ALKHAAS_LOGO = require('../../assets/images/platform-logos/alkhaas-net.png');
+const ABEEA_LOGO = require('../../assets/images/platform-logos/abeea-com-sa.png');
+const JURASH_LOGO = require('../../assets/images/platform-logos/jurash-sa.png');
 const ALNOKHBA_LOGO = require('../../assets/images/alnokhba.png');
-const SOUQ24_LOGO = require('../../assets/images/souq24.png');
-const ERAPULSE_LOGO = require('../../assets/images/erapulse.png');
+const SOUQ24_LOGO = require('../../assets/images/platform-logos/24-com-sa.png');
+const ERAPULSE_LOGO = require('../../assets/images/platform-logos/erapulse-sa.png');
 const NOWAISIRY_LOGO = require('../../assets/images/nowaisiry.png');
 // Card hero photo with graceful fallback. Some sources (e.g. aqarcity) carry photo URLs that have
 // been deleted on their CDN and 302→/notfound, or are only published as thumbnails — listing one
@@ -841,10 +885,8 @@ export function SourceBadge({ source }: { source: string }) {
   if (s.includes('abralosol')) return <PlatformLogo source={ABRALOSOL_LOGO} />;
   if (s.includes('arkaan')) return <PlatformLogo source={ARKAAN_LOGO} />;
   if (s.includes('rawasidark')) return <PlatformLogo source={RAWASIDARK_LOGO} />;
-  // ── onboarded 2026-09-21: the SAME neutral placeholder for all eleven until the owner supplies
-  // each real logo. LAST on purpose, right above the fallback: no new token can capture an existing
-  // platform's source, and each branch must EXIST — the fallback below is عقار's own logo.
-  if (s.includes('alsidra') || s.includes('al sidra') || s.includes('السدرة')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  // Keep new source aliases after the established specific matches.
+  if (s.includes('alsidra') || s.includes('al sidra') || s.includes('السدرة')) return <PlatformLogo source={ALSIDRA_LOGO} />;
   if (s.includes('moftah') || s.includes('مفتاح العقار')) return <PlatformLogo source={MOFTAH_LOGO} />;
   if (s.includes('masar') || s.includes('مسار المستقبل')) return <PlatformLogo source={MASAR_LOGO} />;
   if (s.includes('menassat') || s.includes('منصات')) return <PlatformLogo source={GOMENASSAT_LOGO} />;
@@ -861,82 +903,80 @@ export function SourceBadge({ source }: { source: string }) {
   // verify-platform-registration-complete, which is the barrier that exists for exactly this.
   if (s.includes('نفوذ للاستثمار العقاري') || s.includes('nofodh')) return <PlatformLogo source={NOFODH_LOGO} />;
   if (s.includes('nufouth') || s.includes('نفوذ')) return <PlatformLogo source={NUFOUTH_LOGO} />;
-  // ── onboarded 2026-09-24 (batch 36): the SAME neutral placeholder for all 35 until the owner supplies
-  // each real logo. LAST, right above the fallback, for the reason stated above. aqalemhajer,
-  // goldendeal and sakani sit ABOVE 'hajer' / 'deal' / 'sakan', which contain their slugs.
+  // Specific aliases above must precede shorter brand names.
   if (s.includes('dwelleo') || s.includes('دويليو')) return <PlatformLogo source={DWELLEO_LOGO} />;
-  if (s.includes('shatri') || s.includes('الشاطري للتطوير العقاري')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('alqasem') || s.includes('القاسم العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('fkralemar') || s.includes('فكر الإعمار')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('wadod') || s.includes('ودود العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('almuteb') || s.includes('آل متعب العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('aalbarrak') || s.includes('البراك للعقارات')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('alrifai') || s.includes('الرفاعي للعقار')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('sodasyat') || s.includes('سداسيات العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('hasaad') || s.includes('حصاد الاقتصادية للعقارات')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('aqaralriyadh') || s.includes('عقار الرياض')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('shatri') || s.includes('الشاطري للتطوير العقاري')) return <PlatformLogo source={SHATRI_LOGO} />;
+  if (s.includes('alqasem') || s.includes('القاسم العقارية')) return <PlatformLogo source={ALQASEM_LOGO} />;
+  if (s.includes('fkralemar') || s.includes('فكر الإعمار')) return <PlatformLogo source={FKRALEMAR_LOGO} />;
+  if (s.includes('wadod') || s.includes('ودود العقارية')) return <PlatformLogo source={WADOD_LOGO} />;
+  if (s.includes('almuteb') || s.includes('آل متعب العقارية')) return <PlatformLogo source={ALMUTEB_LOGO} />;
+  if (s.includes('aalbarrak') || s.includes('البراك للعقارات')) return <PlatformLogo source={AALBARRAK_LOGO} />;
+  if (s.includes('alrifai') || s.includes('الرفاعي للعقار')) return <PlatformLogo source={ALRIFAI_LOGO} />;
+  if (s.includes('sodasyat') || s.includes('سداسيات العقارية')) return <PlatformLogo source={SODASYAT_LOGO} />;
+  if (s.includes('hasaad') || s.includes('حصاد الاقتصادية للعقارات')) return <PlatformLogo source={HASAAD_LOGO} />;
+  if (s.includes('aqaralriyadh') || s.includes('عقار الرياض')) return <PlatformLogo source={AQARALRIYADH_LOGO} />;
   if (s.includes('justsa') || s.includes('فقط نقطة العقارية')) return <PlatformLogo source={JUSTSA_LOGO} />;
-  if (s.includes('snam') || s.includes('سنام العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('jawher') || s.includes('جواهر للوساطة والتسويق العقاري')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('m3tmd') || s.includes('مقر المعتمد')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('senan') || s.includes('سنان العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('snam') || s.includes('سنام العقارية')) return <PlatformLogo source={SNAM_LOGO} />;
+  if (s.includes('jawher') || s.includes('جواهر للوساطة والتسويق العقاري')) return <PlatformLogo source={JAWHER_LOGO} />;
+  if (s.includes('m3tmd') || s.includes('مقر المعتمد')) return <PlatformLogo source={M3TMD_LOGO} />;
+  if (s.includes('senan') || s.includes('سنان العقارية')) return <PlatformLogo source={SENAN_LOGO} />;
   if (s.includes('thousand') || s.includes('1000 العقارية')) return <PlatformLogo source={THOUSAND_LOGO} />;
-  if (s.includes('yameen') || s.includes('يمين العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('yameen') || s.includes('يمين العقارية')) return <PlatformLogo source={YAMEEN_LOGO} />;
   if (s.includes('ebriza') || s.includes('إبريزة العقارية')) return <PlatformLogo source={EBRIZA_LOGO} />;
   if (s.includes('eilmalriyada') || s.includes('علم الريادة الإدارية')) return <PlatformLogo source={EILMALRIYADA_LOGO} />;
   if (s.includes('daryusuf') || s.includes('دار يوسف العقارية')) return <PlatformLogo source={DARYUSUF_LOGO} />;
-  if (s.includes('albdah') || s.includes('البداح للعقارات')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('eydah') || s.includes('الإيضاح')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('tamyaz') || s.includes('تمايز العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('hazim') || s.includes('حازم')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('villassa') || s.includes('فلل')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('marksa') || s.includes('مار العقارية')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('albdah') || s.includes('البداح للعقارات')) return <PlatformLogo source={ALBDAH_LOGO} />;
+  if (s.includes('eydah') || s.includes('الإيضاح')) return <PlatformLogo source={EYDAH_LOGO} />;
+  if (s.includes('tamyaz') || s.includes('تمايز العقارية')) return <PlatformLogo source={TAMYAZ_LOGO} />;
+  if (s.includes('hazim') || s.includes('حازم')) return <PlatformLogo source={HAZIM_LOGO} />;
+  if (s.includes('villassa') || s.includes('فلل')) return <PlatformLogo source={VILLASSA_LOGO} />;
+  if (s.includes('marksa') || s.includes('مار العقارية')) return <PlatformLogo source={MARKSA_LOGO} />;
   if (s.includes('rightcompound')) return <PlatformLogo source={RIGHTCOMPOUND_LOGO} />;
-  if (s.includes('livingcompound')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('azure')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('expattrusted') || s.includes('expat trusted housing')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('flow')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('livingcompound')) return <PlatformLogo source={LIVINGCOMPOUND_LOGO} />;
+  if (s.includes('azure')) return <PlatformLogo source={AZURE_LOGO} />;
+  if (s.includes('expattrusted') || s.includes('expat trusted housing')) return <PlatformLogo source={EXPATTRUSTED_LOGO} />;
+  if (s.includes('flow')) return <PlatformLogo source={FLOW_LOGO} />;
   if (s.includes('أبعاد') || s.includes('abaad')) return <PlatformLogo source={ABAAD_LOGO} />;
   if (s.includes('آي باكس') || s.includes('ibaax')) return <PlatformLogo source={IBAAX_LOGO} />;
   if (s.includes('وحدات') || s.includes('wahadat')) return <PlatformLogo source={WAHADAT_LOGO} />;
-  if (s.includes('المربعات') || s.includes('squares')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('رواف') || s.includes('rawaf')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('المربعات') || s.includes('squares')) return <PlatformLogo source={SQUARES_LOGO} />;
+  if (s.includes('رواف') || s.includes('rawaf')) return <PlatformLogo source={RAWAF_LOGO} />;
   if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return <PlatformLogo source={VMKSA_LOGO} />;
-  if (s.includes('مكسب العقارية') || s.includes('macsaib')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('مكسب العقارية') || s.includes('macsaib')) return <PlatformLogo source={MACSAIB_LOGO} />;
   if (s.includes('maqrat')) return <PlatformLogo source={MAQRAT_LOGO} />;
-  if (s.includes('عرش العقارية') || s.includes('arshglobal')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (raw === 'arsh' || s.includes('عرش العقارية') || s.includes('arshglobal')) return <PlatformLogo source={ARSHGLOBAL_LOGO} />;
+  if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return <PlatformLogo source={SUPEROFFICE_LOGO} />;
   if (s.includes('شموع العقار') || s.includes('shomou')) return <PlatformLogo source={SHOMOU_LOGO} />;
-  if (s.includes('منصة مكتب') || s.includes('maktab')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('منصة مكتب') || s.includes('maktab')) return <PlatformLogo source={MAKTAB_LOGO} />;
   if (s.includes('سرداب') || s.includes('sirdab')) return <PlatformLogo source={SIRDAB_LOGO} />;
-  if (s.includes('عشاب العقارية') || s.includes('ashab.sa')) return <PlatformLogo source={ASHAB_LOGO} />;
+  if (raw === 'ashab' || s.includes('عشاب العقارية') || s.includes('ashab.sa')) return <PlatformLogo source={ASHAB_LOGO} />;
   if (s.includes('منافع العقارية') || s.includes('manafe')) return <PlatformLogo source={MANAFE_LOGO} />;
-  if (s.includes('وجف العقارية') || s.includes('wajaf')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('البكيري العقارية') || s.includes('albukaeri')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('ريادة العقارية') || s.includes('ryadah')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('مجموعة صالح القرشي العقارية') || s.includes('sqcc')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('دارا للتطوير العقاري') || s.includes('daraa')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('مكتب طوية للعقار') || s.includes('tawia')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('مانزو') || s.includes('manzo')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('الطابق الثامن') || s.includes('8floor') || s.includes('eightfloor')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('حلول') || s.includes('holoul')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('وجف العقارية') || s.includes('wajaf')) return <PlatformLogo source={WAJAF_LOGO} />;
+  if (s.includes('البكيري العقارية') || s.includes('albukaeri')) return <PlatformLogo source={ALBUKAERI_LOGO} />;
+  if (s.includes('ريادة العقارية') || s.includes('ryadah')) return <PlatformLogo source={RYADAH_LOGO} />;
+  if (s.includes('مجموعة صالح القرشي العقارية') || s.includes('sqcc')) return <PlatformLogo source={SQCC_LOGO} />;
+  if (s.includes('دارا للتطوير العقاري') || s.includes('daraa')) return <PlatformLogo source={DARAA_LOGO} />;
+  if (s.includes('مكتب طوية للعقار') || s.includes('tawia')) return <PlatformLogo source={TAWIA_LOGO} />;
+  if (s.includes('مانزو') || s.includes('manzo')) return <PlatformLogo source={MANZO_LOGO} />;
+  if (s.includes('الطابق الثامن') || s.includes('8floor') || s.includes('eightfloor')) return <PlatformLogo source={EIGHTFLOOR_LOGO} />;
+  if (s.includes('حلول') || s.includes('holoul')) return <PlatformLogo source={HOLOUL_LOGO} />;
   if (s.includes('السوق المفتوح') || s.includes('opensooq')) return <PlatformLogo source={OPENSOOQ_LOGO} />;
-  if (s.includes('معرض نافذة') || s.includes('nafithh')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('مباشر') || s.includes('mobasher')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('مؤاجرة') || s.includes('muajarh')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('دلّالي') || s.includes('dallali')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('شركة مقام للتطوير العقاري') || s.includes('maqamco') || s.includes('maqam development')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('تطبيق أرض') || s.includes('earthapp')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('نوافذ الوطن') || s.includes('nawafeth') || s.includes('nawafethalwatan')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('re/max') || s.includes('remaxsa')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('قمرا') || s.includes('qmra')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
-  if (s.includes('العجلان') || s.includes('alajlan')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('معرض نافذة') || s.includes('nafithh')) return <PlatformLogo source={NAFITHH_LOGO} />;
+  if (s.includes('مباشر') || s.includes('mobasher')) return <PlatformLogo source={MOBASHER_LOGO} />;
+  if (s.includes('مؤاجرة') || s.includes('muajarh')) return <PlatformLogo source={MUAJARH_LOGO} />;
+  if (s.includes('دلّالي') || s.includes('dallali')) return <PlatformLogo source={DALLALI_LOGO} />;
+  if (raw === 'maqam' || s.includes('شركة مقام للتطوير العقاري') || s.includes('maqamco') || s.includes('maqam development')) return <PlatformLogo source={MAQAMCO_LOGO} />;
+  if (s.includes('تطبيق أرض') || s.includes('earthapp')) return <PlatformLogo source={EARTHAPP_LOGO} />;
+  if (s.includes('نوافذ الوطن') || s.includes('nawafeth') || s.includes('nawafethalwatan')) return <PlatformLogo source={NAWAFETH_LOGO} />;
+  if (s.includes('re/max') || s.includes('remaxsa')) return <PlatformLogo source={REMAX_LOGO} />;
+  if (s.includes('قمرا') || s.includes('qmra')) return <PlatformLogo source={QMRA_LOGO} />;
+  if (s.includes('العجلان') || s.includes('alajlan')) return <PlatformLogo source={ALAJLAN_LOGO} />;
   if (s.includes('آل سعيدان') || s.includes('alsaedan')) return <PlatformLogo source={ALSAEDAN_LOGO} />;
-  if (s.includes('إيجو عقار') || s.includes('ego')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('إيجو عقار') || s.includes('ego')) return <PlatformLogo source={EGO_LOGO} />;
   if (s.includes('أحمد المحيسني العقارية') || s.includes('muhaysini')) return <PlatformLogo source={MUHAYSINI_LOGO} />;
   if (s.includes('راز العقارية') || s.includes('razre')) return <PlatformLogo source={RAZRE_LOGO} />;
   if (s.includes('ري إنفست') || s.includes('reinvest')) return <PlatformLogo source={REINVEST_LOGO} />;
-  if (s.includes('صفا للاستثمار') || s.includes('safa')) return <PlatformLogo source={PLATFORM_PLACEHOLDER_LOGO} />;
+  if (s.includes('صفا للاستثمار') || s.includes('safa')) return <PlatformLogo source={SAFA_LOGO} />;
   if (s.includes('صكوك العقارية') || s.includes('sokok')) return <PlatformLogo source={SOKOK_LOGO} />;
   if (s.includes('سكنة') || s.includes('sukna')) return <PlatformLogo source={SUKNA_LOGO} />;
   if (s.includes('طوبة العقارية') || s.includes('tuba')) return <PlatformLogo source={TUBA_LOGO} />;
@@ -1211,8 +1251,6 @@ const card = StyleSheet.create({
   sourceTextRow: { fontSize: 9, flexShrink: 1 },
   midColRow: { paddingStart: 4, paddingEnd: 12, paddingTop: 7, paddingBottom: 0, gap: 2 },
   rightColRow: { paddingStart: 4, paddingEnd: 12, paddingTop: 3, paddingBottom: 8, gap: 1 },
-  hostBadgeRow: { width: 50, height: 24 },
-  hostBadgeArtRow: { transform: [{ scale: 0.52 }] },
   titleTight: { fontSize: 14 },
   priceRow: { fontSize: 17 },
   priceTight: { fontSize: 15.5 },
@@ -1314,9 +1352,8 @@ const card = StyleSheet.create({
 
   // Full-width amenities and compact source footer.
   rightCol: { paddingHorizontal: 10, paddingBottom: 9, paddingTop: 4, gap: 3 },
-  hostHead: { flexDirection: 'row', alignItems: 'center', gap: 3, flexShrink: 1 },
-  hostBadge: { width: 64, height: 32, alignItems: 'center', justifyContent: 'center' },
-  hostBadgeArt: { position: 'absolute', alignItems: 'center', justifyContent: 'center', transform: [{ scale: 0.75 }] },
+  hostHead: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
+  hostBadge: { width: 96, height: 48, flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
   thercBadge: { borderRadius: 8, backgroundColor: '#1f5f8b', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   aoujBadge: { borderRadius: 8, backgroundColor: '#8b5a1f', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   abralosolBadge: { borderRadius: 8, backgroundColor: '#3f6b4a', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },

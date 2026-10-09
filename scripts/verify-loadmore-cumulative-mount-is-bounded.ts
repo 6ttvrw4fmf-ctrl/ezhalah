@@ -89,6 +89,7 @@ const PRELUDE = [
   // same drain it always did. That it must be declared at all is the point: the lift
   // runs the REAL loadMore, so a guard added to production code cannot be invisible here.
   'const conversationEpochRef = { current: 0 };',
+  'const prefetchRef = { current: new Map() }; // no saved-chat pre-load in this fixture (2026-10-07)',
   'const revealCount: any = bus.seedRevealCount != null ? { mid: bus.seedRevealCount } : {};',
   'const loadingMore: any = {};',
   'const initialReveal = (_r: any) => 10;',
@@ -230,9 +231,11 @@ check('§2 every press ADVANCES the mount — no dead press while the button is 
 // (revealTarget caps it), but the sequence goes FLAT after the cap and never terminates — a rendered,
 // pressable button that does nothing. §2's terminate/advance checks must refuse it.
 {
+  // Anchored on loadMore's OWN terminal predicate (2026-10-07: restoreLeftState has a second, unrelated
+  // `if (revealIsTerminal) setCompleted(true);`, so the bare line no longer names loadMore's).
   const mNoTerminal = mutantOf(agentSrc,
-    'if (revealIsTerminal) setCompleted(true);',
-    'if (revealIsTerminal && false) setCompleted(true);');
+    'revealTo >= Math.min(SECOND_PAGE_CAP, totalForCap) || (!hasMoreNow && revealTo >= mergedLen);',
+    'false;');
   const flat = await pressSequence(mNoTerminal, RENDER_CRASH_MEASURED, 5);
   mustCatch('M-no-terminal — a button that never retires (flat, endless press) is caught',
     flat.length > 2 && !flat.every((m, i) => i === 0 || m > flat[i - 1]),

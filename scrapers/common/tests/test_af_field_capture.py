@@ -311,9 +311,10 @@ def test_gathern_balcony_label_is_mapped() -> None:
     assert got["balcony_terrace"] is True
     assert got["elevator"] is True and got["parking"] is True
 
-    # A listing WITHOUT the label must read False, not True — the flags are a closed set over the
-    # labels gathern published for that unit, so absence here is the source's own silence.
-    assert _amenity_flags(["تلفزيون", "انترنت"])["balcony_terrace"] is False
+    # A listing WITHOUT the label is the source's own silence: NULL (AUTHORITATIVE_NULL, which clears a
+    # stale value), never False and never True (🔬 2026-10-09, backlog 245 — this line used to pin False).
+    from scrapers.common.db import AUTHORITATIVE_NULL
+    assert _amenity_flags(["تلفزيون", "انترنت"])["balcony_terrace"] is AUTHORITATIVE_NULL
 
 
 def test_gathern_does_not_invent_kitchen_or_ac() -> None:

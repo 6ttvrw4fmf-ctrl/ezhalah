@@ -627,6 +627,15 @@ def verify_gone_for(live_nid: str):
     return _verify_gone
 
 
+def _make_verify_gone(control: Optional[dict] = None):
+    """The one-argument oracle the daily direct check calls (fleet_liveness.SITES, 2026-10-08): the
+    crawl's own verify_gone_for, with the caller's control row as the in-run canary. No control (or
+    one from another numbering) gives a canary that cannot pass, so no removal is believed."""
+    ad = str((control or {}).get("ad_number") or "")
+    nid = ad[len(PREFIX):] if ad.startswith(PREFIX) and ad[len(PREFIX):].isdigit() else ""
+    return verify_gone_for(nid)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")

@@ -13,7 +13,7 @@ import { toLatinDigits } from '@/lib/inputHygiene';
 import { vagueOrdering } from '@/lib/vagueOrdering';
 import { parseProximity, proximityKeywords, type ProximityIntent } from './proximity';
 import { type Category } from './taxonomy';
-import { t, getLocale } from '@/i18n';
+import { getLocale, detectLocale, translate, type Locale } from '@/i18n';
 import { supabase } from '@/lib/supabase';
 import { partitionRequestedAmenities, cohortAllows } from '@/lib/afCohorts';
 import { certifyAfOnMergedState as certifyAf, type CertifiableBackendQuery } from '@/lib/afCertify';
@@ -280,13 +280,13 @@ export function resetRejectionNotices(): void { announcedRejections.clear(); }
  * there is nothing new to say. Keyed by the intent id, so «تقييم» explained once stays explained
  * even as the conversation moves on.
  */
-function rejectionNotice(): string {
+function rejectionNotice(locale: Locale = getLocale()): string {
   const fresh = lastRejectedFilters
     .map((f) => String(f).split(':')[0])           // 'rating:ممتاز' -> 'rating'
     .filter((f) => f && !announcedRejections.has(f));
   if (!fresh.length) return '';
   for (const f of fresh) announcedRejections.add(f);
-  return t('That option is not available in this search, so I showed the results without it.');
+  return translate(locale, 'That option is not available in this search, so I showed the results without it.');
 }
 
 // AREA NICKNAMES → known district lists. The engine filters by district when these are present, so
@@ -346,8 +346,12 @@ function resolveDistrictsFromText(userText: string, city: string): string[] {
   // «العزيزية في الرياض». (audit #6: was a single .match() — only the first حي was kept.)
   const arHiRe = /حي\s+([؀-ۿ]+(?:\s+(?!في|و|أو|منطقة|مدينة)[؀-ۿ]+)?)/g;
   for (const m of ar.matchAll(arHiRe)) out.push(m[1].trim());
-  const enHiRe = /\b(?:in|district\s+of|neighborhood\s+of)\s+(?:al[-\s])?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s*(?:district|neighborhood)?/g;
-  for (const m of userText.matchAll(enHiRe)) out.push(`Al ${m[1]}`);
+  // English needs the WORD «district»/«neighborhood»: a bare «in X» names a CITY far more often
+  // («apartment for sale in Riyadh»), and treating it as a district turned the city into a district
+  // filter «Al Riyadh» that no listing carries — a false «no results» (ops_zero_result_log
+  // 2026-10-08, Buy·شقة·الرياض = 0 vs thousands). The place itself is still resolved from q.location.
+  const enHiRe = /\b(?:(?:district|neighbou?rhood)\s+of\s+(?:[Aa]l[-\s])?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})|in\s+(?:[Aa]l[-\s])?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:district|neighbou?rhood)\b)/g;
+  for (const m of userText.matchAll(enHiRe)) out.push(`Al ${m[1] ?? m[2]}`);
 
   return Array.from(new Set(out));
 }
@@ -737,7 +741,7 @@ export type AgentHistoryTurn = { role: 'user' | 'model'; text: string };
 async function callAgentBackend(
   text: string,
   ctx: {
-    loggedIn: boolean; order: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[];
+    locale?: Locale; loggedIn: boolean; order: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[];
     prevQuery?: SearchQuery | null;
     // Conversation-scoped decision state (owner-approved consolidation, 2026-08-30) — the server is
     // the single decision authority (supabase/functions/agent/decide.ts) but has no memory of its
@@ -767,7 +771,7 @@ async function callAgentBackend(
       supabase.functions.invoke('agent', {
         body: {
           text,
-          locale: getLocale(),
+          locale: ctx.locale ?? getLocale(),
           loggedIn: ctx.loggedIn,
           order: ctx.order,
           history: ctx.history ?? [],
@@ -964,7 +968,7 @@ export function parseQuery(text: string): SearchQuery {
 // grouped numbers, and area units ("sqm", "m2", "square meters") are normalised to m². This is
 // purely how Ezhalah ECHOES the request — the search engine does its own parsing. (user request:
 // "you fix measurements, currencies, money, everything — act like an AI agent.")
-function normalizeForReadback(original: string): string {
+function normalizeForReadback(original: string, locale: Locale = getLocale()): string {
   const { text: fixed } = spellFix(original);
   let s = toLatinDigits(fixed);
 
@@ -991,7 +995,7 @@ function normalizeForReadback(original: string): string {
   //    (dollars/dirhams/pounds…) and an optional scale (k/m/million/thousand), e.g.
   //    "$3,000" → "SAR 11,250", "2k dollars" → "SAR 7,500", "1.5 million eur" → "SAR 6,150,000".
   const symCur: Record<string, string> = { '$': 'usd', '€': 'euro', '£': 'pound' };
-  const sar = getLocale() === 'en' ? 'SAR' : 'ريال';
+  const sar = locale === 'en' ? 'SAR' : 'ريال';
   const CUR_RE =
     /(?:([$€£])\s*)?(\d[\d,.]*)(?:\s*(million|thousand|billion|mn|bn|k|m)(?![A-Za-z]))?(?:\s*(usd|us\$|dollars?|aed|dirhams?|dhm|dhs|dh|euros?|eur|gbp|pounds?|kwd|dinars?|bhd|bd|kd|qar|qr|omr|egp|sar|sr|riyals?|دولار(?:ات)?|يورو|درهم|دينار|ريال(?:ات)?)(?![A-Za-z]))?/gi;
   s = s.replace(CUR_RE, (whole, sym, numStr, scale, word) => {
@@ -1053,10 +1057,10 @@ function alreadyRestates(reply: string): boolean {
 // with currencies/measurements normalised and shown with Western digits — so Ezhalah always "reads
 // back" the request before the cards appear. (user request: "always retype as an AI what the user
 // wrote… fix what he wrote… always rewrite what the user wrote before displaying the property.")
-function withRestate(original: string, tail: string): string {
-  const shown = normalizeForReadback(original);
+function withRestate(original: string, tail: string, locale: Locale = getLocale()): string {
+  const shown = normalizeForReadback(original, locale);
   const lead =
-    getLocale() === 'en'
+    locale === 'en'
       ? `Got it — you're looking for "${shown}".`
       : `تمام، فهمت أنك تبحث عن «${shown}».`;
   return tail ? `${lead} ${tail}` : lead;
@@ -1069,14 +1073,14 @@ function withRestate(original: string, tail: string): string {
 // mood (the LLM is unreliable for a bare platform-only request). Genuine confidentiality QUESTIONS
 // keep the model's neutral deflection. (user: "if I type give me aqar only, show me aqar only.")
 const PLATFORM_Q_RE = /[?؟]|\b(do|does|did|are|is|can|could|would|which|what|where|how|why|who)\b|\b(هل|وش|وين|كيف|ليش|ايش|إيش)\b/i;
-function maybeForcePlatformSearch(turn: AgentTurn, text: string): AgentTurn {
+function maybeForcePlatformSearch(turn: AgentTurn, text: string, locale: Locale = getLocale()): AgentTurn {
   if (turn.kind === 'listings') return turn;       // already searching → sources set by queryFromBackend
   const sources = resolveSourcesFromText(text);
   if (!sources.length) return turn;                // no platform named → leave the model's reply
   if (PLATFORM_Q_RE.test(text)) return turn;       // "do you search Aqar?" → keep neutral deflection
   const q = parseQuery(text);                      // applySourceFilter sets q.sources (+ Gathern→monthly)
   if (!q.sources || !q.sources.length) return turn;
-  return { kind: 'listings', reply: withRestate(text, ''), query: q };
+  return { kind: 'listings', reply: withRestate(text, '', locale), query: q };
 }
 
 // Classify the message and craft a neutral reply. Deterministic; the listings themselves are
@@ -1087,10 +1091,12 @@ function maybeForcePlatformSearch(turn: AgentTurn, text: string): AgentTurn {
 // when they give a direct search order ("I want…/show me…/أريد…"); otherwise Ezhalah just helps,
 // neutrally, like a normal assistant and invites them to say "show me" when ready.
 export async function respond(text: string, opts?: {
-  loggedIn?: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[]; prevQuery?: SearchQuery | null;
+  locale?: Locale; loggedIn?: boolean; history?: AgentHistoryTurn[]; attemptTexts?: string[]; prevQuery?: SearchQuery | null;
   askCount?: number; userMessageId?: string; historyTurnsRaw?: number;
 }): Promise<AgentTurn> {
   const v = text.trim();
+  const replyLocale = detectLocale(v) ?? opts?.locale ?? getLocale();
+  const t = (key: string) => translate(replyLocale, key);
   const loggedIn = !!opts?.loggedIn;
   if (!v) return { kind: 'message', reply: t("Tell me what you're looking for and I'll search for it.") };
 
@@ -1114,34 +1120,34 @@ export async function respond(text: string, opts?: {
   // forget which caveats this conversation has already given.
   if (!opts?.prevQuery) resetRejectionNotices();
   const backend = await callAgentBackend(v, {
-    loggedIn, order, history: opts?.history, attemptTexts: opts?.attemptTexts, prevQuery: opts?.prevQuery ?? null,
+    locale: replyLocale, loggedIn, order, history: opts?.history, attemptTexts: opts?.attemptTexts, prevQuery: opts?.prevQuery ?? null,
     askCount: opts?.askCount, userMessageId: opts?.userMessageId, historyTurnsRaw: opts?.historyTurnsRaw,
   });
   if (backend) {
     // Named-platform filter safety net: if the user said "Aqar only" / "Gathern فقط" but the model
     // deflected, force the search. When we override, the reply is already final — return as-is.
-    const forced = maybeForcePlatformSearch(backend, v);
+    const forced = maybeForcePlatformSearch(backend, v, replyLocale);
     if (forced !== backend) return forced;
     // For a GUEST listings search we lead with the deterministic normalization echo ("Got it — you're
     // looking for …" with currencies/measurements fixed), keeping the fast search-first feel. For a
     // LOGGED-IN user the model already returns its own structured read-back ("Here is what I have for
     // you: …" — user's prompt spec), so we show that verbatim and DON'T prepend a second restatement.
     if (backend.kind === 'listings' && !loggedIn && !alreadyRestates(backend.reply)) {
-      backend.reply = withRestate(v, backend.reply);
+      backend.reply = withRestate(v, backend.reply, replyLocale);
     }
     // Append AFTER the restatement so the reply still leads with what we ARE searching for; the
     // caveat is a tail, not a headline. The search itself is untouched — everything we could apply
     // has been applied.
     // LISTINGS ONLY, and the call itself is gated — not just its output. The sentence is «…so I
     // showed the results without it», which is simply untrue on a clarification turn where no results
-    // are shown. Worse, rejectionNotice() MUTATES announcedRejections: saying it on a message turn
+    // are shown. Worse, rejectionNotice(replyLocale) MUTATES announcedRejections: saying it on a message turn
     // spent the once-per-conversation budget on a turn that showed nothing, so the listings turn that
     // really did search without the filter then stayed silent about it.
     //
     // Nothing is lost by waiting. lastRejectedFilters is rebuilt every turn from the merged state, so
     // if the filter is still uncertified when the search runs it is announced there — and if the
     // user's answer made it certifiable, it gets APPLIED and there was never anything to announce.
-    const notice = backend.kind === 'listings' ? rejectionNotice() : '';
+    const notice = backend.kind === 'listings' ? rejectionNotice(replyLocale) : '';
     if (notice && backend.kind === 'listings') {
       backend.reply = `${String(backend.reply ?? '').trim()}\n${notice}`.trim();
       // ALSO a structured field (2026-09-11 fix), not just appended to `.reply`: the listings-turn
@@ -1180,7 +1186,7 @@ export async function respond(text: string, opts?: {
     // Guest, or a logged-in user giving a direct order → show listings for any property search.
     if (isRealEstate || order) {
       const base = t('Here are some properties you might be interested in:');
-      return { kind: 'listings', reply: withRestate(v, base), query: parseQuery(fixed.text) };
+      return { kind: 'listings', reply: withRestate(v, base, replyLocale), query: parseQuery(fixed.text) };
     }
     if (ADVICE_RE.test(v)) {
       return {

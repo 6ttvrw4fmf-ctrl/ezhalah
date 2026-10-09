@@ -1,20 +1,17 @@
 // «من نحن» premium single-screen contract (owner brief, 2026-08-23).
 //
-// The About dialog was rebuilt from a five-card corporate scroll into a single-screen company
-// card: hero (wordmark + thesis) + four verb-led value blocks + an abstract map panel (desktop)
-// + a four-column small-print legal strip. This barrier pins the TEN contract points of that
-// brief so no future edit quietly regresses any of them:
+// The About dialog is a short, paragraph-led company explanation with the same calm reading rhythm
+// as the Terms & Privacy dialog. This barrier pins the presentation contract so no future edit
+// quietly brings back the old dashboard-like treatment:
 //
-//   1. the long five-card scroll must not return          6. no Arabic dash separators («—»)
-//      (2026-09-03: and the artwork sits in its OWN box,   7. the map panel stays desktop-only
-//      never as a background under text)                  8. required legal/brand content survives
-//   2. desktop fits a capped single screen
+//   1. the old card/artwork stack must not return           6. no Arabic dash separators («—»)
+//      and About stays a single reading column              7. paragraphs and source notes stay visible
+//   2. desktop fits a capped dialog                         8. required legal/brand content survives
 //   3. themed fully; no × on «من نحن», header-drag
 //   4. no letterSpacing on Arabic text                    9. reduced motion is respected
 //   5. every displayed string has an Arabic entry        10. the sidebar entry still opens the modal
 //
-// Plus the honesty invariant: the ONLY number on the screen derives from PLATFORM_META.length at
-// compile time — never a hardcoded count, never an invented listings/cities figure.
+// Plus the honesty invariant: About does not invent an inventory count or other unsupported number.
 //
 //   node --experimental-strip-types scripts/verify-about-premium-contract.ts    (wired into `npm test`)
 //
@@ -44,21 +41,14 @@ check(
   '1a. the old five-card About stack is gone (no secCard/secIc icon-circle rhythm)',
   !/secCard|secIc|secHead|secTitle/.test(modal),
 );
-// DESIGN CORRECTION (owner 2026-09-03, supersedes the 2026-08-29 artwork-led hero): «من نحن» is
-// NOT text written over a background image. The artwork lives in its OWN box — the real image at
-// its real aspect ratio, contained, nothing painted over it — and the information has its own
-// structure (intro, statistic, 2×2 feature cards, trust card).
 check(
-  '1b. the artwork lives in its OWN box, contained at its real aspect ratio, and no gradient melt remains',
-  /artBox:\s*\{/.test(modal) && /artImg:\s*\{/.test(modal) && /trustCard:\s*\{/.test(modal)
-  && /<RNImage source=\{ABOUT_ART\} style=\{a\.artImg\} resizeMode="contain" \/>/.test(modal)
-  && /aspectRatio: ABOUT_ART_RATIO/.test(modal) && /const ABOUT_ART_RATIO = 900 \/ 1317/.test(modal)
-  && !/LinearGradient/.test(modal),
+  '1b. About uses one calm reading column with no decorative artwork/card machinery',
+  /readingColumn:\s*\{/.test(modal) && /paragraph:\s*\{/.test(modal) && /note:\s*\{/.test(modal)
+  && !/ABOUT_ART|artBox|vGrid|trustCard|LinearGradient/.test(modal),
 );
 check(
-  '1c. the artwork is never a background under text: the image is not absolutely positioned and its box holds ONLY the image',
-  !/artImg:\s*\{[^}]*position: 'absolute'/.test(modal)
-  && /style=\{\[a\.artBox, wide \? a\.artBoxWide : a\.artBoxNarrow\]\}>\s*\n\s*<RNImage source=\{ABOUT_ART\}[^\n]*\n\s*<\/Reveal>/.test(modal),
+  '1c. About renders prose and source notes in document order',
+  /a\.heroLine/.test(modal) && /a\.paragraph/.test(modal) && /a\.rule/.test(modal) && /a\.note/.test(modal),
 );
 
 // ── 2. Desktop about is a capped single screen ──────────────────────────────────────────────────
@@ -76,11 +66,10 @@ check(
 check('3a. About styles are palette-driven (makeAbout factory), never the static light tokens',
   /function makeAbout\(pal: Record<string, string>, dark: boolean\)/.test(modal)
   && /useMemo\(\(\) => makeAbout\(pal, dark\), \[pal, dark\]\)/.test(modal));
-// 3b RETARGETED 2026-09-03: the EXISTING eagle-night asset stays, and it is shown as-is — never
-// dimmed, ghosted or zoomed (the 2026-08-30 per-theme opacity belonged to the wallpaper treatment).
-check('3b. the artwork is the existing eagle-night asset, shown at full opacity in both themes (never ghosted)',
-  /const ABOUT_ART = require\('\.\.\/\.\.\/assets\/images\/eagle-night\.jpg'\)/.test(modal)
-  && !/artImg:[^\n]*opacity/.test(modal) && !/artBox(Wide|Narrow)?:[^\n]*opacity/.test(modal));
+check('3b. the reading page keeps its typography and dividers palette-driven',
+  /heroLine:[^\n]*color: pal\.ink/.test(modal)
+  && /paragraph:[^\n]*color: pal\.body/.test(modal)
+  && /rule:[^\n]*backgroundColor: pal\.line/.test(modal));
 // 3c RETARGETED 2026-09-03: «من نحن» has NO close button (the backdrop closes it) and is DRAGGABLE
 // by its header on desktop, starting centered on every open (no position memory).
 check('3c. «من نحن» renders without a × (gated), drags by its header via the shared machinery, and never remembers a position',
@@ -113,21 +102,19 @@ check(`5. every string InfoModal displays has an Arabic dictionary entry (${new 
 check('6. no Arabic dash separator («—») in any string the About/Support dialog displays',
   dashed.length === 0, dashed.length ? `dashed: ${dashed.join(' | ')}` : undefined);
 
-// ── 7. The trust content is designed, not a document: icon-led rows inside one quiet card ───────
+// ── 7. The About content stays a plain reading page, with a quiet source-note section ──────────
 check(
-  '7. legal facts render as icon-led trust rows under the «الثثقة والشفافية» title'.replace('الثثقة','الثقة'),
-  /trustRow/.test(modal) && /trustIcon/.test(modal) && /Trust & transparency/.test(modal)
-  && (modal.match(/trustRow/g) ?? []).length >= 2,
+  '7. About renders a paragraph-led reading column with source notes',
+  /readingColumn/.test(modal) && /a\.paragraph/.test(modal) && /a\.note/.test(modal) && /a\.rule/.test(modal),
 );
 
-// ── 8. Required content survives: four legal facts + labels + brand line + hero ─────────────────
+// ── 8. Required About copy survives ────────────────────────────────────────────────────────────
 const REQUIRED = [
-  'Our role', 'Listing licensing', 'Disclaimer', 'Data & privacy',
+  'About Us', 'Ezhalah',
+  'Ezhalah is a Saudi, AI-powered property search platform. We help people find properties faster by searching Aqar, Wasalt, Aldarim and more in one place, and help those platforms reach more users by driving traffic directly to their listings.',
   'Ezhalah is a search platform only. We do not own, list, sell, or rent properties, and we run no transactions and take no commission.',
   'Every listing is published by its source platform and remains subject to its licensing. Ezhalah does not issue or own listings.',
-  'Listings come from external platforms and we do not verify them. Confirm the details with the original platform before any decision.',
   'We collect only what the service needs, and we do not sell user data.',
-  'Ezhalah, and may your luck be good.',
   'Smarter property search, bringing the Saudi market together in one place.',
 ];
 const missingReq = REQUIRED.filter((r) => !modal.includes(r));
@@ -162,12 +149,10 @@ check(
   /openInfo\('about'\)/.test(sidebar) && /kind === 'support' \? <SupportBody/.test(modal) && /<AboutBody/.test(modal),
 );
 
-// ── Honesty invariant: the only number derives from the shipped roster ──────────────────────────
+// ── Honesty invariant: About shows no unsupported inventory number ──────────────────────────────
 check(
-  'honesty: the platform count is PLATFORM_META.length at compile time, never a hardcoded digit',
-  /const PLATFORM_COUNT = PLATFORM_META\.length/.test(modal) &&
-    /\+\{String\(PLATFORM_COUNT\)\}/.test(modal) &&
-    !/statNum>\s*\+\d/.test(modal) && !/\+\d+ منصة/.test(modal),
+  'honesty: About contains no inventory count or hardcoded platform statistic',
+  !/PLATFORM_COUNT|PLATFORM_META|statNum|\+\d+ منصة/.test(modal),
 );
 
 console.log(

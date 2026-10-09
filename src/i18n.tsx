@@ -191,6 +191,19 @@ const AR: Record<string, string> = {
   ' /yr': ' / سنوياً',
   'Max price': 'السعر الأقصى',
   'Search': 'بحث',
+  'Real-estate websites in one search': 'مواقع عقارية في بحث واحد',
+  'Search across {count} real-estate websites': 'نبحث عبر {count} موقع عقاري',
+  'Choose websites': 'اختر المواقع',
+  'Deep search': 'بحث عميق',
+  'Choose one or more websites to search only their listings.': 'اختر موقعاً أو أكثر للبحث في عقاراتها فقط.',
+  'Search across Saudi Arabia': 'ابحث في جميع المواقع داخل المملكة',
+  'Choose a website': 'اختر موقعاً',
+  'Search one website': 'ابحث في موقع واحد',
+  'Select a website to narrow your search.': 'حدّد موقعاً لتضييق البحث.',
+  'Search websites…': 'ابحث عن موقع…',
+  'All websites': 'كل المواقع',
+  'Clear website': 'مسح اختيار الموقع',
+  'No matching websites': 'لا توجد مواقع مطابقة',
   'Clear all': 'مسح الكل',
 
   // Deals + verbs
@@ -464,6 +477,7 @@ const AR: Record<string, string> = {
   'Let’s begin': 'يلا نبدأ',
   // 'Continue' reuses the existing auth-flow key ('متابعة') — not redeclared here.
   'Continue · {count} results': 'متابعة · {count} نتيجة',
+  'No results with these choices': 'لا توجد نتائج بهذه الاختيارات',
   // Owner 2026-10-01: one source-data notice above the options; unknown still never means «no».
   'Your search options and counts use published listing details; unmentioned features may still be available, so check the original listing.': 'خيارات بحثك وأعدادها مبنية على بيانات الإعلانات المنشورة؛ غياب المعلومة لا ينفي توفرها، فتأكد من الإعلان الأصلي.',
   'Based on: {labels}': 'بناءً على: {labels}',
@@ -566,6 +580,7 @@ const AR: Record<string, string> = {
   'Reload': 'إعادة تحميل',
   'Loading listings — please try again in a few seconds.':
     'يجري تحميل الإعلانات — حاول مرة ثانية بعد لحظات.',
+  'Loading the rest of your listings…': 'جاري تحميل بقية إعلاناتك…',
 
   // Agent chat chrome
   'Ezhalah is searching…': 'إزهله يبحث…',
@@ -1573,7 +1588,7 @@ export function t(en: string, vars?: Record<string, string | number>): string {
   return translate(_locale, en, vars);
 }
 
-// Detect the script the user is writing in so the whole UI can follow their keyboard:
+// Detect input/message script; callers decide how to use it. Chat replies never change UI locale:
 // any Arabic letter → 'ar', otherwise any Latin letter → 'en'. Returns null for
 // digit-only/empty/symbol input so we don't flip the language on a lone number.
 const _arScript = /[؀-ۿ]/;
@@ -1638,23 +1653,23 @@ export const ATTRIBUTE_UNRESOLVED_AR = 'بيان غير محدد';
 
 // A property type or category — Arabic translation, or lowercased English (matches the prior
 // "here are villas" phrasing).
-export function tWord(en: string): string {
-  return _locale === 'ar' ? AR[en] ?? en : en.toLowerCase();
+export function tWord(en: string, loc: Locale = _locale): string {
+  return loc === 'ar' ? AR[en] ?? en : en.toLowerCase();
 }
 
 // A stored location string ("Riyadh, Al Malqa District") — translate each comma-separated part.
-export function tPlace(s: string): string {
+export function tPlace(s: string, loc: Locale = _locale): string {
   if (!s) return s;
   return s
     .split(',')
-    .map((p) => t(p.trim()))
+    .map((p) => translate(loc, p.trim()))
     .join('، ');
 }
 
 // A bedrooms / size-band option ("Under 100 m²", "100–300 m²", "600+ m²"). Numbers + unit stay;
 // only the words localize. Bedroom counts (plain digits) pass through untouched.
-export function tDetailOption(opt: string): string {
-  if (_locale !== 'ar') return opt;
+export function tDetailOption(opt: string, loc: Locale = _locale): string {
+  if (loc !== 'ar') return opt;
   if (/^\d+\+?$/.test(opt)) return opt; // bedroom counts
   let s = opt.replace(/^Under\s*/, 'أقل من ');
   s = s.replace(/m²/g, 'م²');
@@ -1663,8 +1678,8 @@ export function tDetailOption(opt: string): string {
 
 // A preset price-tab band ("Under SAR 75k", "SAR 75k–150k", "SAR 3M+"). Localize the words only —
 // Western digits, "k"/"M" abbreviations, the en-dash and "+" all stay.
-export function tPriceTab(opt: string): string {
-  if (_locale !== 'ar') return opt;
+export function tPriceTab(opt: string, loc: Locale = _locale): string {
+  if (loc !== 'ar') return opt;
   let s = opt.replace(/^Under\s*/, 'أقل من ');
   s = s.replace(/SAR/g, 'ر.س');
   return s;

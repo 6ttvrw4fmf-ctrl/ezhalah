@@ -991,11 +991,11 @@ POLICIES: dict[str, _P] = {
         "stock."),
     "wahadat": _P(
         _pol("wahadat", 3, 168), CRAWL_PRESENCE_ONLY,
-        "the crawl's OWN seen-set, and it is a genuine FULL-STATE fetch: every run re-reads the "
-        "sitemap's complete list of 100 project pages and re-parses every unit on each, so a unit "
-        "dropping out, or its project leaving the sitemap, is the complete liveness signal. "
-        "db.prune_unseen's 3-strike/coverage/collapse guards are the only additional protection, "
-        "the same shape ~40 other whole-catalogue platforms in this fleet already use.",
+        "the unit's OWN status in its project's record, read every run (2026-10-07): a unit the "
+        "source states as sold or reserved, in a project whose is_active is true, is gone and "
+        "takes a strike; a unit that merely drops out of the list, or whose project is unread, is "
+        "UNKNOWN and is never hidden (absence only selects candidates). prune_unseen's 3-strike, "
+        "coverage and collapse guards still apply.",
         "Not CANDIDATE_PLUS_DIRECT even though a project page can be re-fetched: the unit-level "
         "detail endpoint (pro.wahadat.sa/ar/unit/api/units/<uuid>/) answers 403 unauthenticated, so "
         "there is no per-unit surface to re-probe INDEPENDENTLY of the crawl — a 'direct' check "
@@ -1218,9 +1218,10 @@ POLICIES: dict[str, _P] = {
         "paging (/Property/_Properities, start=1..N, length=12) walked until a page is empty, checked "
         "against #TotalRecord (83 when measured), then every /Property/Details/<id> page re-read. "
         "run.py suppresses prune_unseen unless the walk reached TotalRecord and every page was readable.",
-        "An oracle is possible — a removed id's details page stops carrying the pd-overview licence "
-        "block — but it is not written yet, so this does not claim a direct check. The ads carry REGA "
-        "licence expiry dates (license_expiry) for a future oracle."),
+        "Measured 2026-10-07 (oracle-feasibility-probe 37618176662): a hidden ad's details page still "
+        "answers 200 like a live one, with no marker between them, so NO death signal exists and "
+        "prune_unseen's verify_gone answers UNKNOWN for every row: absence counts strikes and hides "
+        "nothing. The ads carry REGA licence expiry dates (license_expiry) for a future oracle."),
     "macsaib": _P(
         _pol("macsaib", 3, 168), CRAWL_PRESENCE_ONLY,
         "the crawl's OWN seen-set over Taearif's complete, self-declaring JSON feed: "
@@ -1409,6 +1410,11 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     # NEEDS INTERACTIVE APPLY: the registry reseed's DELETE clause is held by the DB connector for a
     # human (LIFECYCLE_ENGINEER.md, 2026-10-05 lesson).
     "rakez",
+    # 2026-10-08: shadow runs read 100% with controls right and nothing to hide — goldendeal
+    # 37769087242 (293/293 live), mustqr 37770177620 (1,282 live, 1 first strike), maqam
+    # 37772746090 (42/42), yameen 37773056567 (10/10), shatri 11:55 UTC (50/50). Their oracles
+    # became callable by the daily check that night (#6436).
+    "goldendeal", "maqam", "mustqr", "yameen", "shatri",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
@@ -1419,6 +1425,7 @@ for _p in FLEET_DAILY_DIRECT:
 # remal and shmoualshmal gained a prune-time oracle on the ad's OWN url on 2026-10-02 (until then
 # neither crawler removed anything), so "absence only" no longer describes them. Tier unchanged.
 # arkaan joined 2026-10-06 (its prune had no oracle; its own page answers 410 for a removed ad).
+# abralosol joined 2026-10-07 (same hole: its crawl read the 404/410 but its prune had no oracle).
 for _p, _sig in (
     ("remal", "the ad's OWN url answering 404/410. Measured 2026-10-02: a never-existed slug, a "
               "wrong post id and the REST record all answer 404, while 12 of 12 live ads answer "
@@ -1437,6 +1444,11 @@ for _p, _sig in (
                "of 12 live ads answer 200 with the RealEstateListing JSON-LD (LIVE). A block, a 5xx, "
                "a redirect and any other 200 are UNKNOWN, and a removal is believed only while an "
                "in-run known-live control still reads live"),
+    ("abralosol", "the ad's OWN /{nid} url answering 404/410, the reading its crawl already makes "
+                  "for every listed ad (crawler audit 2026-10-02: a removed ad's page answers "
+                  "404/410). 200 on that url whose <article> carries a node id is LIVE; a block, a "
+                  "5xx, a redirect and any other 200 are UNKNOWN, and a removal is believed only "
+                  "while an in-run known-live control still reads live (2026-10-07)"),
 ):
     POLICIES[_p] = _P(POLICIES[_p]["policy"], POLICIES[_p]["strategy"], _sig,
                       "Removal is confirmed on the ad's own url at prune time (2026-10-02); the full "

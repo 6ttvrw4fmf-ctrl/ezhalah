@@ -14,7 +14,7 @@ function wiring(a: string): string[] {
   if (!/runAfterAnimation\(/.test(block)) bad.push('the swap is not driven by runAfterAnimation (a frozen rAF would block opening the chat)');
   if (!/if \(token !== savedOpenTokenRef\.current \|\| epochAtTap !== conversationEpochRef\.current\) return;\s*\n\s*open\(\);/.test(block)) bad.push('a stale open (second tap / New Chat during the fade) can still swap over the newer screen, or leaves it faded out');
   if (!/Animated\.timing\(freshFade, \{ toValue: 1,/.test(block)) bad.push('the opened chat never fades back in');
-  if (!/\}, 180\);/.test(block)) bad.push('the fade-in no longer waits for the first re-bottom (the jump would be seen)');
+  if (!/\}, 180\)\)?;/.test(block)) bad.push('the fade-in no longer waits for the first re-bottom (the jump would be seen)');
   if (!/conversationEpochRef\.current\+\+;/.test((/const resetConversationState = \(\) => \{[\s\S]*?\n  \};\n/.exec(a)?.[0] ?? ''))) bad.push('New Chat does not cancel a pending saved-chat open');
   return bad;
 }
@@ -26,7 +26,7 @@ const mustCatch = (label: string, bad: string[]) => { if (!bad.length) failed++;
 console.log('\nOpening a saved chat fades out, lands while hidden, fades in (owner 2026-10-03)\n');
 check('wiring', wiring(src));
 mustCatch('the hard cut coming back (no fade-out)', wiring(src.replace('(onFinished) => Animated.timing(freshFade, { toValue: 0, duration: 110, useNativeDriver: true }).start(onFinished)', '(onFinished) => onFinished()')));
-mustCatch('showing the chat before it landed', wiring(src.replace(/(const turnToSavedChat[\s\S]*?)\}, 180\);/, '$1}, 0);')));
+mustCatch('showing the chat before it landed', wiring(src.replace(/(const turnToSavedChat[\s\S]*?)\}, 180\)(\)?);/, '$1}, 0)$2;')));
 mustCatch('a stale open swapping over the newer chat', wiring(src.replace('if (token !== savedOpenTokenRef.current || epochAtTap !== conversationEpochRef.current) return;', '')));
 mustCatch('New Chat that does not cancel a pending open', wiring(src.replace('conversationEpochRef.current++; // every in-flight', '// every in-flight')));
 mustCatch('a chat that never fades back in', wiring(src.replace(/(const turnToSavedChat[\s\S]*?)Animated\.timing\(freshFade, \{ toValue: 1,/, '$1Animated.timing(freshFade, { toValue: 0,')));

@@ -383,7 +383,11 @@ def _hint_to_id(region_hint: Union[int, str, None]) -> Optional[int]:
         return REGION_EN_TO_ID[s]
     n = norm_ar(s)
     stripped = n[len("منطقه "):] if n.startswith("منطقه ") else n
-    return _REGION_NORM.get(n) or _REGION_NORM.get(stripped)
+    # The catalog names regions «منطقة القصيم» / «المنطقة الشرقية»; sources print the bare name
+    # («القصيم - بريدة - الغدير»). Without these two forms a bare region never became a hint, so a
+    # twin city stayed unresolved (sadiqeltajer «الطرفية» in القصيم: Qassim 941 vs Riyadh 3874, 2026-10-08).
+    return (_REGION_NORM.get(n) or _REGION_NORM.get(stripped)
+            or _REGION_NORM.get("منطقه " + stripped) or _REGION_NORM.get("المنطقه " + stripped))
 
 
 def _pick_candidate(
@@ -397,6 +401,12 @@ def _pick_candidate(
     if not cands:
         return None
     if len(cands) == 1:
+        # A lone catalog namesake in ANOTHER region than the one the source published is a different
+        # place, not this one (muktamel, 2026-10-07: «بحرة» in «منطقة مكة المكرمة» resolved to the
+        # only exact «بحرة» in the catalog, which is in Jazan, and ~21 listings were served under
+        # منطقة جازان). With a region hint, the city must be inside it; otherwise unknown.
+        if hint is not None and cands[0][1] is not None and cands[0][1] != hint:
+            return None
         return cands[0]
     regions = {rid for _, rid in cands}
     if hint is not None:
@@ -445,6 +455,10 @@ def to_catalog(city_ar: Optional[str], region_hint: Union[int, str, None] = None
     stripped = n
     if n.startswith("محافظه "):
         stripped = n[len("محافظه "):]
+    elif n.startswith("مركز "):
+        # «مركز X» (an administrative centre, sadiqeltajer «القصيم - مركز قصيباء - …», 2026-10-08) is
+        # named after its seat town exactly as a governorate is; the same exact-name + hint rules apply.
+        stripped = n[len("مركز "):]
     if stripped != n:
         hit = _pick_candidate(stripped, hint)
         if hit:
