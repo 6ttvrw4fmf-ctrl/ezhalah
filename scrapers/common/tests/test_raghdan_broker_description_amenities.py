@@ -71,3 +71,22 @@ def test_map_listing_stores_what_the_broker_wrote():
     assert row is not None
     assert row["kitchen"] is True and row["elevator"] is True and row["bathrooms"] == 3
     assert "optical_fibers" not in row or row["optical_fibers"] is not False
+
+
+# Every column the reader can emit must exist on raghdan_residential_listings (measured 2026-10-09 via
+# information_schema). «شقة مفروشة» emitted `furnished`, which the table does not have, and PGRST204 failed the
+# whole crawl batch (run 37927579101).
+RAGHDAN_COLUMNS = {"bathrooms", "elevator", "kitchen", "car_entrance", "air_conditioner", "private_entrance",
+                   "optical_fibers", "laundry_room", "balcony_terrace", "maid_room", "driver_room", "parking"}
+
+
+def test_the_reader_only_emits_columns_raghdan_has():
+    every_token = "<br>".join(t for toks in normalize._AMENITY_TOKENS.values() for t in toks)
+    am = normalize.prose_amenities_yes(R._broker_text(f'<div class="rt-content">{every_token}</div>'), skip=R._PROSE_SKIP)
+    assert am and set(am) <= RAGHDAN_COLUMNS, set(am) - RAGHDAN_COLUMNS
+
+
+def test_a_furnished_flat_does_not_break_the_crawl():
+    row, _ = R.map_listing(_page('<div class="rt-content"><p><span>شقة مفروشة مع مطبخ</span></p></div>'),
+                           "https://raghdan.sa/ar/property/375444614027/")
+    assert "furnished" not in row and row["kitchen"] is True
