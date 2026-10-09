@@ -227,8 +227,18 @@ async function main() {
   // predicate never silently changes mid-browse." Same cohort `advancedFilter` already proves opens a
   // real AF question (villa/Buy Riyadh) — reused here specifically so this journey commits a REAL
   // predicate through the real UI, then pages through it.
+  // 🦅 Falcon 2026-10-09: a floor the harness cannot reach is a harness bug, not a product bug. Both
+  // runs of 10-09 scored 0 mismatches and failed ONLY this floor, because the one fixed scope ran
+  // while the counts were timing out (inside the :20 refresh window) and AF read as «not offered».
+  // A journey that could commit no predicate returns null; try one more, structurally different
+  // cohort before the floor is declared missed. Still the same assertions, still the same floor.
   await run('«عرض المزيد» under an active AF predicate → set + predicate both survive',
-    () => showMoreJourney({ city: RIYADH, deal: 'بيع', group: 'الفلل والبيوت', typeLabel: 'فيلا', batches: 2, af: true }),
+    async () => {
+      const primary = await showMoreJourney({ city: RIYADH, deal: 'بيع', group: 'الفلل والبيوت', typeLabel: 'فيلا', batches: 2, af: true });
+      if (primary) return primary;
+      note('show-more-af: the primary scope could not commit a predicate — trying the fallback cohort (Riyadh / إيجار سنوي / شقة)');
+      return showMoreJourney({ city: RIYADH, deal: 'إيجار', period: 'سنوي', group: 'الشقق والسكن المشترك', typeLabel: 'شقة', batches: 2, af: true });
+    },
     () => { done.showMoreAf++; citiesTested.add(RIYADH); });
 
   await run('clear all', () => clearAll({ city: reachableFor('بيع') }));
