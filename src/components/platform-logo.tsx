@@ -14,8 +14,8 @@ export function PlatformLogo({ source }: { source: ImageProps['source'] }) {
   const layout = originalLayouts.get(source as number);
   if (layout) {
     return (
-      <View style={{ width: frameWidth, height: frameHeight, flexShrink: 0, overflow: 'hidden', direction: 'ltr', borderRadius: 5, backgroundColor: layout.dark ? '#263D32' : theme === 'dark' ? '#FFFFFF' : 'transparent' }}>
-        <Image source={source} contentFit="contain" style={{ position: 'absolute', width: layout.width, height: layout.height, left: layout.left, top: layout.top }} />
+      <View style={{ width: frameWidth, height: frameHeight, flexShrink: 0, overflow: 'hidden', direction: 'ltr', backgroundColor: 'transparent' }}>
+        <Image source={source} contentFit="contain" tintColor={layout.monochrome ? (theme === 'dark' ? '#F3F5F3' : '#253831') : undefined} style={{ position: 'absolute', width: layout.width, height: layout.height, left: layout.left, top: layout.top }} />
       </View>
     );
   }

@@ -172,8 +172,7 @@ problems via backend mapping only (see §16), never by editing the card.
 **Card behaviors:** cards pop in staggered (`PopIn`). English-UI place names get client-side
 transliteration for display only (Arabic UI passes through). `listed` date is cleaned to `DD/MM/YYYY`
 or a localized "recently"; junk scraped strings are suppressed. Tapping the card opens the real source
-listing (§7 browser) and fires `trackOpen` (CPC click tracking). ~33 partner platforms have logos
-(`SourceBadge`); unknown source falls back to the Aqar logo.
+listing (§7 browser) and fires `trackOpen` (CPC click tracking). All registered searchable sources have logos (`SourceBadge`). The canonical asset, transparent-frame, sizing and original-color contract is in `docs/ops/PLATFORM_PICKER_PROFILES.md`; its live audit verifies every source currently returning results.
 
 ---
 

@@ -52,13 +52,14 @@ function verify(cardSource = card, imageSource = renderer, theme = 'light') {
       assert.equal(node.type, 'View');
       assert.equal(node.props.style.width, 96);
       assert.equal(node.props.style.height, 48);
-      assert.equal(node.props.style.backgroundColor, profile.layout.dark ? '#263D32' : theme === 'dark' ? '#FFFFFF' : 'transparent');
+      assert.equal(node.props.style.backgroundColor, 'transparent');
       const image = node.props.children[0];
       assert.equal(image.props.source, profile.logo, `${source}: original colors reach the rendered image`);
       assert.equal(image.props.style.width, profile.layout.width);
       assert.equal(image.props.style.height, profile.layout.height);
       assert.equal(image.props.style.left, profile.layout.left);
       assert.equal(image.props.style.top, profile.layout.top);
+      assert.equal(image.props.tintColor, profile.layout.monochrome ? (theme === 'dark' ? '#F3F5F3' : '#253831') : undefined, `${source}: colored brands retain their colors; white-only marks remain legible`);
       assert.equal(image.props.style.tintColor, undefined);
     }
   }
@@ -67,7 +68,8 @@ function verify(cardSource = card, imageSource = renderer, theme = 'light') {
 }
 verify();
 verify(card, renderer, 'dark');
-assert.equal(profiles['نفوذ'].layout.dark, true, 'Nufouth white lettering needs contrast even beside a colored symbol');
+assert.equal(profiles['نفوذ'].logo, '../../assets/images/nufouth.png', 'Nufouth uses its official blue symbol without a backing tile');
+assert.equal(profiles['Deal App'].layout.monochrome, false, 'Deal is never recolored');
 // Use the repository's named mutation harness so the suite can discover this proof.
 function mustCatch(name: string, mutatedCard: string, mutatedRenderer: string) {
   assert.ok(mutatedCard !== card || mutatedRenderer !== renderer, `${name}: mutation target exists`);
@@ -76,9 +78,34 @@ function mustCatch(name: string, mutatedCard: string, mutatedRenderer: string) {
 // Watch the actual previous failures fail: missing brand, old favicon, and black Deal variant.
 for (const [name, mutatedCard, mutatedRenderer] of [
   ['generic placeholder', card.replace(/const WADOD_LOGO = require\('[^']+'\)/, "const WADOD_LOGO = require('../../assets/images/platform-placeholder.png')"), renderer],
-  ['old Nufouth favicon', card.replace(/const NUFOUTH_LOGO = require\('[^']+'\)/, "const NUFOUTH_LOGO = require('../../assets/images/nufouth.png')"), renderer],
+  ['white Nufouth wordmark', card.replace(/const NUFOUTH_LOGO = require\('[^']+'\)/, "const NUFOUTH_LOGO = require('../../assets/images/platform-logos/nufouth-com.png')"), renderer],
+  ['opaque backing tile', card, renderer.replace("backgroundColor: 'transparent'", "backgroundColor: '#263D32'")],
   ['Deal recoloring', card, renderer.replace('source={source}', "source={source === require('../../assets/images/dealapp.png') ? require('../../assets/images/platform-contrast/dealapp-light.png') : source}")],
 ] as const) {
   mustCatch(name, mutatedCard, mutatedRenderer);
 }
-console.log(`PASS: ${roster.length} listing brands and their DB aliases render original assets in equal 96×48 frames; all three regression mutants caught.`);
+console.log(`PASS: ${roster.length} listing brands and their DB aliases render clean assets in equal 96×48 transparent frames; all logo and opaque-backing regression mutants caught.`);
+
+// Optional production audit: registry presence alone cannot prove coverage of real search results.
+if (process.argv.includes('--live')) {
+  const { resolvePublicSupabase } = await import('./lib/public-supabase.ts');
+  const { url, key } = resolvePublicSupabase(process.env);
+  const response = await fetch(`${url}/rest/v1/rpc/loader_active_platforms_ar`, {
+    method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' },
+    body: '{}', signal: AbortSignal.timeout(20_000),
+  });
+  assert.ok(response.ok, `live source audit failed (${response.status}); failure is not empty coverage`);
+  const active = await response.json();
+  assert.ok(Array.isArray(active) && active.length > 0, 'live audit returned real source slugs');
+  const expected = new Map<string, string>();
+  for (const [name, entry] of Object.entries(coverage.platforms) as [string, any][]) {
+    for (const slug of entry.slugs) expected.set(slug, name);
+  }
+  const SourceBadge = badge(card);
+  for (const slug of active) {
+    const name = expected.get(slug);
+    assert.ok(name, `MISSING LOGO MAPPING: ${slug}`);
+    assert.equal(SourceBadge({ source: slug }).props.source, profiles[name].logo, `${slug}: correct logo on its cards`);
+  }
+  console.log(`PASS: all ${active.length} currently searchable source slugs resolve to their correct logo; no missing mappings.`);
+}

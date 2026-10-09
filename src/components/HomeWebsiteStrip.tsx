@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Animated, Easing, View } from 'react-native';
 import { Image } from 'expo-image';
+import { useResolvedTheme } from '@/lib/appearance';
 import { PLATFORM_PICKER_PROFILES } from '@/data/platformPickerProfiles';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 
@@ -9,6 +10,7 @@ const cycleWidth = names.length * 108;
 
 /** Two identical tracks make the loop boundary visually seamless. */
 export default function HomeWebsiteStrip() {
+  const theme = useResolvedTheme();
   const reduced = useReducedMotion();
   const motion = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -26,8 +28,8 @@ export default function HomeWebsiteStrip() {
       {[0, 1].map(copy => names.map(name => {
         const profile = PLATFORM_PICKER_PROFILES[name];
         return <View key={`${copy}-${name}`} style={{ width: 108, height: 48, paddingHorizontal: 6 }}>
-          <View style={{ width: 96, height: 48, borderRadius: 6, backgroundColor: profile.layout.dark ? '#263D32' : 'transparent', overflow: 'hidden' }}>
-            <Image source={profile.logo} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" accessible={false} />
+          <View style={{ width: 96, height: 48, backgroundColor: 'transparent', overflow: 'hidden' }}>
+            <Image source={profile.logo} tintColor={profile.layout.monochrome ? (theme === 'dark' ? '#F3F5F3' : '#253831') : undefined} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" accessible={false} />
           </View>
         </View>;
       }))}
