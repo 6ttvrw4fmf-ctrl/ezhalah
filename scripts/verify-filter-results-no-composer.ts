@@ -112,9 +112,18 @@ console.log('\n── mutation proof: this check actually fails on the regressio
 // branch — and may render nowhere else, so it can never show on Filter-origin results. (Until round 4
 // it sat between the branch and the disclaimer under its own copy of the gate; closeThenDisc above
 // still tolerates that shape, this check forbids any copy OUTSIDE the branch.)
+// The branch's OWN closer sits at the gate's indentation; nested `) : null}` closers inside the box
+// (voice overlay, stop/send) are deeper and must not be mistaken for it. Returns the index just past it.
+const branchClose = (c: string): number => {
+  const open = c.indexOf('{!filterOrigin && !completed ? (');
+  if (open < 0) return -1;
+  const indent = c.slice(c.lastIndexOf('\n', open) + 1, open).match(/^ */)?.[0] ?? '';
+  const at = c.indexOf(`\n${indent}) : null}`, open);
+  return at < 0 ? -1 : at + `\n${indent}) : null}`.length;
+};
 const selectorOnlyInsideBranch = (c: string) => {
   const open = c.indexOf('{!filterOrigin && !completed ? (');
-  const close = open >= 0 ? c.indexOf(') : null}', open) : -1;
+  const close = branchClose(c);
   const at = c.indexOf('<AgentModelSelector');
   return open >= 0 && close > open && at > open && at < close && c.indexOf('<AgentModelSelector', close) < 0;
 };
@@ -122,7 +131,7 @@ check('the model selector renders only inside the gated composer branch (never o
   selectorOnlyInsideBranch(code));
 const selectorOutsideBranch = (() => {
   const c = decomment(agent);
-  const close = c.indexOf(') : null}', c.indexOf('{!filterOrigin && !completed ? (')) + ') : null}'.length;
+  const close = branchClose(c);
   return c.slice(0, close) + '<AgentModelSelector disabled={false} />' + c.slice(close);
 })();
 mustCatch('an ungated model selector appearing on Filter-origin results',
