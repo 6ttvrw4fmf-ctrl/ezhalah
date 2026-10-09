@@ -4894,7 +4894,6 @@ export default function Agent() {
               </View>
             </View>
             ) : null}
-            {!filterOrigin && !completed && <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />}
             {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY (owner, 2026-09-12, second tightening:
                 "REMOVE THIS IN THE FILTER SIMPLE" — the small green Stop square that lingered on
                 Filter-origin results, during both busy AND the cascade reveal animation, is gone.
@@ -4906,6 +4905,7 @@ export default function Agent() {
                 lastFilterRef/lastSeedRef, and returns to the Filter screen with restored state.
                 The trade-off: a mid-flight Filter search has no in-place cancel button; the user
                 navigates away instead. Owner-accepted (2026-09-12). */}
+            {!filterOrigin && !completed && <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />}
             <Text style={s.disc}>
               {t('Ezhalah displays listings from third-party property platforms. We do not own, verify, or recommend any listing. Please review all details carefully before making a decision.')}
             </Text>
