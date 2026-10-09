@@ -16,7 +16,6 @@ almuteb
 alnokhba
 alobid
 alqasem
-alrifai
 alsaedan
 alshawaf
 alsidra
@@ -33,7 +32,6 @@ aqarmonthly
 arkaan
 awal
 azdad
-azure
 bahadhabab
 bossbih
 compoundin
@@ -61,7 +59,6 @@ jawher
 jazwtn
 jurash
 ksaaqar
-livingcompound
 m3tmd
 maktab
 maqam
@@ -100,19 +97,16 @@ senan
 shmoualshmal
 shomou
 snam
-sodasyat
 sokok
 souq24
 sukna
 suwar
 tamyaz
 therc
-thousand
 toor
 tuba
 villassa
 vmksa
-wadod
 wahadat
 wslnaa
 yameen

@@ -211,9 +211,9 @@ jobs:
           #   Small HTML catalogues — tens of detail pages at <=1 s each:
           - { source: alqasem,        cmd: "python -m scrapers.alqasem.run --type all", tmo: 20 }
           - { source: fkralemar,      cmd: "python -m scrapers.fkralemar.run --type all", tmo: 20 }
-          - { source: wadod,          cmd: "python -m scrapers.wadod.run --type all", tmo: 20 }
-          - { source: alrifai,        cmd: "python -m scrapers.alrifai.run --type all", tmo: 20 }
-          - { source: sodasyat,       cmd: "python -m scrapers.sodasyat.run --type all", tmo: 20 }
+          - { source: wadod,          cmd: "python -m scrapers.wadod.run --type all", tmo: 20, proxy: true }
+          - { source: alrifai,        cmd: "python -m scrapers.alrifai.run --type all", tmo: 20, proxy: true }
+          - { source: sodasyat,       cmd: "python -m scrapers.sodasyat.run --type all", tmo: 20, proxy: true }
           #   hasaad: `proxy: true` (2026-10-05, Scraping Engineer) — walk_session() probes 3 profiles DIRECT first;
           #   the proxy is spent only when DIRECT is refused (failed 10-05 on one pinned profile).
           - { source: hasaad,         cmd: "python -m scrapers.hasaad.run --type all", tmo: 20, proxy: true }
@@ -225,7 +225,7 @@ jobs:
           - { source: villassa,       cmd: "python -m scrapers.villassa.run --type all", tmo: 20 }
           - { source: marksa,         cmd: "python -m scrapers.marksa.run --type all", tmo: 20 }
           #   thousand: 105 cards + 105 detail pages at 0.5 s (measured 383 s).
-          - { source: thousand,       cmd: "python -m scrapers.thousand.run --type all", tmo: 20 }
+          - { source: thousand,       cmd: "python -m scrapers.thousand.run --type all", tmo: 20, proxy: true }
           #   ebriza: 22 API pages + one POST detail per record (207) at 0.7 s.
           - { source: ebriza,         cmd: "python -m scrapers.ebriza.run --type all", tmo: 20 }
           #   eilmalriyada: one catalogue call + 283 gallery records at 0.6 s.
@@ -235,8 +235,8 @@ jobs:
           #   Compound sites (one row per unit type; the compound page is the unit of work):
           #   rightcompound walks 254 compound pages at 0.8 s; the other four walk 4-43 pages.
           - { source: rightcompound,  cmd: "python -m scrapers.rightcompound.run --type all", tmo: 30 }
-          - { source: livingcompound, cmd: "python -m scrapers.livingcompound.run --type all", tmo: 20 }
-          - { source: azure,          cmd: "python -m scrapers.azure.run --type all", tmo: 20 }
+          - { source: livingcompound, cmd: "python -m scrapers.livingcompound.run --type all", tmo: 20, proxy: true }
+          - { source: azure,          cmd: "python -m scrapers.azure.run --type all", tmo: 20, proxy: true }
           - { source: expattrusted,   cmd: "python -m scrapers.expattrusted.run --type all", tmo: 20 }
           - { source: flow,           cmd: "python -m scrapers.flow.run --type all", tmo: 20 }
           - { source: abaad,          cmd: "python -m scrapers.abaad.run --type all", tmo: 20 }
