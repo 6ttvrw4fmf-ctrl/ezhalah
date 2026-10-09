@@ -18,6 +18,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { whenNear, NEAR_MARGIN } from '../src/lib/nearViewport.ts';
+import { windowBetween } from './lib/sourceWindow.ts';
 
 let failed = 0;
 const check = (name: string, cond: boolean, detail = '') => {
@@ -106,8 +107,8 @@ for (const [name, impl] of mutants) mustCatch(`a gate that is «${name}»`, judg
 
 // ── 3. ListingPhoto is wired to the gate ─────────────────────────────────────────────────────────
 const card = readFileSync(join(import.meta.dirname, '..', 'src/components/ResultCard.tsx'), 'utf8');
-const fn = card.slice(card.indexOf('function ListingPhoto'), card.indexOf('function SourceBadge'));
-const probeEffect = fn.slice(fn.indexOf('useEffect(() => {\n    if (!IS_WEB'), fn.indexOf('const uri = photos[idx];\n  //'));
+const fn = windowBetween(card, 'function ListingPhoto', 'function SourceBadge', 'src/components/ResultCard.tsx');
+const probeEffect = windowBetween(fn, 'useEffect(() => {\n    if (!IS_WEB', 'const uri = photos[idx];\n  //', 'ListingPhoto');
 check('the probe effect returns early until the card is near', /if \(!IS_WEB \|\| !near\b/.test(probeEffect), probeEffect.slice(0, 80));
 mustCatch('the pre-2026-10-06 eager probe effect (no `near` gate)',
   !/if \(!IS_WEB \|\| !near\b/.test("useEffect(() => {\n    if (!IS_WEB || typeof window === 'undefined') return;"));
