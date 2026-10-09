@@ -189,8 +189,9 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). ~33 partner pl
   Arabic descriptions are «سرعة خاطفة ودقة متناهية للإجابات السريعة» and
   «قوة وتحمل فائق لأصعب المهام والمعالجات»; English descriptions are
   “Lightning-fast precision for instant answers” and “Unmatched endurance for your toughest challenges”.
-  The UI draft changes display selection only; provider model IDs and backend routing are pending
-  owner clarification. These version labels must never be passed as provider API IDs.
+  Shaheen labels the existing agent engine; Hurr has no backend route while disabled. The version
+  labels are product display names and must never be passed as provider API IDs. Enabling Hurr
+  requires an approved provider/model mapping.
 - One conversational surface. Message roles: `user`, `agent` (reply / clarify with answer chips),
   `results` (slogan + summary + intro + sort line + cards), `status` (thinking/searching, morphed in
   place).
