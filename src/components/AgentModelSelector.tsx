@@ -19,11 +19,12 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
   const { locale } = useI18n();
   const arabic = locale === 'ar';
   const [selected, setSelected] = useState<string>('shaheen');
+  const [about, setAbout] = useState(false);
   const [anchor, setAnchor] = useState<{ x: number; y: number; width: number } | null>(null);
   const trigger = useRef<View>(null);
   const { width, height } = useWindowDimensions();
   const model = MODELS.find((item) => item.id === selected)!;
-  const close = () => setAnchor(null);
+  const close = () => { setAnchor(null); setAbout(false); };
 
   useEffect(() => { setAnchor(null); }, [width, height, disabled]);
   useEffect(() => {
@@ -35,14 +36,14 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
     return () => document.removeEventListener('keydown', onKey);
   }, [anchor]);
 
-  const menuWidth = Math.min(360, width - 24);
+  const menuWidth = Math.min(about ? 320 : 240, width - 24);
   const left = anchor ? Math.max(12, Math.min(anchor.x + anchor.width - menuWidth, width - menuWidth - 12)) : 12;
   return (
     <View style={styles.wrap}>
       <Pressable ref={trigger} testID="agent-model-selector" disabled={disabled}
         accessibilityRole="button" accessibilityState={{ expanded: !!anchor, disabled }}
         accessibilityLabel={`${arabic ? 'اختيار النموذج' : 'Select model'}: ${arabic ? model.ar : model.en} ${model.version}`}
-        onPress={() => trigger.current?.measureInWindow((x, y, measuredWidth) => setAnchor({ x, y, width: measuredWidth }))}
+        onPress={() => { setAbout(false); trigger.current?.measureInWindow((x, y, measuredWidth) => setAnchor({ x, y, width: measuredWidth })); }}
         style={({ pressed }) => [styles.trigger, { opacity: disabled ? 0.45 : 1 }, pressed && styles.pressed]}>
         <Text style={styles.label}>{arabic ? model.ar : model.en} {model.version}</Text>
         <Ionicons name="chevron-down" size={12} color={colors.muted} />
@@ -52,7 +53,24 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
           <Pressable style={StyleSheet.absoluteFill} onPress={close}
             accessibilityLabel={arabic ? 'إغلاق قائمة النماذج' : 'Close model menu'} accessibilityRole="button" />
           <View style={[styles.menu, { width: menuWidth, left, bottom: anchor ? Math.max(12, height - anchor.y + 6) : 12 }]}
-            accessibilityViewIsModal role="radiogroup" accessibilityLabel={arabic ? 'النموذج' : 'Model'}>
+            accessibilityViewIsModal>
+            {about ? (
+              <>
+                <Pressable accessibilityRole="button" onPress={() => setAbout(false)} style={styles.aboutRow}>
+                  <Ionicons name={arabic ? 'chevron-forward' : 'chevron-back'} size={15} color={colors.muted} />
+                  <Text style={styles.name}>{arabic ? 'عن النماذج' : 'About models'}</Text>
+                </Pressable>
+                {MODELS.map((item) => (
+                  <View key={item.id} style={styles.aboutCopy}>
+                    <Text style={[styles.name, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? item.ar : item.en} {item.version}</Text>
+                    <Text style={[styles.description, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? item.descriptionAr : item.descriptionEn}</Text>
+                    {item.id === 'hurr' && <Text style={[styles.description, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? 'غير متاح حاليًا' : 'Currently unavailable'}</Text>}
+                  </View>
+                ))}
+              </>
+            ) : (
+              <>
+            <View role="radiogroup" accessibilityLabel={arabic ? 'النموذج' : 'Model'}>
             {MODELS.map((item) => (
               <Pressable key={item.id} testID={`agent-model-${item.id}`} accessibilityRole="radio"
                 disabled={item.id === 'hurr'}
@@ -62,13 +80,21 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
                 style={({ pressed }) => [styles.option, { flexDirection: arabic ? 'row-reverse' : 'row' }, item.id === 'hurr' && styles.unavailable, pressed && styles.pressed]}>
                 <View style={styles.copy}>
                   <Text style={[styles.name, { textAlign: arabic ? 'right' : 'left' }, item.id === 'hurr' && styles.unavailableName]}>{arabic ? item.ar : item.en} {item.version}</Text>
-                  <Text style={[styles.description, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? item.descriptionAr : item.descriptionEn}</Text>
                 </View>
                 <View style={styles.check}>
-                  {selected === item.id && <Ionicons name="checkmark" size={21} color={colors.primary} />}
+                  {selected === item.id ? <Ionicons name="checkmark" size={18} color={colors.primary} /> : item.id === 'hurr' && <Ionicons name="information-circle-outline" size={14} color={colors.muted} />}
                 </View>
               </Pressable>
             ))}
+            </View>
+            <View style={styles.rule} />
+            <Pressable testID="agent-about-models" accessibilityRole="button" onPress={() => setAbout(true)}
+              style={({ pressed }) => [styles.aboutRow, { flexDirection: arabic ? 'row-reverse' : 'row' }, pressed && styles.pressed]}>
+              <Text style={styles.name}>{arabic ? 'عن النماذج' : 'About models'}</Text>
+              <Ionicons name={arabic ? 'chevron-back' : 'chevron-forward'} size={15} color={colors.muted} />
+            </Pressable>
+              </>
+            )}
           </View>
         </View>
       </Modal>
@@ -86,9 +112,12 @@ const styles = StyleSheet.create({
   overlay: { flex: 1 },
   menu: { position: 'absolute', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine,
     borderRadius: 18, padding: 7, ...cardShadow, shadowOpacity: 0.16, shadowRadius: 20, elevation: 10 },
-  option: { alignItems: 'center', gap: 12, paddingHorizontal: 13, paddingVertical: 13, borderRadius: 12 },
+  option: { alignItems: 'center', gap: 12, paddingHorizontal: 10, minHeight: 44, borderRadius: 9 },
+  aboutRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 10, minHeight: 44, borderRadius: 9 },
+  aboutCopy: { paddingHorizontal: 10, paddingVertical: 10 },
+  rule: { height: 1, backgroundColor: colors.fieldLine, marginVertical: 4, marginHorizontal: 7 },
   copy: { flex: 1, minWidth: 0 },
-  name: { color: colors.ink, fontSize: 17, lineHeight: 25, fontWeight: '500' },
+  name: { color: colors.ink, fontSize: 14, lineHeight: 21, fontWeight: '500' },
   description: { color: colors.muted, fontSize: 13, lineHeight: 21, marginTop: 3 },
   check: { width: 24, alignItems: 'center' },
 });

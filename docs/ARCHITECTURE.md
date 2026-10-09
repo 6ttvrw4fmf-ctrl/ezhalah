@@ -184,6 +184,8 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). ~33 partner pl
 - **Model selector (owner, 2026-10-08):** a subtle label below the microphone area opens two
   Claude-style options: **شاهين 2.2 / Shaheen 2.2** (default) and **حُر 4.4 / Hurr 4.4**.
   Hurr is visible in light gray and disabled, like the unavailable Haiku option in the owner's reference.
+  Keep the menu compact: two name/version rows, then a separated «عن النماذج / About models» row
+  opening the descriptions within the same popup.
   Arabic descriptions are «سرعة خاطفة ودقة متناهية للإجابات السريعة» and
   «قوة وتحمل فائق لأصعب المهام والمعالجات»; English descriptions are
   “Lightning-fast precision for instant answers” and “Unmatched endurance for your toughest challenges”.
