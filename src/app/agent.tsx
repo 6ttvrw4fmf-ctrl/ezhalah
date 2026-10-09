@@ -26,6 +26,8 @@ import { stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
 import { startVoiceInput, stopVoiceInput, cancelVoiceInput, isVoiceInputSupported } from '@/lib/voiceInput';
 import VoiceWaveform from '@/components/VoiceWaveform';
 import AgentModelSelector from '@/components/AgentModelSelector';
+import { livePickerNames, loadLivePickerNames, pickerMayOffer } from '@/data/pickerLivePlatforms';
+import { hiddenPlatformNames } from '@/data/loaderActivePlatforms';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
 import { initialReveal as initialRevealPure, CASCADE_MAX } from '@/lib/initialReveal';
@@ -685,20 +687,31 @@ export default function Agent() {
     () => PLATFORM_META.filter((platform, index, all) => selectedSources.includes(platform.name) && all.findIndex(p => p.name === platform.name) === index),
     [selectedSources],
   );
+  // Bumped when the live-sites list lands, so the picker re-filters without a reopen.
+  const [pickerLiveTick, setPickerLiveTick] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    void loadLivePickerNames().then(() => { if (alive) setPickerLiveTick((n) => n + 1); });
+    return () => { alive = false; };
+  }, []);
   const pickerPlatforms = useMemo(() => {
     const needle = platformPickerSearch.replace(/\s+/g, '').toLocaleLowerCase();
     const unique = new Map<string, LoaderPlatform>();
+    const liveNames = livePickerNames();
+    const downNames = hiddenPlatformNames();
     for (const platform of PLATFORM_META) {
       // `logoOnly` brands are intentionally advertised in the loader but have no searchable
       // inventory. They must never be offered as a source restriction that would return nothing.
       if (platform.logoOnly) continue;
+      // A DOWN or EMPTY site is never offered (owner 2026-10-09) — src/data/pickerLivePlatforms.ts.
+      if (!pickerMayOffer(platform.name, liveNames, downNames)) continue;
       if (!unique.has(platform.name)) unique.set(platform.name, platform);
     }
     return Array.from(unique.values()).sort((a, b) => PLATFORM_PICKER_PROFILES[a.name].group.ar.order - PLATFORM_PICKER_PROFILES[b.name].group.ar.order).filter((platform) => {
       if (!needle) return true;
       return `${platform.name} ${t(platform.i18nKey)}`.replace(/\s+/g, '').toLocaleLowerCase().includes(needle);
     });
-  }, [platformPickerSearch, t]);
+  }, [platformPickerSearch, t, pickerLiveTick]);
   const [loaderBottomInset, setLoaderBottomInset] = useState<number>();
   // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): a search that arrived via Normal Filter's
   // «بحث» (the `?filter=` param — see the effect below, the ONE place this flips true) shows its
@@ -3993,7 +4006,7 @@ export default function Agent() {
           <Animated.View style={[s.platformPickerCard, { opacity: pickerProgress, transform: [{ translateY: pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }] }]}>
             <View style={s.platformPickerHeader}>
               <View style={s.platformPickerHeading}>
-                <Text style={s.platformPickerTitle}>{t('Deep search')}</Text>
+                <Text style={s.platformPickerTitle}>{t('Deep search across websites')}</Text>
                 <Text style={s.platformPickerSubtitle}>{t('Choose one or more websites to search only their listings.')}</Text>
               </View>
               <Pressable
