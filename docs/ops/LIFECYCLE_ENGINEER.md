@@ -1009,7 +1009,17 @@ or rewrite another engineer's work, and never start a big change in another engi
   own page. Every site whose removal is not a status gets its own reader in
   `lifecycle_spot_check._reader_for` (muktamel: `run.page_verdict`). Before trusting a site's 0 gone,
   check its `method`: `status-only` on a site whose oracle reads the body is a blind measurement.
+- A caller with no oracle must not be able to hide (2026-10-09). `db.prune_unseen` without
+  `verify_gone` still deactivated on three crawl misses: abwbna and shomou hid 4 rows that day with
+  no source reading, 31 such hides in 7 days on 6 sites, while 46 sites sat in
+  `scrapers/absence-only-prune.txt`. The default is now `db.own_page_status_oracle`: the row's own
+  stored URL must answer 404/410 while a page the same crawl saw answers 200, else UNKNOWN (kept,
+  shown). A site whose removed ads answer 200 now holds its strikes until it gets a measured oracle;
+  that ledger is still the backlog. `mon_unverified_inactivations_24h` reads 0 on such hides by
+  design (absence tiers at `missing_count >= 3` are graded by `mon_detect_unknown_treated_as_dead`),
+  so "0 unverified" is only half the answer: read the open `unknown_treated_as_dead` alerts too.
 - **2026-10-08 (♻️, copied by 🔧):** every reader of one site must share that site's «no answer» rules. Gathern's prune oracle still read a home-page landing as live, so those rows became the sweep's controls, and the sweep checked nothing for ~16 h.
+- **2026-10-09 (♻️, copied by 🔧):** a score that reads a site by HTTP status alone can only ever say «live»; check each site's method before you trust its «0 gone». And when the key number moves the wrong way two nights running (dead-visible 0.76% → 0.85% → over the line on rakez + wasalt), shrink the list to the sites over the line and nothing else.
 
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
