@@ -1108,6 +1108,14 @@ def prune_unseen(
         doomed = new_missing >= grace
         if doomed:
             payload["active"] = False
+        if doomed and verify_gone is None:
+            # ABSENCE NEVER HIDES (LISTING_LIVENESS.md §1-§3; owner decision 2026-10-05). A caller
+            # with no oracle used to deactivate on three crawl misses alone: on 2026-10-09 abwbna
+            # and shomou hid 4 rows that way with no source reading, and 46 sites in
+            # scrapers/absence-only-prune.txt still could. Such a row is now hidden only when ITS OWN
+            # stored URL answers 404/410 while a page this crawl just saw still answers live; any
+            # other answer is UNKNOWN and the row keeps its strike, shown.
+            verify_gone = own_page_status_oracle(c, table, seen)
         if doomed and verify_gone is not None:
             # Only rows about to be deactivated are probed — a strike that is merely ticking up
             # costs nothing and needs no network call.
@@ -1231,6 +1239,83 @@ def prune_unseen(
         if doomed:
             killed += len(ads)
     return killed
+
+
+OWN_PAGE_ORACLE = "own_page_status.default"
+_OWN_PAGE_CONTROLS = 3
+_OWN_PAGE_MAX_READS = 300
+
+
+def _own_page_status_signal(status, body, path_changed):
+    """A bare 404/410 on the listing's OWN path is the only removal this default can see. A redirect
+    elsewhere, a 200 of any shape, or anything unreadable is no opinion (UNKNOWN), never a death."""
+    if status in (404, 410) and not path_changed:
+        return "gone"
+    return None
+
+
+def _own_page_session():
+    try:
+        from curl_cffi import requests as cc
+        return cc.Session(impersonate="chrome124")
+    except Exception:  # noqa: BLE001 — plain requests is still a direct read
+        import requests
+        return requests.Session()
+
+
+def own_page_status_oracle(c, table: str, seen, *, session=None):
+    """verify_gone for a prune_unseen caller that supplied none (see the call site).
+
+    Each at-grace row is read at its own stored `listing_url`. Before any removal a known-live control
+    must answer: up to three ads THIS crawl just saw, read the same way, at least one of which answers
+    200 with a body and no 404/410 (a source that answers blocks with 404, like gathern, fails here and
+    removes nothing). Memoised per call, both ways. No URL, no control, any failure: UNKNOWN."""
+    from scrapers.common.http_liveness import LivenessProbe
+
+    s = session or _own_page_session()
+
+    def url_for(ad_number: str):
+        try:
+            r = _execute(c.table(table).select("listing_url").eq("ad_number", ad_number).limit(1),
+                         what=table + ".own_page_url")
+            data = getattr(r, "data", None) or []
+            return (data[0].get("listing_url") or None) if data else None
+        except Exception:  # noqa: BLE001 — a failed lookup is UNKNOWN, never a kill
+            return None
+
+    state: dict[str, Any] = {}
+
+    def canary() -> tuple[bool, str]:
+        if "v" in state:
+            return state["v"]
+        state["v"] = (False, "no known-live control from this crawl answered live")
+        for ad in sorted(str(a) for a in seen)[:_OWN_PAGE_CONTROLS]:
+            url = url_for(ad)
+            if not url:
+                continue
+            try:
+                r = s.get(url, timeout=45, allow_redirects=True)
+            except Exception:  # noqa: BLE001
+                continue
+            if r.status_code == 200 and (r.text or "") and _own_page_status_signal(
+                    r.status_code, r.text, False) is None:
+                state["v"] = (True, f"control {ad} answers 200")
+                break
+        return state["v"]
+
+    probe = LivenessProbe(platform=table, signal=_own_page_status_signal, session=lambda: s,
+                          url_for=url_for, canary=canary, attempts=1, backoff=0.0)
+    reads = [0]
+
+    def verify_gone(ad_number: str):
+        # A held row stays at grace and is read again next crawl, so the budget bounds a crawl's
+        # cost; a row past it is UNKNOWN (kept, shown), never a kill.
+        if reads[0] >= _OWN_PAGE_MAX_READS:
+            return "unknown", f"{OWN_PAGE_ORACLE}: read budget of {_OWN_PAGE_MAX_READS} spent this run"
+        reads[0] += 1
+        verdict, why = probe.verify_gone(ad_number)
+        return verdict, f"{OWN_PAGE_ORACLE}: {why}"[:300]
+    return verify_gone
 
 
 # The verdict a res/com supersession records, and the oracle that names WHY it was recorded.

@@ -182,11 +182,13 @@ def test_mixed_verdicts_partition_the_batch(wired):
     assert _selfhealed(wired) == ["AC2"]
 
 
-def test_without_an_oracle_behaviour_is_unchanged(wired):
-    """Opt-in: platforms with no control-validated oracle keep the previous semantics exactly."""
+def test_without_an_oracle_absence_alone_kills_nothing(wired):
+    """2026-10-09: this used to pin "no oracle → kill on three misses". That WAS the defect
+    (LISTING_LIVENESS.md §1-§3). With no oracle the default own-page read applies; these rows have no
+    stored URL to read, so they are UNKNOWN and keep their strike (test_prune_absence_needs_own_page_404)."""
     killed = db.prune_unseen("aqarcity_residential_listings", SEEN)
-    assert killed == 3
-    assert sorted(_kills(wired)) == ["AC1", "AC2", "AC3"]
+    assert killed == 0
+    assert _kills(wired) == []
 
 
 # ── The wiring half: the two platforms proven affected must actually pass an oracle ───────────────
