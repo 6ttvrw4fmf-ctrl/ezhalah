@@ -52,20 +52,20 @@ const check = (ok: boolean, msg: string, extra = '') => {
 const real = problems(sql);
 check(real.length === 0, `${file}: both aggregates are scoped to the served index`, real.join('; '));
 
-const mutations: Array<[string, (s: string) => string]> = [
-  ['stalest loses its index scope', s => s.replace(/select min\(t\.checked_at\) into stalest[\s\S]*?;/, 'select min(t.checked_at) into stalest from public.ops_photo_capture_trust t;')],
-  ['stalest reverts to the old whole-table aggregate', s => s.replace(/select min\(t\.checked_at\) into stalest[\s\S]*?;/, 'select min(checked_at) into stalest from public.ops_photo_capture_trust;')],
-  ['trusted_ct loses its index scope', s => s.replace(/select count\(\*\) into trusted_ct[\s\S]*?;/, 'select count(*) into trusted_ct from public.ops_photo_capture_trust t where t.trusted;')],
-  ['trusted_ct stops requiring trusted', s => s.replace('where t.trusted\n     and exists', 'where exists')],
-  ['the staleness bar is loosened', s => s.replace("interval '36 hours'", "interval '360 hours'")],
-  ['the self-heal is removed', s => s.replace("perform public.mon_resolve_key('photo_sync_stale', 'photo_sync_stale');", 'null;')],
-  ['the raise is removed', s => s.replace("n := public.mon_raise('P2', 'photo_sync_stale'", "n := 0; perform ('P2', 'x'")],
-];
-for (const [name, mutate] of mutations) {
-  const mutated = mutate(sql);
-  check(mutated !== sql, `mutation applies: ${name}`);
-  check(problems(mutated).length > 0, `mutation caught: ${name}`);
-}
+const mustCatch = (what: string, mutated: string) => {
+  check(mutated !== sql, `mutation applies: ${what}`);
+  check(problems(mutated).length > 0, `mutation caught: ${what}`);
+};
+mustCatch('stalest loses its index scope',
+  sql.replace(/select min\(t\.checked_at\) into stalest[\s\S]*?;/, 'select min(t.checked_at) into stalest from public.ops_photo_capture_trust t;'));
+mustCatch('stalest reverts to the old whole-table aggregate',
+  sql.replace(/select min\(t\.checked_at\) into stalest[\s\S]*?;/, 'select min(checked_at) into stalest from public.ops_photo_capture_trust;'));
+mustCatch('trusted_ct loses its index scope',
+  sql.replace(/select count\(\*\) into trusted_ct[\s\S]*?;/, 'select count(*) into trusted_ct from public.ops_photo_capture_trust t where t.trusted;'));
+mustCatch('trusted_ct stops requiring trusted', sql.replace('where t.trusted\n     and exists', 'where exists'));
+mustCatch('the staleness bar is loosened', sql.replace("interval '36 hours'", "interval '360 hours'"));
+mustCatch('the self-heal is removed', sql.replace("perform public.mon_resolve_key('photo_sync_stale', 'photo_sync_stale');", 'null;'));
+mustCatch('the raise is removed', sql.replace("n := public.mon_raise('P2', 'photo_sync_stale'", "n := 0; perform ('P2', 'x'"));
 
 if (failed) { console.log(`\n✗ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✓ photo_sync_stale judges the chain by the tables it refreshes, and every clause is load-bearing');
