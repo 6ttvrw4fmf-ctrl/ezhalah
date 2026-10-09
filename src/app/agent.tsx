@@ -3889,6 +3889,7 @@ export default function Agent() {
   const choosePlatform = (source: string | null) => {
     setPickerSourceExplicit(true);
     setSelectedSources(names => source === null ? [] : togglePickerSource(names, source));
+    closePlatformPicker();
   };
 
   return (
@@ -4071,8 +4072,8 @@ export default function Agent() {
                       onPress={() => choosePlatform(platform.name)}
                       style={({ pressed }: any) => [s.platformPickerItem, pressed && s.platformPickerItemPressed]}
                     >
-                      <View style={s.platformPickerLogoFrame}>
-                        <Image source={profile.logo} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" tintColor={profile.layout.dark ? colors.ink : undefined} accessible={false} />
+                      <View style={[s.platformPickerLogoFrame, profile.layout.dark && { backgroundColor: '#263D32' }]}>
+                        <Image source={profile.logo} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" accessible={false} />
                       </View>
                       <View style={s.platformPickerItemCopy}>
                         <Text style={[s.platformPickerItemName, s.platformPickerGridName, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>
@@ -4704,8 +4705,8 @@ export default function Agent() {
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxWidth: 150, height: 28 }} contentContainerStyle={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
                       {selectedPlatforms.map(platform => {
                         const profile = PLATFORM_PICKER_PROFILES[platform.name];
-                        return <View key={platform.name} style={{ width: 30, height: 26, overflow: 'hidden', backgroundColor: 'transparent' }}>
-                          <Image source={profile.logo} style={{ width: 28, height: 24, margin: 1 }} contentFit="contain" tintColor={profile.layout.dark ? colors.ink : undefined} accessible={false} />
+                        return <View key={platform.name} style={{ width: 48, height: 24, borderRadius: 4, overflow: 'hidden', backgroundColor: profile.layout.dark ? '#263D32' : 'transparent' }}>
+                          <Image source={profile.logo} style={{ position: 'absolute', width: profile.layout.width / 2, height: profile.layout.height / 2, left: profile.layout.left / 2, top: profile.layout.top / 2 }} contentFit="contain" accessible={false} />
                         </View>;
                       })}
                     </ScrollView>
@@ -5264,7 +5265,7 @@ const s = StyleSheet.create({
   platformPickerSectionTitle: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 18, fontWeight: '600', paddingHorizontal: 10, paddingTop: 17, paddingBottom: 7 },
   platformPickerItem: { width: '100%', minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 14, borderWidth: 0, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 10, backgroundColor: colors.surface },
   platformPickerItemPressed: { backgroundColor: colors.segTrack },
-  platformPickerLogoFrame: { width: 56, height: 32, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', flexShrink: 0, overflow: 'hidden' },
+  platformPickerLogoFrame: { width: 96, height: 48, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', flexShrink: 0, overflow: 'hidden' },
   platformPickerLogo: { width: 58, height: 44 },
   platformPickerItemName: { fontFamily: CHAT_FONT, flex: 1, minWidth: 0, color: colors.ink, fontSize: 16, lineHeight: 23, fontWeight: '400', textAlign: 'right' },
   platformPickerGridName: { flex: 0, textAlign: 'right' },
