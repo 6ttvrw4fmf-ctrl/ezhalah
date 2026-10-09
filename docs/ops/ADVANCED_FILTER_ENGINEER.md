@@ -114,6 +114,14 @@ cannot find), plus growing the saved-ads sets.
 4. **Report (15 min):** the block at the bottom, last thing you write. Then stop.
 
 ## Traps that already cost real days (read every night; each one is a real past mistake)
+
+- **🦅 Falcon 10-09 — UNKNOWN hardens into NO at the offer.** `src/app/agent.tsx` (`setAfCanNarrow(verdict === 'yes')`)
+  hides «تحديد أكثر» when `assessNarrowing` returns `'unknown'` — i.e. the counts timed out under load — so
+  inside the :20 refresh window a 26,869-result Riyadh apartment scope showed no AF at all while the same
+  scope offered it at 09:32. A failed fetch is not an empty answer: `unknown` must offer and re-probe on the
+  tap. Also: the three heaviest hourly detectors (`price_source_mismatch`, `qa_oracle_combined_scope`,
+  `af_tri_state_violations`) now run behind the ~20 h gate (20261009202418) — read `ops_detector_last_full_run`
+  before expecting an hourly signal from them.
 1. **«The site doesn't publish that field» is a claim you must prove from the raw payload.** aqar's parking was declared
    «unpublished» and pinned NULL; it was nested one level deeper (`extended_details.special_parking`). Read the whole JSON /
    `__NEXT_DATA__` of 2+ live ads before deciding.
