@@ -133,18 +133,18 @@ jobs:
           # prune_unseen() or end_run() and leaves a dangling scrape_runs row (the dealapp lesson).
           # The first scrape of each is a manual dispatch with `source: <slug>` (the input above).
           #   API / REST sources — a handful of calls each:
-          - { source: alsidra,     cmd: "python -m scrapers.alsidra.run --type all", tmo: 20 }
+          - { source: alsidra,     cmd: "python -m scrapers.alsidra.run --type all", tmo: 20, proxy: true }
           - { source: moftah,      cmd: "python -m scrapers.moftah.run --type all", tmo: 20 }
           - { source: masar,       cmd: "python -m scrapers.masar.run --type all", tmo: 20 }
           #   aljassim: ~90 detail pages behind an hcdn challenge it solves in-process.
           - { source: aljassim,    cmd: "python -m scrapers.aljassim.run --type all", tmo: 20 }
           #   gomenassat: one POST for 256 offers, then ~150 detail pages (transacted ones skipped).
-          - { source: gomenassat,  cmd: "python -m scrapers.gomenassat.run --type all", tmo: 20 }
+          - { source: gomenassat,  cmd: "python -m scrapers.gomenassat.run --type all", tmo: 20, proxy: true }
           #   nufouth: 4 index pages + one API record per property (~270).
           - { source: nufouth,     cmd: "python -m scrapers.nufouth.run --type all", tmo: 30 }
           #   almotmkenah: all 361 index ads are fetched (the ~339 archived ones ARE its removal
           #   signal), 0.2s apart.
-          - { source: almotmkenah, cmd: "python -m scrapers.almotmkenah.run --type all", tmo: 30 }
+          - { source: almotmkenah, cmd: "python -m scrapers.almotmkenah.run --type all", tmo: 30, proxy: true }
           #   ialqarawi: 66 whole-category pages, then ~2,641 detail pages over 8 worker threads
           #   (~0.6s each → ~4 min).
           #   ialqarawi: `proxy: true` (2026-09-28, Scraping Engineer) — every profile DIRECT drew an
@@ -209,8 +209,8 @@ jobs:
           - { source: m3tmd,          cmd: "python -m scrapers.m3tmd.run --type all", tmo: 20 }
           - { source: senan,          cmd: "python -m scrapers.senan.run --type all", tmo: 20 }
           #   Small HTML catalogues — tens of detail pages at <=1 s each:
-          - { source: alqasem,        cmd: "python -m scrapers.alqasem.run --type all", tmo: 20 }
-          - { source: fkralemar,      cmd: "python -m scrapers.fkralemar.run --type all", tmo: 20 }
+          - { source: alqasem,        cmd: "python -m scrapers.alqasem.run --type all", tmo: 20, proxy: true }
+          - { source: fkralemar,      cmd: "python -m scrapers.fkralemar.run --type all", tmo: 20, proxy: true }
           - { source: wadod,          cmd: "python -m scrapers.wadod.run --type all", tmo: 20, proxy: true }
           - { source: alrifai,        cmd: "python -m scrapers.alrifai.run --type all", tmo: 20, proxy: true }
           - { source: sodasyat,       cmd: "python -m scrapers.sodasyat.run --type all", tmo: 20, proxy: true }
@@ -231,7 +231,7 @@ jobs:
           #   eilmalriyada: one catalogue call + 283 gallery records at 0.6 s.
           - { source: eilmalriyada,   cmd: "python -m scrapers.eilmalriyada.run --type all", tmo: 20, proxy: true }
           #   daryusuf: 3 REST pages + one page per post (290) at 1.0 s.
-          - { source: daryusuf,       cmd: "python -m scrapers.daryusuf.run --type all", tmo: 30 }
+          - { source: daryusuf,       cmd: "python -m scrapers.daryusuf.run --type all", tmo: 30, proxy: true }
           #   Compound sites (one row per unit type; the compound page is the unit of work):
           #   rightcompound walks 254 compound pages at 0.8 s; the other four walk 4-43 pages.
           - { source: rightcompound,  cmd: "python -m scrapers.rightcompound.run --type all", tmo: 30 }
@@ -266,7 +266,7 @@ jobs:
           - { source: ibaax,        cmd: "python -m scrapers.ibaax.run --type all", tmo: 20 }
           - { source: remaxsa,      cmd: "python -m scrapers.remaxsa.run --type all", tmo: 15 }
           - { source: qmra,         cmd: "python -m scrapers.qmra.run --type all", tmo: 15 }
-          - { source: alajlan,      cmd: "python -m scrapers.alajlan.run --type all", tmo: 15 }
+          - { source: alajlan,      cmd: "python -m scrapers.alajlan.run --type all", tmo: 15, proxy: true }
           # wave 3. wahadat fetches 100 project pages (~56 MB of RSC payload) so it gets a wider
           # timeout; squares is one REST call plus 18 detail pages; rawaf is 11 projects + 11 unit calls.
           - { source: wahadat,      cmd: "python -m scrapers.wahadat.run --type all", tmo: 30 }
