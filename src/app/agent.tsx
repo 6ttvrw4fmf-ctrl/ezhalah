@@ -27,6 +27,7 @@ import { stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
 import { startVoiceInput, stopVoiceInput, cancelVoiceInput, isVoiceInputSupported } from '@/lib/voiceInput';
 import VoiceWaveform from '@/components/VoiceWaveform';
 import AgentModelSelector from '@/components/AgentModelSelector';
+import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
 import { livePickerNames, loadLivePickerNames, pickerMayOffer } from '@/data/pickerLivePlatforms';
 import { hiddenPlatformNames } from '@/data/loaderActivePlatforms';
 import { useReducedMotion } from '@/lib/useReducedMotion';
@@ -3995,6 +3996,10 @@ export default function Agent() {
           pill, owner 2026-08-16: "it stays in the middle, not far right"). Fades + collapses away
           the moment a search happens, in either mode; the wrapper's animated height keeps the chat
           area from snapping up when it leaves. */}
+      {/* The SAME website strip as the Filter home, in the same spot under the header, on the EMPTY landing
+          only — it leaves with the landing title (introLanding). Its phase comes from the wall clock, so
+          Filter ⇄ الوسيط الذكي reads as one strip that never stopped (owner 2026-10-09 round 3). */}
+      {introLanding ? <View style={s.landingStrip}><HomeWebsiteStrip /></View> : null}
       {shouldRenderModeSwitch(modeGone, replay, openingSaved) && (
         <View style={[s.modeWrap, MODE_EASE, modeSearched && s.modeWrapHidden]}>
           <ModeSwitch active="agent" onSwitch={() => router.replace('/')} t={t} />
@@ -4032,7 +4037,7 @@ export default function Agent() {
             <View style={s.platformPickerHeader}>
               <View style={s.platformPickerHeading}>
                 <Text style={s.platformPickerTitle}>{t('Deep search across websites')}</Text>
-                <Text style={s.platformPickerSubtitle}>{t('Choose one or more websites to search only their listings.')}</Text>
+                <Text style={s.platformPickerSubtitle}>{t('Focus your search on one or more specific websites. We show only their listings.')}</Text>
               </View>
               <Pressable
                 accessibilityRole="button"
@@ -4084,38 +4089,52 @@ export default function Agent() {
                 <View style={s.platformPickerLogoFrame}>
                   <Image source={require('../../assets/icons/eagle-search.svg')} style={{ width: 24, height: 24 }} contentFit="contain" tintColor={colors.primary} accessible={false} />
                 </View>
-                <Text numberOfLines={1} style={[s.platformPickerItemName, !selectedSources.length && s.platformPickerItemNameOn]}>{t('All websites')}</Text>
+                <View style={s.platformPickerItemCopy}>
+                  <Text style={[s.platformPickerItemName, !selectedSources.length && s.platformPickerItemNameOn]}>{t('All websites')}</Text>
+                  <Text style={s.platformPickerItemHint}>{t('Search across Saudi Arabia')}</Text>
+                </View>
                 {!selectedSources.length ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
               </Pressable>
 
               <View style={s.platformPickerRule} />
-              {pickerPlatforms.map((platform) => {
+              {pickerPlatforms.map((platform, index) => {
                 const selected = selectedSources.includes(platform.name);
                 const profile = PLATFORM_PICKER_PROFILES[platform.name];
-                // The measured coverage sentence stays in the accessible name only — the row itself is
-                // logo + name + ✓, like Perplexity's mode rows (owner reference 2026-10-09).
+                // What the site is and where it covers — the measured coverage sentence, one quiet line
+                // under the name, never truncated (owner 2026-10-09 round 2: «it had a sentence and
+                // regions — I don't like how you removed it»). Regions head the sections: the nationwide
+                // sites first, then one section per region for the offices that cover one place.
                 const description = profile[locale];
+                const group = profile.group[locale];
+                const startsGroup = index === 0 || PLATFORM_PICKER_PROFILES[pickerPlatforms[index - 1].name].group[locale].key !== group.key;
                 // The reviewed 96×48 logo layout, drawn into a 56×28 slot.
                 const k = 28 / 48;
                 return (
-                  <Pressable
-                    key={platform.name}
-                    testID={`platform-picker-${platform.name}`}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${t(platform.i18nKey)}. ${description}`}
-                    accessibilityState={{ selected }}
-                    aria-pressed={selected}
-                    onPress={() => choosePlatform(platform.name)}
-                    style={({ pressed }: any) => [s.platformPickerItem, pressed && s.platformPickerItemPressed]}
-                  >
-                    <View style={s.platformPickerLogoFrame}>
-                      <Image source={profile.logo} tintColor={profile.layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: profile.layout.width * k, height: profile.layout.height * k, left: profile.layout.left * k, top: profile.layout.top * k }} contentFit="contain" accessible={false} />
-                    </View>
-                    <Text numberOfLines={1} style={[s.platformPickerItemName, selected && s.platformPickerItemNameOn, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>
-                      {t(platform.i18nKey)}
-                    </Text>
-                    {selected ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
-                  </Pressable>
+                  <View key={platform.name} style={{ width: '100%' }}>
+                    {startsGroup ? <Text accessibilityRole="header" style={[s.platformPickerSectionTitle, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>{group.label}</Text> : null}
+                    <Pressable
+                      testID={`platform-picker-${platform.name}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${t(platform.i18nKey)}. ${description}`}
+                      accessibilityState={{ selected }}
+                      aria-pressed={selected}
+                      onPress={() => choosePlatform(platform.name)}
+                      style={({ pressed }: any) => [s.platformPickerItem, pressed && s.platformPickerItemPressed]}
+                    >
+                      <View style={s.platformPickerLogoFrame}>
+                        <Image source={profile.logo} tintColor={profile.layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: profile.layout.width * k, height: profile.layout.height * k, left: profile.layout.left * k, top: profile.layout.top * k }} contentFit="contain" accessible={false} />
+                      </View>
+                      <View style={s.platformPickerItemCopy}>
+                        <Text style={[s.platformPickerItemName, selected && s.platformPickerItemNameOn, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>
+                          {t(platform.i18nKey)}
+                        </Text>
+                        <Text style={[s.platformPickerItemHint, { textAlign: locale === 'ar' ? 'right' : 'left', writingDirection: locale === 'ar' ? 'rtl' : 'ltr' }]}>
+                          {description}
+                        </Text>
+                      </View>
+                      {selected ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
+                    </Pressable>
+                  </View>
                 );
               })}
               {!pickerPlatforms.length ? <Text style={s.platformPickerEmpty}>{t('No matching websites')}</Text> : null}
@@ -4731,21 +4750,28 @@ export default function Agent() {
                   style={({ pressed }: any) => [s.initialSearch, selectedPlatforms.length > 0 && s.initialSearchSelected, pressed && s.initialSearchPressed]}
                 >
                   {selectedPlatforms.length ? (
-                    <View style={s.chipStack}>
-                      {/* Up to three overlapping logo discs + «+N»; the pill keeps ONE width whatever the
-                          count, so the text box never shrinks (owner 2026-10-09). */}
-                      {selectedPlatforms.slice(0, 3).map((platform, i) => {
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={s.chipStack}
+                      contentContainerStyle={s.chipStackContent}
+                      accessible={false}
+                      importantForAccessibility="no-hide-descendants"
+                    >
+                      {/* EVERY picked site's logo, tightly overlapped, never a «+N» (owner 2026-10-09 round 2:
+                          «always show those small websites»). The strip is capped at five discs so the text
+                          box keeps its width; beyond that it scrolls sideways — every logo stays reachable. */}
+                      {selectedPlatforms.map((platform, i) => {
                         const { logo, layout } = PLATFORM_PICKER_PROFILES[platform.name];
                         // The reviewed 96×48 frame, shrunk until the mark's box fits a 19px disc.
                         const k = Math.min(15 / layout.height, 17 / layout.width);
                         return (
-                          <View key={platform.name} style={[s.chipBadge, i > 0 && s.chipBadgeOverlap, { zIndex: 3 - i }]}>
+                          <View key={platform.name} style={[s.chipBadge, i > 0 && s.chipBadgeOverlap, { zIndex: selectedPlatforms.length - i }]}>
                             <Image source={logo} tintColor={layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: layout.width * k, height: layout.height * k, left: 9.5 - (48 - layout.left) * k, top: 9.5 - (24 - layout.top) * k }} contentFit="contain" accessible={false} />
                           </View>
                         );
                       })}
-                      {selectedPlatforms.length > 3 ? <Text style={s.chipCount}>+{selectedPlatforms.length - 3}</Text> : null}
-                    </View>
+                    </ScrollView>
                   ) : (
                     <>
                       <Image source={require('../../assets/icons/eagle-search.svg')} style={s.initialSearchIcon} contentFit="contain" tintColor={colors.ink} accessible={false} />
@@ -4928,6 +4954,13 @@ export default function Agent() {
                   </Animated.View>
                 </Pressable>
               </View>
+              {/* «شاهين 2.2» ON ITS OWN LINE INSIDE THE BOX, under the mic (owner 2026-10-09: «the search button,
+                  the microphone and send all in the same line — the model only below»). A zero-width anchor
+                  centred on the mic (the row is LTR-pinned, so the same offset holds in both locales); the box's
+                  bottom padding makes the room, so the one-line row above it never moves. */}
+              <View pointerEvents="box-none" style={s.composerModelAnchor}>
+                <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />
+              </View>
             </View>
             ) : null}
             {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY (owner, 2026-09-12, second tightening:
@@ -4941,7 +4974,6 @@ export default function Agent() {
                 lastFilterRef/lastSeedRef, and returns to the Filter screen with restored state.
                 The trade-off: a mid-flight Filter search has no in-place cancel button; the user
                 navigates away instead. Owner-accepted (2026-09-12). */}
-            {!filterOrigin && !completed && <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />}
             <Text style={s.disc}>
               {t('Ezhalah displays listings from third-party property platforms. We do not own, verify, or recommend any listing. Please review all details carefully before making a decision.')}
             </Text>
@@ -5254,7 +5286,7 @@ const s = StyleSheet.create({
   // The LTR-pinned column keeps mic/send on the physical right in either locale.
   // Desktop welcome and composer share one compact column; messages still use MAX_W.
   composerCol: { maxWidth: 620, alignSelf: 'center' },
-  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 16, paddingVertical: 6, paddingHorizontal: 10, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
+  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 16, paddingTop: 6, paddingBottom: 30, paddingHorizontal: 10, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
   // Focus glow target — COMPOSER_EASE (web) glides border-color and box-shadow between these two.
   // Carries the FULL shadow set: RNW compiles box-shadow per-style, so a partial override here
   // would win wholesale and drop the green tint + offset (observed live).
@@ -5281,32 +5313,36 @@ const s = StyleSheet.create({
   // ── Voice recording composer (owner brief 2026-08-23) ──
   // composerInner keeps the normal controls' exact pre-voice layout (it owns the composer's size at
   // all times); the recording row overlays it absolutely so the morph never changes the surface.
+  composerModelAnchor: { position: 'absolute', bottom: 3, right: 71, width: 0, alignItems: 'center' },
   composerInner: { flex: 1, flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'flex-end', alignItems: 'flex-end', minHeight: 44, gap: 6 },
   composerInnerHidden: { opacity: 0 },
   // alignSelf center: one line of text sits on the same middle line as «بحث», mic and Send; taller
   // (wrapped) text simply fills the row, and the buttons stay bottom-aligned.
   composerInputColumn: { flex: 1, minWidth: 0, alignItems: 'stretch', position: 'relative', alignSelf: 'center' },
-  // One pill, one width, whatever is picked: «بحث» + eagle, or up to three overlapping logo discs
-  // and a «+N». minWidth (not width) so an English «Search» can never be squeezed. (owner 2026-10-09)
-  initialSearch: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, height: 30, minWidth: 112, paddingHorizontal: 9, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
+  // One pill, one width, whatever is picked: «بحث» + eagle, or every picked site's logo disc in a
+  // strip capped at five (22px discs on a 14px pitch) that scrolls sideways past the cap. minWidth 118
+  // = the capped strip's width, so the text box keeps ONE width from 0 to 20 picks; minWidth (not
+  // width) so an English «Search» can never be squeezed. (owner 2026-10-09)
+  initialSearch: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, height: 30, minWidth: 118, paddingHorizontal: 9, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
   initialSearchSelected: { backgroundColor: colors.tint, borderColor: colors.tintLine },
   initialSearchPressed: { backgroundColor: colors.segTrack },
   initialSearchIcon: { width: 17, height: 17 },
   initialSearchText: { color: colors.ink, fontSize: 14, lineHeight: 20, maxWidth: 148, flexShrink: 1 },
-  chipStack: { flexDirection: 'row', alignItems: 'center' },
+  // flexGrow 0: the strip hugs its discs (a ScrollView grows by default) so the pill stays centred.
+  chipStack: { maxWidth: 78, flexGrow: 0, flexShrink: 1 },
+  chipStackContent: { flexDirection: 'row', alignItems: 'center' },
   // A 22px disc with a 1.5px ring in the pill's own fill, so overlapping marks stay separated.
   chipBadge: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: colors.tint, backgroundColor: colors.surface, overflow: 'hidden' },
   // The FIRST pick sits on top (zIndex inline), the rest peek out from behind it.
-  chipBadgeOverlap: { marginLeft: -7 },
-  chipCount: { marginLeft: 5, fontSize: 11, lineHeight: 14, fontWeight: '600', color: colors.body },
+  chipBadgeOverlap: { marginLeft: -8 },
   micBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   micBtnPressed: { backgroundColor: colors.segTrack, transform: [{ scale: 0.96 }] },
 
   // Website picker (owner reference 2026-10-09: Perplexity's mode sheet): an off-white panel with large
-  // rounded top corners and a thin ✕; rows are a small logo slot + a large label (+ a thin green ✓ on a
-  // lit row — its label in full ink, the rest in muted grey). No headers, no row dividers, one hairline
-  // under «كل المواقع». platformPickerItem may reference colors.* ONLY — verify-platform-picker-profiles.ts
-  // evaluates it in isolation.
+  // rounded top corners and a thin ✕; rows are a small logo slot + the name + the measured coverage
+  // sentence (what the site is, where it covers — one quiet line, never truncated) + a thin green ✓ on
+  // a lit row; region section headers, nationwide first. One hairline under «كل المواقع».
+  // platformPickerItem may reference colors.* ONLY — verify-platform-picker-profiles.ts evaluates it in isolation.
   platformPickerOverlay: { ...StyleSheet.absoluteFill, zIndex: 80, alignItems: 'center', justifyContent: 'flex-end' },
   platformPickerOverlayCard: { padding: 16 },
   platformPickerBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: colors.scrim },
@@ -5324,12 +5360,16 @@ const s = StyleSheet.create({
   platformPickerSearchInput: { flex: 1, minWidth: 0, fontFamily: CHAT_FONT, fontSize: 16, lineHeight: 22, color: colors.ink, paddingVertical: 6, textAlign: 'right', writingDirection: 'rtl', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
   platformPickerList: { minHeight: 0 },
   platformPickerListContent: { paddingBottom: 4 },
-  platformPickerItem: { width: '100%', minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: colors.paper },
+  platformPickerItem: { width: '100%', minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: colors.paper },
   platformPickerItemPressed: { backgroundColor: colors.segTrack },
   platformPickerLogoFrame: { width: 56, height: 28, alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
-  // Unselected rows read in muted grey; the lit row (and «كل المواقع» when nothing is picked) in ink.
-  platformPickerItemName: { fontFamily: CHAT_FONT, flex: 1, minWidth: 0, color: colors.muted, fontSize: 17, lineHeight: 24, fontWeight: '400', textAlign: 'right' },
+  // A column (name over sentence) — no flex: 1 on either Text (iOS collapses a column child to 0px).
+  platformPickerItemCopy: { flex: 1, minWidth: 0 },
+  // Names in body ink, the lit row (and «كل المواقع» when nothing is picked) in full ink; the sentence muted.
+  platformPickerItemName: { fontFamily: CHAT_FONT, color: colors.body, fontSize: 17, lineHeight: 24, fontWeight: '400', textAlign: 'right' },
   platformPickerItemNameOn: { color: colors.ink, fontWeight: '500' },
+  platformPickerItemHint: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: 1, textAlign: 'right' },
+  platformPickerSectionTitle: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 16, fontWeight: '500', paddingHorizontal: 10, paddingTop: 14, paddingBottom: 4 },
   platformPickerRule: { height: 1, backgroundColor: colors.line, marginVertical: 6, marginHorizontal: 10 },
   platformPickerEmpty: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: 'center', paddingVertical: 28 },
   // The LTR pin that fixes the physical order lives INLINE on the row (Sidebar's LTR_PIN idiom —
@@ -5346,6 +5386,9 @@ const s = StyleSheet.create({
   disc: { fontSize: 11, lineHeight: 16, color: colors.muted, textAlign: 'center', marginTop: 2, paddingHorizontal: 12 },
   // Centered Filter/AI pill band under the header (see the JSX note). Explicit height on BOTH ends
   // so MODE_EASE can glide it to 0; overflow hidden so the collapse clips instead of squashing.
+  // The landing's website strip in the Filter home's exact box: the home's side gutter, and −4 so the
+  // strip's top lands on the same y under this screen's taller header (measured 66px on both).
+  landingStrip: { paddingHorizontal: space.screenSide, marginTop: -4 },
   modeWrap: { alignSelf: 'center', alignItems: 'center', justifyContent: 'center', height: 58, overflow: 'hidden' },
   modeWrapHidden: { opacity: 0, height: 0, transform: [{ scale: 0.96 }] },
 });
