@@ -66,14 +66,12 @@ ksaaqar
 livingcompound
 m3tmd
 maktab
-manzo
 maqam
 maqrat
 marksa
 masar
 mizlaj
 moftah
-muajarh
 muhaysini
 muktamel
 mustqr
@@ -103,7 +101,6 @@ satel
 senan
 shmoualshmal
 shomou
-sirdab
 snam
 sodasyat
 sokok
@@ -112,7 +109,6 @@ sqcc
 sukna
 suwar
 tamyaz
-tawia
 therc
 thousand
 toor

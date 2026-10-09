@@ -281,7 +281,7 @@ jobs:
           # wave 3, batch 6: arsh is a hand-built Duda site (1 index + 23 pages).
           - { source: arsh,         cmd: "python -m scrapers.arsh.run --type all", tmo: 10, proxy: true }
           # batch 7 (2026-09-27): the owner's 15-site list.
-          - { source: sirdab,      cmd: "python -m scrapers.sirdab.run --type all", tmo: 15 }
+          - { source: sirdab,      cmd: "python -m scrapers.sirdab.run --type all", tmo: 15, proxy: true }
           - { source: ashab,       cmd: "python -m scrapers.ashab.run --type all", tmo: 45, proxy: true }
           - { source: manafe,      cmd: "python -m scrapers.manafe.run --type all", tmo: 25 }
           - { source: wajaf,       cmd: "python -m scrapers.wajaf.run --type all", tmo: 10 }
@@ -291,7 +291,7 @@ jobs:
           - { source: ryadah,      cmd: "python -m scrapers.ryadah.run --type all", tmo: 10, proxy: true }
           - { source: sqcc,        cmd: "python -m scrapers.sqcc.run --type all", tmo: 10 }
           - { source: daraa,       cmd: "python -m scrapers.daraa.run --type all", tmo: 10, proxy: true }
-          - { source: tawia,       cmd: "python -m scrapers.tawia.run --type all", tmo: 10 }
+          - { source: tawia,       cmd: "python -m scrapers.tawia.run --type all", tmo: 10, proxy: true }
           # SuperOffice (2026-09-27): owner-approved — available private offices only.
           - { source: superoffice, cmd: "python -m scrapers.superoffice.run --type all", tmo: 10, proxy: true }
           # 2026-09-28 (owner-approved): Shomou = 26 index pages + ~1,028 ad pages (only in-date ads kept);
@@ -299,14 +299,14 @@ jobs:
           - { source: shomou,      cmd: "python -m scrapers.shomou.run --type all", tmo: 30 }
           - { source: maktab,      cmd: "python -m scrapers.maktab.run --type all", tmo: 10 }
           # wave 3, batch 5: holoul is an open JSON API (238 rows → 30); eightfloor is a Nuzul tenant (public API, 2 rows); manzo is an open JSON API (1 row).
-          - { source: manzo,        cmd: "python -m scrapers.manzo.run --type all", tmo: 10 }
+          - { source: manzo,        cmd: "python -m scrapers.manzo.run --type all", tmo: 10, proxy: true }
           - { source: eightfloor,   cmd: "python -m scrapers.eightfloor.run --type all", tmo: 10, proxy: true }
           - { source: holoul,       cmd: "python -m scrapers.holoul.run --type all", tmo: 10, proxy: true }
           # wave 3, batch 4: dallali is an open JSON storefront (7 rows); muajarh is an open JSON API (18 rows, 11 real); mobasher reads its discovery API + 28 pages for age/facade; nafithh is server-rendered HTML (3 list pages + 30 details); opensooq's SERP carries the whole vertical as inline JSON (3 pages).
           - { source: opensooq,     cmd: "python -m scrapers.opensooq.run --type all", tmo: 10 }
           - { source: nafithh,      cmd: "python -m scrapers.nafithh.run --type all", tmo: 15 }
           - { source: mobasher,     cmd: "python -m scrapers.mobasher.run --type all", tmo: 15, proxy: true }
-          - { source: muajarh,      cmd: "python -m scrapers.muajarh.run --type all", tmo: 10 }
+          - { source: muajarh,      cmd: "python -m scrapers.muajarh.run --type all", tmo: 10, proxy: true }
           - { source: dallali,      cmd: "python -m scrapers.dallali.run --type all", tmo: 10, proxy: true }
           # wave 3b (2026-09-27): maqam is a Nuzul tenant feed (130 records, only `available` kept); earthapp and
           # nawafeth are small complete feeds (54 / 20 ads).
