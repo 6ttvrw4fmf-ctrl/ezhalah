@@ -463,6 +463,7 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
         const readCount = () => page.evaluate(() => ({
           chip: document.querySelector('[data-testid="af-count-chip"]')?.innerText?.trim() ?? null,
           button: document.querySelector('[data-testid="af-confirm"]')?.innerText?.replace(/\s+/g, ' ').trim() ?? null,
+          zero: document.querySelector('[data-testid="af-zero-note"]')?.innerText?.trim() ?? null,
         }));
         await page.waitForTimeout(2000);
         const at2 = await readCount();
@@ -470,7 +471,9 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
         const at6 = await readCount();
         const watch = { question: seen.title, ticked: [...ticked], at2s: at2, at6s: at6 };
         (result.evidence.countWatch ??= []).push(watch);
-        step(`count watch «${seen.title}» ticks=${ticked.length} +2s chip=${at2.chip} button=${at2.button} · +6s chip=${at6.chip} button=${at6.button}`);
+        step(`count watch «${seen.title}» ticks=${ticked.length} +2s chip=${at2.chip} button=${at2.button} · +6s chip=${at6.chip} button=${at6.button}${at6.zero ? ` zero-note «${at6.zero}»` : ''}`);
+        const n6 = Number(((at6.button ?? '').match(/\d[\d,]*/) ?? [''])[0].replace(/,/g, ''));
+        if (n6 === 0 && /\d/.test(at6.button ?? '') && !at6.zero) throw new Error('a live 0 without its af-zero-note line');
         if (!at6.chip || !/\d/.test(at6.button ?? '')) throw new Error(`count vanished: ${ticked.length} ticks, +6s chip=${at6.chip} button=«${at6.button}»`);
         for (const k of ticked.slice(clicked).reverse()) { await page.click(`[data-testid="af-option-${k}"]`).catch(() => {}); await page.waitForTimeout(400); }
         await page.waitForTimeout(1500);
