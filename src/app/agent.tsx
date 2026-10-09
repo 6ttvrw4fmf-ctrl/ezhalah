@@ -27,6 +27,7 @@ import { stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
 import { startVoiceInput, stopVoiceInput, cancelVoiceInput, isVoiceInputSupported } from '@/lib/voiceInput';
 import VoiceWaveform from '@/components/VoiceWaveform';
 import AgentModelSelector from '@/components/AgentModelSelector';
+import HomeWebsiteStrip from '@/components/HomeWebsiteStrip';
 import { livePickerNames, loadLivePickerNames, pickerMayOffer } from '@/data/pickerLivePlatforms';
 import { hiddenPlatformNames } from '@/data/loaderActivePlatforms';
 import { useReducedMotion } from '@/lib/useReducedMotion';
@@ -3995,6 +3996,10 @@ export default function Agent() {
           pill, owner 2026-08-16: "it stays in the middle, not far right"). Fades + collapses away
           the moment a search happens, in either mode; the wrapper's animated height keeps the chat
           area from snapping up when it leaves. */}
+      {/* The SAME website strip as the Filter home, in the same spot under the header, on the EMPTY landing
+          only — it leaves with the landing title (introLanding). Its phase comes from the wall clock, so
+          Filter ⇄ الوسيط الذكي reads as one strip that never stopped (owner 2026-10-09 round 3). */}
+      {introLanding ? <View style={s.landingStrip}><HomeWebsiteStrip /></View> : null}
       {shouldRenderModeSwitch(modeGone, replay, openingSaved) && (
         <View style={[s.modeWrap, MODE_EASE, modeSearched && s.modeWrapHidden]}>
           <ModeSwitch active="agent" onSwitch={() => router.replace('/')} t={t} />
@@ -5374,6 +5379,9 @@ const s = StyleSheet.create({
   disc: { fontSize: 11, lineHeight: 16, color: colors.muted, textAlign: 'center', marginTop: 2, paddingHorizontal: 12 },
   // Centered Filter/AI pill band under the header (see the JSX note). Explicit height on BOTH ends
   // so MODE_EASE can glide it to 0; overflow hidden so the collapse clips instead of squashing.
+  // The landing's website strip in the Filter home's exact box: the home's side gutter, and −4 so the
+  // strip's top lands on the same y under this screen's taller header (measured 66px on both).
+  landingStrip: { paddingHorizontal: space.screenSide, marginTop: -4 },
   modeWrap: { alignSelf: 'center', alignItems: 'center', justifyContent: 'center', height: 58, overflow: 'hidden' },
   modeWrapHidden: { opacity: 0, height: 0, transform: [{ scale: 0.96 }] },
 });

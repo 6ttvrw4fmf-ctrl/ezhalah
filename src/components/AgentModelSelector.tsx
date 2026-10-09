@@ -5,11 +5,6 @@ import { useI18n } from '@/i18n';
 import { cardShadow, colors, radius } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
 
-// Where the composer's mic sits, measured from the composer's physical right edge: border 1 +
-// padding 10 + Send 38 + gap 6 + half of the 34px mic. The label is centred on it in BOTH locales
-// (the composer column is LTR-pinned), directly under the mic (owner 2026-10-09).
-const MIC_CENTER_FROM_RIGHT = 72;
-
 const MODELS = [
   { id: 'shaheen', ar: 'شاهين', en: 'Shaheen', version: '2.2',
     descriptionAr: 'سرعة خاطفة ودقة متناهية للإجابات السريعة',
@@ -113,9 +108,9 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
 
 const styles = StyleSheet.create({
   // A zero-width anchor at the mic's centre; the trigger is centred on it and overflows both ways.
-  // A zero-width ROW (a column would hand the label a 0px line box and wrap «شاهين 2.2» onto two lines).
-  // Negative margins eat most of the column's 8px gaps: ~6px to the composer, ~10px to the disclaimer.
-  wrap: { alignSelf: 'flex-end', marginRight: MIC_CENTER_FROM_RIGHT, marginTop: -6, marginBottom: -4, width: 0, flexDirection: 'row', justifyContent: 'center' },
+  // Centred under the chat box in both locales (owner 2026-10-09 round 3: «keep it below» — not under
+  // the mic). Negative margins eat most of the column's 8px gaps: ~6px to the box, ~10px to the disclaimer.
+  wrap: { alignSelf: 'center', marginTop: -6, marginBottom: -4 },
   trigger: { flexDirection: 'row', alignItems: 'center', flexShrink: 0, gap: 4, height: 24, paddingHorizontal: 6, borderRadius: radius.pill },
   label: { color: colors.muted, fontSize: 12, lineHeight: 16, fontWeight: '500' },
   pressed: { backgroundColor: colors.tint },
