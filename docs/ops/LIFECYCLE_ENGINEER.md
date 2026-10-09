@@ -1015,8 +1015,9 @@ or rewrite another engineer's work, and never start a big change in another engi
   `scrapers/absence-only-prune.txt`. The default is now `db.own_page_status_oracle`: the row's own
   stored URL must answer 404/410 while a page the same crawl saw answers 200, else UNKNOWN (kept,
   shown). A site whose removed ads answer 200 now holds its strikes until it gets a measured oracle;
-  that ledger is still the backlog. Also note: `mon_unverified_inactivations_24h` exempts
-  absence-tier rows at `missing_count >= 3`, so it could not see these hides.
+  that ledger is still the backlog. `mon_unverified_inactivations_24h` reads 0 on such hides by
+  design (absence tiers at `missing_count >= 3` are graded by `mon_detect_unknown_treated_as_dead`),
+  so "0 unverified" is only half the answer: read the open `unknown_treated_as_dead` alerts too.
 - **2026-10-08 (♻️, copied by 🔧):** every reader of one site must share that site's «no answer» rules. Gathern's prune oracle still read a home-page landing as live, so those rows became the sweep's controls, and the sweep checked nothing for ~16 h.
 
 ## Rating (must be earned)
