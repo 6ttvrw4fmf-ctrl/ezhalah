@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { mergeOne, withFreshTranscript } from '../src/lib/chatMerge.ts';
-import { serializeChat, restoreChat, sameTranscript, TRANSCRIPT_LISTING_CAP, TRANSCRIPT_FIRST_PAGE, LOCAL_TRANSCRIPT_ENTRIES } from '../src/lib/chatTranscript.ts';
+import { serializeChat, restoreChat, sameTranscript, pickLocalTranscripts, TRANSCRIPT_LISTING_CAP, TRANSCRIPT_FIRST_PAGE, LOCAL_TRANSCRIPT_ENTRIES } from '../src/lib/chatTranscript.ts';
 import { resetCallSitesOk, resetCallSiteProblem, RESET_EXITS } from './lib/conversationExits.ts';
 
 let failed = 0;
@@ -97,7 +97,20 @@ check('every disk write routes through serializeHistoryForDisk (transcripts prun
   && (store.match(/serializeHistoryForDisk\(/g) ?? []).length >= 7);
 check('pruning happens ONLY at the serialization boundary — in-memory state keeps every transcript',
   /const serializeHistoryForDisk = \(items: HistoryItem\[\]\): string =>/.test(store)
-  && /slice\(0, LOCAL_TRANSCRIPT_ENTRIES\)/.test(store));
+  && /pickLocalTranscripts\(items, sizeOfTranscript\)/.test(store));
+// …under a BYTE budget (2026-10-08): a saved chat now holds up to 500 cards (~1.3 MB) and one write over the ~5 MB
+// localStorage quota fails for the WHOLE history. The newest transcript is always kept; metas are never pruned.
+{
+  const mk = (id: string, t: number) => ({ id, ts: t, tRev: t, transcript: { bytes: 1_300_000 } as object });
+  const sizeOf = (t: object) => (t as { bytes: number }).bytes;
+  const picked = pickLocalTranscripts([mk('a', 1), mk('b', 2), mk('c', 3), mk('d', 4)], sizeOf);
+  check('disk budget: of four 1.3 MB chats only the newest fit the budget — newest first, never zero',
+    picked.size === 1 && picked.has('d'), JSON.stringify([...picked]));
+  const huge = pickLocalTranscripts([{ id: 'x', ts: 1, transcript: { bytes: 9_000_000 } as object }], sizeOf);
+  check('disk budget: a single over-budget chat is still kept (the newest is always kept)', huge.has('x'));
+  const many = pickLocalTranscripts(Array.from({ length: 30 }, (_, i) => ({ id: 'c' + i, ts: i, transcript: { bytes: 10 } as object })), sizeOf);
+  check('disk budget: small chats are still bounded by the count', many.size === LOCAL_TRANSCRIPT_ENTRIES);
+}
 
 // ── 3b. Server sync (survives new browser / re-login) ───────────────────────────────────────────
 // Re-anchored 2026-08-25: the inline stamp comparison moved into chatMerge.mergeOne() so the pull

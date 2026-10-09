@@ -17,7 +17,7 @@ import { trackClick } from '@/data/clicks';
 import { supabase } from '@/lib/supabase';
 import { mapSupabaseUser, signOutBackend, deleteAccountBackend } from '@/lib/auth';
 import { setThemeAuthState, resetThemeForSignOut } from '@/theme/theme';
-import { restoreChat, persistedOnly, LOCAL_TRANSCRIPT_ENTRIES, type PersistedChat } from '@/lib/chatTranscript';
+import { restoreChat, persistedOnly, pickLocalTranscripts, type PersistedChat } from '@/lib/chatTranscript';
 import { loadChatMetas, fetchChatTranscript, upsertChat, deleteChats, deleteAllChats, chatsToDelete, type ChatMeta } from '@/lib/chatSync';
 import { beginSessionRestore } from '@/lib/sessionRestore';
 import { mergeOne, pickTranscript, mayPromoteTranscript, withFreshTranscript } from '@/lib/chatMerge';
@@ -210,9 +210,19 @@ const historyKey = (sub: string) => 'history:' + sub;
 // hydrateTranscript() refetches a pruned one when its chat is opened. Pruning happens ONLY at the
 // serialization boundary — in-memory state keeps every transcript, so switching between chats in
 // one session never loses anything regardless of age.
+// A BYTE BUDGET ON TOP OF THE COUNT (2026-10-08). A saved chat now keeps everything the user saw — up to 500
+// cards, ~1.3 MB — and a browser gives localStorage ~5 MB for the WHOLE history. One write over the quota
+// fails for ALL of it (the catch below swallows it), so the heavy part must never be able to take the chat
+// list down with it: pickLocalTranscripts keeps transcripts newest-first until the budget is spent (the
+// newest is always kept), the rest stay on the server and hydrate on open. Metas are never pruned.
+const transcriptSize = new WeakMap<object, number>();
+const sizeOfTranscript = (t: object): number => {
+  let n = transcriptSize.get(t);
+  if (n === undefined) { n = JSON.stringify(t).length; transcriptSize.set(t, n); }
+  return n;
+};
 const serializeHistoryForDisk = (items: HistoryItem[]): string => {
-  const byActivity = items.slice().sort((a, b) => (b.tRev ?? b.ts) - (a.tRev ?? a.ts));
-  const keep = new Set(byActivity.filter((it) => it.transcript).slice(0, LOCAL_TRANSCRIPT_ENTRIES).map((it) => it.id));
+  const keep = pickLocalTranscripts(items, sizeOfTranscript);
   return JSON.stringify(items.map((it) => (it.transcript && !keep.has(it.id) ? { ...it, transcript: undefined } : it)));
 };
 

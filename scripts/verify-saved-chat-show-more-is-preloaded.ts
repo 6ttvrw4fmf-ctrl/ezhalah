@@ -42,12 +42,14 @@ function transcript(n: number, revealed: number, completed: boolean): any {
 }
 function remembers(ser: typeof serializeChat): string[] {
   const bad: string[] = [];
-  const t500 = (ser as any) === serializeChat ? transcript(500, 500, true) : null;
-  const r = restoreChat(t500)?.msgs.find((m: any) => m.role === 'results') as any;
-  if (r?.result?.restoreTo !== 500) bad.push(`a 500-card chat restores to ${r?.result?.restoreTo}, not 500`);
-  if (r?.result?.restoreCompleted !== true) bad.push('a finished 500-card chat forgets it was finished');
+  // 2026-10-08: a chat is saved WHOLE up to the display cap, so a reopen needs no fetch at all.
+  const back = restoreChat((ser === serializeChat) ? transcript(500, 500, true) : null);
+  const r = back?.msgs.find((m: any) => m.role === 'results') as any;
+  if (r?.result?.listings?.length !== 500) bad.push(`a 500-card chat is saved with ${r?.result?.listings?.length} cards, not all 500`);
+  if (r?.result?.restoreTo !== undefined) bad.push('a chat saved whole still carries a restore target (it would refetch for nothing)');
+  if (back?.completed !== true) bad.push('a finished 500-card chat forgets it was finished');
   const small = restoreChat(transcript(40, 40, false))?.msgs.find((m: any) => m.role === 'results') as any;
-  if (small?.result?.restoreTo !== undefined) bad.push('an untruncated chat carries a restore target it does not need');
+  if (small?.result?.listings?.length !== 40 || small?.result?.restoreTo !== undefined) bad.push('a small chat is not saved as it was');
   return bad;
 }
 
