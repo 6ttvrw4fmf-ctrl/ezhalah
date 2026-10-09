@@ -39,17 +39,19 @@ def test_strike_reruns_the_prune_with_only_read_gone_rows_unseen(monkeypatch):
     assert calls["seen"] == {"MK1", "MK3"}
     assert calls["kw"]["verify_gone"] == R._probe.verify_gone, "a kill still re-reads behind the canary"
     assert calls["kw"]["shards"] == 4 and calls["kw"]["shard"] == 1
+    assert calls["kw"]["min_coverage"] == 0.0, "every unseen row here was read gone: no absence floor"
 
 
 def test_fetch_records_redirect_404_as_read_gone_and_not_available_as_nothing():
     src = open(R.__file__, encoding="utf-8").read()
     assert '_note_gone(listing_id, "redirect_404")' in src
     assert '_note_gone(listing_id, "dead_404")' in src
-    # 2026-10-08: the measured hollow shell is COUNTED on its own, still through _note (no crawl
-    # strike); only the oracle's own re-read may call it gone, and only once HOLLOW_SHELL_KILLS is on.
+    # 2026-10-09 (armed): the hollow shell on this id's OWN page is a read-gone strike; on another
+    # page, or the rest of the not-available disjunction, it is still only counted (UNKNOWN).
     assert '_note("hollow_shell" if _is_hollow_offer(offer) else "not_available_or_zero_price")' in src, \
         "not-available stays UNKNOWN"
-    assert '_note_gone(listing_id, "hollow_shell")' not in src
+    assert "if HOLLOW_SHELL_KILLS and own and _is_hollow_offer(offer):" in src
+    assert '_note_gone(listing_id, "hollow_shell")' in src
     assert "n = _strike_read_gone(tbl, set(_read_gone_ids), args.shards, args.shard)" in src
 
 
@@ -96,3 +98,40 @@ def test_only_the_conjunction_on_this_listings_own_page_is_gone(monkeypatch):
     other = "https://muktamel.com/real-estates/999/شقة"
     assert _probe_with(monkeypatch, other, HOLLOW, kills=True).verify_gone("MK123")[0] == "unknown"
     assert "SHADOW" not in _probe_with(monkeypatch, other, HOLLOW, kills=False).verify_gone("MK123")[1]
+
+
+def test_armed_after_the_shadow_night():
+    assert R.HOLLOW_SHELL_KILLS is True
+
+
+# ── 2026-10-09: the double-check and the dead-visible score read muktamel like its oracle ─────────
+def _verdict_with(monkeypatch, status, landed, offer, kills=True):
+    monkeypatch.setattr(R, "HOLLOW_SHELL_KILLS", kills)
+    monkeypatch.setattr(R, "_extract_nuxt", lambda body: "src" if offer is not None else None)
+    monkeypatch.setattr(R, "_nuxt_via_node", lambda src: {"offer": offer})
+
+    class _S:
+        def get(self, url, timeout=None, allow_redirects=True):
+            return _Resp(status, landed, "<html/>")
+    monkeypatch.setattr(R, "_session", lambda: _S())
+    return R.page_verdict("https://www.muktamel.com/real-estates/123")
+
+
+def test_page_verdict(monkeypatch):
+    from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN
+    live = {"isAvailable": True, "price": 500000}
+    assert _verdict_with(monkeypatch, 200, OWN, live) == ALIVE
+    assert _verdict_with(monkeypatch, 200, OWN, HOLLOW) == DEAD
+    assert _verdict_with(monkeypatch, 200, OWN, HOLLOW, kills=False) == UNKNOWN
+    assert _verdict_with(monkeypatch, 200, "https://www.muktamel.com/404", None) == DEAD
+    assert _verdict_with(monkeypatch, 404, OWN, None) == DEAD
+    assert _verdict_with(monkeypatch, 500, OWN, live) == UNKNOWN
+    assert _verdict_with(monkeypatch, 200, "https://muktamel.com/real-estates/999/x", live) == UNKNOWN
+    assert _verdict_with(monkeypatch, 200, "https://muktamel.com/real-estates/999/x", HOLLOW) == UNKNOWN
+    assert _verdict_with(monkeypatch, 200, OWN, {"isAvailable": False, "price": 0}) == UNKNOWN
+    assert _verdict_with(monkeypatch, 200, OWN, None) == UNKNOWN
+
+
+def test_spot_check_and_dead_visible_use_it_not_status_only():
+    from scrapers.common import lifecycle_spot_check as L
+    assert L._reader_for("muktamel") is R.page_verdict

@@ -1003,6 +1003,12 @@ or rewrite another engineer's work, and never start a big change in another engi
   because 24 > the cap of 10, so a quarter of the site stayed dead on screen. fleet_liveness now
   hides the cap's worth when every control is live at both ends (gathern's drain), else quarantines
   as before. The cap never moves. A `hides > cap` note two nights running is a stuck site, not a safe one.
+- A score that reads a site by status alone can only ever say "live" (muktamel, 2026-10-09): its
+  withdrawn ads answer 200 with a hollow offer and removed ones 302 to a 200 `/404`, so the nightly
+  dead-visible score read it 10/10 live three nights running while 512 shown rows read hollow on their
+  own page. Every site whose removal is not a status gets its own reader in
+  `lifecycle_spot_check._reader_for` (muktamel: `run.page_verdict`). Before trusting a site's 0 gone,
+  check its `method`: `status-only` on a site whose oracle reads the body is a blind measurement.
 - **2026-10-08 (♻️, copied by 🔧):** every reader of one site must share that site's «no answer» rules. Gathern's prune oracle still read a home-page landing as live, so those rows became the sweep's controls, and the sweep checked nothing for ~16 h.
 
 ## Rating (must be earned)

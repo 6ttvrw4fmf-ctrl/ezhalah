@@ -178,6 +178,12 @@ def _reader_for(platform: str):
                 return ALIVE
             return DEAD if gl.looks_dead(status) else UNKNOWN
         return read
+    if platform == "muktamel":
+        # A withdrawn ad is a 200 hollow shell and a removed one 302s to a 200 /404 page, so a status
+        # read can only ever say "live" (2026-10-09: 10/10 live three nights while 512 shown rows were
+        # hollow). Read it the way its crawl and oracle do.
+        from scrapers.muktamel import run as mk
+        return mk.page_verdict
     return None
 
 
