@@ -1415,6 +1415,11 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     # 37772746090 (42/42), yameen 37773056567 (10/10), shatri 11:55 UTC (50/50). Their oracles
     # became callable by the daily check that night (#6436).
     "goldendeal", "maqam", "mustqr", "yameen", "shatri",
+    # 2026-10-09: three shadow runs (10-08 12:10, 10-08 19:19 recheck, 10-09 07:18) with controls
+    # right and 100% read; 10-09 would_hide 46 of 1,111, all missing from the site's complete
+    # 1,119-card list. A second read (lifecycle-spot-check 37943565545, controls 5/5) read 22 of 22
+    # sampled ones gone. Its oracle became callable by the daily check on 10-08 (#6438).
+    "aqalemhajer",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],

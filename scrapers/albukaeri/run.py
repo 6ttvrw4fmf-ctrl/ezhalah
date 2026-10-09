@@ -46,12 +46,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, norm_district_tok, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 BASE = "https://albukaeri.sa"
 SOURCE = "البكيري العقارية"
 PREFIX = "BKR"
 SLUG = "albukaeri"
-IMPERSONATE = "chrome"
 
 # map_type_exact's per-platform escape hatch — literal readings only (see docstring)
 _TYPE_OVERRIDES = {
@@ -67,7 +67,7 @@ _NEVER_STORE = {"رقم الصك"}
 def get(s: cc.Session, url: str) -> str:
     for attempt in range(3):
         try:
-            r = s.get(url, impersonate=IMPERSONATE, timeout=40)
+            r = s.get(url, timeout=40)
             r.raise_for_status()
             return r.text
         except Exception:  # noqa: BLE001
@@ -259,7 +259,10 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(BASE, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     ids, declared = list_ids(s)
     types = type_by_id(s)
     print(f"{SOURCE}: {len(ids)} listing(s) (site declares {declared}); {len(types)} typed by the site's filter",

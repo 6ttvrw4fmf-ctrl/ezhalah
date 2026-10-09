@@ -49,12 +49,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 BASE = "https://tawia.sa"
 SOURCE = "مكتب طوية للعقار"
 PREFIX = "TWA"
 SLUG = "tawia"
-IMPERSONATE = "chrome"
 
 # the site's own label → its Arabic type word (only where the label is not already a type word)
 _TYPE_AR = {"دور (شقة ضمن فيلا)": "دور"}
@@ -72,7 +72,7 @@ class Gone(Exception):
 def get(s: cc.Session, url: str) -> str:
     for attempt in range(3):
         try:
-            r = s.get(url, impersonate=IMPERSONATE, timeout=40)
+            r = s.get(url, timeout=40)
             if r.status_code == 404:
                 raise Gone(url)
             r.raise_for_status()
@@ -235,7 +235,10 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(BASE, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     ids = walk(s)
     print(f"{SOURCE}: {len(ids)} property page(s) on its sitemap + list", flush=True)
 

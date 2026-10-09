@@ -30,6 +30,9 @@
 -- Re-verified 2026-10-08 (the New Listings Engineer's English-city-before-first-sync migration): UNCHANGED.
 --   That migration only names this view inside job 17's cron command string (it inserts two calls
 --   around the existing refresh); md5(live pg_get_viewdef) == 5f223424d56192158ef4e40c69e12c31 == body below, 146,852 chars.
+-- Re-verified 2026-10-09 (migration 20261009172709_recovered_district_vouches_only_when_verbatim): UNCHANGED.
+--   That migration only READS this view (refresh_district_recovery selects from it); md5(live
+--   pg_get_viewdef) == 5f223424d56192158ef4e40c69e12c31 == body below, 146,852 chars.
 --
 -- CAUGHT BY verify-sql-mirrors-not-stale only because the w3b wiring landed on a NEW calendar day:
 -- the four same-day passes before it left this mirror stale and the barrier green (it compares

@@ -80,16 +80,66 @@ def test_a_genuinely_unreachable_source_still_gives_up_bounded_and_says_why():
         f"the note must name the transport failure, not 'no listings': {run.LAST_FETCH_NOTE!r}")
 
 
-def test_a_deliberate_non_200_is_a_hard_stop_and_is_not_retried():
-    # 403/503 is the source answering us on purpose. Retrying it would hammer them and still be
-    # wrong, so the retry must cover EXCEPTIONS only — never a status the source chose to return.
-    calls = []
+def test_a_refusal_is_retried_bounded_on_fresh_sessions_and_named():
+    # Was «a deliberate non-200 is a hard stop and is not retried» (2026-09-14). Superseded by the
+    # owner's class order (2026-10-05, SCRAPING_ENGINEER.md step 5a: «a block is usually the
+    # handshake, not a ban» — fresh session, next profile) and by the live case it got wrong: on
+    # 2026-10-09 page 1 answered 403 once and cleared by itself 14 minutes later. Three tries with
+    # a 5 s / 10 s pause is not hammering; an unbounded loop would be, so the bound is pinned here.
+    calls, fresh = [], []
 
     class _Blocked:
         def get(self, url, timeout=None):
             calls.append(url)
             return _Resp(None, status=503)
 
-    assert run.fetch_listings(_Blocked()) == [], "a 503 yields no rows"
-    assert len(calls) == 1, f"a deliberate 503 must not be retried — made {len(calls)} calls"
+    s = _Blocked()
+    assert run.fetch_listings(s, fresh=lambda a: fresh.append(a) or s) == [], "a 503 yields no rows"
+    assert len(calls) == 3, f"a refusal is retried at most 3 times — made {len(calls)} calls"
+    assert fresh == [1, 2], f"each retry must use a fresh session: {fresh}"
     assert "503" in run.LAST_FETCH_NOTE, f"the status must be recorded: {run.LAST_FETCH_NOTE!r}"
+
+
+class _Refusing:
+    """Answers HTTP `status` on the first N calls (the 2026-10-09 shape: page 1 → 403), then serves."""
+
+    def __init__(self, refuse_times, status=403, payload=ONE_PAGE):
+        self.refuse_times, self.status, self.payload, self.calls = refuse_times, status, payload, 0
+
+    def get(self, url, timeout=None):
+        self.calls += 1
+        if self.calls <= self.refuse_times:
+            return _Resp(None, status=self.status)
+        return _Resp(self.payload)
+
+
+@pytest.mark.parametrize("status", [403, 429, 503])
+@pytest.mark.parametrize("refusals", [1, 2])
+def test_a_refused_page_is_retried_on_a_fresh_session(status, refusals):
+    # 2026-10-09: page 1 answered 403 once and the whole run failed as «REST returned no listings»;
+    # the automatic re-crawl 14 minutes later read all 6 posts. A refusal must be retried, on a fresh
+    # session with the next browser profile, before the walk gives up.
+    s = _Refusing(refusals, status)
+    rotated: list[int] = []
+
+    def fresh(attempt):
+        rotated.append(attempt)
+        return s
+
+    rows = run.fetch_listings(s, fresh=fresh)
+    assert len(rows) == 1, f"a refused page must be retried — got {rows!r} ({run.LAST_FETCH_NOTE})"
+    assert rotated == list(range(1, refusals + 1)), f"each retry needs a fresh session: {rotated}"
+
+
+def test_a_refusal_that_persists_gives_up_bounded_and_names_the_status():
+    s = _Refusing(99, 403)
+    assert run.fetch_listings(s, fresh=lambda _a: s) == []
+    assert s.calls == 3, f"must give up after 3 attempts — made {s.calls}"
+    assert "HTTP 403" in run.LAST_FETCH_NOTE, run.LAST_FETCH_NOTE
+
+
+def test_a_real_not_found_is_not_retried():
+    # 404/400 is an answer, not a refusal: the walk ends on it without burning retries.
+    s = _Refusing(99, 400)
+    assert run.fetch_listings(s, fresh=lambda _a: s) == []
+    assert s.calls == 1, s.calls

@@ -1019,6 +1019,7 @@ or rewrite another engineer's work, and never start a big change in another engi
   design (absence tiers at `missing_count >= 3` are graded by `mon_detect_unknown_treated_as_dead`),
   so "0 unverified" is only half the answer: read the open `unknown_treated_as_dead` alerts too.
 - **2026-10-08 (♻️, copied by 🔧):** every reader of one site must share that site's «no answer» rules. Gathern's prune oracle still read a home-page landing as live, so those rows became the sweep's controls, and the sweep checked nothing for ~16 h.
+- **2026-10-09 (♻️, copied by 🔧):** a score that reads a site by HTTP status alone can only ever say «live»; check each site's method before you trust its «0 gone». And when the key number moves the wrong way two nights running (dead-visible 0.76% → 0.85% → over the line on rakez + wasalt), shrink the list to the sites over the line and nothing else.
 
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the

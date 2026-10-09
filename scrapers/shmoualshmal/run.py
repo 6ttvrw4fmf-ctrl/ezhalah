@@ -85,13 +85,29 @@ def session() -> cc.Session:
     The source was never down; the caller was unreachable. Same class of block the wasalt path
     documents. PROXY_URL holds only the env NAME — the value lives in the secret, never here.
     """
-    s = cc.Session(impersonate="chrome124")
+    return _session_as("chrome124")
+
+
+# A refused page (403 / 429 / 5xx) is retried on a FRESH session with the next browser profile
+# (2026-10-09, Scraping Engineer): on 10-09 page 1 answered HTTP 403 once and the run failed with
+# «REST returned no listings»; the automatic re-crawl 14 minutes later read all 6 posts. The old loop
+# retried only transport exceptions — a refused status ended the walk on its first answer.
+REFUSED = {403, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
+ROTATION = ("chrome124", "safari17_0", "firefox133")
+
+
+def _session_as(profile: str) -> cc.Session:
+    s = cc.Session(impersonate=profile)   # impersonate OWNS the User-Agent; never set one
     s.headers.update({"Accept": "application/json,text/html;q=0.9",
                       "Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
     purl = os.environ.get("WASALT_PROXY_URL", "").strip()
     if purl:
         s.proxies = {"http": purl, "https": purl}
     return s
+
+
+def _fresh_session(attempt: int) -> cc.Session:
+    return _session_as(ROTATION[attempt % len(ROTATION)])
 
 
 def _clean(s: str) -> str:
@@ -260,7 +276,7 @@ def _make_verify_gone(control: Optional[dict]):
     return lambda ad_number: probe(ad_number, canary=canary)
 
 
-def fetch_listings(s: cc.Session) -> list[dict]:
+def fetch_listings(s: cc.Session, fresh=_fresh_session) -> list[dict]:
     """Every property post. An unparseable body ends enumeration rather than raising — the guard
     awal's 2026-07-27 parking incident put in every WP scraper."""
     out: list[dict] = []
@@ -282,11 +298,16 @@ def fetch_listings(s: cc.Session) -> list[dict]:
         for attempt in range(3):
             try:
                 r = s.get(f"{REST}/properties?per_page=100&page={page}", timeout=40)
-                break
             except Exception as e:
                 last_exc = e
                 if attempt < 2:
                     time.sleep(3 * (attempt + 1))
+                continue
+            if r.status_code in REFUSED and attempt < 2:
+                time.sleep(5 * (attempt + 1))
+                s = fresh(attempt + 1)          # a refusal is the handshake, not a ban
+                continue
+            break
         if r is None:
             LAST_FETCH_NOTE = (f"page {page} raised {type(last_exc).__name__} on all 3 attempts: "
                                f"{str(last_exc)[:110]}")

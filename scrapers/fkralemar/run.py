@@ -65,6 +65,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import city_ar_for, find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 BASE = "https://www.fkralemar.com"
 SOURCE = "فكر الإعمار"
@@ -95,8 +96,10 @@ BATHS_RE = re.compile(r"([\d٠-٩]{1,2})\s*دور(?:ة|ات)\s*ميا[هة]")
 
 def session() -> cc.Session:
     # impersonate owns the User-Agent — never set one here.
-    s = cc.Session(impersonate="chrome")
-    s.headers.update({"Accept-Language": "ar,en;q=0.7"})
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(BASE, headers={"Accept-Language": "ar,en;q=0.7"}, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     return s
 
 

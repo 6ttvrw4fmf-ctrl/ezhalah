@@ -151,6 +151,22 @@ back (the weekly check below).
 These cost your first runs a lot of time. Use them instead of working them out again.
 - **Start with your last report:** read your latest `ops_daily_engineer_run` report. Whatever it
   left under "To reach 10/10" is tonight's first work.
+- **«New listings in search» is counted from the RAW table's `scraped_at`, never from
+  `search_listings_ar.first_seen_at`** (2026-10-09). `first_seen_at` is filled by
+  `sync_search_first_seen_at()` ONLY for rows whose source gave no `last_updated` (an ordering
+  fallback), so it is NULL on most rows of aqar, wasalt, gathern and muhaysini. Read through it, aqar
+  showed «5 new», gathern «0 since 10-05» and muhaysini «0», and three nights went to feeds that were
+  healthy: the raw count was aqar 1,503 · muhaysini 524 · dealapp 1,601 · gathern 42, all searchable
+  after the next :22 sync. The measure, per source table:
+  `select count(*) filter (where s.production_ready) from <table> r left join search_listings_ar s
+  on s.source_table = '<table>' and s.listing_id = r.id where r.scraped_at > now() - interval '24 hours'`
+  (rows scraped after the last :22 sync are not in search yet; re-read at :26).
+- **dwelleo (2026-10-09): its PROPERTY catalogue is empty at the source, not hidden from us.**
+  `api/v1/properties` answers 200 with `pagination.total = 0` under every filter, known ids answer
+  422 «The selected id is invalid» (its «gone» answer), `sitemaps/properties.xml` and
+  `sitemaps/landings.xml` are empty urlsets, while `api/v1/projects` and `sitemaps/projects.xml`
+  (128 projects) still serve. It stays dormant; the auto-return brings it back when a crawl reads
+  half its old catalogue again. Projects are backlog 220.
 - **Websites are `platform_registry` rows with `kind = 'source'`** (147 active, 3 dormant, 3 retired
   on 2026-09-28). `kind = 'internal'` rows are job labels (shards, liveness jobs), not websites:
   never test or report them as sites. Big sites log crawls under several labels (aqar's per-city
@@ -388,6 +404,7 @@ or rewrite another engineer's work, and never start a big change in another engi
 
 ## Lessons from real breakages (use them)
 - **2026-10-07 (copied by 🔧 QA):** a crawl that dies before `begin_run` leaves no row — read the nightly run's failed jobs, not only `scrape_runs`. And write your clock from the database: the report said 110 min, `ops_engineer_review` said 102.
+- **2026-10-09 (🔧 QA, no :end row was written):** write the `:end` row FIRST when time is short — on 10-09 the run stopped at ~82 of 180 min with 13 good proofs and no report, so it rated RED. And a cause you diagnose is a bug you log: you found that `search_listings_ar.first_seen_at` was filled only for rows without `last_updated` (the owner's false «aqar 5 new» alarm) and neither fixed nor logged it. 🔧 fixed it (20261009171105); log what you find even when it is not yours.
 - **2026-10-06 (copied by 🔧 QA):** a district map keyed by the city you ASSUME misses (compoundin: Rawabi is Khobar, Qurtoba is Jeddah). Group the NULL rows by the city in their own address first, then write the map.
 - The same block on several unrelated sites at once = one shared security wall, not several dead sites.
 - It gets *worse* the harder you retry = the browser failed to start, not a block.
