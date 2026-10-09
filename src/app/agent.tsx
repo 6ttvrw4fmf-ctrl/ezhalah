@@ -4840,10 +4840,11 @@ export default function Agent() {
                       <Ionicons name="chevron-down" size={13} color={colors.muted} />
                     </Pressable>
                   )}
-                  {/* The model control lives IN the box now (owner round 4); its menu is a Modal, never clipped. */}
-                  <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />
                 </View>
                 <View style={s.composerToolsEnd}>
+                  {/* The model control lives IN the box, right beside the mic (owner 2026-10-09: «make it close
+                      to the microphone»); its menu is a Modal, never clipped. */}
+                  <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />
                   {busy || revealing ? (
                     // While Ezhalah is thinking/searching OR the cards are still popping in, the Send button
                     // is a Stop box — tap it to cancel the search and freeze the cards shown. (user request.)
