@@ -4969,9 +4969,13 @@ export default function Agent() {
                 // busy (robots, cron), and null means «no number». Two quiet retries with the longer background
                 // budget bring the number back; a retry only ever returns THIS selection's count, so the old
                 // «never show another selection's number» rule still holds (the effect clears it first).
+                // ONE COUNT, THE LONG BUDGET, FROM THE START (🔬 2026-10-09, backlog 281 root cause): the 4 s card
+                // budget aborted a count that was merely in the slow tenth (search p90 is 4.3-6.5 s at every hour,
+                // ops_search_latency_sample) and the retry then asked the busy database for the SAME count again.
+                // Asking once with the background budget shows the number as soon as it exists, with no rerun.
                 const scoped = question.apply(q, keys);
                 const p = (async () => {
-                  let n = await liveResultCount(scoped);
+                  let n = await primeLiveResultCount(scoped);
                   for (let i = 0; n === null && i < 2; i++) {
                     await new Promise((r) => setTimeout(r, 700));
                     n = await primeLiveResultCount(scoped);
