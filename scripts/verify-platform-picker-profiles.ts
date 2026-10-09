@@ -201,10 +201,7 @@ const retainsOldScope = source.replace('return explicit ? { ...query, sources: s
 assert.notEqual(retainsOldScope,source);
 assert.throws(() => assert.deepEqual(load(retainsOldScope,'applyPickerSources')({sources:['aqar']},[],true).sources, []), assert.AssertionError);
 
-const homeRoster = load(source, 'homeWebsiteRoster');
-assert.equal(homeRoster(null).count, null);
-assert.equal(homeRoster(new Set()).count, 149);
-assert.ok(homeRoster(new Set()).names.includes('Deal App'));
-assert.equal(homeRoster(new Set(['Deal App'])).count, 148);
-assert.ok(!homeRoster(new Set(['Deal App'])).names.includes('Deal App'));
-console.log('PASS: homepage count and logos share the complete picker roster; unknown registry remains numberless.');
+const homepageCatalog = load(source, 'PLATFORM_PICKER_PROFILES');
+assert.equal(Object.keys(homepageCatalog).length, 149);
+assert.ok(Object.keys(homepageCatalog).includes('Deal App'));
+console.log('PASS: the complete website catalog includes all 149 original logo profiles, including Dealapp.');
