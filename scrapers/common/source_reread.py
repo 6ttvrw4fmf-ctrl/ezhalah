@@ -224,6 +224,7 @@ def main() -> int:
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--new-hours", type=int, default=24)
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--around", default="", help="print the page HTML around this word (markup diagnostic)")
     a = ap.parse_args()
     client = sb()
 
@@ -254,6 +255,11 @@ def main() -> int:
             item["verdict"] = classify_response(status, body or "",
                                                 dead_marker=PLATFORMS.get(platform, {}).get("dead_marker"))
             item["page"] = page_evidence(body or "")
+            if a.around and body:
+                for m in list(re.finditer(re.escape(a.around), body))[:3]:
+                    snip = body[max(0, m.start() - 400):m.end() + 200]
+                    snip = re.sub(r"(?:\+?966|0)?5\d{8}|\d{9,}", "<num>", snip)   # PDPL: no phone ever printed
+                    print(f"   around «{a.around}»: {snip!r}", flush=True)
             if "wasalt" in table:
                 try:
                     from scrapers.common.cleanup import _wasalt_browser, _wasalt_browser_enabled
