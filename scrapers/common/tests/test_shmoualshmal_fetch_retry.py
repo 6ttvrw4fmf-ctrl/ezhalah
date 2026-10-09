@@ -80,18 +80,23 @@ def test_a_genuinely_unreachable_source_still_gives_up_bounded_and_says_why():
         f"the note must name the transport failure, not 'no listings': {run.LAST_FETCH_NOTE!r}")
 
 
-def test_a_deliberate_non_200_is_a_hard_stop_and_is_not_retried():
-    # 403/503 is the source answering us on purpose. Retrying it would hammer them and still be
-    # wrong, so the retry must cover EXCEPTIONS only — never a status the source chose to return.
-    calls = []
+def test_a_refusal_is_retried_bounded_on_fresh_sessions_and_named():
+    # Was «a deliberate non-200 is a hard stop and is not retried» (2026-09-14). Superseded by the
+    # owner's class order (2026-10-05, SCRAPING_ENGINEER.md step 5a: «a block is usually the
+    # handshake, not a ban» — fresh session, next profile) and by the live case it got wrong: on
+    # 2026-10-09 page 1 answered 403 once and cleared by itself 14 minutes later. Three tries with
+    # a 5 s / 10 s pause is not hammering; an unbounded loop would be, so the bound is pinned here.
+    calls, fresh = [], []
 
     class _Blocked:
         def get(self, url, timeout=None):
             calls.append(url)
             return _Resp(None, status=503)
 
-    assert run.fetch_listings(_Blocked()) == [], "a 503 yields no rows"
-    assert len(calls) == 1, f"a deliberate 503 must not be retried — made {len(calls)} calls"
+    s = _Blocked()
+    assert run.fetch_listings(s, fresh=lambda a: fresh.append(a) or s) == [], "a 503 yields no rows"
+    assert len(calls) == 3, f"a refusal is retried at most 3 times — made {len(calls)} calls"
+    assert fresh == [1, 2], f"each retry must use a fresh session: {fresh}"
     assert "503" in run.LAST_FETCH_NOTE, f"the status must be recorded: {run.LAST_FETCH_NOTE!r}"
 
 
