@@ -101,13 +101,16 @@ const mutants: [string, Impl][] = [
     const io = new IO((e) => { if (e.some((x) => x.isIntersecting)) onNear(); }, { rootMargin: NEAR_MARGIN, scrollMargin: NEAR_MARGIN });
     io.observe(el as Element); return () => io.disconnect(); }],
 ];
-for (const [name, impl] of mutants) check(`a gate that is «${name}» is caught`, judge(impl).length > 0);
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
+for (const [name, impl] of mutants) mustCatch(`a gate that is «${name}»`, judge(impl).length > 0);
 
 // ── 3. ListingPhoto is wired to the gate ─────────────────────────────────────────────────────────
 const card = readFileSync(join(import.meta.dirname, '..', 'src/components/ResultCard.tsx'), 'utf8');
 const fn = card.slice(card.indexOf('function ListingPhoto'), card.indexOf('function SourceBadge'));
 const probeEffect = fn.slice(fn.indexOf('useEffect(() => {\n    if (!IS_WEB'), fn.indexOf('const uri = photos[idx];\n  //'));
 check('the probe effect returns early until the card is near', /if \(!IS_WEB \|\| !near\b/.test(probeEffect), probeEffect.slice(0, 80));
+mustCatch('the pre-2026-10-06 eager probe effect (no `near` gate)',
+  !/if \(!IS_WEB \|\| !near\b/.test("useEffect(() => {\n    if (!IS_WEB || typeof window === 'undefined') return;"));
 check('the probe effect re-runs when `near` flips', /\}, \[key, idx, near\]\);/.test(probeEffect));
 check('`near` comes from whenNear watching the photo\'s own box', /whenNear\(box\.current, \(\) => setNear\(true\)\)/.test(fn) && /<View ref=\{box\} style=\{style\}>/.test(fn));
 check('native is never gated (no probe there; expo-image onError works)', /useState\(!IS_WEB\)/.test(fn));
