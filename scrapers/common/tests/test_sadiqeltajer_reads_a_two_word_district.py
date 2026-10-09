@@ -35,7 +35,7 @@ import scrapers.common.arabic_location as L  # noqa: E402
 import scrapers.sadiqeltajer.run as S  # noqa: E402
 
 BURAIDAH = 11
-CATALOG = ["حي القاع البارد", "حي الغدير", "حي الرابية"]
+CATALOG = ["حي القاع البارد", "حي الغدير", "حي الرابية", "حي الربيع"]
 
 
 @pytest.fixture(autouse=True)
@@ -46,7 +46,13 @@ def _catalog(monkeypatch):
 
 
 def resolve(text: str):
-    return L.find_district_in_text(S.district_window(text), BURAIDAH)   # the REAL resolver (another test stubs S.find_district_in_text)
+    # The REAL resolver: another test module stubs S.find_district_in_text at import time.
+    saved = S.find_district_in_text
+    S.find_district_in_text = L.find_district_in_text
+    try:
+        return S.resolve_district(text, BURAIDAH)
+    finally:
+        S.find_district_in_text = saved
 
 
 def test_a_two_word_district_resolves_whole():
@@ -63,4 +69,12 @@ def test_a_one_word_district_is_unchanged(district):
 
 def test_an_unknown_district_stays_unknown():
     text = "الموقع حسب الصك القصيم - بريدة - الهدية اعلانات مشابهة"
+    assert resolve(text) is None
+
+
+def test_a_later_page_word_is_never_read_as_the_district():
+    # Live 2026-10-09: «… بريدة - المطار» (ad URLs «بحي-المطار»; المطار is not in the بريدة catalog)
+    # followed by page text naming «الربيع». A window that does not START at the district word
+    # must never match, so the ad keeps no district instead of a wrong one.
+    text = "الموقع حسب الصك القصيم - بريدة - المطار الربيع اعلانات"
     assert resolve(text) is None

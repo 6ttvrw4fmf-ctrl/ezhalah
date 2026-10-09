@@ -39,7 +39,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
-from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.arabic_location import find_district_in_text, norm_district_tok, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://sadiq-eltajer.sa"
@@ -177,16 +177,30 @@ def parse_location(text: str) -> tuple[Optional[str], Optional[str], Optional[st
 # The district group above stops at the FIRST space — the line runs straight on into the page's next
 # words («القصيم - بريدة - الغدير اعلانات مشابهة»), so it cannot be greedy. But a two-word district
 # lost its second word: «القصيم - بريدة - القاع البارد» stored «القاع», which no catalog knows in
-# بريدة (49 searchable ads with no district on 2026-10-09; the ad URLs read «بحي-القاع-البارد»). The
-# district word plus the next two words go to find_district_in_text(), which tries 3-, 2-, then
-# 1-word windows against the catalog only, so «القاع البارد» resolves and «الغدير اعلانات» still
-# resolves to «الغدير». Nothing is guessed: no catalog match keeps the district NULL as before.
+# بريدة (49 searchable ads with no district on 2026-10-09; the ad URLs read «بحي-القاع-البارد»).
+# district_window() gives the district word plus the next two words; resolve_district() accepts a
+# 3-, then 2-word window only when it STARTS at the district word and the catalog has exactly that
+# name, then falls back to the one word as before. Never a window that starts later: «بحي المطار»
+# (not in the catalog) followed by the page word «الربيع» must stay unknown, not become حي الربيع.
 def district_window(text: str) -> Optional[str]:
     m = _LOC_RE.search(text)
     if not m:
         return None
     tail = re.findall(r"[؀-ۿ]+", text[m.end(3):])[:2]
     return " ".join([m.group(3).strip(), *tail])
+
+
+def resolve_district(text: str, city_id: Optional[int]) -> Optional[str]:
+    words = (district_window(text) or "").split()
+    if not words or not city_id:
+        return None
+    for size in (3, 2):
+        if len(words) >= size:
+            cand = " ".join(words[:size])
+            hit = find_district_in_text(cand, city_id)
+            if hit and norm_district_tok(hit) == norm_district_tok(cand):
+                return hit
+    return find_district_in_text(words[0], city_id)        # the one-word read, exactly as before
 
 
 # ── the description's own labelled rows ──────────────────────────────────────────────────────────
@@ -441,8 +455,7 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
         return None, category, "no_city"
     city = normalize.map_city(city_ar)
     city_id, region_id = to_catalog(city_ar, region_ar)
-    district_ar = (find_district_in_text(district_window(text), city_id)
-                   if (district_raw and city_id) else None)
+    district_ar = resolve_district(text, city_id) if (district_raw and city_id) else None
 
     price_total, price_per_meter = parse_price(text)
     rent_period, price_annual = (None, None)
