@@ -1,0 +1,79 @@
+{
+  "variants": {
+    "منصات": {
+      "asset": "../../assets/images/platform-clean/menassat.png",
+      "source": "https://gomenassat.com/assets/landing/img/realestate_logo.webp"
+    },
+    "آل متعب العقارية": {
+      "asset": "../../assets/images/platform-clean/almuteb.png",
+      "source": "https://almuteb.sa/wp-content/uploads/2025/11/Al-Muteb-Green-Oil-C.-01-02-1.svg"
+    },
+    "Flow": {
+      "asset": "../../assets/images/platform-clean/flow.png",
+      "source": "https://asset-a.flow.life/image/logo_flow_dark.svg"
+    },
+    "Maqam Al Wisam": {
+      "asset": "../../assets/images/platform-clean/maqam.png",
+      "source": "https://fahadalshahri.com/wp-content/uploads/2026/06/cropped-مقام-الوسام-العقارية-192x192.png"
+    },
+    "راز العقارية": {
+      "asset": "../../assets/images/platform-clean/raz.png",
+      "source": "https://static.wixstatic.com/media/04d244_e8a2db0b75d54d4683f87c71604e5d78%7Emv2.png/v1/fill/w_192%2Ch_192%2Clg_1%2Cusm_0.66_1.00_0.01/04d244_e8a2db0b75d54d4683f87c71604e5d78%7Emv2.png"
+    },
+    "الرفاعي للعقار": {
+      "asset": "../../assets/images/platform-clean/alrifai-small.png",
+      "source": "https://alrifai.com.sa/images/logo-small.png"
+    },
+    "MAQRAT": {
+      "asset": "../../assets/images/platform-clean/maqrat.png",
+      "source": "https://maqrat.com/imgs/logo.png?v=KVFK2LXqVOppJYDz-sx7wUMsNIuB874bKhSdwknqPKc"
+    },
+    "Aqarcity": {
+      "asset": "../../assets/images/aqarcity-logo.png",
+      "source": "Existing collected official aqarcity-logo artwork (unchanged)"
+    },
+    "Ramzalqasim": {
+      "asset": "../../assets/images/ramzalqassim.png",
+      "source": "Existing collected official ramzalqassim artwork (unchanged)"
+    },
+    "Amaall": {
+      "asset": "../../assets/images/amaall.png",
+      "source": "Existing collected official amaall artwork (unchanged)"
+    },
+    "Alta": {
+      "asset": "../../assets/images/alta.png",
+      "source": "Existing collected official alta artwork (unchanged)"
+    },
+    "Awal": {
+      "asset": "../../assets/images/awal.png",
+      "source": "Existing collected official awal artwork (unchanged)"
+    },
+    "Waslna": {
+      "asset": "../../assets/images/wslnaa.png",
+      "source": "Existing collected official wslnaa artwork (unchanged)"
+    },
+    "نفوذ": {
+      "asset": "../../assets/images/nufouth.png",
+      "source": "Existing collected official nufouth artwork (unchanged)"
+    },
+    "آل سعيدان": {
+      "asset": "../../assets/images/alsaedan.png",
+      "source": "Existing collected official alsaedan artwork (unchanged)"
+    }
+  },
+  "monochrome": [
+    "ودود العقارية",
+    "فلل",
+    "دارا للتطوير العقاري",
+    "مكسب العقارية",
+    "العجلان للتسويق العقاري"
+  ],
+  "crops": {
+    "Amaall": [
+      90,
+      154,
+      440,
+      345
+    ]
+  }
+}

@@ -4072,8 +4072,8 @@ export default function Agent() {
                       onPress={() => choosePlatform(platform.name)}
                       style={({ pressed }: any) => [s.platformPickerItem, pressed && s.platformPickerItemPressed]}
                     >
-                      <View style={[s.platformPickerLogoFrame, profile.layout.dark && { backgroundColor: '#263D32' }]}>
-                        <Image source={profile.logo} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" accessible={false} />
+                      <View style={s.platformPickerLogoFrame}>
+                        <Image source={profile.logo} tintColor={profile.layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" accessible={false} />
                       </View>
                       <View style={s.platformPickerItemCopy}>
                         <Text style={[s.platformPickerItemName, s.platformPickerGridName, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>
@@ -4705,8 +4705,8 @@ export default function Agent() {
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxWidth: 150, height: 28 }} contentContainerStyle={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
                       {selectedPlatforms.map(platform => {
                         const profile = PLATFORM_PICKER_PROFILES[platform.name];
-                        return <View key={platform.name} style={{ width: 48, height: 24, borderRadius: 4, overflow: 'hidden', backgroundColor: profile.layout.dark ? '#263D32' : 'transparent' }}>
-                          <Image source={profile.logo} style={{ position: 'absolute', width: profile.layout.width / 2, height: profile.layout.height / 2, left: profile.layout.left / 2, top: profile.layout.top / 2 }} contentFit="contain" accessible={false} />
+                        return <View key={platform.name} style={{ width: 48, height: 24, borderRadius: 4, overflow: 'hidden', backgroundColor: 'transparent' }}>
+                          <Image source={profile.logo} tintColor={profile.layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: profile.layout.width / 2, height: profile.layout.height / 2, left: profile.layout.left / 2, top: profile.layout.top / 2 }} contentFit="contain" accessible={false} />
                         </View>;
                       })}
                     </ScrollView>

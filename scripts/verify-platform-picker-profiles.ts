@@ -79,7 +79,7 @@ function verifyRendering(text: string) {
   const render = new Function('pickerPlatforms', 'PLATFORM_PICKER_PROFILES', 'locale', 'selectedSources', 'choosePlatform', 't', 's', 'pickerTwoColumns', 'colors', 'h', 'Pressable', 'View', 'Text', 'Image', 'Ionicons', js + '\nreturn cards;');
   for (const locale of ['ar', 'en']) {
     for (const twoColumns of [true, false]) {
-      const cards = render(roster, profiles, locale, [], () => {}, (key: string) => key, { platformPickerItem: actualItemStyle }, twoColumns, {}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons');
+      const cards = render(roster, profiles, locale, [], () => {}, (key: string) => key, { platformPickerItem: actualItemStyle }, twoColumns, {ink:'#253831'}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons');
       for (let i = 0; i < cards.length; i++) {
         const root = cards[i]; const profile = profiles[roster[i].name];
         const nodes: any[] = [];
@@ -87,8 +87,8 @@ function verifyRendering(text: string) {
         flatten(root);
         const card = nodes.find(n => n.type === 'Pressable');
         assert.equal(nodes.find(n => n.type === 'Image').props.source, profile.logo);
-        assert.equal(nodes.find(n => n.type === 'Image').props.tintColor, undefined, 'original logo colors are never tinted');
-        assert.ok(nodes.some(n => n.type === 'View' && Array.isArray(n.props?.style) && n.props.style.some((v: any) => v?.backgroundColor === '#263D32')) === profile.layout.dark, 'only pale logos receive a contrast backing');
+        assert.equal(nodes.find(n => n.type === 'Image').props.tintColor, profile.layout.monochrome ? '#253831' : undefined, 'only reviewed white-only marks adapt their ink');
+        assert.ok(!nodes.some(n => n.type === 'View' && Array.isArray(n.props?.style) && n.props.style.some((v: any) => v?.backgroundColor === '#263D32')), 'logos have no backing tiles');
         assert.ok(nodes.some(n => n.type === 'Text' && n.children.includes(profile[locale])), 'description visible');
         assert.ok(card.props.accessibilityLabel.includes(profile[locale]), 'description accessible');
         assert.equal(card.props['aria-pressed'], false, 'unselected toggle communicates its state');
@@ -103,7 +103,7 @@ function mustCatchRender(mutant: string) {
   assert.throws(() => verifyRendering(mutant), assert.AssertionError);
 }
 mustCatchRender(agent.replace('source={profile.logo}', 'source={"../../assets/images/platform-placeholder.png"}'));
-mustCatchRender(agent.replace('source={profile.logo}', 'source={profile.logo} tintColor="#000"'));
+mustCatchRender(agent.replace('tintColor={profile.layout.monochrome ? colors.ink : undefined}', 'tintColor="#000"'));
 mustCatchRender(agent.replace('{description}\n', '{""}\n'));
 console.log(`PASS: ${names.length} bilingual descriptions; 142 original ZIP logos; missing copy and wrong artwork mutations rejected.`);
 
@@ -147,7 +147,7 @@ for (const name of names as string[]) {
   assert.ok(profile.layout.width > 0 && profile.layout.height > 0);
   assert.ok(Number.isFinite(profile.layout.left) && Number.isFinite(profile.layout.top));
 }
-assert.equal(load(source, 'PLATFORM_PICKER_PROFILES')['ودود العقارية'].layout.dark, true);
+assert.equal(load(source, 'PLATFORM_PICKER_PROFILES')['ودود العقارية'].layout.monochrome, true);
 console.log('PASS: multi-selection toggles, canonical source restrictions, duplicate removal, unknown-source refusal and logo visibility layouts.');
 
 assert.equal(sentence({ ...nationwide, focusCounts: { Residential: 90, Commercial: 10 } }, 'ar'), 'عقارات سكنية بالدرجة الأولى في مختلف مناطق المملكة.');
@@ -219,4 +219,4 @@ let chosen: string[] = []; let closed = 0; let explicit = false;
 const choose = new Function('source', 'setPickerSourceExplicit', 'setSelectedSources', 'togglePickerSource', 'closePlatformPicker', chooseJS);
 choose('Aqar', (v: boolean) => explicit = v, (fn: any) => chosen = fn(chosen), load(source, 'togglePickerSource'), () => closed++);
 assert.equal(explicit, true); assert.deepEqual(chosen, ['Aqar']); assert.equal(closed, 1, 'a selection saves immediately and closes the sheet');
-console.log('PASS: original logo colors, pale-logo contrast, and immediate selection/close.');
+console.log('PASS: original brand colors, readable monochrome marks without backplates, and immediate selection/close.');
