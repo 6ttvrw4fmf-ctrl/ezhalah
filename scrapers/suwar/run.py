@@ -114,6 +114,12 @@ _FEATURE_COLUMNS: dict[str, str] = {
 
 _SHAFT_ONLY = ("مؤسس مصعد",)
 
+# Columns suwar publishes STRUCTURALLY (its property_feature taxonomy: the mapped terms above, plus
+# «مؤسس اسبليت» for AC). Prose is never read for these (ADVANCED_FILTER_SOURCE_TRUTH §2). Everything
+# else — above all the kitchen, which no term covers (23 terms measured over all 154 ads, 2026-10-09)
+# — is read from the ad's own description: yes or nothing, never no.
+_STRUCTURED_COLS = tuple(sorted(set(_FEATURE_COLUMNS.values()) | {"air_conditioner"}))
+
 LAST_FETCH_NOTE = "no pages attempted"
 
 
@@ -360,12 +366,15 @@ def map_listing(post: dict, detail: Optional[dict]) -> tuple[Optional[dict], str
     text = detail.get("text") or ""
     area_m2, area_extras = _area(text)
     bedrooms = _to_int(m.group(1)) if (m := _RE_ROOMS.search(text)) else None
-    bathrooms = _to_int(m.group(1)) if (m := _RE_BATHS.search(text)) else None
+    bathrooms = _to_int(m.group(1)) if (m := _RE_BATHS.search(text)) else normalize.baths_from_leading_count(text)
     living = _to_int(m.group(1)) if (m := _RE_LIVING.search(text)) else None
     majlis = _to_int(m.group(1)) if (m := _RE_MAJLIS.search(text)) else None
 
     features = _terms(post)
     feature_cols = {col: True for name, col in _FEATURE_COLUMNS.items() if name in features}
+    prose_cols = normalize.prose_amenities_yes(
+        normalize.html_block_lines((post.get("content") or {}).get("rendered", "")), skip=_STRUCTURED_COLS)
+    feature_cols = {**prose_cols, **feature_cols}
     if "elevator" not in feature_cols and any(f in _SHAFT_ONLY for f in features):
         # The source published its feature list and named only a prepared shaft: unknown, and a stale
         # True written by the old mapping must clear (a None-dropping upsert would keep it).

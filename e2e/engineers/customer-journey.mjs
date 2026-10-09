@@ -6,7 +6,7 @@
 //
 //   node e2e/engineers/customer-journey.mjs --mode normal --sample 5
 //   node e2e/engineers/customer-journey.mjs --mode af --listings '[{"platform":"aqar","source_table":"listings","listing_id":123}]'
-//   flags: --mode normal|af (required) · --sample N | --listings '<json>' · --phone (full mobile
+//   flags: --mode normal|af (required) · --sample N | --listings '<json>' · --count-watch N (af: tick N features, read the live count) · --phone (full mobile
 //          emulation; the viewport is phone-size either way) · --json (machine lines only)
 //
 // NORMAL: drive the Filter home the way a customer does (deal toggle, city typeahead, district
@@ -76,6 +76,7 @@ const arg = (name) => { const i = process.argv.indexOf(`--${name}`); return i > 
 const MODE = arg('mode');
 const PHONE = process.argv.includes('--phone');
 const JSON_ONLY = process.argv.includes('--json');
+const COUNT_WATCH = arg('count-watch') ? Math.min(6, parseInt(arg('count-watch'), 10)) : 0; // see COUNT WATCH below
 if (MODE !== 'normal' && MODE !== 'af') { console.error("need --mode normal|af"); process.exit(2); }
 const SAMPLE = arg('sample') ? Math.min(8, parseInt(arg('sample'), 10)) : null;     // politeness cap
 const LISTINGS = arg('listings') ? JSON.parse(arg('listings')) : null;
@@ -435,6 +436,7 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
       step(`question «${seen.title}» options: ${seen.opts.join(',') || '(none)'}`);
       if (!seen.opts.length) break;
       let clicked = 0;
+      const ticked = [];
       for (const t of targets) {
         if (answered.includes(t)) continue;
         const key = t.kind === 'amenity' && seen.opts.includes(t.token) ? t.token
@@ -442,7 +444,36 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
         if (!key) continue;
         await page.click(`[data-testid="af-option-${key}"]`);
         await page.waitForTimeout(1200);
-        answered.push(t); clicked++;
+        answered.push(t); clicked++; ticked.push(key);
+      }
+      // COUNT WATCH (owner 2026-10-08 screenshot, backlog 281): with --count-watch N, on a question
+      // where the listing's own answer was ticked, tick more offered features up to N, read the header
+      // chip and the primary button at +2 s and +6 s, then UN-TICK the extras (different amenities
+      // INTERSECT, ADVANCED_FILTER_PRODUCT_CONTRACT.md, so an extra pick could drop the listing and the
+      // membership proof must judge only its own answers). A ticked selection whose card shows no
+      // number at +6 s is the owner's bug (the chip and «متابعة · N نتيجة» vanished): FAIL.
+      if (COUNT_WATCH && ticked.some((k) => k !== 'yes') && seen.opts.length > 2) {
+        for (const k of seen.opts) {
+          if (ticked.length >= COUNT_WATCH) break;
+          if (ticked.includes(k) || !/^[a-z_]+$/.test(k) || ['any', 'none', 'skip', 'unknown'].includes(k)) continue;
+          await page.click(`[data-testid="af-option-${k}"]`).catch(() => {});
+          ticked.push(k);
+          await page.waitForTimeout(400);
+        }
+        const readCount = () => page.evaluate(() => ({
+          chip: document.querySelector('[data-testid="af-count-chip"]')?.innerText?.trim() ?? null,
+          button: document.querySelector('[data-testid="af-confirm"]')?.innerText?.replace(/\s+/g, ' ').trim() ?? null,
+        }));
+        await page.waitForTimeout(2000);
+        const at2 = await readCount();
+        await page.waitForTimeout(4000);
+        const at6 = await readCount();
+        const watch = { question: seen.title, ticked: [...ticked], at2s: at2, at6s: at6 };
+        (result.evidence.countWatch ??= []).push(watch);
+        step(`count watch «${seen.title}» ticks=${ticked.length} +2s chip=${at2.chip} button=${at2.button} · +6s chip=${at6.chip} button=${at6.button}`);
+        if (!at6.chip || !/\d/.test(at6.button ?? '')) throw new Error(`count vanished: ${ticked.length} ticks, +6s chip=${at6.chip} button=«${at6.button}»`);
+        for (const k of ticked.slice(clicked).reverse()) { await page.click(`[data-testid="af-option-${k}"]`).catch(() => {}); await page.waitForTimeout(400); }
+        await page.waitForTimeout(1500);
       }
       const btn = clicked ? await page.$('[data-testid="af-confirm"]')
         : (await page.$('[data-testid="af-skip"]')) ?? (await page.$('[data-testid="af-confirm"]'));

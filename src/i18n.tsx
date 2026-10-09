@@ -477,6 +477,7 @@ const AR: Record<string, string> = {
   'Let’s begin': 'يلا نبدأ',
   // 'Continue' reuses the existing auth-flow key ('متابعة') — not redeclared here.
   'Continue · {count} results': 'متابعة · {count} نتيجة',
+  'No results with these choices': 'لا توجد نتائج بهذه الاختيارات',
   // Owner 2026-10-01: one source-data notice above the options; unknown still never means «no».
   'Your search options and counts use published listing details; unmentioned features may still be available, so check the original listing.': 'خيارات بحثك وأعدادها مبنية على بيانات الإعلانات المنشورة؛ غياب المعلومة لا ينفي توفرها، فتأكد من الإعلان الأصلي.',
   'Based on: {labels}': 'بناءً على: {labels}',

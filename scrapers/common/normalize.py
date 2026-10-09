@@ -995,6 +995,16 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
     return out
 
 
+# «4 غرف + 3 دورات مياه + مطبخ» — the bathroom count written BEFORE the noun (مياه / مياة / المياه). A page that
+# states several different counts (a project listing several layouts) has stated no one count: None, never a pick.
+_BATHS_LEADING_RE = re.compile(r"([\d٠-٩]{1,2})\s*(?:دورات|دورة|حمامات)\s*(?:ال)?مي[اآ][هة]")
+
+
+def baths_from_leading_count(raw: Optional[str]) -> Optional[int]:
+    counts = {n for g in _BATHS_LEADING_RE.findall(str(raw or "")) if (n := to_int(g)) and 1 <= n <= 15}
+    return counts.pop() if len(counts) == 1 else None
+
+
 # «3 غرف وصالة ومطبخ», «غرفتين وصالة» — the Saudi listing idiom for a unit's layout. The leading
 # count is the BEDROOM count; «صالة» is one hall. Anything that does not match this exact shape
 # returns nothing rather than a guess.
