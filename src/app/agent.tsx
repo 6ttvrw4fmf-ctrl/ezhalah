@@ -4962,7 +4962,20 @@ export default function Agent() {
                 const q = ageFlowQueryRef.current;
                 if (!q) return Promise.resolve(null);
                 const question = ageFlow.question;
-                const p = liveResultCount(question.apply(q, keys));
+                // A COUNT THAT FAILS IS RETRIED, NEVER LEFT AS NOTHING (owner 2026-10-08, screenshot: the header
+                // chip and «متابعة · N نتيجة» both vanished). The 4 s card budget trips whenever the database is
+                // busy (robots, cron), and null means «no number». Two quiet retries with the longer background
+                // budget bring the number back; a retry only ever returns THIS selection's count, so the old
+                // «never show another selection's number» rule still holds (the effect clears it first).
+                const scoped = question.apply(q, keys);
+                const p = (async () => {
+                  let n = await liveResultCount(scoped);
+                  for (let i = 0; n === null && i < 2; i++) {
+                    await new Promise((r) => setTimeout(r, 700));
+                    n = await primeLiveResultCount(scoped);
+                  }
+                  return n;
+                })();
                 p.then(() => prefetchNextStep(question, q, keys), () => {});
                 return p;
               }}
