@@ -31,6 +31,7 @@ const check = (label: string, ok: boolean, detail = '') => {
   failures++;
   console.error(`FAIL  ${label}${detail ? `\n      ${detail}` : ''}`);
 };
+const mustCatch = (label: string, caught: boolean) => check(`MUTATION — ${label}`, caught);
 
 const committed = readdirSync(join(root, 'supabase/migrations')).includes(MIG);
 check('the fix migration is committed (no production-only drift)', committed, `${MIG} missing`);
@@ -91,10 +92,10 @@ if (del && ins) {
   check('a down site\'s LOCATED rows stay indexed (auto-return still counts them)',
     res.filter((x) => x.platform === 'downsite' && x.located).every((x) => x.indexed));
   check('a live site keeps every row indexed', res.filter((x) => x.platform === 'livesite').every((x) => x.indexed));
-  // MUTATIONS — each half is load-bearing.
-  check('MUTATION — without the delete, the row indexed before the site went down still shows', downShown(scenario(undefined, ins)));
-  check('MUTATION — without the insert filter, the same pass puts it straight back', downShown(scenario(del, undefined)));
-  check('MUTATION — the index before this fix shows the down site on a no-location search', downShown(scenario(undefined, undefined)));
+  // MUTATIONS — each half is load-bearing: break it and the down site shows again.
+  mustCatch('without the delete, the row indexed before the site went down still shows', downShown(scenario(undefined, ins)));
+  mustCatch('without the insert filter, the same pass puts it straight back', downShown(scenario(del, undefined)));
+  mustCatch('the index before this fix shows the down site on a no-location search', downShown(scenario(undefined, undefined)));
 }
 
 if (failures) { console.error(`\n✗ ${failures} check(s) failed`); process.exit(1); }
