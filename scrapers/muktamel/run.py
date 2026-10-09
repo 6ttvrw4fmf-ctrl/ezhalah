@@ -402,7 +402,13 @@ def fetch_one(listing_id: int) -> Optional[tuple[int, dict, bool]]:
     if not offer.get("isAvailable") or offer.get("price") in (None, 0):
         # The measured dead shape (module docstring) is counted on its own, so each run's notes say
         # how many own pages read as the hollow shell; the rest of the disjunction stays UNKNOWN.
-        _note("hollow_shell" if _is_hollow_offer(offer) else "not_available_or_zero_price")
+        # Armed (2026-10-09): the hollow shell on THIS id's own page is a direct removal reading, so it
+        # strikes like redirect_404 even when the coverage guard trips (_strike_read_gone). A shell on
+        # another listing's page, or the rest of the disjunction, says nothing about this id.
+        if HOLLOW_SHELL_KILLS and own and _is_hollow_offer(offer):
+            _note_gone(listing_id, "hollow_shell")
+        else:
+            _note("hollow_shell" if _is_hollow_offer(offer) else "not_available_or_zero_price")
         return None
     _note("live")
     return listing_id, parsed, own
@@ -465,7 +471,10 @@ def _landed_on_404(landed: str) -> bool:
 # offer with a zero price, or anything unparseable, stays no-opinion.
 # SHADOW FIRST (LIFECYCLE_ENGINEER.md protection 2): while HOLLOW_SHELL_KILLS is False the probe
 # records «SHADOW hollow_shell … would be gone» on the evidence row and still answers UNKNOWN.
-HOLLOW_SHELL_KILLS = False
+# ARMED 2026-10-09 after the shadow: 517 SHADOW readings (10-09 05:04-09:54 UTC) fell on 517 rows, every
+# one active at 3-20 strikes and unseen by the crawl since 09-05..09-24; none on a row the crawl read
+# live. Each kill still needs grace (3 strikes) and the in-run live control (_canary).
+HOLLOW_SHELL_KILLS = True
 
 
 def _is_hollow_offer(offer: dict) -> bool:
@@ -1069,9 +1078,41 @@ def _strike_read_gone(tbl: str, gone_ids: set[int], shards: int, shard: int) -> 
         return 0
     print(f"  {tbl}: guard tripped, striking only the {len(struck)} row(s) whose own page read "
           f"removed this run", flush=True)
+    # min_coverage=0: every row missing from `kept` was READ gone, so the absence floor has nothing to
+    # measure (2026-10-09: with the hollow shell armed, ~130 of a 622-row slice read gone and the floor
+    # would discard the rerun too). The collapse guard (30%) still holds.
     return db.prune_unseen(tbl, kept, source="Muktamel", shards=shards, shard=shard,
-                           verify_gone=_probe.verify_gone)
+                           verify_gone=_probe.verify_gone, min_coverage=0.0)
 
+
+
+def page_verdict(url: str) -> str:
+    """ALIVE / DEAD / UNKNOWN for one muktamel ad URL, read the way this crawl and its oracle read it.
+
+    WHY (2026-10-09): the nightly dead-visible score and the spot-check judged muktamel by HTTP status
+    alone. A withdrawn ad answers 200 with a hollow shell, and a removed one 302s to /404 which then
+    answers 200, so status-only read every dead muktamel ad as live: 10/10 "live" three nights running
+    while 512 shown rows read hollow on their own page. ALIVE needs this id's own page with an
+    available, priced offer; anything unread or ambiguous is UNKNOWN."""
+    from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN
+    try:
+        r = _session().get(url, timeout=45, allow_redirects=True)
+    except Exception:  # noqa: BLE001 — unreachable is never evidence
+        return UNKNOWN
+    landed = str(getattr(r, "url", url) or url)
+    if r.status_code in (404, 410) or (r.status_code == 200 and _landed_on_404(landed)):
+        return DEAD
+    if r.status_code != 200 or not _same_listing(url, landed):
+        return UNKNOWN
+    src = _extract_nuxt(r.text or "")
+    offer = ((_nuxt_via_node(src) if src else None) or {}).get("offer")
+    if not isinstance(offer, dict):
+        return UNKNOWN
+    if _is_hollow_offer(offer):
+        return DEAD if HOLLOW_SHELL_KILLS else UNKNOWN
+    if offer.get("isAvailable") and offer.get("price") not in (None, 0):
+        return ALIVE
+    return UNKNOWN
 
 if __name__ == "__main__":
     raise SystemExit(main())
