@@ -122,6 +122,16 @@ cannot find), plus growing the saved-ads sets.
   tap. Also: the three heaviest hourly detectors (`price_source_mismatch`, `qa_oracle_combined_scope`,
   `af_tri_state_violations`) now run behind the ~20 h gate (20261009202418) — read `ops_detector_last_full_run`
   before expecting an hourly signal from them.
+- **🦅 Falcon 10-09 — a perf edit that bypasses the rail leaves THREE P1s open and masks the real one.**
+  `20261003222926` hand-edited `top_cities_by_deal_ar` and `district_options_ar` (server-side `replace()`)
+  an hour after the 21:14 rebuild, so `af_rpc_build_state` no longer matched production and
+  `af_parity_empirical` (2 × hand-edit rows every 30 min), `af_rebuild_would_revert` and
+  `af_count_surfaces_carry_af` stood open for six days under a deleted routine. The dangerous part is the
+  dedup key: `af_parity_empirical` is shared with the EMPIRICAL count-parity probe (D), so while the hand-edit
+  rows hold it open, a real count ≠ results mismatch raises nothing new. Every edit to a rail-owned function
+  goes through `af_eligibility_clause()` / `af_rpc_templates` + `rebuild_af_filter_rpcs()` in the SAME
+  migration — `20260927111536` is the worked example (port, rebuild, prove the 13 surface hashes unchanged in
+  one transaction). Backlog 323.
 1. **«The site doesn't publish that field» is a claim you must prove from the raw payload.** aqar's parking was declared
    «unpublished» and pinned NULL; it was nested one level deeper (`extended_details.special_parking`). Read the whole JSON /
    `__NEXT_DATA__` of 2+ live ads before deciding.
