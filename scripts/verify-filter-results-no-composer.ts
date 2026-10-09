@@ -100,12 +100,17 @@ check('the composer branch still has its own busy||revealing → Stop ternary (A
 
 // The disclaimer must render at top-level of the composer wrap, not gated on any branch. After
 // decomment(), JSX block comments collapse to `{}` so we allow arbitrary intermediate whitespace
-// or empty jsx-expressions between the `) : null}` and the disclaimer, but no other JSX or code.
-const closeThenDisc = /\) : null\}(?:\s|\{\})*<Text style=\{s\.disc\}>/;
+// or empty jsx-expressions between the `) : null}` and the disclaimer. The owner-approved model
+// row may also sit here, but ONLY under the same !filterOrigin && !completed gate; an ungated
+// selector still fails. The legal disclaimer stays outside both gates.
+const closeThenDisc = /\) : null\}(?:\s|\{\})*(?:\{!filterOrigin && !completed && <AgentModelSelector disabled=\{busy \|\| revealing \|\| voiceState !== 'idle'\} \/>\}(?:\s|\{\})*)?<Text style=\{s\.disc\}>/;
 check("the disclaimer sits after the branch's closing `) : null}` (outside every branch)",
   closeThenDisc.test(code));
 
 console.log('\n── mutation proof: this check actually fails on the regressions it exists to catch ──');
+const ungatedModelSelector = agent.replace('{!filterOrigin && !completed && <AgentModelSelector', '{<AgentModelSelector');
+mustCatch('an ungated model selector appearing on Filter-origin results',
+  ungatedModelSelector !== agent && !closeThenDisc.test(decomment(ungatedModelSelector)));
 // Mutation 1: someone "simplifies" the JSX by dropping the whole three-way branch, leaving the
 // composer unconditional again (the ORIGINAL 09-11 bug this barrier prevents).
 const mutatedNoGate = agent.replace(

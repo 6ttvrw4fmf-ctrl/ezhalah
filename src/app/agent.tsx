@@ -25,6 +25,7 @@ import { msgRTL } from '@/lib/textDirection';
 import { stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
 import { startVoiceInput, stopVoiceInput, cancelVoiceInput, isVoiceInputSupported } from '@/lib/voiceInput';
 import VoiceWaveform from '@/components/VoiceWaveform';
+import AgentModelSelector from '@/components/AgentModelSelector';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
 import { initialReveal as initialRevealPure, CASCADE_MAX } from '@/lib/initialReveal';
@@ -4904,6 +4905,7 @@ export default function Agent() {
                 lastFilterRef/lastSeedRef, and returns to the Filter screen with restored state.
                 The trade-off: a mid-flight Filter search has no in-place cancel button; the user
                 navigates away instead. Owner-accepted (2026-09-12). */}
+            {!filterOrigin && !completed && <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />}
             <Text style={s.disc}>
               {t('Ezhalah displays listings from third-party property platforms. We do not own, verify, or recommend any listing. Please review all details carefully before making a decision.')}
             </Text>
