@@ -55,12 +55,13 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
             accessibilityViewIsModal role="radiogroup" accessibilityLabel={arabic ? 'النموذج' : 'Model'}>
             {MODELS.map((item) => (
               <Pressable key={item.id} testID={`agent-model-${item.id}`} accessibilityRole="radio"
-                accessibilityState={{ checked: selected === item.id }}
+                disabled={item.id === 'hurr'}
+                accessibilityState={{ checked: selected === item.id, disabled: item.id === 'hurr' }}
                 aria-checked={selected === item.id}
                 onPress={() => { setSelected(item.id); close(); trigger.current?.focus(); }}
-                style={({ pressed }) => [styles.option, { flexDirection: arabic ? 'row-reverse' : 'row' }, pressed && styles.pressed]}>
+                style={({ pressed }) => [styles.option, { flexDirection: arabic ? 'row-reverse' : 'row' }, item.id === 'hurr' && styles.unavailable, pressed && styles.pressed]}>
                 <View style={styles.copy}>
-                  <Text style={[styles.name, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? item.ar : item.en} {item.version}</Text>
+                  <Text style={[styles.name, { textAlign: arabic ? 'right' : 'left' }, item.id === 'hurr' && styles.unavailableName]}>{arabic ? item.ar : item.en} {item.version}</Text>
                   <Text style={[styles.description, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? item.descriptionAr : item.descriptionEn}</Text>
                 </View>
                 <View style={styles.check}>
@@ -80,6 +81,8 @@ const styles = StyleSheet.create({
   trigger: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 44, paddingHorizontal: 8, borderRadius: radius.pill },
   label: { color: colors.muted, fontSize: 12, fontWeight: '500' },
   pressed: { backgroundColor: colors.tint },
+  unavailable: { opacity: 0.55 },
+  unavailableName: { color: colors.muted },
   overlay: { flex: 1 },
   menu: { position: 'absolute', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine,
     borderRadius: 18, padding: 7, ...cardShadow, shadowOpacity: 0.16, shadowRadius: 20, elevation: 10 },
