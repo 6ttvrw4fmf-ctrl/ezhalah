@@ -4023,7 +4023,7 @@ export default function Agent() {
                   ? [{ translateY: pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [36, 0] }) }]
                   : [
                       { translateY: pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) },
-                      { scale: pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) },
+                      { scale: Platform.OS === 'web' ? 1 : pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) },
                     ],
               },
             ]}
