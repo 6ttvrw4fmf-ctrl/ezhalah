@@ -25,6 +25,7 @@ ACTIVE = ([{"ad_number": f"D{i}", "missing_count": 2} for i in range(3)]
           + [{"ad_number": f"L{i}", "missing_count": 0} for i in range(20)])
 SEEN = {f"L{i}" for i in range(20)}
 URL = {r["ad_number"]: f"https://src.example/ad/{r['ad_number']}" for r in ACTIVE}
+ROW_EXTRA: dict = {}
 
 
 class _Q:
@@ -56,7 +57,8 @@ class _Q:
 
     def execute(self):
         if self.want is not None:
-            return types.SimpleNamespace(data=[{"listing_url": URL.get(self.want)}])
+            return types.SimpleNamespace(data=[{"listing_url": URL.get(self.want),
+                                                **ROW_EXTRA.get(self.want, {})}])
         return types.SimpleNamespace(data=ACTIVE)
 
 
@@ -129,3 +131,16 @@ def test_the_read_budget_holds_the_rest_unknown(monkeypatch):
     assert killed == 2 and len(kills) == 2
     held = [e for e in ev if e["verdict"] == "UNKNOWN"]
     assert len(held) == 1 and "read budget" in held[0]["note"]
+
+
+def test_a_passed_published_end_date_is_the_sources_own_word(monkeypatch):
+    # shomou / earthapp, 2026-10-09: the list drops an ad past its own end date while its page still
+    # answers 200. The stored end date the source printed is the evidence; a future or missing one is not.
+    monkeypatch.setattr(sys.modules[__name__], "ROW_EXTRA", {
+        "D0": {"additional_info": {"ad_end_date": "2026-09-30"}},
+        "D1": {"license_expiry": "2026-10-01"},
+        "D2": {"additional_info": {"ad_end_date": "2099-12-31"}}})
+    killed, kills, ev = _run(monkeypatch, _Session(dead_status=200))
+    assert kills == ["D0", "D1"] and killed == 2
+    gone = {e["ad_number"]: e["note"] for e in ev if e["verdict"] == "GONE"}
+    assert set(gone) == {"D0", "D1"} and all("published end date" in n for n in gone.values())

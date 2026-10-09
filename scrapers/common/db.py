@@ -1254,6 +1254,23 @@ def _own_page_status_signal(status, body, path_changed):
     return None
 
 
+_END_DATE_KEYS = ("license_expiry",)
+_END_DATE_INFO_KEYS = ("ad_end_date", "license_end_date", "expired_at", "end_date")
+
+
+def _published_end_passed(row: Optional[dict]) -> Optional[str]:
+    """The stored source-published end date when it has passed (normalize.ad_expiry_state), else None.
+    No date, an unreadable date or a future one is None: never evidence."""
+    if not row:
+        return None
+    from scrapers.common import normalize
+    info = row.get("additional_info") if isinstance(row.get("additional_info"), dict) else {}
+    for raw in [row.get(k) for k in _END_DATE_KEYS] + [info.get(k) for k in _END_DATE_INFO_KEYS]:
+        if isinstance(raw, str) and normalize.ad_expiry_state(raw) == "expired":
+            return raw
+    return None
+
+
 def _own_page_session():
     try:
         from curl_cffi import requests as cc
@@ -1273,15 +1290,22 @@ def own_page_status_oracle(c, table: str, seen, *, session=None):
     from scrapers.common.http_liveness import LivenessProbe
 
     s = session or _own_page_session()
+    rows: dict[str, Optional[dict]] = {}
+
+    def row_of(ad_number: str) -> Optional[dict]:
+        if ad_number not in rows:
+            try:   # "*": tables differ in which end-date columns they carry
+                r = _execute(c.table(table).select("*").eq("ad_number", ad_number).limit(1),
+                             what=table + ".own_page_url")
+                data = getattr(r, "data", None) or []
+                rows[ad_number] = data[0] if data else None
+            except Exception:  # noqa: BLE001 — a failed lookup is UNKNOWN, never a kill
+                rows[ad_number] = None
+        return rows[ad_number]
 
     def url_for(ad_number: str):
-        try:
-            r = _execute(c.table(table).select("listing_url").eq("ad_number", ad_number).limit(1),
-                         what=table + ".own_page_url")
-            data = getattr(r, "data", None) or []
-            return (data[0].get("listing_url") or None) if data else None
-        except Exception:  # noqa: BLE001 — a failed lookup is UNKNOWN, never a kill
-            return None
+        row = row_of(ad_number)
+        return (row.get("listing_url") or None) if row else None
 
     state: dict[str, Any] = {}
 
@@ -1312,6 +1336,13 @@ def own_page_status_oracle(c, table: str, seen, *, session=None):
         # cost; a row past it is UNKNOWN (kept, shown), never a kill.
         if reads[0] >= _OWN_PAGE_MAX_READS:
             return "unknown", f"{OWN_PAGE_ORACLE}: read budget of {_OWN_PAGE_MAX_READS} spent this run"
+        # The ad's OWN published end date (licence / ad end, as the source printed it and the crawl
+        # stored it) has passed: the source itself says the ad is over, which is why its complete
+        # list stopped serving it (shomou, earthapp, maktab, opensooq …: 2026-10-09, 15 of 31 such
+        # hides; their pages still answer 200). That is the source's statement, not our clock.
+        ended = _published_end_passed(row_of(ad_number))
+        if ended:
+            return "gone", f"{OWN_PAGE_ORACLE}: the ad's own published end date {ended} has passed"
         reads[0] += 1
         verdict, why = probe.verify_gone(ad_number)
         return verdict, f"{OWN_PAGE_ORACLE}: {why}"[:300]
