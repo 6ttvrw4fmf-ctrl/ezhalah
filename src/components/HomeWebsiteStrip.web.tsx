@@ -27,7 +27,7 @@ export default function HomeWebsiteStrip() {
         {names.map(name => {
           const profile = PLATFORM_PICKER_PROFILES[name];
           return <div key={name} data-website={name} style={{ flex: '0 0 108px', height: 48, display: 'flex', justifyContent: 'center' }}>
-            <div style={{ position: 'relative', width: 96, height: 48, backgroundColor: 'transparent', overflow: 'hidden' }}>
+            <div style={{ position: 'relative', width: 96, height: 48, backgroundColor: 'transparent', overflow: 'hidden', transform: 'scale(0.9)' }}>
               <Image source={profile.logo} tintColor={profile.layout.monochrome ? (theme === 'dark' ? '#F3F5F3' : '#253831') : undefined} loading="eager" priority={names.indexOf(name) < 5 ? 'high' : 'normal'} transition={0} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" accessible={false} />
             </div>
           </div>;
