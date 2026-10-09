@@ -180,6 +180,17 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). All registered
 
 ### 6.1 `src/app/agent.tsx` — chat + inline results
 
+- **Model selector (owner, 2026-10-08):** a subtle label below the microphone area opens two
+  Claude-style options: **شاهين 2.2 / Shaheen 2.2** (default) and **حُر 4.4 / Hurr 4.4**.
+  Hurr is visible in light gray and disabled, like the unavailable Haiku option in the owner's reference.
+  Keep the menu compact: two name/version rows, then a separated «عن النماذج / About models» row
+  opening the descriptions within the same popup.
+  Arabic descriptions are «سرعة خاطفة ودقة متناهية للإجابات السريعة» and
+  «قوة وتحمل فائق لأصعب المهام والمعالجات»; English descriptions are
+  “Lightning-fast precision for instant answers” and “Unmatched endurance for your toughest challenges”.
+  Shaheen labels the existing agent engine; Hurr has no backend route while disabled. The version
+  labels are product display names and must never be passed as provider API IDs. Enabling Hurr
+  requires an approved provider/model mapping.
 - One conversational surface. Message roles: `user`, `agent` (reply / clarify with answer chips),
   `results` (slogan + summary + intro + sort line + cards), `status` (thinking/searching, morphed in
   place).
