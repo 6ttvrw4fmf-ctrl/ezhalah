@@ -3,6 +3,12 @@ import { Modal, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useI18n } from '@/i18n';
 import { cardShadow, colors, radius } from '@/theme/tokens';
+import { TAP44 } from '@/theme/palette';
+
+// Where the composer's mic sits, measured from the composer's physical right edge: border 1 +
+// padding 10 + Send 38 + gap 6 + half of the 34px mic. The label is centred on it in BOTH locales
+// (the composer column is LTR-pinned), directly under the mic (owner 2026-10-09).
+const MIC_CENTER_FROM_RIGHT = 72;
 
 const MODELS = [
   { id: 'shaheen', ar: 'شاهين', en: 'Shaheen', version: '2.2',
@@ -44,8 +50,11 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
         accessibilityRole="button" accessibilityState={{ expanded: !!anchor, disabled }}
         accessibilityLabel={`${arabic ? 'اختيار النموذج' : 'Select model'}: ${arabic ? model.ar : model.en} ${model.version}`}
         onPress={() => { setAbout(false); trigger.current?.measureInWindow((x, y, measuredWidth) => setAnchor({ x, y, width: measuredWidth })); }}
+        // Visually a 24px line; the 44px floor comes from TAP_TARGET_CSS via this marker.
+        // @ts-expect-error web-only DOM props on the RNW host node
+        dataSet={{ ...TAP44 }}
         style={({ pressed }) => [styles.trigger, { opacity: disabled ? 0.45 : 1 }, pressed && styles.pressed]}>
-        <Text style={styles.label}>{arabic ? model.ar : model.en} {model.version}</Text>
+        <Text style={styles.label} numberOfLines={1}>{arabic ? model.ar : model.en} {model.version}</Text>
         <Ionicons name="chevron-down" size={12} color={colors.muted} />
       </Pressable>
       <Modal visible={!!anchor} transparent animationType="fade" onRequestClose={close}>
@@ -103,9 +112,12 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
 }
 
 const styles = StyleSheet.create({
-  wrap: { alignSelf: 'flex-end', marginTop: 2, marginRight: 36 },
-  trigger: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 44, paddingHorizontal: 8, borderRadius: radius.pill },
-  label: { color: colors.muted, fontSize: 12, fontWeight: '500' },
+  // A zero-width anchor at the mic's centre; the trigger is centred on it and overflows both ways.
+  // A zero-width ROW (a column would hand the label a 0px line box and wrap «شاهين 2.2» onto two lines).
+  // Negative margins eat most of the column's 8px gaps: ~6px to the composer, ~10px to the disclaimer.
+  wrap: { alignSelf: 'flex-end', marginRight: MIC_CENTER_FROM_RIGHT, marginTop: -6, marginBottom: -4, width: 0, flexDirection: 'row', justifyContent: 'center' },
+  trigger: { flexDirection: 'row', alignItems: 'center', flexShrink: 0, gap: 4, height: 24, paddingHorizontal: 6, borderRadius: radius.pill },
+  label: { color: colors.muted, fontSize: 12, lineHeight: 16, fontWeight: '500' },
   pressed: { backgroundColor: colors.tint },
   unavailable: { opacity: 0.55 },
   unavailableName: { color: colors.muted },
