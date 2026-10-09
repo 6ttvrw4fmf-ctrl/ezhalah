@@ -561,6 +561,7 @@ def _type_phrase(title: str) -> str:
 
 def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, str]:
     """(row, category, skip_reason). row is None exactly when the source leaves it unpublishable."""
+    detail_read = bool(detail)      # the detail page was fetched and parsed (a failed fetch is {})
     detail = detail or {}
     title = detail.get("title") or ix["title"]
     fields: dict[str, str] = detail.get("fields") or {}
@@ -614,7 +615,15 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
         # search/display layer under the owner's 2026-09-03 reversal.
         price_per_meter = amount
         if transaction_type == "Buy":
+            # The site's own «الإجمالي» figure, or — when the detail page WAS read and prints none —
+            # AUTHORITATIVE_NULL: the source settled that this ad has a rate and no total, so the
+            # upsert clears a stale total instead of keeping it (Falcon 2026-10-09: six ads were
+            # served at «0 ر.س» for 18 days because an older adapter had stored 0 and a plain None
+            # is dropped by db._unknown_must_not_overwrite_known). A FAILED detail fetch is not the
+            # source speaking, so it still sends None.
             price_total = detail.get("site_total")
+            if price_total is None and detail_read:
+                price_total = db.AUTHORITATIVE_NULL
     elif amount is not None and basis == "total" and transaction_type == "Rent":
         # PERIOD = SOURCE. Only a token in the price LABEL — the field that is ABOUT this figure —
         # may set the period. The description is deliberately NOT searched: it is long prose and a
