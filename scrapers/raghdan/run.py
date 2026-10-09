@@ -651,7 +651,9 @@ def _rendered_utilities(body: str) -> dict[str, bool]:
 # this prose is its statement: yes or nothing, never no; the utilities card stays the only source for
 # optical fibres (structured).
 _RT_CONTENT_RE = re.compile(r'class="rt-content[^"]*"\s*>(.*?)</div>', re.S)
-_PROSE_SKIP = ("optical_fibers",)
+# furnished: raghdan_residential_listings has NO furnished column — a «مفروشة» in the broker text made the whole
+# batch upsert fail (PGRST204, crawl 37927579101, 2026-10-09). Never emit a column the table does not have.
+_PROSE_SKIP = ("optical_fibers", "furnished")
 
 
 def _broker_text(body: str) -> str:
