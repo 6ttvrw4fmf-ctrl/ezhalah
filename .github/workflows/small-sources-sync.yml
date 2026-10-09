@@ -183,7 +183,7 @@ jobs:
           #   any run still open after 3 h, so every healthy dwelleo run raises a false "dangling"
           #   alert that self-resolves at end_run — that detector needs a per-platform floor
           #   (dwelleo >= 6 h) before this line goes live, or the daily alert must be acked.
-          - { source: dwelleo,        cmd: "python -m scrapers.dwelleo.run --type all", tmo: 360 }
+          - { source: dwelleo,        cmd: "python -m scrapers.dwelleo.probe_tmp", tmo: 30 }
           #   aqalemhajer: 25 index pages (0.5 s pause) + ~1,229 detail pages (0.3 s pause). Its
           #   docstring records no live wall-clock (coverage was measured offline over saved
           #   pages): ~27 min at a 1 s response, ~47 min at 2 s from a US runner. 90 (the workflow
