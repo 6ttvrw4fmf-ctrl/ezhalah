@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Easing,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -26,6 +27,8 @@ import { stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
 import { startVoiceInput, stopVoiceInput, cancelVoiceInput, isVoiceInputSupported } from '@/lib/voiceInput';
 import VoiceWaveform from '@/components/VoiceWaveform';
 import AgentModelSelector from '@/components/AgentModelSelector';
+import { livePickerNames, loadLivePickerNames, pickerMayOffer } from '@/data/pickerLivePlatforms';
+import { hiddenPlatformNames } from '@/data/loaderActivePlatforms';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
 import { initialReveal as initialRevealPure, CASCADE_MAX } from '@/lib/initialReveal';
@@ -66,7 +69,7 @@ import { listingOpenUrl, openListing } from '@/lib/openListing';
 import {
   EMPTY_AD_PANE, closeAdTab, hideAdPane, inAppPreviewHost, inAppViewerHost, openAdTab, showAdPane, type AdPane, type AdTab,
 } from '@/lib/inAppViewer';
-import { VIEWER_SPLIT_BREAKPOINT } from '@/lib/responsive';
+import { PICKER_SHEET_BREAKPOINT, VIEWER_SPLIT_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import AdViewer from '@/components/AdViewer';
 import { buildAfSummaryItems } from '@/lib/afSummary';
@@ -685,20 +688,31 @@ export default function Agent() {
     () => PLATFORM_META.filter((platform, index, all) => selectedSources.includes(platform.name) && all.findIndex(p => p.name === platform.name) === index),
     [selectedSources],
   );
+  // Bumped when the live-sites list lands, so the picker re-filters without a reopen.
+  const [pickerLiveTick, setPickerLiveTick] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    void loadLivePickerNames().then(() => { if (alive) setPickerLiveTick((n) => n + 1); });
+    return () => { alive = false; };
+  }, []);
   const pickerPlatforms = useMemo(() => {
     const needle = platformPickerSearch.replace(/\s+/g, '').toLocaleLowerCase();
     const unique = new Map<string, LoaderPlatform>();
+    const liveNames = livePickerNames();
+    const downNames = hiddenPlatformNames();
     for (const platform of PLATFORM_META) {
       // `logoOnly` brands are intentionally advertised in the loader but have no searchable
       // inventory. They must never be offered as a source restriction that would return nothing.
       if (platform.logoOnly) continue;
+      // A DOWN or EMPTY site is never offered (owner 2026-10-09) — src/data/pickerLivePlatforms.ts.
+      if (!pickerMayOffer(platform.name, liveNames, downNames)) continue;
       if (!unique.has(platform.name)) unique.set(platform.name, platform);
     }
     return Array.from(unique.values()).sort((a, b) => PLATFORM_PICKER_PROFILES[a.name].group.ar.order - PLATFORM_PICKER_PROFILES[b.name].group.ar.order).filter((platform) => {
       if (!needle) return true;
       return `${platform.name} ${t(platform.i18nKey)}`.replace(/\s+/g, '').toLocaleLowerCase().includes(needle);
     });
-  }, [platformPickerSearch, t]);
+  }, [platformPickerSearch, t, pickerLiveTick]);
   const [loaderBottomInset, setLoaderBottomInset] = useState<number>();
   // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): a search that arrived via Normal Filter's
   // «بحث» (the `?filter=` param — see the effect below, the ONE place this flips true) shows its
@@ -1028,6 +1042,8 @@ export default function Agent() {
   const adPaneRef = useRef<AdPane<AdTab<Listing>>>(EMPTY_AD_PANE);
   const commitAdPane = (p: AdPane<AdTab<Listing>>) => { adPaneRef.current = p; setAdPane(p); };
   const viewerSplit = useAtLeast(VIEWER_SPLIT_BREAKPOINT);
+  // Phone: the site picker is a bottom sheet; wider: a floating card (owner 2026-10-09).
+  const pickerSheet = !useAtLeast(PICKER_SHEET_BREAKPOINT);
   const pushAdTab = (tab: AdTab<Listing>) => {
     const { evicted, ...next } = openAdTab(adPaneRef.current, tab);
     commitAdPane(next);
@@ -3872,8 +3888,12 @@ export default function Agent() {
   const [pickerVisible, setPickerVisible] = useState(false);
   useEffect(() => {
     if (platformPickerOpen) setPickerVisible(true);
+    // Calm and mirrored: the sheet eases OUT on the way up and IN on the way down — the same path
+    // both ways, no overshoot (nothing here carried a flick). Reduced motion: no motion at all.
     const animation = Animated.timing(pickerProgress, {
-      toValue: platformPickerOpen ? 1 : 0, duration: reducedMotion ? 0 : 180,
+      toValue: platformPickerOpen ? 1 : 0,
+      duration: reducedMotion ? 0 : platformPickerOpen ? 240 : 170,
+      easing: platformPickerOpen ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
       useNativeDriver: Platform.OS !== 'web',
     });
     animation.start(({ finished }) => { if (finished && !platformPickerOpen) setPickerVisible(false); });
@@ -3983,17 +4003,35 @@ export default function Agent() {
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
       {pickerVisible && (
-        <Animated.View style={[s.platformPickerOverlay, { opacity: pickerProgress }]} testID="platform-picker" pointerEvents="box-none">
+        <Animated.View style={[s.platformPickerOverlay, !pickerSheet && s.platformPickerOverlayCard, { opacity: pickerProgress }]} testID="platform-picker" pointerEvents="box-none">
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t('Close')}
             onPress={closePlatformPicker}
             style={s.platformPickerBackdrop}
           />
-          <Animated.View style={[s.platformPickerCard, { opacity: pickerProgress, transform: [{ translateY: pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }] }]}>
+          {/* Perplexity-style mode menu (owner 2026-10-09): a bottom sheet on a phone, a compact floating
+              card on a laptop. Rows are logo + name (+ the measured coverage line, one quiet line) + a
+              check at the far end; the user may light several — each tap closes, the next opens again. */}
+          <Animated.View
+            style={[
+              s.platformPickerCard,
+              pickerSheet ? [s.platformPickerCardSheet, { paddingBottom: insets.bottom + 12 }] : s.platformPickerCardFloating,
+              {
+                opacity: pickerProgress,
+                transform: pickerSheet
+                  ? [{ translateY: pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [36, 0] }) }]
+                  : [
+                      { translateY: pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) },
+                      { scale: Platform.OS === 'web' ? 1 : pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) },
+                    ],
+              },
+            ]}
+          >
+            {pickerSheet ? <View style={s.platformPickerGrabber} /> : null}
             <View style={s.platformPickerHeader}>
               <View style={s.platformPickerHeading}>
-                <Text style={s.platformPickerTitle}>{t('Deep search')}</Text>
+                <Text style={s.platformPickerTitle}>{t('Deep search across websites')}</Text>
                 <Text style={s.platformPickerSubtitle}>{t('Choose one or more websites to search only their listings.')}</Text>
               </View>
               <Pressable
@@ -4008,7 +4046,7 @@ export default function Agent() {
             </View>
 
             <View style={s.platformPickerSearchBox}>
-              <Ionicons name="search-outline" size={18} color={colors.muted} />
+              <Ionicons name="search-outline" size={17} color={colors.muted} />
               <TextInput
                 value={platformPickerSearch}
                 onChangeText={setPlatformPickerSearch}
@@ -4041,54 +4079,45 @@ export default function Agent() {
                 accessibilityRole="button"
                 accessibilityLabel={t('All websites')}
                 onPress={() => choosePlatform(null)}
-                style={({ pressed }: any) => [s.platformPickerAll, pressed && s.platformPickerItemPressed]}
+                style={({ pressed }: any) => [s.platformPickerItem, pressed && s.platformPickerItemPressed]}
               >
-                <View style={s.platformPickerAllMark}>
-                  <Image source={require('../../assets/icons/eagle-search.svg')} style={{ width: 26, height: 26 }} contentFit="contain" tintColor={colors.primary} accessible={false} />
+                <View style={s.platformPickerLogoFrame}>
+                  <Image source={require('../../assets/icons/eagle-search.svg')} style={{ width: 24, height: 24 }} contentFit="contain" tintColor={colors.primary} accessible={false} />
                 </View>
-                <View style={s.platformPickerItemCopy}>
-                  <Text style={s.platformPickerItemName}>{t('All websites')}</Text>
-                </View>
+                <Text numberOfLines={1} style={[s.platformPickerItemName, !selectedSources.length && s.platformPickerItemNameOn]}>{t('All websites')}</Text>
                 {!selectedSources.length ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
               </Pressable>
 
               <View style={s.platformPickerRule} />
-              <View style={s.platformPickerGrid}>
-                {pickerPlatforms.map((platform, index) => {
-                  const selected = selectedSources.includes(platform.name);
-                  const profile = PLATFORM_PICKER_PROFILES[platform.name];
-                  const description = profile[locale];
-                  const group = profile.group[locale];
-                  const startsGroup = index === 0 || PLATFORM_PICKER_PROFILES[pickerPlatforms[index - 1].name].group[locale].key !== group.key;
-                  return (
-                    <View key={platform.name} style={{ width: '100%' }}>
-                      {startsGroup ? <Text accessibilityRole="header" style={[s.platformPickerSectionTitle, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>{group.label}</Text> : null}
-                    <Pressable
-                      testID={`platform-picker-${platform.name}`}
-                      accessibilityRole="button"
-                      accessibilityLabel={`${t(platform.i18nKey)}. ${description}`}
-                      accessibilityState={{ selected }}
-                      aria-pressed={selected}
-                      onPress={() => choosePlatform(platform.name)}
-                      style={({ pressed }: any) => [s.platformPickerItem, pressed && s.platformPickerItemPressed]}
-                    >
-                      <View style={s.platformPickerLogoFrame}>
-                        <Image source={profile.logo} tintColor={profile.layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" accessible={false} />
-                      </View>
-                      <View style={s.platformPickerItemCopy}>
-                        <Text style={[s.platformPickerItemName, s.platformPickerGridName, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>
-                          {t(platform.i18nKey)}
-                        </Text>
-                        <Text style={[s.platformPickerItemHint, { textAlign: locale === 'ar' ? 'right' : 'left', writingDirection: locale === 'ar' ? 'rtl' : 'ltr' }]}>
-                          {description}
-                        </Text>
-                      </View>
-                      {selected ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
-                    </Pressable>
+              {pickerPlatforms.map((platform) => {
+                const selected = selectedSources.includes(platform.name);
+                const profile = PLATFORM_PICKER_PROFILES[platform.name];
+                // The measured coverage sentence stays in the accessible name only — the row itself is
+                // logo + name + ✓, like Perplexity's mode rows (owner reference 2026-10-09).
+                const description = profile[locale];
+                // The reviewed 96×48 logo layout, drawn into a 56×28 slot.
+                const k = 28 / 48;
+                return (
+                  <Pressable
+                    key={platform.name}
+                    testID={`platform-picker-${platform.name}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${t(platform.i18nKey)}. ${description}`}
+                    accessibilityState={{ selected }}
+                    aria-pressed={selected}
+                    onPress={() => choosePlatform(platform.name)}
+                    style={({ pressed }: any) => [s.platformPickerItem, pressed && s.platformPickerItemPressed]}
+                  >
+                    <View style={s.platformPickerLogoFrame}>
+                      <Image source={profile.logo} tintColor={profile.layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: profile.layout.width * k, height: profile.layout.height * k, left: profile.layout.left * k, top: profile.layout.top * k }} contentFit="contain" accessible={false} />
                     </View>
-                  );
-                })}
-              </View>
+                    <Text numberOfLines={1} style={[s.platformPickerItemName, selected && s.platformPickerItemNameOn, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>
+                      {t(platform.i18nKey)}
+                    </Text>
+                    {selected ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
+                  </Pressable>
+                );
+              })}
               {!pickerPlatforms.length ? <Text style={s.platformPickerEmpty}>{t('No matching websites')}</Text> : null}
             </ScrollView>
           </Animated.View>
@@ -4702,14 +4731,21 @@ export default function Agent() {
                   style={({ pressed }: any) => [s.initialSearch, selectedPlatforms.length > 0 && s.initialSearchSelected, pressed && s.initialSearchPressed]}
                 >
                   {selectedPlatforms.length ? (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxWidth: 150, height: 28 }} contentContainerStyle={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
-                      {selectedPlatforms.map(platform => {
-                        const profile = PLATFORM_PICKER_PROFILES[platform.name];
-                        return <View key={platform.name} style={{ width: 48, height: 24, borderRadius: 4, overflow: 'hidden', backgroundColor: 'transparent' }}>
-                          <Image source={profile.logo} tintColor={profile.layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: profile.layout.width / 2, height: profile.layout.height / 2, left: profile.layout.left / 2, top: profile.layout.top / 2 }} contentFit="contain" accessible={false} />
-                        </View>;
+                    <View style={s.chipStack}>
+                      {/* Up to three overlapping logo discs + «+N»; the pill keeps ONE width whatever the
+                          count, so the text box never shrinks (owner 2026-10-09). */}
+                      {selectedPlatforms.slice(0, 3).map((platform, i) => {
+                        const { logo, layout } = PLATFORM_PICKER_PROFILES[platform.name];
+                        // The reviewed 96×48 frame, shrunk until the mark's box fits a 19px disc.
+                        const k = Math.min(15 / layout.height, 17 / layout.width);
+                        return (
+                          <View key={platform.name} style={[s.chipBadge, i > 0 && s.chipBadgeOverlap, { zIndex: 3 - i }]}>
+                            <Image source={logo} tintColor={layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: layout.width * k, height: layout.height * k, left: 9.5 - (48 - layout.left) * k, top: 9.5 - (24 - layout.top) * k }} contentFit="contain" accessible={false} />
+                          </View>
+                        );
                       })}
-                    </ScrollView>
+                      {selectedPlatforms.length > 3 ? <Text style={s.chipCount}>+{selectedPlatforms.length - 3}</Text> : null}
+                    </View>
                   ) : (
                     <>
                       <Image source={require('../../assets/icons/eagle-search.svg')} style={s.initialSearchIcon} contentFit="contain" tintColor={colors.ink} accessible={false} />
@@ -5250,43 +5286,51 @@ const s = StyleSheet.create({
   // alignSelf center: one line of text sits on the same middle line as «بحث», mic and Send; taller
   // (wrapped) text simply fills the row, and the buttons stay bottom-aligned.
   composerInputColumn: { flex: 1, minWidth: 0, alignItems: 'stretch', position: 'relative', alignSelf: 'center' },
-  initialSearch: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 7, height: 30, paddingHorizontal: 11, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
-  initialSearchSelected: { borderWidth: 0, backgroundColor: 'transparent', paddingHorizontal: 4 },
+  // One pill, one width, whatever is picked: «بحث» + eagle, or up to three overlapping logo discs
+  // and a «+N». minWidth (not width) so an English «Search» can never be squeezed. (owner 2026-10-09)
+  initialSearch: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, height: 30, minWidth: 112, paddingHorizontal: 9, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
+  initialSearchSelected: { backgroundColor: colors.tint, borderColor: colors.tintLine },
   initialSearchPressed: { backgroundColor: colors.segTrack },
   initialSearchIcon: { width: 17, height: 17 },
-  selectedSearchLogo: { width: 21, height: 21, borderRadius: 5 },
   initialSearchText: { color: colors.ink, fontSize: 14, lineHeight: 20, maxWidth: 148, flexShrink: 1 },
+  chipStack: { flexDirection: 'row', alignItems: 'center' },
+  // A 22px disc with a 1.5px ring in the pill's own fill, so overlapping marks stay separated.
+  chipBadge: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: colors.tint, backgroundColor: colors.surface, overflow: 'hidden' },
+  // The FIRST pick sits on top (zIndex inline), the rest peek out from behind it.
+  chipBadgeOverlap: { marginLeft: -7 },
+  chipCount: { marginLeft: 5, fontSize: 11, lineHeight: 14, fontWeight: '600', color: colors.body },
   micBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   micBtnPressed: { backgroundColor: colors.segTrack, transform: [{ scale: 0.96 }] },
 
-  // Website picker — a single focused sheet, rather than a second settings screen. The selected
-  // logo then stays in the landing chip, making the restriction visible before the user sends.
-  platformPickerOverlay: { ...StyleSheet.absoluteFill, zIndex: 80, alignItems: 'center', justifyContent: 'flex-end', padding: IS_WEB ? 16 : 0 },
-  platformPickerBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(12, 26, 18, 0.34)' },
-  platformPickerCard: { width: '100%', maxWidth: 560, maxHeight: IS_WEB ? '72%' : '80%', backgroundColor: colors.surface, borderRadius: 24, padding: 18, paddingBottom: 20, ...cardShadow, shadowOpacity: 0.2, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 12 },
-  platformPickerHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 },
-  platformPickerHeading: { flex: 1, minWidth: 0 },
-  platformPickerTitle: { fontFamily: CHAT_FONT, fontSize: 18, lineHeight: 26, fontWeight: '600', color: colors.ink, textAlign: 'right' },
-  platformPickerSubtitle: { fontFamily: CHAT_FONT, fontSize: 12.5, lineHeight: 19, color: colors.muted, marginTop: 2, textAlign: 'right' },
-  platformPickerClose: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
+  // Website picker (owner reference 2026-10-09: Perplexity's mode sheet): an off-white panel with large
+  // rounded top corners and a thin ✕; rows are a small logo slot + a large label (+ a thin green ✓ on a
+  // lit row — its label in full ink, the rest in muted grey). No headers, no row dividers, one hairline
+  // under «كل المواقع». platformPickerItem may reference colors.* ONLY — verify-platform-picker-profiles.ts
+  // evaluates it in isolation.
+  platformPickerOverlay: { ...StyleSheet.absoluteFill, zIndex: 80, alignItems: 'center', justifyContent: 'flex-end' },
+  platformPickerOverlayCard: { padding: 16 },
+  platformPickerBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: colors.scrim },
+  platformPickerCard: { width: '100%', backgroundColor: colors.paper, paddingHorizontal: 16, ...cardShadow, shadowOpacity: 0.18, shadowRadius: 28, shadowOffset: { width: 0, height: -4 }, elevation: 12 },
+  platformPickerCardSheet: { maxHeight: '84%', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingTop: 8 },
+  platformPickerCardFloating: { maxWidth: 400, maxHeight: '74%', borderRadius: 24, paddingTop: 16, paddingBottom: 14 },
+  platformPickerGrabber: { alignSelf: 'center', width: 36, height: 5, borderRadius: 3, backgroundColor: colors.line, marginBottom: 12 },
+  platformPickerHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12, paddingLeft: 4 },
+  platformPickerHeading: { flex: 1, minWidth: 0, paddingTop: 6 },
+  platformPickerTitle: { fontFamily: CHAT_FONT, fontSize: 18, lineHeight: 25, fontWeight: '600', color: colors.ink, textAlign: 'right' },
+  platformPickerSubtitle: { fontFamily: CHAT_FONT, fontSize: 13, lineHeight: 19, color: colors.muted, marginTop: 3, textAlign: 'right' },
+  platformPickerClose: { width: 44, height: 44, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', marginRight: -10 },
   platformPickerClosePressed: { backgroundColor: colors.segTrack },
-  platformPickerSearchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 42, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 13, backgroundColor: colors.paper, paddingHorizontal: 12, marginBottom: 12 },
-  platformPickerSearchInput: { flex: 1, minWidth: 0, fontFamily: CHAT_FONT, fontSize: 16, lineHeight: 22, color: colors.ink, paddingVertical: 8, textAlign: 'right', writingDirection: 'rtl', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
+  platformPickerSearchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 38, borderRadius: 12, backgroundColor: colors.segTrack, paddingHorizontal: 12, marginBottom: 8 },
+  platformPickerSearchInput: { flex: 1, minWidth: 0, fontFamily: CHAT_FONT, fontSize: 16, lineHeight: 22, color: colors.ink, paddingVertical: 6, textAlign: 'right', writingDirection: 'rtl', ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}) },
   platformPickerList: { minHeight: 0 },
-  platformPickerListContent: { paddingBottom: 2 },
-  platformPickerAll: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 62, borderWidth: 0, borderColor: colors.fieldLine, borderRadius: 10, paddingHorizontal: 10, backgroundColor: colors.surface },
-  platformPickerAllMark: { width: 32, height: 32, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
-  platformPickerItemCopy: { flex: 1, minWidth: 0 },
-  platformPickerItemHint: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 11.5, lineHeight: 17, marginTop: 1, textAlign: 'right' },
-  platformPickerRule: { height: 1, backgroundColor: colors.line, marginTop: 12, marginBottom: 0 },
-  platformPickerGrid: { width: '100%' },
-  platformPickerSectionTitle: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 18, fontWeight: '600', paddingHorizontal: 10, paddingTop: 17, paddingBottom: 7 },
-  platformPickerItem: { width: '100%', minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 14, borderWidth: 0, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 10, backgroundColor: colors.surface },
+  platformPickerListContent: { paddingBottom: 4 },
+  platformPickerItem: { width: '100%', minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: colors.paper },
   platformPickerItemPressed: { backgroundColor: colors.segTrack },
-  platformPickerLogoFrame: { width: 96, height: 48, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', flexShrink: 0, overflow: 'hidden' },
-  platformPickerLogo: { width: 58, height: 44 },
-  platformPickerItemName: { fontFamily: CHAT_FONT, flex: 1, minWidth: 0, color: colors.ink, fontSize: 16, lineHeight: 23, fontWeight: '400', textAlign: 'right' },
-  platformPickerGridName: { flex: 0, textAlign: 'right' },
+  platformPickerLogoFrame: { width: 56, height: 28, alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
+  // Unselected rows read in muted grey; the lit row (and «كل المواقع» when nothing is picked) in ink.
+  platformPickerItemName: { fontFamily: CHAT_FONT, flex: 1, minWidth: 0, color: colors.muted, fontSize: 17, lineHeight: 24, fontWeight: '400', textAlign: 'right' },
+  platformPickerItemNameOn: { color: colors.ink, fontWeight: '500' },
+  platformPickerRule: { height: 1, backgroundColor: colors.line, marginVertical: 6, marginHorizontal: 10 },
   platformPickerEmpty: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: 'center', paddingVertical: 28 },
   // The LTR pin that fixes the physical order lives INLINE on the row (Sidebar's LTR_PIN idiom —
   // RNW rejects `direction` inside StyleSheet.create but honours it as an inline style).
@@ -5298,7 +5342,8 @@ const s = StyleSheet.create({
   // fixed-width controls, whatever the amplitude (owner brief §1/§4).
   voiceWaveWrap: { flex: 1, alignSelf: 'stretch', minHeight: 34, overflow: 'hidden' },
   stopBtn: { width: 34, height: 34, borderRadius: 12, backgroundColor: colors.dark, alignItems: 'center', justifyContent: 'center' },
-  disc: { fontSize: 11, lineHeight: 16, color: colors.muted, textAlign: 'center', marginTop: 10, paddingHorizontal: 12 },
+  // marginTop 2: the model label above is already the breathing room (owner 2026-10-09: no «big space»).
+  disc: { fontSize: 11, lineHeight: 16, color: colors.muted, textAlign: 'center', marginTop: 2, paddingHorizontal: 12 },
   // Centered Filter/AI pill band under the header (see the JSX note). Explicit height on BOTH ends
   // so MODE_EASE can glide it to 0; overflow hidden so the collapse clips instead of squashing.
   modeWrap: { alignSelf: 'center', alignItems: 'center', justifyContent: 'center', height: 58, overflow: 'hidden' },
