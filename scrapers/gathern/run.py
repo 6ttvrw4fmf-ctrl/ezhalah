@@ -849,8 +849,16 @@ _AMENITY_FLAG_LABELS: dict[str, str] = {
 }
 
 
-def _amenity_flags(labels: list[str]) -> dict[str, bool]:
-    return {col: label in labels for col, label in _AMENITY_FLAG_LABELS.items()}
+# LISTED = YES; ABSENT = SILENCE, NEVER «NO» (🔬 AF engineer 2026-10-09, backlog 245; ADVANCED_FILTER_SOURCE_TRUTH
+# §2 «Never infer "no" from missing data»). Gathern's feature list names only what a unit HAS and never prints a
+# no, yet this returned False for every label it lacked: 374 active units whose list is EMPTY were served «no
+# lift», and «no driver room» stood on 5,247 of 5,266 active units. A list that was read settles the column —
+# absent is AUTHORITATIVE_NULL, so the crawl clears the manufactured False; a payload with no list at all says
+# nothing (None, dropped by the upsert).
+def _amenity_flags(labels: list[str], listed: bool = True) -> dict[str, Any]:
+    if not listed:
+        return {}
+    return {col: (True if label in labels else db.AUTHORITATIVE_NULL) for col, label in _AMENITY_FLAG_LABELS.items()}
 
 
 # Bathroom count from the list response's amenities[] — a list of {icon, count, title} objects where
@@ -1072,7 +1080,7 @@ def map_listing(it: dict) -> Optional[dict]:
         "photo_urls": _photos(it),
         "rega_location_verified": False,
         "additional_info": info,
-        **_amenity_flags(amenity_labels),
+        **_amenity_flags(amenity_labels, listed=isinstance(it.get("features"), list)),
     }
 
 
