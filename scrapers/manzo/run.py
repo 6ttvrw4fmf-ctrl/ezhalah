@@ -32,13 +32,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 API = "https://api.manzo.com.sa/property/v1/properties"
 SITE = "https://manzo.com.sa/ar/property/"
 SOURCE = "مانزو"
 PREFIX = "MNZ"
 SLUG = "manzo"
-IMPERSONATE = "chrome"
 
 _TYPE_AR = {"Apartment": "شقة", "Villa": "فيلا", "Floor": "دور", "Land": "ارض", "Office": "مكتب",
             "Shop": "محل", "Building": "عمارة", "Warehouse": "مستودع", "Studio": "استوديو"}
@@ -50,7 +50,7 @@ _NEVER_STORE = {"lister_info", "borders", "commission", "deep_link", "share_imag
 def get_json(s: cc.Session, url: str) -> Any:
     for attempt in range(3):
         try:
-            r = s.get(url, impersonate=IMPERSONATE, timeout=40)
+            r = s.get(url, timeout=40)
             r.raise_for_status()
             return r.json()
         except Exception:  # noqa: BLE001
@@ -163,7 +163,10 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(API, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     listing, declared = walk(s)
     print(f"{SOURCE}: {len(listing)} propert(ies) (API declares total_count={declared})", flush=True)
 

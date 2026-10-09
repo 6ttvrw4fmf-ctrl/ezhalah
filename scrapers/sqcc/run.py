@@ -57,6 +57,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
     find_district_in_text, is_ambiguous_standalone_word, norm_district_tok, to_catalog)
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 BASE = "https://sqcc.sa"
 SITEMAP = BASE + "/wp-sitemap-posts-realestate-1.xml"
@@ -64,7 +65,6 @@ CATS = BASE + "/wp-sitemap-taxonomies-realestate_cats-1.xml"
 SOURCE = "مجموعة صالح القرشي العقارية"
 PREFIX = "SQC"
 SLUG = "sqcc"
-IMPERSONATE = "chrome"
 
 _DEAL_CAT = {"وحدات للبيع": "Buy", "وحدات للأيجار": "Rent"}
 _DEAL_WORD = ((re.compile(r"للبيع|تمليك"), "Buy"), (re.compile(r"لل[اإأ]يجار|للتأجير|للتاجير"), "Rent"))
@@ -85,7 +85,7 @@ def fetch(s: cc.Session, url: str) -> Any:
     """The response for 200/404 (a past-the-end page is an answer, not a failure); retries anything else."""
     for attempt in range(3):
         try:
-            r = s.get(url, impersonate=IMPERSONATE, timeout=40)
+            r = s.get(url, timeout=40)
             if r.status_code in (200, 404):
                 return r
             raise RuntimeError(f"HTTP {r.status_code} for {url}")
@@ -293,7 +293,10 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(BASE, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     urls = [urllib.parse.unquote(u) for u in re.findall(r"<loc>([^<]+)</loc>", fetch(s, SITEMAP).text)]
     cats, where = walk_categories(s)
     print(f"{SOURCE}: {len(urls)} realestate post(s) in the sitemap; categories "

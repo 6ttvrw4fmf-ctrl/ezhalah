@@ -133,18 +133,18 @@ jobs:
           # prune_unseen() or end_run() and leaves a dangling scrape_runs row (the dealapp lesson).
           # The first scrape of each is a manual dispatch with `source: <slug>` (the input above).
           #   API / REST sources — a handful of calls each:
-          - { source: alsidra,     cmd: "python -m scrapers.alsidra.run --type all", tmo: 20 }
+          - { source: alsidra,     cmd: "python -m scrapers.alsidra.run --type all", tmo: 20, proxy: true }
           - { source: moftah,      cmd: "python -m scrapers.moftah.run --type all", tmo: 20 }
           - { source: masar,       cmd: "python -m scrapers.masar.run --type all", tmo: 20 }
           #   aljassim: ~90 detail pages behind an hcdn challenge it solves in-process.
           - { source: aljassim,    cmd: "python -m scrapers.aljassim.run --type all", tmo: 20 }
           #   gomenassat: one POST for 256 offers, then ~150 detail pages (transacted ones skipped).
-          - { source: gomenassat,  cmd: "python -m scrapers.gomenassat.run --type all", tmo: 20 }
+          - { source: gomenassat,  cmd: "python -m scrapers.gomenassat.run --type all", tmo: 20, proxy: true }
           #   nufouth: 4 index pages + one API record per property (~270).
           - { source: nufouth,     cmd: "python -m scrapers.nufouth.run --type all", tmo: 30 }
           #   almotmkenah: all 361 index ads are fetched (the ~339 archived ones ARE its removal
           #   signal), 0.2s apart.
-          - { source: almotmkenah, cmd: "python -m scrapers.almotmkenah.run --type all", tmo: 30 }
+          - { source: almotmkenah, cmd: "python -m scrapers.almotmkenah.run --type all", tmo: 30, proxy: true }
           #   ialqarawi: 66 whole-category pages, then ~2,641 detail pages over 8 worker threads
           #   (~0.6s each → ~4 min).
           #   ialqarawi: `proxy: true` (2026-09-28, Scraping Engineer) — every profile DIRECT drew an
@@ -209,11 +209,11 @@ jobs:
           - { source: m3tmd,          cmd: "python -m scrapers.m3tmd.run --type all", tmo: 20 }
           - { source: senan,          cmd: "python -m scrapers.senan.run --type all", tmo: 20 }
           #   Small HTML catalogues — tens of detail pages at <=1 s each:
-          - { source: alqasem,        cmd: "python -m scrapers.alqasem.run --type all", tmo: 20 }
-          - { source: fkralemar,      cmd: "python -m scrapers.fkralemar.run --type all", tmo: 20 }
-          - { source: wadod,          cmd: "python -m scrapers.wadod.run --type all", tmo: 20 }
-          - { source: alrifai,        cmd: "python -m scrapers.alrifai.run --type all", tmo: 20 }
-          - { source: sodasyat,       cmd: "python -m scrapers.sodasyat.run --type all", tmo: 20 }
+          - { source: alqasem,        cmd: "python -m scrapers.alqasem.run --type all", tmo: 20, proxy: true }
+          - { source: fkralemar,      cmd: "python -m scrapers.fkralemar.run --type all", tmo: 20, proxy: true }
+          - { source: wadod,          cmd: "python -m scrapers.wadod.run --type all", tmo: 20, proxy: true }
+          - { source: alrifai,        cmd: "python -m scrapers.alrifai.run --type all", tmo: 20, proxy: true }
+          - { source: sodasyat,       cmd: "python -m scrapers.sodasyat.run --type all", tmo: 20, proxy: true }
           #   hasaad: `proxy: true` (2026-10-05, Scraping Engineer) — walk_session() probes 3 profiles DIRECT first;
           #   the proxy is spent only when DIRECT is refused (failed 10-05 on one pinned profile).
           - { source: hasaad,         cmd: "python -m scrapers.hasaad.run --type all", tmo: 20, proxy: true }
@@ -225,18 +225,18 @@ jobs:
           - { source: villassa,       cmd: "python -m scrapers.villassa.run --type all", tmo: 20 }
           - { source: marksa,         cmd: "python -m scrapers.marksa.run --type all", tmo: 20 }
           #   thousand: 105 cards + 105 detail pages at 0.5 s (measured 383 s).
-          - { source: thousand,       cmd: "python -m scrapers.thousand.run --type all", tmo: 20 }
+          - { source: thousand,       cmd: "python -m scrapers.thousand.run --type all", tmo: 20, proxy: true }
           #   ebriza: 22 API pages + one POST detail per record (207) at 0.7 s.
           - { source: ebriza,         cmd: "python -m scrapers.ebriza.run --type all", tmo: 20 }
           #   eilmalriyada: one catalogue call + 283 gallery records at 0.6 s.
           - { source: eilmalriyada,   cmd: "python -m scrapers.eilmalriyada.run --type all", tmo: 20, proxy: true }
           #   daryusuf: 3 REST pages + one page per post (290) at 1.0 s.
-          - { source: daryusuf,       cmd: "python -m scrapers.daryusuf.run --type all", tmo: 30 }
+          - { source: daryusuf,       cmd: "python -m scrapers.daryusuf.run --type all", tmo: 30, proxy: true }
           #   Compound sites (one row per unit type; the compound page is the unit of work):
           #   rightcompound walks 254 compound pages at 0.8 s; the other four walk 4-43 pages.
           - { source: rightcompound,  cmd: "python -m scrapers.rightcompound.run --type all", tmo: 30 }
-          - { source: livingcompound, cmd: "python -m scrapers.livingcompound.run --type all", tmo: 20 }
-          - { source: azure,          cmd: "python -m scrapers.azure.run --type all", tmo: 20 }
+          - { source: livingcompound, cmd: "python -m scrapers.livingcompound.run --type all", tmo: 20, proxy: true }
+          - { source: azure,          cmd: "python -m scrapers.azure.run --type all", tmo: 20, proxy: true }
           - { source: expattrusted,   cmd: "python -m scrapers.expattrusted.run --type all", tmo: 20 }
           - { source: flow,           cmd: "python -m scrapers.flow.run --type all", tmo: 20 }
           - { source: abaad,          cmd: "python -m scrapers.abaad.run --type all", tmo: 20 }
@@ -266,7 +266,7 @@ jobs:
           - { source: ibaax,        cmd: "python -m scrapers.ibaax.run --type all", tmo: 20 }
           - { source: remaxsa,      cmd: "python -m scrapers.remaxsa.run --type all", tmo: 15 }
           - { source: qmra,         cmd: "python -m scrapers.qmra.run --type all", tmo: 15 }
-          - { source: alajlan,      cmd: "python -m scrapers.alajlan.run --type all", tmo: 15 }
+          - { source: alajlan,      cmd: "python -m scrapers.alajlan.run --type all", tmo: 15, proxy: true }
           # wave 3. wahadat fetches 100 project pages (~56 MB of RSC payload) so it gets a wider
           # timeout; squares is one REST call plus 18 detail pages; rawaf is 11 projects + 11 unit calls.
           - { source: wahadat,      cmd: "python -m scrapers.wahadat.run --type all", tmo: 30 }
@@ -281,37 +281,37 @@ jobs:
           # wave 3, batch 6: arsh is a hand-built Duda site (1 index + 23 pages).
           - { source: arsh,         cmd: "python -m scrapers.arsh.run --type all", tmo: 10, proxy: true }
           # batch 7 (2026-09-27): the owner's 15-site list.
-          - { source: sirdab,      cmd: "python -m scrapers.sirdab.run --type all", tmo: 15 }
+          - { source: sirdab,      cmd: "python -m scrapers.sirdab.run --type all", tmo: 15, proxy: true }
           - { source: ashab,       cmd: "python -m scrapers.ashab.run --type all", tmo: 45, proxy: true }
           - { source: manafe,      cmd: "python -m scrapers.manafe.run --type all", tmo: 25 }
-          - { source: wajaf,       cmd: "python -m scrapers.wajaf.run --type all", tmo: 10 }
-          - { source: albukaeri,   cmd: "python -m scrapers.albukaeri.run --type all", tmo: 10 }
+          - { source: wajaf,       cmd: "python -m scrapers.wajaf.run --type all", tmo: 10, proxy: true }
+          - { source: albukaeri,   cmd: "python -m scrapers.albukaeri.run --type all", tmo: 10, proxy: true }
           #   ryadah: `proxy: true` (2026-09-28) — WP REST 403'd the runner IP; the probe tries 3
           #   profiles DIRECT before the proxy, so the proxy is only used when DIRECT is refused.
           - { source: ryadah,      cmd: "python -m scrapers.ryadah.run --type all", tmo: 10, proxy: true }
-          - { source: sqcc,        cmd: "python -m scrapers.sqcc.run --type all", tmo: 10 }
+          - { source: sqcc,        cmd: "python -m scrapers.sqcc.run --type all", tmo: 10, proxy: true }
           - { source: daraa,       cmd: "python -m scrapers.daraa.run --type all", tmo: 10, proxy: true }
-          - { source: tawia,       cmd: "python -m scrapers.tawia.run --type all", tmo: 10 }
+          - { source: tawia,       cmd: "python -m scrapers.tawia.run --type all", tmo: 10, proxy: true }
           # SuperOffice (2026-09-27): owner-approved — available private offices only.
-          - { source: superoffice, cmd: "python -m scrapers.superoffice.run --type all", tmo: 10 }
+          - { source: superoffice, cmd: "python -m scrapers.superoffice.run --type all", tmo: 10, proxy: true }
           # 2026-09-28 (owner-approved): Shomou = 26 index pages + ~1,028 ad pages (only in-date ads kept);
           #   Maktab = one public JSON page of offices.
           - { source: shomou,      cmd: "python -m scrapers.shomou.run --type all", tmo: 30 }
           - { source: maktab,      cmd: "python -m scrapers.maktab.run --type all", tmo: 10 }
           # wave 3, batch 5: holoul is an open JSON API (238 rows → 30); eightfloor is a Nuzul tenant (public API, 2 rows); manzo is an open JSON API (1 row).
-          - { source: manzo,        cmd: "python -m scrapers.manzo.run --type all", tmo: 10 }
-          - { source: eightfloor,   cmd: "python -m scrapers.eightfloor.run --type all", tmo: 10 }
-          - { source: holoul,       cmd: "python -m scrapers.holoul.run --type all", tmo: 10 }
+          - { source: manzo,        cmd: "python -m scrapers.manzo.run --type all", tmo: 10, proxy: true }
+          - { source: eightfloor,   cmd: "python -m scrapers.eightfloor.run --type all", tmo: 10, proxy: true }
+          - { source: holoul,       cmd: "python -m scrapers.holoul.run --type all", tmo: 10, proxy: true }
           # wave 3, batch 4: dallali is an open JSON storefront (7 rows); muajarh is an open JSON API (18 rows, 11 real); mobasher reads its discovery API + 28 pages for age/facade; nafithh is server-rendered HTML (3 list pages + 30 details); opensooq's SERP carries the whole vertical as inline JSON (3 pages).
           - { source: opensooq,     cmd: "python -m scrapers.opensooq.run --type all", tmo: 10 }
           - { source: nafithh,      cmd: "python -m scrapers.nafithh.run --type all", tmo: 15 }
-          - { source: mobasher,     cmd: "python -m scrapers.mobasher.run --type all", tmo: 15 }
-          - { source: muajarh,      cmd: "python -m scrapers.muajarh.run --type all", tmo: 10 }
+          - { source: mobasher,     cmd: "python -m scrapers.mobasher.run --type all", tmo: 15, proxy: true }
+          - { source: muajarh,      cmd: "python -m scrapers.muajarh.run --type all", tmo: 10, proxy: true }
           - { source: dallali,      cmd: "python -m scrapers.dallali.run --type all", tmo: 10, proxy: true }
           # wave 3b (2026-09-27): maqam is a Nuzul tenant feed (130 records, only `available` kept); earthapp and
           # nawafeth are small complete feeds (54 / 20 ads).
           - { source: maqam,        cmd: "python -m scrapers.maqam.run --type all", tmo: 15 }
-          - { source: earthapp,     cmd: "python -m scrapers.earthapp.run --type all", tmo: 15 }
+          - { source: earthapp,     cmd: "python -m scrapers.earthapp.run --type all", tmo: 15, proxy: true }
           - { source: nawafeth,     cmd: "python -m scrapers.nawafeth.run --type all", tmo: 15 }
           - { source: erapulse,    cmd: "python -m scrapers.erapulse.run --type all" }
           - { source: nowaisiry,   cmd: "python -m scrapers.nowaisiry.run --type all" }

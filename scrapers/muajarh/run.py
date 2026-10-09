@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 API = "https://admin.muajarh.com/api/v1/properties"
 MEDIA = "https://admin.muajarh.com/"
@@ -55,7 +56,6 @@ SITE = "https://muajarh.com/properties"
 SOURCE = "مؤاجرة"
 PREFIX = "MJR"
 SLUG = "muajarh"
-IMPERSONATE = "chrome"
 
 _CATEGORY_AR = {"villas": "فيلا", "apartments": "شقة", "floor": "دور", "floors": "دور", "rooms": "غرفة",
                 "studios": "استوديو", "warehouses": "مستودع", "shops": "محل", "offices": "مكتب"}
@@ -71,7 +71,7 @@ _NEVER_STORE = {"advertiserName", "advertiserMobile", "deedNumber", "locationDes
 def get_json(s: cc.Session, url: str) -> Any:
     for attempt in range(3):
         try:
-            r = s.get(url, impersonate=IMPERSONATE, timeout=40)
+            r = s.get(url, timeout=40)
             r.raise_for_status()
             return r.json()
         except Exception:  # noqa: BLE001
@@ -195,7 +195,10 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(API, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     listings, declared = walk(s)
     print(f"{SOURCE}: {len(listings)} record(s) (API declares total={declared})", flush=True)
 

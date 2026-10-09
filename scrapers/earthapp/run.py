@@ -55,13 +55,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, norm_district_tok, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 API = "https://earthapp.com.sa/api"
 MAP = "https://map.earthapp.com.sa"
 SOURCE = "تطبيق أرض"
 PREFIX = "EAR"
 SLUG = "earthapp"
-IMPERSONATE = "chrome"
 TIMEOUT = 30
 MAX_LAND_PPM = 50_000          # owner threshold 2026-09-26: above this a per-m² land rate is not believable
 
@@ -77,7 +77,7 @@ def get_json(s: cc.Session, url: str) -> Any:
     last: Exception | None = None
     for attempt in range(3):     # measured: one 40 s stall on the first call, then 1.7 s responses
         try:
-            r = s.get(url, impersonate=IMPERSONATE, timeout=TIMEOUT, headers={"Accept": "application/json"})
+            r = s.get(url, timeout=TIMEOUT, headers={"Accept": "application/json"})
             r.raise_for_status()
             return r.json()
         except Exception as e:  # noqa: BLE001
@@ -263,7 +263,10 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(API, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     offers, declared, pages_ok = walk(s)
     if a.limit:
         offers = offers[: a.limit]

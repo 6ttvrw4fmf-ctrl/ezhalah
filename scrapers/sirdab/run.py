@@ -39,13 +39,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 LIST = "https://marketplace.sirdab.co/ar/ads"
 SITE = "https://marketplace.sirdab.co/ar/ads/"
 SOURCE = "سرداب"
 PREFIX = "SRD"
 SLUG = "sirdab"
-IMPERSONATE = "chrome"
 
 _TYPE_AR = {"warehouse": "مستودع", "storefront": "محل", "workshop": "ورشة", "factory": "مصنع",
             "storage_yard": "ساحة تخزين", "storage": "تخزين ذاتي"}
@@ -70,7 +70,7 @@ _NEVER_STORE = {"owner_phone", "user_id", "created_by", "building_number", "seco
 def get(s: cc.Session, url: str) -> str:
     for attempt in range(3):
         try:
-            r = s.get(url, impersonate=IMPERSONATE, timeout=40)
+            r = s.get(url, timeout=40)
             r.raise_for_status()
             return r.text
         except Exception:  # noqa: BLE001
@@ -224,7 +224,10 @@ def main() -> int:
     a = ap.parse_args()
     dry = a.dry_run
 
-    s = cc.Session()
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(LIST, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     ads, declared = walk(s)
     print(f"{SOURCE}: {len(ads)} ad(s) (site declares totalCount={declared})", flush=True)
 
