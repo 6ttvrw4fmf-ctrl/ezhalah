@@ -144,3 +144,36 @@ def test_a_passed_published_end_date_is_the_sources_own_word(monkeypatch):
     assert kills == ["D0", "D1"] and killed == 2
     gone = {e["ad_number"]: e["note"] for e in ev if e["verdict"] == "GONE"}
     assert set(gone) == {"D0", "D1"} and all("published end date" in n for n in gone.values())
+
+
+# ── 2026-10-09 (backlog 300): a crawl that READ an ad sold/rented records it; that is not absence ──
+def test_note_read_gone_records_only_sold_or_rented(monkeypatch):
+    monkeypatch.setattr(db, "_READ_GONE", {})
+    assert db.note_read_gone("A1", "مباع بالكامل") and db.note_read_gone("A2", "تم التأجير")
+    for status in ("محجوز", "قريبا", "", None, "متاح"):
+        assert not db.note_read_gone("A3", status), status
+    assert not db.note_read_gone(None, "مباع")
+    assert set(db._READ_GONE) == {"A1", "A2"}
+
+
+def test_a_crawl_read_sold_hides_even_when_the_page_answers_200(monkeypatch):
+    monkeypatch.setattr(db, "_READ_GONE", {"D0": "مباع"})
+    killed, kills, ev = _run(monkeypatch, _Session(dead_status=200))
+    assert kills == ["D0"] and killed == 1
+    assert [e["note"] for e in ev if e["verdict"] == "GONE"] == [f"{db.OWN_PAGE_ORACLE}: its own page read «مباع» this run"]
+
+
+def test_the_crawlers_that_drop_sold_ads_record_the_reading(monkeypatch):
+    from scrapers.ashab import run as ashab
+    from scrapers.ryadah import run as ryadah
+    from scrapers.wajaf import run as wajaf
+    monkeypatch.setattr(db, "_READ_GONE", {})
+    got = ashab.map_page({"badges": ["للبيع", "مباع"], "title": "", "description": "", "spec": {}},
+                         "123", "https://x/properties/123")
+    assert got[0] is None and db._READ_GONE.get(f"{ashab.PREFIX}123") == "مباع"
+    got = ryadah.map_property({"id": 5}, {"status": "تم البيع"}, [])
+    assert got[0] is None and db._READ_GONE.get(f"{ryadah.PREFIX}5") == "تم البيع"
+    got = wajaf.map_page({"units": [], "badges": ["مؤجر"], "url": "https://x/unit/77"})
+    assert got[0] is None and db._READ_GONE.get(f"{wajaf.PREFIX}U77") == "مؤجر"
+    ashab.map_page({"badges": ["للبيع", "محجوز"], "title": "", "description": "", "spec": {}}, "9", "u")
+    assert f"{ashab.PREFIX}9" not in db._READ_GONE, "reserved is not a removal"
