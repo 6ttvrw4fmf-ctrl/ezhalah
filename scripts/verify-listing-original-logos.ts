@@ -65,12 +65,14 @@ function verify(cardSource = card, imageSource = renderer) {
   assert.equal(profiles['Deal App'].logo, '../../assets/images/dealapp.png', 'Deal is the original yellow asset');
 }
 verify();
+assert.equal(profiles['نفوذ'].layout.dark, true, 'Nufouth white lettering needs contrast even beside a colored symbol');
 // Watch the actual previous failures fail: missing brand, old favicon, and black Deal variant.
 for (const [name, mutatedCard, mutatedRenderer] of [
   ['generic placeholder', card.replace(/const WADOD_LOGO = require\('[^']+'\)/, "const WADOD_LOGO = require('../../assets/images/platform-placeholder.png')"), renderer],
   ['old Nufouth favicon', card.replace(/const NUFOUTH_LOGO = require\('[^']+'\)/, "const NUFOUTH_LOGO = require('../../assets/images/nufouth.png')"), renderer],
   ['Deal recoloring', card, renderer.replace('source={source}', "source={source === require('../../assets/images/dealapp.png') ? require('../../assets/images/platform-contrast/dealapp-light.png') : source}")],
 ] as const) {
-  assert.throws(() => verify(mutatedCard, mutatedRenderer), undefined, `${name}: mutant must fail`);
+  assert.ok(mutatedCard !== card || mutatedRenderer !== renderer, `${name}: mutation target exists`);
+  assert.throws(() => verify(mutatedCard, mutatedRenderer), assert.AssertionError, `${name}: mutant must fail`);
 }
 console.log(`PASS: ${roster.length} listing brands and their DB aliases render original assets in equal 96×48 frames; all three regression mutants caught.`);

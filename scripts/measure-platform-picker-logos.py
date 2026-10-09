@@ -24,7 +24,8 @@ for name, relative in assets.items():
         'left': round((96 - width * scale) / 2 - left * scale, 2),
         'top': round((48 - height * scale) / 2 - top * scale, 2),
         'visibleWidth': round(width * scale, 2), 'visibleHeight': round(height * scale, 2),
-        'dark': light > 0.75,
+        # Mixed-color wordmarks (e.g. Nufouth) still lose their white lettering on white.
+        'dark': light > 0.20,
     }
 records = ',\n'.join('  ' + json.dumps(name, ensure_ascii=False) + ': ' + json.dumps(layout, separators=(',', ':')) for name, layout in layouts.items())
 (root / 'src/data/platformPickerLogoLayout.json').write_text('{\n' + records + '\n}\n')
