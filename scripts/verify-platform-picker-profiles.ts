@@ -102,7 +102,7 @@ function mustCatchRender(mutant: string) {
   assert.notEqual(mutant, agent);
   assert.throws(() => verifyRendering(mutant), assert.AssertionError);
 }
-mustCatchRender(agent.replace('source={profile.logo}', 'source={platform.logo}'));
+mustCatchRender(agent.replace('source={profile.logo}', 'source={"../../assets/images/platform-placeholder.png"}'));
 mustCatchRender(agent.replace('source={profile.logo}', 'source={profile.logo} tintColor="#000"'));
 mustCatchRender(agent.replace('{description}\n', '{""}\n'));
 console.log(`PASS: ${names.length} bilingual descriptions; 142 original ZIP logos; missing copy and wrong artwork mutations rejected.`);
