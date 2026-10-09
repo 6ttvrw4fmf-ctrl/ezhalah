@@ -109,6 +109,22 @@ OTHER_CITY_TOKENS: tuple[tuple[str, str], ...] = (
     ("بقيق", "Abqaiq"),
 )
 OFFICE_CITY = "Hofuf"        # canonical English for الأحساء / الهفوف (N.map_city("الأحساء"))
+# المبرز is Al-Ahsa's second city (catalog city 2748), and the office sells there too. Before
+# 2026-10-09 every such ad fell to office_default and was served under الهفوف: a customer searching
+# المبرز could not find ~330 of them, and their districts never resolved (QA 2026-10-09, backlog 206).
+#   ad_text           → the ad's own title/description names «المبرز» and never «الهفوف»
+#                       («بيت عربي في المبرز حي الحزم», «حي الغسانية ٢، المبرز – الأحساء»).
+#   district_mubarraz → the district is one ≥2 independent pages place in المبرز: the ads' own text
+#                       and amlakalahsa (an Al-Ahsa office whose geocoded city is المبرز), measured
+#                       2026-10-09. A name with one confirmation (المصطفى, محاسن, الرضا, جوهرة النزهة)
+#                       is NOT here; it keeps office_default until a second page confirms it.
+MUBARRAZ_CITY = "Mubarraz"   # loc_city_map «mubarraz» → المبرز (migration 20261009172136)
+MUBARRAZ_REGION = "Eastern Province"
+MUBARRAZ_DISTRICTS = frozenset({
+    "جوهرة الهادي", "الغسانية", "الجابرية", "الراجحي", "بوسحبل", "دانة الراشدية",
+    "بستان المطيرفي", "الحزم", "درة الشمال",
+})
+_DISTRICT_SUFFIX = re.compile(r"\s*[0-9٠-٩]+\s*$")  # «الغسانية ٢» → «الغسانية»
 _STREETY = ("شارع", "طريق")  # «شارع الظهران» is a street in Hofuf, not the city of Dhahran
 
 # PDPL: redact_pii() removes numbers/handles; this truncates the contact CTA prose that precedes
@@ -371,13 +387,19 @@ def _detail(s: cc.Session, nid: str) -> dict:
 
 
 # ── mapping ─────────────────────────────────────────────────────────────────────────────────────
-def _city(district: Optional[str]) -> tuple[Optional[str], Optional[str], str]:
-    """(city, region, basis). See OTHER_CITY_TOKENS for why the table is small and explicit."""
+def _city(district: Optional[str], text: Optional[str] = None) -> tuple[Optional[str], Optional[str], str]:
+    """(city, region, basis). See OTHER_CITY_TOKENS for why the table is small and explicit, and
+    MUBARRAZ_DISTRICTS for the two المبرز bases."""
     d = (district or "").strip()
     if d and not d.startswith(_STREETY):
         for token, city in OTHER_CITY_TOKENS:
             if token in d:
                 return city, N.region_for_city(city), "district_token"
+    t = text or ""
+    if "المبرز" in t and "الهفوف" not in t:
+        return MUBARRAZ_CITY, MUBARRAZ_REGION, "ad_text"
+    if d and _DISTRICT_SUFFIX.sub("", d).removeprefix("حي ").strip() in MUBARRAZ_DISTRICTS:
+        return MUBARRAZ_CITY, MUBARRAZ_REGION, "district_mubarraz"
     return OFFICE_CITY, N.region_for_city(OFFICE_CITY), "office_default"
 
 
@@ -507,7 +529,8 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
     # rent_period is still recorded when the body states it — the period is a fact about the LEASE,
     # not about which column the number lands in.
 
-    city, region, city_basis = _city(ix["district"])
+    city, region, city_basis = _city(
+        ix["district"], f"{detail.get('title') or ''} {detail.get('description') or ''}")
     photos = detail.get("photo_urls") or []
     if not photos and ix["thumb"] and PLACEHOLDER_IMG not in ix["thumb"]:
         thumb = re.sub(r"/styles/[^/]+/public/", "/", ix["thumb"]).split("?")[0]
