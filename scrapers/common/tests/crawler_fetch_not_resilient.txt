@@ -8,7 +8,6 @@ abwbna
 akariyoun
 alajlan
 albdah
-albukaeri
 aldarim
 aljassim
 alkhaas
@@ -43,7 +42,6 @@ deal
 dealapp
 dwelleo
 eaqartabuk
-earthapp
 ebriza
 ego
 eilmalriyada
@@ -105,7 +103,6 @@ snam
 sodasyat
 sokok
 souq24
-sqcc
 sukna
 suwar
 tamyaz
@@ -117,6 +114,5 @@ villassa
 vmksa
 wadod
 wahadat
-wajaf
 wslnaa
 yameen

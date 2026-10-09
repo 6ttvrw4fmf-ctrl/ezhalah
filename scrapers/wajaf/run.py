@@ -51,12 +51,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, norm_district_tok, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 BASE = "https://wajaf.sa"
 SOURCE = "وجف العقارية"
 PREFIX = "WJF"
 SLUG = "wajaf"
-IMPERSONATE = "chrome"
 
 _DEAL = {"بيع": "Buy", "إيجار": "Rent"}
 # map_type_exact's per-platform escape hatch: plain readings the shared map does not key (nufouth precedent)
@@ -68,7 +68,7 @@ _LAND = {"Residential Land", "Commercial Land"}
 def get(s: cc.Session, url: str) -> str:
     for attempt in range(3):
         try:
-            r = s.get(url, impersonate=IMPERSONATE, timeout=40)
+            r = s.get(url, timeout=40)
             r.raise_for_status()
             return r.text
         except Exception:  # noqa: BLE001
@@ -79,7 +79,10 @@ def get(s: cc.Session, url: str) -> str:
 
 
 def arabic_session() -> cc.Session:
-    s = cc.Session()
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(BASE, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     get(s, f"{BASE}/language?lang=ar&type=frontend")
     return s
 
