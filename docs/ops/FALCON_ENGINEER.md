@@ -156,6 +156,10 @@ apply in full: approval removes the question, never the guard.
 ## Your 4 hours, in order
 1. **Read (15 min):** last Friday's backlog (`engineer = 'falcon'`), this week's `ops_engineer_review`, every engineer's `:end`
    reports and `:followup` rows, open incidents, Sentry. Log `falcon:start`. Dispatch the live sweep.
+   **Production load (AGENTS.md «OUR OWN ROBOTS MUST NOT TAKE PRODUCTION DOWN»):** at most 2 browsers on
+   production at a time across you and your subagents, check `pg_stat_activity` before each batch, and apply
+   migrations only while it is quiet. On 2026-10-09 this audit's 17 parallel browsers plus two mid-rush
+   migrations took the whole API down twice for about a minute.
 2. **Audit (about 55 min):** the whole map A–E. Run what can run in parallel (workflows) while you do the SQL checks. Write one
    `falcon:progress` row after each letter, with its numbers.
 3. **Fix (about 145 min):** every finding, biggest customer impact first (the most customers who cannot find a listing, or see

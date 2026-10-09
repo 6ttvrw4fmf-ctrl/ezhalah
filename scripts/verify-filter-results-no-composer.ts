@@ -108,9 +108,34 @@ check("the disclaimer sits after the branch's closing `) : null}` (outside every
   closeThenDisc.test(code));
 
 console.log('\n── mutation proof: this check actually fails on the regressions it exists to catch ──');
-const ungatedModelSelector = agent.replace('{!filterOrigin && !completed && <AgentModelSelector', '{<AgentModelSelector');
+// The model selector lives INSIDE the composer box since 2026-10-09 (round 4) — i.e. inside the gated
+// branch — and may render nowhere else, so it can never show on Filter-origin results. (Until round 4
+// it sat between the branch and the disclaimer under its own copy of the gate; closeThenDisc above
+// still tolerates that shape, this check forbids any copy OUTSIDE the branch.)
+// The branch's OWN closer sits at the gate's indentation; nested `) : null}` closers inside the box
+// (voice overlay, stop/send) are deeper and must not be mistaken for it. Returns the index just past it.
+const branchClose = (c: string): number => {
+  const open = c.indexOf('{!filterOrigin && !completed ? (');
+  if (open < 0) return -1;
+  const indent = c.slice(c.lastIndexOf('\n', open) + 1, open).match(/^ */)?.[0] ?? '';
+  const at = c.indexOf(`\n${indent}) : null}`, open);
+  return at < 0 ? -1 : at + `\n${indent}) : null}`.length;
+};
+const selectorOnlyInsideBranch = (c: string) => {
+  const open = c.indexOf('{!filterOrigin && !completed ? (');
+  const close = branchClose(c);
+  const at = c.indexOf('<AgentModelSelector');
+  return open >= 0 && close > open && at > open && at < close && c.indexOf('<AgentModelSelector', close) < 0;
+};
+check('the model selector renders only inside the gated composer branch (never on Filter-origin results)',
+  selectorOnlyInsideBranch(code));
+const selectorOutsideBranch = (() => {
+  const c = decomment(agent);
+  const close = branchClose(c);
+  return c.slice(0, close) + '<AgentModelSelector disabled={false} />' + c.slice(close);
+})();
 mustCatch('an ungated model selector appearing on Filter-origin results',
-  ungatedModelSelector !== agent && !closeThenDisc.test(decomment(ungatedModelSelector)));
+  !selectorOnlyInsideBranch(selectorOutsideBranch));
 // Mutation 1: someone "simplifies" the JSX by dropping the whole three-way branch, leaving the
 // composer unconditional again (the ORIGINAL 09-11 bug this barrier prevents).
 const mutatedNoGate = agent.replace(
