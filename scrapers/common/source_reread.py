@@ -187,6 +187,36 @@ def parse_ids(spec: str) -> list[tuple[str, int]]:
     return out
 
 
+# Which KEY of wasalt's page JSON states a fact (trap 1: «the site doesn't publish it» must be proven from the
+# raw payload). The score flattens propertyDetailsV3 into text lines and loses the key; this prints the path.
+_WASALT_FACT = re.compile(r"elevat|lift|مصعد|kitchen|مطبخ|bath|حمام|دورات|amenit|feature|facing|direction|واجهة", re.I)
+
+
+def wasalt_fact_paths(data, limit: int = 60) -> list[str]:
+    from scrapers.common.af_score import _WASALT_SKIP
+    pd = (((data or {}).get("props") or {}).get("pageProps") or {}).get("propertyDetailsV3")
+    out: list[str] = []
+
+    def walk(node, path: str, key: str = "") -> None:
+        if len(out) >= limit or (key and _WASALT_SKIP.search(key)):
+            return
+        if isinstance(node, dict):
+            leaves = {k: v for k, v in node.items() if isinstance(v, (str, int, float, bool)) and not _WASALT_SKIP.search(str(k))}
+            if 0 < len(node) <= 6 and len(leaves) == len(node) and any(_WASALT_FACT.search(str(v)) for v in leaves.values()):
+                out.append(f"{path} = {json.dumps(leaves, ensure_ascii=False)[:200]}")   # a small {key, label, value} row
+                return
+            for k, v in node.items():
+                walk(v, f"{path}.{k}", str(k))
+        elif isinstance(node, list):
+            for i, x in enumerate(node[:30]):
+                walk(x, f"{path}[{i}]", key)
+        elif node not in (None, "") and (_WASALT_FACT.search(path) or _WASALT_FACT.search(str(node)[:200])):
+            out.append(f"{path} = {str(node)[:160]}")
+
+    walk(pd, "propertyDetailsV3")
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ids", default="", help="table:id,… exactly these listings")
@@ -224,6 +254,15 @@ def main() -> int:
             item["verdict"] = classify_response(status, body or "",
                                                 dead_marker=PLATFORMS.get(platform, {}).get("dead_marker"))
             item["page"] = page_evidence(body or "")
+            if "wasalt" in table:
+                try:
+                    from scrapers.common.cleanup import _wasalt_browser, _wasalt_browser_enabled
+                    if _wasalt_browser_enabled():
+                        data, _st, _n = _wasalt_browser().page_data(url)
+                        for line in wasalt_fact_paths(data):
+                            print(f"   wasalt key: {line}", flush=True)
+                except Exception as e:  # noqa: BLE001 — a diagnostic never fails the re-read
+                    print(f"   wasalt key probe failed: {e!r}", flush=True)
         out.append(item)
 
     text = json.dumps(out, ensure_ascii=False, indent=1, default=str)
