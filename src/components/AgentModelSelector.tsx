@@ -1,0 +1,91 @@
+import { useEffect, useRef, useState } from 'react';
+import { Modal, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { useI18n } from '@/i18n';
+import { cardShadow, colors, radius } from '@/theme/tokens';
+
+const MODELS = [
+  { id: 'shaheen', ar: 'شاهين', en: 'Shaheen', version: '2.2',
+    descriptionAr: 'سرعة خاطفة ودقة متناهية للإجابات السريعة',
+    descriptionEn: 'Lightning-fast precision for instant answers' },
+  { id: 'hurr', ar: 'حُر', en: 'Hurr', version: '4.4',
+    descriptionAr: 'قوة وتحمل فائق لأصعب المهام والمعالجات',
+    descriptionEn: 'Unmatched endurance for your toughest challenges' },
+] as const;
+
+// Display selection only until provider model IDs are approved. Never send marketing versions
+// as provider API IDs or imply a backend cutover from a UI label.
+export default function AgentModelSelector({ disabled = false }: { disabled?: boolean }) {
+  const { locale } = useI18n();
+  const arabic = locale === 'ar';
+  const [selected, setSelected] = useState<string>('shaheen');
+  const [anchor, setAnchor] = useState<{ x: number; y: number; width: number } | null>(null);
+  const trigger = useRef<View>(null);
+  const { width, height } = useWindowDimensions();
+  const model = MODELS.find((item) => item.id === selected)!;
+  const close = () => setAnchor(null);
+
+  useEffect(() => { setAnchor(null); }, [width, height, disabled]);
+  useEffect(() => {
+    if (!anchor || Platform.OS !== 'web') return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); setAnchor(null); trigger.current?.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [anchor]);
+
+  const menuWidth = Math.min(360, width - 24);
+  const left = anchor ? Math.max(12, Math.min(anchor.x + anchor.width - menuWidth, width - menuWidth - 12)) : 12;
+  return (
+    <View style={styles.wrap}>
+      <Pressable ref={trigger} testID="agent-model-selector" disabled={disabled}
+        accessibilityRole="button" accessibilityState={{ expanded: !!anchor, disabled }}
+        accessibilityLabel={`${arabic ? 'اختيار النموذج' : 'Select model'}: ${arabic ? model.ar : model.en} ${model.version}`}
+        onPress={() => trigger.current?.measureInWindow((x, y, measuredWidth) => setAnchor({ x, y, width: measuredWidth }))}
+        style={({ pressed }) => [styles.trigger, { opacity: disabled ? 0.45 : 1 }, pressed && styles.pressed]}>
+        <Text style={styles.label}>{arabic ? model.ar : model.en} {model.version}</Text>
+        <Ionicons name="chevron-down" size={12} color={colors.muted} />
+      </Pressable>
+      <Modal visible={!!anchor} transparent animationType="fade" onRequestClose={close}>
+        <View style={styles.overlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={close}
+            accessibilityLabel={arabic ? 'إغلاق قائمة النماذج' : 'Close model menu'} accessibilityRole="button" />
+          <View style={[styles.menu, { width: menuWidth, left, bottom: anchor ? Math.max(12, height - anchor.y + 6) : 12 }]}
+            accessibilityViewIsModal role="radiogroup" accessibilityLabel={arabic ? 'النموذج' : 'Model'}>
+            {MODELS.map((item) => (
+              <Pressable key={item.id} testID={`agent-model-${item.id}`} accessibilityRole="radio"
+                accessibilityState={{ checked: selected === item.id }}
+                aria-checked={selected === item.id}
+                onPress={() => { setSelected(item.id); close(); trigger.current?.focus(); }}
+                style={({ pressed }) => [styles.option, { flexDirection: arabic ? 'row-reverse' : 'row' }, pressed && styles.pressed]}>
+                <View style={styles.copy}>
+                  <Text style={[styles.name, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? item.ar : item.en} {item.version}</Text>
+                  <Text style={[styles.description, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? item.descriptionAr : item.descriptionEn}</Text>
+                </View>
+                <View style={styles.check}>
+                  {selected === item.id && <Ionicons name="checkmark" size={21} color={colors.primary} />}
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  wrap: { alignSelf: 'flex-end', marginTop: 2, marginRight: 36 },
+  trigger: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 44, paddingHorizontal: 8, borderRadius: radius.pill },
+  label: { color: colors.muted, fontSize: 12, fontWeight: '500' },
+  pressed: { backgroundColor: colors.tint },
+  overlay: { flex: 1 },
+  menu: { position: 'absolute', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine,
+    borderRadius: 18, padding: 7, ...cardShadow, shadowOpacity: 0.16, shadowRadius: 20, elevation: 10 },
+  option: { alignItems: 'center', gap: 12, paddingHorizontal: 13, paddingVertical: 13, borderRadius: 12 },
+  copy: { flex: 1, minWidth: 0 },
+  name: { color: colors.ink, fontSize: 17, lineHeight: 25, fontWeight: '500' },
+  description: { color: colors.muted, fontSize: 13, lineHeight: 21, marginTop: 3 },
+  check: { width: 24, alignItems: 'center' },
+});

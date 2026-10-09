@@ -25,6 +25,7 @@ import { msgRTL } from '@/lib/textDirection';
 import { stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
 import { startVoiceInput, stopVoiceInput, cancelVoiceInput, isVoiceInputSupported } from '@/lib/voiceInput';
 import VoiceWaveform from '@/components/VoiceWaveform';
+import AgentModelSelector from '@/components/AgentModelSelector';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
 import { initialReveal as initialRevealPure, CASCADE_MAX } from '@/lib/initialReveal';
@@ -4893,6 +4894,7 @@ export default function Agent() {
               </View>
             </View>
             ) : null}
+            {!filterOrigin && !completed && <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />}
             {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY (owner, 2026-09-12, second tightening:
                 "REMOVE THIS IN THE FILTER SIMPLE" — the small green Stop square that lingered on
                 Filter-origin results, during both busy AND the cascade reveal animation, is gone.
