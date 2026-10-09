@@ -4735,52 +4735,11 @@ export default function Agent() {
                   mid-transition heights and ratchets an empty box to max — observed live). The
                   textarea keeps the pre-redesign numeric-height contract; the wrapper eases to the
                   same target and clips the single frame of difference. */}
-              {/* ONE ROW (owner 2026-10-05: «this box is still big» → «One row»): «بحث» at the far left,
-                  the text in the middle, mic + Send on the right. The chip is a flex SIBLING of the input,
-                  never laid over it, so English text starting at the left can't run into it. */}
-              {!busy && !revealing && (
-                <Pressable
-                  testID="initial-chat-search"
-                  accessibilityRole="button"
-                  accessibilityLabel={selectedPlatforms.length ? `${t('Search')}: ${selectedPlatforms.map(p => t(p.i18nKey)).join('، ')}` : t('Search')}
-                  onPress={openPlatformPicker}
-                  hitSlop={5}
-                  // @ts-expect-error web-only DOM props on the RNW host node
-                  dataSet={{ ...TAP44 }}
-                  style={({ pressed }: any) => [s.initialSearch, selectedPlatforms.length > 0 && s.initialSearchSelected, pressed && s.initialSearchPressed]}
-                >
-                  {selectedPlatforms.length ? (
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      style={s.chipStack}
-                      contentContainerStyle={s.chipStackContent}
-                      accessible={false}
-                      importantForAccessibility="no-hide-descendants"
-                    >
-                      {/* EVERY picked site's logo, tightly overlapped, never a «+N» (owner 2026-10-09 round 2:
-                          «always show those small websites»). The strip is capped at five discs so the text
-                          box keeps its width; beyond that it scrolls sideways — every logo stays reachable. */}
-                      {selectedPlatforms.map((platform, i) => {
-                        const { logo, layout } = PLATFORM_PICKER_PROFILES[platform.name];
-                        // The reviewed 96×48 frame, shrunk until the mark's box fits a 19px disc.
-                        const k = Math.min(15 / layout.height, 17 / layout.width);
-                        return (
-                          <View key={platform.name} style={[s.chipBadge, i > 0 && s.chipBadgeOverlap, { zIndex: selectedPlatforms.length - i }]}>
-                            <Image source={logo} tintColor={layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: layout.width * k, height: layout.height * k, left: 9.5 - (48 - layout.left) * k, top: 9.5 - (24 - layout.top) * k }} contentFit="contain" accessible={false} />
-                          </View>
-                        );
-                      })}
-                    </ScrollView>
-                  ) : (
-                    <>
-                      <Image source={require('../../assets/icons/eagle-search.svg')} style={s.initialSearchIcon} contentFit="contain" tintColor={colors.ink} accessible={false} />
-                      <Text style={s.initialSearchText}>{t('Search')}</Text>
-                    </>
-                  )}
-                  <Ionicons name="chevron-down" size={13} color={colors.muted} />
-                </Pressable>
-              )}
+              {/* TWO ROWS (owner 2026-10-09 round 4, the familiar Claude/ChatGPT box — supersedes the 10-05 one
+                  row): the text on its own full-width line, then a controls row inside the SAME box — «بحث»
+                  and «شاهين 2.2» at the start, mic + Send at the end. The controls are flex SIBLINGS of the
+                  input, never laid over it. The column is LTR-pinned, so the physical order holds in both
+                  locales (mic left of Send; e2e/welcome.spec.ts). */}
               <View style={s.composerInputColumn}>
               <View style={[s.inputGrow, INPUT_EASE, { height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) }]}>
               <TextInput
@@ -4836,66 +4795,117 @@ export default function Agent() {
               {showIntroExamples ? <IntroExampleRotator reducedMotion={reducedMotion} /> : null}
               </View>
               </View>
-              {busy || revealing ? (
-                // While Ezhalah is thinking/searching OR the cards are still popping in, the Send button
-                // is a Stop box — tap it to cancel the search and freeze the cards shown. (user request.)
-                <Pressable
-                  onPress={stop}
-                  style={s.stopBtn}
-                  hitSlop={8}
-                  // @ts-expect-error web-only DOM props on the RNW host node
-                  dataSet={{ ...TAP44 }}
-                  accessibilityLabel={t('Stop')}
-                >
-                  <Ionicons name="stop" size={15} color="#fff" />
-                </Pressable>
-              ) : (
-                <>
-                  {/* Mic — enters recording mode (owner brief §2): immediate press feedback, then the
-                      composer itself morphs. Sits immediately left of Send, same 34px control family.
-                      Hidden ONLY where isVoiceInputSupported() is false — a LIVE, capability-only
-                      runtime check with NO browser-name exclusion of any kind (owner ruling,
-                      2026-08-25: capability-based detection, never a UA guess — iOS Safari shows the
-                      mic like every other capable browser; a runtime failure there gets its own
-                      honest, specific message instead — see voiceInput.ts's own comment for the full
-                      evidence trail). Showing a mic that can only ever flash a failure toast and
-                      revert reads as broken — but hiding a mic the runtime genuinely supports, on a
-                      guess about the browser's name, is the same mistake in the other direction. */}
-                  {isVoiceInputSupported() && !completed ? (
-                  <Pressable
-                    testID="voice-mic"
-                    onPress={() => { void startVoice(); }}
-                    hitSlop={8}
-                    // @ts-expect-error web-only DOM props on the RNW host node
-                    dataSet={{ ...TAP44 }}
-                    accessibilityLabel={t('Voice input')}
-                    style={({ pressed }: any) => [s.micBtn, pressed && s.micBtnPressed]}
-                  >
-                    <Ionicons name="mic-outline" size={19} color={colors.body} />
-                  </Pressable>
-                  ) : null}
-                  {/* COMPLETED (owner request 2026-09-05): the send arrow becomes a lock — same
-                      composer, same button, no separate card. It never fires (the real "start
-                      over" action is the hamburger, top left), so it always renders disabled. */}
-                  <Pressable
-                    onPress={() => send()}
-                    disabled={completed || !typed.trim()}
-                    onPressIn={() => sendSpring(0.9)}
-                    onPressOut={() => sendSpring(1)}
-                    onHoverIn={() => { setSendHover(true); sendSpring(1.06); }}
-                    onHoverOut={() => { setSendHover(false); sendSpring(1); }}
-                    hitSlop={6}
-                    // @ts-expect-error web-only DOM props on the RNW host node
-                    dataSet={{ ...TAP44 }}
-                    accessibilityLabel={completed ? t('This chat is closed — tap ☰ at the top to start a new search') : t('Search')}
-                    style={completed || !typed.trim() ? s.sendDisabled : undefined}
-                  >
-                    <Animated.View style={[s.sendBtn, sendHover && !completed && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
-                      <Ionicons name={completed ? 'lock-closed' : 'arrow-up'} size={completed ? 15 : 17} color="#fff" />
-                    </Animated.View>
-                  </Pressable>
-                </>
-              )}
+              <View style={s.composerTools}>
+                <View style={s.composerToolsStart}>
+                  {!busy && !revealing && (
+                    <Pressable
+                      testID="initial-chat-search"
+                      accessibilityRole="button"
+                      accessibilityLabel={selectedPlatforms.length ? `${t('Search')}: ${selectedPlatforms.map(p => t(p.i18nKey)).join('، ')}` : t('Search')}
+                      onPress={openPlatformPicker}
+                      hitSlop={5}
+                      // @ts-expect-error web-only DOM props on the RNW host node
+                      dataSet={{ ...TAP44 }}
+                      style={({ pressed }: any) => [s.initialSearch, selectedPlatforms.length > 0 && s.initialSearchSelected, pressed && s.initialSearchPressed]}
+                    >
+                      {selectedPlatforms.length ? (
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          style={s.chipStack}
+                          contentContainerStyle={s.chipStackContent}
+                          accessible={false}
+                          importantForAccessibility="no-hide-descendants"
+                        >
+                          {/* EVERY picked site's logo, tightly overlapped, never a «+N» (owner 2026-10-09 round 2:
+                              «always show those small websites»). The strip is capped at five discs so the text
+                              box keeps its width; beyond that it scrolls sideways — every logo stays reachable. */}
+                          {selectedPlatforms.map((platform, i) => {
+                            const { logo, layout } = PLATFORM_PICKER_PROFILES[platform.name];
+                            // The reviewed 96×48 frame, shrunk until the mark's box fits a 19px disc.
+                            const k = Math.min(15 / layout.height, 17 / layout.width);
+                            return (
+                              <View key={platform.name} style={[s.chipBadge, i > 0 && s.chipBadgeOverlap, { zIndex: selectedPlatforms.length - i }]}>
+                                <Image source={logo} tintColor={layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: layout.width * k, height: layout.height * k, left: 9.5 - (48 - layout.left) * k, top: 9.5 - (24 - layout.top) * k }} contentFit="contain" accessible={false} />
+                              </View>
+                            );
+                          })}
+                        </ScrollView>
+                      ) : (
+                        <>
+                          <Image source={require('../../assets/icons/eagle-search.svg')} style={s.initialSearchIcon} contentFit="contain" tintColor={colors.ink} accessible={false} />
+                          <Text style={s.initialSearchText}>{t('Search')}</Text>
+                        </>
+                      )}
+                      <Ionicons name="chevron-down" size={13} color={colors.muted} />
+                    </Pressable>
+                  )}
+                  {/* The model control lives IN the box now (owner round 4); its menu is a Modal, never clipped. */}
+                  <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />
+                </View>
+                <View style={s.composerToolsEnd}>
+                  {busy || revealing ? (
+                    // While Ezhalah is thinking/searching OR the cards are still popping in, the Send button
+                    // is a Stop box — tap it to cancel the search and freeze the cards shown. (user request.)
+                    <Pressable
+                      onPress={stop}
+                      style={s.stopBtn}
+                      hitSlop={8}
+                      // @ts-expect-error web-only DOM props on the RNW host node
+                      dataSet={{ ...TAP44 }}
+                      accessibilityLabel={t('Stop')}
+                    >
+                      <Ionicons name="stop" size={15} color="#fff" />
+                    </Pressable>
+                  ) : (
+                    <>
+                      {/* Mic — enters recording mode (owner brief §2): immediate press feedback, then the
+                          composer itself morphs. Sits immediately left of Send, same 34px control family.
+                          Hidden ONLY where isVoiceInputSupported() is false — a LIVE, capability-only
+                          runtime check with NO browser-name exclusion of any kind (owner ruling,
+                          2026-08-25: capability-based detection, never a UA guess — iOS Safari shows the
+                          mic like every other capable browser; a runtime failure there gets its own
+                          honest, specific message instead — see voiceInput.ts's own comment for the full
+                          evidence trail). Showing a mic that can only ever flash a failure toast and
+                          revert reads as broken — but hiding a mic the runtime genuinely supports, on a
+                          guess about the browser's name, is the same mistake in the other direction. */}
+                      {isVoiceInputSupported() && !completed ? (
+                      <Pressable
+                        testID="voice-mic"
+                        onPress={() => { void startVoice(); }}
+                        hitSlop={8}
+                        // @ts-expect-error web-only DOM props on the RNW host node
+                        dataSet={{ ...TAP44 }}
+                        accessibilityLabel={t('Voice input')}
+                        style={({ pressed }: any) => [s.micBtn, pressed && s.micBtnPressed]}
+                      >
+                        <Ionicons name="mic-outline" size={19} color={colors.body} />
+                      </Pressable>
+                      ) : null}
+                      {/* COMPLETED (owner request 2026-09-05): the send arrow becomes a lock — same
+                          composer, same button, no separate card. It never fires (the real "start
+                          over" action is the hamburger, top left), so it always renders disabled. */}
+                      <Pressable
+                        onPress={() => send()}
+                        disabled={completed || !typed.trim()}
+                        onPressIn={() => sendSpring(0.9)}
+                        onPressOut={() => sendSpring(1)}
+                        onHoverIn={() => { setSendHover(true); sendSpring(1.06); }}
+                        onHoverOut={() => { setSendHover(false); sendSpring(1); }}
+                        hitSlop={6}
+                        // @ts-expect-error web-only DOM props on the RNW host node
+                        dataSet={{ ...TAP44 }}
+                        accessibilityLabel={completed ? t('This chat is closed — tap ☰ at the top to start a new search') : t('Search')}
+                        style={completed || !typed.trim() ? s.sendDisabled : undefined}
+                      >
+                        <Animated.View style={[s.sendBtn, sendHover && !completed && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
+                          <Ionicons name={completed ? 'lock-closed' : 'arrow-up'} size={completed ? 15 : 17} color="#fff" />
+                        </Animated.View>
+                      </Pressable>
+                    </>
+                  )}
+                </View>
+              </View>
               </View>
               {/* ── Recording mode ── same composer surface, ChatGPT's spatial hierarchy, PHYSICALLY
                   pinned LTR (owner brief §13 — the page is RTL but these four controls never mirror):
@@ -4967,7 +4977,6 @@ export default function Agent() {
                 lastFilterRef/lastSeedRef, and returns to the Filter screen with restored state.
                 The trade-off: a mid-flight Filter search has no in-place cancel button; the user
                 navigates away instead. Owner-accepted (2026-09-12). */}
-            {!filterOrigin && !completed && <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />}
             <Text style={s.disc}>
               {t('Ezhalah displays listings from third-party property platforms. We do not own, verify, or recommend any listing. Please review all details carefully before making a decision.')}
             </Text>
@@ -5280,7 +5289,9 @@ const s = StyleSheet.create({
   // The LTR-pinned column keeps mic/send on the physical right in either locale.
   // Desktop welcome and composer share one compact column; messages still use MAX_W.
   composerCol: { maxWidth: 620, alignSelf: 'center' },
-  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 16, paddingVertical: 6, paddingHorizontal: 10, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
+  // A COLUMN since round 4 (text row over controls row). No flex: 1 on any child — iOS Safari collapses
+  // a flex: 1 column child to 0px (verify-ios-column-flex-collapse.ts); every row sizes by content.
+  composer: { flexDirection: 'column', alignItems: 'stretch', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: 18, paddingTop: 6, paddingBottom: 6, paddingHorizontal: 10, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
   // Focus glow target — COMPOSER_EASE (web) glides border-color and box-shadow between these two.
   // Carries the FULL shadow set: RNW compiles box-shadow per-style, so a partial override here
   // would win wholesale and drop the green tint + offset (observed live).
@@ -5307,11 +5318,15 @@ const s = StyleSheet.create({
   // ── Voice recording composer (owner brief 2026-08-23) ──
   // composerInner keeps the normal controls' exact pre-voice layout (it owns the composer's size at
   // all times); the recording row overlays it absolutely so the morph never changes the surface.
-  composerInner: { flex: 1, flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'flex-end', alignItems: 'flex-end', minHeight: 44, gap: 6 },
+  composerInner: { alignSelf: 'stretch', gap: 2 },
   composerInnerHidden: { opacity: 0 },
   // alignSelf center: one line of text sits on the same middle line as «بحث», mic and Send; taller
   // (wrapped) text simply fills the row, and the buttons stay bottom-aligned.
-  composerInputColumn: { flex: 1, minWidth: 0, alignItems: 'stretch', position: 'relative', alignSelf: 'center' },
+  // Row 1: the text line, full width. Row 2: the controls — start side «بحث» + model, end side mic + Send.
+  composerInputColumn: { alignSelf: 'stretch', minWidth: 0, alignItems: 'stretch', position: 'relative', paddingHorizontal: 4 },
+  composerTools: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 40 },
+  composerToolsStart: { flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 1, minWidth: 0 },
+  composerToolsEnd: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
   // One pill, one width, whatever is picked: «بحث» + eagle, or every picked site's logo disc in a
   // strip capped at five (22px discs on a 14px pitch) that scrolls sideways past the cap. minWidth 118
   // = the capped strip's width, so the text box keeps ONE width from 0 to 20 picks; minWidth (not
@@ -5375,7 +5390,7 @@ const s = StyleSheet.create({
   // fixed-width controls, whatever the amplitude (owner brief §1/§4).
   voiceWaveWrap: { flex: 1, alignSelf: 'stretch', minHeight: 34, overflow: 'hidden' },
   stopBtn: { width: 34, height: 34, borderRadius: 12, backgroundColor: colors.dark, alignItems: 'center', justifyContent: 'center' },
-  // marginTop 2: the model label above is already the breathing room (owner 2026-10-09: no «big space»).
+  // The column's 8px gap + 2 = a small, even 10px under the box (owner 2026-10-09 round 4: no big gap).
   disc: { fontSize: 11, lineHeight: 16, color: colors.muted, textAlign: 'center', marginTop: 2, paddingHorizontal: 12 },
   // Centered Filter/AI pill band under the header (see the JSX note). Explicit height on BOTH ends
   // so MODE_EASE can glide it to 0; overflow hidden so the collapse clips instead of squashing.

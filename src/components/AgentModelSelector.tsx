@@ -108,11 +108,11 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
 
 const styles = StyleSheet.create({
   // A zero-width anchor at the mic's centre; the trigger is centred on it and overflows both ways.
-  // Centred under the chat box in both locales (owner 2026-10-09 round 3: «keep it below» — not under
-  // the mic). Negative margins eat most of the column's 8px gaps: ~6px to the box, ~10px to the disclaimer.
-  wrap: { alignSelf: 'center', marginTop: -6, marginBottom: -4 },
-  trigger: { flexDirection: 'row', alignItems: 'center', flexShrink: 0, gap: 4, height: 24, paddingHorizontal: 6, borderRadius: radius.pill },
-  label: { color: colors.muted, fontSize: 12, lineHeight: 16, fontWeight: '500' },
+  // A quiet in-box control on the composer's controls row, beside «بحث» (owner 2026-10-09 round 4:
+  // «include شاهين 2.2 in the same box»). Visually 30px; the 44px floor comes from the TAP44 marker.
+  wrap: { flexShrink: 1, minWidth: 0 },
+  trigger: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, gap: 4, height: 30, paddingHorizontal: 8, borderRadius: radius.pill },
+  label: { color: colors.muted, fontSize: 13, lineHeight: 18, fontWeight: '500', flexShrink: 1 },
   pressed: { backgroundColor: colors.tint },
   unavailable: { opacity: 0.55 },
   unavailableName: { color: colors.muted },
