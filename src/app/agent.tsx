@@ -3992,7 +3992,7 @@ export default function Agent() {
           <Animated.View style={[s.platformPickerCard, { opacity: pickerProgress, transform: [{ translateY: pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }] }]}>
             <View style={s.platformPickerHeader}>
               <View style={s.platformPickerHeading}>
-                <Text style={s.platformPickerTitle}>{t('Choose websites')}</Text>
+                <Text style={s.platformPickerTitle}>{t('Deep search')}</Text>
                 <Text style={s.platformPickerSubtitle}>{t('Choose one or more websites to search only their listings.')}</Text>
               </View>
               <Pressable
@@ -4047,7 +4047,6 @@ export default function Agent() {
                 </View>
                 <View style={s.platformPickerItemCopy}>
                   <Text style={s.platformPickerItemName}>{t('All websites')}</Text>
-                  <Text style={s.platformPickerItemHint}>{t('Search across Saudi Arabia')}</Text>
                 </View>
                 {!selectedSources.length ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
               </Pressable>
