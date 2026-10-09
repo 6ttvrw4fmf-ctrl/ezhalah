@@ -174,6 +174,21 @@ def parse_location(text: str) -> tuple[Optional[str], Optional[str], Optional[st
             m.group(3).strip())
 
 
+# The district group above stops at the FIRST space — the line runs straight on into the page's next
+# words («القصيم - بريدة - الغدير اعلانات مشابهة»), so it cannot be greedy. But a two-word district
+# lost its second word: «القصيم - بريدة - القاع البارد» stored «القاع», which no catalog knows in
+# بريدة (49 searchable ads with no district on 2026-10-09; the ad URLs read «بحي-القاع-البارد»). The
+# district word plus the next two words go to find_district_in_text(), which tries 3-, 2-, then
+# 1-word windows against the catalog only, so «القاع البارد» resolves and «الغدير اعلانات» still
+# resolves to «الغدير». Nothing is guessed: no catalog match keeps the district NULL as before.
+def district_window(text: str) -> Optional[str]:
+    m = _LOC_RE.search(text)
+    if not m:
+        return None
+    tail = re.findall(r"[؀-ۿ]+", text[m.end(3):])[:2]
+    return " ".join([m.group(3).strip(), *tail])
+
+
 # ── the description's own labelled rows ──────────────────────────────────────────────────────────
 # The description's own rows. A label ENDS the previous value whether or not it carries a colon —
 # this source writes «العمر : جديد الدخل 42الف المكونات : …», so a stop that required a colon let
@@ -426,7 +441,8 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
         return None, category, "no_city"
     city = normalize.map_city(city_ar)
     city_id, region_id = to_catalog(city_ar, region_ar)
-    district_ar = find_district_in_text(district_raw, city_id) if (district_raw and city_id) else None
+    district_ar = (find_district_in_text(district_window(text), city_id)
+                   if (district_raw and city_id) else None)
 
     price_total, price_per_meter = parse_price(text)
     rent_period, price_annual = (None, None)
