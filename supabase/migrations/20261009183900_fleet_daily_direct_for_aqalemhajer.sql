@@ -1,6 +1,6 @@
--- NEEDS INTERACTIVE APPLY (2026-10-09, ♻️ Lifecycle Engineer). apply_migration timed out at 60 s (the
--- reseed's DELETE clause is held for a human, lesson of 2026-10-05); verified nothing landed. A daytime
--- session applies it, renames this file to the minted version, mirrors it byte-exact, and merges.
+-- APPLIED INTERACTIVELY 2026-10-09 (owner session). The ♻️ run's apply_migration timed out at 60 s with the
+-- reseed's DELETE clause held for a human; impact verified first: exactly 1 row changes (aqalemhajer),
+-- 0 deleted, 0 new.
 --
 -- ♻️ Lifecycle Engineer, 2026-10-09: aqalemhajer joins the daily DIRECT tier,
 -- CANDIDATE_PLUS_DIRECT/168h -> DIRECT_REVISIT/48h (liveness_policies.FLEET_DAILY_DIRECT, which is
