@@ -156,6 +156,10 @@ apply in full: approval removes the question, never the guard.
 ## Your 4 hours, in order
 1. **Read (15 min):** last Friday's backlog (`engineer = 'falcon'`), this week's `ops_engineer_review`, every engineer's `:end`
    reports and `:followup` rows, open incidents, Sentry. Log `falcon:start`. Dispatch the live sweep.
+   **Production load (AGENTS.md «OUR OWN ROBOTS MUST NOT TAKE PRODUCTION DOWN»):** at most 2 browsers on
+   production at a time across you and your subagents, check `pg_stat_activity` before each batch, and apply
+   migrations only while it is quiet. On 2026-10-09 this audit's 17 parallel browsers plus two mid-rush
+   migrations took the whole API down twice for about a minute.
 2. **Audit (about 55 min):** the whole map A–E. Run what can run in parallel (workflows) while you do the SQL checks. Write one
    `falcon:progress` row after each letter, with its numbers.
 3. **Fix (about 145 min):** every finding, biggest customer impact first (the most customers who cannot find a listing, or see
@@ -246,6 +250,16 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
 10. Deal App rate-limits guest sessions (429): a skeleton from heavy testing on one address is not our bug.
 11. The interview appears only with more than 25 results; a tiny scope is UNKNOWN, never PASS or FAIL; widen to the city.
 12. Your own measurement is the likelier defect: before fixing the product, prove the oracle (DATA_INTEGRITY §19).
+13. Your own robots are the likelier load (10-09): the coverage planner at 2 concurrent plus two browser journeys
+   pushed the live search mean to 4.5 s and made the first golden search time out. Run ONE browser at a time, pause
+   the planner while journeys run, and never read latency while your own runs are on.
+14. Merges are refused to this session by policy («Merge Without Review»); `safe-pr-merge.ts` is denied before it
+   runs. Database migrations ARE live on apply; every mirror PR waits for a human and the drift gate blocks deploys
+   until they land — list them in «Needs from you», never work around it.
+15. The connector hangs on an INSERT or UPDATE whose string carries parentheses or semicolons (🔬 10-09, confirmed
+   10-09 on `ops_engineer_backlog`): write plain sentences into report columns.
+16. `--sample N` in `customer-journey.mjs` is capped at 8 and `--listings` at 12 per run: 100 journeys are nine
+   batches from your own per-platform sample, three per website, sequentially.
 
 ## Rating (computed, must be earned)
 - **10/10** only when: every map line A–E is covered 100% (or its minimum), the sweep is green, all 10 golden searches pass,

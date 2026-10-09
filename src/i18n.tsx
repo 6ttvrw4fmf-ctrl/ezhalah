@@ -195,7 +195,7 @@ const AR: Record<string, string> = {
   'Search across {count} real-estate websites': 'نبحث عبر {count} موقع عقاري',
   'Choose websites': 'اختر المواقع',
   'Deep search across websites': 'بحث عميق في المواقع',
-  'Choose one or more websites to search only their listings.': 'اختر موقعاً أو أكثر للبحث في عقاراتها فقط.',
+  'Focus your search on one or more specific websites. We show only their listings.': 'خصّص بحثك في موقع معيّن أو أكثر، ونعرض لك إعلاناتها فقط.',
   'Search across Saudi Arabia': 'ابحث في جميع المواقع داخل المملكة',
   'Choose a website': 'اختر موقعاً',
   'Search one website': 'ابحث في موقع واحد',
