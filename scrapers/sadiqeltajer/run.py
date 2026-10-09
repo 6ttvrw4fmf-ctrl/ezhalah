@@ -473,6 +473,11 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
         "price_published": (price_total is not None) or (price_per_meter is not None),
     }
     row["additional_info"] = {k: v for k, v in extra.items() if v is not None}
+    # The kitchen / maid room / laundry the ad's OWN room list names («المكونات : … مطبخ . دورة مياة»).
+    # The site has no amenity field at all; this labelled list is its statement. Yes or nothing, never
+    # no (ADVANCED_FILTER_SOURCE_TRUTH §2). Kitchen was 0 of 1,512 active while 272 lists name one
+    # (🔬 AF engineer 2026-10-09; ops_af_score kitchen we_miss 3/3).
+    row.update(normalize.prose_amenities_yes(extra["components"]))
     return row, category, ""
 
 
