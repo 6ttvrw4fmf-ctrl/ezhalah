@@ -206,6 +206,7 @@ def map_page(d: dict[str, Any], ad_id: str, url: str, unit_of: Optional[str] = N
     if re.search(r"مزاد", blob):
         return None, "auction"
     if status != AVAILABLE:
+        db.note_read_gone(f"{PREFIX}{ad_id}", status)   # its own page says sold/rented: a reading
         return None, f"status_{status or 'missing'}"
     deal = _DEAL.get(deal_ar)
     if not deal:

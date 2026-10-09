@@ -2,7 +2,7 @@
 import logoLayout from './platformPickerLogoLayout.json';
 import coverageSnapshot from './platformPickerCoverage.json';
 import { platformCoverageSentence, platformCoverageGroup, type PickerCoverage } from '../lib/platformCoverageSentence';
-export type PlatformPickerProfile = { logo: number; ar: string; en: string; group: { ar: {key: string; order: number; label: string}; en: {key: string; order: number; label: string} }; layout: { width: number; height: number; left: number; top: number; dark: boolean } };
+export type PlatformPickerProfile = { logo: number; ar: string; en: string; group: { ar: {key: string; order: number; label: string}; en: {key: string; order: number; label: string} }; layout: { width: number; height: number; left: number; top: number; monochrome: boolean } };
 const LOGOS: Record<string, number> = {
   "Aqar": require("../../assets/images/platform-logos/sa-aqar-fm.png"),
   "Wasalt": require("../../assets/images/platform-logos/wasalt-sa.png"),
@@ -154,6 +154,24 @@ const LOGOS: Record<string, number> = {
   "تطبيق أرض": require("../../assets/images/platform-logos/earthapp.png"),
   "نوافذ الوطن": require("../../assets/images/platform-logos/nawafeth.png"),
 };
+// Deal uses the same original yellow brand asset as listing cards (owner, 2026-10-08).
+LOGOS["Deal App"] = require("../../assets/images/dealapp.png");
+// Official symbols/light-surface variants avoid white wordmarks and opaque backing tiles.
+LOGOS["Aqarcity"] = require("../../assets/images/aqarcity-logo.png");
+LOGOS["Ramzalqasim"] = require("../../assets/images/ramzalqassim.png");
+LOGOS["Amaall"] = require("../../assets/images/amaall.png");
+LOGOS["Alta"] = require("../../assets/images/alta.png");
+LOGOS["Awal"] = require("../../assets/images/awal.png");
+LOGOS["Waslna"] = require("../../assets/images/wslnaa.png");
+LOGOS["نفوذ"] = require("../../assets/images/nufouth.png");
+LOGOS["آل سعيدان"] = require("../../assets/images/alsaedan.png");
+LOGOS["منصات"] = require("../../assets/images/platform-clean/menassat.png");
+LOGOS["آل متعب العقارية"] = require("../../assets/images/platform-clean/almuteb.png");
+LOGOS["Flow"] = require("../../assets/images/platform-clean/flow.png");
+LOGOS["Maqam Al Wisam"] = require("../../assets/images/platform-clean/maqam.png");
+LOGOS["راز العقارية"] = require("../../assets/images/platform-clean/raz.png");
+LOGOS["الرفاعي للعقار"] = require("../../assets/images/platform-clean/alrifai-small.png");
+LOGOS["MAQRAT"] = require("../../assets/images/platform-clean/maqrat.png");
 const coverage = coverageSnapshot.platforms as Record<string, PickerCoverage>;
 export const PLATFORM_PICKER_PROFILES: Record<string, PlatformPickerProfile> = Object.fromEntries(
   Object.entries(LOGOS).map(([name, logo]) => [name, {

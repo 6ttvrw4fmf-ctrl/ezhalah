@@ -170,6 +170,7 @@ def map_property(post: dict, d: dict[str, Any], terms: list[str]) -> tuple[Optio
     status = d.get("status") or ""
     deal = _DEAL.get(status)
     if not deal:                                   # تم البيع / تم التأجير / قريبا — no offer
+        db.note_read_gone(f"{PREFIX}{post.get('id')}", status)   # sold/rented on its own page
         return None, f"status_{status or 'none'}"
     crumbs = d.get("crumbs") or []
     if crumbs and crumbs[0] != "السعودية":

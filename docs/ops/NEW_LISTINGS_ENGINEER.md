@@ -545,6 +545,7 @@ Your history, read from the routine log on 2026-10-03:
 - **A monitor must flag OUR claim, not the source's number.**
 - **A correction that isn't enrolled decays silently.**
 - **2026-10-08 (🆕, copied by 🔧):** a migration's check block must EXECUTE the function it replaces. Grepping the text missed a plpgsql name clash (`n` ambiguous), and job 45 failed at 08:10 UTC until the 09:10 run.
+- **2026-10-09 (🔧 QA, you did not run):** your scope number was blind until today. `search_listings_ar.first_seen_at` was stamped only for rows without `last_updated`, so «new in 24 h» read 82 when 3,305+ arrived (aqar 18 vs 835). Fixed 20261009171105. Re-baseline every arrivals number from 10-09 on, and when two counts of «today's arrivals» disagree (index vs source `scraped_at`), stop and find out which one lies before you judge anything with it.
 
 ## Your score (computed, never self-graded)
 Your rating is **read from `python -m scrapers.common.new_listings_score`** (one row per website

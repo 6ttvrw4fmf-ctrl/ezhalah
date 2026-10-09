@@ -42,16 +42,28 @@ def _L(**rooms):
 
 @pytest.mark.parametrize("site", ["aldarim", "abwbna", "alobid", "bahadhabab"])
 def test_untouched_block_is_unknown(site):
-    row, _ = importlib.import_module(f"scrapers.{site}.run").map_listing(_L())
+    mod = importlib.import_module(f"scrapers.{site}.run")
+    row, _ = mod.map_listing(_L())
     assert row is not None
     for c in COLS:
-        assert row[c] is None, f"{site}.{c}: an unfilled block said «no»"
+        # unknown — since 2026-10-09 the AUTHORITATIVE kind, so the crawl also clears a stored «no»
+        assert row[c] is mod.db.AUTHORITATIVE_NULL, f"{site}.{c}: an unfilled block said «no»"
 
 
 @pytest.mark.parametrize("site", ["aldarim", "abwbna", "alobid", "bahadhabab"])
-def test_filled_block_keeps_its_real_zeros(site):
-    row, _ = importlib.import_module(f"scrapers.{site}.run").map_listing(_L(bedrooms=5, bathrooms=4))
-    assert row["maid_room"] is False and row["driver_room"] is False and row["balcony_terrace"] is False
+def test_filled_block_zeros_are_silence_too(site):
+    # REPOINTED 2026-10-09 (🔬, backlog 246). This test pinned «a filled block keeps its zeros as real NO». The
+    # ad page never prints a 0 (re-read abwbna 36968, aldarim 54267, alobid 40615, bahadhabab 38743, run
+    # 37931268959: «مصعد» appears once, in the label dictionary, never as a row; the goldendeal ruling on the same
+    # SaaS, 2026-09-23, measured the visible DOM). A 0 the customer never sees is not a statement: it now writes
+    # AUTHORITATIVE_NULL, which clears the stored False, and a positive count is still a yes.
+    mod = importlib.import_module(f"scrapers.{site}.run")
+    row, _ = mod.map_listing(_L(bedrooms=5, bathrooms=4, maid_rooms=1))
+    assert row["maid_room"] is True
+    for c in ("driver_room", "balcony_terrace"):
+        assert row[c] is mod.db.AUTHORITATIVE_NULL, c
+    assert False not in [row.get(c) for c in ("kitchen", "maid_room", "driver_room", "balcony_terrace",
+                                              "elevator", "parking", "air_conditioner")]
 
 
 def test_helper_reads_null_as_untouched_and_any_count_as_filled():

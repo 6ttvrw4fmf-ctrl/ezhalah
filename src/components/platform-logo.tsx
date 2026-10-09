@@ -1,39 +1,41 @@
 import { Image, type ImageProps } from 'expo-image';
 import { View } from 'react-native';
-import { platformLogoBounds, platformLogoContrast } from './platform-logo-bounds';
-import { useAtLeast } from '@/lib/useAtLeast';
-import { PLATFORM_LOGO_BREAKPOINT } from '@/lib/responsive';
+import { platformLogoBounds } from './platform-logo-bounds';
+import { PLATFORM_PICKER_PROFILES } from '@/data/platformPickerProfiles';
 import { useResolvedTheme } from '@/lib/appearance';
+
+const originalLayouts = new Map(Object.values(PLATFORM_PICKER_PROFILES).map(profile => [profile.logo, profile.layout]));
 
 /** The same transparent slot and optical sizing on every platform surface. */
 export function PlatformLogo({ source }: { source: ImageProps['source'] }) {
-  const wide = useAtLeast(PLATFORM_LOGO_BREAKPOINT);
   const theme = useResolvedTheme();
-  const themedSource = platformLogoContrast.get(source)?.[theme] ?? source;
-  const unit = wide ? 32 : 24;
-  const frameWidth = unit * 3;
-  const frameHeight = unit * 1.5;
+  const frameWidth = 96;
+  const frameHeight = 48;
+  const layout = originalLayouts.get(source as number);
+  if (layout) {
+    return (
+      <View style={{ width: frameWidth, height: frameHeight, flexShrink: 0, overflow: 'hidden', direction: 'ltr', backgroundColor: 'transparent' }}>
+        <Image source={source} contentFit="contain" tintColor={layout.monochrome ? (theme === 'dark' ? '#F3F5F3' : '#253831') : undefined} style={{ position: 'absolute', width: layout.width, height: layout.height, left: layout.left, top: layout.top }} />
+      </View>
+    );
+  }
+
+  // Legacy/non-searchable marks retain their original artwork too; never substitute tinted assets.
   const bounds = platformLogoBounds.get(source);
 
   if (!bounds) {
-    return <Image source={themedSource} contentFit="contain" style={{ width: frameWidth, height: frameHeight, flexShrink: 0 }} />;
+    return <Image source={source} contentFit="contain" style={{ width: frameWidth, height: frameHeight, flexShrink: 0 }} />;
   }
 
   const [imageWidth, imageHeight, left, top, right, bottom] = bounds;
   const artworkWidth = right - left;
   const artworkHeight = bottom - top;
-  // Equal visible bounding-box area gives wordmarks more width without distorting
-  // their lettering. Bound tall/wide extremes inside the same transparent slot.
-  const scale = Math.min(
-    unit / Math.sqrt(artworkWidth * artworkHeight),
-    (frameWidth - 4) / artworkWidth,
-    (frameHeight - 4) / artworkHeight,
-  );
+  const scale = Math.min(88 / artworkWidth, 40 / artworkHeight);
 
   return (
     <View style={{ width: frameWidth, height: frameHeight, flexShrink: 0, overflow: 'hidden', direction: 'ltr' }}>
       <Image
-        source={themedSource}
+        source={source}
         contentFit="contain"
         style={{
           position: 'absolute',

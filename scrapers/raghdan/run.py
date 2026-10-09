@@ -644,6 +644,23 @@ def _rendered_utilities(body: str) -> dict[str, bool]:
     return {col: True for ar, col in _UTILITIES.items() if ar in card}
 
 
+# THE BROKER'S OWN DESCRIPTION (🔬 AF engineer 2026-10-09). The JSON-LD description is a generated spec
+# line («المساحة … عدد الغرف 4 …»); what the broker wrote is the rendered «rt-content» block — one <p> per
+# line («▪️ مطبخ», «▪️ 3 دورات مياه», «مصعد للمشروع»). Kitchen / bathrooms / lift were stored on 0 of 382
+# while the ads state them (ops_af_score 2026-10-09: 0 of 3 findable). raghdan has no amenity field, so
+# this prose is its statement: yes or nothing, never no; the utilities card stays the only source for
+# optical fibres (structured).
+_RT_CONTENT_RE = re.compile(r'class="rt-content[^"]*"\s*>(.*?)</div>', re.S)
+# furnished: raghdan_residential_listings has NO furnished column — a «مفروشة» in the broker text made the whole
+# batch upsert fail (PGRST204, crawl 37927579101, 2026-10-09). Never emit a column the table does not have.
+_PROSE_SKIP = ("optical_fibers", "furnished")
+
+
+def _broker_text(body: str) -> str:
+    m = _RT_CONTENT_RE.search(body or "")
+    return normalize.html_block_lines(m.group(1)) if m else ""
+
+
 def _spec_int(v: Optional[str]) -> Optional[int]:
     """«عرض الشارع» and «رقم القطعة» print a literal 0 when the seller left them blank. Storing 0
     would claim a zero-metre street; 0 here means "not stated", so it must stay NULL."""
@@ -887,6 +904,11 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         # utilities: listed ⇒ True, not listed ⇒ absent ⇒ NULL (never False)
         **_rendered_utilities(body),
     }
+    broker = _broker_text(body)
+    row.update(normalize.prose_amenities_yes(broker, skip=_PROSE_SKIP))
+    baths = normalize.baths_from_leading_count(broker)
+    if baths is not None:
+        row["bathrooms"] = baths
     return row, category
 
 

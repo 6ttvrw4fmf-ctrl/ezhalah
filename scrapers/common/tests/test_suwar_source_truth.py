@@ -262,3 +262,56 @@ def test_a_real_lift_beside_a_shaft_term_is_still_a_lift():
 def test_no_lift_term_writes_nothing():
     row, _ = R.map_listing(_post(features=("موقف خاص",)), _detail())
     assert "elevator" not in row or row["elevator"] is None
+
+
+# ── kitchen and bathrooms from the ad's own spec lines (🔬 AF engineer, 2026-10-09) ───────────────
+# ops_af_score 2026-10-09: suwar 0 of 5 findable — kitchen «we_miss» 5/5, bathrooms 4/5. suwar's
+# property_feature taxonomy has no kitchen term (23 terms over all 154 ads), so the kitchen is prose-only
+# and was never read; and the spec lines put the count FIRST («3 دورات مياه»), which _RE_BATHS
+# («دورات المياه : N») never matched. Fixtures are verbatim live descriptions (project numbers only).
+_P_719 = ("<p>4 غرف + صاله + مطبخ + غرفه عامله مع دورة مياة + 3 دورات مياة<br>* مدخلين * خزانات مستقله "
+          "* ⁠موقف خاص * ⁠غرفة سائق مشتركة<br>المساحة / 167 م السعر / 600,000</p>")
+_P_661 = ("<p>🏘 شقة الدور الأول / 4 غرف + 3 دورات مياه + صالة واسعة + مطبخ + غرفة غسيل المساحة 170م<br>"
+          "الأدوار المتكرره / 5 غرف + 4 دورات مياه + صالة واسعة + مطبخ + غرفة غسيل المساحة 200م<br>"
+          "✏️ خزان مستقل _ عداد مستقل ✏️ موقف خاص 🚘 مشروع 953</p>")
+
+
+def _post_with(content, features=()):
+    p = _post(features=features)
+    p["content"] = {"rendered": content}
+    return p
+
+
+def test_the_kitchen_the_ad_names_is_stored():
+    row, _ = R.map_listing(_post_with(_P_719), _detail(text=_P_719))
+    assert row["kitchen"] is True
+
+
+def test_one_stated_bathroom_count_is_stored():
+    row, _ = R.map_listing(_post_with(_P_719), _detail(text=R._plain(_P_719)))
+    assert row["bathrooms"] == 3
+
+
+def test_a_project_with_several_layouts_states_no_single_bathroom_count():
+    row, _ = R.map_listing(_post_with(_P_661), _detail(text=R._plain(_P_661)))
+    assert row["bathrooms"] is None, "4 and 3 are two layouts, not one fact"
+    assert row["kitchen"] is True and row["laundry_room"] is True
+
+
+def test_prose_never_overrides_a_structured_column():
+    # «موقف خاص» in the prose of an ad whose feature list does NOT tick it: parking is structured on
+    # suwar, so the prose is not read for it (and the shaft rule above stays the only elevator path).
+    row, _ = R.map_listing(_post_with("<p>مطبخ<br>موقف خاص<br>مصعد</p>"), _detail())
+    assert "parking" not in row and "elevator" not in row
+    assert row["kitchen"] is True
+
+
+def test_prose_never_says_no():
+    row, _ = R.map_listing(_post_with("<p>لا يوجد مطبخ</p>"), _detail())
+    assert "kitchen" not in row, "prose only says yes or nothing (SOURCE_TRUTH §2)"
+
+
+def test_mutation_without_the_prose_reader_the_kitchen_is_lost(monkeypatch):
+    monkeypatch.setattr(R.normalize, "prose_amenities_yes", lambda raw, skip=(): {})
+    row, _ = R.map_listing(_post_with(_P_719), _detail(text=_P_719))
+    assert "kitchen" not in row          # proves test_the_kitchen_the_ad_names_is_stored is what catches it

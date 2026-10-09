@@ -25,6 +25,7 @@ import { msgRTL } from '@/lib/textDirection';
 import { stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
 import { startVoiceInput, stopVoiceInput, cancelVoiceInput, isVoiceInputSupported } from '@/lib/voiceInput';
 import VoiceWaveform from '@/components/VoiceWaveform';
+import AgentModelSelector from '@/components/AgentModelSelector';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { buildResultsReadAloudSegments } from '@/lib/readAloudScript';
 import { initialReveal as initialRevealPure, CASCADE_MAX } from '@/lib/initialReveal';
@@ -3889,6 +3890,7 @@ export default function Agent() {
   const choosePlatform = (source: string | null) => {
     setPickerSourceExplicit(true);
     setSelectedSources(names => source === null ? [] : togglePickerSource(names, source));
+    closePlatformPicker();
   };
 
   return (
@@ -3991,7 +3993,7 @@ export default function Agent() {
           <Animated.View style={[s.platformPickerCard, { opacity: pickerProgress, transform: [{ translateY: pickerProgress.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }] }]}>
             <View style={s.platformPickerHeader}>
               <View style={s.platformPickerHeading}>
-                <Text style={s.platformPickerTitle}>{t('Choose websites')}</Text>
+                <Text style={s.platformPickerTitle}>{t('Deep search')}</Text>
                 <Text style={s.platformPickerSubtitle}>{t('Choose one or more websites to search only their listings.')}</Text>
               </View>
               <Pressable
@@ -4046,7 +4048,6 @@ export default function Agent() {
                 </View>
                 <View style={s.platformPickerItemCopy}>
                   <Text style={s.platformPickerItemName}>{t('All websites')}</Text>
-                  <Text style={s.platformPickerItemHint}>{t('Search across Saudi Arabia')}</Text>
                 </View>
                 {!selectedSources.length ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
               </Pressable>
@@ -4072,7 +4073,7 @@ export default function Agent() {
                       style={({ pressed }: any) => [s.platformPickerItem, pressed && s.platformPickerItemPressed]}
                     >
                       <View style={s.platformPickerLogoFrame}>
-                        <Image source={profile.logo} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" tintColor={profile.layout.dark ? colors.ink : undefined} accessible={false} />
+                        <Image source={profile.logo} tintColor={profile.layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" accessible={false} />
                       </View>
                       <View style={s.platformPickerItemCopy}>
                         <Text style={[s.platformPickerItemName, s.platformPickerGridName, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>
@@ -4704,8 +4705,8 @@ export default function Agent() {
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxWidth: 150, height: 28 }} contentContainerStyle={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
                       {selectedPlatforms.map(platform => {
                         const profile = PLATFORM_PICKER_PROFILES[platform.name];
-                        return <View key={platform.name} style={{ width: 30, height: 26, overflow: 'hidden', backgroundColor: 'transparent' }}>
-                          <Image source={profile.logo} style={{ width: 28, height: 24, margin: 1 }} contentFit="contain" tintColor={profile.layout.dark ? colors.ink : undefined} accessible={false} />
+                        return <View key={platform.name} style={{ width: 48, height: 24, borderRadius: 4, overflow: 'hidden', backgroundColor: 'transparent' }}>
+                          <Image source={profile.logo} tintColor={profile.layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: profile.layout.width / 2, height: profile.layout.height / 2, left: profile.layout.left / 2, top: profile.layout.top / 2 }} contentFit="contain" accessible={false} />
                         </View>;
                       })}
                     </ScrollView>
@@ -4904,6 +4905,7 @@ export default function Agent() {
                 lastFilterRef/lastSeedRef, and returns to the Filter screen with restored state.
                 The trade-off: a mid-flight Filter search has no in-place cancel button; the user
                 navigates away instead. Owner-accepted (2026-09-12). */}
+            {!filterOrigin && !completed && <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />}
             <Text style={s.disc}>
               {t('Ezhalah displays listings from third-party property platforms. We do not own, verify, or recommend any listing. Please review all details carefully before making a decision.')}
             </Text>
@@ -4962,7 +4964,24 @@ export default function Agent() {
                 const q = ageFlowQueryRef.current;
                 if (!q) return Promise.resolve(null);
                 const question = ageFlow.question;
-                const p = liveResultCount(question.apply(q, keys));
+                // A COUNT THAT FAILS IS RETRIED, NEVER LEFT AS NOTHING (owner 2026-10-08, screenshot: the header
+                // chip and «متابعة · N نتيجة» both vanished). The 4 s card budget trips whenever the database is
+                // busy (robots, cron), and null means «no number». Two quiet retries with the longer background
+                // budget bring the number back; a retry only ever returns THIS selection's count, so the old
+                // «never show another selection's number» rule still holds (the effect clears it first).
+                // ONE COUNT, THE LONG BUDGET, FROM THE START (🔬 2026-10-09, backlog 281 root cause): the 4 s card
+                // budget aborted a count that was merely in the slow tenth (search p90 is 4.3-6.5 s at every hour,
+                // ops_search_latency_sample) and the retry then asked the busy database for the SAME count again.
+                // Asking once with the background budget shows the number as soon as it exists, with no rerun.
+                const scoped = question.apply(q, keys);
+                const p = (async () => {
+                  let n = await primeLiveResultCount(scoped);
+                  for (let i = 0; n === null && i < 2; i++) {
+                    await new Promise((r) => setTimeout(r, 700));
+                    n = await primeLiveResultCount(scoped);
+                  }
+                  return n;
+                })();
                 p.then(() => prefetchNextStep(question, q, keys), () => {});
                 return p;
               }}
@@ -5264,7 +5283,7 @@ const s = StyleSheet.create({
   platformPickerSectionTitle: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 18, fontWeight: '600', paddingHorizontal: 10, paddingTop: 17, paddingBottom: 7 },
   platformPickerItem: { width: '100%', minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 14, borderWidth: 0, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 10, backgroundColor: colors.surface },
   platformPickerItemPressed: { backgroundColor: colors.segTrack },
-  platformPickerLogoFrame: { width: 56, height: 32, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', flexShrink: 0, overflow: 'hidden' },
+  platformPickerLogoFrame: { width: 96, height: 48, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', flexShrink: 0, overflow: 'hidden' },
   platformPickerLogo: { width: 58, height: 44 },
   platformPickerItemName: { fontFamily: CHAT_FONT, flex: 1, minWidth: 0, color: colors.ink, fontSize: 16, lineHeight: 23, fontWeight: '400', textAlign: 'right' },
   platformPickerGridName: { flex: 0, textAlign: 'right' },

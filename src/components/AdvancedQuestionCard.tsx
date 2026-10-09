@@ -27,6 +27,8 @@ import type { AdvancedOption } from '@/data/advancedFilters';
 // Second tap on the same option within this window = confirm + advance (owner 2026-08-22). Only the
 // SECOND tap acts, so a single tap is never delayed waiting to see whether another one follows.
 const DOUBLE_TAP_MS = 320;
+// The live count waits for the selection to be still this long (a quick run of ticks asks for one count).
+export const LIVE_COUNT_SETTLE_MS = 300;
 const PRESS_IN = { duration: 120, easing: Easing.bezier(0.23, 1, 0.32, 1) };
 const RELEASE = { duration: 300, dampingRatio: 1 };
 
@@ -382,11 +384,17 @@ export default function AdvancedQuestionCard({
   // So the same clear the null-resolution path performs is hoisted to the START of the effect —
   // the pending window now says exactly what the post-timeout window says: nothing. The tapped
   // option's own pill still carries its exact number, so the user is never left without one.
+  // FIVE QUICK TICKS ASK FOR ONE COUNT, NOT FIVE (🔬 2026-10-09, backlog 281). Every tick used to start its own
+  // count RPC at once; a superseded one was ignored but still ran, so a customer ticking five features put five
+  // full counts on the database together and the one they were waiting for queued behind its own siblings.
+  // The count now starts once the selection has been still for LIVE_COUNT_SETTLE_MS; a newer tick cancels it.
   useEffect(() => {
     let alive = true;
     setCount(null);
-    liveCount(sel).then((n) => { if (alive) setCount(n); });
-    return () => { alive = false; };
+    const settle = setTimeout(() => {
+      liveCount(sel).then((n) => { if (alive) setCount(n); });
+    }, LIVE_COUNT_SETTLE_MS);
+    return () => { alive = false; clearTimeout(settle); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel.join(','), titleKey]);
 
@@ -473,6 +481,15 @@ export default function AdvancedQuestionCard({
                 first={i === 0} onPress={() => pick(o.key)} />
             ))}
           </View>
+          {/* A LIVE ZERO IS SAID PLAINLY (owner 2026-10-08, backlog 281). Different features INTERSECT, so
+              five ticks can leave nothing; a bare «0 نتيجة» on the chip read like a broken number. Only a
+              real, resolved 0 for THIS selection prints it (count is cleared to null while a count is in
+              flight or failed, and null prints nothing: never a guessed zero). */}
+          {sel.length > 0 && count === 0 ? (
+            <Text style={[s.unknownNote, { writingDirection: isRTL ? 'rtl' : 'ltr', textAlign: isRTL ? 'right' : 'left' }]} testID="af-zero-note">
+              {t('No results with these choices')}
+            </Text>
+          ) : null}
         </Reanimated.View>
       </ScrollView>
       {/* PINNED action row — outside the ScrollView on purpose (see s.foot). */}

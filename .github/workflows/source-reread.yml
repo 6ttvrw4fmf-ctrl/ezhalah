@@ -26,6 +26,10 @@ on:
         description: "New = first seen within this many hours"
         type: string
         default: "24"
+      around:
+        description: "Print the page HTML around this word (markup diagnostic; phone-like numbers redacted)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -55,9 +59,10 @@ jobs:
           PLATFORM: ${{ inputs.platform }}
           N: ${{ inputs.n }}
           NEW_HOURS: ${{ inputs.new_hours }}
+          AROUND: ${{ inputs.around }}
         run: |
           exec xvfb-run -a python -m scrapers.common.source_reread \
-            --ids "$IDS" --platform "$PLATFORM" --n "$N" --new-hours "$NEW_HOURS"
+            --ids "$IDS" --platform "$PLATFORM" --n "$N" --new-hours "$NEW_HOURS" --around "$AROUND"
       - name: Keep the result for the engineer
         if: always()
         uses: actions/upload-artifact@v4

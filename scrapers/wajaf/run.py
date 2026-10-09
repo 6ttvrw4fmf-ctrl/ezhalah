@@ -174,6 +174,9 @@ def map_page(d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], str]:
         return None, "project_container"
     status = d["badges"][0] if d["badges"] else None
     if status != "متاح":
+        uid = re.search(r"/unit/(\d+)$", d.get("url") or "")    # the same ad_number map_page builds
+        db.note_read_gone(f"{PREFIX}U{uid.group(1)}" if uid
+                          else f"{PREFIX}{(d.get('url') or '').rstrip('/').rsplit('/', 1)[-1]}", status)
         return None, f"status_{status}"
     deal = _DEAL.get(d["deal"] or "")
     if not deal:
