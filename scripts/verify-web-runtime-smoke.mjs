@@ -460,7 +460,7 @@ try {
   // screen (src/lib/nearViewport.ts). This counts what the BUILT app really fetches, so it also
   // catches the flood coming back by any other road: a prefetch, an eager <img>, an expo-image change.
   {
-    const PHOTO_BUDGET = 40; // fixed build: ~14 (cards on and ~6 below the screen); old build: 367
+    const PHOTO_BUDGET = 100; // fixed build 14–31 (cards on and ~6 below the screen, broken-photo retries); flood 326–367
     const cardsShown = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="result-card-grid"]')].pop()
       ?.querySelectorAll('[data-testid^="card-listing-"]').length ?? 0);
     const pressPager = async () => {

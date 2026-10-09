@@ -20,7 +20,7 @@
 // box on a brisk scroll. whenNear now watches the sleeping card's WRAPPER, against the list's own
 // SCROLLER (nearGeometry): 0–1 of 72 in WebKit, 3 of 75 in Chromium on 4G (today's eager build: 38).
 // The behaviour half lives in scripts/verify-web-runtime-smoke.mjs journey D2: the BUILT app must
-// fetch ≤ 40 photos after the second press (old build: 367).
+// fetch ≤ 100 photos after the second press (fixed build 14–31; old build 367).
 //
 // This barrier EXECUTES whenNear against a scripted IntersectionObserver, proves each check can fail
 // by running it against broken variants, then pins the wiring in ListingPhoto.
