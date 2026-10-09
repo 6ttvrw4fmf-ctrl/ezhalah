@@ -250,6 +250,16 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
 10. Deal App rate-limits guest sessions (429): a skeleton from heavy testing on one address is not our bug.
 11. The interview appears only with more than 25 results; a tiny scope is UNKNOWN, never PASS or FAIL; widen to the city.
 12. Your own measurement is the likelier defect: before fixing the product, prove the oracle (DATA_INTEGRITY §19).
+13. Your own robots are the likelier load (10-09): the coverage planner at 2 concurrent plus two browser journeys
+   pushed the live search mean to 4.5 s and made the first golden search time out. Run ONE browser at a time, pause
+   the planner while journeys run, and never read latency while your own runs are on.
+14. Merges are refused to this session by policy («Merge Without Review»); `safe-pr-merge.ts` is denied before it
+   runs. Database migrations ARE live on apply; every mirror PR waits for a human and the drift gate blocks deploys
+   until they land — list them in «Needs from you», never work around it.
+15. The connector hangs on an INSERT or UPDATE whose string carries parentheses or semicolons (🔬 10-09, confirmed
+   10-09 on `ops_engineer_backlog`): write plain sentences into report columns.
+16. `--sample N` in `customer-journey.mjs` is capped at 8 and `--listings` at 12 per run: 100 journeys are nine
+   batches from your own per-platform sample, three per website, sequentially.
 
 ## Rating (computed, must be earned)
 - **10/10** only when: every map line A–E is covered 100% (or its minimum), the sweep is green, all 10 golden searches pass,

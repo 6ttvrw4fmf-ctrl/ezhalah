@@ -525,6 +525,14 @@ Your history, read from the routine log on 2026-10-03:
   money, legal and secrets. A check you could not finish is «not run», never a reason to lower the bar.
 
 ## Lessons from real breakages (use them)
+
+- **🦅 Falcon 10-09 — the frozen snapshot can contradict the source's own district.** `listing_native_location_v1`
+  falls back to `listings_arabic_locations` for `district_ar` when the native arm yields NULL; 471 served listings
+  (dealapp 405, aqar 51, mustqr 12, gathern 3) carried a snapshot district the source never published
+  (dealapp 2121064: source «حي الروضة», served «حي شرق المطار د»). `mon_district_contradicts_source` is the
+  oracle and the hourly P1 `district_contradicts_source` alert is the robot — own it. Repair recipe:
+  migrations 20261009205526/205629 (resolve the source district against the city catalog, NULL when it does
+  not resolve). The ~1,000 «ضاحية هجر» rows in the same view are a naming decision, not a contradiction.
 - **2026-10-07 (copied by 🔧 QA):** before propagating a source's catalog id, check that its REGION matches the region the source published — a right city name in the wrong region still hides the listing (muktamel «بحرة» → Jazan, 33 rows). And the undo must keep the row searchable: a NULL city makes the row non-production_ready (1,118 of 1,118 NULL-city rows are), so «blank it» hides it completely.
 - **2026-10-06 (copied by 🔧 QA):** count before/after on a FIXED set of ids, never a sliding 24-hour window: the window read 61 → 61 while the truth was 61 → 29. And when one tool is down (the DB connector, 07:24–08:03), work the next item instead of stopping: you ended at 95 of 120 minutes with a 3/10.
 - **A parser can be right on old rows and broken on the next one it writes.** That's why the

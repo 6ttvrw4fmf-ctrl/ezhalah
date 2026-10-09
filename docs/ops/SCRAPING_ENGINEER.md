@@ -233,6 +233,13 @@ These cost your first runs a lot of time. Use them instead of working them out a
   what the page itself says next to what we store.
 
 ## Lessons from 2026-10-07 (facts that cost time tonight)
+
+- **🦅 Falcon 10-09 — a None-dropping upsert keeps a wrong value alive for weeks (trap 4).** Six bossbih
+  per-metre ads were served at «0 ر.س» for 18 days: an older adapter stored 0, the current branch emitted
+  None for the total, and `db._unknown_must_not_overwrite_known` dropped the None on every daily re-seen.
+  When the SOURCE settles a field as absent (a rate and no «الإجمالي»), name `db.AUTHORITATIVE_NULL`, never
+  None — and only when the page was actually read. The `zero_price_served` alert had said so since 09-21
+  under a deleted routine: read the alerts for your platforms, not just your own run log.
 - **A crawl that dies before `db.begin_run()` writes NO `scrape_runs` row.** nafithh (domain gone, 2 nights), squares
   and ryadah failed this way and looked healthy. Read the nightly `small-sources-sync` run's FAILED JOBS too, not only
   `scrape_runs`. The early-warning robot now flags a nightly site with no row in 20 h (`20261007054542`).
