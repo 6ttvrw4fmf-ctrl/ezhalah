@@ -388,6 +388,7 @@ or rewrite another engineer's work, and never start a big change in another engi
 
 ## Lessons from real breakages (use them)
 - **2026-10-07 (copied by 🔧 QA):** a crawl that dies before `begin_run` leaves no row — read the nightly run's failed jobs, not only `scrape_runs`. And write your clock from the database: the report said 110 min, `ops_engineer_review` said 102.
+- **2026-10-09 (🔧 QA, no :end row was written):** write the `:end` row FIRST when time is short — on 10-09 the run stopped at ~82 of 180 min with 13 good proofs and no report, so it rated RED. And a cause you diagnose is a bug you log: you found that `search_listings_ar.first_seen_at` was filled only for rows without `last_updated` (the owner's false «aqar 5 new» alarm) and neither fixed nor logged it. 🔧 fixed it (20261009171105); log what you find even when it is not yours.
 - **2026-10-06 (copied by 🔧 QA):** a district map keyed by the city you ASSUME misses (compoundin: Rawabi is Khobar, Qurtoba is Jeddah). Group the NULL rows by the city in their own address first, then write the map.
 - The same block on several unrelated sites at once = one shared security wall, not several dead sites.
 - It gets *worse* the harder you retry = the browser failed to start, not a block.
