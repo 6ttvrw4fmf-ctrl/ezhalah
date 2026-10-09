@@ -70,6 +70,10 @@ export const ABOUT_ART_BREAKPOINT = 640;
 // useAtLeast() like every other width-gated flag; the scan now also catches renamed width reads.
 export const SHARE_LABEL_BREAKPOINT = 380;
 
+// AI-chat site picker (owner 2026-10-09, Perplexity-style): below this width it is a bottom sheet
+// with a drag-handle look; at/above it a compact floating card. Same SSR rule as every gate above.
+export const PICKER_SHEET_BREAKPOINT = 768;
+
 // RETIRED 2026-09-12 (same day, a few hours later): LOADER_PILL_LABEL_BREAKPOINT drove a logo-only
 // compact tile on the search-loading strip below 640px. Owner reversed it — "put the name also,
 // because we need to include the name of each website" — so the name now always renders, every
