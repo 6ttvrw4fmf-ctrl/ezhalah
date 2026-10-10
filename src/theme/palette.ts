@@ -238,5 +238,5 @@ export const BUZZER_GOLD = {
   rim: 'rgba(122,82,8,0.55)', // dark-gold outer ring
   shade: 'rgba(176,122,16,0.55)', // drop shadow
   glow: 'rgba(246,211,101,0.45)', // warm glow, resting
-  glowPeak: 'rgba(246,211,101,0.9)', // warm glow, pulse peak
+  glowPeak: 'rgba(255,214,90,0.95)', // warm glow, pulse peak (brighter — owner 2026-10-10 «make it shiny»)
 } as const;

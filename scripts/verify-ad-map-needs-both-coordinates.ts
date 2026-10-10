@@ -394,12 +394,12 @@ const PREVIEW_RAW = readFileSync(join(ROOT, 'src/components/ListingPreview.tsx')
 const keyframeBlocks = (src: string) => codeOnly(src).match(/animationKeyframes: \[\{[\s\S]*?\}\]/g) ?? [];
 const motionOk = (src: string) => {
   const blocks = keyframeBlocks(src);
-  const shine = /goldShine: \{[\s\S]*?animationKeyframes: \[\{[^\]]*backgroundPosition: '100% 0'[^\]]*backgroundPosition: '0% 0'/.test(codeOnly(src));
+  const shine = /goldShine: \{[\s\S]*?animationKeyframes: \[\{[^\]]*backgroundPosition: '110% 0'[^\]]*backgroundPosition: '-10% 0'/.test(codeOnly(src));
   return blocks.length >= 3 && blocks.every((b) => !/transform/.test(b)) && shine;
 };
 check('every keyframe on the ad page uses properties react-native-web keeps (no transform); the shine sweeps by background position', motionOk(PREVIEW_RAW));
-sourceMutant('a transform keyframe (silently empty on web)', !motionOk(PREVIEW_RAW.replace("'35%': { backgroundPosition: '0% 0' }", "'35%': { backgroundPosition: '0% 0', transform: [{ translateX: '-130%' }] }")));
-sourceMutant('a shine that never moves', !motionOk(PREVIEW_RAW.replace("'0%': { backgroundPosition: '100% 0' }, '35%': { backgroundPosition: '0% 0' }", "'0%': { opacity: 1 }, '35%': { opacity: 1 }")));
+sourceMutant('a transform keyframe (silently empty on web)', !motionOk(PREVIEW_RAW.replace("'60%': { backgroundPosition: '-10% 0' }", "'60%': { backgroundPosition: '-10% 0', transform: [{ translateX: '-130%' }] }")));
+sourceMutant('a shine that never moves', !motionOk(PREVIEW_RAW.replace("'0%': { backgroundPosition: '110% 0' }, '60%': { backgroundPosition: '-10% 0' }", "'0%': { opacity: 1 }, '60%': { opacity: 1 }")));
 
 console.log(failed === 0 ? '\n✅ the ad page pins only what the source published, and its prices block shows only computed-for-this-ad, source-true numbers.\n' : `\n❌ ${failed} check(s) failed — a guessed pin or a wrong number can reach the page.\n`);
 process.exit(failed === 0 ? 0 : 1);
