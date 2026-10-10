@@ -41,6 +41,10 @@ const MAP_MIN = 170;
 // Marker on the history entry the expanded map pushes (same approach as AdViewer's HISTORY_MARK): the
 // browser's Back closes the map and lands on the viewer's own marked entry, which it treats as «show».
 const SHEET_MARK = 'ezAdMap';
+// THE TAP MOMENT (owner 2026-10-10): the open happens OPEN_DELAY_MS after the tap — inside the browser's
+// user-activation window, so Safari lets the new tab through — while a small pop-up and a confetti burst
+// mark the hand-off. Keep it under ~800ms or the tab is blocked.
+const OPEN_DELAY_MS = 750;
 // Numerals only — the app's Poppins token; Arabic text keeps the system face (no letter-spacing, ever).
 const NUM_FONT = IS_WEB ? `${font.family.semibold}, Poppins, ui-sans-serif, system-ui, sans-serif` : undefined;
 const NUM_RUN = /(\d[\d,.]*)/;
@@ -63,13 +67,86 @@ export default function ListingPreview({ listing: l, url, onClose }: {
   const name = t(sourceName(l.source));
   const photos = (l.photos?.length ? l.photos : [l.photo]).filter(Boolean);
   const [main, setMain] = useState(0);
-  const open = () => { if (Platform.OS === 'web' && url) window.open(url, '_blank', 'noopener,noreferrer'); };
+  // window.open(url, '_blank', 'noopener') ALWAYS returns null, so a blocked tab could not be told from an
+  // opened one; open plainly, then sever the opener by hand. null here = genuinely blocked.
+  const open = (): boolean => {
+    if (Platform.OS !== 'web' || !url) return false;
+    const w = window.open(url, '_blank');
+    if (w) w.opener = null;
+    return !!w;
+  };
   const wide = useAtLeast(PICKER_SHEET_BREAKPOINT);
   const reduced = useReducedMotion();
 
+  // ── the tap moment: the buzzer pushes, a gold ring bursts, a 🎉 pops, confetti rains + bursts, then
+  //    the open fires at OPEN_DELAY_MS. No card, no text, no scrim — a party, then the redirect. ────────
+  const [pressing, setPressing] = useState<string | null>(null);
+  const [burst, setBurst] = useState(0);
+  const [partyOn, setPartyOn] = useState(false);
+  const canvasRef = useRef<any>(null);
+  const rootRef = useRef<any>(null);
+  const busy = useRef(false);
+  // A tab the browser blocked once: the next tap opens at once, inside the tap itself, with no delay.
+  const blockedOnce = useRef(false);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => () => { timers.current.forEach(clearTimeout); }, []);
+  const later = (fn: () => void, ms: number) => { timers.current.push(setTimeout(fn, ms)); };
+  // Confetti: ~160 pieces rain from the top with a gentle sway, ~90 burst out of the buzzer; gold + the
+  // brand greens + white + a little red and blue; 2.2s, fading through the last 40%. Canvas, no library.
+  const party = (ox: number, oy: number) => {
+    const cv = canvasRef.current; const cx = cv?.getContext?.('2d');
+    if (!cx) { setPartyOn(false); return; }
+    const w = box.w, h = box.h, dpr = window.devicePixelRatio || 1;
+    cv.width = w * dpr; cv.height = h * dpr; cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const palette = [BUZZER_GOLD.mid, BUZZER_GOLD.deep, BUZZER_GOLD.light, lightColors.primary, lightColors.accentLeaf, lightColors.onFill, lightColors.danger, lightColors.rnplInk];
+    const piece = (x: number, y: number, vx: number, vy: number, sway: number) => ({
+      x, y, vx, vy, sway, ph: Math.random() * Math.PI * 2, w: 5 + Math.random() * 6, hh: 8 + Math.random() * 8, r: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4, c: palette[(Math.random() * palette.length) | 0],
+    });
+    const bits = [
+      ...Array.from({ length: 160 }, () => piece(Math.random() * w, -20 - Math.random() * h * 0.4, 0, 2 + Math.random() * 3, 0.6 + Math.random() * 0.9)),
+      ...Array.from({ length: 90 }, () => { const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2, v = 7 + Math.random() * 9; return piece(ox, oy, Math.cos(a) * v, Math.sin(a) * v, 0); }),
+    ];
+    const t0 = performance.now(); const DUR = 2200;
+    const tick = (t: number) => {
+      const k = (t - t0) / DUR;
+      cx.clearRect(0, 0, w, h);
+      if (k >= 1) { setPartyOn(false); return; }
+      const alpha = k < 0.6 ? 1 : Math.max(0, 1 - (k - 0.6) / 0.4);
+      for (const b of bits) {
+        b.vy += b.sway ? 0.04 : 0.32; b.vx *= 0.99; b.x += b.vx + (b.sway ? Math.sin(t / 300 + b.ph) * b.sway : 0); b.y += b.vy; b.r += b.vr;
+        cx.save(); cx.translate(b.x, b.y); cx.rotate(b.r); cx.fillStyle = b.c; cx.globalAlpha = alpha;
+        cx.fillRect(-b.w / 2, -b.hh / 2, b.w, b.hh); cx.restore();
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  };
+  // ONE handler for the bar, its floating twin and the host badge (the barrier checks they share it).
+  const goOpen = (e?: any) => {
+    if (busy.current) return;
+    if (reduced || blockedOnce.current || !IS_WEB) { if (!open()) blockedOnce.current = true; return; }
+    busy.current = true;
+    setBurst(Date.now());
+    later(() => setBurst(0), 600);
+    setPartyOn(true);
+    let origin: { x: number; y: number } | null = null;
+    try {
+      const root = rootRef.current?.getBoundingClientRect?.();
+      const from = (e?.currentTarget?.querySelector?.('[data-gold]') ?? e?.currentTarget)?.getBoundingClientRect?.();
+      if (root && from) origin = { x: from.left + from.width / 2 - root.left, y: from.top + from.height / 2 - root.top };
+    } catch { /* no origin: the rain still falls */ }
+    later(() => party(origin?.x ?? box.w / 2, origin?.y ?? box.h), 0);
+    const fire = () => {
+      // Blocked: never navigate Ezhalah's own tab away — the next tap opens at once instead.
+      if (!open()) blockedOnce.current = true;
+      busy.current = false;
+    };
+    later(fire, OPEN_DELAY_MS);
+  };
+
   // ── the first-screen budget: root − top bar − hero − head − address row − CTA row → the map ────
-  const [box, setBox] = useState({ w: 0, h: 0, bar: 0, head: 0, addr: 0, cta: 0 });
-  const measure = (k: 'bar' | 'head' | 'addr' | 'cta') => (e: any) => {
+  const [box, setBox] = useState({ w: 0, h: 0, bar: 0, thumbs: 0, head: 0, addr: 0, cta: 0 });
+  const measure = (k: 'bar' | 'thumbs' | 'head' | 'addr' | 'cta') => (e: any) => {
     const h = Math.round(e.nativeEvent.layout.height);
     setBox((b) => (b[k] === h ? b : { ...b, [k]: h }));
   };
@@ -82,7 +159,7 @@ export default function ListingPreview({ listing: l, url, onClose }: {
   // The map card's margin + borders; the CTA row is the first screen's last IN-FLOW row, so the map
   // fills exactly down to it — no blank band on any height.
   const mapH = box.h && box.head && box.addr
-    ? Math.max(MAP_MIN, box.h - box.bar - heroH - box.head - box.addr - box.cta - 12)
+    ? Math.max(MAP_MIN, box.h - box.bar - heroH - box.thumbs - box.head - box.addr - box.cta - 12)
     : MAP_MIN;
 
   // ── the source's pin (web only; native keeps the card data alone) ───────────────────────────────
@@ -220,6 +297,7 @@ export default function ListingPreview({ listing: l, url, onClose }: {
   const descParts = desc ? desc.split(/\s*•\s*|\s*\n+\s*/).map((p) => p.trim()).filter(Boolean) : [];
   const tx = { textAlign: (isRTL ? 'right' : 'left') as 'right' | 'left', writingDirection: (isRTL ? 'rtl' : 'ltr') as 'rtl' | 'ltr' };
   const Frame: any = 'iframe';
+  const Canvas: any = 'canvas';
   const mapTitle = t('Property location on Google Maps');
   // 375px phones: the one-line key details give up a point of size rather than a pixel of width.
   const keyFont = box.w && box.w < 390 ? { fontSize: 13.5 } : null;
@@ -228,31 +306,40 @@ export default function ListingPreview({ listing: l, url, onClose }: {
   // side — a gold pill carrying the site's logo in its own colours. The whole bar is the tap target.
   // Motion (all off under reduced motion): a white shine sweeps the gold pill only (~3s), its glow
   // pulses (2.4s), the hand taps (1.1s). The spoken name stays «افتح الإعلان في {site} للتواصل».
+  // The bar itself never highlights or scales; a press anywhere on it pushes only the buzzer.
   const cta = (testID: string, live = true) => (
     <Pressable
       testID={testID}
-      onPress={open}
+      onPress={goOpen}
+      onPressIn={() => setPressing(testID)}
+      onPressOut={() => setPressing(null)}
       focusable={live}
       accessibilityRole="link"
       accessibilityLabel={t('Open the ad on {name} to contact', { name })}
       accessibilityElementsHidden={!live}
       importantForAccessibility={live ? 'auto' : 'no-hide-descendants'}
-      style={({ hovered, pressed }: any) => [s.cta, (hovered || pressed) && s.ctaHover, pressed && s.ctaPressed]}
+      style={s.cta}
     >
       <View style={s.ctaLines}>
         <Text numberOfLines={1} style={[s.ctaTx, tx]}>{t('Tap here to contact')}</Text>
         <Text numberOfLines={1} style={[s.ctaSub, tx]}>{t('Takes you to the original {name} ad', { name })}</Text>
       </View>
       <Text style={[s.ctaHand, !reduced && s.ctaHandTap]}>👈</Text>
-      <View style={[s.gold, !reduced && s.goldPulse]} pointerEvents="none">
+      <View
+        style={[s.gold, !reduced && s.goldPulse, pressing === testID && s.goldDown]}
+        pointerEvents="none"
+        // @ts-expect-error web-only DOM prop on the RNW host node (the confetti origin)
+        dataSet={{ gold: '1' }}
+      >
         <View style={[{ transform: [{ scale: 88 / 96 }] }, s.goldLogo]}><SourceBadge source={l.source} /></View>
         {!reduced && <View style={s.goldShine} pointerEvents="none" />}
+        {burst > 0 && <View key={burst} style={s.goldRing} pointerEvents="none" />}
       </View>
     </Pressable>
   );
 
   return (
-    <View testID="listing-preview" style={s.root} onLayout={onRoot}>
+    <View testID="listing-preview" style={s.root} onLayout={onRoot} ref={rootRef}>
       {/* (1) slim top bar: the source pill + this tab's ✕ */}
       <View style={s.bar} onLayout={measure('bar')}>
         <View style={s.srcPill}>
@@ -318,7 +405,7 @@ export default function ListingPreview({ listing: l, url, onClose }: {
           )}
         </View>}
         {wide && photos.length > 1 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.thumbs}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.thumbs} onLayout={measure('thumbs')}>
             {photos.map((p, i) => (
               <Pressable key={p + i} testID="listing-preview-thumb" accessibilityRole="button" accessibilityLabel={t('Photo {n} of {total}', { n: i + 1, total: photos.length })} accessibilityState={{ selected: i === main }} onPress={() => goTo(i)} style={[s.thumb, i === main && s.thumbOn]}>
                 <Image source={{ uri: p }} style={s.fill} contentFit="cover" priority="low" loading="lazy" />
@@ -347,7 +434,7 @@ export default function ListingPreview({ listing: l, url, onClose }: {
           </View>
           <Pressable
             testID="listing-preview-host"
-            onPress={open}
+            onPress={goOpen}
             accessibilityRole="link"
             accessibilityLabel={t('Open the ad on {name} to contact', { name })}
             style={({ hovered, pressed }: any) => [s.host, (hovered || pressed) && s.hostHover]}
@@ -453,6 +540,14 @@ export default function ListingPreview({ listing: l, url, onClose }: {
       >
         {cta('listing-preview-contact-floating', floating)}
       </View>
+
+      {/* the tap moment: a full-page, untouchable overlay — the 🎉 near the price, confetti over everything */}
+      {IS_WEB && !reduced && partyOn ? (
+        <View testID="listing-preview-party" style={s.party} pointerEvents="none" aria-hidden>
+          <Canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
+          <Text style={[s.popper, { top: box.bar + heroH - 24 }]}>🎉</Text>
+        </View>
+      ) : null}
 
       {/* the expanded map: the same embed, interactive, over this page — the page keeps its scroll */}
       {mapOpen && geo && IS_WEB ? (
@@ -579,8 +674,6 @@ const s = StyleSheet.create({
     ...(IS_WEB ? { backgroundImage: `linear-gradient(135deg, color-mix(in srgb, ${colors.primary} 82%, white), ${colors.primary} 48%, ${colors.dark})` } as any : {}),
     boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 10px 26px rgba(29,74,55,0.34)',
   },
-  ctaHover: { backgroundColor: colors.dark, ...(IS_WEB ? { backgroundImage: `linear-gradient(135deg, ${colors.primary}, ${colors.dark} 60%, ${colors.dark})` } as any : {}) },
-  ctaPressed: { transform: [{ scale: 0.97 }] },
   ctaLines: { flexShrink: 1, flexGrow: 1, minWidth: 0, gap: 3 },
   ctaTx: { color: colors.onFill, fontSize: 17, lineHeight: 22, fontWeight: '800' },
   ctaSub: { color: colors.onFill, opacity: 0.88, fontSize: 12.5, lineHeight: 16 },
@@ -606,7 +699,29 @@ const s = StyleSheet.create({
     }],
     animationDuration: '2.4s', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out',
   } as any) : {},
+  // Pressed anywhere on the bar: only the buzzer goes down.
+  goldDown: {
+    transform: [{ translateY: 3 }, { scale: 0.93 }],
+    boxShadow: `inset 0 3px 8px rgba(122,82,8,0.45), inset 0 0 0 2px ${BUZZER_GOLD.ring}, 0 0 0 3px ${BUZZER_GOLD.rim}, 0 2px 6px ${BUZZER_GOLD.shade}`,
+  },
+  // A gold ring bursting outward from the buzzer on tap (.55s).
+  goldRing: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: radius.pill, borderWidth: 3, borderColor: BUZZER_GOLD.ring,
+    ...(IS_WEB ? {
+      animationKeyframes: [{ '0%': { opacity: 0.9, transform: [{ scale: 1 }] }, '100%': { opacity: 0, transform: [{ scale: 2.2 }] } }],
+      animationDuration: '0.55s', animationTimingFunction: 'ease-out', animationFillMode: 'forwards',
+    } as any : {}),
+  },
   goldLogo: IS_WEB ? ({ filter: 'drop-shadow(0 1px 0 rgba(255,255,255,0.6))' } as any) : {},
+  // The party overlay (pointer-events none) and the 🎉 that pops with an overshoot near the price.
+  party: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 3 },
+  popper: {
+    position: 'absolute', alignSelf: 'center', fontSize: 96, lineHeight: 110, textAlign: 'center',
+    ...(IS_WEB ? {
+      animationKeyframes: [{ '0%': { opacity: 0, transform: [{ scale: 0.2 }] }, '18%': { opacity: 1, transform: [{ scale: 1.25 }] }, '32%': { transform: [{ scale: 0.96 }] }, '45%': { transform: [{ scale: 1 }] }, '70%': { opacity: 1 }, '100%': { opacity: 0, transform: [{ scale: 1 }] } }],
+      animationDuration: '2.2s', animationTimingFunction: 'ease-out', animationFillMode: 'forwards',
+    } as any : {}),
+  },
   // A white shine that sweeps the gold pill only, once every ~3s.
   goldShine: {
     position: 'absolute', top: -12, bottom: -12, left: 0, width: '60%',

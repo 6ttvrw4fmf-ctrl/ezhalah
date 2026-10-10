@@ -409,7 +409,9 @@ const previewPrice = (src: string) => {
   return /priceRuns\(listingPrice\(l, locale\)\)/.test(code) && !/\bl\.(?:price|priceAnnual|pricePerMeter)\b/.test(code);
 };
 const previewProse = (src: string) => /const desc = hideArabicProseInEnglish\(/.test(codeOnly(src)) && /\{desc \? \(/.test(codeOnly(src));
-const previewContact = (src: string) => /window\.open\(url, '_blank', 'noopener,noreferrer'\)/.test(codeOnly(src));
+// window.open with 'noopener' always returns null, so the page opens plainly and severs the opener by
+// hand — that is what lets a blocked tab be told apart from an opened one (and never navigates us away).
+const previewContact = (src: string) => /const w = window\.open\(url, '_blank'\);\s*if \(w\) w\.opener = null;/.test(codeOnly(src)) && !/window\.location/.test(codeOnly(src));
 const previewPhotos = (src: string) => {
   const code = codeOnly(src);
   return /l\.photos\?\.length \? l\.photos : \[l\.photo\]/.test(code)
@@ -417,11 +419,12 @@ const previewPhotos = (src: string) => {
 };
 check('preview price only uses the shared price contract', previewPrice(preview));
 check('preview description is hidden in English', previewProse(preview));
-check('contact opens the original URL with noopener and noreferrer', previewContact(preview));
+check('contact opens the original URL in a new tab with the opener severed, never by navigating this tab', previewContact(preview));
 check('source-ordered gallery prioritizes the shown photo and lazy-loads the rest', previewPhotos(preview));
 mustCatch('preview formats its own price', !previewPrice(preview.replace('listingPrice(l, locale)', 'l.price')));
 mustCatch('description exposes Arabic in English', !previewProse(preview.replace('const desc = hideArabicProseInEnglish(', 'const desc = String(')));
-mustCatch('contact drops opener protection', !previewContact(preview.replace('noopener,noreferrer', '')));
+mustCatch('contact drops opener protection', !previewContact(preview.replace('if (w) w.opener = null;', '')));
+mustCatch('a blocked tab navigates Ezhalah away', !previewContact(preview.replace("if (!open()) blockedOnce.current = true;\n      busy.current = false;", "if (!open()) window.location.assign(url);\n      busy.current = false;")));
 mustCatch('90 photos load eagerly', !previewPhotos(preview.replaceAll('loading="lazy"', 'loading="eager"')));
 
 
@@ -515,7 +518,19 @@ const hostBadgePass = (src: string) => ['ar', 'en'].every((locale) => {
   return !!host && !!contact && host.props.onPress === contact.props.onPress && host.props.accessibilityLabel === contact.props.accessibilityLabel;
 });
 check('the host badge opens the ad through the contact handler, with the same spoken name', hostBadgePass(preview));
-mustCatch('host badge opens something else', !hostBadgePass(preview.replace(/testID="listing-preview-host"\s+onPress=\{open\}/, 'testID="listing-preview-host" onPress={openMap}')));
+// The tap moment delays the real open behind a pop-up — it must stay inside the browser's user-activation
+// window (≤ 800ms) or Safari blocks the tab; and the open is still the one noopener window.open.
+const tapMomentPass = (src: string) => {
+  const code = codeOnly(src);
+  const delay = Number((/const OPEN_DELAY_MS = (\d+);/.exec(code) ?? [])[1]);
+  return delay > 0 && delay <= 800 && /later\(fire, OPEN_DELAY_MS\);/.test(code) && /const fire = \(\) => \{\s*if \(!open\(\)\) blockedOnce\.current = true;/.test(code)
+    && /if \(reduced \|\| blockedOnce\.current \|\| !IS_WEB\) \{ if \(!open\(\)\) blockedOnce\.current = true; return; \}/.test(code);
+};
+check('the delayed open stays inside the user-activation window and goes through open()', tapMomentPass(preview));
+mustCatch('the open drifts past the activation window', !tapMomentPass(preview.replace('const OPEN_DELAY_MS = 750;', 'const OPEN_DELAY_MS = 2000;')));
+mustCatch('the party opens the ad some other way', !tapMomentPass(preview.replace('const fire = () => {', "const fire = () => {\n      window.location.assign(url); return;")));
+mustCatch('reduced motion still waits for the party', !tapMomentPass(preview.replace('if (reduced || blockedOnce.current || !IS_WEB)', 'if (blockedOnce.current || !IS_WEB)')));
+mustCatch('host badge opens something else', !hostBadgePass(preview.replace(/testID="listing-preview-host"\s+onPress=\{goOpen\}/, 'testID="listing-preview-host" onPress={openMap}')));
 check('zero photos renders complete details without image/empty gallery; one photo renders one image', noPhotoPass(preview));
 mustCatch('no-photo listing gets an empty gallery/broken image', !noPhotoPass(preview.replace('photos.length > 0 &&', 'true &&')));
 mustCatch('single-photo listing loses its gallery', !noPhotoPass(preview.replace('photos.length > 0 &&', 'photos.length > 1 &&')));
