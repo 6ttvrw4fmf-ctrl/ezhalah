@@ -108,6 +108,14 @@ _PRICE_AND_PERIOD = {"price_annual", "price_total", "price_per_meter", "rent_per
 TYPE_TO_SLUG = {v: k for k, v in N.SLUG_TO_TYPE.items()}
 
 
+def _brief(d: dict[str, Any]) -> dict[str, Any]:
+    """Log-sized view: a gallery prints as its photo count (40k-row repair runs would print GBs)."""
+    def b(v: Any) -> Any:
+        if isinstance(v, tuple):
+            return tuple(b(x) for x in v)
+        return f"[{len(v)} photos]" if isinstance(v, list) else v
+    return {k: b(v) for k, v in d.items()}
+
 def explicit_cohort(ads: list[str]) -> list[dict[str, Any]]:
     """The named rows, whatever their capture looks like.
 
@@ -167,6 +175,49 @@ def stub_cohort(limit: int, deal: Optional[str], ptype: Optional[str]) -> list[d
     return out
     return out
 
+
+# Every row captured by the pre-2026-10-10 gallery sweep carries this junk entry (160,448 of 160,450
+# live residential rows that day). A re-read with the fixed enricher drops it; a failed read leaves it.
+# So the marker is both the cohort and its progress meter, and a repaired row is never picked twice.
+SWEEP_JUNK_MARKER = '{"https://images.aqar.fm\\\\"}'      # PostgREST array literal, quoted
+BIG3 = ["Riyadh", "Jeddah", "Dammam"]
+
+
+def photo_repair_cohort(limit: int, shard: int = 0, shards: int = 1) -> list[dict[str, Any]]:
+    """Rows still showing other ads' photos (and no pin), in the order users see them: sale ads in
+    Riyadh/Jeddah/Dammam, then other sale ads, then rent in the big three, then the rest — newest rows
+    (highest id) first inside each tier. `shards` parallel jobs split it by the ad number's last digit,
+    so two jobs never fetch the same ad."""
+    c = db.sb()
+    cols = "id, ad_number, listing_url, property_type, transaction_type, " + ", ".join(REPORT_FIELDS)
+    digits = ",".join(f"ad_number.like.*{d}" for d in range(10) if d % shards == shard)
+    out: list[dict[str, Any]] = []
+    for deal, big in (("Buy", True), ("Buy", False), ("Rent", True), ("Rent", False)):
+        page = 0
+        while len(out) < limit:
+            q = (c.table(TABLE).select(cols).eq("active", True).eq("transaction_type", deal)
+                 .contains("photo_urls", SWEEP_JUNK_MARKER).not_.is_("listing_url", "null")
+                 .or_(digits))
+            q = q.in_("city", BIG3) if big else q.not_.in_("city", BIG3)
+            want = min(1000, limit - len(out))
+            batch = (q.order("id", desc=True)
+                     .range(page * 1000, page * 1000 + want - 1).execute().data or [])
+            out += batch
+            if len(batch) < want:
+                break
+            page += 1
+    return out
+
+
+def remaining_marked() -> int:
+    """Live Aqar rows (both tables) still carrying the old sweep — the repair chain's stop signal.
+    An unreadable count reads as 0, so a broken count stops the chain rather than looping it."""
+    c, n = db.sb(), 0
+    for t in ("aqar_residential_listings", "aqar_commercial_listings"):
+        r = (c.table(t).select("id", count="exact").eq("active", True)
+             .contains("photo_urls", SWEEP_JUNK_MARKER).limit(1).execute())
+        n += r.count or 0
+    return n
 
 AMENITY_REPAIR_TABLE = "aqar_amenity_fabrication_repair_20260809"
 
@@ -257,13 +308,13 @@ def recover(rows: list[dict[str, Any]], dry_run: bool, workers: int,
             return
         if dry_run:
             with lock:
-                print(f"  [{counter['done']}] DRY ad={r['ad_number']} +{gained} ~{changed}")
+                print(f"  [{counter['done']}] DRY ad={r['ad_number']} +{_brief(gained)} ~{_brief(changed)}")
             return
         try:
             UPSERT_FN(fresh)
             with lock:
                 counter["written"] += 1
-                print(f"  [{counter['done']}] ✓ ad={r['ad_number']} +{gained} ~{changed}")
+                print(f"  [{counter['done']}] ✓ ad={r['ad_number']} +{_brief(gained)} ~{_brief(changed)}")
         except Exception as e:  # noqa: BLE001
             with lock:
                 print(f"  [{counter['done']}] ✗ upsert failed ad={r['ad_number']}: {str(e)[:120]}")
@@ -289,7 +340,9 @@ def main() -> int:
                          "cohort. Lets a caller target a cohort identified elsewhere (e.g. rows "
                          "whose stored price disagrees with the figure their own capture rendered) "
                          "without teaching this script a second detection heuristic.")
-    ap.add_argument("--cohort", choices=["stub", "amenity-repair"], default="stub",
+    ap.add_argument("--shard", default="0/1",
+                    help="i/n — this job's slice of the photo-repair cohort (by the ad number's last digit)")
+    ap.add_argument("--cohort", choices=["stub", "amenity-repair", "photo-repair"], default="stub",
                     help="stub = rows with no «تفاصيل الإعلان» block (the June backfill). "
                          "amenity-repair = the closed set of rows whose amenity booleans were "
                          "prose-fabricated and cleared on 2026-08-09, re-read so aqar's own "
@@ -309,6 +362,9 @@ def main() -> int:
     ads = [s.strip() for s in args.ads.split(",") if s.strip()]
     if ads:
         rows, mode = explicit_cohort(ads), "explicit"
+    elif args.cohort == "photo-repair":
+        i, n = (int(x) for x in args.shard.split("/"))
+        rows, mode = photo_repair_cohort(args.limit, i, n), f"photo-repair {i}/{n}"
     elif args.cohort == "amenity-repair":
         rows, mode = amenity_repair_cohort(args.limit, args.deal, args.ptype), "amenity-repair"
     else:
