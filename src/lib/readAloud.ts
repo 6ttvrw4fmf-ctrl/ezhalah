@@ -185,10 +185,15 @@ export function hasSpeakableContent(segments: ReadAloudSegment[] | undefined | n
   return !!segments && buildUnits(segments).length > 0;
 }
 
+export function stripEmoji(text: string): string {
+  return text.replace(/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{FE0F}\u{200D}\u{20E3}]/gu, '').replace(/[ \t]{2,}/g, ' ');
+}
+
 function buildUnits(segments: ReadAloudSegment[]): Unit[] {
   const units: Unit[] = [];
   for (const seg of segments) {
-    const trimmed = seg.text.trim();
+    // Never speak an emoji (owner 2026-10-10: the voice read «✅» aloud after «طلع لنا 9,515 نتيجة»).
+    const trimmed = stripEmoji(seg.text).trim();
     if (!trimmed) continue;
     for (const chunk of splitIntoChunks(trimmed)) units.push({ kind: 'speak', text: chunk });
     if (seg.pauseAfterMs) units.push({ kind: 'pause', ms: seg.pauseAfterMs });

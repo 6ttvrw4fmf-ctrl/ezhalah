@@ -186,8 +186,13 @@ export function pickerSourceSlugs(names: string[]): string[] {
     return entry.slugs;
   }))];
 }
+// Deep search is a FOCUSED search (owner 2026-10-10: «for the deep search we allow how many websites he can
+// choose … let's make it 3»). A 4th pick is refused here — the one function every pick goes through — and the
+// sheet shows the limit and dims the rows that cannot be added. Removing a site is always allowed.
+export const MAX_PICKER_SOURCES = 3;
 export function togglePickerSource(names: string[], name: string): string[] {
-  return names.includes(name) ? names.filter(value => value !== name) : [...names, name];
+  if (names.includes(name)) return names.filter(value => value !== name);
+  return names.length >= MAX_PICKER_SOURCES ? names : [...names, name];
 }
 
 export function applyPickerSources<Q extends { sources?: string[] }>(query: Q, slugs: string[], explicit: boolean): Q {

@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources } from '@/data/platformPickerProfiles';
+import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, MAX_PICKER_SOURCES } from '@/data/platformPickerProfiles';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { COMPOSER_INPUT, TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
@@ -4065,6 +4065,9 @@ export default function Agent() {
               <View style={s.platformPickerHeading}>
                 <Text style={s.platformPickerTitle}>{t('Deep search across websites')}</Text>
                 <Text style={s.platformPickerSubtitle}>{t('Focus your search on one or more specific websites. We show only their listings.')}</Text>
+                <Text testID="platform-picker-limit" style={[s.platformPickerSubtitle, selectedSources.length >= MAX_PICKER_SOURCES && { color: colors.primary }]}>
+                  {t('You can choose up to 3 websites')}
+                </Text>
               </View>
               <Pressable
                 accessibilityRole="button"
@@ -4126,6 +4129,9 @@ export default function Agent() {
               <View style={s.platformPickerRule} />
               {pickerPlatforms.map((platform, index) => {
                 const selected = selectedSources.includes(platform.name);
+                // At the limit, a site not already chosen cannot be added: the row is dimmed and inert, so the
+                // tap neither closes the sheet nor silently does nothing (togglePickerSource refuses it too).
+                const atLimit = !selected && selectedSources.length >= MAX_PICKER_SOURCES;
                 const profile = PLATFORM_PICKER_PROFILES[platform.name];
                 // What the site is and where it covers — the measured coverage sentence, one quiet line
                 // under the name, never truncated (owner 2026-10-09 round 2: «it had a sentence and
@@ -4143,10 +4149,11 @@ export default function Agent() {
                       testID={`platform-picker-${platform.name}`}
                       accessibilityRole="button"
                       accessibilityLabel={`${t(platform.i18nKey)}. ${description}`}
-                      accessibilityState={{ selected }}
+                      accessibilityState={{ selected, disabled: atLimit }}
                       aria-pressed={selected}
+                      disabled={atLimit}
                       onPress={() => choosePlatform(platform.name)}
-                      style={({ pressed }: any) => [s.platformPickerItem, pressed && s.platformPickerItemPressed]}
+                      style={({ pressed }: any) => [s.platformPickerItem, pressed && s.platformPickerItemPressed, atLimit && { opacity: 0.4 }]}
                     >
                       <View style={s.platformPickerLogoFrame}>
                         <Image source={profile.logo} tintColor={profile.layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: profile.layout.width * k, height: profile.layout.height * k, left: profile.layout.left * k, top: profile.layout.top * k }} contentFit="contain" accessible={false} />
@@ -5340,7 +5347,8 @@ const s = StyleSheet.create({
   // ── Voice recording composer (owner brief 2026-08-23) ──
   // composerInner keeps the normal controls' exact pre-voice layout (it owns the composer's size at
   // all times); the recording row overlays it absolutely so the morph never changes the surface.
-  composerModelAnchor: { position: 'absolute', bottom: 3, right: 71, width: 0, alignItems: 'center' },
+  // Nudged left of the mic (owner 2026-10-10: «move it a bit left — too much on the right»).
+  composerModelAnchor: { position: 'absolute', bottom: 3, right: 92, width: 0, alignItems: 'center' },
   composerInner: { flex: 1, flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'flex-end', alignItems: 'flex-end', minHeight: 44, gap: 6 },
   composerInnerHidden: { opacity: 0 },
   // alignSelf center: one line of text sits on the same middle line as «بحث», mic and Send; taller
@@ -5359,9 +5367,11 @@ const s = StyleSheet.create({
   chipStack: { maxWidth: 78, flexGrow: 0, flexShrink: 1 },
   chipStackContent: { flexDirection: 'row', alignItems: 'center' },
   // A 22px disc with a 1.5px ring in the pill's own fill, so overlapping marks stay separated.
-  chipBadge: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: colors.tint, backgroundColor: colors.surface, overflow: 'hidden' },
+  // No disc behind the logo (owner 2026-10-10: «I don't like how the logo has a background behind it») — the mark
+  // sits straight on the pill; with at most 3 picks they stand side by side instead of overlapping.
+  chipBadge: { width: 22, height: 22, overflow: 'hidden' },
   // The FIRST pick sits on top (zIndex inline), the rest peek out from behind it.
-  chipBadgeOverlap: { marginLeft: -8 },
+  chipBadgeOverlap: { marginLeft: 3 },
   micBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   micBtnPressed: { backgroundColor: colors.segTrack, transform: [{ scale: 0.96 }] },
 
