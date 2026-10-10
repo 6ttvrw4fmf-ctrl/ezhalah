@@ -62,7 +62,7 @@ def _barrier_word(word):
     import contextlib, io
     with contextlib.redirect_stdout(io.StringIO()):
         t = _land_type({"specs": [{"name": "area", "value": 600}, {"name": "type", "value": word}]}, "0")
-    return "AUTHORITATIVE_NULL" if t is AUTHORITATIVE_NULL else t
+    return t if t is None or isinstance(t, str) else "SENTINEL"
 `;
 const CASES: [string, boolean, string | null, string][] = [
   ['6772165', false, 'Residential Land', 'Aqar «سكني» → Residential Land (the ad that surfaced the bug)'],
@@ -107,7 +107,7 @@ const ao = a ? run(a) : null;
 mustCatch('the page-text guess coming back (a residential plot typed from the nav menu)',
   !!ao && ao[0] !== 'Residential Land');
 // (b) unknown defaulting to commercial — Aqar silent, we say «تجاري».
-const b = mutate('(b)', (s) => s.replace('    if not word:\n        return AUTHORITATIVE_NULL\n',
+const b = mutate('(b)', (s) => s.replace('    if not word:\n        return LAND_USAGE_SILENT\n',
   '    if not word:\n        return "Commercial Land"\n'));
 mustCatch('a silent plot defaulting to Commercial Land', !!b && !allRight(run(b)));
 const b2 = mutate('(b2)', (s) => s.replace('    return AQAR_LAND_USAGE.get(word)\n',
@@ -121,7 +121,7 @@ const d = mutate('(d)', (s) => s.replace('"سكني/تجاري": "Commercial Lan
 mustCatch('«سكني/تجاري» filed as residential (owner rule: Commercial Land)', !!d && run(d)[2] !== 'Commercial Land');
 // (e) a failed / closed read erasing the stored type.
 const e = mutate('(e)', (s) => s.replace('    if not isinstance(specs, list) or not specs:\n        return None\n',
-  '    if not isinstance(specs, list) or not specs:\n        return AUTHORITATIVE_NULL\n'));
+  '    if not isinstance(specs, list) or not specs:\n        return LAND_USAGE_SILENT\n'));
 mustCatch('a failed or closed read writing NULL over the stored type', !!e && !allRight(run(e)));
 
 check('npm test runs this guard', npmTestRuns(ROOT, 'verify-aqar-land-usage-is-aqars-own'));

@@ -14,7 +14,7 @@ from urllib.parse import urlparse, unquote
 
 from scrapers.common.http import get
 from scrapers.common import normalize as N
-from scrapers.common.db import AUTHORITATIVE_NULL
+from scrapers.common.db import AUTHORITATIVE_NULL, _AuthoritativeNull
 
 
 # PDPL: never store broker/advertiser contact. Strip Saudi mobile numbers from any free text we keep.
@@ -227,12 +227,15 @@ def _listing_json(html: str) -> Optional[dict[str, Any]]:
 # (the only three values Aqar defines for land — it has no industrial or agricultural land usage).
 # «سكني/تجاري» = Commercial Land: owner's mixed-use rule (2026-09-27, Mobasher «أرض سكني تجاري»).
 AQAR_LAND_USAGE = {"سكني": "Residential Land", "تجاري": "Commercial Land", "سكني/تجاري": "Commercial Land"}
+# Aqar lists a plot's specs but no usage: the upsert writes this as NULL over a stale guessed type (it
+# writes every _AuthoritativeNull as NULL). Its own name, so the price sentinel stays price-only.
+LAND_USAGE_SILENT = _AuthoritativeNull()
 
 
 def _land_type(obj: Optional[dict[str, Any]], ad_number: str) -> Any:
     """A plot's type from Aqar's own «نوع العقار». SOURCE IS TRUTH — never a default:
     payload unread, or no spec list at all (a closed ad shows none) → None (unknown; the upsert keeps
-    the stored value) · Aqar lists the plot's specs but no usage → AUTHORITATIVE_NULL (Aqar is silent;
+    the stored value) · Aqar lists the plot's specs but no usage → LAND_USAGE_SILENT (Aqar is silent;
     NULL, never a guessed commercial — this includes payload `type: 4`, which Aqar's own dictionary
     does not label and its page does not show) · a word we do not map → None, loudly."""
     specs = obj.get("specs") if isinstance(obj, dict) else None
@@ -242,7 +245,7 @@ def _land_type(obj: Optional[dict[str, Any]], ad_number: str) -> Any:
     word = spec.get("value") if spec else None
     word = "".join(word.split()) if isinstance(word, str) and not word.startswith("$") else ""
     if not word:
-        return AUTHORITATIVE_NULL
+        return LAND_USAGE_SILENT
     if word not in AQAR_LAND_USAGE:
         print(f"⚠ aqar: UNMAPPED land usage «{word}» (ad {ad_number}) — type left unknown; owner to place it",
               file=sys.stderr, flush=True)
