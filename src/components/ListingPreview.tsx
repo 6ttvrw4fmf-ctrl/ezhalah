@@ -639,7 +639,7 @@ const s = StyleSheet.create({
   arrow: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   arrowHover: { opacity: 0.85 },
   arrowDisc: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.92)', boxShadow: '0 2px 8px rgba(0,0,0,0.18)' },
-  thumbs: { gap: 8, paddingHorizontal: 14, paddingTop: 10 },
+  thumbs: { gap: 8, paddingHorizontal: 14, paddingTop: 6 },
   thumb: { width: 72, height: 54, borderRadius: 10, overflow: 'hidden', borderWidth: 2, borderColor: 'transparent' },
   thumbOn: { borderColor: colors.primary },
   // price + key line + host badge
