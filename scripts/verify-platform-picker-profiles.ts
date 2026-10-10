@@ -251,5 +251,7 @@ run('Aqar');
 assert.equal(explicit, true); assert.deepEqual(chosen, ['Aqar']); assert.equal(closed, 0, 'lighting a site saves at once and KEEPS the sheet open (owner 2026-10-10)');
 run('Wasalt'); assert.deepEqual(chosen, ['Aqar', 'Wasalt']); assert.equal(closed, 0);
 run(null); assert.deepEqual(chosen, []); assert.equal(closed, 1, '«كل المواقع» clears and closes'); assert.equal(tappedRegion, null, '«كل المواقع» clears the tapped region');
-assert.ok(/testID="platform-picker-done"[\s\S]*?onPress=\{closePlatformPicker\}/.test(agent), 'a Done button closes the sheet');
-console.log('PASS: original brand colors, readable monochrome marks without backplates, selection keeps the sheet open, Done/all-websites close it.');
+// The ways out: the ✕ and a tap on the backdrop (owner 2026-10-10: no Done button — «till he clicks x»).
+assert.equal((agent.match(/accessibilityLabel=\{t\('Close'\)\}\s*onPress=\{closePlatformPicker\}/g) ?? []).length, 2, 'the backdrop and the ✕ both close the sheet');
+assert.ok(!/platform-picker-done/.test(agent), 'no Done button');
+console.log('PASS: original brand colors, readable monochrome marks without backplates, selection keeps the sheet open, ✕/backdrop/all-websites close it.');

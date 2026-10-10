@@ -3969,8 +3969,8 @@ export default function Agent() {
   const choosePlatform = (source: string | null) => {
     setPickerSourceExplicit(true);
     setSelectedSources(names => source === null ? [] : togglePickerSource(names, source));
-    // Lighting a site keeps the sheet open so several can be picked in one visit; only «كل المواقع» (and
-    // the Done button / ✕) closes it (owner 2026-10-10: «when the user clicks on it, it doesn't take him out»).
+    // Lighting a site keeps the sheet open so several can be picked in one visit; only «كل المواقع», the ✕
+    // or a tap outside closes it (owner 2026-10-10: «it doesn't take him out … till he clicks x»).
     if (source === null) { setPickerRegion(null); closePlatformPicker(); }
   };
 
@@ -4218,18 +4218,6 @@ export default function Agent() {
               })}
               {!pickerPlatforms.length ? <Text style={s.platformPickerEmpty}>{t('No matching websites')}</Text> : null}
             </ScrollView>
-            {/* The way out once sites are lit: Done, with the count — the sheet no longer closes per tap. */}
-            <Pressable
-              testID="platform-picker-done"
-              accessibilityRole="button"
-              accessibilityLabel={t('Done')}
-              onPress={closePlatformPicker}
-              style={({ pressed }: any) => [s.platformPickerDone, pressed && s.platformPickerDonePressed]}
-            >
-              <Text style={s.platformPickerDoneText}>
-                {selectedSources.length ? `${t('Done')} · ${t('{count} websites', { count: selectedSources.length })}` : t('Done')}
-              </Text>
-            </Pressable>
           </Animated.View>
         </Animated.View>
       )}
@@ -5466,9 +5454,6 @@ const s = StyleSheet.create({
   platformPickerItem: { width: '100%', minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: colors.paper },
   platformPickerItemPressed: { backgroundColor: colors.segTrack },
   platformPickerItemOn: { backgroundColor: colors.tint },
-  platformPickerDone: { marginTop: 8, minHeight: 46, borderRadius: 14, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  platformPickerDonePressed: { backgroundColor: colors.dark },
-  platformPickerDoneText: { fontFamily: CHAT_FONT, color: colors.onFill, fontSize: 16, lineHeight: 22, fontWeight: '600' },
   platformPickerLogoFrame: { width: 56, height: 28, alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
   // A column (name over sentence) — no flex: 1 on either Text (iOS collapses a column child to 0px).
   platformPickerItemCopy: { flex: 1, minWidth: 0 },
