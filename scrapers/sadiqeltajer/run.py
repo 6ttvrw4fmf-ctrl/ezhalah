@@ -190,17 +190,24 @@ def district_window(text: str) -> Optional[str]:
     return " ".join([m.group(3).strip(), *tail])
 
 
-def resolve_district(text: str, city_id: Optional[int]) -> Optional[str]:
+def resolve_district_words(text: str, city_id: Optional[int]) -> tuple[Optional[str], Optional[str]]:
+    """(catalog district, the ad's OWN words it matched). The words are what the card prints as the
+    neighbourhood: 2026-10-10 a «حي القاع البارد» card still read «القاع, بريدة» because
+    `neighborhood` kept the one-word read after the district resolved from the two-word window."""
     words = (district_window(text) or "").split()
     if not words or not city_id:
-        return None
+        return None, None
     for size in (3, 2):
         if len(words) >= size:
             cand = " ".join(words[:size])
             hit = find_district_in_text(cand, city_id)
             if hit and norm_district_tok(hit) == norm_district_tok(cand):
-                return hit
-    return find_district_in_text(words[0], city_id)        # the one-word read, exactly as before
+                return hit, cand
+    return find_district_in_text(words[0], city_id), words[0]   # the one-word read, exactly as before
+
+
+def resolve_district(text: str, city_id: Optional[int]) -> Optional[str]:
+    return resolve_district_words(text, city_id)[0]
 
 
 # ── the description's own labelled rows ──────────────────────────────────────────────────────────
@@ -455,7 +462,10 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
         return None, category, "no_city"
     city = normalize.map_city(city_ar)
     city_id, region_id = to_catalog(city_ar, region_ar)
-    district_ar = resolve_district(text, city_id) if (district_raw and city_id) else None
+    district_ar, district_words = (resolve_district_words(text, city_id) if (district_raw and city_id)
+                                   else (None, None))
+    if district_ar and district_words:
+        district_raw = district_words      # the ad's own full words («القاع البارد», not «القاع»)
 
     price_total, price_per_meter = parse_price(text)
     rent_period, price_annual = (None, None)

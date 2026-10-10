@@ -147,6 +147,11 @@ back (the weekly check below).
   compare Gathern's web-view count with ours per city. If the web view grows back, crawl it the same
   day. Delete this line only if Gathern's web view comes back and we carry it.
 
+> **📍 MAP PINS, EVERY CRAWLER (owner, 2026-10-09 — permanent).** Every crawler and every new site captures the
+> source's own map pin (lat/lng) whenever the source publishes one, Haraj and Property Finder included. Source pins only:
+> never geocode an address or a district into an «exact» pin; reject a pin outside Saudi Arabia, at 0,0 or on the site's
+> city-centre default (→ NULL). Coordinates only, never phones or names. Backlog 312 tracks coverage per site.
+
 ## Facts you don't need to rediscover (from your first runs, 2026-09-27)
 These cost your first runs a lot of time. Use them instead of working them out again.
 - **Start with your last report:** read your latest `ops_daily_engineer_run` report. Whatever it

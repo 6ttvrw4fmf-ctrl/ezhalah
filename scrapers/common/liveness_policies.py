@@ -81,7 +81,9 @@ SOURCE_LIST_PRESENCE = "SOURCE_LIST_PRESENCE"
 # amlakalahsa JOINS this set on 2026-09-12 (single-office Al-Ahsa WordPress+ACF listing site).
 # CRAWL_PRESENCE_ONLY for the same reason as remal/amaall above: a small WordPress REST catalogue
 # (6 CPTs, ~260 posts) re-read in full each run, with no per-listing revisit endpoint of its own.
-NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common"})
+# haraj (2026-10-10) is a SHADOW crawler only (scrapers/haraj/shadow.py writes nothing): it gets its
+# liveness policy in the same change that makes it production-searchable (backlog 311).
+NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "haraj"})
 
 
 class _P(dict):
