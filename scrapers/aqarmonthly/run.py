@@ -233,7 +233,11 @@ _ext_by_id: dict[int, dict] = {}
 # pages render «مطبخ · مصعد · مكيف · موقف خاص» (source-reread run 37288862098, ad 6570974) — invisible
 # to every customer who ticks an amenity on a Monthly search (ops_af_score 2026-10-05: find 0/10).
 AMENITY_GQL_FIELDS: tuple[str, ...] = ("lift", "ketchen", "ac", "maid", "driver", "car_entrance",
-                                       "special_entrance", "two_entrances", "extended_details")
+                                       "special_entrance", "two_entrances", "extended_details", "wc")
+# `wc` (2026-10-10, 🔬): the same Listing's bathroom count — the «دورات المياه» row of the unit page.
+# The Monthly apartment interview asks «كم دورة مياه», and 0 of 3,073 searchable Monthly apartments
+# carried one (ops_af_score 2026-10-10 aqarmonthly bathrooms we_miss 4/4). Settled against the live
+# schema like the flags above, so a schema that does not know it drops it and the crawl is unchanged.
 # The subset the live schema accepted this run (see settle_amenity_fields); () = today's query exactly.
 _amenity_fields: tuple[str, ...] = ()
 
@@ -289,6 +293,12 @@ def settle_across_units(answer_for, ids, tries: int = SETTLE_TRIES) -> tuple[str
         if got:
             return got
     return ()
+
+
+def wc_bathrooms(raw) -> int | None:
+    """aqar's `wc` → a bathroom count: a whole number 1..15, else None (0, junk and absence are silence)."""
+    n = N.to_int(raw) if raw is not None else None
+    return n if n is not None and 1 <= n <= 15 else None
 
 
 def map_amenities(g: dict) -> dict:
@@ -553,6 +563,8 @@ def map_listing(g: dict, price: dict) -> dict | None:
         # exists in the same API response but is never read either — no bedroom-specific signal
         # exists here. Owner decision 2026-07-28: null rather than store an unverifiable figure.
         "bedrooms":         None,
+        # «دورات المياه» — a positive count only; 0 / missing is silence, never «no bathroom».
+        "bathrooms":        wc_bathrooms(g.get("wc")),
         # Forward-fix (2026-07-10 location-data-quality audit): an honest None beats the literal
         # "Other" sentinel — the additive resolve_slug()-derived columns already cover most rows.
         "city":             city,

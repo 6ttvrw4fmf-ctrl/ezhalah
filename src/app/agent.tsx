@@ -97,7 +97,7 @@ import { listingLocationAr, listingPrice } from '@/lib/listingDisplay';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard, type ShellPills } from '@/components/AdvancedQuestionCard';
-import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes } from '@/lib/afProbe';
+import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes, offersNarrowing } from '@/lib/afProbe';
 import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, resolveScopeOptionsInBackground, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, primeLiveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
 import { isScopeQuestionId, nextScopeTier, unresolvedScopeTiers, scopeCandidates, type ScopeTier } from '@/lib/afPlan';
 import { markSearchLeftBehind } from '@/lib/searchLeftBehind';
@@ -2366,7 +2366,7 @@ export default function Agent() {
       // owner 2026-09-12: reverses the 2026-09-04 decision to narrate "nothing left" as a chat
       // bubble — too dense/confusing in practice. Silent now: afCanNarrow alone still correctly
       // hides «تحديد أكثر» when exhausted (line ~3418); «عرض المزيد» is untouched by this verdict.
-      setAfCanNarrow((c) => ({ ...c, [m.id]: verdict === 'yes' }));
+      setAfCanNarrow((c) => ({ ...c, [m.id]: offersNarrowing(verdict) }));   // unknown offers (backlog 317)
     });
   }, [lastResultsMsg, guidedPills]);
 

@@ -292,7 +292,7 @@ check('…and it earns an OFFER too — offer and ask agree on it',
   check('UNKNOWN still never hardens into NO: an UNMEASURABLE tier is `unknown`, only a MEASURED one may say no',
     /if \(!res \|\| res\.probeFailed\) return 'unknown';/.test(assess)
     && /if \(ranked && !ranked\.probeFailed\) return 'no';/.test(assess)
-    && /verdict === 'yes'/.test(probe),
+    && /offersNarrowing\(verdict\)/.test(probe),   // 317: unknown offers, only a decided no hides
     'src/app/agent.tsx offer probe — a turn showing >INTERVIEW_STOP_AT matches cannot truthfully have '
     + 'an empty scope, so total===0 is a failed count RPC, not a fact (permanent fleet rule)');
   check('the advanced-pool rank runs against the RESOLVED scope and the walked asked-set',
