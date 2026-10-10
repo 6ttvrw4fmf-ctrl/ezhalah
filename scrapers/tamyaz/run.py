@@ -56,6 +56,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import time
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -89,8 +90,8 @@ def _tally(skipped: dict[str, int]) -> str:
     return ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
 
 
-def session() -> cc.Session:
-    s = cc.Session(impersonate="chrome")   # impersonate OWNS the User-Agent
+def session(profile: str = "chrome") -> cc.Session:
+    s = cc.Session(impersonate=profile)   # impersonate OWNS the User-Agent
     s.headers.update({"Accept-Language": "ar,en;q=0.7", "Accept": "application/json"})
     return s
 
@@ -207,8 +208,32 @@ def map_listing(p: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     return row, category, ""
 
 
+# 2026-10-10: one 40 s connect timeout (curl 28) failed the whole nightly with zero retries; the
+# automatic re-crawl 28 minutes later read every ad. A transport error or a refused / 5xx answer is
+# retried on a FRESH session with the next profile; a definite answer (200, 404, …) is not.
+_RETRY_PROFILES = ("chrome", "safari17_0", "firefox133")
+_RETRY_STATUSES = {403, 408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
+
+
+def _get_api(s: cc.Session, url: str, make_session=session, pause: float = 5.0):
+    last_exc = None
+    for i, prof in enumerate(_RETRY_PROFILES):
+        if i:
+            time.sleep(pause * i)
+            s = make_session(prof)
+        try:
+            r = s.get(url, timeout=40)
+        except Exception as exc:  # noqa: BLE001 — transport failure: retry, then raise the last one
+            last_exc = exc
+            continue
+        if r.status_code in _RETRY_STATUSES and i < len(_RETRY_PROFILES) - 1:
+            continue
+        return r
+    raise last_exc if last_exc else RuntimeError(f"{url}: no answer after {len(_RETRY_PROFILES)} sessions")
+
+
 def fetch_properties(s: cc.Session, limit: int = 0) -> list[dict]:
-    r = s.get(f"{BASE}/api/properties", timeout=40)
+    r = _get_api(s, f"{BASE}/api/properties")
     if r.status_code != 200:
         raise RuntimeError(f"/api/properties returned {r.status_code}")
     try:
