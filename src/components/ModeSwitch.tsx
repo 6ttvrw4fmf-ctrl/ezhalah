@@ -1,6 +1,6 @@
 // ModeSwitch — the top-nav control that presents Ezhalah's TWO ways to search as one premium,
 // compact segmented control:
-//   [ ⚟ تصفية | 💬 الوسيط الذكي ]  (English: Filter | Smart Broker)
+//   [ ⚟ تصفية | ✧ الوسيط الذكي ]  (English: Filter | Smart Broker)
 // One shared component owns 100% of this control's design (same philosophy as the Advanced Filter
 // Design Contract): the two screens (home = filter, /agent = AI) just mount it with `active` and a
 // navigation callback.
@@ -11,9 +11,10 @@
 //   • Generous size + spacing: 46-tall track, larger 17px icons, an 8px icon↔label gap, 13.5px type.
 //   • A luxurious raised-white active indicator (soft green-tinted shadow) that GLIDES between halves
 //     on a gentle, slightly-overshooting spring — never a hard switch.
-//   • The two sides are a matched pair: each has one thin outline icon (funnel / chat bubble) that turns
-//     brand-green when its side is active. (Owner 2026-10-09: the breathing green sparkle «doesn't look
-//     professional enough» — replaced by the plain outline sibling of the funnel, in both languages.)
+//   • The two sides are a matched pair: each has one thin outline icon (funnel / AI stars) that turns
+//     brand-green when its side is active. (Owner 2026-10-09: the filled, breathing green sparkle «doesn't look
+//     professional enough»; owner 2026-10-10: «include the AI star» — so the stars stay, as the outline
+//     sparkles-outline in the funnel's colours, with no animation. Both languages.)
 //   • Cross-screen continuity: the control sits at the same top-bar spot on both screens, and a
 //     module-level `lastMode` remembers where the indicator was when you tapped — the arriving
 //     screen's control animates the indicator FROM that side into place, so navigation reads as one
@@ -123,7 +124,7 @@ export default function ModeSwitch({
         <Text style={[s.segT, active === 'filter' ? s.segTOn : null, en && { fontFamily: SYSTEM_FONT, fontWeight: active === 'filter' ? '600' : '500' }]} numberOfLines={1}>{t('Filter')}</Text>
       </Pressable>
 
-      {/* الوسيط الذكي / Smart Broker — the chat side: a thin outline bubble, the funnel's sibling. */}
+      {/* الوسيط الذكي / Smart Broker — the AI side: the AI stars, drawn as a thin outline like the funnel. */}
       <Pressable
         style={[s.seg, { width: segW }]}
         onPress={() => press('agent')}
@@ -134,7 +135,7 @@ export default function ModeSwitch({
         accessibilityState={{ selected: aiSteady }}
         accessibilityLabel={t('Smart Assistant')}
       >
-        <Ionicons name="chatbubble-outline" size={17} color={aiSteady ? colors.primary : colors.muted} />
+        <Ionicons name="sparkles-outline" size={17} color={aiSteady ? colors.primary : colors.muted} />
         <Text style={[s.segT, aiSteady ? s.segTOn : null, en && { fontFamily: SYSTEM_FONT, fontWeight: aiSteady ? '600' : '500' }]} numberOfLines={1}>{t('Smart Assistant')}</Text>
       </Pressable>
     </View>
