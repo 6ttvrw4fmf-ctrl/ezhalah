@@ -106,8 +106,9 @@ _PRICE_AND_PERIOD = {"price_annual", "price_total", "price_per_meter", "rent_per
 
 # canonical property_type -> the aqar URL slug enrich_residential expects
 TYPE_TO_SLUG = {v: k for k, v in N.SLUG_TO_TYPE.items()}
-# enrich_residential re-derives a plot's zoning from the land page's own text («تجاري» / «صناعي» /
-# «زراعي»), so these stored types live under aqar's `land` slug but are NOT values of SLUG_TO_TYPE.
+# A plot's type comes from Aqar's own «نوع العقار» (Commercial Land), and rows typed before 2026-10-10 by
+# the old page-text guess still hold Industrial Land / Agriculture Plot — all live under aqar's `land`
+# slug but are NOT values of SLUG_TO_TYPE.
 # Missing here, every such row was skipped as "unfetchable" without a single fetch — 21,613 live land
 # rows kept other ads' photos through the 2026-10-10 repair. Guarded by
 # scripts/verify-aqar-photos-are-the-ads-own.ts (every type the enricher can write must resolve).
@@ -225,6 +226,39 @@ def remaining_marked() -> int:
         n += r.count or 0
     return n
 
+# Land typed by the pre-2026-10-10 page-text guess (nav «مكتب تجاري», district list «حي الصناعية»): 0 of
+# 26,889 live plots residential while Aqar's own «نوع العقار» said سكني on 18,522. A re-read stamps
+# raw_captured_at, so `before` (the fix's merge time) makes the cohort its own progress meter.
+LAND_GUESS_TYPES = ["Commercial Land", "Industrial Land", "Agriculture Plot"]
+
+
+def _land_usage_query(c: Any, cols: str, before: str) -> Any:
+    return (c.table(TABLE).select(cols, count="exact").eq("active", True)
+            .in_("property_type", LAND_GUESS_TYPES).lt("raw_captured_at", before)
+            .not_.is_("listing_url", "null"))
+
+
+def land_usage_cohort(limit: int, before: str, shard: int = 0, shards: int = 1) -> list[dict[str, Any]]:
+    """Live plots not re-read since `before`, newest first, split across shards by the ad's last digit."""
+    c = db.sb()
+    cols = "id, ad_number, listing_url, property_type, transaction_type, " + ", ".join(REPORT_FIELDS)
+    digits = ",".join(f"ad_number.like.*{d}" for d in range(10) if d % shards == shard)
+    out: list[dict[str, Any]] = []
+    while len(out) < limit:
+        want = min(1000, limit - len(out))
+        batch = (_land_usage_query(c, cols, before).or_(digits).order("id", desc=True)
+                 .range(len(out), len(out) + want - 1).execute().data or [])
+        out += batch
+        if len(batch) < want:
+            break
+    return out
+
+
+def remaining_land_guesses(before: str) -> int:
+    """The land chain's stop signal; an unreadable count reads as 0 so it can never loop."""
+    return _land_usage_query(db.sb(), "id", before).limit(1).execute().count or 0
+
+
 AMENITY_REPAIR_TABLE = "aqar_amenity_fabrication_repair_20260809"
 
 
@@ -272,7 +306,7 @@ def amenity_repair_cohort(limit: int, deal: Optional[str], ptype: Optional[str])
 
 
 def recover(rows: list[dict[str, Any]], dry_run: bool, workers: int,
-            structured_only: bool = True) -> dict[str, int]:
+            structured_only: bool = True, write_all: bool = False) -> dict[str, int]:
     counter = {"done": 0, "fetched": 0, "written": 0, "unfetchable": 0, "no_gain": 0, "no_slug": 0}
     lock = threading.Lock()
 
@@ -306,11 +340,14 @@ def recover(rows: list[dict[str, Any]], dry_run: bool, workers: int,
         # What the re-read actually recovers, purely for the operator's report.
         reportable = [f for f in REPORT_FIELDS
                       if not (structured_only and f in _PRICE_AND_PERIOD)]
+        # property_type rides along: a land row whose ONLY fix is Aqar's own «نوع العقار» (2026-10-10)
+        # must be written, not reported as "no change".
+        reportable.insert(0, "property_type")
         gained = {f: fresh.get(f) for f in reportable
                   if r.get(f) is None and fresh.get(f) is not None}
         changed = {f: (r.get(f), fresh.get(f)) for f in reportable
                    if r.get(f) is not None and fresh.get(f) is not None and r.get(f) != fresh.get(f)}
-        if not gained and not changed:
+        if not gained and not changed and not write_all:
             with lock:
                 counter["no_gain"] += 1
                 print(f"  [{counter['done']}] · ad={r['ad_number']} no change "
@@ -352,7 +389,9 @@ def main() -> int:
                          "without teaching this script a second detection heuristic.")
     ap.add_argument("--shard", default="0/1",
                     help="i/n — this job's slice of the photo-repair cohort (by the ad number's last digit)")
-    ap.add_argument("--cohort", choices=["stub", "amenity-repair", "photo-repair"], default="stub",
+    ap.add_argument("--before", default="",
+                    help="land-usage cohort: re-read live plots whose capture is older than this ISO time")
+    ap.add_argument("--cohort", choices=["stub", "amenity-repair", "photo-repair", "land-usage"], default="stub",
                     help="stub = rows with no «تفاصيل الإعلان» block (the June backfill). "
                          "amenity-repair = the closed set of rows whose amenity booleans were "
                          "prose-fabricated and cleared on 2026-08-09, re-read so aqar's own "
@@ -375,6 +414,11 @@ def main() -> int:
     elif args.cohort == "photo-repair":
         i, n = (int(x) for x in args.shard.split("/"))
         rows, mode = photo_repair_cohort(args.limit, i, n), f"photo-repair {i}/{n}"
+    elif args.cohort == "land-usage":
+        if not args.before:
+            ap.error("--cohort land-usage needs --before")
+        i, n = (int(x) for x in args.shard.split("/"))
+        rows, mode = land_usage_cohort(args.limit, args.before, i, n), f"land-usage {i}/{n}"
     elif args.cohort == "amenity-repair":
         rows, mode = amenity_repair_cohort(args.limit, args.deal, args.ptype), "amenity-repair"
     else:
@@ -389,7 +433,10 @@ def main() -> int:
 
     run_platform = "aqar_stub_recovery" if args.table == "residential" else "aqar_stub_recovery_commercial"
     run_id = None if args.dry_run else db.begin_run(run_platform)
-    c = recover(rows, args.dry_run, args.workers, structured_only=not args.include_price)
+    # land-usage writes every row it read, even one whose type was already right: the write stamps
+    # raw_captured_at, which is what takes the row out of the cohort.
+    c = recover(rows, args.dry_run, args.workers, structured_only=not args.include_price,
+                write_all=args.cohort == "land-usage")
     print(f"\nfetched={c['fetched']} written={c['written']} "
           f"unfetchable={c['unfetchable']} no_gain={c['no_gain']} no_slug={c['no_slug']} of {len(rows)}")
 
