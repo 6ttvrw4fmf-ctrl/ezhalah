@@ -23,13 +23,25 @@
 name: Dealapp liveness
 
 on:
-  schedule:
-    # EVERY 2 HOURS (owner decision 2026-09-28: Deal App checked as strongly as Aqar, 48 h window).
-    # Capacity by CADENCE, never by probing harder (LISTING_LIFECYCLE_ENGINEER.md §4.1d): each run
-    # stays paced inside dealapp's per-visitor view quota (liveness.OriginBudget, 9 renders/min,
-    # 50-min stop) and checked 600 ads in run 36492484098. 12 runs/day = ~7,200 ads/day against
-    # ~16.5k active = a ~55 h cycle. Runs never overlap (concurrency group below).
-    - cron: "40 */2 * * *"
+  # EVERY 2 HOURS (owner decision 2026-09-28: Deal App checked as strongly as Aqar, 48 h window).
+  # Capacity by CADENCE, never by probing harder (LISTING_LIFECYCLE_ENGINEER.md §4.1d): each run
+  # stays paced inside dealapp's per-visitor view quota (liveness.OriginBudget, 9 renders/min,
+  # 50-min stop) and checked 600 ads in run 36492484098. 12 runs/day = ~7,200 ads/day against
+  # ~16.5k active = a ~55 h cycle. Runs never overlap (concurrency group below).
+  #
+  # The cadence is dispatched by pg_cron (job gh-dealapp-liveness, 40 */2 * * *) through the
+  # wrapper dealapp-liveness-cron.yml, which calls this file with apply=true (♻️ 2026-10-10).
+  # Until then this file carried its own GitHub `schedule:` and GitHub fired it 2-5 times a day
+  # instead of 12 (measured 10-02..10-10: 1,200-3,000 ads a day), so dealapp's checked-in-time
+  # share swung with GitHub's scheduler (96.0% -> 82.8% in one day). A workflow's own schedule is
+  # not a schedule here (LIFECYCLE_ENGINEER.md); the GitHub cron was removed so one slot never
+  # runs twice.
+  workflow_call:
+    inputs:
+      apply:
+        description: "Write strikes/verifications/deactivations (the pg_cron path passes true)."
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       apply:
@@ -77,9 +89,10 @@ jobs:
           # set, and a test pins that the secret's mere presence is not enough.
           WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
         run: |
-          # A scheduled run applies; a manual dispatch writes only when apply=true is passed
-          # explicitly. `github.event_name == 'schedule'` is what makes the cron path effective —
-          # a dispatch with no inputs must never silently become a writing run.
+          # A run applies only when apply=true is passed explicitly: by the pg_cron wrapper
+          # (dealapp-liveness-cron.yml, workflow_call) or by a human on a manual dispatch. A
+          # dispatch with no inputs must never silently become a writing run. (`schedule` is kept
+          # in the test so a GitHub cron, if one is ever added back, still applies.)
           APPLY=""
           if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.apply }}" = "true" ]; then
             APPLY="--apply"
