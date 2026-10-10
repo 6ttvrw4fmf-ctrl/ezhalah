@@ -6,10 +6,11 @@
 // first with English fallbacks. (PRD §5.1, prototype matchLocations — extended to nationwide data.)
 
 import raw from './sa-locations.json';
-import { norm, catalogCityExtras, catalogDistrictExtras, type CatalogCity, type CatalogDistrict } from '../lib/locationSuggest';
+import { norm, catalogCityExtras, catalogDistrictExtras, isLatinQuery, latinRank, type CatalogCity, type CatalogDistrict } from '../lib/locationSuggest';
 import { supabase } from '@/lib/supabase';
 import { CITY_AR_DISPLAY, CITY_TOKENS, cityTokensReverseLookup } from '@/lib/cityDisplay';
 import { arabicOrPlaceholder, cutPlaceName } from '@/lib/arabicText';
+import { translitPlace } from '@/lib/translitPlace';
 import { LOCATION_UNRESOLVED_AR } from '@/i18n';
 import type { Category, Deal } from './taxonomy';
 
@@ -76,8 +77,8 @@ for (const [id, regionId, en, ar] of DATA.cities) CITY_BY_ID.set(id, { en, ar, r
 
 // The built-in catalog as plain arrays for the instant typed matchers (src/lib/locationSuggest.ts): every city and
 // every district of every city, in memory, so typing never waits for a pool and never hides a real place.
-const CATALOG_CITIES: CatalogCity[] = DATA.cities.map(([id, regionId, , ar]) => ({
-  cityId: id, cityAr: ar, regionId, regionAr: REGION_BY_ID.get(regionId)?.ar ?? null,
+const CATALOG_CITIES: CatalogCity[] = DATA.cities.map(([id, regionId, en, ar]) => ({
+  cityId: id, cityAr: ar, regionId, regionAr: REGION_BY_ID.get(regionId)?.ar ?? null, cityEn: en,
 }));
 const AMBIGUOUS_CITY_NAMES: ReadonlySet<string> = (() => {
   const seen = new Set<string>();
@@ -86,10 +87,32 @@ const AMBIGUOUS_CITY_NAMES: ReadonlySet<string> = (() => {
   return dup;
 })();
 const CATALOG_DISTRICTS_BY_CITY = new Map<number, CatalogDistrict[]>();
-for (const [cityId, , , ar] of DATA.districts) {
+// The official English district names end in " Dist."; the English District field shows the bare name, as the
+// Arabic one shows «النرجس», not «حي النرجس».
+const bareDistEn = (en: string) => en.replace(/\s*\bDist\.?$/i, '').trim();
+for (const [cityId, , en, ar] of DATA.districts) {
+  const d: CatalogDistrict = { cityId, districtAr: ar, districtEn: bareDistEn(en) };
   const list = CATALOG_DISTRICTS_BY_CITY.get(cityId);
-  if (list) list.push({ cityId, districtAr: ar });
-  else CATALOG_DISTRICTS_BY_CITY.set(cityId, [{ cityId, districtAr: ar }]);
+  if (list) list.push(d);
+  else CATALOG_DISTRICTS_BY_CITY.set(cityId, [d]);
+}
+
+// ENGLISH NAMES for the English UI (owner 2026-10-09): the official names above, by id. Display only — a picked
+// row still carries its Arabic name into the search, so English changes what the user reads, never what is found.
+// A place the catalog does not carry falls back to the transliteration the result cards already use.
+export const cityNameEn = (cityId: number, cityAr: string): string => CITY_BY_ID.get(cityId)?.en ?? translitPlace(cityAr);
+export const regionNameEn = (regionId: number | null, regionAr: string | null): string | null =>
+  (regionId != null ? REGION_BY_ID.get(regionId)?.en : undefined) ?? (regionAr ? translitPlace(regionAr) : null);
+let _districtEn: Map<string, string> | null = null;
+const districtEnKey = (cityId: number, ar: string) => `${cityId}:${stripAl(stripDistrictWord(norm(ar)))}`;
+export function districtNameEn(cityId: number, districtAr: string): string {
+  if (!_districtEn) {
+    _districtEn = new Map();
+    for (const list of CATALOG_DISTRICTS_BY_CITY.values()) {
+      for (const d of list) if (d.districtEn) _districtEn.set(districtEnKey(d.cityId, d.districtAr), d.districtEn);
+    }
+  }
+  return _districtEn.get(districtEnKey(cityId, districtAr)) ?? translitPlace(districtAr.replace(/^حي\s+/, ''));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1213,7 +1236,9 @@ export function matchDistrictsByCityId(cityId: number, deal: Deal | null, catego
     }
   }
   const scored: { opt: DistrictOption; rank: number }[] = [];
+  const latin = isLatinQuery(query); // English UI: match the English name (Arabic UI never sends Latin here)
   for (const opt of all) {
+    if (latin) { const r = latinRank(query, districtNameEn(cityId, opt.districtAr)); if (r !== null) scored.push({ opt, rank: r }); continue; }
     const n = norm(opt.districtAr);
     if (n.startsWith(q)) scored.push({ opt, rank: 0 });
     else if (n.includes(q)) scored.push({ opt, rank: 1 });
@@ -1249,11 +1274,13 @@ export function matchCitiesByText(deal: Deal | null, periodTok: string | null, c
   }
   const borrowed = exactPool === undefined && basePool !== undefined;
   const scored: { opt: CityOption; rank: number }[] = [];
+  const latin = isLatinQuery(query); // English UI: match the English name (Arabic UI never sends Latin here)
   for (const opt of basePool ?? []) {
     const n = norm(opt.cityAr);
     // A name two real cities share (الهفوف) ranks differently in every scope: while the exact pool is not loaded it
     // is held back entirely, so the first row a user can tap is never the wrong one (a real-browser test caught it).
     if (borrowed && AMBIGUOUS_CITY_NAMES.has(n)) continue;
+    if (latin) { const r = latinRank(query, cityNameEn(opt.cityId, opt.cityAr)); if (r !== null) scored.push({ opt, rank: r }); continue; }
     if (n.startsWith(q)) scored.push({ opt, rank: 0 });
     else if (n.includes(q)) scored.push({ opt, rank: 1 });
   }
