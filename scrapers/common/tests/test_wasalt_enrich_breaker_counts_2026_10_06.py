@@ -39,6 +39,7 @@ class _Q:
     def is_(self, *a): return self
     def lt(self, *a): return self
     def lte(self, *a): return self
+    def gte(self, *a): return self
     def not_(self): return self
 
     def limit(self, n):
