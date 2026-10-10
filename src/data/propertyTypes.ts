@@ -321,6 +321,18 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   'Raw Land':            { rawTypes: ['أرض خام'], kinds: BOTH },
 };
 
+// «أرض خام» is a TAG token, never a stored property_type (live 2026-10-10: the box counted Riyadh/بنبان
+// 167 and returned 0 — the card fetch asked the raw tables for property_type = 'أرض خام'). The SERVER
+// selection (p_types) keeps the token; the raw-table card fetch, which only re-reads ids the server
+// already chose, must ask for the land types those rows really carry.
+export const RAW_LAND_TOKEN = 'أرض خام';
+export const RAW_LAND_CARRIER_TYPES = ['Commercial Land', 'Industrial Land', 'Residential Land', 'Agriculture Plot'];
+export function storedRawTypes(rawTypes: string[]): string[] {
+  if (!rawTypes.includes(RAW_LAND_TOKEN)) return rawTypes;
+  const carriers = RAW_LAND_CARRIER_TYPES.flatMap((t) => CLEAN_TO_QUERY[t]?.rawTypes ?? []);
+  return [...new Set([...rawTypes.filter((r) => r !== RAW_LAND_TOKEN), ...carriers])];
+}
+
 // «مرافق خدمية» (Service Facilities) = EXACTLY these 5 facility types, nothing else, EVER (owner 2026-07-07,
 // PERMANENT). Derived from SERVICE_FACILITY_TYPES so the fetch (rawTypes) and the match (SUBGROUPS) share ONE
 // source of truth — they can never drift or include a non-facility type. Membership changes ONLY by a
