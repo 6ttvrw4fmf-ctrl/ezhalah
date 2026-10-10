@@ -198,6 +198,12 @@ const AR: Record<string, string> = {
   'Focus your search on one or more specific websites. We show only their listings.': 'خصّص بحثك في موقع معيّن أو أكثر، ونعرض لك إعلاناتها فقط.',
   'You can choose up to 3 websites': 'يمكنك اختيار ثلاثة مواقع كحدٍّ أقصى.',
   'Search across Saudi Arabia': 'ابحث في جميع المواقع داخل المملكة',
+  // The regions map inside the picker (owner 2026-10-10: «highlight the entire region … so users are
+  // aware of where they cover»): tap a region to see only the websites with listings there.
+  'Tap a region to see the websites that cover it': 'اضغط على منطقة لعرض المواقع التي تغطيها',
+  'All regions': 'كل المناطق',
+  '{count} websites': '{count} موقع',
+  'Map data © OpenStreetMap contributors': 'بيانات الخريطة © مساهمو OpenStreetMap',
   'Choose a website': 'اختر موقعاً',
   'Search one website': 'ابحث في موقع واحد',
   'Select a website to narrow your search.': 'حدّد موقعاً لتضييق البحث.',

@@ -179,6 +179,16 @@ export const PLATFORM_PICKER_PROFILES: Record<string, PlatformPickerProfile> = O
   }]),
 );
 
+// The catalogue regions (sa-locations ids) a site has listings in — measured coverage, or the one region
+// a site with no listings names itself. Feeds the picker's regions map (owner 2026-10-10).
+export function platformRegionIds(name: string): number[] {
+  const entry = coverage[name];
+  if (!entry) return [];
+  const measured = entry.regions.filter(region => region.count > 0).map(region => region.id);
+  const named = (entry as PickerCoverage & { region?: { id: number } }).region?.id;
+  return measured.length ? measured : named ? [named] : [];
+}
+
 export function pickerSourceSlugs(names: string[]): string[] {
   return [...new Set(names.flatMap(name => {
     const entry = coverageSnapshot.platforms[name as keyof typeof coverageSnapshot.platforms];

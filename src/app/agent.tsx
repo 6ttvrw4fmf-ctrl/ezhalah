@@ -16,7 +16,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, MAX_PICKER_SOURCES } from '@/data/platformPickerProfiles';
+import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, MAX_PICKER_SOURCES, platformRegionIds } from '@/data/platformPickerProfiles';
+import PickerRegionsMap from '@/components/PickerRegionsMap';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { COMPOSER_INPUT, TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
@@ -684,6 +685,8 @@ export default function Agent() {
   // The source picker owns the exact websites selected for this conversation.
   const [platformPickerOpen, setPlatformPickerOpen] = useState(false);
   const [platformPickerSearch, setPlatformPickerSearch] = useState('');
+  // The picker's regions map (owner 2026-10-10): the tapped catalogue region, or null = whole kingdom.
+  const [pickerRegion, setPickerRegion] = useState<number | null>(null);
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [pickerSourceExplicit, setPickerSourceExplicit] = useState(false);
   const selectedPlatforms = useMemo(
@@ -697,7 +700,7 @@ export default function Agent() {
     void loadLivePickerNames().then(() => { if (alive) setPickerLiveTick((n) => n + 1); });
     return () => { alive = false; };
   }, []);
-  const pickerPlatforms = useMemo(() => {
+  const offeredPlatforms = useMemo(() => {
     const needle = platformPickerSearch.replace(/\s+/g, '').toLocaleLowerCase();
     const unique = new Map<string, LoaderPlatform>();
     const liveNames = livePickerNames();
@@ -715,6 +718,20 @@ export default function Agent() {
       return `${platform.name} ${t(platform.i18nKey)}`.replace(/\s+/g, '').toLocaleLowerCase().includes(needle);
     });
   }, [platformPickerSearch, t, pickerLiveTick]);
+  // THE REGIONS MAP (owner 2026-10-10: «highlight the entire region … so users are aware of where they
+  // cover»). A tapped region is a VIEW over the offered list — only the sites with listings there — and
+  // never a change to the search: the restriction still comes solely from selectedSources/choosePlatform.
+  const pickerRegionCounts = useMemo(() => {
+    const counts: Record<number, number> = {};
+    for (const platform of offeredPlatforms) for (const id of platformRegionIds(platform.name)) counts[id] = (counts[id] ?? 0) + 1;
+    return counts;
+  }, [offeredPlatforms]);
+  const pickerPlatforms = useMemo(
+    () => (pickerRegion === null ? offeredPlatforms : offeredPlatforms.filter((platform) => platformRegionIds(platform.name).includes(pickerRegion))),
+    [offeredPlatforms, pickerRegion],
+  );
+  // The regions the lit sites cover — the map glows there so the user sees the reach of their picks.
+  const pickerCoveredRegions = useMemo(() => new Set(selectedSources.flatMap((name) => platformRegionIds(name))), [selectedSources]);
   const [loaderBottomInset, setLoaderBottomInset] = useState<number>();
   // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): a search that arrived via Normal Filter's
   // «بحث» (the `?filter=` param — see the effect below, the ONE place this flips true) shows its
@@ -3939,6 +3956,7 @@ export default function Agent() {
   const choosePlatform = (source: string | null) => {
     setPickerSourceExplicit(true);
     setSelectedSources(names => source === null ? [] : togglePickerSource(names, source));
+    if (source === null) setPickerRegion(null);
     closePlatformPicker();
   };
 
@@ -4126,6 +4144,17 @@ export default function Agent() {
                 </View>
                 {!selectedSources.length ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
               </Pressable>
+
+              <PickerRegionsMap
+                locale={locale}
+                t={t}
+                fontFamily={CHAT_FONT}
+                selectedRegion={pickerRegion}
+                coveredRegions={pickerCoveredRegions}
+                counts={pickerRegionCounts}
+                onSelectRegion={(id) => setPickerRegion((current) => (current === id ? null : id))}
+                compact={pickerSheet}
+              />
 
               <View style={s.platformPickerRule} />
               {pickerPlatforms.map((platform, index) => {

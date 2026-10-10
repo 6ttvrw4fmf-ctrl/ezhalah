@@ -37,6 +37,11 @@ function verify(text: string, helperText = helper) {
       assert.equal(profile.group.ar.label, 'في مختلف مناطق المملكة', `${name}: multi-region site belongs in the nationwide list`);
     }
   }
+  // The regions map reads each site's reach from the same snapshot (owner 2026-10-10).
+  const regionIds = load(text, 'platformRegionIds', helperText);
+  assert.ok(regionIds('Aqar').length >= 6, 'Aqar reaches many regions');
+  assert.deepEqual(regionIds('Al Humaidan'), [4], 'a site with no listings carries the region it names (Qassim)');
+  assert.deepEqual(regionIds('No such site'), []);
   // Preserve the collected ZIP pack, including variants replaced by an owner-approved original asset.
   for (const match of text.matchAll(/require\("([^"]*\/platform-logos\/[^"]+)"\)/g)) files.add(match[1]);
   assert.equal(profiles['Deal App'].logo, roster.find((p: any) => p.name === 'Deal App').logo, 'Deal uses its original yellow listing-card asset');
