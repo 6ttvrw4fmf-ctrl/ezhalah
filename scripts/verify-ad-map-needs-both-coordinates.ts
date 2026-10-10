@@ -105,8 +105,9 @@ await mustCatchStats('numbers shown from a handful of houses', 'if (best.size < 
 
 // ── wiring: the page draws only the fetched pin; the data module never guesses one ────────────────
 const wired = (dataSrc: string, previewSrc: string) =>
-  /const geo = mapPoint\(own\);\s*return geo;/.test(dataSrc)
-  && /select\('latitude,longitude'\)\.eq\('source_table', l\.sourceTable\)\.eq\('listing_id', l\.id\)/.test(dataSrc)
+  /const geo = mapPoint\(own\);\s*return \{ geo, row: own \};/.test(dataSrc)
+  && /select\(AD_ROW_SELECT\)\.eq\('source_table', l\.sourceTable\)\.eq\('listing_id', l\.id\)/.test(dataSrc)
+  && /const AD_ROW_SELECT = 'latitude,longitude,/.test(dataSrc)
   && !/geocod|centroid/i.test(dataSrc) && !/mapPoint\((?!own\)|row[):])/.test(dataSrc)
   && /\{geo && IS_WEB \? \(/.test(previewSrc) && /\{mapOpen && geo && IS_WEB \? \(/.test(previewSrc)
   && /mapEmbedUrl\(geo, locale, 14\)/.test(previewSrc) && /mapEmbedUrl\(geo, locale, 15\)/.test(previewSrc) && !/mapEmbedUrl\((?!geo, locale, 1[45]\))/.test(previewSrc)
