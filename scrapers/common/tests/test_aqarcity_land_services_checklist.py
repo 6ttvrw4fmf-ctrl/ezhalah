@@ -39,4 +39,4 @@ def test_silence_and_non_land_write_nothing():
 
 def test_map_listing_applies_it():
     src = (ROOT / "scrapers" / "aqarcity" / "run.py").read_text(encoding="utf-8")
-    assert "amenities.update(land_utilities(mapped_type, services_raw))" in src
+    assert "amenities.update(land_utilities(mapped_type, checklist))" in src
