@@ -114,9 +114,11 @@ await mustCatchStats('numbers shown from a handful of houses', 'if (best.size < 
 await mustCatchStats('the type dropped from the dedupe key', 'const key = lic ? `${lic}|${type}|${area}` : `${platform}|${type}|${price}|${area}`;', 'const key = lic ? `${lic}|${area}` : `${platform}|${price}|${area}`;');
 
 // ── the «الأسعار» block's other three rules (owner 2026-10-10) ──────────────────────────────────
+type Split = { n: number; dearer: number; cheaper: number; k: number } | null;
 type Block = {
   isSameAd: (a: Row, b: Row) => boolean;
-  dearerTenths: (each: { price: number; area: number }[], adPpm: number) => number | null;
+  dearerSplit: (each: { price: number; area: number }[], adPpm: number) => Split;
+  sameAdSiblings: (own: Row, rows: Row[], down: Set<string>) => Row[];
   mojFacts: (row: Row | null) => { deals: number; avgDeal: number; avgPpm: number; p10: number | null; p90: number | null; from: string; to: string } | null;
 };
 const liftBlock = async (file: string): Promise<Block & Stats> => {
@@ -125,10 +127,11 @@ const liftBlock = async (file: string): Promise<Block & Stats> => {
     { header: 'const PRICE_MIN', endsWith: /;$/ }, { header: 'const PRICE_MAX', endsWith: /;$/ }, { header: 'const MIN_HOUSES', endsWith: /;$/ }, { header: 'const MOJ_MIN_DEALS', endsWith: /;$/ },
     { header: 'const percentile = (' },
     { header: 'export function askingPriceStats(' },
-    { header: 'export function dearerTenths(' },
+    { header: 'export function dearerSplit(' },
     { header: 'export function isSameAd(' },
+    { header: 'export function sameAdSiblings(' },
     { header: 'export function mojFacts(' },
-  ], ['askingPriceStats', 'dearerTenths', 'isSameAd', 'mojFacts']);
+  ], ['askingPriceStats', 'dearerSplit', 'isSameAd', 'sameAdSiblings', 'mojFacts']);
   return Object.assign(mod.askingPriceStats as Stats, mod) as unknown as Block & Stats;
 };
 // The real pair (2026-10-10): aqar 13462300 and wasalt 7392441 — licence 7201079013, 199 m², different prices.
@@ -150,9 +153,29 @@ const blockProblems = (b: Block & Stats): string[] => {
   if (b.isSameAd(SAME_A, { ...SAME_B, platform: 'aqar' })) out.push('the same platform was offered as another site');
   if (b.isSameAd({ ...SAME_A, license_number: '' }, { ...SAME_B, license_number: '' })) out.push('two rows WITHOUT a licence were matched');
   const ks = b(K_FIXTURE, new Set());
-  const k = ks ? b.dearerTenths(ks.each, 7000) : null;
-  if (k !== 5) out.push(`k = ${k} ≠ 5 (not computed from the deduped set)`);
-  if (b.dearerTenths([], 7000) !== null || b.dearerTenths([{ price: M, area: 200 }], 0) !== null) out.push('k shown without houses or without an ad m² price');
+  const kd = ks ? b.dearerSplit(ks.each, 7000) : null;
+  if (kd?.k !== 5) out.push(`k = ${kd?.k} ≠ 5 (not computed from the deduped set)`);
+  if (b.dearerSplit([], 7000) !== null || b.dearerSplit([{ price: M, area: 200 }], 0) !== null) out.push('k shown without houses or without an ad m² price');
+  // The live case (aqar 14856194, 2,900,000 / 312 m² = 9,295/m²): 36 of 1,493 villas dearer → the sentence says 36,
+  // the picture shows ONE dark glyph — never «0 أغلى» while 36 are dearer.
+  const h = (ppm: number) => ({ price: ppm * 100, area: 100 });
+  const LIVE = [...Array.from({ length: 36 }, () => h(12_000)), ...Array.from({ length: 1457 }, () => h(5_000))];
+  const live = b.dearerSplit(LIVE, 9295);
+  if (!live || live.n !== 1493 || live.dearer !== 36 || live.cheaper !== 1457) out.push(`36/1493: counts ${JSON.stringify(live)}`);
+  if (live?.k !== 1) out.push(`36/1493: k = ${live?.k} ≠ 1 (the picture must not show 0 while 36 are dearer)`);
+  const none = b.dearerSplit(Array.from({ length: 20 }, () => h(5_000)), 9295);
+  if (none?.dearer !== 0 || none?.k !== 0) out.push(`none dearer: ${JSON.stringify(none)} (k must be 0)`);
+  const all = b.dearerSplit(Array.from({ length: 20 }, () => h(12_000)), 9295);
+  if (all?.cheaper !== 0 || all?.k !== 10) out.push(`all dearer: ${JSON.stringify(all)} (k must be 10)`);
+  const nearlyAll = b.dearerSplit([...Array.from({ length: 1492 }, () => h(12_000)), h(5_000)], 9295);
+  if (nearlyAll?.k !== 9) out.push(`1492 of 1493 dearer: k = ${nearlyAll?.k} ≠ 9 (the picture must not show 10 while one is cheaper)`);
+  const eq = b.dearerSplit([h(12_000), h(9_295), h(9_295), h(5_000)], 9295);
+  if (!eq || eq.n !== 4 || eq.dearer !== 1 || eq.cheaper !== 1) out.push(`equal per-m² houses must count in neither: ${JSON.stringify(eq)}`);
+  // Duplicates on the SAME live set as the asking stats: a hidden site (dwelleo) with the same licence neither appears nor counts.
+  const DWELLEO: Row = { source_table: 'dwelleo_residential_listings', listing_id: 77, platform: 'dwelleo', license_number: '7201079013', area_m2: 199, price_total: '1300000' };
+  const sibs = b.sameAdSiblings(SAME_A, [SAME_A, SAME_B, DWELLEO, { ...SAME_B, listing_id: 1 }], new Set(['dwelleo']));
+  if (sibs.length !== 1 || sibs[0].platform !== 'wasalt') out.push(`siblings with dwelleo hidden: ${sibs.map((r) => r.platform).join(',')} ≠ wasalt alone (one per platform, hidden site out)`);
+  if (b.sameAdSiblings(SAME_A, [SAME_B, DWELLEO], new Set()).length !== 2) out.push('with nothing hidden, both other sites should show');
   const f = b.mojFacts(MOJ_ROW);
   if (!f) return [...out, 'the seeded ministry row produced no facts'];
   if (f.deals !== 285) out.push(`deals ${f.deals} ≠ 285`);
@@ -179,12 +202,19 @@ const mustCatchBlock = async (what: string, from: string, to: string) => {
 await mustCatchBlock('a different licence shown as the same ad', "if (!lic || lic !== String(other.license_number ?? '').trim()) return false;", 'if (!lic) return false;');
 await mustCatchBlock('a different area shown as the same ad', 'if (!Number.isFinite(a) || !(a > 0) || a !== b) return false;', 'if (!Number.isFinite(a) || !(a > 0)) return false;');
 await mustCatchBlock('k computed from every row instead of the deduped set', 'each: [...best.values()],', 'each: rows.map((r) => ({ price: num(r.price_total), area: num(r.area_m2) })),');
+await mustCatchBlock('the picture showing 0 while some house is dearer (no lower clamp)', 'Math.max(dearer > 0 ? 1 : 0, raw)', 'raw');
+await mustCatchBlock('the picture showing 10 while some house is cheaper (no upper clamp)', 'Math.min(cheaper > 0 ? 9 : 10, ', 'Math.min(10, ');
+await mustCatchBlock('an equal per-m² house counted as dearer', 'const dearer = ppms.filter((p) => p > adPpm).length;', 'const dearer = ppms.filter((p) => p >= adPpm).length;');
+await mustCatchBlock('a hidden site shown and counted as a duplicate', 'if (!platform || downSlugs.has(platform)) continue;\n    if (!isSameAd(own, r)', 'if (!platform) continue;\n    if (!isSameAd(own, r)');
 await mustCatchBlock('the ministry period taken from the clock', "const from = String(row.window_from ?? '').slice(0, 10), to = String(row.window_to ?? '').slice(0, 10);", "const from = String(row.window_from ?? '').slice(0, 10), to = new Date().toISOString().slice(0, 10);");
 await mustCatchBlock('avg_ppm recomputed instead of shown', 'const deals = num(row.deals), avgDeal = num(row.avg_deal), avgPpm = num(row.avg_ppm);', 'const deals = num(row.deals), avgDeal = num(row.avg_deal), avgPpm = Math.round(num(row.avg_deal) / 312);');
 await mustCatchBlock('the ministry spread invented from its average', "const p10 = num(row.p10_deal), p90 = num(row.p90_deal);", 'const p10 = num(row.avg_deal) * 0.3, p90 = num(row.avg_deal) * 1.2;');
 await mustCatchBlock('the ministry card shown from a handful of deals', 'deals < MOJ_MIN_DEALS', 'deals < 1');
 // The tiles multiply the SHOWN averages by the ad's own area; k comes from the deduped set.
-const tilesWired = (p: string) => /dearerTenths\(prices\.stats\.each, adPpm\)/.test(p)
+const tilesWired = (p: string) => /dearerSplit\(prices\.stats\.each, adPpm\)/.test(p)
+  // the sentence prints the EXACT counts and the glyphs read split.k; the duplicates wrap in two columns, no sideways scroll
+  && /\{ n: fmtInt\(split\.n\), type: typePlural\(\), dearer: fmtInt\(split\.dearer\), cheaper: fmtInt\(split\.cheaper\) \}/.test(p) && /i < split\.k \? s\.houseUp : s\.houseDn/.test(p)
+  && /sameRow: \{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 \}/.test(p) && !/<ScrollView horizontal[^>]*s\.sameRow/.test(p)
   // each product tile is computed from the SHOWN figures (tileFromShown) and prints exactly those figures beneath it
   && /fmtInt\(tileFromShown\(prices\.moj\.avgPpm, prices\.area\)\)/.test(p) && /fmtInt\(tileFromShown\(prices\.stats\.meanPpm, prices\.area\)\)/.test(p)
   && /\$\{fmtInt\(prices\.moj\.avgPpm\)\} × \$\{fmtInt\(prices\.area\)\}/.test(p) && /\$\{fmtInt\(prices\.stats\.meanPpm\)\} × \$\{fmtInt\(prices\.area\)\}/.test(p)
@@ -194,6 +224,8 @@ const tilesWired = (p: string) => /dearerTenths\(prices\.stats\.each, adPpm\)/.t
   && /h\.gov \? <Text[^>]*>\{t\('Source: Ministry of Justice'\)\}/.test(p) && /mj\.p10 != null && mj\.p90 != null \? `\$\{fmtM\(mj\.p10\)\} – \$\{fmtM\(mj\.p90\)\} \$\{t\('million'\)\}` : null/.test(p);
 check('the tiles multiply the shown averages by this ad’s area and k reads the deduped set', tilesWired(PREVIEW));
 sourceMutant('a tile recomputing the ministry’s per-m² figure', !tilesWired(PREVIEW.replace('tileFromShown(prices.moj.avgPpm, prices.area)', 'Math.round(prices.moj.avgDeal)')));
+sourceMutant('the duplicates row scrolling sideways again', !tilesWired(PREVIEW.replace("sameRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }", 'sameRow: { gap: 8 }')));
+sourceMutant('the sentence back to rounded tenths', !tilesWired(PREVIEW.replaceAll('dearer: fmtInt(split.dearer), cheaper: fmtInt(split.cheaper) }', 'dearer: split.k, cheaper: 10 - split.k }')));
 sourceMutant('a tile multiplying the unrounded figure instead of the shown one', !tilesWired(PREVIEW.replace('fmtInt(tileFromShown(prices.moj.avgPpm, prices.area))', 'fmtInt(Math.round(prices.moj.avgPpm * prices.area / 1000) * 1000)')));
 
 // ── the tile equals the formula it displays (owner: a reader who multiplies the two printed numbers gets our number) ──
@@ -304,7 +336,7 @@ sourceMutant('the siblings handed over as index rows instead of real cards', !si
 const groupWired = (p: string, dataSrc: string) =>
   /fetchGroupPrices\(row, commercial \? 'Commercial' : 'Residential'\)/.test(p)
   && /const st = prices\.group, mj = prices\.moj;/.test(p)
-  && /dearerTenths\(prices\.stats\.each, adPpm\)/.test(p)            // card 3 stays same-type
+  && /dearerSplit\(prices\.stats\.each, adPpm\)/.test(p)             // card 3 stays same-type
   && /\.in\('type_ar', \[\.\.\.scope\.types\]\)/.test(dataSrc)
   // paged reads are ORDERED on a stable key, or the pages overlap and houses go missing (measured: 3,192 vs 3,728)
   && /\.order\('source_table'\)\.order\('listing_id'\)\.range\(page \* PAGE, page \* PAGE \+ PAGE - 1\)/.test(dataSrc)
