@@ -31,9 +31,16 @@ check('«أرض خام» + «أرض تجارية» keeps commercial land and add
   (() => { const u = storedRawTypes([...CLEAN_TO_QUERY['Commercial Land'].rawTypes, RAW_LAND_TOKEN]); return u.includes('Commercial Land') && new Set(u).size === u.length && !u.includes(RAW_LAND_TOKEN); })());
 check('the box is offered in the commercial land group (owner placement)', groupMembers('Commercial & Industrial Plots').includes('Raw Land'));
 
-// MUTATION — the exact pre-fix behaviour (identity) must be caught by the second check's predicate.
-const identity = (r: string[]) => r;
-check('MUTATION — an identity storedRawTypes (the 2026-10-10 bug) is caught', identity(raw).includes(RAW_LAND_TOKEN));
+// The predicate both checks above encode, applied to any candidate mapping.
+const cardFetchIsRight = (fn: (r: string[]) => string[]): boolean => {
+  const out = fn(raw);
+  return !out.includes(RAW_LAND_TOKEN) && carriers.every((c) => out.includes(c));
+};
+const mustCatch = (label: string, caught: boolean) => check(`MUTATION — ${label}`, caught);
+check('the shipped storedRawTypes satisfies the predicate', cardFetchIsRight(storedRawTypes));
+mustCatch('an identity mapping (the 2026-10-10 bug: property_type IN («أرض خام»)) is caught', !cardFetchIsRight((r) => r));
+mustCatch('a mapping that drops the token but forgets Agriculture Plot is caught',
+  !cardFetchIsRight((r) => storedRawTypes(r).filter((x) => x !== 'Agriculture Plot')));
 
 console.log(failed ? `\n✗ ${failed} assertion(s) FAILED` : '\n✓ verify-raw-land-type: the server token and the card fetch agree');
 process.exit(failed ? 1 : 0);
