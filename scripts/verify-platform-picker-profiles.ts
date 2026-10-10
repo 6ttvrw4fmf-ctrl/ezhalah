@@ -32,6 +32,10 @@ function verify(text: string, helperText = helper) {
     const bytes = readFileSync(new URL(`../src/data/${profile.logo}`, import.meta.url));
     assert.equal(bytes.subarray(1, 4).toString(), 'PNG', `${name}: PNG asset loads`);
     if (profile.logo.includes('/platform-logos/')) files.add(profile.logo);
+    // No separate «عدة مناطق» list: a multi-region site sits under «في مختلف مناطق المملكة» (owner 2026-10-10).
+    if (coverage.platforms[name]?.regions?.length >= 2 && !(coverage.platforms[name].regions.some((r: any) => r.count > coverage.platforms[name].total / 2))) {
+      assert.equal(profile.group.ar.label, 'في مختلف مناطق المملكة', `${name}: multi-region site belongs in the nationwide list`);
+    }
   }
   // Preserve the collected ZIP pack, including variants replaced by an owner-approved original asset.
   for (const match of text.matchAll(/require\("([^"]*\/platform-logos\/[^"]+)"\)/g)) files.add(match[1]);
@@ -53,6 +57,9 @@ function mustCatch(mutant: string) {
 const emptyCopy = helper.replace("export function platformCoverageSentence(coverage: PickerCoverage | undefined, locale: 'ar' | 'en'): string {", "export function platformCoverageSentence(coverage: PickerCoverage | undefined, locale: 'ar' | 'en'): string { return '';");
 assert.notEqual(emptyCopy, helper);
 assert.throws(() => verify(source, emptyCopy), assert.AssertionError);
+const severalList = helper.replace("return nationwide;\n  return", "return { key: 'multiple-regions', order: 100, label: ar ? 'عدة مناطق' : 'Several regions' };\n  return");
+assert.notEqual(severalList, helper, 'several-regions mutation target exists');
+assert.throws(() => verify(source, severalList), assert.AssertionError);
 mustCatch(source.replace('wasalt-sa.png', 'sa-aqar-fm.png'));
 // Execute the actual JSX map: the displayed image and sentence must come from the profile.
 const agent = read('../src/app/agent.tsx');
