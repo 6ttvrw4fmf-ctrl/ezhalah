@@ -40,7 +40,7 @@ check('the state that drove it is gone too (no dead flag left behind)',
   !/dealPriceCleared/.test(code));
 
 check('the helper is NOT styled as a warning',
-  new RegExp(`s\\.rangeNote\\}>\\{t\\('${KEY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(code),
+  new RegExp(`s\\.rangeNote(?:, x\\.rangeNote\\])?\\}>\\{t\\('${KEY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(code),
   'it must use the muted rangeNote style, never rangeNoteWarn (amber + bold)');
 
 // The Arabic copy itself: one short sentence, no error vocabulary, no exclamation.
