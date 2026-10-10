@@ -236,6 +236,21 @@ def probe(s: cc.Session, url: str, budget: Optional[RequestBudget] = None
     return None, "", ""
 
 
+def alive_since_read(stamp, read_iso: str) -> bool:
+    """True when the row's last_verified_alive_at is NEWER than the moment this sweep read it.
+
+    Pure, so a barrier can execute it. A missing or unparsable stamp is False: the sweep's own
+    reading stands. Both values are ISO-8601 timestamps with a UTC offset, as the DB returns them.
+    """
+    if not stamp or not read_iso:
+        return False
+    try:
+        return datetime.fromisoformat(str(stamp).replace("Z", "+00:00")) > \
+            datetime.fromisoformat(str(read_iso).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Dealapp liveness sweep (candidate + direct confirm)")
     ap.add_argument("--limit", type=int, default=300, help="probe at most N candidates")
@@ -296,18 +311,21 @@ def main() -> int:
         # on ONE update killed the 2026-10-06 06:49 run after 600 reads, so none of its verdicts
         # landed. The updates are idempotent, so retrying them is safe (aqar learned it 2026-10-02).
         writes_ok = args.apply and not canary["bogus_alive"]
-        pending: list[tuple[dict, str, int, int]] = []   # (row, action, strikes, http_status)
+        # (row, action, strikes, http_status, read_iso): read_iso is WHEN this sweep read the ad,
+        # kept per row because the sweep reads for up to 50 minutes and applies at the end.
+        pending: list[tuple[dict, str, int, int, str]] = []
         for row in cands:
             adid = _adid(row["listing_url"])
             if budget.exhausted:
                 break        # stop cleanly on the boundary; a partial sweep is a normal outcome
+            read_iso = datetime.now(timezone.utc).isoformat()
             verdict, status = probe_listing(s, row["listing_url"], budget)
             stats["scanned"] += 1
             stats[{ALIVE: "alive", DEAD: "dead", UNKNOWN: "unknown"}[verdict]] += 1
 
             d = decide(verdict, strikes=int(row.get("missing_count") or 0),
                        policy=policy, evidence=EvidenceKind.DIRECT)
-            pending.append((row, d.action, d.strikes, status))
+            pending.append((row, d.action, d.strikes, status, read_iso))
 
             if writes_ok and d.action == "reset":
                 # last_liveness_probe_at = "we LOOKED", whatever the verdict. It is what lets
@@ -327,14 +345,37 @@ def main() -> int:
         if writes_ok:
             # "We LOOKED", for every row this run read that no branch below writes: UNKNOWNs, and
             # strikes/kills the trust gate held back. Never evidence — only the rotation key.
-            looked = [row["id"] for row, action, _s, _st in pending
+            looked = [row["id"] for row, action, _s, _st, _r in pending
                       if action not in ("reset",) and not (trusted and action in ("strike", "deactivate"))]
             for i in range(0, len(looked), 200):
                 _execute(client.table(TABLE).update({"last_liveness_probe_at": now_iso})
                          .in_("id", looked[i:i + 200]), what="dealapp looked")
 
+        # A LIVE ANSWER BETWEEN STRIKES RESETS THEM — even one written by another reader while this
+        # sweep was still reading (2026-10-10). The crawl shards and this sweep run at the same
+        # hour: on 2026-10-10 dealapp 9252915 was read dead here (run 01:54-02:44), the crawl read
+        # its own page ALIVE at 02:44:16 and stamped last_verified_alive_at, and the kill below
+        # landed at 02:44:31 over that fresher answer — the one unverified hide of the day
+        # (mon_unverified_inactivations_24h = 1). So before a strike or a kill is written, the row's
+        # current stamp is re-read and a row proven alive after this sweep read it is HELD: nothing
+        # written (the alive writer already reset its strikes), applied=false in the evidence.
+        held_alive: set = set()
         if writes_ok and trusted:
-            for row, action, strikes, _status in pending:
+            to_write = [(row, read_iso) for row, action, _s, _st, read_iso in pending
+                        if action in ("strike", "deactivate")]
+            stamps: dict = {}
+            ids = [row["id"] for row, _r in to_write]
+            for i in range(0, len(ids), 200):
+                res = _execute(client.table(TABLE).select("id, last_verified_alive_at")
+                               .in_("id", ids[i:i + 200]), what="dealapp recheck-alive")
+                for r in (getattr(res, "data", None) or []):
+                    stamps[r["id"]] = r.get("last_verified_alive_at")
+            held_alive = {row["id"] for row, read_iso in to_write
+                          if alive_since_read(stamps.get(row["id"]), read_iso)}
+            stats["held_alive"] = len(held_alive)
+            for row, action, strikes, _status, _read in pending:
+                if row["id"] in held_alive:
+                    continue
                 if action == "strike":
                     _execute(client.table(TABLE).update({"missing_count": strikes,
                                                          "last_liveness_probe_at": now_iso})
@@ -375,9 +416,10 @@ def main() -> int:
                 "verdict": {"strike": "strike", "deactivate": "kill"}.get(action, "unknown"),
                 "missing_count_before": int(row.get("missing_count") or 0),
                 "missing_count_after": strikes,
-                "applied": bool(writes_ok and trusted and action in ("strike", "deactivate")),
+                "applied": bool(writes_ok and trusted and action in ("strike", "deactivate")
+                                and row["id"] not in held_alive),
             }
-            for row, action, strikes, st in pending
+            for row, action, strikes, st, _read in pending
             if action != "reset"
         ]
         for i in range(0, len(detail_rows), 500):
@@ -394,7 +436,8 @@ def main() -> int:
                 f"scanned={stats['scanned']} "
                 f"alive={stats['alive']} dead={stats['dead']} unknown={stats['unknown']} "
                 f"verified={stats['verified']} strike={stats['struck']} "
-                f"inactivated={stats['deactivated']} sitemap_ids={stats['sitemap_ids']} "
+                f"inactivated={stats['deactivated']} held_alive={stats.get('held_alive', 0)} "
+                f"sitemap_ids={stats['sitemap_ids']} "
                 f"canary_live={canary['live']}/{canary['live_n']} "
                 f"canary_bogus={'ALIVE!' if canary['bogus_alive'] else 'not-alive'}"
                 + ("" if trusted else " | QUARANTINED: verified-rate or canary failed, no deactivation written"))
