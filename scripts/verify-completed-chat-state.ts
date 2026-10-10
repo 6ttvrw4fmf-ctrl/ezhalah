@@ -88,7 +88,7 @@ check("R11.2 (revised again 2026-09-12/13, silent this time): a MEASURED 'no' af
   && !/noMoreSaidRef/.test(agent)
   && !/if \(!ok && afCarryRef\.current\) setCompleted\(true\);/.test(agent));
 check("...and that verdict path still records afCanNarrow first (the «تحديد أكثر» gate is untouched)",
-  /setAfCanNarrow\(\(c\) => \(\{ \.\.\.c, \[m\.id\]: verdict === 'yes' \}\)\);/.test(agent));
+  /setAfCanNarrow\(\(c\) => \(\{ \.\.\.c, \[m\.id\]: offersNarrowing\(verdict\) \}\)\);/.test(agent));
 
 console.log("\n── the composer is the SAME box, made inert — not a separate card ──");
 const compIdx = agent.indexOf("<View style={[s.composerWrap");
