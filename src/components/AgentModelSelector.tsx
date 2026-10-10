@@ -49,8 +49,8 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
         // @ts-expect-error web-only DOM props on the RNW host node
         dataSet={{ ...TAP44 }}
         style={({ pressed }) => [styles.trigger, { opacity: disabled ? 0.45 : 1 }, pressed && styles.pressed]}>
+        {/* No ⌄ arrow (owner 2026-10-10: «for shaheen 2.2 don't include this drop menu thing») — the name alone. */}
         <Text style={styles.label} numberOfLines={1}>{arabic ? model.ar : model.en} {model.version}</Text>
-        <Ionicons name="chevron-down" size={12} color={colors.muted} />
       </Pressable>
       <Modal visible={!!anchor} transparent animationType="fade" onRequestClose={close}>
         <View style={styles.overlay}>
