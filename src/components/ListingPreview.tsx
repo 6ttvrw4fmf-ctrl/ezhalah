@@ -920,9 +920,12 @@ const s = StyleSheet.create({
   goldLogo: IS_WEB ? ({ filter: 'drop-shadow(0 1px 0 rgba(255,255,255,0.6))' } as any) : {},
   // The confetti overlay (pointer-events none).
   party: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 3 },
-  // A white shine that sweeps the gold pill only, once every ~3s.
+  // A white shine that sweeps the gold pill only, once every ~3s. Symmetric insets on purpose: RTL flips
+  // left/right, and a one-sided anchor (left 0, width 60%) parked the streak INSIDE the pill on Arabic
+  // pages — a frozen white bar at rest and a sweep too short to read as a flash (owner 2026-10-10).
+  // 140% wide ± 130% of itself = fully outside the pill at rest, in either direction.
   goldShine: {
-    position: 'absolute', top: -12, bottom: -12, left: 0, width: '60%',
+    position: 'absolute', top: -12, bottom: -12, left: '-20%', right: '-20%',
     ...(IS_WEB ? {
       backgroundImage: 'linear-gradient(110deg, rgba(255,255,255,0) 35%, rgba(255,255,255,0.85) 50%, rgba(255,255,255,0) 65%)',
       animationKeyframes: [{ '0%': { transform: [{ translateX: '130%' }] }, '28%': { transform: [{ translateX: '-130%' }] }, '100%': { transform: [{ translateX: '-130%' }] } }],
