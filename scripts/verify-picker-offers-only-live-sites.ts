@@ -4,6 +4,7 @@
 // listings) each sat there reading «بيانات نطاق العقارات غير متاحة حالياً», and picking one could only
 // ever return nothing.
 //
+// (Owner 2026-10-10: alhumaidan — healthy, 0 listings — is kept via OFFERED_WHILE_EMPTY.)
 // The rule (src/data/pickerLivePlatforms.ts): offer a site only if loader_strip_platforms_ar() — sites
 // with ≥1 searchable listing that are not dormant/retired — names it; until that list lands, never
 // offer one the down-status list (hiddenPlatformNames) names.
@@ -30,14 +31,17 @@ const check = (label: string, ok: boolean, detail = '') => {
 
 type May = (name: string, live: Set<string> | null, down: Set<string> | null) => boolean;
 const lift = async (file: string): Promise<May> =>
-  (await liftSymbols(file, [{ header: 'export function pickerMayOffer(' }], ['pickerMayOffer'])).pickerMayOffer as May;
+  (await liftSymbols(file, [{ header: 'export const OFFERED_WHILE_EMPTY', endsWith: /;$/ }, { header: 'export function pickerMayOffer(' }], ['pickerMayOffer'])).pickerMayOffer as May;
 
 // Production on 2026-10-09: live = strip list, down = dormant/retired statuses.
 const LIVE = new Set(['Aqar', 'Wasalt', 'Sanadak']);
 const DOWN = new Set(['Toor', 'Sadin']);
 const problems = (may: May): string[] => {
   const out: string[] = [];
-  if (may('Al Humaidan', LIVE, DOWN)) out.push('an «active» site with ZERO listings (alhumaidan) was offered');
+  // Owner 2026-10-10: a healthy site with 0 listings (alhumaidan) stays offered — but never once it is DOWN.
+  if (!may('Al Humaidan', LIVE, DOWN)) out.push('the owner-kept empty site (alhumaidan) was hidden');
+  if (may('Al Humaidan', LIVE, new Set(['Al Humaidan']))) out.push('the empty site was offered while DOWN');
+  if (may('Gudai', LIVE, DOWN)) out.push('a site missing from the live list (not owner-kept) was offered');
   if (may('Toor', LIVE, DOWN)) out.push('a retired site (toor) was offered');
   if (!may('Aqar', LIVE, DOWN)) out.push('a live site (aqar) was hidden');
   if (may('Toor', null, DOWN)) out.push('before the live list lands, a DOWN site (toor) was offered');
@@ -67,6 +71,8 @@ const mustCatch = async (what: string, from: string, to: string) => {
   console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
 };
 await mustCatch('offering every site again', 'return liveNames ? liveNames.has(name) : !downNames?.has(name);', 'return true;');
+await mustCatch('dropping the owner-kept empty site', "new Set(['Al Humaidan'])", 'new Set<string>()');
+await mustCatch('offering the empty site even when DOWN', 'if (OFFERED_WHILE_EMPTY.has(name)) return !downNames?.has(name);', 'if (OFFERED_WHILE_EMPTY.has(name)) return true;');
 await mustCatch('ignoring the down list before the live list lands', 'return liveNames ? liveNames.has(name) : !downNames?.has(name);', 'return liveNames ? liveNames.has(name) : true;');
 const unwiredCaught = !wired(memo.replace('if (!pickerMayOffer(platform.name, liveNames, downNames)) continue;', ''), LIB_SRC);
 if (!unwiredCaught) failed++;
