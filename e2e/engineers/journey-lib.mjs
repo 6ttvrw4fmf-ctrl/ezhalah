@@ -82,7 +82,18 @@ export const TYPE_UI = {
   'أرض تجارية': { cat: 'تجاري', group: G.cplot, tap: 'أرض تجارية' },
   'أرض صناعية': { cat: 'تجاري', group: G.cplot, tap: 'أرض صناعية' },
 };
-export const typeUi = (typeAr) => TYPE_UI[String(typeAr || '').normalize('NFC')] ?? null;
+// A type the catalog calls «both» (known_type_ar macro both — today only «عمارة») lives in BOTH
+// categories, and the SOURCE TABLE decides which one a customer must open: a building stored in a
+// *_commercial_listings table is served only under تجاري → «مبنى تجاري» (§41.14: the residential
+// overlay deliberately excludes «عمارة»). The Falcon's 10-09 run marked aldarim_commercial 576461 a
+// product FAIL for a search that returned 0, when the real product path (مبنى تجاري, Riyadh / حي
+// العليا, Buy) returns it as 1 of 2 — the harness had sent the customer to the wrong category.
+export const COMMERCIAL_TABLE_UI = { 'عمارة': 'مبنى تجاري' };
+export const typeUi = (typeAr, sourceTable) => {
+  const t = String(typeAr || '').normalize('NFC');
+  if (/_commercial_listings$/.test(String(sourceTable || '')) && COMMERCIAL_TABLE_UI[t]) return TYPE_UI[COMMERCIAL_TABLE_UI[t]] ?? null;
+  return TYPE_UI[t] ?? null;
+};
 
 /** Stay-length-priced platforms show «اضغط للاطلاع…», never a figure (owner 2026-10-02) —
  *  a customer cannot use a price range to find them, so the journey must not set one. */
@@ -146,6 +157,12 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   assert.ok(!carriedOnRequest({}, []).carried, 'zero answers can never count as carried');
   assert.equal(typeUi('شقة').group, 'الشقق والسكن المشترك');
   assert.equal(typeUi('نوع غريب'), null);
+  // a «both» type follows its SOURCE TABLE's category: the same «عمارة» is residential in a
+  // residential table and «مبنى تجاري» in a commercial one (Falcon 2026-10-09)
+  assert.equal(typeUi('عمارة', 'aqar_residential_listings').tap, 'عمارة سكنية');
+  assert.equal(typeUi('عمارة', 'aldarim_commercial_listings').tap, 'مبنى تجاري');
+  assert.equal(typeUi('عمارة', 'aldarim_commercial_listings').cat, 'تجاري');
+  assert.equal(typeUi('محل', 'aldarim_commercial_listings')?.cat ?? null, typeUi('محل')?.cat ?? null);
   assert.equal(priceOf({ platform: 'gathern', deal_ar: 'إيجار', price_total: 500 }), null,
     'stay-length-priced platforms have no customer-visible price');
   assert.equal(priceOf({ platform: 'aqar', deal_ar: 'بيع', price_total: 100000 }), 100000);

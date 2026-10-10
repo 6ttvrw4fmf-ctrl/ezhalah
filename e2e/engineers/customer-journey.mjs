@@ -127,7 +127,7 @@ const sampleListings = async (n) => {
   }
   const rows = (await Promise.all(platforms.map((p) =>
     rest(`search_listings_ar?select=${ROW_COLS}&${base}&platform=eq.${encodeURIComponent(p)}&order=first_seen_at.desc&limit=30`)))).flat();
-  const usable = rows.filter((r) => typeUi(r.type_ar) && (MODE !== 'af' || afTargetsFor(r).length));
+  const usable = rows.filter((r) => typeUi(r.type_ar, r.source_table) && (MODE !== 'af' || afTargetsFor(r).length));
   if (MODE !== 'af') return pickSpread(usable, n);
   // The app offers the guided interview only above 25 results, so an AF sample prefers listings
   // whose city + deal + type scope is comfortably larger (one cheap exact-count request each).
@@ -239,7 +239,7 @@ async function runJourney(row, sourceUrl, attempt, opts = {}) {
     await page.getByText('الضروري فقط').click({ timeout: 8000 }).catch(() => {}); // consent: decline non-essential
 
     // ── the filter, the way a customer fills it ────────────────────────────────────────────
-    const ui = typeUi(row.type_ar);
+    const ui = typeUi(row.type_ar, row.source_table);
     if (!ui) { result.status = 'UNKNOWN'; result.failedStep = `type_ar «${row.type_ar}» has no UI mapping in journey-lib.mjs`; return result; }
 
     step('deal');
