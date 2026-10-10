@@ -66,6 +66,44 @@ behaviors these examples are worded around.
 | Foreign-currency budgets (USD/AED/…) | Conversion code exists (pinned approx rates) but the owner's bar is "proven + genuinely supported"; not needed for the Saudi audience, so none shipped. |
 | «أبي مكتب في العليا» (bare العليا) | «العليا» has 14 catalog hits across cities → triggers a which-city clarification rather than a direct search; the shipped version names الرياض. |
 
+## English UI — PROVEN (`INTRO_EXAMPLES_EN`, owner 2026-10-10)
+
+Same method, `locale:'en'`, 3 reps each against the production agent (2026-10-10). A numbered row is
+the English twin of that proven Arabic example and parsed to the same search on all 3 runs; a «—» row
+is a short phone form (the phone slot is ~124px, so long English sentences would end in «…»).
+
+| # | Example (verbatim) | Proven parse (edge query, stable 3×) |
+|---|---|---|
+| 2 | Apartment in Riyadh, 3 bedrooms, up to 80K a year | Apartment, الرياض, Rent, rentPeriod=annual, detail=3, price=80000, priceIsAnnual |
+| 3 | Find me a warehouse in Dammam | Warehouse, الدمام, both deals (unstated) |
+| 4 | Monthly apartment in Khobar, 2 bedrooms, up to 5,500 SAR a month | Apartment, الخبر, Rent, rentPeriod=monthly, detail=2, price=66000 (5,500 × 12), priceIsAnnual |
+| 6 | Find me a cheap apartment in Jeddah | Apartment, جدة, both deals, sort=price_asc |
+| 7 | Villa for sale in north Riyadh, 5 bedrooms, budget up to 3 million | Villa, Buy, شمال الرياض, detail=5+, price=3000000 |
+| 8 | Find me a rest house in Riyadh | Rest House, الرياض, both deals |
+| 11 | Monthly apartment in Khobar | Apartment, الخبر, Rent, rentPeriod=monthly |
+| 14 | 2-bedroom apartment in Makkah | Apartment, مكة المكرمة, both deals, detail=2 |
+| 16 | Chalet for rent in Jeddah | Chalet, جدة, Rent |
+| 19 | Land for sale in Riyadh | Residential Land, Buy, الرياض |
+| 24 | Shop for rent in Riyadh | Shop, الرياض, Rent |
+| — | Villa in Riyadh | Villa, الرياض, both deals |
+| — | Villa in Jeddah | Villa, جدة, both deals |
+| — | Shop in Riyadh | Shop, الرياض, both deals |
+| — | Shop in Dammam | Shop, الدمام, both deals |
+| — | Office in Riyadh | Office, الرياض, both deals |
+| — | Chalet in Jeddah | Chalet, جدة, both deals |
+| — | Flat in Jeddah | Apartment, جدة, both deals |
+
+## English UI — FAILED (do NOT add to `INTRO_EXAMPLES_EN` without new proof)
+
+| Candidate | Probe result — why it was dropped |
+|---|---|
+| I want a villa in north Riyadh | UNSTABLE: rep 1 deal=Buy only, reps 2–3 both deals. |
+| Residential land in Jeddah, 500 m² | MISPARSED: price=500000000 — the «m» of «m²» was read as «million». |
+| Office for rent in Riyadh, around 150 m² | MISPARSED: price=150000000 — same «m²» → million defect. |
+| Factory for rent in the Eastern Province | Came back kind=message (a question), not listings. |
+| Land in Riyadh / Land in Jeddah | UNSTABLE: deal flips between Buy only and both deals across reps. |
+| Office for rent / Villa for sale (no city) | Came back kind=message (asks for the city), not listings. |
+
 Raw probe outputs (full JSON, 3 reps each) were captured in the implementing session
 (2026-08-23, PR: feat/ai-intro-rotating-examples); re-run the probe by POSTing the sentences to the
 edge function as described above.

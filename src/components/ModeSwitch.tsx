@@ -14,7 +14,8 @@
 //   • The two sides are a matched pair: each has one thin outline icon (funnel / AI stars) that turns
 //     brand-green when its side is active. (Owner 2026-10-09: the filled, breathing green sparkle «doesn't look
 //     professional enough»; owner 2026-10-10: «include the AI star» — so the stars stay, as the outline
-//     sparkles-outline in the funnel's colours, with no animation. Both languages.)
+//     sparkles-outline in the funnel's colours, with no animation. Both languages. Owner 2026-10-10: the
+//     active icon is the DARK brand green, and the English pill gets room around «Smart Broker».)
 //   • Cross-screen continuity: the control sits at the same top-bar spot on both screens, and a
 //     module-level `lastMode` remembers where the indicator was when you tapped — the arriving
 //     screen's control animates the indicator FROM that side into place, so navigation reads as one
@@ -45,7 +46,7 @@ const setLtr = (node: any) => {
 };
 
 const SEG_W = 106;   // each half — wider than the old 98 for a more generous, premium footprint
-const SEG_W_EN = 116; // English: «Smart Broker» is wider than «الوسيط الذكي» and must not truncate
+const SEG_W_EN = 126; // English: «Smart Broker» (~86px) gets the same ~20px air each side as «الوسيط الذكي»
 // Poppins is not loaded on the web, so its English glyphs fell back to a serif. English labels use the same system
 // stack as the rest of the page there; Arabic keeps what it has (owner: «the Arabic is perfect»).
 const SYSTEM_FONT = IS_WEB ? 'ui-sans-serif, -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif' : undefined;
@@ -120,7 +121,7 @@ export default function ModeSwitch({
         accessibilityState={{ selected: active === 'filter' }}
         accessibilityLabel={t('Filter')}
       >
-        <Ionicons name="funnel-outline" size={17} color={active === 'filter' ? colors.primary : colors.muted} />
+        <Ionicons name="funnel-outline" size={17} color={active === 'filter' ? colors.dark : colors.muted} />
         <Text style={[s.segT, active === 'filter' ? s.segTOn : null, en && { fontFamily: SYSTEM_FONT, fontWeight: active === 'filter' ? '600' : '500' }]} numberOfLines={1}>{t('Filter')}</Text>
       </Pressable>
 
@@ -135,7 +136,7 @@ export default function ModeSwitch({
         accessibilityState={{ selected: aiSteady }}
         accessibilityLabel={t('Smart Assistant')}
       >
-        <Ionicons name="sparkles-outline" size={17} color={aiSteady ? colors.primary : colors.muted} />
+        <Ionicons name="sparkles-outline" size={17} color={aiSteady ? colors.dark : colors.muted} />
         <Text style={[s.segT, aiSteady ? s.segTOn : null, en && { fontFamily: SYSTEM_FONT, fontWeight: aiSteady ? '600' : '500' }]} numberOfLines={1}>{t('Smart Assistant')}</Text>
       </Pressable>
     </View>

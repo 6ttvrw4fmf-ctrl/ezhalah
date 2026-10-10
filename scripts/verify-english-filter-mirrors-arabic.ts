@@ -91,6 +91,11 @@ const aiStarIsClean = (src: string) => /name="sparkles-outline"/.test(src) && !/
 check('the Smart Broker side has the AI stars as a clean outline (not the filled, breathing sparkle)', aiStarIsClean(mode));
 mustCatch('the filled sparkle coming back', !aiStarIsClean(mode.replace('name="sparkles-outline"', 'name="sparkles"')));
 mustCatch('the breathing animation coming back', !aiStarIsClean(mode + '\nconst breath = useRef(new Animated.Value(0)).current;'));
+// Owner 2026-10-10: «make the star dark green» — both active icons are the dark brand green (a matched pair).
+const darkIcons = (src: string) => /name="sparkles-outline" size=\{17\} color=\{aiSteady \? colors\.dark : colors\.muted\}/.test(src)
+  && /name="funnel-outline" size=\{17\} color=\{active === 'filter' \? colors\.dark : colors\.muted\}/.test(src);
+check('the active star and funnel are dark green', darkIcons(mode));
+mustCatch('the star back on the lighter green', !darkIcons(mode.replace('aiSteady ? colors.dark', 'aiSteady ? colors.primary')));
 check('«Smart Broker» fits: the English segment is wider than the Arabic one', /const SEG_W_EN = 1[1-9]\d;/.test(mode) && /const segW = en \? SEG_W_EN : SEG_W;/.test(mode));
 check('English labels use the system font on the web (Poppins is not loaded there: a serif fallback)', /en && \{ fontFamily: SYSTEM_FONT/.test(mode));
 const ui = read('src/components/ui.tsx');
