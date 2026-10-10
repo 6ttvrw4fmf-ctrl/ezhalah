@@ -581,6 +581,7 @@ export default function ListingPreview({ listing: l, url, onClose }: {
                           <View style={[s.tag, h.gov && s.tagGov, s.halfTag]}><Text style={[s.tagTx, h.gov && s.tagGovTx]}>{h.tag}</Text></View>
                           {labels.map((label, i) => cell(label, h.rows[i], `${h.key}-${i}`))}
                           <Text style={[s.halfFoot, tx]}>{h.foot}</Text>
+                          {h.gov ? <Text style={[s.halfFoot, tx]}>{t('Source: Ministry of Justice')}</Text> : null}
                         </View>
                       ))}
                     </View>

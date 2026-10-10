@@ -186,7 +186,9 @@ await mustCatchBlock('the ministry card shown from a handful of deals', 'deals <
 // The tiles multiply the SHOWN averages by the ad's own area; k comes from the deduped set.
 const tilesWired = (p: string) => /dearerTenths\(prices\.stats\.each, adPpm\)/.test(p) && /round1000\(prices\.moj\.avgPpm \* prices\.area\)/.test(p) && /round1000\(prices\.stats\.meanPpm \* prices\.area\)/.test(p)
   // the split card prints our MEANS beside the ministry's means, and the same four labels on both halves
-  && /fmtM\(st\.mean\)/.test(p) && /fmtInt\(st\.meanPpm\)/.test(p) && /fmtInt\(mj\.avgPpm\)/.test(p) && /labels\.map\(\(label, i\) => cell\(label, h\.rows\[i\]/.test(p);
+  && /fmtM\(st\.mean\)/.test(p) && /fmtInt\(st\.meanPpm\)/.test(p) && /fmtInt\(mj\.avgPpm\)/.test(p) && /labels\.map\(\(label, i\) => cell\(label, h\.rows\[i\]/.test(p)
+  // the ministry half names its source and its window; a figure the row lacks is a hidden cell («—»), never an estimate
+  && /h\.gov \? <Text[^>]*>\{t\('Source: Ministry of Justice'\)\}/.test(p) && /mj\.p10 != null && mj\.p90 != null \? `\$\{fmtM\(mj\.p10\)\} – \$\{fmtM\(mj\.p90\)\} \$\{t\('million'\)\}` : null/.test(p);
 check('the tiles multiply the shown averages by this ad’s area and k reads the deduped set', tilesWired(PREVIEW));
 sourceMutant('a tile recomputing the ministry’s per-m² figure', !tilesWired(PREVIEW.replace('round1000(prices.moj.avgPpm * prices.area)', 'round1000(prices.moj.avgDeal)')));
 
