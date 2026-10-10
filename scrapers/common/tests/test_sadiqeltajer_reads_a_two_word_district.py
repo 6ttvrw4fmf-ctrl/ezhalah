@@ -78,3 +78,26 @@ def test_a_later_page_word_is_never_read_as_the_district():
     # must never match, so the ad keeps no district instead of a wrong one.
     text = "الموقع حسب الصك القصيم - بريدة - المطار الربيع اعلانات"
     assert resolve(text) is None
+
+
+def _words(text: str):
+    saved = S.find_district_in_text
+    S.find_district_in_text = L.find_district_in_text
+    try:
+        return S.resolve_district_words(text, BURAIDAH)
+    finally:
+        S.find_district_in_text = saved
+
+
+def test_the_card_neighbourhood_carries_the_full_words():
+    # 2026-10-10: the district resolved to «حي القاع البارد» but the card still printed «القاع, بريدة»
+    # because `neighborhood` kept the one-word read. The matched words are what map_row stores.
+    text = "الموقع حسب الصك القصيم - بريدة - القاع البارد اعلانات مشابهة 9 1 م²"
+    assert _words(text) == ("حي القاع البارد", "القاع البارد")
+    assert _words("الموقع حسب الصك القصيم - بريدة - الغدير اعلانات مشابهة") == ("حي الغدير", "الغدير")
+    assert _words("الموقع حسب الصك القصيم - بريدة - الهدية اعلانات مشابهة") == (None, "الهدية")
+
+
+def test_map_row_stores_the_matched_words_as_neighborhood():
+    src = (ROOT / "scrapers" / "sadiqeltajer" / "run.py").read_text(encoding="utf-8")
+    assert "district_raw = district_words" in src
