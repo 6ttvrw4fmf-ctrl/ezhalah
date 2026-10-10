@@ -652,7 +652,9 @@ function extractPrice(input: string): string {
   // See toWesternDigits() in ./postModel.ts for why this was a silent Arabic-first product bug.
   const t = toWesternDigits(input).toLowerCase();
   const NUM_RE =
-    /(\d[\d,.]*)\s*(?:(k|m|mn|million|thousand|bn|billion)(?![a-z]))?\s*(sar|sr|riyal|usd|\$|dollar|aed|dirham|dhm|dhs|dh|eur|€|euro|gbp|£|pound|kwd|kd|dinar|bhd|bd|qar|qr|omr|egp)?/gi;
+    // «m» is «million» only when it is not the start of «m²»/«m2» — else «150 m²» became 150,000,000
+    // (English probe 2026-10-10) because the size-unit guard below only sees the text AFTER the «m».
+    /(\d[\d,.]*)\s*(?:(k|m|mn|million|thousand|bn|billion)(?![a-z²³\d]))?\s*(sar|sr|riyal|usd|\$|dollar|aed|dirham|dhm|dhs|dh|eur|€|euro|gbp|£|pound|kwd|kd|dinar|bhd|bd|qar|qr|omr|egp)?/gi;
   // Candidates carry their text position so digit-written and WORD-written amounts can be merged in
   // reading order — the range rule below depends on "first" meaning first in the sentence.
   const candidates: Array<{ n: number; index: number }> = [];
