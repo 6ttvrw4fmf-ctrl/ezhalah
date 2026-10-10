@@ -1789,7 +1789,7 @@ export async function fetchListingsForQuery(
     return { listings: null, pageCandidates, pageTotal };   // RC-A: a raw-card chunk failed or timed out → retry UI, not a misleadingly-partial grid (incl. Stop-cancelled)
   }
   const map = new Map<string, Listing>();
-  entries.forEach(([tbl], i) => { for (const l of fetched[i]) map.set(`${tbl}:${l.id}`, l); });
+  entries.forEach(([tbl], i) => { for (const l of fetched[i]) { l.sourceTable = tbl; map.set(`${tbl}:${l.id}`, l); } });
 
   // 4) Rebuild in newest-first order (dropping rows the raw filters / index↔raw drift removed), attach
   //    each row's city + region, then DIVERSIFY by geography according to the search scope so broad
@@ -1929,7 +1929,7 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
     const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).eq('active', true).limit(1);
     if (error || !data || !data.length) continue;
     const [row] = finalize(data, table.includes('_commercial') ? 'com' : 'res');
-    if (row) { LISTING_CACHE.set(row.id, row); return row; }
+    if (row) { row.sourceTable = table; LISTING_CACHE.set(row.id, row); return row; }
   }
   return null;
 }

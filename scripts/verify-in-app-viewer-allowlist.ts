@@ -402,44 +402,48 @@ check('preview back and forward are disabled', previewNav(viewer));
 mustCatch('preview back enabled', !previewNav(viewer.replace('!!current?.listing || !canFrameBack', '!canFrameBack')));
 
 const preview = readFileSync(new URL('../src/components/ListingPreview.tsx', import.meta.url), 'utf8');
+// The price is the shared listingPrice() string, split into numeral / unit runs for the type only
+// (priceRuns keeps the text byte-identical) — never the raw price fields.
 const previewPrice = (src: string) => {
   const code = codeOnly(src);
-  return /\{listingPrice\(l, locale\)\}/.test(code) && !/\bl\.(?:price|priceAnnual|pricePerMeter)\b/.test(code);
+  return /priceRuns\(listingPrice\(l, locale\)\)/.test(code) && !/\bl\.(?:price|priceAnnual|pricePerMeter)\b/.test(code);
 };
-const previewProse = (src: string) => /const desc = hideArabicProseInEnglish\(/.test(codeOnly(src)) && /\{desc \? \(/.test(codeOnly(src));
-const previewContact = (src: string) => /window\.open\(url, '_blank', 'noopener,noreferrer'\)/.test(codeOnly(src));
+// window.open with 'noopener' always returns null, so the page opens plainly and severs the opener by
+// hand — that is what lets a blocked tab be told apart from an opened one (and never navigates us away).
+const previewContact = (src: string) => /const w = window\.open\(url, '_blank'\);\s*if \(w\) w\.opener = null;/.test(codeOnly(src)) && !/window\.location/.test(codeOnly(src));
 const previewPhotos = (src: string) => {
   const code = codeOnly(src);
   return /l\.photos\?\.length \? l\.photos : \[l\.photo\]/.test(code)
     && /priority="high" loading="eager"/.test(code) && /priority="low" loading="lazy"/.test(code);
 };
 check('preview price only uses the shared price contract', previewPrice(preview));
-check('preview description is hidden in English', previewProse(preview));
-check('contact opens the original URL with noopener and noreferrer', previewContact(preview));
-check('source-ordered gallery prioritizes main photo and lazy-loads thumbnails', previewPhotos(preview));
+check('contact opens the original URL in a new tab with the opener severed, never by navigating this tab', previewContact(preview));
+check('source-ordered gallery prioritizes the shown photo and lazy-loads the rest', previewPhotos(preview));
 mustCatch('preview formats its own price', !previewPrice(preview.replace('listingPrice(l, locale)', 'l.price')));
-mustCatch('description exposes Arabic in English', !previewProse(preview.replace('const desc = hideArabicProseInEnglish(', 'const desc = String(')));
-mustCatch('contact drops opener protection', !previewContact(preview.replace('noopener,noreferrer', '')));
-mustCatch('90 thumbnails load eagerly', !previewPhotos(preview.replace('loading="lazy"', 'loading="eager"')));
+mustCatch('contact drops opener protection', !previewContact(preview.replace('if (w) w.opener = null;', '')));
+mustCatch('a blocked tab navigates Ezhalah away', !previewContact(preview.replace("if (!open()) blockedOnce.current = true;\n      busy.current = false;", "if (!open()) window.location.assign(url);\n      busy.current = false;")));
+mustCatch('90 photos load eagerly', !previewPhotos(preview.replaceAll('loading="lazy"', 'loading="eager"')));
 
 
-// Execute the actual facts block against real-world raw-field shapes: Aqar's age is numeric even
-// though Listing types it as a string. The live browser caught .trim() crashing the whole screen.
+// Execute the actual facts block (the key line's stats + the details rows) against real-world raw-field
+// shapes: Aqar's age is numeric even though Listing types it as a string. The live browser caught
+// .trim() crashing the whole screen. A field the source left silent must stay ABSENT — never «0».
 const factsPass = (src: string) => {
   const block = windowBetween(codeOnly(src), 'const facts:', 'const place =', 'ListingPreview facts');
-  const facts = new Function('l', 't', 'locale', 'arabicOrPlaceholderForFreeText', 'translateTrailingPeriodWord', 'DIRECTION_LABEL', 'ATTRIBUTE_UNRESOLVED_AR', stripTypeScriptTypes(block) + '\nreturn facts;');
-  const run = (l: object) => facts(l, (s: string) => s, 'en', arabicOrPlaceholderForFreeText, translateTrailingPeriodWord, {}, 'unknown') as string[][];
+  const facts = new Function('l', 't', 'locale', 'arabicOrPlaceholderForFreeText', 'translateTrailingPeriodWord', 'DIRECTION_LABEL', 'ATTRIBUTE_UNRESOLVED_AR', stripTypeScriptTypes(block) + '\nreturn { facts, stats };');
+  const run = (l: object) => facts(l, (s: string) => s, 'en', arabicOrPlaceholderForFreeText, translateTrailingPeriodWord, {}, 'unknown') as { facts: string[][]; stats: string[] };
   try {
     const empty = run({ area: 0, beds: 0, bathrooms: null });
     const numeric = run({ area: 147, beds: 4, property_age: 0, direction: null });
     const text = run({ property_age: '2', rentPeriod: 'monthly' });
-    return empty.length === 0 && numeric.length === 3 && numeric.some(([k, v]) => k === 'Age' && v === 'New construction')
-      && text.some(([k, v]) => k === 'Age' && v === '2') && text.some(([k, v]) => k === 'Rent period' && v === 'Monthly');
+    return empty.facts.length === 0 && empty.stats.length === 0
+      && numeric.stats.length === 2 && numeric.facts.length === 1 && numeric.facts.some(([k, v]) => k === 'Age' && v === 'New construction')
+      && text.facts.some(([k, v]) => k === 'Age' && v === '2') && text.facts.some(([k, v]) => k === 'Rent period' && v === 'Monthly');
   } catch { return false; }
 };
 check('missing facts stay absent; numeric age never crashes and zero age means new', factsPass(preview));
 mustCatch('raw numeric age crashes on string trim', !factsPass(preview.replace("String(l.property_age ?? '').trim()", "l.property_age?.trim()")));
-mustCatch('missing area becomes a zero fact', !factsPass(preview.replace('if (l.area > 0)', 'if (true)')));
+mustCatch('missing area becomes a zero stat', !factsPass(preview.replace('if (l.area > 0)', 'if (true)')));
 
 // Execute the actual TSX render with host components represented as inspectable nodes. Real
 // sourceName and AR dictionary/translation run unchanged; no replica of preview render logic.
@@ -454,14 +458,17 @@ const renderPreview = (src: string, source: string, locale: string, photos: stri
   const output = ts.transpileModule(src, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const modules: Record<string, unknown> = {
     'react/jsx-runtime': { jsx, jsxs: jsx },
-    react: { useState: (value: unknown) => [value, () => {}] },
+    react: { useState: (value: unknown) => [value, () => {}], useEffect: () => {}, useRef: (value: unknown) => ({ current: value }) },
     'react-native': { Platform: { OS: 'web' }, Pressable: 'Pressable', ScrollView: 'ScrollView', Text: 'Text', View: 'View', StyleSheet: { create: (x: unknown) => x } },
     'expo-image': { Image: 'Image' }, '@expo/vector-icons/Ionicons': { default: 'Ionicons' },
-    '@/theme/tokens': { colors: {}, radius: {} },
+    '@/theme/tokens': { colors: {}, radius: {}, font: { family: {} }, lightColors: {} }, '@/theme/palette': { TAP44: {}, BUZZER_GOLD: {} },
     '@/i18n': { useI18n: () => ({ locale, isRTL: locale === 'ar', t: (key: string, vars?: Record<string, string | number>) => translate(locale, key, vars) }) },
     '@/lib/listingDisplay': { ...display, listingPrice: () => 'shared-price' },
     '@/lib/arabicText': arabicText,
     '@/lib/translitPlace': { translitPlace: (x: string) => x }, '@/lib/afEvidence': { DIRECTION_LABEL: {} },
+    '@/lib/useAtLeast': { useAtLeast: () => false }, '@/lib/responsive': { PICKER_SHEET_BREAKPOINT: 768 }, '@/lib/useReducedMotion': { useReducedMotion: () => true },
+    '@/components/ResultCard': { SourceBadge: 'SourceBadge', FEATURE_META: [], arAttrValue: (_l: string, v: string) => v },
+    '@/data/adPageData': { fetchAdPin: () => Promise.resolve(null), mapEmbedUrl: () => '' },
   };
   const exports: Record<string, any> = {};
   new Function('require', 'exports', output)((name: string) => {
@@ -474,17 +481,22 @@ const nodes = (root: any): Node[] => !root || typeof root !== 'object' ? [] : Ar
   ? root.flatMap(nodes) : [root, ...nodes(root.props?.children)];
 const textOf = (root: any): string => root == null || root === false ? '' : typeof root !== 'object'
   ? String(root) : Array.isArray(root) ? root.map(textOf).join('') : textOf(root.props?.children);
+// The places the page names the site — the top-bar pill and the button to the real ad — all use the
+// card's source name (Aqar = عقار), in AR and EN alike.
 const namingPass = (src: string) => ['AQAR', 'Wasalt', 'Abr Alosol', 'THE RC', 'عقاريون', 'Sakan'].every((source) =>
   ['ar', 'en'].every((locale) => {
     const tree = renderPreview(src, source, locale);
     const name = translate(locale, (display.sourceName as (s: string) => string)(source));
-    return textOf(nodes(tree).find((n) => n.props.testID === 'listing-preview-contact')) === translate(locale, 'Open the ad on {name} to contact', { name })
-      && nodes(tree).some((n) => n.type === 'Text' && textOf(n) === translate(locale, 'Details as published on {name}.', { name }))
+    const texts = nodes(tree).filter((n) => n.type === 'Text').map(textOf);
+    const contact = nodes(tree).find((n) => n.props.testID === 'listing-preview-contact');
+    return !!contact && textOf(contact) === translate(locale, 'Tap here to contact') + translate(locale, "and to confirm it's still on {siteName}", { siteName: name }) + '👈'
+      && contact.props.accessibilityLabel === translate(locale, 'Open the ad on {name} to contact', { name })
+      && texts.some((x) => x.startsWith(`${name} · `))
       && (source !== 'AQAR' || locale !== 'ar' || name === 'عقار');
   }));
-check('rendered contact and attribution use the card source name in AR + EN (Aqar = عقار)', namingPass(preview));
-mustCatch('contact hardcodes Aqar', !namingPass(preview.replace("t('Open the ad on {name} to contact', { name })", "t('Open the ad on {name} to contact', { name: t('AQAR') })")));
-mustCatch('attribution hardcodes Aqar', !namingPass(preview.replace("t('Details as published on {name}.', { name })", "t('Details as published on {name}.', { name: t('AQAR') })")));
+check('rendered pill and the open button use the card source name in AR + EN (Aqar = عقار)', namingPass(preview));
+mustCatch('contact hardcodes Aqar', !namingPass(preview.replace(`{t("and to confirm it's still on {siteName}", { siteName: name })}`, `{t("and to confirm it's still on {siteName}", { siteName: t('AQAR') })}`)));
+mustCatch('contact loses its spoken name', !namingPass(preview.replace(/accessibilityLabel=\{t\('Open the ad on \{name\} to contact', \{ name \}\)\}(\s+accessibilityElementsHidden=\{!live\})/, '$1')));
 mustCatch('raw source bypasses translated card name', !namingPass(preview.replace('t(sourceName(l.source))', 'l.source')));
 const noPhotoPass = (src: string) => {
   const empty = nodes(renderPreview(src, 'Wasalt', 'ar'));
@@ -493,6 +505,27 @@ const noPhotoPass = (src: string) => {
     && empty.some((n) => n.props.testID === 'listing-preview-contact') && empty.some((n) => textOf(n) === 'shared-price')
     && single.filter((n) => n.type === 'Image').length === 1 && single.some((n) => n.props.testID === 'listing-preview-gallery');
 };
+// The host badge beside the price is a second door to the same ad: the SAME handler as the sticky bar.
+const hostBadgePass = (src: string) => ['ar', 'en'].every((locale) => {
+  const all = nodes(renderPreview(src, 'AQAR', locale));
+  const host = all.find((n) => n.props.testID === 'listing-preview-host');
+  const contact = all.find((n) => n.props.testID === 'listing-preview-contact');
+  return !!host && !!contact && host.props.onPress === contact.props.onPress && host.props.accessibilityLabel === contact.props.accessibilityLabel;
+});
+check('the host badge opens the ad through the contact handler, with the same spoken name', hostBadgePass(preview));
+// The tap moment delays the real open behind a pop-up — it must stay inside the browser's user-activation
+// window (≤ 1s) or Safari blocks the tab; and the open is still the one window.open.
+const tapMomentPass = (src: string) => {
+  const code = codeOnly(src);
+  const delay = Number((/const OPEN_DELAY_MS = (\d+);/.exec(code) ?? [])[1]);
+  return delay > 0 && delay <= 1000 && /later\(fire, OPEN_DELAY_MS\);/.test(code) && /const fire = \(\) => \{\s*if \(!open\(\)\) blockedOnce\.current = true;/.test(code)
+    && /if \(reduced \|\| blockedOnce\.current \|\| !IS_WEB\) \{ if \(!open\(\)\) blockedOnce\.current = true; return; \}/.test(code);
+};
+check('the delayed open stays inside the user-activation window and goes through open()', tapMomentPass(preview));
+mustCatch('the open drifts past the activation window', !tapMomentPass(preview.replace('const OPEN_DELAY_MS = 950;', 'const OPEN_DELAY_MS = 2000;')));
+mustCatch('the party opens the ad some other way', !tapMomentPass(preview.replace('const fire = () => {', "const fire = () => {\n      window.location.assign(url); return;")));
+mustCatch('reduced motion still waits for the party', !tapMomentPass(preview.replace('if (reduced || blockedOnce.current || !IS_WEB)', 'if (blockedOnce.current || !IS_WEB)')));
+mustCatch('host badge opens something else', !hostBadgePass(preview.replace(/testID="listing-preview-host"\s+onPress=\{goOpen\}/, 'testID="listing-preview-host" onPress={openMap}')));
 check('zero photos renders complete details without image/empty gallery; one photo renders one image', noPhotoPass(preview));
 mustCatch('no-photo listing gets an empty gallery/broken image', !noPhotoPass(preview.replace('photos.length > 0 &&', 'true &&')));
 mustCatch('single-photo listing loses its gallery', !noPhotoPass(preview.replace('photos.length > 0 &&', 'photos.length > 1 &&')));
