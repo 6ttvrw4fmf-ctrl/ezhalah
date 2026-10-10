@@ -37,7 +37,7 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
     return () => document.removeEventListener('keydown', onKey);
   }, [anchor]);
 
-  const menuWidth = Math.min(about ? 320 : 240, width - 24);
+  const menuWidth = Math.min(about ? 320 : 300, width - 24);
   const left = anchor ? Math.max(12, Math.min(anchor.x + anchor.width - menuWidth, width - menuWidth - 12)) : 12;
   return (
     <View style={styles.wrap}>
@@ -60,9 +60,9 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
             accessibilityViewIsModal>
             {about ? (
               <>
-                <Pressable accessibilityRole="button" onPress={() => setAbout(false)} style={styles.aboutRow}>
-                  <Ionicons name={arabic ? 'chevron-forward' : 'chevron-back'} size={15} color={colors.muted} />
-                  <Text style={styles.name}>{arabic ? 'عن النماذج' : 'About models'}</Text>
+                <Pressable accessibilityRole="button" onPress={() => setAbout(false)} style={[styles.aboutRow, styles.aboutLink, { flexDirection: arabic ? 'row-reverse' : 'row' }]}>
+                  <Ionicons name={arabic ? 'chevron-forward' : 'chevron-back'} size={12} color={colors.muted} />
+                  <Text style={styles.aboutText}>{arabic ? 'عن النماذج' : 'About models'}</Text>
                 </Pressable>
                 {MODELS.map((item) => (
                   <View key={item.id} style={styles.aboutCopy}>
@@ -82,20 +82,25 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
                 aria-checked={selected === item.id}
                 onPress={() => { setSelected(item.id); close(); trigger.current?.focus(); }}
                 style={({ pressed }) => [styles.option, { flexDirection: arabic ? 'row-reverse' : 'row' }, item.id === 'hurr' && styles.unavailable, pressed && styles.pressed]}>
+                {/* Name + its one-line sentence (owner 2026-10-10: «for the models include the sentence»); an
+                    unavailable model says «قريباً» in words instead of an ⓘ glyph. */}
                 <View style={styles.copy}>
                   <Text style={[styles.name, { textAlign: arabic ? 'right' : 'left' }, item.id === 'hurr' && styles.unavailableName]}>{arabic ? item.ar : item.en} {item.version}</Text>
+                  <Text style={[styles.optionLine, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? item.descriptionAr : item.descriptionEn}</Text>
                 </View>
                 <View style={styles.check}>
-                  {selected === item.id ? <Ionicons name="checkmark" size={18} color={colors.primary} /> : item.id === 'hurr' && <Ionicons name="information-circle-outline" size={14} color={colors.muted} />}
+                  {selected === item.id ? <Ionicons name="checkmark" size={18} color={colors.primary} />
+                    : item.id === 'hurr' ? <Text style={styles.soon}>{arabic ? 'قريباً' : 'Soon'}</Text> : null}
                 </View>
               </Pressable>
             ))}
             </View>
             <View style={styles.rule} />
             <Pressable testID="agent-about-models" accessibilityRole="button" onPress={() => setAbout(true)}
-              style={({ pressed }) => [styles.aboutRow, { flexDirection: arabic ? 'row-reverse' : 'row' }, pressed && styles.pressed]}>
-              <Text style={styles.name}>{arabic ? 'عن النماذج' : 'About models'}</Text>
-              <Ionicons name={arabic ? 'chevron-back' : 'chevron-forward'} size={15} color={colors.muted} />
+              style={({ pressed }) => [styles.aboutRow, styles.aboutLink, { flexDirection: arabic ? 'row-reverse' : 'row' }, pressed && styles.pressed]}>
+              {/* The arrow sits beside the words, small and quiet — a link, not a far-away chevron. */}
+              <Text style={styles.aboutText}>{arabic ? 'عن النماذج' : 'About models'}</Text>
+              <Ionicons name={arabic ? 'chevron-back' : 'chevron-forward'} size={12} color={colors.muted} />
             </Pressable>
               </>
             )}
@@ -119,12 +124,16 @@ const styles = StyleSheet.create({
   overlay: { flex: 1 },
   menu: { position: 'absolute', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.fieldLine,
     borderRadius: 18, padding: 7, ...cardShadow, shadowOpacity: 0.16, shadowRadius: 20, elevation: 10 },
-  option: { alignItems: 'center', gap: 12, paddingHorizontal: 10, minHeight: 44, borderRadius: 9 },
+  option: { alignItems: 'center', gap: 12, paddingHorizontal: 10, paddingVertical: 8, minHeight: 52, borderRadius: 9 },
   aboutRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 10, minHeight: 44, borderRadius: 9 },
   aboutCopy: { paddingHorizontal: 10, paddingVertical: 10 },
   rule: { height: 1, backgroundColor: colors.fieldLine, marginVertical: 4, marginHorizontal: 7 },
   copy: { flex: 1, minWidth: 0 },
   name: { color: colors.ink, fontSize: 14, lineHeight: 21, fontWeight: '500' },
   description: { color: colors.muted, fontSize: 13, lineHeight: 21, marginTop: 3 },
+  optionLine: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 1 },
+  soon: { color: colors.muted, fontSize: 11, lineHeight: 16, fontWeight: '600' },
+  aboutLink: { justifyContent: 'flex-start', gap: 4, minHeight: 40 },
+  aboutText: { color: colors.body, fontSize: 13, lineHeight: 19, fontWeight: '500' },
   check: { width: 24, alignItems: 'center' },
 });
