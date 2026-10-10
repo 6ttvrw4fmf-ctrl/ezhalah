@@ -80,9 +80,12 @@ const mutants: Array<[string, (s: string) => string]> = [
   }],
   ['«حي» not dropped', (s) => s.replace("regexp_replace(regexp_replace(k, ' بضاحيه هجر$', ''), '^حي ', '')", "regexp_replace(regexp_replace(k, ' بضاحيه هجر$', ''), '^ZZZ ', '')")],
 ];
+const mustCatch = (label: string, caught: boolean) => {
+  if (!caught) { console.error(`✗ ${label} was NOT caught`); process.exit(1); }
+};
 for (const [name, mut] of mutants) {
   const m = mut(sql);
   if (m === sql) { console.error(`✗ mutant «${name}» did not apply — anchors drifted`); process.exit(1); }
-  if (!problems(m).length) { console.error(`✗ mutant «${name}» was NOT caught`); process.exit(1); }
+  mustCatch(`mutant «${name}»`, problems(m).length > 0);
 }
 console.log(`✓ reordered dahiyah ordinal resolves in ${newest} (5 cases + arm order, 3 mutants caught)`);
