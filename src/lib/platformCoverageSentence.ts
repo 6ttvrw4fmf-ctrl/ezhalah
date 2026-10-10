@@ -76,7 +76,7 @@ export function platformCoverageGroup(coverage: PickerCoverage | undefined, loca
       return { key: `region-${first.id}`, order: first.id, label: ar ? first.name : `${first.en} Region` };
     }
   }
-  // A site spread over several regions joins the nationwide list — no separate «عدة مناطق» list (owner 2026-10-10).
-  if (coverage?.state === 'source-examples' || coverage?.regions.length) return nationwide;
-  return { key: 'other', order: 101, label: ar ? 'مواقع أخرى' : 'Other websites' };
+  // Every other site — spread over several regions, or with no measured inventory (alhumaidan) — joins
+  // the nationwide list: no separate «عدة مناطق» or «مواقع أخرى» list (owner 2026-10-10).
+  return nationwide;
 }
