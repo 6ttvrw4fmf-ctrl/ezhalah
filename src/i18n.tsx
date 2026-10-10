@@ -200,11 +200,10 @@ const AR: Record<string, string> = {
   'By coverage': 'حسب التغطية',
   // The sheet reads as two steps (owner 2026-10-10: «search on the region you want, then choose the websites below»).
   'Step 1 · Choose the region': '١ · اختر المنطقة',
-  'Step 2 · Choose the websites (up to 3)': '٢ · اختر المواقع (حتى ٣)',
+  'Step 2 · Choose the websites': '٢ · اختر المواقع',
   'Whole kingdom': 'كل المملكة',
   'Websites covering {region}': 'المواقع التي تغطي {region}',
   '{count} listings': '{count} إعلان',
-  'You can choose up to 3 websites': 'يمكنك اختيار ثلاثة مواقع كحدٍّ أقصى.',
   'Search across Saudi Arabia': 'ابحث في جميع المواقع داخل المملكة',
   // The regions map inside the picker (owner 2026-10-10: «highlight the entire region … so users are
   // aware of where they cover»): tap a region to see only the websites with listings there.

@@ -46,7 +46,7 @@ check('the component prints the attribution and draws every region', /OpenStreet
 const wired = (src: string) =>
   /offeredPlatforms\.filter\(\(platform\) => platformRegionIds\(platform\.name\)\.includes\(pickerRegion\)\)/.test(src)
   && /<PickerRegionsMap[\s\S]*?onSelectRegion=\{\(id\) => setPickerRegion\(\(current\) => \(current === id \? null : id\)\)\}/.test(src)
-  && /if \(source === null\) setPickerRegion\(null\);/.test(src)
+  && /if \(source === null\) \{ setPickerRegion\(null\); closePlatformPicker\(\); \}/.test(src)
   && /pickerPlatforms\.map\(/.test(src)
   // The region's own offices first (owner: «should show the sites in that region»).
   && /\.sort\(\(a, b\) => platformRegionShare\(b\.name, pickerRegion\) - platformRegionShare\(a\.name, pickerRegion\)\)/.test(src)
@@ -68,7 +68,7 @@ mustCatch('a map with a region missing', shapesOk({ ...PATHS, regions: PATHS.reg
 mustCatch('a collapsed outline', shapesOk({ ...PATHS, regions: PATHS.regions.map((r: any, i: number) => (i ? r : { ...r, d: 'M1 1L2 2Z' })) }).length > 0);
 mustCatch('a dropped attribution', shapesOk({ ...PATHS, attribution: '' }).length > 0);
 mustCatch('the region filter removed', !wired(AGENT.replace('offeredPlatforms.filter((platform) => platformRegionIds(platform.name).includes(pickerRegion))', 'offeredPlatforms')));
-mustCatch('«كل المواقع» no longer clearing the region', !wired(AGENT.replace('if (source === null) setPickerRegion(null);', '')));
+mustCatch('«كل المواقع» no longer clearing the region', !wired(AGENT.replace('if (source === null) { setPickerRegion(null); closePlatformPicker(); }', 'if (source === null) closePlatformPicker();')));
 mustCatch('the region\'s own offices no longer listed first', !wired(AGENT.replace('.sort((a, b) => platformRegionShare(b.name, pickerRegion) - platformRegionShare(a.name, pickerRegion))', '')));
 mustCatch('the region heading replaced by the coverage sections', !wired(AGENT.replace("const sectionLabel = pickerRegion !== null ? t('Websites covering {region}', { region: regionLabel(pickerRegion, locale) }) : group.label;", 'const sectionLabel = group.label;')));
 mustCatch('«كل المواقع» no longer glowing the whole kingdom', !wired(AGENT.replace('selectedSources.length ? selectedSources.flatMap((name) => platformRegionIds(name)) : Object.keys(pickerRegionCounts).map(Number)', 'selectedSources.flatMap((name) => platformRegionIds(name))')));

@@ -94,10 +94,10 @@ function verifyRendering(text: string) {
   assert.equal(actualItemStyle.width, '100%', 'every desktop/phone row uses the full list width');
   const h = (type: string, props: any, ...children: any[]) => ({ type, props, children });
   // pickerRegion / regionLabel: the regions map's heading (2026-10-10) — rendered here with no region tapped.
-  const render = new Function('pickerPlatforms', 'PLATFORM_PICKER_PROFILES', 'locale', 'selectedSources', 'choosePlatform', 't', 's', 'pickerTwoColumns', 'colors', 'h', 'Pressable', 'View', 'Text', 'Image', 'Ionicons', 'MAX_PICKER_SOURCES', 'pickerRegion', 'regionLabel', 'platformRegionListings', js + '\nreturn cards;');
+  const render = new Function('pickerPlatforms', 'PLATFORM_PICKER_PROFILES', 'locale', 'selectedSources', 'choosePlatform', 't', 's', 'pickerTwoColumns', 'colors', 'h', 'Pressable', 'View', 'Text', 'Image', 'Ionicons', 'pickerRegion', 'regionLabel', 'platformRegionListings', js + '\nreturn cards;');
   for (const locale of ['ar', 'en']) {
     for (const twoColumns of [true, false]) {
-      const cards = render(roster, profiles, locale, [], () => {}, (key: string) => key, { platformPickerItem: actualItemStyle }, twoColumns, {ink:'#253831'}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons', 3, null, () => '', () => 0);
+      const cards = render(roster, profiles, locale, [], () => {}, (key: string) => key, { platformPickerItem: actualItemStyle }, twoColumns, {ink:'#253831'}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons', null, () => '', () => 0);
       for (let i = 0; i < cards.length; i++) {
         const root = cards[i]; const profile = profiles[roster[i].name];
         const nodes: any[] = [];
@@ -158,12 +158,12 @@ assert.throws(() => slugs(['nonexistent']), /Unknown picker source/);
 let selected = toggle([], 'Aqar');
 selected = toggle(selected, 'Wasalt');
 assert.deepEqual(selected, ['Aqar', 'Wasalt']);
-// Deep search caps at 3 sites (owner 2026-10-10): a 4th is refused, removing one frees a slot.
+// No cap (owner 2026-10-10, reversing the cap of 3): a 4th and a 5th site are accepted; unlighting still works.
 const three = toggle(toggle(toggle([], 'Aqar'), 'Wasalt'), 'Deal App');
-assert.deepEqual(toggle(three, 'Gathern'), three, 'a 4th website must be refused');
-assert.deepEqual(toggle(toggle(three, 'Wasalt'), 'Gathern'), ['Aqar', 'Deal App', 'Gathern'], 'removing one frees a slot');
-const uncapped = (names: string[], name: string) => names.includes(name) ? names.filter((v) => v !== name) : [...names, name];
-assert.notDeepEqual(uncapped(three, 'Gathern'), three, 'mutation: the pre-cap toggle lets a 4th through, so the check above can fail');
+assert.deepEqual(toggle(toggle(three, 'Gathern'), 'Sanadak'), ['Aqar', 'Wasalt', 'Deal App', 'Gathern', 'Sanadak'], 'any number of websites may be lit');
+assert.deepEqual(toggle(toggle(three, 'Gathern'), 'Wasalt'), ['Aqar', 'Deal App', 'Gathern'], 'a lit site unlights');
+const capped = (names: string[], name: string) => names.includes(name) ? names.filter((v) => v !== name) : names.length >= 3 ? names : [...names, name];
+assert.deepEqual(capped(three, 'Gathern'), three, 'mutation: a capped toggle refuses the 4th, so the check above can fail');
 assert.deepEqual(toggle(selected, 'Aqar'), ['Wasalt']);
 assert.deepEqual(slugs(['Aqar', 'Aqar']), ['aqar', 'aqarmonthly']);
 for (const name of names as string[]) {
@@ -244,7 +244,12 @@ const chooseMatch = agent.match(/const choosePlatform = \(source: string \| null
 assert.ok(chooseMatch);
 const chooseJS = ts.transpile(chooseMatch[1], { target: ts.ScriptTarget.ES2022 });
 let chosen: string[] = []; let closed = 0; let explicit = false;
-const choose = new Function('source', 'setPickerSourceExplicit', 'setSelectedSources', 'togglePickerSource', 'closePlatformPicker', chooseJS);
-choose('Aqar', (v: boolean) => explicit = v, (fn: any) => chosen = fn(chosen), load(source, 'togglePickerSource'), () => closed++);
-assert.equal(explicit, true); assert.deepEqual(chosen, ['Aqar']); assert.equal(closed, 1, 'a selection saves immediately and closes the sheet');
-console.log('PASS: original brand colors, readable monochrome marks without backplates, and immediate selection/close.');
+const choose = new Function('source', 'setPickerSourceExplicit', 'setSelectedSources', 'togglePickerSource', 'closePlatformPicker', 'setPickerRegion', chooseJS);
+let tappedRegion: number | null = 6;
+const run = (src: string | null) => choose(src, (v: boolean) => explicit = v, (fn: any) => chosen = fn(chosen), load(source, 'togglePickerSource'), () => closed++, (v: number | null) => tappedRegion = v);
+run('Aqar');
+assert.equal(explicit, true); assert.deepEqual(chosen, ['Aqar']); assert.equal(closed, 0, 'lighting a site saves at once and KEEPS the sheet open (owner 2026-10-10)');
+run('Wasalt'); assert.deepEqual(chosen, ['Aqar', 'Wasalt']); assert.equal(closed, 0);
+run(null); assert.deepEqual(chosen, []); assert.equal(closed, 1, '«كل المواقع» clears and closes'); assert.equal(tappedRegion, null, '«كل المواقع» clears the tapped region');
+assert.ok(/testID="platform-picker-done"[\s\S]*?onPress=\{closePlatformPicker\}/.test(agent), 'a Done button closes the sheet');
+console.log('PASS: original brand colors, readable monochrome marks without backplates, selection keeps the sheet open, Done/all-websites close it.');

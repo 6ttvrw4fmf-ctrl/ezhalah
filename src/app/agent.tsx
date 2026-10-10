@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, MAX_PICKER_SOURCES, platformRegionIds, platformRegionShare, platformRegionListings } from '@/data/platformPickerProfiles';
+import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, platformRegionIds, platformRegionShare, platformRegionListings } from '@/data/platformPickerProfiles';
 import PickerRegionsMap, { regionLabel } from '@/components/PickerRegionsMap';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { COMPOSER_INPUT, TAP44 } from '@/theme/palette';
@@ -3969,8 +3969,9 @@ export default function Agent() {
   const choosePlatform = (source: string | null) => {
     setPickerSourceExplicit(true);
     setSelectedSources(names => source === null ? [] : togglePickerSource(names, source));
-    if (source === null) setPickerRegion(null);
-    closePlatformPicker();
+    // Lighting a site keeps the sheet open so several can be picked in one visit; only «كل المواقع» (and
+    // the Done button / ✕) closes it (owner 2026-10-10: «when the user clicks on it, it doesn't take him out»).
+    if (source === null) { setPickerRegion(null); closePlatformPicker(); }
   };
 
   return (
@@ -4097,9 +4098,6 @@ export default function Agent() {
               <View style={s.platformPickerHeading}>
                 <Text style={s.platformPickerTitle}>{t('Deep search across websites')}</Text>
                 <Text style={s.platformPickerSubtitle}>{t('Focus your search on one or more specific websites. We show only their listings.')}</Text>
-                <Text testID="platform-picker-limit" style={[s.platformPickerSubtitle, selectedSources.length >= MAX_PICKER_SOURCES && { color: colors.primary }]}>
-                  {t('You can choose up to 3 websites')}
-                </Text>
               </View>
               <Pressable
                 accessibilityRole="button"
@@ -4132,7 +4130,7 @@ export default function Agent() {
               />
 
               {/* Step 2 (owner 2026-10-10): the websites — searched by name or picked from the list below. */}
-              <Text accessibilityRole="header" style={[s.platformPickerStep, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>{t('Step 2 · Choose the websites (up to 3)')}</Text>
+              <Text accessibilityRole="header" style={[s.platformPickerStep, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>{t('Step 2 · Choose the websites')}</Text>
               <View style={s.platformPickerSearchBox}>
                 <Ionicons name="search-outline" size={17} color={colors.muted} />
                 <TextInput
@@ -4175,9 +4173,6 @@ export default function Agent() {
               <View style={s.platformPickerRule} />
               {pickerPlatforms.map((platform, index) => {
                 const selected = selectedSources.includes(platform.name);
-                // At the limit, a site not already chosen cannot be added: the row is dimmed and inert, so the
-                // tap neither closes the sheet nor silently does nothing (togglePickerSource refuses it too).
-                const atLimit = !selected && selectedSources.length >= MAX_PICKER_SOURCES;
                 const profile = PLATFORM_PICKER_PROFILES[platform.name];
                 // What the site is and where it covers — the measured coverage sentence, one quiet line
                 // under the name, never truncated (owner 2026-10-09 round 2: «it had a sentence and
@@ -4198,11 +4193,10 @@ export default function Agent() {
                       testID={`platform-picker-${platform.name}`}
                       accessibilityRole="button"
                       accessibilityLabel={`${t(platform.i18nKey)}. ${description}`}
-                      accessibilityState={{ selected, disabled: atLimit }}
+                      accessibilityState={{ selected }}
                       aria-pressed={selected}
-                      disabled={atLimit}
                       onPress={() => choosePlatform(platform.name)}
-                      style={({ pressed }: any) => [s.platformPickerItem, pressed && s.platformPickerItemPressed, atLimit && { opacity: 0.4 }]}
+                      style={({ pressed }: any) => [s.platformPickerItem, selected && s.platformPickerItemOn, pressed && s.platformPickerItemPressed]}
                     >
                       <View style={s.platformPickerLogoFrame}>
                         <Image source={profile.logo} tintColor={profile.layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: profile.layout.width * k, height: profile.layout.height * k, left: profile.layout.left * k, top: profile.layout.top * k }} contentFit="contain" accessible={false} />
@@ -4224,6 +4218,18 @@ export default function Agent() {
               })}
               {!pickerPlatforms.length ? <Text style={s.platformPickerEmpty}>{t('No matching websites')}</Text> : null}
             </ScrollView>
+            {/* The way out once sites are lit: Done, with the count — the sheet no longer closes per tap. */}
+            <Pressable
+              testID="platform-picker-done"
+              accessibilityRole="button"
+              accessibilityLabel={t('Done')}
+              onPress={closePlatformPicker}
+              style={({ pressed }: any) => [s.platformPickerDone, pressed && s.platformPickerDonePressed]}
+            >
+              <Text style={s.platformPickerDoneText}>
+                {selectedSources.length ? `${t('Done')} · ${t('{count} websites', { count: selectedSources.length })}` : t('Done')}
+              </Text>
+            </Pressable>
           </Animated.View>
         </Animated.View>
       )}
@@ -5459,6 +5465,10 @@ const s = StyleSheet.create({
   platformPickerListContent: { paddingBottom: 4 },
   platformPickerItem: { width: '100%', minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: colors.paper },
   platformPickerItemPressed: { backgroundColor: colors.segTrack },
+  platformPickerItemOn: { backgroundColor: colors.tint },
+  platformPickerDone: { marginTop: 8, minHeight: 46, borderRadius: 14, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  platformPickerDonePressed: { backgroundColor: colors.dark },
+  platformPickerDoneText: { fontFamily: CHAT_FONT, color: colors.onFill, fontSize: 16, lineHeight: 22, fontWeight: '600' },
   platformPickerLogoFrame: { width: 56, height: 28, alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
   // A column (name over sentence) — no flex: 1 on either Text (iOS collapses a column child to 0px).
   platformPickerItemCopy: { flex: 1, minWidth: 0 },
