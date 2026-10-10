@@ -4159,6 +4159,7 @@ export default function Agent() {
                 selectedRegion={pickerRegion}
                 coveredRegions={pickerCoveredRegions}
                 counts={pickerRegionCounts}
+                totalCount={offeredPlatforms.length}
                 onSelectRegion={(id) => setPickerRegion((current) => (current === id ? null : id))}
                 compact={pickerSheet}
               />

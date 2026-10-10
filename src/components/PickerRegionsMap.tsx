@@ -35,11 +35,13 @@ type Props = {
   coveredRegions: Set<number>;
   /** Offered sites per region; a region with none is quiet and inert. */
   counts: Record<number, number>;
+  /** All offered sites — the whole-kingdom caption. */
+  totalCount: number;
   onSelectRegion: (id: number) => void;
   compact: boolean;
 };
 
-function PickerRegionsMap({ locale, t, fontFamily, selectedRegion, coveredRegions, counts, onSelectRegion, compact }: Props) {
+function PickerRegionsMap({ locale, t, fontFamily, selectedRegion, coveredRegions, counts, totalCount, onSelectRegion, compact }: Props) {
   const pal = useThemePalette();
   const ar = locale === 'ar';
   const align = ar ? 'right' : 'left';
@@ -64,9 +66,13 @@ function PickerRegionsMap({ locale, t, fontFamily, selectedRegion, coveredRegion
             </Pressable>
           </>
         ) : (
-          <Text style={[styles.captionHint, { fontFamily, textAlign: align }]}>{t('Tap a region to see the websites that cover it')}</Text>
+          // The whole kingdom: every offered site, the entire map lit (owner 2026-10-10).
+          <Text style={[styles.captionTitle, { fontFamily, textAlign: align }]} numberOfLines={1}>
+            {t('Saudi Arabia')} · {t('{count} websites', { count: totalCount })}
+          </Text>
         )}
       </View>
+      {picked ? null : <Text style={[styles.captionHint, { fontFamily, textAlign: align }]}>{t('Tap a region to see the websites that cover it')}</Text>}
       <SvgRoot width="100%" height={compact ? 196 : 224} viewBox={regionMap.viewBox} preserveAspectRatio="xMidYMid meet">
         {regionMap.regions.map((region) => {
           const count = counts[region.id] ?? 0;
