@@ -66,6 +66,10 @@ REPORT_FIELDS = (
     "rent_period", "price_annual", "price_total", "area_m2", "bedrooms", "bathrooms",
     "property_age", "floor_number", "direction", "furnished", "elevator", "parking",
     "kitchen", "license_number", "street_width_m",
+    # The ad's own gallery and pin (2026-10-10): rows captured before the photo fix hold other ads'
+    # photos and no coordinates, so an `--ads` run must count a corrected gallery / a new pin as a
+    # change worth writing. A fetch that could not read them yields None, which is never a change.
+    "photo_urls", "additional_info",
 )
 
 # Fields whose value comes from aqar's own STRUCTURED keys (the RSC listing object) or from a

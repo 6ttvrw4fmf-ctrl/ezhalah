@@ -226,6 +226,57 @@ def _listing_json(html: str) -> Optional[dict[str, Any]]:
     return None
 
 
+AQAR_PHOTO_BASE = "https://images.aqar.fm/webp/750x0/props/"
+
+
+def _own_photos(obj: Optional[dict[str, Any]]) -> Optional[list[str]]:
+    """The ad's OWN photos, from aqar's own `listing.imgs` — one 750px URL per photo, in aqar's order.
+
+    LISTING FIDELITY (owner rule): a listing shows only its own photos. The old extractor swept every
+    `images.aqar.fm` URL in the raw page, which also holds the «إعلانات مشابهة» thumbnails of OTHER
+    ads, every CDN size variant of each photo, and JSON-escaped junk ending in a backslash — on
+    2026-10-10 all 160,450 live residential rows carried it (ad 6815040: 86 entries for 21 photos,
+    5 of them another villa; ad 6438846 has no photos at all and showed only other ads' houses).
+
+      list  → aqar's listing payload names the gallery; `imgs: null` / `[]` is the source saying
+              «no photos», so the row really is emptied.
+      None  → payload unreadable, or it has no `imgs` key: UNKNOWN. The upsert drops a None, so the
+              stored photos survive a failed fetch — never blank a row on a bad read.
+    """
+    if not isinstance(obj, dict) or "imgs" not in obj:
+        return None
+    imgs = obj["imgs"]
+    if imgs is None:
+        return []
+    if not isinstance(imgs, list):
+        return None
+    out = [x if x.startswith("https://") else AQAR_PHOTO_BASE + x.lstrip("/")
+           for x in (str(i).strip() for i in imgs if isinstance(i, str))
+           if x and "\\" not in x]
+    return list(dict.fromkeys(out))
+
+
+def _own_coordinates(obj: Optional[dict[str, Any]]) -> Optional[dict[str, float]]:
+    """The pin aqar itself shows for the ad: `listing.location {lat, lng}` (ld+json `geo` carries the
+    same). `precise_location` is null on most ads, so it is not required — `location` IS aqar's pin.
+
+    Written as `additional_info = {"latitude", "longitude"}`, the shape listing_rich_attrs already
+    reads for every generic platform. None (→ the upsert keeps what is stored) when the payload is
+    unreadable, the pin is absent, (0,0), or outside Saudi Arabia (lat 16–33, lng 34–56) — which
+    also rejects a swapped pair instead of guessing which number is which.
+    """
+    loc = obj.get("location") if isinstance(obj, dict) else None
+    if not isinstance(loc, dict):
+        return None
+    lat, lng = loc.get("lat"), loc.get("lng")
+    if isinstance(lat, bool) or isinstance(lng, bool) or not isinstance(lat, (int, float)) \
+            or not isinstance(lng, (int, float)):
+        return None
+    if not (16 <= lat <= 33 and 34 <= lng <= 56):
+        return None
+    return {"latitude": float(lat), "longitude": float(lng)}
+
+
 def _structured_price(obj: Optional[dict[str, Any]]) -> tuple[Optional[int], bool]:
     """aqar's OWN published price, plus whether aqar settled the question at all.
 
@@ -883,11 +934,9 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     features = _amenities(html, text, obj)
 
     # ─── Media & Metadata ────────────────────────────────────────────────────
-    # ALL listing photos (no cap). Scoped to images.aqar.fm — the gallery CDN — so the broker
-    # avatar on cdn.aqar.fm/users/* (PII) and the REGA s3 license icons are NOT swept in.
-    # (capture-complete contract: store every photo URL the source exposes; the old [:30] cap was
-    # silently dropping galleries — observed up to 65 distinct image URLs on a single listing.)
-    photos = list(dict.fromkeys(re.findall(r'https://images\.aqar\.fm[^"\'\s]+', html)))
+    # The ad's OWN gallery only — see _own_photos(). None = could not read it on this fetch, and the
+    # upsert then keeps the stored photos (a failed read never blanks a row).
+    photos = _own_photos(obj)
     mv = re.search(r'https://[^"\'\s]+\.(?:mp4|webm|mov)', html, re.IGNORECASE)
     video_url = mv.group(0) if mv else None
     mt = re.search(r"<title>(.*?)</title>", html, re.DOTALL)
@@ -913,7 +962,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
         "schema": "aqar.v2-fulltext",
         "source_text": _redact_pii(text),
         "url_path": unquote(urlparse(url).path),
-        "image_count": len(photos),
+        "image_count": len(photos) if photos is not None else None,
     }
     # The ad's own map pin (JSON-LD GeoCoordinates), backlog 312. Absent -> no key (silent, never guessed).
     pin = source_pin(html)
@@ -991,6 +1040,10 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
         **features,
         # media
         "photo_urls":              photos,
+        "additional_info":         _own_coordinates(obj),
+        "images_evidence":         {"observed": obj is not None, "container_present": obj is not None,
+                                    "key_present": isinstance(obj, dict) and "imgs" in obj,
+                                    "count": len(photos) if photos is not None else None},
         "video_url":               video_url,
         "title":                   title,
         "description":             description,
