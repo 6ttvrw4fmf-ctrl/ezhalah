@@ -205,24 +205,20 @@ def _listing_json(html: str) -> Optional[dict[str, Any]]:
             blob = blob.encode("latin-1", "ignore").decode("utf-8", "ignore")
         except UnicodeError:      # already clean on some payload shapes — keep what we have
             pass
+    # raw_decode, not a brace counter: the counter ignored strings, so an ad whose own text holds a
+    # «{» or «}» closed the object mid-string, failed to parse, and the WHOLE payload read as None —
+    # photos, pin, price and amenities all unknown. Live 2026-10-10: ad 6753755 and 42 more rows kept
+    # other ads' photos through every re-scrape that way.
+    dec = _json.JSONDecoder()
     for m in _LISTING_OBJ_RE.finditer(blob):
         start = blob.index("{", m.start() + len('"listing"'))
-        depth = 0
-        for i in range(start, min(len(blob), start + 200_000)):
-            ch = blob[i]
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    try:
-                        obj = _json.loads(blob[start:i + 1])
-                    except Exception:  # noqa: BLE001
-                        break
-                    # The first `"listing":{` in the payload is an i18n label bundle with no id.
-                    if isinstance(obj, dict) and obj.get("id") is not None:
-                        return obj
-                    break
+        try:
+            obj, _ = dec.raw_decode(blob, start)
+        except ValueError:
+            continue
+        # The first `"listing":{` in the payload is an i18n label bundle with no id.
+        if isinstance(obj, dict) and obj.get("id") is not None:
+            return obj
     return None
 
 
