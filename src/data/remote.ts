@@ -1610,19 +1610,34 @@ async function bounded<T = any>(builder: any, ms = RPC_TIMEOUT_MS, signal?: Abor
   }
 }
 
+// CHUNKS RUN CONCURRENTLY, ≤ RAW_CHUNK_CONCURRENCY IN FLIGHT PER TABLE (2026-10-10). Each chunk is its
+// own `.in('id', slice)` over ids the RPC already returned — no cursor, nothing read from the previous
+// response — so awaiting them one at a time bought nothing. Measured: an Advanced Filter round on
+// الرياض/إيجار/شقة sent 1,500 aqar ids as 8 back-to-back ~0.9 s requests (0.99 → 8.27 s), past the
+// owner's 7 s round ceiling. Same 8 requests now, in two waves. Kept from the sequential loop: the
+// request budget (one request per chunk), chunk ORDER (each page lands in its own slot), Stop between
+// chunks, and fail-closed — any chunk error rejects the table (caller → null → retry UI, never a short
+// grid) and no NEW chunk starts after it. Pinned by scripts/verify-raw-card-chunks-run-concurrently.ts.
+const RAW_CHUNK_CONCURRENCY = 4;
 async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[], signal?: AbortSignal): Promise<Listing[]> {
   const kind: SourceKind = tbl.includes('_commercial') ? 'com' : 'res';
-  const out: Listing[] = [];
-  for (let i = 0; i < ids.length; i += ID_CHUNK) {
-    if (signal?.aborted) throw new DOMException('cancelled', 'AbortError'); // Stop pressed between chunks
-    // RC-A: capture the error (was silently dropped → a chunk that 500s produced a blank/partial grid
-    // that contradicted the «لقينا N إعلان» headline). On any chunk failure, surface it so the caller
-    // returns null → retry, rather than showing a misleadingly-short result set.
-    const { data, error } = await bounded(keptFiltersReq(q, tbl).in('id', ids.slice(i, i + ID_CHUNK)).limit(ID_CHUNK), RPC_TIMEOUT_MS, signal);
-    if (error) throw new Error(`fetchRawByIds(${tbl}): ${error.message}`);
-    if (data) out.push(...finalize(data, kind));
-  }
-  return out;
+  const pages: Listing[][] = [];
+  let next = 0;
+  let failed = false;
+  const worker = async () => {
+    while (!failed && next * ID_CHUNK < ids.length) {
+      if (signal?.aborted) throw new DOMException('cancelled', 'AbortError'); // Stop pressed between chunks
+      const n = next++;
+      // RC-A: capture the error (was silently dropped → a chunk that 500s produced a blank/partial grid
+      // that contradicted the «لقينا N إعلان» headline). On any chunk failure, surface it so the caller
+      // returns null → retry, rather than showing a misleadingly-short result set.
+      const { data, error } = await bounded(keptFiltersReq(q, tbl).in('id', ids.slice(n * ID_CHUNK, (n + 1) * ID_CHUNK)).limit(ID_CHUNK), RPC_TIMEOUT_MS, signal);
+      if (error) { failed = true; throw new Error(`fetchRawByIds(${tbl}): ${error.message}`); }
+      pages[n] = data ? finalize(data, kind) : [];
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(RAW_CHUNK_CONCURRENCY, Math.ceil(ids.length / ID_CHUNK)) }, worker));
+  return pages.flat();
 }
 
 // Per-search fetch — ROUTING LAYER (Phase 1.5). The buy/rent location index (a materialized view over
