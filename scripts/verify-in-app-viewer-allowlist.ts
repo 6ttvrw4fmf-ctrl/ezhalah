@@ -408,7 +408,6 @@ const previewPrice = (src: string) => {
   const code = codeOnly(src);
   return /priceRuns\(listingPrice\(l, locale\)\)/.test(code) && !/\bl\.(?:price|priceAnnual|pricePerMeter)\b/.test(code);
 };
-const previewProse = (src: string) => /const desc = hideArabicProseInEnglish\(/.test(codeOnly(src)) && /\{desc \? \(/.test(codeOnly(src));
 // window.open with 'noopener' always returns null, so the page opens plainly and severs the opener by
 // hand — that is what lets a blocked tab be told apart from an opened one (and never navigates us away).
 const previewContact = (src: string) => /const w = window\.open\(url, '_blank'\);\s*if \(w\) w\.opener = null;/.test(codeOnly(src)) && !/window\.location/.test(codeOnly(src));
@@ -418,11 +417,9 @@ const previewPhotos = (src: string) => {
     && /priority="high" loading="eager"/.test(code) && /priority="low" loading="lazy"/.test(code);
 };
 check('preview price only uses the shared price contract', previewPrice(preview));
-check('preview description is hidden in English', previewProse(preview));
 check('contact opens the original URL in a new tab with the opener severed, never by navigating this tab', previewContact(preview));
 check('source-ordered gallery prioritizes the shown photo and lazy-loads the rest', previewPhotos(preview));
 mustCatch('preview formats its own price', !previewPrice(preview.replace('listingPrice(l, locale)', 'l.price')));
-mustCatch('description exposes Arabic in English', !previewProse(preview.replace('const desc = hideArabicProseInEnglish(', 'const desc = String(')));
 mustCatch('contact drops opener protection', !previewContact(preview.replace('if (w) w.opener = null;', '')));
 mustCatch('a blocked tab navigates Ezhalah away', !previewContact(preview.replace("if (!open()) blockedOnce.current = true;\n      busy.current = false;", "if (!open()) window.location.assign(url);\n      busy.current = false;")));
 mustCatch('90 photos load eagerly', !previewPhotos(preview.replaceAll('loading="lazy"', 'loading="eager"')));
@@ -484,24 +481,22 @@ const nodes = (root: any): Node[] => !root || typeof root !== 'object' ? [] : Ar
   ? root.flatMap(nodes) : [root, ...nodes(root.props?.children)];
 const textOf = (root: any): string => root == null || root === false ? '' : typeof root !== 'object'
   ? String(root) : Array.isArray(root) ? root.map(textOf).join('') : textOf(root.props?.children);
-// The three places the page names the site — the top-bar pill, the closing line and the one button
-// to the real ad — all use the card's source name (Aqar = عقار), in AR and EN alike.
+// The places the page names the site — the top-bar pill and the button to the real ad — all use the
+// card's source name (Aqar = عقار), in AR and EN alike.
 const namingPass = (src: string) => ['AQAR', 'Wasalt', 'Abr Alosol', 'THE RC', 'عقاريون', 'Sakan'].every((source) =>
   ['ar', 'en'].every((locale) => {
     const tree = renderPreview(src, source, locale);
     const name = translate(locale, (display.sourceName as (s: string) => string)(source));
     const texts = nodes(tree).filter((n) => n.type === 'Text').map(textOf);
     const contact = nodes(tree).find((n) => n.props.testID === 'listing-preview-contact');
-    return !!contact && textOf(contact) === translate(locale, 'Tap here to contact') + translate(locale, 'Takes you to the original {name} ad', { name }) + '👈'
+    return !!contact && textOf(contact) === translate(locale, 'Tap here to contact') + translate(locale, "and to confirm it's still on {siteName}", { siteName: name }) + '👈'
       && contact.props.accessibilityLabel === translate(locale, 'Open the ad on {name} to contact', { name })
-      && texts.some((x) => x === translate(locale, 'This ad is from {name}', { name }))
       && texts.some((x) => x.startsWith(`${name} · `))
       && (source !== 'AQAR' || locale !== 'ar' || name === 'عقار');
   }));
-check('rendered pill, closing line and the open button use the card source name in AR + EN (Aqar = عقار)', namingPass(preview));
-mustCatch('contact hardcodes Aqar', !namingPass(preview.replace("{t('Takes you to the original {name} ad', { name })}", "{t('Takes you to the original {name} ad', { name: t('AQAR') })}")));
+check('rendered pill and the open button use the card source name in AR + EN (Aqar = عقار)', namingPass(preview));
+mustCatch('contact hardcodes Aqar', !namingPass(preview.replace(`{t("and to confirm it's still on {siteName}", { siteName: name })}`, `{t("and to confirm it's still on {siteName}", { siteName: t('AQAR') })}`)));
 mustCatch('contact loses its spoken name', !namingPass(preview.replace(/accessibilityLabel=\{t\('Open the ad on \{name\} to contact', \{ name \}\)\}(\s+accessibilityElementsHidden=\{!live\})/, '$1')));
-mustCatch('closing line hardcodes Aqar', !namingPass(preview.replace("t('This ad is from {name}', { name })", "t('This ad is from {name}', { name: t('AQAR') })")));
 mustCatch('raw source bypasses translated card name', !namingPass(preview.replace('t(sourceName(l.source))', 'l.source')));
 const noPhotoPass = (src: string) => {
   const empty = nodes(renderPreview(src, 'Wasalt', 'ar'));

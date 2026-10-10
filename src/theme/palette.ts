@@ -37,6 +37,11 @@ export const lightColors = {
   accentLeaf: '#2fb672', // bright "AI" accent
   amberBg: '#fdf6ec',
   amberInk: '#92591a',
+  // The ad page's hazard note («قد يكون الإعلان حُذف أو بيع», owner 2026-10-10): a warmer amber than the
+  // banner family above, with its own hairline — one note, read before the button.
+  hazardBg: '#fff7e3',
+  hazardLine: '#f1d38a',
+  hazardInk: '#6b4a00',
   whatsApp: '#25d366',
   onFill: '#ffffff', // text/icons ON solid green fills — white in BOTH themes
   selFill: '#2f7247', // SELECTED control fill (white text) — deeper than dark-theme primary
@@ -104,6 +109,9 @@ export const darkColors: Record<PaletteKey, string> = {
   accentLeaf: '#2fb672',
   amberBg: '#2b2416',
   amberInk: '#e3b56f',
+  hazardBg: '#2b2416',
+  hazardLine: '#5a4414',
+  hazardInk: '#f0cf7a',
   whatsApp: '#25d366',
   onFill: '#ffffff',
   selFill: '#2f7247', // selected control fill — brand green as ACCENT

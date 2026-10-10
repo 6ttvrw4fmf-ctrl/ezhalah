@@ -55,6 +55,18 @@ export function priceRuns(s: string): { text: string; num: boolean }[] {
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+// A chevron drawn as SVG on web (an ‹ › glyph would be mirrored by bidi); the icon font on native.
+function Chevron({ dir }: { dir: 'left' | 'right' }) {
+  const Svg: any = 'svg', Path: any = 'path';
+  return (
+    <View style={s.arrowDisc}>
+      {IS_WEB
+        ? <Svg width={18} height={18} viewBox="0 0 24 24" aria-hidden="true"><Path d={dir === 'left' ? 'M15 5l-7 7 7 7' : 'M9 5l7 7-7 7'} fill="none" stroke={lightColors.ink} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" /></Svg>
+        : <Ionicons name={dir === 'left' ? 'chevron-back' : 'chevron-forward'} size={20} color={lightColors.ink} />}
+    </View>
+  );
+}
 // Pin the row to physical LTR (web DOM dir), like AdViewer's browser chrome.
 const setLtr = (node: any) => { if (IS_WEB && node?.setAttribute) node.setAttribute('dir', 'ltr'); };
 
@@ -302,9 +314,6 @@ export default function ListingPreview({ listing: l, url, onClose }: {
   const chips = FEATURE_META.filter((f) => l.features?.[f.key]).map((f) => t(f.label));
   if (l.driver_room) chips.push(t('Driver room'));
   const rows = [...facts, ...extra];
-  const desc = hideArabicProseInEnglish((() => { const d = (l.description ?? '').trim(); return d && /[ء-ي]/.test(d) ? '‏' + d : null; })(), locale);
-  // «Organize this data» (owner): the source's own «•» bullets and line breaks become a list — the text itself is untouched.
-  const descParts = desc ? desc.split(/\s*•\s*|\s*\n+\s*/).map((p) => p.trim()).filter(Boolean) : [];
   const tx = { textAlign: (isRTL ? 'right' : 'left') as 'right' | 'left', writingDirection: (isRTL ? 'rtl' : 'ltr') as 'rtl' | 'ltr' };
   const Frame: any = 'iframe';
   const Canvas: any = 'canvas';
@@ -317,6 +326,11 @@ export default function ListingPreview({ listing: l, url, onClose }: {
   // Motion (all off under reduced motion): a white shine sweeps the gold pill only (~3s), its glow
   // pulses (2.4s), the hand taps (1.1s). The spoken name stays «افتح الإعلان في {site} للتواصل».
   // The bar itself never highlights or scales; a press anywhere on it pushes only the buzzer.
+  const hazard = (
+    <View role="note" style={s.hazard}>
+      <Text style={s.hazardTx}><Text aria-hidden>⚠️</Text>{' '}{t("This ad may have been removed or sold. We review ads continuously, but we can't guarantee they're still available.")}</Text>
+    </View>
+  );
   const cta = (testID: string, live = true) => (
     <Pressable
       testID={testID}
@@ -332,9 +346,9 @@ export default function ListingPreview({ listing: l, url, onClose }: {
     >
       <View style={s.ctaLines}>
         <Text numberOfLines={1} style={[s.ctaTx, tx]}>{t('Tap here to contact')}</Text>
-        <Text numberOfLines={1} style={[s.ctaSub, tx]}>{t('Takes you to the original {name} ad', { name })}</Text>
+        <Text numberOfLines={1} style={[s.ctaSub, tx]}>{t("and to confirm it's still on {siteName}", { siteName: name })}</Text>
       </View>
-      <Text style={[s.ctaHand, !reduced && s.ctaHandTap]}>👈</Text>
+      <Text style={s.ctaHand}>👈</Text>
       <View
         style={[s.gold, !reduced && s.goldPulse, pressing === testID && s.goldDown]}
         pointerEvents="none"
@@ -398,18 +412,15 @@ export default function ListingPreview({ listing: l, url, onClose }: {
               <Text style={s.counterTx}>{main + 1} / {photos.length}</Text>
             </Pressable>
           )}
-          {photos.length > 1 && photos.length <= 8 && (
-            <View style={s.dots} pointerEvents="none">
-              {photos.map((p, i) => <View key={p + i} style={[s.dot, i === main && s.dotOn]} />)}
-            </View>
-          )}
-          {wide && photos.length > 1 && (
+          {photos.length > 1 && (
+            // Pinned LTR: the LEFT button steps to the next photo in Arabic (the reading direction), the RIGHT
+            // one back; English mirrors. SVG chevrons, never ‹ › glyphs — bidi would mirror those.
             <View style={s.arrows} ref={setLtr} pointerEvents="box-none">
-              <Pressable onPress={() => goTo(main - 1)} accessibilityRole="button" accessibilityLabel={t('Back')} style={({ hovered }: any) => [s.arrow, hovered && s.arrowHover]}>
-                <Ionicons name="chevron-back" size={20} color={colors.onFill} />
+              <Pressable testID="listing-preview-arrow-left" onPress={() => goTo(main + (isRTL ? 1 : -1))} accessibilityRole="button" accessibilityLabel={t(isRTL ? 'Next photo' : 'Previous photo')} style={({ hovered }: any) => [s.arrow, hovered && s.arrowHover]}>
+                <Chevron dir="left" />
               </Pressable>
-              <Pressable onPress={() => goTo(main + 1)} accessibilityRole="button" accessibilityLabel={t('Next photo')} style={({ hovered }: any) => [s.arrow, hovered && s.arrowHover]}>
-                <Ionicons name="chevron-forward" size={20} color={colors.onFill} />
+              <Pressable testID="listing-preview-arrow-right" onPress={() => goTo(main + (isRTL ? -1 : 1))} accessibilityRole="button" accessibilityLabel={t(isRTL ? 'Previous photo' : 'Next photo')} style={({ hovered }: any) => [s.arrow, hovered && s.arrowHover]}>
+                <Chevron dir="right" />
               </Pressable>
             </View>
           )}
@@ -489,6 +500,7 @@ export default function ListingPreview({ listing: l, url, onClose }: {
 
         {/* (5) the first screen's last row: ONE button to the real ad */}
         <View style={s.ctaRow} ref={inflowRef} onLayout={(e: any) => { ctaPos.current = { y: e.nativeEvent.layout.y, h: e.nativeEvent.layout.height }; measure('cta')(e); }}>
+          {hazard}
           {cta('listing-preview-contact')}
         </View>
 
@@ -519,27 +531,6 @@ export default function ListingPreview({ listing: l, url, onClose }: {
           </View>
         )}
 
-        {/* (7) the description, verbatim; the source's bullets as a list */}
-        {desc ? (
-          <View testID="listing-preview-description" style={s.section}>
-            <Text style={[s.h, tx]}>{t('Description')}</Text>
-            {descParts.length > 1 ? (
-              <View style={s.descList}>
-                <Text style={[s.desc, tx]}>{descParts[0]}</Text>
-                {descParts.slice(1).map((p, i) => (
-                  <View key={i} style={s.bullet}>
-                    <Text style={s.bulletDot}>•</Text>
-                    <Text style={[s.desc, s.bulletTx, tx]}>{p}</Text>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={[s.desc, tx]}>{desc}</Text>
-            )}
-          </View>
-        ) : null}
-
-        <Text style={[s.note, tx]}>{t('This ad is from {name}', { name })}</Text>
       </ScrollView>
 
       {/* the floating twin of the CTA: visible only while the in-flow row is out of view; inert otherwise */}
@@ -548,6 +539,7 @@ export default function ListingPreview({ listing: l, url, onClose }: {
         pointerEvents={floating ? 'box-none' : 'none'}
         aria-hidden={!floating}
       >
+        {hazard}
         {cta('listing-preview-contact-floating', floating)}
       </View>
 
@@ -603,12 +595,11 @@ const s = StyleSheet.create({
     backgroundColor: colors.scrim, borderRadius: radius.pill, paddingHorizontal: 11,
   },
   counterTx: { color: colors.onFill, fontSize: 12.5, fontFamily: NUM_FONT, fontVariant: ['tabular-nums'] },
-  dots: { position: 'absolute', bottom: 14, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 5 },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.onFill, opacity: 0.5 },
-  dotOn: { opacity: 1 },
-  arrows: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 8 },
-  arrow: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.scrim },
-  arrowHover: { backgroundColor: colors.dark },
+  arrows: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10 },
+  // A 44px hit box around a white 36px disc — the visible circle the owner asked for, the tap floor kept.
+  arrow: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  arrowHover: { opacity: 0.85 },
+  arrowDisc: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.92)', boxShadow: '0 2px 8px rgba(0,0,0,0.18)' },
   thumbs: { gap: 8, paddingHorizontal: 14, paddingTop: 10 },
   thumb: { width: 72, height: 54, borderRadius: 10, overflow: 'hidden', borderWidth: 2, borderColor: 'transparent' },
   thumbOn: { borderColor: colors.primary },
@@ -665,15 +656,12 @@ const s = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.tint, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 5 },
   chipTx: { fontSize: 12.5, color: colors.chipIcon },
-  descList: { gap: 4 },
-  desc: { fontSize: 15, lineHeight: 26, color: colors.body },
-  bullet: { flexDirection: 'row', gap: 8 },
-  bulletDot: { fontSize: 15, lineHeight: 26, color: colors.primary },
-  bulletTx: { flexShrink: 1 },
-  note: { marginTop: 16, marginHorizontal: 16, fontSize: 12, color: colors.muted },
   // the CTA row (in flow) and its floating twin
-  ctaRow: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10 },
-  ctaFloat: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 10, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.line },
+  ctaRow: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10, gap: 8 },
+  // The hazard note (owner: «EXTREMELY important»): read before the button, in both bars.
+  hazard: { backgroundColor: colors.hazardBg, borderWidth: 1, borderColor: colors.hazardLine, borderRadius: 12, paddingVertical: 7, paddingHorizontal: 10 },
+  hazardTx: { fontSize: 12.5, lineHeight: 18, color: colors.hazardInk },
+  ctaFloat: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 10, gap: 8, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.line },
   // A 68px bar that invites the tap: a three-stop green gradient (CSS, so the theme's var() tokens
   // resolve inside it; the lightest stop is a tint OF the primary token), an inset top highlight and a
   // deeper shadow. The copy on the start side, the pointing hand, the gold buzzer on the end side.
@@ -686,12 +674,8 @@ const s = StyleSheet.create({
   ctaLines: { flexShrink: 1, flexGrow: 1, minWidth: 0, gap: 3 },
   ctaTx: { color: colors.onFill, fontSize: 17, lineHeight: 22, fontWeight: '800' },
   ctaSub: { color: colors.onFill, opacity: 0.88, fontSize: 12.5, lineHeight: 16 },
-  // The pointing hand, ~6px from the buzzer; it taps toward it on a 1.1s loop (off under reduced motion).
+  // The pointing hand, ~6px from the buzzer; it stays still (owner 2026-10-10).
   ctaHand: { fontSize: 26, lineHeight: 30, marginEnd: 6, flexShrink: 0, ...(IS_WEB ? { filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.25))' } as any : {}) },
-  ctaHandTap: IS_WEB ? ({
-    animationKeyframes: [{ '0%': { transform: [{ translateX: 0 }] }, '50%': { transform: [{ translateX: -6 }] }, '100%': { transform: [{ translateX: 0 }] } }],
-    animationDuration: '1.1s', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out',
-  } as any) : {},
   // THE GOLD BUZZER: a radial gold, an inner light ring, a dark-gold rim, a warm glow — the site's logo in
   // its own colours on top. The brand's one gold exception (src/theme/palette.ts BUZZER_GOLD).
   gold: {
