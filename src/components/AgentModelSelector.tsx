@@ -60,8 +60,8 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
             accessibilityViewIsModal>
             {about ? (
               <>
-                <Pressable accessibilityRole="button" onPress={() => setAbout(false)} style={[styles.aboutRow, styles.aboutLink, { flexDirection: arabic ? 'row-reverse' : 'row' }]}>
-                  <Ionicons name={arabic ? 'chevron-forward' : 'chevron-back'} size={12} color={colors.muted} />
+                <Pressable accessibilityRole="button" onPress={() => setAbout(false)} style={[styles.aboutRow, styles.aboutLink, { flexDirection: 'row' }]}>
+                  <Ionicons name={arabic ? 'chevron-forward' : 'chevron-back'} size={12} color={colors.muted} style={arabic ? styles.rtlFlip : undefined} />
                   <Text style={styles.aboutText}>{arabic ? 'عن النماذج' : 'About models'}</Text>
                 </Pressable>
                 {MODELS.map((item) => (
@@ -97,10 +97,11 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
             </View>
             <View style={styles.rule} />
             <Pressable testID="agent-about-models" accessibilityRole="button" onPress={() => setAbout(true)}
-              style={({ pressed }) => [styles.aboutRow, styles.aboutLink, { flexDirection: arabic ? 'row-reverse' : 'row' }, pressed && styles.pressed]}>
-              {/* The arrow sits beside the words, small and quiet — a link, not a far-away chevron. */}
+              style={({ pressed }) => [styles.aboutRow, styles.aboutLink, { flexDirection: 'row' }, pressed && styles.pressed]}>
+              {/* The arrow sits beside the words, small and quiet — a link, not a far-away chevron. The page is
+                  dir=rtl in Arabic, so a plain row already starts at the right edge (row-reverse put it on the left). */}
               <Text style={styles.aboutText}>{arabic ? 'عن النماذج' : 'About models'}</Text>
-              <Ionicons name={arabic ? 'chevron-back' : 'chevron-forward'} size={12} color={colors.muted} />
+              <Ionicons name={arabic ? 'chevron-back' : 'chevron-forward'} size={12} color={colors.muted} style={arabic ? styles.rtlFlip : undefined} />
             </Pressable>
               </>
             )}
@@ -135,5 +136,8 @@ const styles = StyleSheet.create({
   soon: { color: colors.muted, fontSize: 11, lineHeight: 16, fontWeight: '600' },
   aboutLink: { justifyContent: 'flex-start', gap: 4, minHeight: 40 },
   aboutText: { color: colors.body, fontSize: 13, lineHeight: 19, fontWeight: '500' },
+  // Under dir=rtl the icon font draws the chevron facing the wrong way (measured live 2026-10-10: «عن النماذج»
+  // showed ›); mirroring it makes the Arabic link read «عن النماذج ‹», like every RTL «more» link.
+  rtlFlip: { transform: [{ scaleX: -1 }] },
   check: { width: 24, alignItems: 'center' },
 });
