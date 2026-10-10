@@ -42,9 +42,9 @@ const MAP_MIN = 170;
 // browser's Back closes the map and lands on the viewer's own marked entry, which it treats as «show».
 const SHEET_MARK = 'ezAdMap';
 // THE TAP MOMENT (owner 2026-10-10): the open happens OPEN_DELAY_MS after the tap — inside the browser's
-// user-activation window, so Safari lets the new tab through — while a small pop-up and a confetti burst
-// mark the hand-off. Keep it under ~800ms or the tab is blocked.
-const OPEN_DELAY_MS = 750;
+// user-activation window, so Safari lets the new tab through — while confetti marks the hand-off. Keep
+// it under ~1s or the tab is blocked.
+const OPEN_DELAY_MS = 950;
 // Numerals only — the app's Poppins token; Arabic text keeps the system face (no letter-spacing, ever).
 const NUM_FONT = IS_WEB ? `${font.family.semibold}, Poppins, ui-sans-serif, system-ui, sans-serif` : undefined;
 const NUM_RUN = /(\d[\d,.]*)/;
@@ -78,8 +78,8 @@ export default function ListingPreview({ listing: l, url, onClose }: {
   const wide = useAtLeast(PICKER_SHEET_BREAKPOINT);
   const reduced = useReducedMotion();
 
-  // ── the tap moment: the buzzer pushes, a gold ring bursts, a 🎉 pops, confetti rains + bursts, then
-  //    the open fires at OPEN_DELAY_MS. No card, no text, no scrim — a party, then the redirect. ────────
+  // ── the tap moment: the buzzer pushes, a gold ring bursts, confetti everywhere, then the open fires
+  //    at OPEN_DELAY_MS. No card, no text, nothing in the middle — a lot of confetti, then the redirect. ──
   const [pressing, setPressing] = useState<string | null>(null);
   const [burst, setBurst] = useState(0);
   const [partyOn, setPartyOn] = useState(false);
@@ -91,31 +91,41 @@ export default function ListingPreview({ listing: l, url, onClose }: {
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   useEffect(() => () => { timers.current.forEach(clearTimeout); }, []);
   const later = (fn: () => void, ms: number) => { timers.current.push(setTimeout(fn, ms)); };
-  // Confetti: ~160 pieces rain from the top with a gentle sway, ~90 burst out of the buzzer; gold + the
-  // brand greens + white + a little red and blue; 2.2s, fading through the last 40%. Canvas, no library.
+  // Confetti, a lot of it (owner: «a lot, and take a little bit of time»): 340 pieces rain from above the
+  // top, two bottom-corner cannons fire 130 each up and inward, 110 burst out of the buzzer. Gold + the
+  // brand greens + white + a little red and blue; a quarter are round; ~3.2s, fading through the last 25%.
+  // Canvas, no library. It keeps running after the tab opens, so it finishes when the user comes back.
   const party = (ox: number, oy: number) => {
     const cv = canvasRef.current; const cx = cv?.getContext?.('2d');
     if (!cx) { setPartyOn(false); return; }
     const w = box.w, h = box.h, dpr = window.devicePixelRatio || 1;
     cv.width = w * dpr; cv.height = h * dpr; cx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const palette = [BUZZER_GOLD.mid, BUZZER_GOLD.deep, BUZZER_GOLD.light, lightColors.primary, lightColors.accentLeaf, lightColors.onFill, lightColors.danger, lightColors.rnplInk];
-    const piece = (x: number, y: number, vx: number, vy: number, sway: number) => ({
-      x, y, vx, vy, sway, ph: Math.random() * Math.PI * 2, w: 5 + Math.random() * 6, hh: 8 + Math.random() * 8, r: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4, c: palette[(Math.random() * palette.length) | 0],
+    const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+    const piece = (x: number, y: number, vx: number, vy: number, g: number) => ({
+      x, y, vx, vy, g, w: rnd(5, 12), hh: rnd(8, 17), r: Math.random() * 6, vr: rnd(-0.25, 0.25), round: Math.random() < 0.25, c: palette[(Math.random() * palette.length) | 0],
     });
+    const shot = (x: number, y: number, deg: number, spread: number, v0: number, v1: number, g: number) => {
+      const a = (deg * Math.PI) / 180 + (Math.random() - 0.5) * spread, v = rnd(v0, v1);
+      return piece(x, y, Math.cos(a) * v, Math.sin(a) * v, g);
+    };
     const bits = [
-      ...Array.from({ length: 160 }, () => piece(Math.random() * w, -20 - Math.random() * h * 0.4, 0, 2 + Math.random() * 3, 0.6 + Math.random() * 0.9)),
-      ...Array.from({ length: 90 }, () => { const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2, v = 7 + Math.random() * 9; return piece(ox, oy, Math.cos(a) * v, Math.sin(a) * v, 0); }),
+      ...Array.from({ length: 340 }, () => piece(Math.random() * w, rnd(-1.1 * h, -20), rnd(-1.1, 1.1), rnd(1.5, 5), 0.07)),
+      ...Array.from({ length: 130 }, () => shot(0, h, -60, 0.7, 14, 22, 0.3)),
+      ...Array.from({ length: 130 }, () => shot(w, h, -120, 0.7, 14, 22, 0.3)),
+      ...Array.from({ length: 110 }, () => shot(ox, oy, -90, 2.4, 8, 18, 0.32)),
     ];
-    const t0 = performance.now(); const DUR = 2200;
+    const t0 = performance.now(); const DUR = 3200;
     const tick = (t: number) => {
       const k = (t - t0) / DUR;
       cx.clearRect(0, 0, w, h);
       if (k >= 1) { setPartyOn(false); return; }
-      const alpha = k < 0.6 ? 1 : Math.max(0, 1 - (k - 0.6) / 0.4);
+      const alpha = k < 0.75 ? 1 : Math.max(0, 1 - (k - 0.75) / 0.25);
       for (const b of bits) {
-        b.vy += b.sway ? 0.04 : 0.32; b.vx *= 0.99; b.x += b.vx + (b.sway ? Math.sin(t / 300 + b.ph) * b.sway : 0); b.y += b.vy; b.r += b.vr;
+        b.vy += b.g; b.vx *= 0.99; b.x += b.vx; b.y += b.vy; b.r += b.vr;
         cx.save(); cx.translate(b.x, b.y); cx.rotate(b.r); cx.fillStyle = b.c; cx.globalAlpha = alpha;
-        cx.fillRect(-b.w / 2, -b.hh / 2, b.w, b.hh); cx.restore();
+        if (b.round) { cx.beginPath(); cx.arc(0, 0, b.w / 2, 0, Math.PI * 2); cx.fill(); } else cx.fillRect(-b.w / 2, -b.hh / 2, b.w, b.hh);
+        cx.restore();
       }
       requestAnimationFrame(tick);
     };
@@ -541,11 +551,10 @@ export default function ListingPreview({ listing: l, url, onClose }: {
         {cta('listing-preview-contact-floating', floating)}
       </View>
 
-      {/* the tap moment: a full-page, untouchable overlay — the 🎉 near the price, confetti over everything */}
+      {/* the tap moment: a full-page, untouchable overlay of confetti — nothing else */}
       {IS_WEB && !reduced && partyOn ? (
         <View testID="listing-preview-party" style={s.party} pointerEvents="none" aria-hidden>
           <Canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
-          <Text style={[s.popper, { top: box.bar + heroH - 24 }]}>🎉</Text>
         </View>
       ) : null}
 
@@ -713,15 +722,8 @@ const s = StyleSheet.create({
     } as any : {}),
   },
   goldLogo: IS_WEB ? ({ filter: 'drop-shadow(0 1px 0 rgba(255,255,255,0.6))' } as any) : {},
-  // The party overlay (pointer-events none) and the 🎉 that pops with an overshoot near the price.
+  // The confetti overlay (pointer-events none).
   party: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 3 },
-  popper: {
-    position: 'absolute', alignSelf: 'center', fontSize: 96, lineHeight: 110, textAlign: 'center',
-    ...(IS_WEB ? {
-      animationKeyframes: [{ '0%': { opacity: 0, transform: [{ scale: 0.2 }] }, '18%': { opacity: 1, transform: [{ scale: 1.25 }] }, '32%': { transform: [{ scale: 0.96 }] }, '45%': { transform: [{ scale: 1 }] }, '70%': { opacity: 1 }, '100%': { opacity: 0, transform: [{ scale: 1 }] } }],
-      animationDuration: '2.2s', animationTimingFunction: 'ease-out', animationFillMode: 'forwards',
-    } as any : {}),
-  },
   // A white shine that sweeps the gold pill only, once every ~3s.
   goldShine: {
     position: 'absolute', top: -12, bottom: -12, left: 0, width: '60%',

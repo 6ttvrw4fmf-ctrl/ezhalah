@@ -519,15 +519,15 @@ const hostBadgePass = (src: string) => ['ar', 'en'].every((locale) => {
 });
 check('the host badge opens the ad through the contact handler, with the same spoken name', hostBadgePass(preview));
 // The tap moment delays the real open behind a pop-up — it must stay inside the browser's user-activation
-// window (≤ 800ms) or Safari blocks the tab; and the open is still the one noopener window.open.
+// window (≤ 1s) or Safari blocks the tab; and the open is still the one window.open.
 const tapMomentPass = (src: string) => {
   const code = codeOnly(src);
   const delay = Number((/const OPEN_DELAY_MS = (\d+);/.exec(code) ?? [])[1]);
-  return delay > 0 && delay <= 800 && /later\(fire, OPEN_DELAY_MS\);/.test(code) && /const fire = \(\) => \{\s*if \(!open\(\)\) blockedOnce\.current = true;/.test(code)
+  return delay > 0 && delay <= 1000 && /later\(fire, OPEN_DELAY_MS\);/.test(code) && /const fire = \(\) => \{\s*if \(!open\(\)\) blockedOnce\.current = true;/.test(code)
     && /if \(reduced \|\| blockedOnce\.current \|\| !IS_WEB\) \{ if \(!open\(\)\) blockedOnce\.current = true; return; \}/.test(code);
 };
 check('the delayed open stays inside the user-activation window and goes through open()', tapMomentPass(preview));
-mustCatch('the open drifts past the activation window', !tapMomentPass(preview.replace('const OPEN_DELAY_MS = 750;', 'const OPEN_DELAY_MS = 2000;')));
+mustCatch('the open drifts past the activation window', !tapMomentPass(preview.replace('const OPEN_DELAY_MS = 950;', 'const OPEN_DELAY_MS = 2000;')));
 mustCatch('the party opens the ad some other way', !tapMomentPass(preview.replace('const fire = () => {', "const fire = () => {\n      window.location.assign(url); return;")));
 mustCatch('reduced motion still waits for the party', !tapMomentPass(preview.replace('if (reduced || blockedOnce.current || !IS_WEB)', 'if (blockedOnce.current || !IS_WEB)')));
 mustCatch('host badge opens something else', !hostBadgePass(preview.replace(/testID="listing-preview-host"\s+onPress=\{goOpen\}/, 'testID="listing-preview-host" onPress={openMap}')));
