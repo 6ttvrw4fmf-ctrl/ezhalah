@@ -76,10 +76,10 @@ function verifyRendering(text: string) {
   const actualItemStyle = new Function('colors', `return (${itemStyle});`)({});
   assert.equal(actualItemStyle.width, '100%', 'every desktop/phone row uses the full list width');
   const h = (type: string, props: any, ...children: any[]) => ({ type, props, children });
-  const render = new Function('pickerPlatforms', 'PLATFORM_PICKER_PROFILES', 'locale', 'selectedSources', 'choosePlatform', 't', 's', 'pickerTwoColumns', 'colors', 'h', 'Pressable', 'View', 'Text', 'Image', 'Ionicons', js + '\nreturn cards;');
+  const render = new Function('pickerPlatforms', 'PLATFORM_PICKER_PROFILES', 'locale', 'selectedSources', 'choosePlatform', 't', 's', 'pickerTwoColumns', 'colors', 'h', 'Pressable', 'View', 'Text', 'Image', 'Ionicons', 'MAX_PICKER_SOURCES', js + '\nreturn cards;');
   for (const locale of ['ar', 'en']) {
     for (const twoColumns of [true, false]) {
-      const cards = render(roster, profiles, locale, [], () => {}, (key: string) => key, { platformPickerItem: actualItemStyle }, twoColumns, {ink:'#253831'}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons');
+      const cards = render(roster, profiles, locale, [], () => {}, (key: string) => key, { platformPickerItem: actualItemStyle }, twoColumns, {ink:'#253831'}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons', 3);
       for (let i = 0; i < cards.length; i++) {
         const root = cards[i]; const profile = profiles[roster[i].name];
         const nodes: any[] = [];
@@ -140,6 +140,12 @@ assert.throws(() => slugs(['nonexistent']), /Unknown picker source/);
 let selected = toggle([], 'Aqar');
 selected = toggle(selected, 'Wasalt');
 assert.deepEqual(selected, ['Aqar', 'Wasalt']);
+// Deep search caps at 3 sites (owner 2026-10-10): a 4th is refused, removing one frees a slot.
+const three = toggle(toggle(toggle([], 'Aqar'), 'Wasalt'), 'Deal App');
+assert.deepEqual(toggle(three, 'Gathern'), three, 'a 4th website must be refused');
+assert.deepEqual(toggle(toggle(three, 'Wasalt'), 'Gathern'), ['Aqar', 'Deal App', 'Gathern'], 'removing one frees a slot');
+const uncapped = (names: string[], name: string) => names.includes(name) ? names.filter((v) => v !== name) : [...names, name];
+assert.notDeepEqual(uncapped(three, 'Gathern'), three, 'mutation: the pre-cap toggle lets a 4th through, so the check above can fail');
 assert.deepEqual(toggle(selected, 'Aqar'), ['Wasalt']);
 assert.deepEqual(slugs(['Aqar', 'Aqar']), ['aqar', 'aqarmonthly']);
 for (const name of names as string[]) {

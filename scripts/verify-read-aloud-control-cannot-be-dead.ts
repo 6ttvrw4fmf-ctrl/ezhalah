@@ -39,6 +39,7 @@ const lifted = await liftSymbols(
   'src/lib/readAloud.ts',
   [{ header: 'function splitIntoChunks(' },
    { header: 'export function hasSpeakableContent(' },
+   { header: 'export function stripEmoji(' },
    { header: 'function buildUnits(' }],
   ['hasSpeakableContent'],
   "type Unit = { kind: 'speak'; text: string } | { kind: 'pause'; ms: number };\n"

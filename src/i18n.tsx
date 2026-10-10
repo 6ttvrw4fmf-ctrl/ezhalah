@@ -196,6 +196,7 @@ const AR: Record<string, string> = {
   'Choose websites': 'اختر المواقع',
   'Deep search across websites': 'بحث عميق في المواقع',
   'Focus your search on one or more specific websites. We show only their listings.': 'خصّص بحثك في موقع معيّن أو أكثر، ونعرض لك إعلاناتها فقط.',
+  'You can choose up to 3 websites': 'تقدر تختار ٣ مواقع كحد أقصى',
   'Search across Saudi Arabia': 'ابحث في جميع المواقع داخل المملكة',
   'Choose a website': 'اختر موقعاً',
   'Search one website': 'ابحث في موقع واحد',
