@@ -1240,6 +1240,13 @@ const AR: Record<string, string> = {
   "and to confirm it's still on {siteName}": 'وللتأكد من توفّره في {siteName}',
   "This ad may have been removed or sold. We review ads continuously, but we can't guarantee they're still available.": 'قد يكون الإعلان حُذف أو بيع. نراجع الإعلانات باستمرار، لكن لا نضمن توفّرها.',
   'Previous photo': 'الصورة السابقة',
+  // The asking-price box (numbers only, never a judgement word — owner 2026-10-10).
+  'Asking prices: {type} {deal} in {district}': 'أسعار الإعلانات: {type} {deal} في {district}',
+  '{n} million': '{n} مليون',
+  'median': 'الوسيط',
+  'per m²': 'للمتر',
+  'this ad': 'هذا الإعلان',
+  'From {n} {type} listed {deal} in {district}, each house counted once. Just numbers — the decision is yours.': 'من {n} {type} معروضة {deal} في {district}، كل بيت محسوب مرة واحدة. أرقام فقط، والقرار لك.',
   'Call': 'اتصال',
   'WhatsApp': 'واتساب',
   'Telegram': 'تيليجرام',

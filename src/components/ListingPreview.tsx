@@ -13,7 +13,7 @@ import { useAtLeast } from '@/lib/useAtLeast';
 import { PICKER_SHEET_BREAKPOINT } from '@/lib/responsive';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SourceBadge, FEATURE_META, arAttrValue } from '@/components/ResultCard';
-import { fetchAdPin, mapEmbedUrl, type GeoPoint } from '@/data/adPageData';
+import { fetchAdPage, fetchAskingPrices, mapEmbedUrl, type AskingPrices, type GeoPoint } from '@/data/adPageData';
 import type { Listing } from '@/data/listings';
 
 // THE IN-APP AD PAGE for the sites that cannot be framed (lib/inAppViewer.ts IN_APP_PREVIEW_HOSTS):
@@ -41,6 +41,8 @@ const MAP_MIN = 170;
 // Marker on the history entry the expanded map pushes (same approach as AdViewer's HISTORY_MARK): the
 // browser's Back closes the map and lands on the viewer's own marked entry, which it treats as «show».
 const SHEET_MARK = 'ezAdMap';
+// The asking-price box: a figure's place on the p10→p90 bar (0–100%).
+const pct = (v: number, r: { p10: number; p90: number }) => Math.round(Math.max(0, Math.min(100, r.p90 > r.p10 ? ((v - r.p10) / (r.p90 - r.p10)) * 100 : 50)));
 // THE TAP MOMENT (owner 2026-10-10): the open happens OPEN_DELAY_MS after the tap — inside the browser's
 // user-activation window, so Safari lets the new tab through — while confetti marks the hand-off. Keep
 // it under ~1s or the tab is blocked.
@@ -184,12 +186,20 @@ export default function ListingPreview({ listing: l, url, onClose }: {
     ? Math.max(MAP_MIN, box.h - box.bar - heroH - box.thumbs - box.head - box.addr - box.cta - 12)
     : MAP_MIN;
 
-  // ── the source's pin (web only; native keeps the card data alone) ───────────────────────────────
+  // ── the source's pin + the asking prices around this ad (web only; native keeps the card data alone) ──
   const [geo, setGeo] = useState<GeoPoint | null>(null);
+  const [range, setRange] = useState<{ stats: AskingPrices; price: number | null } | null>(null);
   useEffect(() => {
     if (!IS_WEB) return;
     let alive = true;
-    void fetchAdPin(l).then((p) => { if (alive) setGeo(p); });
+    void fetchAdPage(l).then(({ geo: pin, row }) => {
+      if (!alive) return;
+      setGeo(pin);
+      void fetchAskingPrices(row).then((stats) => {
+        const own = Number(row?.price_total);
+        if (alive && stats) setRange({ stats, price: Number.isFinite(own) ? own : null });
+      });
+    });
     return () => { alive = false; };
   }, [l]);
 
@@ -315,6 +325,10 @@ export default function ListingPreview({ listing: l, url, onClose }: {
   if (l.driver_room) chips.push(t('Driver room'));
   const rows = [...facts, ...extra];
   const tx = { textAlign: (isRTL ? 'right' : 'left') as 'right' | 'left', writingDirection: (isRTL ? 'rtl' : 'ltr') as 'rtl' | 'ltr' };
+  // «1.95 مليون» (two decimals at most, trailing zeros dropped) or «850,000».
+  const fmtSar = (v: number) => v >= 1e6
+    ? t('{n} million', { n: String(Math.round(v / 1e4) / 100) })
+    : Math.round(v).toLocaleString('en-US');
   const Frame: any = 'iframe';
   const Canvas: any = 'canvas';
   const mapTitle = t('Property location on Google Maps');
@@ -495,8 +509,30 @@ export default function ListingPreview({ listing: l, url, onClose }: {
           ) : null}
         </View>
 
-        {/* Reserved, empty today (zero height): the asking-price range bar «أسعار الإعلانات: {type} {deal} في {district}» — a later PR. */}
-        <View testID="listing-preview-range" />
+        {/* the asking prices around this ad — numbers only, each house once; nothing when < 10 houses */}
+        <View testID="listing-preview-range">
+          {range ? (
+            <View style={s.range}>
+              <Text style={[s.h, tx]}>{t('Asking prices: {type} {deal} in {district}', { type: typeLabel, deal: t('for Sale'), district: district || city })}</Text>
+              <View style={s.rangeBarWrap}>
+                <View style={s.rangeTrack}>
+                  <View style={[s.rangeMedian, { [isRTL ? 'right' : 'left']: `${pct(range.stats.median, range.stats)}%` }]} />
+                  {range.price != null && <View style={[s.rangeDot, { [isRTL ? 'right' : 'left']: `${pct(range.price, range.stats)}%` }]} />}
+                </View>
+                <View style={s.rangeEnds}>
+                  <Text style={s.rangeEnd}>{fmtSar(range.stats.p10)}</Text>
+                  <Text style={s.rangeEnd}>{fmtSar(range.stats.p90)}</Text>
+                </View>
+              </View>
+              <Text style={[s.rangeMid, tx]}>
+                <Text style={s.rangeK}>{t('median')} </Text><Text style={s.rangeV}>{fmtSar(range.stats.median)}</Text>
+                {range.stats.medianPpm != null ? <><Text style={s.rangeK}>{`  ·  ${t('per m²')} `}</Text><Text style={s.rangeV}>{Math.round(range.stats.medianPpm).toLocaleString('en-US')}</Text></> : null}
+                {range.price != null ? <Text style={s.rangeK}>{`  ·  ● ${t('this ad')}`}</Text> : null}
+              </Text>
+              <Text style={[s.rangeNote, tx]}>{t('From {n} {type} listed {deal} in {district}, each house counted once. Just numbers — the decision is yours.', { n: range.stats.houses.toLocaleString('en-US'), type: typeLabel, deal: t('for Sale'), district: district || city })}</Text>
+            </View>
+          ) : null}
+        </View>
 
         {/* (5) the first screen's last row: ONE button to the real ad */}
         <View style={s.ctaRow} ref={inflowRef} onLayout={(e: any) => { ctaPos.current = { y: e.nativeEvent.layout.y, h: e.nativeEvent.layout.height }; measure('cta')(e); }}>
@@ -645,6 +681,18 @@ const s = StyleSheet.create({
     position: 'absolute', top: 12, width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, boxShadow: '0 2px 10px rgba(20,40,30,0.18)',
   },
+  // the asking-price box
+  range: { marginTop: 14, marginHorizontal: 16, gap: 8, borderWidth: 1, borderColor: colors.line, borderRadius: radius.card, padding: 12 },
+  rangeBarWrap: { gap: 4 },
+  rangeTrack: { height: 8, borderRadius: radius.pill, backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
+  rangeMedian: { position: 'absolute', top: -3, width: 2, height: 12, marginLeft: -1, backgroundColor: colors.muted, borderRadius: 1 },
+  rangeDot: { position: 'absolute', top: -5, width: 16, height: 16, marginLeft: -8, borderRadius: 8, backgroundColor: colors.primary, borderWidth: 2, borderColor: colors.surface },
+  rangeEnds: { flexDirection: 'row', justifyContent: 'space-between' },
+  rangeEnd: { fontSize: 12, color: colors.muted, fontFamily: NUM_FONT },
+  rangeMid: { fontSize: 13.5, color: colors.ink },
+  rangeK: { color: colors.muted },
+  rangeV: { fontWeight: '700', color: colors.ink, fontFamily: NUM_FONT },
+  rangeNote: { fontSize: 12, lineHeight: 18, color: colors.muted },
   // sections
   section: { marginTop: 14, paddingHorizontal: 16, gap: 8 },
   h: { fontSize: 13, fontWeight: '600', color: colors.muted },

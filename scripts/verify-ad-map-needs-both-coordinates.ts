@@ -56,11 +56,58 @@ const problems = ({ mapPoint }: Fns): string[] => {
 const real = problems(await lift(DATA));
 check('a pin needs BOTH published coordinates — strings or numbers, never a half, never (0,0)', real.length === 0, real.join('\n      '));
 
+// ── asking prices: each house once, down sites out, junk out, never under 10 houses ──────────────
+type Stats = (rows: Record<string, unknown>[], down: Set<string>) => { houses: number; p10: number; median: number; p90: number; medianPpm: number | null } | null;
+const liftStats = async (file: string): Promise<Stats> => (await liftSymbols(file, [
+  { header: 'const num = (', endsWith: /: NaN;$/ },
+  { header: 'const PRICE_MIN', endsWith: /;$/ }, { header: 'const PRICE_MAX', endsWith: /;$/ }, { header: 'const MIN_HOUSES', endsWith: /;$/ },
+  { header: 'const percentile = (' },
+  { header: 'export function askingPriceStats(' },
+], ['askingPriceStats'])).askingPriceStats as Stats;
+// Ten licensed houses at 1.0M…1.9M (200 m² → 5,000…9,500 per m²) + the first one AGAIN on another site at
+// 1.5M (one house, its lowest figure) + two identical unlicensed rows (one house, 4,000 per m²) + a 50k typo
+// + a 9M row on a DOWN site. 11 houses: p10 1.1M · median 1.4M · p90 1.8M · median per m² 7,000.
+const M = 1_000_000;
+const FIXTURE: Record<string, unknown>[] = [
+  ...Array.from({ length: 10 }, (_, i) => ({ platform: i % 2 ? 'wasalt' : 'aqar', license_number: `L${i}`, area_m2: 200, price_total: String(M + i * 100_000) })),
+  { platform: 'wasalt', license_number: 'L0', area_m2: 200, price_total: '1500000' },
+  { platform: 'sakan', license_number: null, area_m2: 300, price_total: '1200000' },
+  { platform: 'sakan', license_number: '', area_m2: 300, price_total: 1_200_000 },
+  { platform: 'aqar', license_number: 'J1', area_m2: 100, price_total: '50000' },
+  { platform: 'toor', license_number: 'D1', area_m2: 200, price_total: '9000000' },
+];
+const statsProblems = (stats: Stats): string[] => {
+  const out: string[] = [];
+  const r = stats(FIXTURE, new Set(['toor']));
+  if (!r) return ['the fixture (11 houses) produced no numbers'];
+  if (r.houses !== 11) out.push(`houses: ${r.houses} ≠ 11 (a house listed twice was counted twice, or the junk/down rows got in)`);
+  if (Math.abs(r.p10 - 1.1 * M) > 1) out.push(`p10 ${r.p10} ≠ 1.1M`);
+  if (Math.abs(r.median - 1.4 * M) > 1) out.push(`median ${r.median} ≠ 1.4M`);
+  if (Math.abs(r.p90 - 1.8 * M) > 1) out.push(`p90 ${r.p90} ≠ 1.8M (the down site's 9M or the 50k typo got in)`);
+  if (r.medianPpm == null || Math.abs(r.medianPpm - 7000) > 1) out.push(`median per m² ${r.medianPpm} ≠ 7,000`);
+  if (stats(FIXTURE.slice(0, 9), new Set()) !== null) out.push('nine houses still produced numbers (floor is 10)');
+  return out;
+};
+const statsReal = statsProblems(await liftStats(DATA));
+check('asking prices: each house once (licence+area, lowest figure), junk and down sites out, nothing under 10 houses', statsReal.length === 0, statsReal.join('\n      '));
+const mustCatchStats = async (what: string, from: string, to: string) => {
+  if (!DATA_SRC.includes(from)) { failed++; console.log(`FAIL  mutation anchor missing: ${what}`); return; }
+  const file = join(mkdtempSync(join(tmpdir(), 'ad-prices-')), 'adPageData.ts');
+  writeFileSync(file, DATA_SRC.replace(from, to));
+  const caught = statsProblems(await liftStats(file)).length > 0;
+  if (!caught) failed++;
+  console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
+};
+await mustCatchStats('a house counted once per row', 'if (!cur || price < cur.price) best.set(key, { price, area });', 'best.set(`${key}|${best.size}`, { price, area });');
+await mustCatchStats('a down site counted', 'if (!platform || downSlugs.has(platform)) continue;', 'if (!platform) continue;');
+await mustCatchStats('a junk price counted', 'if (!Number.isFinite(price) || price < PRICE_MIN || price > PRICE_MAX) continue;', 'if (!Number.isFinite(price)) continue;');
+await mustCatchStats('numbers shown from a handful of houses', 'if (best.size < MIN_HOUSES) return null;', 'if (best.size < 1) return null;');
+
 // ── wiring: the page draws only the fetched pin; the data module never guesses one ────────────────
 const wired = (dataSrc: string, previewSrc: string) =>
   /const geo = mapPoint\(own\);\s*return geo;/.test(dataSrc)
   && /select\('latitude,longitude'\)\.eq\('source_table', l\.sourceTable\)\.eq\('listing_id', l\.id\)/.test(dataSrc)
-  && !/district|neighborhood|geocod|centroid/i.test(dataSrc)
+  && !/geocod|centroid/i.test(dataSrc) && !/mapPoint\((?!own\)|row[):])/.test(dataSrc)
   && /\{geo && IS_WEB \? \(/.test(previewSrc) && /\{mapOpen && geo && IS_WEB \? \(/.test(previewSrc)
   && /mapEmbedUrl\(geo, locale, 14\)/.test(previewSrc) && /mapEmbedUrl\(geo, locale, 15\)/.test(previewSrc) && !/mapEmbedUrl\((?!geo, locale, 1[45]\))/.test(previewSrc)
   && (previewSrc.match(/window\.open\(/g) ?? []).length === 1;   // only the one button to the real ad — never the map
