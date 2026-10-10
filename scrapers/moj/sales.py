@@ -201,10 +201,10 @@ _HAY = re.compile(r"^حي\s+")
 
 
 def norm(s: str | None) -> str:
-    """Spelling-only normalisation, NOT fuzzy: strip a leading «حي », ة→ه, أإآ→ا, ى→ي, collapse spaces."""
-    s = _HAY.sub("", (s or "").strip())
-    s = s.translate(str.maketrans({"ة": "ه", "أ": "ا", "إ": "ا", "آ": "ا", "ى": "ي"}))
-    return re.sub(r"\s+", " ", s).strip()
+    """Spelling-only normalisation, NOT fuzzy: ة→ه, أإآ→ا, ى→ي, collapse spaces, then strip a leading «حي »
+    (letters first, so the ministry's «حى الورود» loses its prefix too)."""
+    s = (s or "").translate(str.maketrans({"ة": "ه", "أ": "ا", "إ": "ا", "آ": "ا", "ى": "ي"}))
+    return _HAY.sub("", re.sub(r"\s+", " ", s).strip())
 
 
 def norm_region(s: str | None) -> str:
