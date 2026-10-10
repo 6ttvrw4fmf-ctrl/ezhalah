@@ -13,7 +13,7 @@ import { useAtLeast } from '@/lib/useAtLeast';
 import { PICKER_SHEET_BREAKPOINT } from '@/lib/responsive';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SourceBadge, FEATURE_META, arAttrValue } from '@/components/ResultCard';
-import { dearerTenths, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojFacts } from '@/data/adPageData';
+import { dearerSplit, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojFacts } from '@/data/adPageData';
 import { listingOpenUrl } from '@/lib/openListing';
 import type { Listing } from '@/data/listings';
 
@@ -215,7 +215,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
   // This ad's own m² price (its price ÷ its area, both as the source published them) and its place among
   // the deduped houses: k of every 10 cost more per m².
   const adPpm = prices.price != null && prices.area != null ? prices.price / prices.area : null;
-  const k = adPpm != null && prices.stats ? dearerTenths(prices.stats.each, adPpm) : null;
+  const split = adPpm != null && prices.stats ? dearerSplit(prices.stats.each, adPpm) : null;
 
   // ── the expanded map: a full-pane sheet over this page; ✕ / Escape / Back close it in place ─────
   const [mapOpen, setMapOpen] = useState(false);
@@ -597,7 +597,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                   <Text style={[s.sameH, tx]}>{prices.same.length === 1
                     ? t('This same property is listed on two sites (same licence number):')
                     : t('This same property is listed on {k} sites (same licence number):', { k: prices.same.length + 1 })}</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.sameRow}>
+                  <View style={s.sameRow}>
                     {/* Each site's OWN listing_url (through listingOpenUrl, the same resolver the tabs use) — never a URL built from an id. */}
                     {[{ card: l, href: url, me: true }, ...prices.same.map((sib) => ({ card: sib, href: listingOpenUrl(sib) ?? '', me: false }))].map(({ card, href, me }) => (
                       <Pressable
@@ -615,23 +615,25 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                         <Text numberOfLines={1} style={[s.siteHint, me && s.siteHintMe]}>{me ? t('this ad') : t('Tap to view it')}</Text>
                       </Pressable>
                     ))}
-                  </ScrollView>
+                  </View>
                 </View>
               )}
 
-              {adPpm != null && k != null && prices.stats && prices.price != null && prices.area != null && (
+              {adPpm != null && split != null && prices.stats && prices.price != null && prices.area != null && (
                 <View testID="listing-preview-prices-ppm" style={s.pcard}>
                   <View style={s.pcardHead}>
                     <Text style={[s.pcardTitle, tx]}>{t('Price per m²: {n} SAR', { n: fmtInt(adPpm) })}</Text>
                   </View>
-                  <View style={s.houses} accessible accessibilityLabel={t('Of every 10 {type} listed in the district: {k} cost more per m² than this ad, and {rest} less', { type: typePlural(), k, rest: 10 - k })}>
+                  {/* The picture is 10 glyphs (k from dearerSplit, never 0 while one is dearer nor 10 while one is cheaper);
+                      the sentence carries the EXACT counts. */}
+                  <View style={s.houses} accessible accessibilityLabel={t('Of {n} {type} listed in the district: {dearer} cost more per m² than this ad, and {cheaper} less', { n: fmtInt(split.n), type: typePlural(), dearer: fmtInt(split.dearer), cheaper: fmtInt(split.cheaper) })}>
                     {Array.from({ length: 10 }, (_, i) => (
-                      <View key={i} style={[s.house, i < k ? s.houseUp : s.houseDn]}>
-                        <Ionicons name={commercial ? 'business' : 'home'} size={14} color={i < k ? colors.onFill : colors.chipIcon} />
+                      <View key={i} style={[s.house, i < split.k ? s.houseUp : s.houseDn]}>
+                        <Ionicons name={commercial ? 'business' : 'home'} size={14} color={i < split.k ? colors.onFill : colors.chipIcon} />
                       </View>
                     ))}
                   </View>
-                  {bullet(t('Of every 10 {type} listed in the district: {k} cost more per m² than this ad, and {rest} less', { type: typePlural(), k, rest: 10 - k }))}
+                  {bullet(t('Of {n} {type} listed in the district: {dearer} cost more per m² than this ad, and {cheaper} less', { n: fmtInt(split.n), type: typePlural(), dearer: fmtInt(split.dearer), cheaper: fmtInt(split.cheaper) }))}
                   <Text style={[s.pcardSub, tx]}>{t('The same property ({area} m²) priced at the district average:', { area: fmtInt(prices.area) })}</Text>
                   <View style={s.tiles}>
                     <View style={[s.tile, s.tileMe]}>
@@ -833,8 +835,9 @@ const s = StyleSheet.create({
   halfFoot: { fontSize: 11, lineHeight: 15, color: colors.muted, marginTop: 2 },
   same: { gap: 6 },
   sameH: { fontSize: 13.5, color: colors.ink },
-  sameRow: { gap: 8 },
-  siteCard: { width: 128, borderWidth: 1, borderColor: colors.line, borderRadius: 12, padding: 8, gap: 2, alignItems: 'center', backgroundColor: colors.surface },
+  // Two columns that wrap into rows — a third site goes to the next row, nothing scrolls sideways.
+  sameRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  siteCard: { width: '48%', borderWidth: 1, borderColor: colors.line, borderRadius: 12, padding: 8, gap: 2, alignItems: 'center', backgroundColor: colors.surface },
   siteCardMe: { borderColor: colors.tintLine, backgroundColor: colors.tint },
   siteCardHover: { borderColor: colors.primary },
   siteLogo: { width: 48, height: 24, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },

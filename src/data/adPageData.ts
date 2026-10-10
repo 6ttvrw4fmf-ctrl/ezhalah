@@ -155,12 +155,21 @@ export function tileFromShown(ppm: number, area: number): number {
   return Math.round((Math.round(ppm) * Math.round(area)) / 1000) * 1000;
 }
 
-/** Of every 10 houses in the DEDUPED set, how many cost more per m² than this ad (0–10); null without an ad m² price. */
-export function dearerTenths(each: House[], adPpm: number): number | null {
+/** This ad against the DEDUPED same-type houses that have a per-m² price: exact counts dearer / cheaper per m²
+ *  (an equal price per m² counts in neither), and the 10-glyph picture k = round(10·dearer/n) clamped so that
+ *  a picture never shows 0 while some house is dearer, nor 10 while some house is cheaper (owner: «0 أغلى»
+ *  printed for 36 of 1,493 was false). Null without an ad m² price or without houses. */
+export type DearerSplit = { n: number; dearer: number; cheaper: number; k: number };
+export function dearerSplit(each: House[], adPpm: number): DearerSplit | null {
   if (!Number.isFinite(adPpm) || adPpm <= 0) return null;
   const ppms = each.filter((h) => h.area > 0).map((h) => h.price / h.area);
   if (!ppms.length) return null;
-  return Math.round((10 * ppms.filter((p) => p > adPpm).length) / ppms.length);
+  const n = ppms.length;
+  const dearer = ppms.filter((p) => p > adPpm).length;
+  const cheaper = ppms.filter((p) => p < adPpm).length;
+  const raw = Math.round((10 * dearer) / n);
+  const k = Math.min(cheaper > 0 ? 9 : 10, Math.max(dearer > 0 ? 1 : 0, raw));
+  return { n, dearer, cheaper, k };
 }
 
 /** Same ad, other site: the licence number and the exact area agree, the platform differs. Price is not compared. */
@@ -212,8 +221,22 @@ export function fetchMojSales(row: AdRow | null, cls: MojClass = 'سكني'): Pr
 }
 
 // ── the same ad on other sites ───────────────────────────────────────────────────────────────────
+/** The other sites' index rows for this ad: isSameAd, on the SAME live-platform set as the asking stats and
+ *  the search (a hidden / down / dormant site neither appears nor counts), one row per platform, index order. */
+export function sameAdSiblings(own: AdRow, rows: AdRow[], downSlugs: Set<string>): AdRow[] {
+  const seen = new Set<string>();
+  const out: AdRow[] = [];
+  for (const r of rows) {
+    const platform = String(r.platform ?? '').trim().toLowerCase();
+    if (!platform || downSlugs.has(platform)) continue;
+    if (!isSameAd(own, r) || !r.source_table || seen.has(platform)) continue;
+    seen.add(platform);
+    out.push(r);
+  }
+  return out;
+}
 const sameCache = new Map<string, Promise<Listing[]>>();
-/** The OTHER sites' real cards for this ad (licence + area agree): one per platform, in index order. */
+/** The OTHER live sites' real cards for this ad (licence + area agree): one per platform, in index order. */
 export function fetchSameAd(row: AdRow | null): Promise<Listing[]> {
   const lic = String(row?.license_number ?? '').trim();
   const area = num(row?.area_m2);
@@ -223,18 +246,16 @@ export function fetchSameAd(row: AdRow | null): Promise<Listing[]> {
   if (!p) {
     const own = row;
     p = (async () => {
+      await loadHiddenPlatformNames();   // the registry's down list, once per session (bounded inside)
       const { data, error } = await boundedRpc<AdRow[]>(
         supabase!.from('search_listings_ar').select('source_table,listing_id,platform,license_number,area_m2,price_total')
           .eq('license_number', lic).eq('area_m2', area).limit(50),
       );
       if (error) { sameCache.delete(key); return []; }
-      // The predicate is re-run on the client: the row IS what the page shows. One row per platform.
-      const seen = new Set<string>();
+      // The predicate is re-run on the client: the row IS what the page shows.
       const byTable = new Map<string, number[]>();
-      for (const r of data ?? []) {
-        if (!isSameAd(own, r) || !r.source_table || seen.has(String(r.platform))) continue;
-        seen.add(String(r.platform));
-        byTable.set(r.source_table, [...(byTable.get(r.source_table) ?? []), Number(r.listing_id)]);
+      for (const r of sameAdSiblings(own, data ?? [], downPlatformSlugs())) {
+        byTable.set(r.source_table as string, [...(byTable.get(r.source_table as string) ?? []), Number(r.listing_id)]);
       }
       const cards = await Promise.all([...byTable].map(([t, ids]) => fetchListingCards(t, ids)));
       return cards.flat();
