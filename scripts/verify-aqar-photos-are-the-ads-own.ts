@@ -61,7 +61,8 @@ const real = readFileSync(SRC, 'utf8');
 type Coords = { latitude: number; longitude: number } | null;
 type Out = { row: boolean; photo_urls: string[] | null; coords: Coords };
 const CALLS = [['6815040', 'villa', 'sale', false], ['6438846', 'apartment', 'rent', false],
-               ['6815040', 'villa', 'sale', true], ['6772165', 'land', 'sale', false]];
+               ['6815040', 'villa', 'sale', true], ['6772165', 'land', 'sale', false],
+               ['6753755', 'apartment', 'rent', false]];
 const run = (source: string): Out[] => pyCall(ROOT, MOD, '_barrier_photos', CALLS, source + HARNESS) as Out[];
 
 // The pin each page itself publishes in its ld+json `geo` — read here independently of the extractor
@@ -71,7 +72,8 @@ const geoOf = (ad: string) => {
   const m = html.match(/"geo":\{[^}]*"latitude":(-?[0-9.]+),"longitude":(-?[0-9.]+)/);
   return m ? { latitude: Number(m[1]), longitude: Number(m[2]) } : null;
 };
-const GEO = [geoOf('6815040'), geoOf('6438846'), geoOf('6772165')];
+const GEO = [geoOf('6815040'), geoOf('6438846'), geoOf('6772165'), geoOf('6753755')];
+const BRACE_FIRST = 'https://images.aqar.fm/webp/750x0/props/002560473_1782818506095.jpg';
 const LAND_FIRST = 'https://images.aqar.fm/webp/750x0/props/003239080_1783961654587.jpg';
 const samePin = (c: Coords, g: Coords) => !!c && !!g && c.latitude === g.latitude && c.longitude === g.longitude;
 const OWN_FIRST = 'https://images.aqar.fm/webp/750x0/props/003757760_1786380520839.jpg';
@@ -88,6 +90,10 @@ const verdict = (o: Out[]) => {
     // A LAND page (ad 6772165, «أرض للبيع», 9 photos on aqar) — the shape the 2026-10-10 repair skipped.
     land: (o[3]?.photo_urls ?? []).length === 9 && o[3].photo_urls![0] === LAND_FIRST
       && samePin(o[3].coords, GEO[2]),
+    // An ad whose OWN TEXT holds «{»/«}» (6753755, 4 photos on aqar): the old brace counter closed
+    // the payload mid-string and read the whole listing as None — 43 rows kept other ads' photos.
+    braces: (o[4]?.photo_urls ?? []).length === 4 && o[4].photo_urls![0] === BRACE_FIRST
+      && samePin(o[4].coords, GEO[3]),
   };
 };
 
@@ -95,6 +101,8 @@ const verdict = (o: Out[]) => {
 const o = run(real);
 const v = verdict(o);
 check('both real pages enrich to a row', o[0].row && o[1].row);
+check('an ad whose own text holds { } (6753755) still yields its 4 photos and its pin', v.braces,
+  `got ${o[4]?.photo_urls?.length} photos, pin ${JSON.stringify(o[4]?.coords)}`);
 check('a real LAND page (6772165) yields its own 9 photos and its own pin', v.land,
   `got ${o[3]?.photo_urls?.length} photos, pin ${JSON.stringify(o[3]?.coords)}`);
 check('ad 6815040: exactly its 21 own photos, one 750px URL each, Aqar\'s first photo first', v.villaExact,
@@ -152,6 +160,28 @@ const fSrc = real.replace('    if not (16 <= lat <= 33 and 34 <= lng <= 56):\n  
 check('MUTATION (f): anchor intact', fSrc !== real);
 const fOut = fSrc === real ? [] : pyCall(ROOT, MOD, '_own_coordinates', [[{ location: { lat: 0, lng: 0 } }]], fSrc);
 mustCatch('the Saudi box removed, letting (0,0) through', fOut[0] !== null);
+
+// (h) the brace counter the payload reader used until 2026-10-10, verbatim.
+const BRACE_COUNTER = `    for m in _LISTING_OBJ_RE.finditer(blob):
+        start = blob.index("{", m.start() + len('"listing"'))
+        depth = 0
+        for i in range(start, min(len(blob), start + 200_000)):
+            ch = blob[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        obj = _json.loads(blob[start:i + 1])
+                    except Exception:  # noqa: BLE001
+                        break
+                    if isinstance(obj, dict) and obj.get("id") is not None:
+                        return obj
+                    break
+    return None`;
+const h = mutate('(h)', (s) => s.replace(/    dec = _json\.JSONDecoder\(\)\n[\s\S]*?\n    return None/, BRACE_COUNTER));
+mustCatch('a payload reader that counts braces inside the ad\'s own text', h !== null && h.villaExact && !h.braces);
 
 // ── the repair must REACH every row: each stored property_type resolves to an aqar slug ─────────
 // 2026-10-10: the recovery mapped type→slug by inverting SLUG_TO_TYPE, so the zoning types the
