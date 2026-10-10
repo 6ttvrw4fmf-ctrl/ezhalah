@@ -373,5 +373,24 @@ sourceMutant('a district-centroid fallback for the pin', !wired(codeOnly(DATA_SR
 sourceMutant('the page drawing a map without a pin', !wired(codeOnly(DATA_SRC), PREVIEW.replace('{geo && IS_WEB ? (', '{IS_WEB ? (')));
 sourceMutant('the map opening a new tab from our UI', !wired(codeOnly(DATA_SRC), PREVIEW.replace('const openMap = () => {', "const openMap = () => { window.open(mapEmbedUrl(geo, locale, 15), '_blank');")));
 
+// ── the page counts only what search shows (owner 2026-10-10: a site the engineer marks dead/suspended
+// is hidden EVERYWHERE). Search's own switch is production_ready (a dormant platform's rows are false);
+// both search_listings_ar reads behind the block must carry it, on top of the registry's down list.
+const prodGated = (src: string) => {
+  const reads = codeOnly(src).match(/from\('search_listings_ar'\)[^;]*?\.(limit|range)\(/g) ?? [];
+  const block = reads.filter((r) => /license_number|deal_ar/.test(r));   // the duplicates + asking-price reads
+  return block.length === 2 && block.every((r) => /\.eq\('production_ready', true\)/.test(r));
+};
+check('the duplicates and asking-price reads count only rows search shows (production_ready)', prodGated(DATA_SRC));
+sourceMutant('the duplicates read without search\'s switch', !prodGated(DATA_SRC.replace(".eq('area_m2', area).eq('production_ready', true)", ".eq('area_m2', area)")));
+sourceMutant('the asking-price read without search\'s switch', !prodGated(DATA_SRC.replace(".eq('district_ar', row.district_ar as string).eq('production_ready', true)", ".eq('district_ar', row.district_ar as string)")));
+
+// ── the gold shine rests OUTSIDE the pill in both directions (RTL flips left/right; a one-sided anchor
+// parked a frozen white streak inside the pill on Arabic pages, so it never read as a flash).
+const PREVIEW_RAW = readFileSync(join(ROOT, 'src/components/ListingPreview.tsx'), 'utf8');
+const shineOk = (src: string) => /goldShine: \{\s*position: 'absolute', top: -12, bottom: -12, left: '-20%', right: '-20%',/.test(src);
+check('the gold shine is anchored symmetrically, so it sweeps and rests outside the pill in RTL and LTR', shineOk(PREVIEW_RAW));
+sourceMutant('a one-sided shine anchor (frozen streak in RTL)', !shineOk(PREVIEW_RAW.replace("left: '-20%', right: '-20%',", "left: 0, width: '60%',")));
+
 console.log(failed === 0 ? '\n✅ the ad page pins only what the source published, and its prices block shows only computed-for-this-ad, source-true numbers.\n' : `\n❌ ${failed} check(s) failed — a guessed pin or a wrong number can reach the page.\n`);
 process.exit(failed === 0 ? 0 : 1);
