@@ -614,6 +614,7 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
         # written explicitly, tri-state, or the fact is lost instead of merely wrong.
         "separate_water_meter":       _yes_no(addl_info, "waterMeter"),
         "separate_electricity_meter": _yes_no(addl_info, "electricityMeter"),
+        **land_service_fields(property_type, addl_info),
         "detail_enriched": detail_enriched,
         # Feature-grid booleans the card already renders. Wasalt amenities map roughly.
         #
@@ -655,6 +656,38 @@ def map_property(prop: dict, deal: str, s: Optional["RotatingSession"] = None) -
         "laundry_room":     has("laundry"),
         "balcony_terrace":  has("balcony", "terrace"),
     }
+
+
+def is_land_type(property_type) -> bool:
+    """wasalt land types are the English «… Land» words (Residential Land, Farming Land, Commercial Land)."""
+    return bool(property_type) and str(property_type).strip().endswith("Land")
+
+
+def land_service_fields(property_type, addl_info) -> dict:
+    """electricity / water_supply for a wasalt LAND, from its own electricityMeter / waterMeter.
+
+    Backlog 326 (owner, 2026-10-09): wasalt publishes «electricityMeter» / «waterMeter» Yes/No on
+    ~6,300 of its ~8,300 live lands, yet the index carried electricity/water_supply = NULL on all of
+    them. On a plot of land the meter IS the service connection, so Yes -> True and No -> False.
+
+    LAND ONLY, deliberately. On an apartment or a villa «electricityMeter: No» means a SHARED meter,
+    not a home without electricity, so mapping it would manufacture a negative the source never
+    stated. Non-land ads keep these columns NULL (their meters stay in separate_*_meter).
+
+    Only DETERMINED values are returned; a key the land does not publish is omitted, never None, so
+    neither the upsert path nor enrich.py's bare update() can erase a value an earlier read found.
+    Sanitation is not published by wasalt and is never written here.
+    """
+    if not is_land_type(property_type):
+        return {}
+    out: dict = {}
+    em = _yes_no(addl_info, "electricityMeter")
+    if em is not None:
+        out["electricity"] = em
+    wm = _yes_no(addl_info, "waterMeter")
+    if wm is not None:
+        out["water_supply"] = wm
+    return out
 
 
 def _yes_no(addl_info, key: str):
