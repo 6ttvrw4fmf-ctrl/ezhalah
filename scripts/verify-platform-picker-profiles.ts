@@ -57,7 +57,7 @@ function mustCatch(mutant: string) {
 const emptyCopy = helper.replace("export function platformCoverageSentence(coverage: PickerCoverage | undefined, locale: 'ar' | 'en'): string {", "export function platformCoverageSentence(coverage: PickerCoverage | undefined, locale: 'ar' | 'en'): string { return '';");
 assert.notEqual(emptyCopy, helper);
 assert.throws(() => verify(source, emptyCopy), assert.AssertionError);
-const severalList = helper.replace("return nationwide;\n  return", "return { key: 'multiple-regions', order: 100, label: ar ? 'عدة مناطق' : 'Several regions' };\n  return");
+const severalList = helper.replace("  return nationwide;\n}", "  if (coverage?.regions.length) return { key: 'multiple-regions', order: 100, label: ar ? 'عدة مناطق' : 'Several regions' };\n  return nationwide;\n}");
 assert.notEqual(severalList, helper, 'several-regions mutation target exists');
 assert.throws(() => verify(source, severalList), assert.AssertionError);
 mustCatch(source.replace('wasalt-sa.png', 'sa-aqar-fm.png'));
@@ -200,7 +200,7 @@ console.log('PASS: selected website summary reuses card naming and deduplicates 
 const group = load(helper, 'platformCoverageGroup');
 assert.equal(group(coverage.platforms.Aqar, 'ar').key, 'nationwide');
 assert.equal(group(coverage.platforms.Aldarim, 'ar').label, 'منطقة الرياض');
-assert.equal(group(undefined, 'ar').key, 'other');
+assert.equal(group(undefined, 'ar').key, 'nationwide', 'no separate «مواقع أخرى» list (owner 2026-10-10)');
 const ordered = (names as string[]).slice().sort((a,b)=>group(coverage.platforms[a],'ar').order-group(coverage.platforms[b],'ar').order);
 assert.equal(group(coverage.platforms[ordered[0]],'ar').key, 'nationwide');
 assert.deepEqual(ordered.slice().sort(), names);
