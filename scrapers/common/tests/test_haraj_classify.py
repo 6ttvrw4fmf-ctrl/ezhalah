@@ -57,3 +57,14 @@ def test_broker_service_post_is_not_an_offer():
 def test_bedroom_in_an_apartment_body_does_not_kill_the_offer():
     assert classify("شقة مفروشة للايجار", "تتكون من غرفة نوم وصالة كبيرة ومطبخ")[0] == "offer"  # 11190241633
     assert classify("غرفة نوم للبيع نظيفة", "")[0] == "other"
+
+
+# Shadow v2 2026-10-10 (CI run 38027397165): a partnership/marketing post is not an offer; «تمليك» and «حوش» are.
+def test_partnership_and_marketer_posts_are_not_offers():
+    assert classify("محل ايجار او شريك خضار وفواكهه", "")[0] == "other"               # 11190239193
+    assert classify("الخرج", "عندك أرض أو بيت وتبي تسوّقه؟ تواصل معي")[0] == "other"  # 11190239013
+
+
+def test_ownership_and_yard_offers():
+    assert classify("شقق تمليك 6 غرف فاخرة حي الروابي", "")[0] == "offer"            # 11190238312
+    assert classify("حوش كبير للإيجار 5040م2", "")[0] == "offer"                       # 11190238317

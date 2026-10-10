@@ -9,7 +9,7 @@ on:
     inputs:
       max_posts:
         description: "How many posts to read (1 request a second)"
-        default: "900"
+        default: "1100"
   # A PUSH that changes the Haraj crawler (push path filters read the pushed commits only, so an
   # unrelated push on the same PR does not re-crawl Haraj — a pull_request filter reads the whole PR).
   push:
@@ -40,4 +40,4 @@ jobs:
       - name: Classifier tests
         run: pip install pytest && python -m pytest -q scrapers/common/tests/test_haraj_classify.py
       - name: Shadow crawl (prints only)
-        run: exec python -m scrapers.haraj.shadow --max-posts "${{ github.event.inputs.max_posts || '900' }}"
+        run: exec python -m scrapers.haraj.shadow --max-posts "${{ github.event.inputs.max_posts || '1100' }}"

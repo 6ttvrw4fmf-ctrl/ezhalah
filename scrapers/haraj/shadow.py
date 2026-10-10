@@ -87,6 +87,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-posts", type=int, default=150)
     ap.add_argument("--seed", type=int, default=20261010)
+    ap.add_argument("--skip-hours", type=int, default=3,
+                    help="skip the newest N hourly sitemap files (already hand-checked in an earlier run)")
     ap.add_argument("--want", type=int, default=110, help="stop after this many real-estate posts")
     a = ap.parse_args()
 
@@ -101,13 +103,14 @@ def main() -> int:
     st, sm = fetch(f"{BASE}/sitemap.xml")
     locs = re.findall(r"<loc>([^<]+)</loc>", sm) if st == 200 else []
     print(f"sitemap.xml: {st} locs={len(locs)} first={locs[:3]} last={locs[-3:]}", flush=True)
-    for u in locs[-3:][::-1]:
+    files = locs[-(3 + a.skip_hours):len(locs) - a.skip_hours] if a.skip_hours else locs[-3:]
+    for u in files[::-1]:
         st2, t = fetch(u)
         got = post_ids(t) if st2 == 200 else []
         print(f"  sitemap file {u}: {st2} posts={len(got)}", flush=True)
         sm_ids = [i for i in got if i not in ids]
         random.Random(a.seed).shuffle(sm_ids)
-        ids += sm_ids[:900]
+        ids += sm_ids
     print(f"\ncandidate posts: {len(ids)}", flush=True)
 
     rows, n_fetch = [], 0
