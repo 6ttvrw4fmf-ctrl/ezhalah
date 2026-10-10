@@ -4797,11 +4797,15 @@ export default function Agent() {
                           box keeps its width; beyond that it scrolls sideways — every logo stays reachable. */}
                       {selectedPlatforms.map((platform, i) => {
                         const { logo, layout } = PLATFORM_PICKER_PROFILES[platform.name];
-                        // The reviewed 96×48 frame, shrunk until the mark's box fits a 19px disc.
-                        const k = Math.min(15 / layout.height, 17 / layout.width);
+                        // ONE site: its logo fills the pill (owner 2026-10-10: «make it big; small only when
+                        // more than 1»). Two or three share the space side by side.
+                        const single = selectedPlatforms.length === 1;
+                        const W = single ? 74 : 22;
+                        const H = single ? 24 : 22;
+                        const k = Math.min((H - 2) / layout.height, (W - 2) / layout.width);
                         return (
-                          <View key={platform.name} style={[s.chipBadge, i > 0 && s.chipBadgeOverlap, { zIndex: selectedPlatforms.length - i }]}>
-                            <Image source={logo} tintColor={layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: layout.width * k, height: layout.height * k, left: 9.5 - (48 - layout.left) * k, top: 9.5 - (24 - layout.top) * k }} contentFit="contain" accessible={false} />
+                          <View key={platform.name} style={[s.chipBadge, { width: W, height: H }, i > 0 && s.chipBadgeOverlap]}>
+                            <Image source={logo} tintColor={layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: layout.width * k, height: layout.height * k, left: W / 2 - (48 - layout.left) * k, top: H / 2 - (24 - layout.top) * k }} contentFit="contain" accessible={false} />
                           </View>
                         );
                       })}
@@ -5359,7 +5363,8 @@ const s = StyleSheet.create({
   // = the capped strip's width, so the text box keeps ONE width from 0 to 20 picks; minWidth (not
   // width) so an English «Search» can never be squeezed. (owner 2026-10-09)
   initialSearch: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, height: 30, minWidth: 118, paddingHorizontal: 9, borderWidth: 1, borderColor: colors.fieldLine, borderRadius: radius.pill, backgroundColor: colors.surface },
-  initialSearchSelected: { backgroundColor: colors.tint, borderColor: colors.tintLine },
+  // Picked sites: the pill keeps the plain box fill — no tinted background behind the logos (owner 2026-10-10).
+  initialSearchSelected: { backgroundColor: colors.surface, borderColor: colors.fieldLine },
   initialSearchPressed: { backgroundColor: colors.segTrack },
   initialSearchIcon: { width: 17, height: 17 },
   initialSearchText: { color: colors.ink, fontSize: 14, lineHeight: 20, maxWidth: 148, flexShrink: 1 },
