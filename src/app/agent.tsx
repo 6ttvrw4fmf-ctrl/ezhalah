@@ -38,6 +38,8 @@ import { createRevealHandoff } from '@/lib/revealHandoff';
 import { distinctPlatformCount } from '@/lib/platformDiversity';
 import { newerTurnPending as newerTurnPendingPure } from '@/lib/liveTurn';
 import SearchLoader from '@/components/SearchLoader';
+import AfCheckLoader from '@/components/AfCheckLoader';
+import { afCheckTiming, afPickLabels } from '@/lib/afCheckTiming';
 import FeedbackRow from '@/components/FeedbackRow';
 import ReadAloudPlayer from '@/components/ReadAloudPlayer';
 import { CardIn, LoadingDots, GoldPulse, GoldShineButton } from '@/components/CardReveal';
@@ -173,7 +175,9 @@ type ChatMsg =
   // `query` + `resultSources` feed the search-loading animation's platform strip (which real
   // platforms to show while searching); they never affect the search itself. `exiting` tells the
   // loader to fade out softly just before the morph to results (owner v4: no hard cut).
-  | { id: string; role: 'status'; phase: 'thinking' | 'searching'; slogan?: string; summary?: string; query?: SearchQuery; resultSources?: string[]; exiting?: boolean };
+  // `afPicks`: this loader belongs to an Advanced Filter round — it checks the user's picks one by one
+  // (AfCheckLoader) instead of showing the platform roster, and leaves earlier turns undimmed.
+  | { id: string; role: 'status'; phase: 'thinking' | 'searching'; slogan?: string; summary?: string; query?: SearchQuery; resultSources?: string[]; exiting?: boolean; afPicks?: string[] };
 
 const uid = () => 'm' + Date.now() + Math.round(Math.random() * 1e6);
 
@@ -1522,6 +1526,10 @@ export default function Agent() {
   // Search-loader layout and delayed landing callbacks must never pull the page down.
   const searchingVisibleRef = useRef(false);
   searchingVisibleRef.current = msgs.some((m) => m.role === 'status' && m.phase === 'searching');
+  // A NEW search dims earlier turns while it loads (#5400: the old count must read as the old one). An
+  // Advanced Filter round does not (owner 2026-10-10: remove the fade): it narrows the results the user
+  // is reading, and its loader lists their own picks.
+  const newSearchLoading = msgs.some((m) => m.role === 'status' && m.phase === 'searching' && !m.afPicks);
   const toBottom = () => requestAnimationFrame(() => {
     if (searchingVisibleRef.current) return;
     scrollRef.current?.scrollToEnd({ animated: !landInstantRef.current });
@@ -1678,6 +1686,8 @@ export default function Agent() {
   // of following it. (owner 2026-07-09: no artificial delays, results show as soon as ready.)
   const searchingAtRef = useRef<Record<string, number>>({});
   const loaderPresentedRef = useRef<Record<string, boolean>>({});
+  // An Advanced Filter round's checklist beat (lib/afCheckTiming), set when the round starts.
+  const afHoldRef = useRef<Record<string, number>>({});
   // Flip a chat-turn 'thinking' status into the live searching loader the moment the query is KNOWN
   // (right before runQuery) — the pills + min-beat then overlap the fetch exactly like the
   // filter/refine paths. Without this, chat searches only started their beat AFTER the results were
@@ -1702,7 +1712,7 @@ export default function Agent() {
     // completion signal and must never drive checkmarks (owner: no ✓ in the loader, ever).
     const resultSources = Array.from(new Set(result.listings.map((l) => l.source).filter(Boolean)));
     setMsgs((m) => m.map((x) => (x.id === statusId
-      ? { id: statusId, role: 'status', phase: 'searching', slogan, summary, query: result.query ?? (x.role === 'status' ? x.query : undefined), resultSources }
+      ? { id: statusId, role: 'status', phase: 'searching', slogan, summary, query: result.query ?? (x.role === 'status' ? x.query : undefined), resultSources, afPicks: x.role === 'status' ? x.afPicks : undefined }
       : x)));
     toBottom();
     // Wait only the REMAINDER of the minimum searching beat (counted from when the searching loader
@@ -1715,13 +1725,20 @@ export default function Agent() {
     // and the user then waited 12 s for the 10.6 s every-platform loader floor + its page dwell. That
     // floor exists to show every platform being searched on a NEW search; a round narrows results the
     // user is already looking at, so its results show the moment they are ready (exit fade only).
+    // OWNER 2026-10-10 replaces that with a short checklist beat: the round's loader checks the user's
+    // own picks one by one (AfCheckLoader), so it holds until its last pick is ticked — 5–7 s in all
+    // with the exit fade (lib/afCheckTiming). Results that take longer still show the moment they land.
     if (!afCompleted) {
       const remaining = SEARCH_MIN_MS - (Date.now() - since);
       if (remaining > 0) await waitRun(run, remaining);
       // Presentation-only gate: each logo/name page must finish its actual visible dwell.
       // The search has already completed; this changes only when its results are revealed.
       while (!run.cancelled && loaderPresentedRef.current[statusId] !== true) await waitRun(run, 100);
+    } else {
+      const remaining = (afHoldRef.current[statusId] ?? 0) - (Date.now() - since);
+      if (remaining > 0) await waitRun(run, remaining);
     }
+    delete afHoldRef.current[statusId];
     delete loaderPresentedRef.current[statusId];
     delete searchingAtRef.current[statusId];
     if (run.cancelled) return;
@@ -2392,7 +2409,9 @@ export default function Agent() {
     // Guaranteed search → the searching loader (roster + wave) starts IMMEDIATELY, no thinking beat.
     searchingAtRef.current[statusId] = Date.now();
     const echoId = uid();
-    setMsgs((m) => [...m, { id: echoId, role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined }]);
+    const afPicks = opts?.guided ? afPickLabels(opts.guided.facets, t) : [];
+    if (afPicks.length) afHoldRef.current[statusId] = afCheckTiming(afPicks.length, LOADER_EXIT_MS).holdMs;
+    setMsgs((m) => [...m, { id: echoId, role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined, ...(afPicks.length ? { afPicks } : {}) }]);
     toBottom();
     // STAY IN THE SECTION YOU ARE IN (owner 2026-10-03). The round just closed on the old turn's
     // «تحديد أكثر» button, so the new answers bubble and the loader are appended directly below it —
@@ -4221,6 +4240,7 @@ export default function Agent() {
                 // The branded slogan + search summary are NOT shown here anymore (owner: keep loading
                 // clean/focused); they still appear in the RESULTS bubble below, unchanged. RTL is
                 // handled inside SearchLoader (the message column is LTR-pinned).
+                if (m.afPicks?.length) return <AfCheckLoader key={m.id} picks={m.afPicks} exitMs={LOADER_EXIT_MS} exiting={m.exiting} />;
                 return <SearchLoader key={m.id} bottomInset={loaderBottomInset} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} />;
               }
               if (m.role === 'agent') {
@@ -4329,7 +4349,7 @@ export default function Agent() {
                   // threw them to the top — and when they came back above the new turn the view jumped
                   // again. Dimming keeps #5400's purpose (the old count is plainly the old one) with no
                   // layout change at all, so the reader stays exactly where they were.
-                  style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%', opacity: searchingVisibleRef.current || (latestResult?.id !== m.id && latestResult?.typing && !doneTyping[latestResult.id]) ? 0.35 : 1 }}
+                  style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%', opacity: newSearchLoading || (latestResult?.id !== m.id && latestResult?.typing && !latestResult.afCompleted && !doneTyping[latestResult.id]) ? 0.35 : 1 }}
                 >
                   {/* 1) BRANDED SLOGAN — the Ezhalah mark + its personality line. The row sizes to its
                       content and is pushed to the correct edge by the parent's alignItems. ENGLISH →

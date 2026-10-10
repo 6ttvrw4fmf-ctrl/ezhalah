@@ -587,6 +587,7 @@ const AR: Record<string, string> = {
   // Agent chat chrome
   'Ezhalah is searching…': 'إزهله يبحث…',
   'Ezhalah is thinking…': 'إزهله يفكر…',
+  'Ezhalah is checking the sites for your picks…': 'إزهله يفحص المواقع حسب اختيارك…',
   // Search-loading animation (platform-checking strip + filter status lines)
   'Ezhalah is searching the platforms…': 'إزهله يبحث في المنصات…',
   'Searching all platforms…': 'يتم البحث في جميع المنصات…',
