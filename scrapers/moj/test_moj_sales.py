@@ -46,6 +46,7 @@ DEALS = [  # region, city, area, class, ref, price, m², date
     (RIY, "الرياض", "الرياض/حي الملقا", "تجاري", "m2", 8_000_000, 1000, "2026-04-02"),
     (MAK, "جدة", "جدة/الحمراء", "تجاري", "h1", 7_000_000, 700, "2026-06-01"),
     (MAK, "جدة", "جدة/الحمراء", "زراعي", "h2", 1, 1, "2026-06-02"),               # not a class we store
+    (RIY, "عفيف", "عفيف/ حى الورود", "سكني", "a1", 600_000, 600, "2026-07-01"),   # the ministry's «حى » prefix
 ]
 OURS = [
     {"region_ar": "منطقة الرياض", "city_ar": "الرياض", "district_ar": "حي الرمال"},
@@ -54,6 +55,7 @@ OURS = [
     {"region_ar": "منطقة الرياض", "city_ar": "الرياض", "district_ar": "حي النرجس"},
     {"region_ar": "منطقة الرياض", "city_ar": "الرياض", "district_ar": "حي الملقا"},     # two MoJ onto one
     {"region_ar": "منطقة مكة المكرمة", "city_ar": "جدة", "district_ar": "حي الحمراء"},
+    {"region_ar": "منطقة الرياض", "city_ar": "عفيف", "district_ar": "حي الورود"},
 ]
 
 
@@ -175,6 +177,7 @@ def check_matching(m) -> list[str]:
         return [f"bulk run raised: {e!r}"]
     want = {("الرياض/الرمال", "سكني"): ("matched", "الرياض", "حي الرمال"),
             ("جدة/الحمراء", "تجاري"): ("matched", "جدة", "حي الحمراء"),       # region spelt differently
+            ("عفيف/ حى الورود", "سكني"): ("matched", "عفيف", "حي الورود"),     # «حى » + a leading space
             ("القويعية/الورود", "سكني"): ("ambiguous", None, None),           # two of ours
             ("الرياض/الملقا", "تجاري"): ("ambiguous", None, None),            # two MoJ onto one of ours
             ("الرياض/حي الملقا", "تجاري"): ("ambiguous", None, None)}
@@ -248,6 +251,10 @@ def check_monitor(m) -> list[str]:
 
 CHECKS = [check_truth, check_window, check_ppm, check_matching, check_spread, check_partial, check_monitor]
 
+TRANSLATE = '.translate(str.maketrans({"ة": "ه", "أ": "ا", "إ": "ا", "آ": "ا", "ى": "ي"}))'
+NORM_BODY = '    s = (s or "")' + TRANSLATE + '\n    return _HAY.sub("", re.sub(r"\\s+", " ", s).strip())'
+NORM_BODY_STRIP_FIRST = '    s = _HAY.sub("", (s or "").strip())' + TRANSLATE + '\n    return re.sub(r"\\s+", " ", s).strip()'
+
 # ── mutants: the real source with one line changed; each must turn at least one named check red ──────
 MUTANTS = [
     ("avg_ppm recomputed as total ÷ total", check_ppm,
@@ -258,6 +265,8 @@ MUTANTS = [
      "        if len(cands) > 1:\n            out[(region, area)] = (\"ambiguous\", None, None)\n            continue\n", ""),
     ("two MoJ districts onto one of ours displayed", check_matching,
      "        if len(keys) > 1:", "        if False:"),
+    ("«حى » prefix kept (old order: strip «حي » before normalising)", check_matching,
+     NORM_BODY, NORM_BODY_STRIP_FIRST),
     ("partial read accepted (totals check removed)", check_partial, "if summed != total:", "if False:"),
     ("partial read accepted (truncation ignored)", check_partial,
      'complete = ds.get("IC") is True and "RT" not in ds', "complete = True"),
