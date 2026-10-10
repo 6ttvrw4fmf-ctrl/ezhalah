@@ -23,7 +23,8 @@ import type { Listing } from '@/data/listings';
 // top bar · hero · price + key line · location card · the sticky «open it» bar — fits with no scroll.
 // The hero takes a fixed share of the page (≈29% of its height, clamped); the MAP CARD is the flexible
 // block: every other first-screen block is measured (onLayout) and the map fills whatever height is
-// left, never under MAP_MIN, so there is no empty gap above the sticky bar on any height. Explicit
+// left, never under MAP_MIN, so there is no empty gap above the button on any height. When something
+// is added to the first screen (the hazard note), the map is what gives way — nothing else moves. Explicit
 // heights on a definite column, never `flex: 1` inside an indefinite one (iOS Safari resolves that to
 // 0px — see scripts/verify-ios-column-flex-collapse.ts). The rows UNDER the map card (details ·
 // description · the source line) are a continuation the page may scroll to.
@@ -37,7 +38,7 @@ const IS_WEB = Platform.OS === 'web';
 const HERO_MIN = 170;
 const HERO_MAX = 260;
 const HERO_SHARE = 0.29;
-const MAP_MIN = 170;
+const MAP_MIN = 150;
 // Marker on the history entry the expanded map pushes (same approach as AdViewer's HISTORY_MARK): the
 // browser's Back closes the map and lands on the viewer's own marked entry, which it treats as «show».
 const SHEET_MARK = 'ezAdMap';
@@ -509,7 +510,14 @@ export default function ListingPreview({ listing: l, url, onClose }: {
           ) : null}
         </View>
 
-        {/* the asking prices around this ad — numbers only, each house once; nothing when < 10 houses */}
+        {/* (5) the first screen's last row: ONE button to the real ad */}
+        <View style={s.ctaRow} ref={inflowRef} onLayout={(e: any) => { ctaPos.current = { y: e.nativeEvent.layout.y, h: e.nativeEvent.layout.height }; measure('cta')(e); }}>
+          {hazard}
+          {cta('listing-preview-contact')}
+        </View>
+
+        {/* the continuation starts here: the asking prices around this ad — numbers only, each house once;
+            nothing when < 10 houses. Below the first screen on purpose: the hero and the map are at their floors. */}
         <View testID="listing-preview-range">
           {range ? (
             <View style={s.range}>
@@ -534,11 +542,6 @@ export default function ListingPreview({ listing: l, url, onClose }: {
           ) : null}
         </View>
 
-        {/* (5) the first screen's last row: ONE button to the real ad */}
-        <View style={s.ctaRow} ref={inflowRef} onLayout={(e: any) => { ctaPos.current = { y: e.nativeEvent.layout.y, h: e.nativeEvent.layout.height }; measure('cta')(e); }}>
-          {hazard}
-          {cta('listing-preview-contact')}
-        </View>
 
         {/* (6) details: a compact two-column grid of what the source published, then its feature chips */}
         {(rows.length > 0 || chips.length > 0) && (
