@@ -49,7 +49,7 @@ check('the rewrite forwards the path (/:path*)',
 
 // ── (3) remote.ts runs card photos through the canonical helper ──────────────────────────────────
 const remote = readFileSync(join(ROOT, 'src/data/remote.ts'), 'utf8');
-check('remote.ts imports photoDisplayUrl', /import \{ photoDisplayUrl \} from '@\/lib\/photoUrl'/.test(remote));
+check('remote.ts imports photoDisplayUrl', /import \{[^}]*\bphotoDisplayUrl\b[^}]*\} from '@\/lib\/photoUrl'/.test(remote));
 check('remote.ts maps every real photo URL through photoDisplayUrl (the single canonical point)',
   /\.map\(\(u: string\) => photoDisplayUrl\(u\)\)/.test(remote)
   && /const realPhotoUrls = Array\.isArray\(r\.photo_urls\)/.test(remote));
