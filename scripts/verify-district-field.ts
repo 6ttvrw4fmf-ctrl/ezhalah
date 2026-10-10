@@ -96,13 +96,14 @@ check('empty focus shows the Category+Deal+period-scoped Top-6 via topDistrictsF
 check('typing filters within the chosen city+scope via matchDistrictsByCityId (cohort-typed)', /matchDistrictsByCityId\(citySelected\.cityId, effDeal, effCategory, rentPeriodTok, v, cohortTypes, cityTableScope\)/.test(indexSrc));
 // Arabic-only: typing the district in English yields NO autocomplete and the same Arabic hint the City
 // field shows (owner UI request 2026-07-18) — every district name is Arabic, so there's nothing to match.
-check('English district input shows the Arabic-only hint and clears suggestions', /const latin = isLatinOnlyInput\(v\);[\s\S]{0,220}?setDistrictSuggestions\(latin \? \[\][\s\S]{0,220}?setDistrictMsg\(latin \? ARABIC_ONLY_MSG/.test(indexSrc));
+check('Arabic UI only: Latin typing is the wrong script there (the English UI matches English names, owner 2026-10-09)', /const wrongScript = \(v: string\) => locale === 'ar' && isLatinOnlyInput\(v\);/.test(indexSrc));
+check('English district input in the Arabic UI shows the Arabic-only hint and clears suggestions', /const latin = wrongScript\(v\);[\s\S]{0,220}?setDistrictSuggestions\(latin \? \[\][\s\S]{0,220}?setDistrictMsg\(latin \? ARABIC_ONLY_MSG/.test(indexSrc));
 
 // ── Dropdown shows the Top-6 WITHOUT listing numbers (owner UI request 2026-07-18). Top-6 is still
 //    SELECTED by active-listing count (asserted above, in locations.ts), but the count is no longer
 //    displayed; every row (incl. zero-listing catalog districts) renders its name unconditionally. ──
 check('district dropdown no longer displays the listing count', !/grouped\(opt\.listingCount\)/.test(indexSrc) && !/\{opt\.listingCount\}/.test(indexSrc));
-check('every district row renders its name unconditionally (zero-listing districts still selectable)', /<Text style=\{\[s\.suggCity, isEmpty && s\.suggCityEmpty\]\}>\{opt\.districtAr\}<\/Text>/.test(indexSrc));
+check('every district row renders its name unconditionally (zero-listing districts still selectable)', /<Text style=\{\[s\.suggCity, x\.suggCity, isEmpty && s\.suggCityEmpty\]\}>\{citySelected \? districtLabel\(citySelected\.cityId, opt\.districtAr\) : opt\.districtAr\}<\/Text>/.test(indexSrc));
 
 // ── Dead-end guard (2026-08-09): a district with ZERO listings for the current deal/category must be
 //    visibly marked, so a user is never silently led into a 0-result pick. The row stays selectable
