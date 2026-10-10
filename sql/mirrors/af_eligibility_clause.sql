@@ -1,4 +1,18 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-10-09 (migration 20261009235607_raw_land_type_token_in_af_clause):
+--   CHANGED — two edits, rebuilt twice by rebuild_af_filter_rpcs() in one migration.
+--   (1) The category block is the 20261003222926 semi-join (`s.type_ar in (select k.type_ar from
+--       known_type_ar k where k.macro = p_category) or (… macro = 'both' and <table kind>)`), ported from
+--       the two hand-edited RPCs so the rail renders them again (backlog 323; af_rebuild_would_revert
+--       was asserted empty before the first rebuild). Same rows as the EXISTS it replaces.
+--   (2) «أرض خام» (owner 2026-10-09): the type token 'أرض خام' in p_types / p_types2 also matches a row
+--       tagged unit_subtype_ar = 'أرض خام' (sync_raw_land_subtype, 20261009235145), and such a row passes
+--       the category gate when that token was asked for. Dry run in a rolled-back transaction: Riyadh
+--       rent شقة 43,332 → 43,332, Riyadh أرض تجارية 6,670 → 6,670, all lands under تجاري 26,818 → 26,818,
+--       raw land Riyadh 1,338 (157 ms), country 5,968; would_revert 0 afterwards.
+--   Body below rebuilt offline from the previous body by the same two edits and PROVEN against production:
+--   Recorded md5 of pg_get_functiondef: 0e7153e98f68fa6aa26b7a00fb6e4334
+--   (length 10,998; the previous text hashed 8d9c9312948bd90aaef0001e1701fbe6, 10,787.)
 -- Re-verified 2026-10-03 (migration 20261003211448_af_every_question_multi_select_unions):
 --   CHANGED — three lines appended after the p_unit_subtypes line (owner 2026-10-03: «never force the
 --   user to select one thing»): p_furnished_in / p_age_buckets / p_rating_buckets, each the union of
@@ -198,7 +212,7 @@ CREATE OR REPLACE FUNCTION public.af_eligibility_clause()
  RETURNS text
  LANGUAGE sql
  IMMUTABLE
-AS $function$ select E'
+AS $function$select E'
     where (s.production_ready or ((p_cities is null or cardinality(p_cities) = 0) and (p_districts is null or cardinality(p_districts) = 0) and p_region_ids is null and not public.search_row_price_gated(s.deal_ar, s.price_total) and (s.region_id is null or s.city_id is null)))
       -- read-side defense-in-depth (2026-08): block only Ezhalah-side impossible/invalid states;
       -- never hides a source price (no magnitude check; 0 legal); production_ready must have a location.
@@ -215,27 +229,22 @@ AS $function$ select E'
            or (p_rent_period not in (''شهري'',''سنوي'',''كلاهما'') and s.rent_period_ar = p_rent_period))
       and (
             ((p_tables is null or s.source_table = any(p_tables))
-             and (p_types is null or s.type_ar = any(p_types)))
+             and (p_types is null or s.type_ar = any(p_types)
+                  or (s.unit_subtype_ar = ''أرض خام'' and ''أرض خام'' = any(p_types))))
          or (p_tables2 is not null and p_types2 is not null
              and s.source_table = any(p_tables2)
-             and s.type_ar = any(p_types2))
+             and (s.type_ar = any(p_types2)
+                  or (s.unit_subtype_ar = ''أرض خام'' and ''أرض خام'' = any(p_types2))))
       )
       and (p_category is null
-           or exists (
-             select 1 from known_type_ar k
-             where k.type_ar = s.type_ar
-               and (
-                 k.macro = p_category
-                 or (
-                   k.macro = ''both''
-                   and (case p_category
-                          when ''Residential'' then s.source_table like ''%\\_residential\\_listings''
-                          when ''Commercial''  then s.source_table like ''%\\_commercial\\_listings''
-                          else true
-                        end)
-                 )
-               )
-           ))
+           or (s.unit_subtype_ar = ''أرض خام'' and ''أرض خام'' = any(coalesce(p_types, ''{}''::text[]) || coalesce(p_types2, ''{}''::text[])))
+           or (s.type_ar in (select k.type_ar from known_type_ar k where k.macro = p_category)
+           or (s.type_ar in (select k.type_ar from known_type_ar k where k.macro = ''both'')
+               and (case p_category
+                      when ''Residential'' then s.source_table like ''%\\_residential\\_listings''
+                      when ''Commercial''  then s.source_table like ''%\\_commercial\\_listings''
+                      else true
+                    end))))
       and (p_cities is null or cardinality(p_cities) = 0
            or normalize_ar(s.city_ar) = any (array(select tok from city_tokens))
            or s.city_id = any (array(select city_id from city_ids))
@@ -329,4 +338,4 @@ AS $function$ select E'
             (''9.5'' = any(p_rating_buckets) and s.rating >= 9.5)
          or (''9.0'' = any(p_rating_buckets) and s.rating >= 9.0)
          or (''9.0_rc10'' = any(p_rating_buckets) and s.rating >= 9.0 and s.reviews_count >= 10))))
-'::text $function$
+'::text$function$

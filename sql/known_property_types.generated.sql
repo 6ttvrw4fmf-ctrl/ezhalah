@@ -3,7 +3,7 @@
 -- plus the ambiguous «Building» raw; identical to the propertyTypes.ts RAW_TO_CLEAN key set + «Building»).
 -- This is the discovery allowlist detect_novel_property_types() (pg_cron jobid 33) diffs live data
 -- against; a raw type absent here is flagged as novel. APPEND-ONLY: existing rows' added_at / note are
--- preserved (ON CONFLICT DO NOTHING), so applying this never resets discovery history. 72 known raw aliases.
+-- preserved (ON CONFLICT DO NOTHING), so applying this never resets discovery history. 73 known raw aliases.
 create table if not exists public.known_property_types (
   raw_type text primary key,
   added_at timestamptz not null default now(),
@@ -54,6 +54,7 @@ insert into public.known_property_types (raw_type) values
   ('Villa'),
   ('Warehouse'),
   ('Workshop'),
+  ('أرض خام'),
   ('إستراحة'),
   ('برج'),
   ('برج اتصالات'),

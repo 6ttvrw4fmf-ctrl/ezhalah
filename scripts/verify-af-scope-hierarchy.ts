@@ -249,7 +249,8 @@ check('the RPC category gate is dropped ONLY for a cross-macro scope (group pick
 check('…and for the bare type pick under تجاري', scopeCrossesMacro(BUY({ category: 'Commercial', types: ['Residential Land'] })));
 check('…but kept for a same-macro scope on either side', !scopeCrossesMacro(BUY({ category: 'Commercial', typeGroups: ['Retail & Workspace'] })) && !scopeCrossesMacro(BUY({ category: 'Residential', typeGroups: ['Residential Plots'] })) && !scopeCrossesMacro(BUY({ category: 'Commercial', types: ['Commercial Land'] })));
 check('…and never fires without a category pill (nothing-selected keeps the implied default)', !scopeCrossesMacro(BUY({ category: null as unknown as SearchQuery['category'], types: ['Residential Land'] })));
-check('TYPE candidates under the commercial land group list all three lands, deduped', JSON.stringify(scopeCandidates(SCOPE_TYPE_ID, BUY({ category: 'Commercial', typeGroups: ['Commercial & Industrial Plots'] }))) === JSON.stringify(['Commercial Land', 'Industrial Land', 'Residential Land']));
+// «أرض خام» (Raw Land, owner 2026-10-09) joined the land group as its fourth box.
+check('TYPE candidates under the commercial land group list all four land boxes, deduped', JSON.stringify(scopeCandidates(SCOPE_TYPE_ID, BUY({ category: 'Commercial', typeGroups: ['Commercial & Industrial Plots'] }))) === JSON.stringify(['Commercial Land', 'Industrial Land', 'Residential Land', 'Raw Land']));
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll scope-hierarchy assertions passed');
 process.exit(failed ? 1 : 0);

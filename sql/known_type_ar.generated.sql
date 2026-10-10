@@ -3,7 +3,7 @@
 -- after any change to the clean-type map, then re-apply so detect_novel_property_types() (pg_cron
 -- jobid 33) and the trust checks stay in sync with what the app can actually reach.
 -- macro = which category owns the label: Residential | Commercial | both («عمارة» only — resolved by
--- source-table kind at read time). 59 covered type_ar labels.
+-- source-table kind at read time). 60 covered type_ar labels.
 create table if not exists public.known_type_ar (type_ar text primary key, macro text);
 alter table public.known_type_ar add column if not exists macro text;  -- upgrade path from 1-col shape
 -- Full re-sync: the generated set is authoritative.
@@ -11,6 +11,7 @@ truncate public.known_type_ar;
 insert into public.known_type_ar (type_ar, macro) values
   ('أرض', 'Residential'),
   ('أرض تجارية', 'Commercial'),
+  ('أرض خام', 'Commercial'),
   ('أرض زراعية', 'Residential'),
   ('أرض سكنية', 'Residential'),
   ('أرض صناعية', 'Commercial'),

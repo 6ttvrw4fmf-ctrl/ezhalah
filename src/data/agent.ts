@@ -103,7 +103,7 @@ const CURRENCY_RATES: Record<string, number> = {
 const TYPE_SYNONYMS: Record<string, string> = {
   flat: 'Apartment', apt: 'Apartment', studio: 'Studio', penthouse: 'Apartment', duplex: 'Duplex',
   mansion: 'Villa', palace: 'Villa', townhouse: 'Villa', home: 'Villa', dwelling: 'Villa',
-  plot: 'Residential Land', cabin: 'Chalet',
+  plot: 'Residential Land', cabin: 'Chalet', 'raw land': 'Raw Land', 'undeveloped land': 'Raw Land',
   workspace: 'Office', clinic: 'Office', storage: 'Warehouse', depot: 'Warehouse',
   store: 'Shop', retail: 'Shop', boutique: 'Shop', gallery: 'Showroom', garage: 'Workshop',
   plant: 'Factory', ranch: 'Farm', orchard: 'Agriculture Plot', campsite: 'Camp',
@@ -206,6 +206,9 @@ const AR_TYPE: Record<string, string> = {
   // before the bare 'أرض'/'ارض' entries below or it can never be reached. (Found live 2026-07-23:
   // the original أرض-زراعية fix was silently dead code because of exactly this ordering.)
   'أرض زراعية': 'Agriculture Plot', 'ارض زراعية': 'Agriculture Plot',
+  // أرض خام (owner 2026-10-09) — before the bare أرض/ارض for the same prefix reason.
+  'أرض خام': 'Raw Land', 'ارض خام': 'Raw Land', 'أراضي خام': 'Raw Land', 'اراضي خام': 'Raw Land',
+  'أرض غير مخدومة': 'Raw Land', 'ارض غير مخدومة': 'Raw Land',
   'أرض': 'Residential Land', 'ارض': 'Residential Land',
 };
 const RES_TYPES = new Set(Object.entries(CLEAN_MACRO).filter(([, c]) => c === 'Residential').map(([t]) => t));
@@ -568,6 +571,10 @@ export function parseAreaConstraint(text: string): { areaMin?: number; areaMax?:
   return {};
 }
 
+// «أرض خام» / «اراضي خام» / «ارض غير مخدومة» / raw land — whole-word خام (never «الخامس»).
+const RAW_LAND_PHRASE = /(أرض|ارض|أراضي|اراضي|اراضى|أراضى)\s+(?:(ال)?خام(?![\u0621-\u064A])|غير\s+مخدوم|غير\s+مطور)|\braw\s+lands?\b|\bundeveloped\s+lands?\b/i;
+const RAW_LAND_LIFTABLE = new Set(['Residential Land', 'Commercial Land', 'Industrial Land', 'Agriculture Plot']);
+
 export function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts?: string[]): SearchQuery {
   let q = emptyQuery();
   q.deal = b.deal === 'Buy' ? 'Buy' : 'Rent';
@@ -605,6 +612,14 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
       q.type = norm.clean === 'Unknown' ? null : norm.clean;
       q.category = norm.macro;
     }
+  }
+  // أرض خام (owner 2026-10-09). The edge model's type vocabulary predates this box (an edge deploy is an
+  // owner CLI step), so it answers a land type or nothing for «ابي ارض خام». The user's OWN words decide:
+  // a raw-land phrase lifts a land/empty type to 'Raw Land' (its home is تجاري → «الأراضي»). Never
+  // touches a non-land type — «شقة … خام» is not a raw land.
+  if (RAW_LAND_PHRASE.test(userText) && (q.type == null || RAW_LAND_LIFTABLE.has(q.type))) {
+    q.type = 'Raw Land';
+    q.category = CLEAN_MACRO['Raw Land'];
   }
 
   // `detail` may be a bedroom count (1–5+) OR a size in m² — for a home the user can give EITHER (their
