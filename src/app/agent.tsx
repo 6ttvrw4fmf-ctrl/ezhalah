@@ -197,7 +197,7 @@ const bedsLabel = (n: string, ar: boolean): string => {
 const greetingText = (locale: Locale): string =>
   locale === 'ar'
     ? 'وش العقار اللي في بالك؟\nقل لنا مواصفاته، وإزهله.'
-    : 'Ezhalah';
+    : 'What property are you after?\nDescribe it, and Ezhalah it.';
 
 // Ezhalah's SEARCHING-phase voice — one Najdi-flavoured swagger line chosen at random before each
 // search (its recognizable Saudi personality, NOT generic "searching now"). Shown ONLY while searching,
@@ -600,8 +600,9 @@ function BrandReveal({ brand, text, onDone }: { brand: string; text: string; onD
 // text is structurally impossible to overwrite.
 const INTRO_EX_FADE_MS = 220;
 function IntroExampleRotator({ reducedMotion }: { reducedMotion: boolean }) {
+  const { locale } = useI18n();
   const [w, setW] = useState(0);
-  const pool = useMemo(() => introExamplesForWidth(w), [w]);
+  const pool = useMemo(() => introExamplesForWidth(w, locale), [w, locale]);
   const [i, setI] = useState(0);
   const [phase, setPhase] = useState<'in' | 'shown' | 'out'>('shown');
   const text = pool.length ? pool[i % pool.length] : '';
@@ -643,7 +644,7 @@ function IntroExampleRotator({ reducedMotion }: { reducedMotion: boolean }) {
       onLayout={(e) => setW(e.nativeEvent.layout.width)}
     >
       {text ? (
-        <Text numberOfLines={1} ellipsizeMode="tail" style={[s.introRotatorText, ease, pose]}>
+        <Text numberOfLines={1} ellipsizeMode="tail" style={[s.introRotatorText, locale === 'en' && s.introRotatorTextEn, ease, pose]}>
           {text}
         </Text>
       ) : null}
@@ -4228,8 +4229,8 @@ export default function Agent() {
                   const [title, subtitle] = greetingText(locale).split('\n');
                   return (
                     <View key={m.id} testID="intro-greeting" style={s.greeting}>
-                      <Text style={s.greetingText}>{title}</Text>
-                      {!!subtitle && <Text style={s.greetingSubtitle}>{subtitle}</Text>}
+                      <Text style={[s.greetingText, locale === 'en' && s.greetingEn]}>{title}</Text>
+                      {!!subtitle && <Text style={[s.greetingSubtitle, locale === 'en' && s.greetingEn]}>{subtitle}</Text>}
                     </View>
                   );
                 }
@@ -5309,6 +5310,10 @@ const s = StyleSheet.create({
   // it reads as the placeholder, not as a second element.
   introRotator: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, justifyContent: 'center' },
   introRotatorText: { fontSize: Platform.OS === 'web' ? 16 : 15, lineHeight: 22, color: colors.muted, paddingHorizontal: 2, textAlign: 'right', writingDirection: 'rtl' as any },
+  // English UI (owner 2026-10-10): the examples sit on the LEFT like any English placeholder, and the
+  // centred greeting reads left-to-right (otherwise the «?» lands at the start of the line).
+  introRotatorTextEn: { textAlign: 'left', writingDirection: 'ltr' as any },
+  greetingEn: { writingDirection: 'ltr' as any },
   brand: { fontWeight: '700', color: colors.primary },
 
   emptyRes: { fontSize: 14, color: colors.muted },

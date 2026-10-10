@@ -44,6 +44,34 @@ export const INTRO_EXAMPLES: readonly string[] = [
   'أبي شقة شهرية ما تتعدى ٦ آلاف ريال',
 ];
 
+// The English UI's examples (owner 2026-10-10: «the Arabic text below we need to change it to English»).
+// Same promise, same proof: each sentence was sent to the PRODUCTION agent with locale 'en', 3 reps,
+// and parsed to the same search as its Arabic twin (docs/ops/INTRO_EXAMPLES_PROOF.md, «English»).
+// English candidates that failed there (an «m²» size read as a price, a factory that came back as a
+// message, an unstable deal) are listed under its English FAILED table and must not be added here.
+// The short ones («Shop in Riyadh») exist for phones: the slot there is ~124px, and Latin text is
+// wider than Arabic, so the long sentences would always end in «…».
+export const INTRO_EXAMPLES_EN: readonly string[] = [
+  'Villa for sale in north Riyadh, 5 bedrooms, budget up to 3 million',
+  'Shop in Riyadh',
+  'Apartment in Riyadh, 3 bedrooms, up to 80K a year',
+  'Villa in Jeddah',
+  'Find me a warehouse in Dammam',
+  'Flat in Jeddah',
+  'Chalet for rent in Jeddah',
+  'Office in Riyadh',
+  'Monthly apartment in Khobar, 2 bedrooms, up to 5,500 SAR a month',
+  'Shop in Dammam',
+  'Land for sale in Riyadh',
+  'Villa in Riyadh',
+  'Find me a cheap apartment in Jeddah',
+  'Chalet in Jeddah',
+  'Shop for rent in Riyadh',
+  '2-bedroom apartment in Makkah',
+  'Find me a rest house in Riyadh',
+  'Monthly apartment in Khobar',
+];
+
 // Approximate advance width of Arabic body text at the composer's 16px web font — used ONLY to pick
 // examples that fit the measured placeholder width on one line, so narrow screens rotate the SHORT
 // members of the pool instead of truncating a long sentence (owner brief §9). Conservative on
@@ -53,15 +81,16 @@ export const INTRO_EXAMPLE_CHAR_PX = 8;
 // Pure + deterministic (the barrier unit-tests it): the curated order is preserved so rotation
 // diversity survives the width filter. When fewer than 3 fit (very narrow), fall back to the 5
 // shortest so the rotation always has variety and the text stays readable.
-export function introExamplesForWidth(width: number): string[] {
+export function introExamplesForWidth(width: number, locale: 'ar' | 'en' = 'ar'): string[] {
   // NOTE: `width` is a MEASURED element width (onLayout of the placeholder slot, never negative),
   // not a viewport breakpoint — the repo's breakpoint barrier (verify-ssr-hydration-parity C)
   // rightly owns those in lib/responsive.ts; the falsy guard keeps its full-tree scan clean.
   if (!width) return [];
+  const pool = locale === 'en' ? INTRO_EXAMPLES_EN : INTRO_EXAMPLES;
   const budget = Math.floor(width / INTRO_EXAMPLE_CHAR_PX);
-  const fit = INTRO_EXAMPLES.filter((s) => s.length <= budget);
+  const fit = pool.filter((s) => s.length <= budget);
   if (fit.length >= 3) return fit;
-  return [...INTRO_EXAMPLES].sort((a, b) => a.length - b.length).slice(0, 5);
+  return [...pool].sort((a, b) => a.length - b.length).slice(0, 5);
 }
 
 // Each example holds long enough to actually read (~2.6–4s, scaled by length — owner brief §3).
