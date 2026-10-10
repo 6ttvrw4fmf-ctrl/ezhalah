@@ -3493,8 +3493,35 @@ export default function Agent() {
     // capture effect) and pushed that truncated view over the server's longer one — permanently.
     // Treating stale as "not held" hands the decision to hydrateTranscript, which owns it.
     const heldStale = !!(entry as { txStale?: boolean } | undefined)?.txStale;
-    let t: PersistedChat | null = heldStale ? null : (entry?.transcript ?? null);
-    if (!t && entryId) t = await hydrateTranscript(entryId).catch(() => null);
+    const local: PersistedChat | null = entry?.transcript ?? null;
+    let t: PersistedChat | null = heldStale ? null : local;
+    // NEVER AN EMPTY SCREEN WHILE THE SERVER ANSWERS (owner 2026-10-10, iPhone on LTE: «when I click on
+    // the side chat history and choose a chat, this pops up» — the hero header over a blank page). The
+    // page turn fades the chat in after 180 ms whether or not its messages exist yet, and this hydrate
+    // is a real round trip, so a held-but-stale copy (or a snapshot) used to sit unshown behind an
+    // empty transcript for seconds. Paint what this device already holds NOW; the server's answer
+    // below replaces it when it lands. lastCapturedRef is set to the painted copy, so nothing is
+    // written back until the hydrated one has taken its place.
+    if (!t && entryId) {
+      const early = local ? restoreChat(local) : null;
+      if (early) {
+        setMsgs(early.msgs as unknown as ChatMsg[]);
+        setDoneTyping(early.doneTyping);
+        setRevealCount(early.revealCount);
+        setCompleted(early.completed === true);
+        lastCapturedRef.current = JSON.stringify(local);
+        landAtLatest();
+      } else if (entry?.snapshot) {
+        void openStatic(q, override, entry.snapshot); // synchronous snapshot branch — zero network
+      } else if (q?.deal || q?.location || q?.category || q?.type || override) {
+        // Nothing held at all (a chat from another device): at least the request the user made.
+        const { bubble } = override ?? filterToChat(q);
+        setMsgs([{ id: replayMsgIds(entryId, uid).userId, role: 'user', text: bubble }]);
+      }
+      t = await hydrateTranscript(entryId).catch(() => null);
+      // A failed hydrate keeps the pre-existing fallback below (snapshot/replay) on purpose: adopting the
+      // stale copy as THE transcript would let the next turn write it over the server's longer one.
+    }
     // THE USER OPENED SOMETHING ELSE WHILE THIS ONE WAS HYDRATING (ops_incident #599, the same
     // mechanism as loadMore's guard). This is the path that reaches the network — a pruned cache, a
     // new browser, a re-login or a second device — so the window is a real round trip, and the

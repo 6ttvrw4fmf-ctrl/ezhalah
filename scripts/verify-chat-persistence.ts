@@ -277,7 +277,9 @@ check('agent: restore reinstates ALL FIVE state slices (msgs, doneTyping, reveal
 check('agent: restore adopts the chat id so continuing the conversation updates the SAME entry',
   /chatIdRef\.current = entryId \?\? null;/.test(agent));
 check('agent: restore falls back to the server copy when the local cache was pruned',
-  /if \(!t && entryId\) t = await hydrateTranscript\(entryId\)\.catch\(\(\) => null\);/.test(agent));
+  // 2026-10-10: the hydrate now sits inside a block that first paints the held copy (never blank while
+  // the server answers — verify-saved-chat-never-blank-while-hydrating.ts); the fallback is unchanged.
+  /if \(!t && entryId\) \{[\s\S]{0,1600}?t = await hydrateTranscript\(entryId\)\.catch\(\(\) => null\);/.test(agent));
 check('agent: restore never echo-writes what it just rendered', /lastCapturedRef\.current = JSON\.stringify\(t\);/.test(agent));
 // FLUSH-ON-EXIT (owner 2026-08-26: «leaving the chat must never lose later messages»). The 600ms
 // debounce alone had a real loss window: switching chats while the newest turn's cards were still
