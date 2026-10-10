@@ -441,3 +441,12 @@ workflow. Deferred for the owner: the `p_has_license=false` clause arm reads a m
 - Questions: street_width · direction. n = 5,939 Buy (Rent 69 → not certified). Street known 92%
   (p25 15 m / p75 25 m), direction known 84% over 8 values. No utility chips (raw = no services).
 - Parity, RPC vs SQL: street ≥ 20 m 2,816 = 2,816; Riyadh + شمال 220 = 220. Registry row 20261010000246.
+- **Owner rule 2026-10-10 (20261010014915):** raw = the source CLEARLY says «no» for every service, or «no
+  services», or «أرض خام». Wasalt's meter-only rows (≈1,129) and «غير مطور» left the set → 4,905 tagged
+  (4,645 «no for all» + 260 «no services» / «خام»). The cohort's questions are unchanged.
+- **Owner STRICT rule 2026-10-10 (20261010015307) — supersedes the line above:** words only. Aqar's unticked
+  service boxes were measured to be ordinary plots, so «all three false» is no longer evidence. Raw = the
+  ad/site says «خام», «غير مطور», «غير مخدوم» / «بدون خدمات» / «خالية من الخدمات» / aqarcity «لايوجد خدمات»,
+  «أرض بكر», «غير مخطط» / «غير مقسم», and no source field says a service exists. → 309 tagged (Buy 303;
+  ialqarawi 145 · aqarcity 61 · aqar 48 · dealapp 29 · others). Coverage on this set: street 50%, direction
+  35% — the live usefulness gates (>25 scope, option floors) decide when each is actually asked.
