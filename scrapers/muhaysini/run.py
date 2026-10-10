@@ -273,8 +273,8 @@ OPEN QUESTIONS FOR ONBOARDING (none of these are guessed in code)
     field. Worth raising with the platform.
   · «لايوجد خدمات» (231 rows) is a BLANKET negative naming no specific utility, so it sets no
     column False. Does the owner read it as an explicit NO for electricity/water/sanitation?
-  · `latitude`/`longitude` are published on all 2,827 (and are real, not placeholders) but the
-    listing tables carry no coordinate columns, so they are not stored.
+  · `latitude`/`longitude` are published on all 2,827 (and are real, not placeholders). Since
+    2026-10-10 (backlog 312) they travel in additional_info.latitude/longitude, which the index reads.
   · ids 3220, 3697 and 2231 describe THEMSELVES as under construction in their own prose, and the
     platform publishes all three as ordinary `available` sales with full REGA licences. There is no
     source field to key an off-plan skip on (trap 7), so we publish them. If the owner wants such
@@ -305,6 +305,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.source_pin import sa_pin  # noqa: E402
 from scrapers.common.arabic_location import city_ar_for, find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
@@ -361,6 +362,12 @@ _UTILITY_COLS = {
     "صرف صحي": "sanitation",
     "ألياف ضوئية": "optical_fibers",
 }
+def pin_fields(rec: dict) -> dict:
+    """{latitude, longitude} from the ad's own pin, or {} when absent / outside Saudi / 0,0."""
+    lat, lng = sa_pin(rec.get("latitude"), rec.get("longitude"))
+    return {"latitude": lat, "longitude": lng} if lat is not None else {}
+
+
 # Published utilities with no column of their own; kept as raw words in additional_info.
 # «لايوجد خدمات» (231 rows) is an explicit but BLANKET negative — it names no specific utility, so
 # it sets nothing False (the abaad reading).
@@ -785,6 +792,9 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "source_status": _clean(rec.get("status")),
         "ad_duration_expire": _clean(rec.get("adDurationExpire")),
         "mode_deed_location": redact_pii(_clean(rega.get("locationDescriptionOnMOJDeed"))),
+        # The ad's OWN map pin (backlog 312): muhaysini publishes latitude/longitude on every ad; the
+        # index's generic branch reads additional_info->>'latitude'. Out-of-Saudi / 0,0 -> not stored.
+        **pin_fields(rec),
     }
     row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v is not None})
     row["source_capture"] = strip_pii_fields({

@@ -139,6 +139,49 @@ _PRIVATE_ENTRANCE_KEYS = ("special_entrance", "two_entrances")
 _LISTING_OBJ_RE = re.compile(r'"listing"\s*:\s*\{')
 
 
+# Saudi Arabia's bounding box (generous). A pin outside it, or at 0,0, is not a real location.
+_SA_LAT = (16.0, 32.5)
+_SA_LNG = (34.0, 56.0)
+_LD_JSON_RE = re.compile(r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>', re.S)
+
+
+def source_pin(html: str) -> Optional[dict[str, float]]:
+    """The map pin aqar ITSELF publishes for this ad, or None.
+
+    Backlog 312 (owner, 2026-10-09: every crawler captures the source's own pin). A live aqar ad page
+    embeds a schema.org RealEstateListing in <script type="application/ld+json"> whose
+    offers.itemOffered.geo is a GeoCoordinates {latitude, longitude} (scrapers/aqar/testdata/
+    aqar_live_page.excerpt.html, ad 6541629: 24.594493, 46.715077). Source pin only: nothing is
+    geocoded. A pin outside Saudi Arabia or at 0,0 is rejected (None), never stored.
+    """
+    if not html or "GeoCoordinates" not in html:
+        return None
+    for blob in _LD_JSON_RE.findall(html):
+        if "GeoCoordinates" not in blob:
+            continue
+        try:
+            data = _json.loads(blob)
+        except ValueError:
+            continue
+        stack = [data]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, dict):
+                if node.get("@type") == "GeoCoordinates":
+                    try:
+                        lat = float(node.get("latitude"))
+                        lng = float(node.get("longitude"))
+                    except (TypeError, ValueError):
+                        return None
+                    if _SA_LAT[0] <= lat <= _SA_LAT[1] and _SA_LNG[0] <= lng <= _SA_LNG[1]:
+                        return {"lat": lat, "lng": lng}
+                    return None
+                stack.extend(node.values())
+            elif isinstance(node, list):
+                stack.extend(node)
+    return None
+
+
 def _listing_json(html: str) -> Optional[dict[str, Any]]:
     """The listing object aqar embeds in its RSC flight payload, or None if it is not present.
 
@@ -886,7 +929,8 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # Stored in the DEDICATED `source_capture` column — NOT `additional_info` (which the app selects
     # on every search and renders as the {key,label,value} panel; Aqar keeps that NULL). source_capture
     # is never selected by the client, so this adds zero query weight to live search.
-    # Aqar pages carry no clean JSON-LD/__NEXT_DATA__ blob and expose no coordinates; the de-tagged
+    # Aqar pages carry no clean __NEXT_DATA__ blob; their one coordinate source is the JSON-LD geo read
+    # by source_pin() below (2026-10-10 — the older note here said «no coordinates», wrong). The de-tagged
     # visible `text` already holds every field the page shows (title, description, all specs, location
     # text, features, dates). Store it verbatim — minus Saudi phone numbers (PDPL) — so any field we
     # don't promote to a dedicated column today stays recoverable from stored data WITHOUT a re-scrape.
@@ -899,6 +943,10 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
         "url_path": unquote(urlparse(url).path),
         "image_count": len(photos) if photos is not None else None,
     }
+    # The ad's own map pin (JSON-LD GeoCoordinates), backlog 312. Absent -> no key (silent, never guessed).
+    pin = source_pin(html)
+    if pin:
+        source_capture["pin"] = pin
 
     return {
         "ad_number":               ad_number,

@@ -265,8 +265,8 @@ DETAIL, MEASURED
     a published 0 as False and a silent field as None (29 rows publish a count).
   · `land_area`, `size_prefix`, `land_area_size_postfix`, `virtual_tour`, `video_url` and
     `bedrooms` are null on all 4,424 and are not read.
-  · Coordinates are published (`address_latitude`/`address_longitude` on every row) but the
-    listing tables carry no coordinate columns, so they are not stored.
+  · Coordinates are published (`address_latitude`/`address_longitude` on every row). Since
+    2026-10-10 (backlog 312) they travel in additional_info.latitude/longitude, which the index reads.
 """
 from __future__ import annotations
 
@@ -286,6 +286,7 @@ from scrapers.common.arabic_location import find_district_in_text, to_catalog  #
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
+from scrapers.common.source_pin import pin_dict  # noqa: E402
 
 BASE = "https://tuba.com.sa"
 API = f"{BASE}/test/properties"          # the site's own ajax url — see the docstring
@@ -623,6 +624,11 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "source_rent_type": _clean(rec.get("rent_type")),
         "source_status": _clean(rec.get("status")),
         "popularity": rec.get("popularity"),                   # NOT read as views_count
+        # The ad's OWN map pin (backlog 312), via the one shared gate; the index reads these keys.
+        # Measured 2026-10-10: the pin is the REGA licence's location.latitude/longitude (all 3,850
+        # stored captures carry it); the listing's address_latitude/longitude is the fallback.
+        **(pin_dict((ar.get("location") or {}).get("latitude"), (ar.get("location") or {}).get("longitude"))
+           or pin_dict(rec.get("address_latitude"), rec.get("address_longitude"))),
     }
     row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v is not None})
     # The capture is PRIVATE, but "private" is not "may accumulate contact details". Both payloads

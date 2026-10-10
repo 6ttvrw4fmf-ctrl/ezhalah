@@ -31,7 +31,7 @@ from curl_cffi import requests as cc
 
 from scrapers.common import db
 from scrapers.common import normalize as N
-from scrapers.wasalt.run import _yes_no
+from scrapers.wasalt.run import _yes_no, land_service_fields
 
 BASE = "https://wasalt.sa"
 NEXT_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
@@ -170,7 +170,7 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
               f"is a few/day — this looks like a flag reset or a backfill. Refusing to crawl the backlog "
               f"through the metered proxy. Re-run with --allow-backfill to override.", flush=True)
         return {"deep": 0, "empty": 0, "fail": 0, "aborted": pending}
-    q = (c.table(table).select("ad_number,listing_url")
+    q = (c.table(table).select("ad_number,listing_url,property_type")
          .eq("active", True).eq("detail_enriched", False))
     # Cloud matrix sharding: 10 parallel jobs, each claims a DISJOINT slice by the last digit of
     # ad_number (WST…N). Server-side, ~even, zero overlap → no duplicate proxy fetches. Only valid
@@ -214,6 +214,8 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
             cy = next((r.get("value") for r in deep if r.get("key") == "completionYear"), None)
             upd["property_age"] = N.parse_property_age(cy)
             upd.update(meter_fields_from_deep(deep))
+            # Backlog 326: a LAND's meters are its electricity / water service (run.land_service_fields).
+            upd.update(land_service_fields(row.get("property_type"), deep))
         try:
             db.sb().table(table).update(upd).eq("ad_number", row["ad_number"]).execute()
             with lock: stats["deep" if deep else "empty"] += 1
