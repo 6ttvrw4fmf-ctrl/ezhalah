@@ -1631,7 +1631,9 @@ async function fetchRawByIds(q: SearchQuery, tbl: string, ids: number[], signal?
       // RC-A: capture the error (was silently dropped → a chunk that 500s produced a blank/partial grid
       // that contradicted the «لقينا N إعلان» headline). On any chunk failure, surface it so the caller
       // returns null → retry, rather than showing a misleadingly-short result set.
-      const { data, error } = await bounded(keptFiltersReq(q, tbl).in('id', ids.slice(n * ID_CHUNK, (n + 1) * ID_CHUNK)).limit(ID_CHUNK), RPC_TIMEOUT_MS, signal);
+      // A timeout/abort THROWS out of bounded() rather than returning `error` — it must stop new chunks too.
+      const { data, error } = await bounded(keptFiltersReq(q, tbl).in('id', ids.slice(n * ID_CHUNK, (n + 1) * ID_CHUNK)).limit(ID_CHUNK), RPC_TIMEOUT_MS, signal)
+        .catch((e: unknown) => { failed = true; throw e; });
       if (error) { failed = true; throw new Error(`fetchRawByIds(${tbl}): ${error.message}`); }
       pages[n] = data ? finalize(data, kind) : [];
     }
