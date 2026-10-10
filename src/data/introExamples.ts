@@ -50,7 +50,8 @@ export const INTRO_EXAMPLES: readonly string[] = [
 // English candidates that failed there (an «m²» size read as a price, a factory that came back as a
 // message, an unstable deal) are listed under its English FAILED table and must not be added here.
 // The short ones («Shop in Riyadh») exist for phones: the slot there is ~124px, and Latin text is
-// wider than Arabic, so the long sentences would always end in «…».
+// wider than Arabic, so the long sentences would always end in «…». («Shop in Dammam» is proven but
+// measured 132px on the live 124px slot — wide capitals — so it is left out.)
 export const INTRO_EXAMPLES_EN: readonly string[] = [
   'Villa for sale in north Riyadh, 5 bedrooms, budget up to 3 million',
   'Shop in Riyadh',
@@ -61,7 +62,6 @@ export const INTRO_EXAMPLES_EN: readonly string[] = [
   'Chalet for rent in Jeddah',
   'Office in Riyadh',
   'Monthly apartment in Khobar, 2 bedrooms, up to 5,500 SAR a month',
-  'Shop in Dammam',
   'Land for sale in Riyadh',
   'Villa in Riyadh',
   'Find me a cheap apartment in Jeddah',
