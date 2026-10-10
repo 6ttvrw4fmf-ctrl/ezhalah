@@ -1,0 +1,38 @@
+# Property Finder Saudi SHADOW read (backlog 108, owner 2026-10-05). Reads propertyfinder.sa with our
+# honest bot user-agent (never a browser identity), <= 1 request a second, never the robots-disallowed
+# /search paths, and PRINTS what a listing carries. It writes NOTHING: no database secret is given to it.
+name: Property Finder shadow read
+
+on:
+  workflow_dispatch:
+    inputs:
+      pages:
+        description: "Category pages to read"
+        default: "3"
+  push:
+    branches-ignore: [main]
+    paths:
+      - "scrapers/propertyfinder/**"
+
+concurrency:
+  group: propertyfinder-shadow
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Shadow read (prints only)
+        run: exec python -m scrapers.propertyfinder.shadow --pages "${{ github.event.inputs.pages || '3' }}"
