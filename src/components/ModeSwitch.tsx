@@ -1,6 +1,6 @@
 // ModeSwitch — the top-nav control that presents Ezhalah's TWO ways to search as one premium,
 // compact segmented control:
-//   [ ⚟ تصفية | ✦ المساعد الذكي ]
+//   [ ⚟ تصفية | 💬 الوسيط الذكي ]  (English: Filter | Smart Broker)
 // One shared component owns 100% of this control's design (same philosophy as the Advanced Filter
 // Design Contract): the two screens (home = filter, /agent = AI) just mount it with `active` and a
 // navigation callback.
@@ -11,21 +11,21 @@
 //   • Generous size + spacing: 46-tall track, larger 17px icons, an 8px icon↔label gap, 13.5px type.
 //   • A luxurious raised-white active indicator (soft green-tinted shadow) that GLIDES between halves
 //     on a gentle, slightly-overshooting spring — never a hard switch.
-//   • The two sides are deliberately asymmetric in feeling: تصفية is utilitarian (funnel goes brand-
-//     green only when active), while المساعد الذكي is quietly ALIVE — its sparkle always carries the
-//     brighter «leaf» accent and, when that side is NOT selected, breathes softly (scale + opacity)
-//     to invite conversation without ever being flashy.
+//   • The two sides are a matched pair: each has one thin outline icon (funnel / chat bubble) that turns
+//     brand-green when its side is active. (Owner 2026-10-09: the breathing green sparkle «doesn't look
+//     professional enough» — replaced by the plain outline sibling of the funnel, in both languages.)
 //   • Cross-screen continuity: the control sits at the same top-bar spot on both screens, and a
 //     module-level `lastMode` remembers where the indicator was when you tapped — the arriving
 //     screen's control animates the indicator FROM that side into place, so navigation reads as one
 //     continuous control, not two separate headers. Fresh loads start settled (no animation).
 // JS driver on web (native driver only off-web), same as the rest of the codebase. Tokens only.
-import { useCallback, useEffect, useRef } from 'react';
-import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useRef } from 'react';
+import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, cardShadow, font, radius } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
+import { useI18n } from '@/i18n';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -44,6 +44,10 @@ const setLtr = (node: any) => {
 };
 
 const SEG_W = 106;   // each half — wider than the old 98 for a more generous, premium footprint
+const SEG_W_EN = 116; // English: «Smart Broker» is wider than «الوسيط الذكي» and must not truncate
+// Poppins is not loaded on the web, so its English glyphs fell back to a serif. English labels use the same system
+// stack as the rest of the page there; Arabic keeps what it has (owner: «the Arabic is perfect»).
+const SYSTEM_FONT = IS_WEB ? 'ui-sans-serif, -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif' : undefined;
 const PAD = 4;       // track inner padding — the indicator floats inside the hairline
 const H = 46;        // track height (was 40) — compact but no longer a tiny iOS toggle
 
@@ -60,10 +64,12 @@ export default function ModeSwitch({
   onSwitch: (to: SearchMode) => void;
   t: (s: string) => string;
 }) {
-  const toX = active === 'filter' ? 0 : SEG_W;
+  const en = useI18n().locale === 'en';
+  const segW = en ? SEG_W_EN : SEG_W;
+  const toX = active === 'filter' ? 0 : segW;
   // Start from where the user left the indicator on the previous screen (cross-screen glide);
   // settled if this is a fresh load or we're already there.
-  const from = lastMode && lastMode !== active ? (lastMode === 'filter' ? 0 : SEG_W) : toX;
+  const from = lastMode && lastMode !== active ? (lastMode === 'filter' ? 0 : segW) : toX;
   const x = useRef(new Animated.Value(from)).current;
   // The indicator settles on `active` EVERY TIME this control is the one on screen — not just on
   // mount. `active` is the committed truth (which screen you are actually on); the animated value is
@@ -84,37 +90,23 @@ export default function ModeSwitch({
     }, [active, toX, x]),
   );
 
-  // The AI side is quietly "alive": when it is NOT the selected mode, its sparkle breathes — a soft,
-  // slow scale+opacity swell that reads as "come talk to me" without any flash. Selected AI is calm
-  // and steady (no need to draw attention to where you already are).
-  const breath = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    if (active === 'agent') return;
-    const half = (v: number) =>
-      Animated.timing(breath, { toValue: v, duration: 1800, easing: Easing.inOut(Easing.quad), useNativeDriver: !IS_WEB });
-    const loop = Animated.loop(Animated.sequence([half(1), half(0)]));
-    loop.start();
-    return () => loop.stop();
-  }, [breath, active]);
   const aiSteady = active === 'agent';
-  const sparkleOpacity = aiSteady ? 1 : breath.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] });
-  const sparkleScale = aiSteady ? 1 : breath.interpolate({ inputRange: [0, 1], outputRange: [1, 1.14] });
 
   const press = (to: SearchMode) => {
     if (to === active) return;
     // Begin the glide immediately so the tap answers instantly, then let the screen navigate; the
     // destination control picks the motion up from `lastMode` and settles it.
-    Animated.spring(x, { toValue: to === 'filter' ? 0 : SEG_W, ...GLIDE, useNativeDriver: !IS_WEB }).start();
+    Animated.spring(x, { toValue: to === 'filter' ? 0 : segW, ...GLIDE, useNativeDriver: !IS_WEB }).start();
     onSwitch(to);
   };
 
   return (
     <View ref={setLtr} style={s.track} accessibilityRole="tablist">
-      <Animated.View style={[s.indicator, { transform: [{ translateX: x }] }]} />
+      <Animated.View style={[s.indicator, { width: segW, transform: [{ translateX: x }] }]} />
 
       {/* تصفية — utilitarian: the funnel goes brand-green only when this side is active. */}
       <Pressable
-        style={s.seg}
+        style={[s.seg, { width: segW }]}
         onPress={() => press('filter')}
         hitSlop={6}
         // These two tabs TOUCH (gapX = 0, measured on production), which is exactly why
@@ -128,13 +120,12 @@ export default function ModeSwitch({
         accessibilityLabel={t('Filter')}
       >
         <Ionicons name="funnel-outline" size={17} color={active === 'filter' ? colors.primary : colors.muted} />
-        <Text style={[s.segT, active === 'filter' ? s.segTOn : null]} numberOfLines={1}>{t('Filter')}</Text>
+        <Text style={[s.segT, active === 'filter' ? s.segTOn : null, en && { fontFamily: SYSTEM_FONT, fontWeight: active === 'filter' ? '600' : '500' }]} numberOfLines={1}>{t('Filter')}</Text>
       </Pressable>
 
-      {/* المساعد الذكي — the "alive" side: its sparkle always carries the brighter leaf accent and
-          breathes when unselected, subtly suggesting conversation. */}
+      {/* الوسيط الذكي / Smart Broker — the chat side: a thin outline bubble, the funnel's sibling. */}
       <Pressable
-        style={s.seg}
+        style={[s.seg, { width: segW }]}
         onPress={() => press('agent')}
         hitSlop={6}
         // @ts-expect-error web-only DOM props on the RNW host node
@@ -143,10 +134,8 @@ export default function ModeSwitch({
         accessibilityState={{ selected: aiSteady }}
         accessibilityLabel={t('Smart Assistant')}
       >
-        <Animated.View style={{ opacity: sparkleOpacity, transform: [{ scale: sparkleScale }] }}>
-          <Ionicons name="sparkles" size={17} color={colors.accentLeaf} />
-        </Animated.View>
-        <Text style={[s.segT, aiSteady ? s.segTOn : null]} numberOfLines={1}>{t('Smart Assistant')}</Text>
+        <Ionicons name="chatbubble-outline" size={17} color={aiSteady ? colors.primary : colors.muted} />
+        <Text style={[s.segT, aiSteady ? s.segTOn : null, en && { fontFamily: SYSTEM_FONT, fontWeight: aiSteady ? '600' : '500' }]} numberOfLines={1}>{t('Smart Assistant')}</Text>
       </Pressable>
     </View>
   );
