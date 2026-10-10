@@ -200,6 +200,10 @@ console.log('PASS: selected website summary reuses card naming and deduplicates 
 const group = load(helper, 'platformCoverageGroup');
 assert.equal(group(coverage.platforms.Aqar, 'ar').key, 'nationwide');
 assert.equal(group(coverage.platforms.Aldarim, 'ar').label, 'منطقة الرياض');
+// A site with no listings sits in the region it names itself (owner 2026-10-10: al-humaidan = بريدة، القصيم).
+assert.equal(group(coverage.platforms['Al Humaidan'], 'ar').label, 'منطقة القصيم', 'Al Humaidan sits under القصيم');
+const unnamed = load(helper.replace("  if (named) return", "  if (false) return"), 'platformCoverageGroup');
+assert.notEqual(unnamed(coverage.platforms['Al Humaidan'], 'ar').label, 'منطقة القصيم', 'mutation: ignoring the named region is caught');
 assert.equal(group(undefined, 'ar').key, 'nationwide', 'no separate «مواقع أخرى» list (owner 2026-10-10)');
 const ordered = (names as string[]).slice().sort((a,b)=>group(coverage.platforms[a],'ar').order-group(coverage.platforms[b],'ar').order);
 assert.equal(group(coverage.platforms[ordered[0]],'ar').key, 'nationwide');
