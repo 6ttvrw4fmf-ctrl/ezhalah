@@ -40,4 +40,4 @@ jobs:
       - name: Classifier tests
         run: pip install pytest && python -m pytest -q scrapers/common/tests/test_haraj_classify.py
       - name: Shadow crawl (prints only)
-        run: python -m scrapers.haraj.shadow --max-posts "${{ github.event.inputs.max_posts || '900' }}"
+        run: exec python -m scrapers.haraj.shadow --max-posts "${{ github.event.inputs.max_posts || '900' }}"
