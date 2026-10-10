@@ -6,7 +6,7 @@ import type { SearchQuery } from './search';
 import { REGIONS, CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { translitPlace } from '@/lib/translitPlace';
 import { scopeCrossesMacro } from '@/lib/searchDefaults';
-import { normalizeType, queryForSelection, queryForTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
+import { normalizeType, queryForSelection, queryForTypes, storedRawTypes, SUBGROUPS, CLEAN_MACRO, CLEAN_TO_TYPE_AR, EN_TO_AR, typeArForTypes, typeArForSelection, type CleanQuery, type SourceKind, type Macro } from './propertyTypes';
 import { effectiveTypes, effectiveGroups, bedroomTokens } from './search';
 import { scoreListingProximity } from './proximity';
 import { cityDisplay } from './locations';
@@ -319,7 +319,7 @@ function effectiveCleanQuery(q: SearchQuery): CleanQuery | null {
 // spelling a clean type came from (e.g. Shop ⊇ {Shop, Kiosk}; Studio ⊇ {Studio, ستوديو, …}).
 function dbTypesFor(q: SearchQuery): string[] | null {
   const cq = effectiveCleanQuery(q);
-  return cq && cq.rawTypes.length ? cq.rawTypes : null;
+  return cq && cq.rawTypes.length ? storedRawTypes(cq.rawTypes) : null;   // «أرض خام» → the land types its rows carry
 }
 
 // FILTER-FIRST (owner 2026-07-08): the search RPC applies these BEFORE the per-platform/limit cap, so the
