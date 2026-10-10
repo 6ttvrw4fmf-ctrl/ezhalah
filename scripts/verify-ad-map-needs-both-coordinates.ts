@@ -385,12 +385,21 @@ check('the duplicates and asking-price reads count only rows search shows (produ
 sourceMutant('the duplicates read without search\'s switch', !prodGated(DATA_SRC.replace(".eq('area_m2', area).eq('production_ready', true)", ".eq('area_m2', area)")));
 sourceMutant('the asking-price read without search\'s switch', !prodGated(DATA_SRC.replace(".eq('district_ar', row.district_ar as string).eq('production_ready', true)", ".eq('district_ar', row.district_ar as string)")));
 
-// ── the gold shine rests OUTSIDE the pill in both directions (RTL flips left/right; a one-sided anchor
-// parked a frozen white streak inside the pill on Arabic pages, so it never read as a flash).
+// ── the gold buzzer's motion must reach the browser. react-native-web DROPS transform arrays inside
+// animationKeyframes — the generated @keyframes come out empty (measured live 2026-10-10: the shine's
+// rule was `0% { } 28% { } 100% { }`, so it never moved on any listing; the tap ring never burst).
+// String properties survive (boxShadow, backgroundPosition, backgroundColor). So: no transform in any
+// keyframe on this page, and the shine moves by background position.
 const PREVIEW_RAW = readFileSync(join(ROOT, 'src/components/ListingPreview.tsx'), 'utf8');
-const shineOk = (src: string) => /goldShine: \{\s*position: 'absolute', top: -12, bottom: -12, left: '-20%', right: '-20%',/.test(src);
-check('the gold shine is anchored symmetrically, so it sweeps and rests outside the pill in RTL and LTR', shineOk(PREVIEW_RAW));
-sourceMutant('a one-sided shine anchor (frozen streak in RTL)', !shineOk(PREVIEW_RAW.replace("left: '-20%', right: '-20%',", "left: 0, width: '60%',")));
+const keyframeBlocks = (src: string) => codeOnly(src).match(/animationKeyframes: \[\{[\s\S]*?\}\]/g) ?? [];
+const motionOk = (src: string) => {
+  const blocks = keyframeBlocks(src);
+  const shine = /goldShine: \{[\s\S]*?animationKeyframes: \[\{[^\]]*backgroundPosition: '100% 0'[^\]]*backgroundPosition: '0% 0'/.test(codeOnly(src));
+  return blocks.length >= 3 && blocks.every((b) => !/transform/.test(b)) && shine;
+};
+check('every keyframe on the ad page uses properties react-native-web keeps (no transform); the shine sweeps by background position', motionOk(PREVIEW_RAW));
+sourceMutant('a transform keyframe (silently empty on web)', !motionOk(PREVIEW_RAW.replace("'35%': { backgroundPosition: '0% 0' }", "'35%': { backgroundPosition: '0% 0', transform: [{ translateX: '-130%' }] }")));
+sourceMutant('a shine that never moves', !motionOk(PREVIEW_RAW.replace("'0%': { backgroundPosition: '100% 0' }, '35%': { backgroundPosition: '0% 0' }", "'0%': { opacity: 1 }, '35%': { opacity: 1 }")));
 
 console.log(failed === 0 ? '\n✅ the ad page pins only what the source published, and its prices block shows only computed-for-this-ad, source-true numbers.\n' : `\n❌ ${failed} check(s) failed — a guessed pin or a wrong number can reach the page.\n`);
 process.exit(failed === 0 ? 0 : 1);
