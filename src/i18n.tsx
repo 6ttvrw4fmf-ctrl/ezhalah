@@ -1265,7 +1265,7 @@ const AR: Record<string, string> = {
   'Ministry of Justice': 'وزارة العدل',
   'Source: Ministry of Justice': 'المصدر: وزارة العدل',
   'Price per m²: {n} SAR': 'سعر المتر: {n} ر.س',
-  'Of every 10 {type} listed in the district: {k} cost more per m² than this ad, and {rest} less': 'من كل 10 {type} معروضة في الحي: {k} أغلى للمتر من هذا الإعلان، و{rest} أرخص',
+  'Of {n} {type} listed in the district: {dearer} cost more per m² than this ad, and {cheaper} less': 'من {n} {type} معروضة في الحي: {dearer} أغلى للمتر من هذا الإعلان، و{cheaper} أرخص',
   'The same property ({area} m²) priced at the district average:': 'نفس العقار ({area} م²) لو حُسب بمتوسط الحي:',
   'Price in the ad': 'السعر في الإعلان',
   'At the listed average ≈': 'بمتوسط المعروض ≈',
