@@ -1027,6 +1027,12 @@ or rewrite another engineer's work, and never start a big change in another engi
   design (absence tiers at `missing_count >= 3` are graded by `mon_detect_unknown_treated_as_dead`),
   so "0 unverified" is only half the answer: read the open `unknown_treated_as_dead` alerts too.
 - **2026-10-08 (♻️, copied by 🔧):** every reader of one site must share that site's «no answer» rules. Gathern's prune oracle still read a home-page landing as live, so those rows became the sweep's controls, and the sweep checked nothing for ~16 h.
+- **2026-10-10 (♻️):** a GitHub `schedule:` is not a schedule, measured again: dealapp-liveness.yml's
+  `40 */2` fired 2-5 of 12 slots a day (scrape_runs 10-02..10-10), so dealapp's in-time share swung
+  96.0% → 82.8% in one day on the crawl's luck. Every lifecycle cadence lives in `cron.job`
+  (`gh-dealapp-liveness` → `dealapp-liveness-cron.yml`, a wrapper that passes apply=true because
+  `trigger_gh_workflow()` passes no inputs). When a site's coverage moves with no code change, count
+  its job's runs per day before reading its code.
 - **2026-10-10 (♻️):** the dead ad the score finds is usually one between strike 1 and strike 3, not one the
   checker missed (reinvest 13257993: own API 404 at the 07:35 daily read, 2 of 3 strikes, on screen at
   09:05). Shorten the window instead of hunting a bug: the fleet recheck now runs at 14:17 and 20:47 UTC.
