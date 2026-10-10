@@ -41,15 +41,21 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
-      - name: Repair residential, then commercial
+      - name: Repair residential
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_MIN_INTERVAL: "0.4"
         run: |
-          python -m scrapers.aqar.recover_stubs --cohort photo-repair --shard ${{ matrix.shard }}/5 \
+          exec python -m scrapers.aqar.recover_stubs --cohort photo-repair --shard ${{ matrix.shard }}/5 \
             --limit "${{ inputs.limit || '8000' }}" --table residential
-          python -m scrapers.aqar.recover_stubs --cohort photo-repair --shard ${{ matrix.shard }}/5 \
+      - name: Repair commercial
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_MIN_INTERVAL: "0.4"
+        run: |
+          exec python -m scrapers.aqar.recover_stubs --cohort photo-repair --shard ${{ matrix.shard }}/5 \
             --limit 1500 --table commercial
 
   # Self-chaining instead of a cron: when every shard succeeded and rows still carry the marker,
