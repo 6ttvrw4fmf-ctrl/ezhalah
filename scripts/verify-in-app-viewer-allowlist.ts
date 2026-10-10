@@ -461,7 +461,7 @@ const renderPreview = (src: string, source: string, locale: string, photos: stri
     react: { useState: (value: unknown) => [value, () => {}], useEffect: () => {}, useRef: (value: unknown) => ({ current: value }) },
     'react-native': { Platform: { OS: 'web' }, Pressable: 'Pressable', ScrollView: 'ScrollView', Text: 'Text', View: 'View', StyleSheet: { create: (x: unknown) => x } },
     'expo-image': { Image: 'Image' }, '@expo/vector-icons/Ionicons': { default: 'Ionicons' },
-    '@/theme/tokens': { colors: {}, radius: {}, font: { family: {} } }, '@/theme/palette': { TAP44: {} },
+    '@/theme/tokens': { colors: {}, radius: {}, font: { family: {} }, lightColors: {} }, '@/theme/palette': { TAP44: {}, BUZZER_GOLD: {} },
     '@/i18n': { useI18n: () => ({ locale, isRTL: locale === 'ar', t: (key: string, vars?: Record<string, string | number>) => translate(locale, key, vars) }) },
     '@/lib/listingDisplay': { ...display, listingPrice: () => 'shared-price' },
     '@/lib/arabicText': arabicText,
@@ -489,7 +489,7 @@ const namingPass = (src: string) => ['AQAR', 'Wasalt', 'Abr Alosol', 'THE RC', '
     const name = translate(locale, (display.sourceName as (s: string) => string)(source));
     const texts = nodes(tree).filter((n) => n.type === 'Text').map(textOf);
     const contact = nodes(tree).find((n) => n.props.testID === 'listing-preview-contact');
-    return !!contact && textOf(contact) === translate(locale, 'Tap here to contact 👈') + translate(locale, 'Takes you to the original {name} ad', { name })
+    return !!contact && textOf(contact) === translate(locale, 'Tap here to contact') + translate(locale, 'Takes you to the original {name} ad', { name }) + '👈'
       && contact.props.accessibilityLabel === translate(locale, 'Open the ad on {name} to contact', { name })
       && texts.some((x) => x === translate(locale, 'This ad is from {name}', { name }))
       && texts.some((x) => x.startsWith(`${name} · `))

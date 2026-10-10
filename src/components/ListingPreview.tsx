@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { colors, font, radius } from '@/theme/tokens';
-import { TAP44 } from '@/theme/palette';
+import { colors, font, lightColors, radius } from '@/theme/tokens';
+import { BUZZER_GOLD, TAP44 } from '@/theme/palette';
 import { useI18n, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { listingPrice, sourceName } from '@/lib/listingDisplay';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, attrDisplayLabel, hideArabicProseInEnglish, translateTrailingPeriodWord } from '@/lib/arabicText';
@@ -224,11 +224,10 @@ export default function ListingPreview({ listing: l, url, onClose }: {
   // 375px phones: the one-line key details give up a point of size rather than a pixel of width.
   const keyFont = box.w && box.w < 390 ? { fontSize: 13.5 } : null;
   // THE BUTTON TO THE REAL AD, rendered twice from one place: in flow (the first screen's last row) and
-  // as the floating twin. Start side: the copy, its 👈 sliding toward the logo; a hairline; end side: the
-  // site's logo big, tinted pure white. A soft shine sweeps across every ~4s. Both motions are off under
-  // reduced motion. The spoken name stays «افتح الإعلان في {site} للتواصل».
-  const tap = t('Tap here to contact 👈');
-  const tapBody = tap.endsWith('👈') ? tap.slice(0, -2).trimEnd() : tap;
+  // as the floating twin. Start side: the copy; then the 👈 tapping toward the GOLD BUZZER on the end
+  // side — a gold pill carrying the site's logo in its own colours. The whole bar is the tap target.
+  // Motion (all off under reduced motion): a white shine sweeps the gold pill only (~3s), its glow
+  // pulses (2.4s), the hand taps (1.1s). The spoken name stays «افتح الإعلان في {site} للتواصل».
   const cta = (testID: string, live = true) => (
     <Pressable
       testID={testID}
@@ -240,13 +239,15 @@ export default function ListingPreview({ listing: l, url, onClose }: {
       importantForAccessibility={live ? 'auto' : 'no-hide-descendants'}
       style={({ hovered, pressed }: any) => [s.cta, (hovered || pressed) && s.ctaHover, pressed && s.ctaPressed]}
     >
-      {!reduced && <View style={s.ctaShine} pointerEvents="none" />}
       <View style={s.ctaLines}>
-        <Text numberOfLines={1} style={[s.ctaTx, tx]}>{tapBody}{' '}<Text style={!reduced && s.ctaHand}>👈</Text></Text>
+        <Text numberOfLines={1} style={[s.ctaTx, tx]}>{t('Tap here to contact')}</Text>
         <Text numberOfLines={1} style={[s.ctaSub, tx]}>{t('Takes you to the original {name} ad', { name })}</Text>
       </View>
-      <View style={s.ctaDivider} />
-      <View style={s.ctaLogo} pointerEvents="none"><View style={[{ transform: [{ scale: 92 / 96 }] }, s.ctaLogoWhite]}><SourceBadge source={l.source} /></View></View>
+      <Text style={[s.ctaHand, !reduced && s.ctaHandTap]}>👈</Text>
+      <View style={[s.gold, !reduced && s.goldPulse]} pointerEvents="none">
+        <View style={[{ transform: [{ scale: 88 / 96 }] }, s.goldLogo]}><SourceBadge source={l.source} /></View>
+        {!reduced && <View style={s.goldShine} pointerEvents="none" />}
+      </View>
     </Pressable>
   );
 
@@ -374,11 +375,12 @@ export default function ListingPreview({ listing: l, url, onClose }: {
                 style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0, pointerEvents: 'none' }}
               />
               <Pressable testID="listing-preview-map" onPress={openMap} accessibilityRole="button" accessibilityLabel={t('Expand the map')} style={s.mapTap}>
+                <View style={s.mapChip}>
+                  <Ionicons name="expand-outline" size={15} color={lightColors.ink} />
+                  <Text style={s.mapChipTx}>{t('Tap here to see the location')}</Text>
+                </View>
                 <View style={[s.mapPill, isRTL ? { right: 10 } : { left: 10 }]}>
                   <Text style={s.mapPillTx}>{t('Location as published by {name}', { name })}</Text>
-                </View>
-                <View style={[s.mapChip, isRTL ? { left: 10 } : { right: 10 }]}>
-                  <Ionicons name="expand-outline" size={16} color={colors.ink} />
                 </View>
               </Pressable>
             </View>
@@ -532,14 +534,17 @@ const s = StyleSheet.create({
   mapBox: { backgroundColor: colors.chipFill, borderTopWidth: 1, borderTopColor: colors.line },
   mapTap: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   mapPill: {
-    position: 'absolute', top: 10, maxWidth: '80%',
+    position: 'absolute', bottom: 10, maxWidth: '80%',
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4,
   },
   mapPillTx: { fontSize: 11.5, fontWeight: '600', color: colors.muted },
+  // Centred on the satellite image, so it is white on purpose in both themes (a photo, not a surface).
   mapChip: {
-    position: 'absolute', bottom: 10, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
+    position: 'absolute', top: 10, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 7,
+    boxShadow: '0 4px 14px rgba(0,0,0,0.18)',
   },
+  mapChipTx: { fontSize: 13, fontWeight: '700', color: lightColors.ink },
   mapSheet: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.surface },
   mapClose: {
     position: 'absolute', top: 12, width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
@@ -566,36 +571,49 @@ const s = StyleSheet.create({
   ctaRow: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10 },
   ctaFloat: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 10, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.line },
   // A 68px bar that invites the tap: a three-stop green gradient (CSS, so the theme's var() tokens
-  // resolve inside it; the lightest stop is a tint OF the primary token), an inset top highlight, a
-  // deeper shadow, the site's logo big in a white square on the start side, the arrow chip on the end.
+  // resolve inside it; the lightest stop is a tint OF the primary token), an inset top highlight and a
+  // deeper shadow. The copy on the start side, the pointing hand, the gold buzzer on the end side.
   cta: {
-    flexDirection: 'row', alignItems: 'center', gap: 12, height: 68, paddingHorizontal: 10, borderRadius: 20, overflow: 'hidden',
+    flexDirection: 'row', alignItems: 'center', gap: 6, height: 68, paddingStart: 16, paddingEnd: 8, borderRadius: 20,
     backgroundColor: colors.primary,
     ...(IS_WEB ? { backgroundImage: `linear-gradient(135deg, color-mix(in srgb, ${colors.primary} 82%, white), ${colors.primary} 48%, ${colors.dark})` } as any : {}),
     boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 10px 26px rgba(29,74,55,0.34)',
   },
   ctaHover: { backgroundColor: colors.dark, ...(IS_WEB ? { backgroundImage: `linear-gradient(135deg, ${colors.primary}, ${colors.dark} 60%, ${colors.dark})` } as any : {}) },
   ctaPressed: { transform: [{ scale: 0.97 }] },
-  // A soft diagonal band that sweeps across once every ~4s (CSS keyframes; omitted under reduced motion).
-  ctaShine: {
-    position: 'absolute', top: -20, bottom: -20, width: '45%', left: 0,
+  ctaLines: { flexShrink: 1, flexGrow: 1, minWidth: 0, gap: 3 },
+  ctaTx: { color: colors.onFill, fontSize: 17, lineHeight: 22, fontWeight: '800' },
+  ctaSub: { color: colors.onFill, opacity: 0.88, fontSize: 12.5, lineHeight: 16 },
+  // The pointing hand, ~6px from the buzzer; it taps toward it on a 1.1s loop (off under reduced motion).
+  ctaHand: { fontSize: 26, lineHeight: 30, marginEnd: 6, flexShrink: 0, ...(IS_WEB ? { filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.25))' } as any : {}) },
+  ctaHandTap: IS_WEB ? ({
+    animationKeyframes: [{ '0%': { transform: [{ translateX: 0 }] }, '50%': { transform: [{ translateX: -6 }] }, '100%': { transform: [{ translateX: 0 }] } }],
+    animationDuration: '1.1s', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out',
+  } as any) : {},
+  // THE GOLD BUZZER: a radial gold, an inner light ring, a dark-gold rim, a warm glow — the site's logo in
+  // its own colours on top. The brand's one gold exception (src/theme/palette.ts BUZZER_GOLD).
+  gold: {
+    width: 112, height: 54, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0,
+    backgroundColor: BUZZER_GOLD.mid,
+    ...(IS_WEB ? { backgroundImage: `radial-gradient(ellipse at 35% 30%, ${BUZZER_GOLD.light} 0%, ${BUZZER_GOLD.mid} 38%, ${BUZZER_GOLD.deep} 72%, ${BUZZER_GOLD.dark} 100%)` } as any : {}),
+    boxShadow: `inset 0 0 0 2px ${BUZZER_GOLD.ring}, 0 0 0 3px ${BUZZER_GOLD.rim}, 0 6px 16px ${BUZZER_GOLD.shade}, 0 0 14px ${BUZZER_GOLD.glow}`,
+  },
+  goldPulse: IS_WEB ? ({
+    animationKeyframes: [{
+      '0%': { boxShadow: `inset 0 0 0 2px ${BUZZER_GOLD.ring}, 0 0 0 3px ${BUZZER_GOLD.rim}, 0 6px 16px ${BUZZER_GOLD.shade}, 0 0 14px ${BUZZER_GOLD.glow}` },
+      '50%': { boxShadow: `inset 0 0 0 2px ${BUZZER_GOLD.ring}, 0 0 0 3px ${BUZZER_GOLD.rim}, 0 6px 16px ${BUZZER_GOLD.shade}, 0 0 28px ${BUZZER_GOLD.glowPeak}` },
+      '100%': { boxShadow: `inset 0 0 0 2px ${BUZZER_GOLD.ring}, 0 0 0 3px ${BUZZER_GOLD.rim}, 0 6px 16px ${BUZZER_GOLD.shade}, 0 0 14px ${BUZZER_GOLD.glow}` },
+    }],
+    animationDuration: '2.4s', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out',
+  } as any) : {},
+  goldLogo: IS_WEB ? ({ filter: 'drop-shadow(0 1px 0 rgba(255,255,255,0.6))' } as any) : {},
+  // A white shine that sweeps the gold pill only, once every ~3s.
+  goldShine: {
+    position: 'absolute', top: -12, bottom: -12, left: 0, width: '60%',
     ...(IS_WEB ? {
-      backgroundImage: 'linear-gradient(115deg, rgba(255,255,255,0) 35%, rgba(255,255,255,0.22) 50%, rgba(255,255,255,0) 65%)',
-      animationKeyframes: [{ '0%': { transform: [{ translateX: '-260%' }] }, '32%': { transform: [{ translateX: '320%' }] }, '100%': { transform: [{ translateX: '320%' }] } }],
-      animationDuration: '4s', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out',
+      backgroundImage: 'linear-gradient(110deg, rgba(255,255,255,0) 35%, rgba(255,255,255,0.85) 50%, rgba(255,255,255,0) 65%)',
+      animationKeyframes: [{ '0%': { transform: [{ translateX: '130%' }] }, '28%': { transform: [{ translateX: '-130%' }] }, '100%': { transform: [{ translateX: '-130%' }] } }],
+      animationDuration: '3s', animationDelay: '0.8s', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out',
     } as any : {}),
   },
-  ctaLines: { flexShrink: 1, flexGrow: 1, minWidth: 0, gap: 1 },
-  ctaTx: { color: colors.onFill, fontSize: 17, fontWeight: '800' },
-  ctaSub: { color: colors.onFill, opacity: 0.88, fontSize: 12.5 },
-  // The pointing hand slides toward the logo (the end side) on a 1.4s loop; omitted under reduced motion.
-  ctaHand: IS_WEB ? ({
-    display: 'inline-block',
-    animationKeyframes: [{ '0%': { transform: [{ translateX: 0 }] }, '50%': { transform: [{ translateX: -4 }] }, '100%': { transform: [{ translateX: 0 }] } }],
-    animationDuration: '1.4s', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out',
-  } as any) : {},
-  ctaDivider: { width: 1, height: 40, backgroundColor: 'rgba(255,255,255,0.22)', flexShrink: 0 },
-  // The site's own transparent logo, big, in pure white — monochrome marks included.
-  ctaLogo: { width: 92, height: 46, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 },
-  ctaLogoWhite: IS_WEB ? ({ filter: 'brightness(0) invert(1)' } as any) : {},
 });
