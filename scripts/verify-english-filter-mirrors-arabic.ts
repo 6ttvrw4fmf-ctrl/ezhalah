@@ -86,9 +86,11 @@ mustCatch('a new label drawn with s.fieldLabelAbove and no English override («?
 
 // ── 5. the toggle and the shared pieces ────────────────────────────────────────────────────────────────────────────
 const mode = read('src/components/ModeSwitch.tsx');
-const noSparkle = (src: string) => !/name="sparkles"/.test(src) && /name="chatbubble-outline"/.test(src);
-check('the Smart Broker side has the plain outline bubble, not the sparkle', noSparkle(mode));
-mustCatch('the sparkle coming back', !noSparkle(mode.replace('name="chatbubble-outline"', 'name="sparkles"')));
+// Owner 2026-10-09: the filled, breathing green sparkle «doesn't look professional»; 2026-10-10: «include the AI star».
+const aiStarIsClean = (src: string) => /name="sparkles-outline"/.test(src) && !/name="sparkles"/.test(src) && !/\bbreath\b/.test(src); // the animation's own variable, not the word in a comment
+check('the Smart Broker side has the AI stars as a clean outline (not the filled, breathing sparkle)', aiStarIsClean(mode));
+mustCatch('the filled sparkle coming back', !aiStarIsClean(mode.replace('name="sparkles-outline"', 'name="sparkles"')));
+mustCatch('the breathing animation coming back', !aiStarIsClean(mode + '\nconst breath = useRef(new Animated.Value(0)).current;'));
 check('«Smart Broker» fits: the English segment is wider than the Arabic one', /const SEG_W_EN = 1[1-9]\d;/.test(mode) && /const segW = en \? SEG_W_EN : SEG_W;/.test(mode));
 check('English labels use the system font on the web (Poppins is not loaded there: a serif fallback)', /en && \{ fontFamily: SYSTEM_FONT/.test(mode));
 const ui = read('src/components/ui.tsx');
