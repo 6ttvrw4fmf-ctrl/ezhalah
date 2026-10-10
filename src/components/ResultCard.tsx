@@ -19,7 +19,7 @@ const IS_WEB = Platform.OS === 'web';
 
 // Feature key → (icon, EN label key) — the wrapping amenities row on the listing card.
 // The label is run through t() so it localizes to Arabic. Order matters: most useful features first.
-const FEATURE_META: Array<{ key: keyof NonNullable<Listing['features']>; icon: any; label: string }> = [
+export const FEATURE_META: Array<{ key: keyof NonNullable<Listing['features']>; icon: any; label: string }> = [
   { key: 'parking',          icon: 'car-outline',           label: 'Parking' },
   { key: 'maid_room',        icon: 'person-outline',        label: 'Maid Room' },
   { key: 'elevator',         icon: 'arrow-up-circle-outline', label: 'Elevator' },
@@ -482,7 +482,7 @@ const FREE_TEXT_PROSE_LABELS = new Set([
 // app — production rendered a blank white page for any search containing such a listing. The
 // boundary fix in remote.ts is the root-cause fix; String() here means no future caller (or a
 // newly-added shape on another platform) can turn one odd source value into a blank screen again.
-function arAttrValue(label: string, value: string, locale: string): string {
+export function arAttrValue(label: string, value: string, locale: string): string {
   const v = String(value ?? '').trim();
   if (!v) return value;
   const ll = String(label ?? '').trim().toLowerCase();

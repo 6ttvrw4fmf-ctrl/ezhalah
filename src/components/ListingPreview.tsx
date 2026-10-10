@@ -1,29 +1,181 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { colors, radius } from '@/theme/tokens';
+import { colors, font, radius } from '@/theme/tokens';
+import { TAP44 } from '@/theme/palette';
 import { useI18n, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { listingPrice, sourceName } from '@/lib/listingDisplay';
-import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish, translateTrailingPeriodWord } from '@/lib/arabicText';
+import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, attrDisplayLabel, hideArabicProseInEnglish, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { translitPlace } from '@/lib/translitPlace';
 import { DIRECTION_LABEL } from '@/lib/afEvidence';
+import { useAtLeast } from '@/lib/useAtLeast';
+import { PICKER_SHEET_BREAKPOINT } from '@/lib/responsive';
+import { useReducedMotion } from '@/lib/useReducedMotion';
+import { SourceBadge, FEATURE_META, arAttrValue } from '@/components/ResultCard';
+import { fetchAdPin, mapEmbedUrl, type GeoPoint } from '@/data/adPageData';
 import type { Listing } from '@/data/listings';
 
-// Allowlisted sites that cannot be framed still open in a tab of
-// the same pane — showing Ezhalah's own copy of the ad, exactly as the site published it, plus one
-// button to the real ad for calling / messaging. Nothing is computed: a field the source left silent
-// is simply not shown (never «0», never «no»).
-export default function ListingPreview({ listing: l, url }: { listing: Listing; url: string }) {
+// THE IN-APP AD PAGE for the sites that cannot be framed (lib/inAppViewer.ts IN_APP_PREVIEW_HOSTS):
+// Ezhalah's own copy of the ad, exactly as the site published it, inside the viewer's tab.
+//
+// ONE SCREEN FIRST (owner 2026-10-10: «it feels like so much scrolling»). At 390×844 the first screen —
+// top bar · hero · price + key line · location card · the sticky «open it» bar — fits with no scroll.
+// The hero takes a fixed share of the page (≈29% of its height, clamped); the MAP CARD is the flexible
+// block: every other first-screen block is measured (onLayout) and the map fills whatever height is
+// left, never under MAP_MIN, so there is no empty gap above the sticky bar on any height. Explicit
+// heights on a definite column, never `flex: 1` inside an indefinite one (iOS Safari resolves that to
+// 0px — see scripts/verify-ios-column-flex-collapse.ts). The rows UNDER the map card (details ·
+// description · the source line) are a continuation the page may scroll to.
+//
+// SOURCE IS TRUTH. Nothing here is computed: the price is the shared listingPrice() string; a field the
+// source left silent is simply absent (never «0», never «لا»); the map is drawn only from the pin the
+// source published (data/adPageData.ts) and is labelled «as published by {site}»; the description is
+// the source's own text, its own «•» bullets laid out as a list. No licence row, no ad number, no
+// disclaimer paragraph — one quiet «هذا الإعلان من {site}» line closes the page.
+const IS_WEB = Platform.OS === 'web';
+const HERO_MIN = 170;
+const HERO_MAX = 260;
+const HERO_SHARE = 0.29;
+const MAP_MIN = 170;
+// Marker on the history entry the expanded map pushes (same approach as AdViewer's HISTORY_MARK): the
+// browser's Back closes the map and lands on the viewer's own marked entry, which it treats as «show».
+const SHEET_MARK = 'ezAdMap';
+// Numerals only — the app's Poppins token; Arabic text keeps the system face (no letter-spacing, ever).
+const NUM_FONT = IS_WEB ? `${font.family.semibold}, Poppins, ui-sans-serif, system-ui, sans-serif` : undefined;
+const NUM_RUN = /(\d[\d,.]*)/;
+
+/** The price string split into numeric and non-numeric runs: the text is byte-identical, only the font differs. */
+export function priceRuns(s: string): { text: string; num: boolean }[] {
+  return s.split(NUM_RUN).filter(Boolean).map((text) => ({ text, num: NUM_RUN.test(text) }));
+}
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+// Pin the row to physical LTR (web DOM dir), like AdViewer's browser chrome.
+const setLtr = (node: any) => { if (IS_WEB && node?.setAttribute) node.setAttribute('dir', 'ltr'); };
+
+export default function ListingPreview({ listing: l, url, onClose }: {
+  listing: Listing; url: string;
+  /** The viewer's own close for this tab (the ✕ in the page's top bar). */
+  onClose?: () => void;
+}) {
   const { t, locale, isRTL } = useI18n();
   const name = t(sourceName(l.source));
   const photos = (l.photos?.length ? l.photos : [l.photo]).filter(Boolean);
   const [main, setMain] = useState(0);
   const open = () => { if (Platform.OS === 'web' && url) window.open(url, '_blank', 'noopener,noreferrer'); };
+  const wide = useAtLeast(PICKER_SHEET_BREAKPOINT);
+  const reduced = useReducedMotion();
+
+  // ── the first-screen budget: root − top bar − hero − head − address row − CTA row → the map ────
+  const [box, setBox] = useState({ w: 0, h: 0, bar: 0, head: 0, addr: 0, cta: 0 });
+  const measure = (k: 'bar' | 'head' | 'addr' | 'cta') => (e: any) => {
+    const h = Math.round(e.nativeEvent.layout.height);
+    setBox((b) => (b[k] === h ? b : { ...b, [k]: h }));
+  };
+  const onRoot = (e: any) => {
+    const { width, height } = e.nativeEvent.layout;
+    const w = Math.round(width), h = Math.round(height);
+    setBox((b) => (b.w === w && b.h === h ? b : { ...b, w, h }));
+  };
+  const heroH = box.h ? clamp(Math.round(box.h * HERO_SHARE), HERO_MIN, HERO_MAX) : HERO_MIN;
+  // The map card's margin + borders; the CTA row is the first screen's last IN-FLOW row, so the map
+  // fills exactly down to it — no blank band on any height.
+  const mapH = box.h && box.head && box.addr
+    ? Math.max(MAP_MIN, box.h - box.bar - heroH - box.head - box.addr - box.cta - 12)
+    : MAP_MIN;
+
+  // ── the source's pin (web only; native keeps the card data alone) ───────────────────────────────
+  const [geo, setGeo] = useState<GeoPoint | null>(null);
+  useEffect(() => {
+    if (!IS_WEB) return;
+    let alive = true;
+    void fetchAdPin(l).then((p) => { if (alive) setGeo(p); });
+    return () => { alive = false; };
+  }, [l]);
+
+  // ── the expanded map: a full-pane sheet over this page; ✕ / Escape / Back close it in place ─────
+  const [mapOpen, setMapOpen] = useState(false);
+  const mapOpenRef = useRef(mapOpen); mapOpenRef.current = mapOpen;
+  const openMap = () => {
+    setMapOpen(true);
+    if (!IS_WEB) return;
+    try {
+      const st = window.history.state;
+      if (!st?.[SHEET_MARK]) window.history.pushState({ ...(st ?? {}), [SHEET_MARK]: true }, '');
+    } catch { /* history unavailable: the sheet still opens */ }
+  };
+  // Retire our entry in place — never history.back() (AdViewer's rule: a frame may own the top entry).
+  const closeMap = () => {
+    setMapOpen(false);
+    if (!IS_WEB) return;
+    try {
+      const st = window.history.state;
+      if (st?.[SHEET_MARK]) { const { [SHEET_MARK]: _drop, ...rest } = st; window.history.replaceState(rest, ''); }
+    } catch { /* history unavailable: closing still works */ }
+  };
+  useEffect(() => {
+    if (!IS_WEB) return;
+    const onPop = () => { if (mapOpenRef.current && !window.history.state?.[SHEET_MARK]) setMapOpen(false); };
+    // Capture phase: this runs before AdViewer's own Escape (which would hide the whole pane).
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !mapOpenRef.current) return;
+      e.stopImmediatePropagation();
+      closeMap();
+    };
+    window.addEventListener('popstate', onPop);
+    window.addEventListener('keydown', onKey, true);
+    return () => { window.removeEventListener('popstate', onPop); window.removeEventListener('keydown', onKey, true); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── the CTA: in flow as the first screen's last row; a floating twin fades in only while the in-flow
+  //    one is out of view (IntersectionObserver on web; the scroll offset on native) ───────────────
+  const [floating, setFloating] = useState(false);
+  const ctaPos = useRef({ y: 0, h: 0 });
+  const viewH = useRef(0);
+  const ioRef = useRef<IntersectionObserver | null>(null);
+  const inflowRef = (node: any) => {
+    ioRef.current?.disconnect();
+    ioRef.current = null;
+    if (!IS_WEB || !node || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(([e]) => setFloating(!e.isIntersecting), { threshold: 0.2 });
+    io.observe(node);
+    ioRef.current = io;
+  };
+  useEffect(() => () => ioRef.current?.disconnect(), []);
+  const onBodyScroll = (e: any) => {
+    if (IS_WEB) return;
+    const top = e.nativeEvent.contentOffset.y;
+    const { y, h } = ctaPos.current;
+    const vh = viewH.current || e.nativeEvent.layoutMeasurement.height;
+    setFloating(!(y < top + vh && y + h > top));
+  };
+
+  // ── the hero: swipe (scroll-snap paging) · tap the counter or the laptop arrows to step ─────────
+  const heroRef = useRef<ScrollView>(null);
+  const slideW = box.w || 0;
+  const goTo = (i: number) => {
+    if (photos.length < 2) return;
+    const n = ((i % photos.length) + photos.length) % photos.length;
+    setMain(n);
+    if (!slideW) return;
+    // In an RTL scroller the browser counts scrollLeft downward from 0; read the real direction.
+    const node: any = (heroRef.current as any)?.getScrollableNode?.();
+    const rtl = IS_WEB && node ? getComputedStyle(node).direction === 'rtl' : isRTL;
+    heroRef.current?.scrollTo({ x: n * slideW * (rtl ? -1 : 1), animated: true });
+  };
+  const onHeroScroll = (e: any) => {
+    if (!slideW) return;
+    const i = Math.round(Math.abs(e.nativeEvent.contentOffset.x) / slideW);
+    if (i !== main && i >= 0 && i < photos.length) setMain(i);
+  };
+
+  // ── facts, ONLY from what the source published ──────────────────────────────────────────────────
   const facts: [string, string][] = [];
-  if (l.area > 0) facts.push([t('Area'), `${l.area} ${t('m²')}`]);
-  if (l.beds > 0) facts.push([t('Listing bedrooms'), String(l.beds)]);
-  if ((l.bathrooms ?? 0) > 0) facts.push([t('Bathrooms'), String(l.bathrooms)]);
+  const stats: string[] = [];
+  if (l.beds > 0) stats.push(t('{n} rooms', { n: l.beds }));
+  if ((l.bathrooms ?? 0) > 0) stats.push(t('{n} bathrooms', { n: l.bathrooms as number }));
+  if (l.area > 0) stats.push(`${l.area} ${t('m²')}`);
   const sourceText = (v: string) => arabicOrPlaceholderForFreeText(translateTrailingPeriodWord(t(v), locale), locale, ATTRIBUTE_UNRESOLVED_AR);
   // Raw platform fields can be numbers despite the Listing string type (like ResultCard's attributes).
   const age = String(l.property_age ?? '').trim();
@@ -32,92 +184,418 @@ export default function ListingPreview({ listing: l, url }: { listing: Listing; 
   if (facing) facts.push([t('Facing'), sourceText(DIRECTION_LABEL[facing] ?? facing)]);
   const period = String(l.rentPeriod ?? '').trim();
   if (period) facts.push([t('Rent period'), sourceText(({ annual: 'Yearly', monthly: 'Monthly' } as Record<string, string>)[period] ?? period)]);
+  if ((l.halls ?? 0) > 0) facts.push([t('Halls'), String(l.halls)]);
+  if ((l.master_bedrooms ?? 0) > 0) facts.push([t('Master Bedrooms'), String(l.master_bedrooms)]);
+  if ((l.reception_rooms_majlis ?? 0) > 0) facts.push([t('Majlis'), String(l.reception_rooms_majlis)]);
+  const residence = String(l.residence_type ?? '').trim();
+  if (residence) facts.push([t('Residence type'), sourceText(residence)]);
+  const project = String(l.project_name ?? '').trim();
+  if (project) facts.push([t('Project'), sourceText(project)]);
+  if (typeof l.rating === 'number' && Number.isFinite(l.rating)) {
+    const n = l.reviews_count;
+    facts.push([t('Rating'), `${l.rating}${typeof n === 'number' && n > 0 ? ` (${t('{n} reviews', { n })})` : ''}`]);
+  }
   const place = (raw: string) => locale === 'en' && raw ? translitPlace(raw) : raw;
   const city = place(arabicOrPlaceholder(t(l.city), locale, LOCATION_UNRESOLVED_AR));
-  const location = (place(arabicOrPlaceholder(t(l.district), locale, LOCATION_UNRESOLVED_AR)) || city || LOCATION_UNRESOLVED_AR)
-    + (l.district ? `, ${city || LOCATION_UNRESOLVED_AR}` : '');
+  const district = place(arabicOrPlaceholder(t(l.district), locale, LOCATION_UNRESOLVED_AR));
+  const sep = locale === 'ar' ? '، ' : ', ';
+  const location = (district || city || LOCATION_UNRESOLVED_AR) + (l.district ? `${sep}${city || LOCATION_UNRESOLVED_AR}` : '');
+  const street = hideArabicProseInEnglish(String(l.street_name ?? '').trim() || null, locale) ?? '';
+  const address = [street, location].filter(Boolean).join(sep);
   const typeLabel = arabicOrPlaceholder(/[ء-ي]/.test(l.type || '') ? l.type : t(l.cleanType ?? l.type), locale, TYPE_UNRESOLVED_AR);
-  const title = hideArabicProseInEnglish((() => { const v = (l.title ?? '').trim(); return v && /[ء-ي]/.test(v) ? '\u200f' + v : null; })(), locale) || typeLabel;
-  const desc = hideArabicProseInEnglish((() => { const d = (l.description ?? '').trim(); return d && /[ء-ي]/.test(d) ? '\u200f' + d : null; })(), locale);
-  // The app's own type, same as the chat around it (the Tajawal face was retired 2026-10-04 — owner:
-  // «the text format is weird, not like how it was»).
-  const face = {};
-  const tx = { ...face, textAlign: (isRTL ? 'right' : 'left') as 'right' | 'left', writingDirection: (isRTL ? 'rtl' : 'ltr') as 'rtl' | 'ltr' };
+  // The source's own additional-information panel, through the card's own value/label display rules.
+  const shown = new Set(facts.map(([k]) => k));
+  const extra: [string, string][] = [];
+  for (const r of l.additional_info ?? []) {
+    if (!r || !r.label || !r.value) continue;
+    const k = attrDisplayLabel(t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR);
+    const v = arAttrValue(r.label, String(r.value), locale);
+    if (k && v && !shown.has(k)) { shown.add(k); extra.push([k, v]); }
+  }
+  const chips = FEATURE_META.filter((f) => l.features?.[f.key]).map((f) => t(f.label));
+  if (l.driver_room) chips.push(t('Driver room'));
+  const rows = [...facts, ...extra];
+  const desc = hideArabicProseInEnglish((() => { const d = (l.description ?? '').trim(); return d && /[ء-ي]/.test(d) ? '‏' + d : null; })(), locale);
+  // «Organize this data» (owner): the source's own «•» bullets and line breaks become a list — the text itself is untouched.
+  const descParts = desc ? desc.split(/\s*•\s*|\s*\n+\s*/).map((p) => p.trim()).filter(Boolean) : [];
+  const tx = { textAlign: (isRTL ? 'right' : 'left') as 'right' | 'left', writingDirection: (isRTL ? 'rtl' : 'ltr') as 'rtl' | 'ltr' };
+  const Frame: any = 'iframe';
+  const mapTitle = t('Property location on Google Maps');
+  // 375px phones: the one-line key details give up a point of size rather than a pixel of width.
+  const keyFont = box.w && box.w < 390 ? { fontSize: 13.5 } : null;
+  // THE BUTTON TO THE REAL AD, rendered twice from one place: in flow (the first screen's last row) and
+  // as the floating twin. Start side: the copy, its 👈 sliding toward the logo; a hairline; end side: the
+  // site's logo big, tinted pure white. A soft shine sweeps across every ~4s. Both motions are off under
+  // reduced motion. The spoken name stays «افتح الإعلان في {site} للتواصل».
+  const tap = t('Tap here to contact 👈');
+  const tapBody = tap.endsWith('👈') ? tap.slice(0, -2).trimEnd() : tap;
+  const cta = (testID: string, live = true) => (
+    <Pressable
+      testID={testID}
+      onPress={open}
+      focusable={live}
+      accessibilityRole="link"
+      accessibilityLabel={t('Open the ad on {name} to contact', { name })}
+      accessibilityElementsHidden={!live}
+      importantForAccessibility={live ? 'auto' : 'no-hide-descendants'}
+      style={({ hovered, pressed }: any) => [s.cta, (hovered || pressed) && s.ctaHover, pressed && s.ctaPressed]}
+    >
+      {!reduced && <View style={s.ctaShine} pointerEvents="none" />}
+      <View style={s.ctaLines}>
+        <Text numberOfLines={1} style={[s.ctaTx, tx]}>{tapBody}{' '}<Text style={!reduced && s.ctaHand}>👈</Text></Text>
+        <Text numberOfLines={1} style={[s.ctaSub, tx]}>{t('Takes you to the original {name} ad', { name })}</Text>
+      </View>
+      <View style={s.ctaDivider} />
+      <View style={s.ctaLogo} pointerEvents="none"><View style={[{ transform: [{ scale: 92 / 96 }] }, s.ctaLogoWhite]}><SourceBadge source={l.source} /></View></View>
+    </Pressable>
+  );
 
   return (
-    <ScrollView testID="listing-preview" style={s.root} contentContainerStyle={s.content}>
-      {photos.length > 0 && <View testID="listing-preview-gallery" style={s.photoMain}>
-        <Image source={{ uri: photos[main] }} style={s.fill} contentFit="cover" priority="high" loading="eager" accessibilityLabel={t('Photo {n} of {total}', { n: main + 1, total: photos.length })} />
-        {photos.length > 1 && (
-          <View style={s.counter}><Text style={[s.counterTx, face]}>{main + 1} / {photos.length}</Text></View>
-        )}
-      </View>}
-      {photos.length > 1 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.thumbs}>
-          {photos.map((p, i) => (
-            <Pressable key={p + i} testID="listing-preview-thumb" accessibilityRole="button" accessibilityLabel={t('Photo {n} of {total}', { n: i + 1, total: photos.length })} accessibilityState={{ selected: i === main }} onPress={() => setMain(i)} style={[s.thumb, i === main && s.thumbOn]}>
-              <Image source={{ uri: p }} style={s.fill} contentFit="cover" priority="low" loading="lazy" />
-            </Pressable>
-          ))}
-        </ScrollView>
-      )}
-
-      <Text style={[s.price, tx]}>{listingPrice(l, locale)}</Text>
-      <Text style={[s.title, tx]}>{title}</Text>
-      <Text style={[s.loc, tx]}>
-        <Ionicons name="location-outline" size={14} color={colors.muted} /> {location}
-      </Text>
-
-      {facts.length > 0 && (
-        <View style={s.facts}>
-          {facts.map(([k, v]) => (
-            <View key={k} style={s.fact}>
-              <Text style={[s.factK, face]}>{k}</Text>
-              <Text style={[s.factV, face]}>{v}</Text>
-            </View>
-          ))}
+    <View testID="listing-preview" style={s.root} onLayout={onRoot}>
+      {/* (1) slim top bar: the source pill + this tab's ✕ */}
+      <View style={s.bar} onLayout={measure('bar')}>
+        <View style={s.srcPill}>
+          <View style={s.srcLogo} pointerEvents="none"><View style={{ transform: [{ scale: 0.4 }] }}><SourceBadge source={l.source} /></View></View>
+          <Text numberOfLines={1} style={[s.srcTx, tx]}><Text style={s.srcName}>{name}</Text>{` · ${location}`}</Text>
         </View>
-      )}
+        {onClose ? (
+          <Pressable
+            testID="listing-preview-close"
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel={t('Close')}
+            style={({ hovered }: any) => [s.iconBtn, hovered && s.hover]}
+            // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
+            dataSet={{ ...TAP44 }}
+          >
+            <Ionicons name="close" size={20} color={colors.ink} />
+          </Pressable>
+        ) : null}
+      </View>
 
-      <Pressable testID="listing-preview-contact" onPress={open} accessibilityRole="link" style={({ hovered }: any) => [s.cta, hovered && s.ctaHover]}>
-        <Ionicons name="open-outline" size={18} color={colors.onFill} />
-        <Text style={[s.ctaTx, face]}>{t('Open the ad on {name} to contact', { name })}</Text>
-      </Pressable>
+      <ScrollView style={s.scroll} contentContainerStyle={s.content} scrollEventThrottle={48} onScroll={onBodyScroll} onLayout={(e: any) => { viewH.current = e.nativeEvent.layout.height; }}>
+        {/* (2) hero: edge to edge, swipeable, the flexible block */}
+        {photos.length > 0 && <View testID="listing-preview-gallery" style={[s.hero, { height: heroH }]}>
+          <ScrollView
+            ref={heroRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            scrollEventThrottle={16}
+            onScroll={onHeroScroll}
+            style={s.fill}
+          >
+            {photos.map((p, i) => (
+              <View key={p + i} style={{ width: slideW || '100%', height: heroH }}>
+                {i === main
+                  ? <Image source={{ uri: p }} style={s.fill} contentFit="cover" priority="high" loading="eager" accessibilityLabel={t('Photo {n} of {total}', { n: i + 1, total: photos.length })} />
+                  : Math.abs(i - main) <= 1
+                    ? <Image source={{ uri: p }} style={s.fill} contentFit="cover" priority="low" loading="lazy" accessibilityLabel={t('Photo {n} of {total}', { n: i + 1, total: photos.length })} />
+                    : null}
+              </View>
+            ))}
+          </ScrollView>
+          {photos.length > 1 && (
+            <Pressable testID="listing-preview-counter" onPress={() => goTo(main + 1)} accessibilityRole="button" accessibilityLabel={t('Next photo')} style={[s.counter, isRTL ? { right: 10 } : { left: 10 }]}>
+              <Text style={s.counterTx}>{main + 1} / {photos.length}</Text>
+            </Pressable>
+          )}
+          {photos.length > 1 && photos.length <= 8 && (
+            <View style={s.dots} pointerEvents="none">
+              {photos.map((p, i) => <View key={p + i} style={[s.dot, i === main && s.dotOn]} />)}
+            </View>
+          )}
+          {wide && photos.length > 1 && (
+            <View style={s.arrows} ref={setLtr} pointerEvents="box-none">
+              <Pressable onPress={() => goTo(main - 1)} accessibilityRole="button" accessibilityLabel={t('Back')} style={({ hovered }: any) => [s.arrow, hovered && s.arrowHover]}>
+                <Ionicons name="chevron-back" size={20} color={colors.onFill} />
+              </Pressable>
+              <Pressable onPress={() => goTo(main + 1)} accessibilityRole="button" accessibilityLabel={t('Next photo')} style={({ hovered }: any) => [s.arrow, hovered && s.arrowHover]}>
+                <Ionicons name="chevron-forward" size={20} color={colors.onFill} />
+              </Pressable>
+            </View>
+          )}
+        </View>}
+        {wide && photos.length > 1 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.thumbs}>
+            {photos.map((p, i) => (
+              <Pressable key={p + i} testID="listing-preview-thumb" accessibilityRole="button" accessibilityLabel={t('Photo {n} of {total}', { n: i + 1, total: photos.length })} accessibilityState={{ selected: i === main }} onPress={() => goTo(i)} style={[s.thumb, i === main && s.thumbOn]}>
+                <Image source={{ uri: p }} style={s.fill} contentFit="cover" priority="low" loading="lazy" />
+              </Pressable>
+            ))}
+          </ScrollView>
+        )}
 
-      {desc ? (
-        <View style={s.section}>
-          <Text style={[s.h, tx]}>{t('Description')}</Text>
-          <Text style={[s.desc, tx]}>{desc}</Text>
+        {/* (3) price — numerals in the app's Poppins token, the currency small — ONE key line, and the
+            host badge on the end side: the site's logo big, «مستضاف على {site}», a tap to the real ad */}
+        <View style={s.head} onLayout={measure('head')}>
+          <View style={s.headMain}>
+            <Text testID="listing-preview-price" numberOfLines={1} style={[s.price, tx]}>
+              {priceRuns(listingPrice(l, locale)).map((r, i) => <Text key={i} style={r.num ? s.priceNum : s.priceUnit}>{r.text}</Text>)}
+            </Text>
+            <View style={s.keyLine}>
+              <Text numberOfLines={1} style={[s.keyTx, s.keyType, keyFont]}>{typeLabel}</Text>
+              <View style={s.deal}><Text numberOfLines={1} style={s.dealTx}>{t(l.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text></View>
+              {stats.map((v) => (
+                <View key={v} style={s.keyStat}>
+                  <View style={s.keyDot} />
+                  <Text numberOfLines={1} style={[s.keyTx, keyFont]}>{v}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+          <Pressable
+            testID="listing-preview-host"
+            onPress={open}
+            accessibilityRole="link"
+            accessibilityLabel={t('Open the ad on {name} to contact', { name })}
+            style={({ hovered, pressed }: any) => [s.host, (hovered || pressed) && s.hostHover]}
+          >
+            <View style={s.hostLogo} pointerEvents="none"><View style={{ transform: [{ scale: 0.75 }] }}><SourceBadge source={l.source} /></View></View>
+            <Text numberOfLines={2} style={s.hostTx}>{t('Hosted on {name}', { name })}</Text>
+          </Pressable>
+        </View>
+
+        {/* (4) location: the address as published; the source's own pin, when it published one */}
+        <View style={s.loc}>
+          <View style={s.addrRow} onLayout={measure('addr')}>
+            <Ionicons name="location-outline" size={15} color={colors.muted} />
+            <Text numberOfLines={1} style={[s.addr, tx]}>{address}</Text>
+          </View>
+          {geo && IS_WEB ? (
+            <View style={[s.mapBox, { height: mapH }]}>
+              <Frame
+                src={mapEmbedUrl(geo, locale, 14)}
+                title={mapTitle}
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+                tabIndex={-1}
+                aria-hidden="true"
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0, pointerEvents: 'none' }}
+              />
+              <Pressable testID="listing-preview-map" onPress={openMap} accessibilityRole="button" accessibilityLabel={t('Expand the map')} style={s.mapTap}>
+                <View style={[s.mapPill, isRTL ? { right: 10 } : { left: 10 }]}>
+                  <Text style={s.mapPillTx}>{t('Location as published by {name}', { name })}</Text>
+                </View>
+                <View style={[s.mapChip, isRTL ? { left: 10 } : { right: 10 }]}>
+                  <Ionicons name="expand-outline" size={16} color={colors.ink} />
+                </View>
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
+
+        {/* Reserved, empty today (zero height): the asking-price range bar «أسعار الإعلانات: {type} {deal} في {district}» — a later PR. */}
+        <View testID="listing-preview-range" />
+
+        {/* (5) the first screen's last row: ONE button to the real ad */}
+        <View style={s.ctaRow} ref={inflowRef} onLayout={(e: any) => { ctaPos.current = { y: e.nativeEvent.layout.y, h: e.nativeEvent.layout.height }; measure('cta')(e); }}>
+          {cta('listing-preview-contact')}
+        </View>
+
+        {/* (6) details: a compact two-column grid of what the source published, then its feature chips */}
+        {(rows.length > 0 || chips.length > 0) && (
+          <View testID="listing-preview-details" style={s.section}>
+            <Text style={[s.h, tx]}>{t('Details')}</Text>
+            {rows.length > 0 && (
+              <View style={s.grid}>
+                {rows.map(([k, v], i) => (
+                  <View key={k} style={[s.cell, i >= rows.length - (rows.length % 2 || 2) && s.cellLast]}>
+                    <Text numberOfLines={1} style={[s.cellK, tx]}>{k}</Text>
+                    <Text numberOfLines={2} style={[s.cellV, tx]}>{v}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+            {chips.length > 0 && (
+              <View style={s.chips}>
+                {chips.map((c) => (
+                  <View key={c} style={s.chip}>
+                    <Ionicons name="checkmark" size={13} color={colors.primary} />
+                    <Text style={s.chipTx}>{c}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* (7) the description, verbatim; the source's bullets as a list */}
+        {desc ? (
+          <View testID="listing-preview-description" style={s.section}>
+            <Text style={[s.h, tx]}>{t('Description')}</Text>
+            {descParts.length > 1 ? (
+              <View style={s.descList}>
+                <Text style={[s.desc, tx]}>{descParts[0]}</Text>
+                {descParts.slice(1).map((p, i) => (
+                  <View key={i} style={s.bullet}>
+                    <Text style={s.bulletDot}>•</Text>
+                    <Text style={[s.desc, s.bulletTx, tx]}>{p}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={[s.desc, tx]}>{desc}</Text>
+            )}
+          </View>
+        ) : null}
+
+        <Text style={[s.note, tx]}>{t('This ad is from {name}', { name })}</Text>
+      </ScrollView>
+
+      {/* the floating twin of the CTA: visible only while the in-flow row is out of view; inert otherwise */}
+      <View
+        style={[s.ctaFloat, { opacity: floating ? 1 : 0 }, IS_WEB && ({ transitionProperty: 'opacity', transitionDuration: '160ms' } as any)]}
+        pointerEvents={floating ? 'box-none' : 'none'}
+        aria-hidden={!floating}
+      >
+        {cta('listing-preview-contact-floating', floating)}
+      </View>
+
+      {/* the expanded map: the same embed, interactive, over this page — the page keeps its scroll */}
+      {mapOpen && geo && IS_WEB ? (
+        <View testID="listing-preview-map-sheet" style={s.mapSheet}>
+          <Frame src={mapEmbedUrl(geo, locale, 15)} title={mapTitle} referrerPolicy="no-referrer-when-downgrade" allow="fullscreen" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }} />
+          <Pressable
+            testID="listing-preview-map-close"
+            onPress={closeMap}
+            accessibilityRole="button"
+            accessibilityLabel={t('Close')}
+            style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
+            // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
+            dataSet={{ ...TAP44 }}
+          >
+            <Ionicons name="close" size={22} color={colors.ink} />
+          </Pressable>
         </View>
       ) : null}
-
-      <Text style={[s.note, tx]}>{t('Details as published on {name}.', { name })}</Text>
-    </ScrollView>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  root: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.paper },
-  content: { padding: 16, paddingBottom: 40, gap: 10 },
+  root: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.surface, overflow: 'hidden' },
   fill: { width: '100%', height: '100%' },
-  photoMain: { width: '100%', aspectRatio: 16 / 10, borderRadius: radius.card, overflow: 'hidden', backgroundColor: colors.chipFill },
-  counter: { position: 'absolute', bottom: 10, left: 10, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 3 },
-  counterTx: { color: '#fff', fontSize: 13 },
-  thumbs: { gap: 8 },
-  thumb: { width: 72, height: 52, borderRadius: 10, overflow: 'hidden', borderWidth: 2, borderColor: 'transparent' },
+  hover: { backgroundColor: colors.tint },
+  // top bar
+  bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingHorizontal: 10, paddingVertical: 6, minWidth: 0 },
+  srcPill: {
+    flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 4,
+    borderWidth: 1, borderColor: colors.line, borderRadius: radius.pill, paddingVertical: 4, paddingHorizontal: 10,
+  },
+  srcLogo: { width: 38, height: 19, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  srcTx: { flexShrink: 1, fontSize: 13, color: colors.muted },
+  srcName: { color: colors.ink, fontWeight: '600' },
+  iconBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  // scroll body
+  scroll: { position: 'absolute', top: 56, left: 0, right: 0, bottom: 0 },
+  content: { paddingBottom: 96 },
+  // hero
+  hero: { width: '100%', backgroundColor: colors.chipFill, overflow: 'hidden' },
+  counter: {
+    position: 'absolute', bottom: 10, left: 10, minHeight: 28, justifyContent: 'center',
+    backgroundColor: colors.scrim, borderRadius: radius.pill, paddingHorizontal: 11,
+  },
+  counterTx: { color: colors.onFill, fontSize: 12.5, fontFamily: NUM_FONT, fontVariant: ['tabular-nums'] },
+  dots: { position: 'absolute', bottom: 14, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 5 },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.onFill, opacity: 0.5 },
+  dotOn: { opacity: 1 },
+  arrows: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 8 },
+  arrow: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.scrim },
+  arrowHover: { backgroundColor: colors.dark },
+  thumbs: { gap: 8, paddingHorizontal: 14, paddingTop: 10 },
+  thumb: { width: 72, height: 54, borderRadius: 10, overflow: 'hidden', borderWidth: 2, borderColor: 'transparent' },
   thumbOn: { borderColor: colors.primary },
-  price: { fontSize: 22, fontWeight: '700', color: colors.primary, marginTop: 4 },
-  title: { fontSize: 17, fontWeight: '600', color: colors.ink },
-  loc: { fontSize: 14, color: colors.muted },
-  facts: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
-  fact: { backgroundColor: colors.chipFill, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12, minWidth: 92, alignItems: 'center' },
-  factK: { fontSize: 12, color: colors.muted },
-  factV: { fontSize: 15, fontWeight: '600', color: colors.ink, marginTop: 2 },
-  cta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.primary, borderRadius: radius.pill, paddingVertical: 13, marginTop: 6 },
-  ctaHover: { backgroundColor: colors.dark },
-  ctaTx: { color: colors.onFill, fontSize: 16, fontWeight: '600' },
-  section: { marginTop: 8, gap: 6 },
-  h: { fontSize: 16, fontWeight: '600', color: colors.ink },
-  desc: { fontSize: 15, lineHeight: 24, color: colors.body },
-  note: { fontSize: 12, color: colors.muted, marginTop: 10 },
+  // price + key line + host badge
+  head: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 10 },
+  headMain: { flexGrow: 1, flexShrink: 1, minWidth: 0, gap: 4 },
+  price: { fontSize: 28, lineHeight: 36, color: colors.dark },
+  priceNum: { fontFamily: NUM_FONT, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  priceUnit: { fontSize: 15, color: colors.muted, fontWeight: '500' },
+  // ONE line, never wrapped: the type label is the part that gives way.
+  keyLine: { flexDirection: 'row', alignItems: 'center', flexWrap: 'nowrap', gap: 7, minWidth: 0 },
+  keyTx: { fontSize: 15, fontWeight: '600', color: colors.ink },
+  keyType: { flexShrink: 1 },
+  keyStat: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 0 },
+  host: { alignItems: 'center', gap: 4, width: 88, flexShrink: 0 },
+  hostHover: { opacity: 0.85 },
+  // The transparent logo itself, no frame (owner: a framed one «looks like a photo»).
+  hostLogo: { width: 72, height: 36, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  hostTx: { fontSize: 11.5, lineHeight: 14, fontWeight: '600', color: colors.muted, textAlign: 'center' },
+  keyDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: colors.line },
+  deal: { backgroundColor: colors.tint, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2, flexShrink: 0 },
+  dealTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
+  // location
+  loc: { marginHorizontal: 16, marginTop: 10, borderWidth: 1, borderColor: colors.line, borderRadius: radius.card, overflow: 'hidden' },
+  addrRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 10 },
+  addr: { flexShrink: 1, fontSize: 14, color: colors.ink },
+  mapBox: { backgroundColor: colors.chipFill, borderTopWidth: 1, borderTopColor: colors.line },
+  mapTap: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  mapPill: {
+    position: 'absolute', top: 10, maxWidth: '80%',
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4,
+  },
+  mapPillTx: { fontSize: 11.5, fontWeight: '600', color: colors.muted },
+  mapChip: {
+    position: 'absolute', bottom: 10, width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line,
+  },
+  mapSheet: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.surface },
+  mapClose: {
+    position: 'absolute', top: 12, width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, boxShadow: '0 2px 10px rgba(20,40,30,0.18)',
+  },
+  // sections
+  section: { marginTop: 14, paddingHorizontal: 16, gap: 8 },
+  h: { fontSize: 13, fontWeight: '600', color: colors.muted },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', borderWidth: 1, borderColor: colors.line, borderRadius: radius.card, overflow: 'hidden' },
+  cell: { width: '50%', paddingHorizontal: 12, paddingVertical: 8, gap: 1, borderBottomWidth: 1, borderBottomColor: colors.line },
+  cellLast: { borderBottomWidth: 0 },
+  cellK: { fontSize: 12, color: colors.muted },
+  cellV: { fontSize: 14, fontWeight: '600', color: colors.ink },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.tint, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 5 },
+  chipTx: { fontSize: 12.5, color: colors.chipIcon },
+  descList: { gap: 4 },
+  desc: { fontSize: 15, lineHeight: 26, color: colors.body },
+  bullet: { flexDirection: 'row', gap: 8 },
+  bulletDot: { fontSize: 15, lineHeight: 26, color: colors.primary },
+  bulletTx: { flexShrink: 1 },
+  note: { marginTop: 16, marginHorizontal: 16, fontSize: 12, color: colors.muted },
+  // the CTA row (in flow) and its floating twin
+  ctaRow: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10 },
+  ctaFloat: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 10, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.line },
+  // A 68px bar that invites the tap: a three-stop green gradient (CSS, so the theme's var() tokens
+  // resolve inside it; the lightest stop is a tint OF the primary token), an inset top highlight, a
+  // deeper shadow, the site's logo big in a white square on the start side, the arrow chip on the end.
+  cta: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, height: 68, paddingHorizontal: 10, borderRadius: 20, overflow: 'hidden',
+    backgroundColor: colors.primary,
+    ...(IS_WEB ? { backgroundImage: `linear-gradient(135deg, color-mix(in srgb, ${colors.primary} 82%, white), ${colors.primary} 48%, ${colors.dark})` } as any : {}),
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 10px 26px rgba(29,74,55,0.34)',
+  },
+  ctaHover: { backgroundColor: colors.dark, ...(IS_WEB ? { backgroundImage: `linear-gradient(135deg, ${colors.primary}, ${colors.dark} 60%, ${colors.dark})` } as any : {}) },
+  ctaPressed: { transform: [{ scale: 0.97 }] },
+  // A soft diagonal band that sweeps across once every ~4s (CSS keyframes; omitted under reduced motion).
+  ctaShine: {
+    position: 'absolute', top: -20, bottom: -20, width: '45%', left: 0,
+    ...(IS_WEB ? {
+      backgroundImage: 'linear-gradient(115deg, rgba(255,255,255,0) 35%, rgba(255,255,255,0.22) 50%, rgba(255,255,255,0) 65%)',
+      animationKeyframes: [{ '0%': { transform: [{ translateX: '-260%' }] }, '32%': { transform: [{ translateX: '320%' }] }, '100%': { transform: [{ translateX: '320%' }] } }],
+      animationDuration: '4s', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out',
+    } as any : {}),
+  },
+  ctaLines: { flexShrink: 1, flexGrow: 1, minWidth: 0, gap: 1 },
+  ctaTx: { color: colors.onFill, fontSize: 17, fontWeight: '800' },
+  ctaSub: { color: colors.onFill, opacity: 0.88, fontSize: 12.5 },
+  // The pointing hand slides toward the logo (the end side) on a 1.4s loop; omitted under reduced motion.
+  ctaHand: IS_WEB ? ({
+    display: 'inline-block',
+    animationKeyframes: [{ '0%': { transform: [{ translateX: 0 }] }, '50%': { transform: [{ translateX: -4 }] }, '100%': { transform: [{ translateX: 0 }] } }],
+    animationDuration: '1.4s', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out',
+  } as any) : {},
+  ctaDivider: { width: 1, height: 40, backgroundColor: 'rgba(255,255,255,0.22)', flexShrink: 0 },
+  // The site's own transparent logo, big, in pure white — monochrome marks included.
+  ctaLogo: { width: 92, height: 46, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 },
+  ctaLogoWhite: IS_WEB ? ({ filter: 'brightness(0) invert(1)' } as any) : {},
 });
