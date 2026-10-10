@@ -331,6 +331,8 @@ def fetch_ar(slug: str) -> tuple[bool, Optional[dict], Optional[str], Optional[s
 # runaway re-crawl (a flag reset re-queuing ~57k rows), not to throttle ordinary new listings: on
 # 2026-10-05 ~13k genuinely new rows were pending, which the old 5,000 would have refused.
 MAX_PENDING_DEFAULT = 15000
+# Over the cap, only rows scraped this recently (plus every no-city row) are fetched: see enrich_table.
+ARRIVALS_WINDOW_H = 48
 
 
 def pending_count(c, table: str, flag: str, sel: str) -> int:
@@ -367,24 +369,53 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
     # it through the metered Saudi proxy is exactly what exhausted the free tier (25-26 Jun). Refuse
     # unless explicitly authorised, so a stray flag reset can never silently re-crawl ~57k rows.
     pending = pending_count(c, table, "ar_fetched", "id")
+    # ARRIVALS MODE (New Listings Engineer, 2026-10-10). Over the cap this used to refuse the WHOLE
+    # run, which also starved the one thing it exists for — today's arrivals. From 10-08 the
+    # residential queue sat at 19-27k (wasalt re-lists ~8k ads a day), every run refused in 0 s, and
+    # 137 of 7,552 arrivals in 24 h had NO city (the English list payload carried none; the Arabic
+    # page is where it comes from), so they were unsearchable, plus ~140 with an unbridged English
+    # neighbourhood and no district. Over the cap we now take only (1) rows with no city — they are
+    # invisible to every customer — and (2) rows scraped in the last ARRIVALS_WINDOW_H hours. A flag
+    # reset re-queues OLD rows, which this window excludes, so the breaker still blocks the runaway
+    # re-crawl it was written for; and if even the fresh window exceeds the cap, the run refuses.
+    arrivals_since = None
     if pending > max_pending and not allow_backfill:
-        print(f"⚠ CIRCUIT BREAKER: {pending} un-fetched rows in {table} (> {max_pending}). Steady state "
-              f"is a few/day — this looks like a flag reset or a backfill. Refusing to crawl the backlog "
-              f"through the metered proxy. Re-run with --allow-backfill to override.", flush=True)
-        return {"ok": 0, "empty": 0, "fail": 0, "aborted": pending, "pending_before": pending}
-    q = (c.table(table).select("id,ad_number,listing_url")
-         .eq("active", True).eq("ar_fetched", False))
-    # Cloud matrix sharding: 10 parallel jobs, each claims a disjoint slice by the last digit of
-    # ad_number (WST…N). Server-side, ~even, zero overlap → no duplicate proxy fetches.
-    if shards == 10:
-        q = q.like("ad_number", f"%{shard}")
+        arrivals_since = (datetime.now(timezone.utc) - timedelta(hours=ARRIVALS_WINDOW_H)).isoformat()
+        fresh = (c.table(table).select("id", count="exact").eq("active", True).eq("ar_fetched", False)
+                 .gte("scraped_at", arrivals_since).limit(1).execute())
+        if fresh.count is None or int(fresh.count) > max_pending:
+            print(f"⚠ CIRCUIT BREAKER: {pending} un-fetched rows in {table} (> {max_pending}), and the "
+                  f"last {ARRIVALS_WINDOW_H}h alone holds {fresh.count}. This looks like a flag reset or a "
+                  f"backfill. Refusing to crawl through the metered proxy. Re-run with --allow-backfill "
+                  f"to override.", flush=True)
+            return {"ok": 0, "empty": 0, "fail": 0, "aborted": pending, "pending_before": pending}
+        print(f"⚠ {pending} un-fetched rows (> {max_pending}): arrivals mode — no-city rows first, then "
+              f"the {fresh.count} scraped in the last {ARRIVALS_WINDOW_H}h; the old backlog waits.",
+              flush=True)
+
+    def _base():
+        q = (c.table(table).select("id,ad_number,listing_url")
+             .eq("active", True).eq("ar_fetched", False))
+        # Cloud matrix sharding: 10 parallel jobs, each claims a disjoint slice by the last digit of
+        # ad_number (WST…N). Server-side, ~even, zero overlap → no duplicate proxy fetches.
+        if shards == 10:
+            q = q.like("ad_number", f"%{shard}")
+        return q
     # NEWEST FIRST (New Listings Engineer, 2026-10-07). The pending queue holds ~12k rows and a run
     # clears ~380 before its time budget, so `order("id")` (oldest first) meant a listing that
     # arrived today waited behind thousands of older ones: 985 of 985 wasalt rows scraped in the
     # last 3 days had ar_fetched=false, and the Arabic page is where their city/district come from
     # (9 of 463 arrivals unsearchable for no city, 28 with no district). Today's arrivals go first;
     # older pending rows drain behind them.
-    rows = q.order("id", desc=True).limit(limit).execute().data or []
+    if arrivals_since is None:
+        rows = _base().order("id", desc=True).limit(limit).execute().data or []
+    else:
+        rows = _base().is_("city", "null").order("id", desc=True).limit(limit).execute().data or []
+        seen = {r["id"] for r in rows}
+        if len(rows) < limit:
+            more = (_base().gte("scraped_at", arrivals_since).order("id", desc=True)
+                    .limit(limit).execute().data or [])
+            rows += [r for r in more if r["id"] not in seen][: limit - len(rows)]
     print(f"── {table} shard {shard}/{shards}: {len(rows)} un-fetched rows (cap {limit})", flush=True)
     stats = {"ok": 0, "empty": 0, "fail": 0, "skipped": 0}
     lock = threading.Lock()
@@ -590,6 +621,11 @@ def main() -> int:
         # wrongly flip every healthy "fully caught up" run to ok=False.
         allow_empty=True,
     )
+    # A refusal is a run that did not do its job (same rule as enrich.py, 2026-10-10): fail where
+    # people look instead of reporting success.
+    if aborted:
+        print(f"✗ circuit breaker refused this run: {aborted} rows pending — nothing was enriched", flush=True)
+        return 2
     return 0
 
 
