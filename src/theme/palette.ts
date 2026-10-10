@@ -37,6 +37,11 @@ export const lightColors = {
   accentLeaf: '#2fb672', // bright "AI" accent
   amberBg: '#fdf6ec',
   amberInk: '#92591a',
+  // The ad page's hazard note («قد يكون الإعلان حُذف أو بيع», owner 2026-10-10): a warmer amber than the
+  // banner family above, with its own hairline — one note, read before the button.
+  hazardBg: '#fff7e3',
+  hazardLine: '#f1d38a',
+  hazardInk: '#6b4a00',
   whatsApp: '#25d366',
   onFill: '#ffffff', // text/icons ON solid green fills — white in BOTH themes
   selFill: '#2f7247', // SELECTED control fill (white text) — deeper than dark-theme primary
@@ -104,6 +109,9 @@ export const darkColors: Record<PaletteKey, string> = {
   accentLeaf: '#2fb672',
   amberBg: '#2b2416',
   amberInk: '#e3b56f',
+  hazardBg: '#2b2416',
+  hazardLine: '#5a4414',
+  hazardInk: '#f0cf7a',
   whatsApp: '#25d366',
   onFill: '#ffffff',
   selFill: '#2f7247', // selected control fill — brand green as ACCENT
@@ -217,3 +225,18 @@ export const TAP44 = { tap44: '1' } as const;
 export const COMPOSER_INPUT = { composerInput: '1' } as const;
 export const COMPOSER_PLACEHOLDER_CSS =
   '[data-composer-input]::placeholder{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}';
+
+// THE GOLD BUZZER (owner 2026-10-10) — the one control allowed to leave the green: the pill that carries
+// the source's logo inside the in-app ad page's «اضغط هنا للتواصل» bar. A deliberate brand exception for
+// this single control; same values in both themes (gold reads on light and on charcoal alike).
+export const BUZZER_GOLD = {
+  light: '#fff3b0', // radial centre
+  mid: '#f6d365',
+  deep: '#e0a526',
+  dark: '#b07a10', // radial edge
+  ring: '#f9e08a', // inner light ring
+  rim: 'rgba(122,82,8,0.55)', // dark-gold outer ring
+  shade: 'rgba(176,122,16,0.55)', // drop shadow
+  glow: 'rgba(246,211,101,0.45)', // warm glow, resting
+  glowPeak: 'rgba(246,211,101,0.9)', // warm glow, pulse peak
+} as const;
