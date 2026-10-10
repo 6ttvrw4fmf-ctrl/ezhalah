@@ -1,7 +1,7 @@
 # Haraj SHADOW crawl (backlog 311, owner order 2026-10-09). Reads haraj.com.sa with our honest bot
 # user-agent, classifies each real-estate post as offer / request / other / doubt, and PRINTS the
 # sample for the hand-check the owner requires before Haraj may go live. It writes NOTHING: no
-# database secret is given to it, so it cannot. Runs on PRs that touch the Haraj crawler and on demand.
+# database secret is given to it, so it cannot. Runs on pushes that change the Haraj crawler and on demand.
 name: Haraj shadow crawl
 
 on:
@@ -10,10 +10,16 @@ on:
       max_posts:
         description: "How many posts to read (1 request a second)"
         default: "900"
-  pull_request:
+  # A PUSH that changes the Haraj crawler (push path filters read the pushed commits only, so an
+  # unrelated push on the same PR does not re-crawl Haraj — a pull_request filter reads the whole PR).
+  push:
+    branches-ignore: [main]
     paths:
       - "scrapers/haraj/**"
-      - ".github/workflows/haraj-shadow.yml"
+
+concurrency:
+  group: haraj-shadow
+  cancel-in-progress: false
 
 permissions:
   contents: read
