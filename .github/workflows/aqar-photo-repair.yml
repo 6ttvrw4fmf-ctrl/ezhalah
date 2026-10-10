@@ -1,0 +1,85 @@
+name: Aqar photo + pin repair
+
+# Re-reads Aqar rows still holding the pre-2026-10-10 gallery sweep (other ads' photos, size variants,
+# backslash junk, no map pin) through the production enricher + upsert (scrapers/aqar/recover_stubs.py
+# --cohort photo-repair). Users' view first: sale ads in Riyadh/Jeddah/Dammam, then other sale ads,
+# then rent; newest first. A failed fetch writes nothing (the enricher returns None, the upsert drops
+# it), and a repaired row loses the junk marker so it is never picked again.
+#
+# Started once by hand; each round re-dispatches the next (job `next`) until ≤300 rows are left.
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "rows per shard per table this run (5 shards)"
+        required: false
+        default: "8000"
+      hops:
+        description: "rounds this run may still chain after itself (stops earlier when ≤300 rows are left)"
+        required: false
+        default: "8"
+
+concurrency:
+  group: aqar-photo-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]      # one machine (own IP) per shard; ≤2.5 fetches/s each
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Repair residential, then commercial
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_MIN_INTERVAL: "0.4"
+        run: |
+          python -m scrapers.aqar.recover_stubs --cohort photo-repair --shard ${{ matrix.shard }}/5 \
+            --limit "${{ inputs.limit || '8000' }}" --table residential
+          python -m scrapers.aqar.recover_stubs --cohort photo-repair --shard ${{ matrix.shard }}/5 \
+            --limit 1500 --table commercial
+
+  # Self-chaining instead of a cron: when every shard succeeded and rows still carry the marker,
+  # dispatch the next round with one hop fewer. Stops at ≤300 rows left, on any shard failure, on an
+  # unreadable count (reads as 0), or when hops run out — it can never loop unbounded.
+  next:
+    needs: repair
+    if: ${{ needs.repair.result == 'success' && (inputs.hops || '8') != '0' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Dispatch the next round while rows still need it
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          left=$(python -c "from scrapers.aqar.recover_stubs import remaining_marked; print(remaining_marked())")
+          echo "live Aqar rows still carrying the old gallery sweep: $left"
+          if [ "$left" -gt 300 ]; then
+            gh workflow run aqar-photo-repair.yml --ref "${{ github.ref_name }}" \
+              -f limit="${{ inputs.limit || '8000' }}" -f hops="$(( ${{ inputs.hops || '8' }} - 1 ))"
+          fi
