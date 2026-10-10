@@ -37,11 +37,26 @@ on:
   # not a schedule here (LIFECYCLE_ENGINEER.md); the GitHub cron was removed so one slot never
   # runs twice.
   workflow_call:
+    # Every `inputs.*` this file reads must be declared here too, or GitHub refuses the called
+    # run at validation (the first pg_cron dispatch, 2026-10-10 12:40 UTC, failed in 2 s with no
+    # job for exactly that reason). Same names, same defaults as the dispatch inputs below.
     inputs:
       apply:
         description: "Write strikes/verifications/deactivations (the pg_cron path passes true)."
         type: boolean
         default: false
+      limit:
+        description: "Max candidates to probe this run"
+        type: string
+        default: "600"
+      proxy:
+        description: "Never set on the pg_cron path (see the dispatch input of the same name)."
+        type: boolean
+        default: false
+      max_requests:
+        description: "Hard ceiling on TOTAL requests. 0 = unlimited."
+        type: string
+        default: "0"
   workflow_dispatch:
     inputs:
       apply:
