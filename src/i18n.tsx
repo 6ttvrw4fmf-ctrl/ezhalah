@@ -195,7 +195,11 @@ const AR: Record<string, string> = {
   'Search across {count} real-estate websites': 'نبحث عبر {count} موقع عقاري',
   'Choose websites': 'اختر المواقع',
   'Deep search across websites': 'بحث عميق في المواقع',
-  'Focus your search on one or more specific websites. We show only their listings.': 'خصّص بحثك في موقع معيّن أو أكثر، ونعرض لك إعلاناتها فقط.',
+  // Owner 2026-10-10: the sheet must say its purpose — one site, several, or all, chosen by coverage.
+  'Focus your search on one or more specific websites. We show only their listings.': 'اختر موقعاً معيّناً أو أكثر، أو كل المواقع، ونعرض لك إعلاناتها فقط.',
+  'By coverage': 'حسب التغطية',
+  'Websites covering {region}': 'المواقع التي تغطي {region}',
+  '{count} listings': '{count} إعلان',
   'You can choose up to 3 websites': 'يمكنك اختيار ثلاثة مواقع كحدٍّ أقصى.',
   'Search across Saudi Arabia': 'ابحث في جميع المواقع داخل المملكة',
   // The regions map inside the picker (owner 2026-10-10: «highlight the entire region … so users are
@@ -1636,6 +1640,7 @@ function fill(template: string, vars?: Record<string, string | number>): string 
 // — each entry is the faithful translation of the Arabic value, in plain sentence-case English.
 const EN: Record<string, string> = {
   'Listing bedrooms': 'Bedrooms',
+  'Focus your search on one or more specific websites. We show only their listings.': 'Choose one or more specific websites, or all of them. We show only their listings.',
   'Smart Assistant': 'Smart Broker', // «الوسيط الذكي»
   'One site to search every Saudi real-estate platform and website.': 'One site to search all Saudi real-estate platforms and websites.',
   'Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.':

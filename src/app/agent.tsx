@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, MAX_PICKER_SOURCES, platformRegionIds, platformRegionShare } from '@/data/platformPickerProfiles';
+import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, MAX_PICKER_SOURCES, platformRegionIds, platformRegionShare, platformRegionListings } from '@/data/platformPickerProfiles';
 import PickerRegionsMap, { regionLabel } from '@/components/PickerRegionsMap';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { COMPOSER_INPUT, TAP44 } from '@/theme/palette';
@@ -725,6 +725,12 @@ export default function Agent() {
     const counts: Record<number, number> = {};
     for (const platform of offeredPlatforms) for (const id of platformRegionIds(platform.name)) counts[id] = (counts[id] ?? 0) + 1;
     return counts;
+  }, [offeredPlatforms]);
+  // Measured listings per region across the offered sites — the «4,120 إعلان» beside a tapped region.
+  const pickerRegionListings = useMemo(() => {
+    const sums: Record<number, number> = {};
+    for (const platform of offeredPlatforms) for (const id of platformRegionIds(platform.name)) sums[id] = (sums[id] ?? 0) + platformRegionListings(platform.name, id);
+    return sums;
   }, [offeredPlatforms]);
   // A tapped region lists the sites with listings there, its own offices first (the share of their
   // inventory in that region, highest first), the nationwide portals after.
@@ -4159,6 +4165,7 @@ export default function Agent() {
                 selectedRegion={pickerRegion}
                 coveredRegions={pickerCoveredRegions}
                 counts={pickerRegionCounts}
+                listings={pickerRegionListings}
                 totalCount={offeredPlatforms.length}
                 onSelectRegion={(id) => setPickerRegion((current) => (current === id ? null : id))}
                 compact={pickerSheet}
@@ -4180,7 +4187,7 @@ export default function Agent() {
                 // A tapped map region is the one heading (owner 2026-10-10: «say the region title, then the
                 // websites»); otherwise the measured-coverage sections.
                 const startsGroup = pickerRegion !== null ? index === 0 : index === 0 || PLATFORM_PICKER_PROFILES[pickerPlatforms[index - 1].name].group[locale].key !== group.key;
-                const sectionLabel = pickerRegion !== null ? regionLabel(pickerRegion, locale) : group.label;
+                const sectionLabel = pickerRegion !== null ? t('Websites covering {region}', { region: regionLabel(pickerRegion, locale) }) : group.label;
                 // The reviewed 96×48 logo layout, drawn into a 56×28 slot.
                 const k = 28 / 48;
                 return (
@@ -4207,6 +4214,8 @@ export default function Agent() {
                           {description}
                         </Text>
                       </View>
+                      {/* While a region is tapped: this site's measured listings there (owner: real numbers). */}
+                      {pickerRegion !== null ? <Text style={s.platformPickerItemCount}>{t('{count} listings', { count: platformRegionListings(platform.name, pickerRegion).toLocaleString('en-US') })}</Text> : null}
                       {selected ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
                     </Pressable>
                   </View>
@@ -5456,6 +5465,7 @@ const s = StyleSheet.create({
   platformPickerItemName: { fontFamily: CHAT_FONT, color: colors.body, fontSize: 17, lineHeight: 24, fontWeight: '400', textAlign: 'right' },
   platformPickerItemNameOn: { color: colors.ink, fontWeight: '500' },
   platformPickerItemHint: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: 1, textAlign: 'right' },
+  platformPickerItemCount: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 16, flexShrink: 0 },
   platformPickerSectionTitle: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 16, fontWeight: '500', paddingHorizontal: 10, paddingTop: 14, paddingBottom: 4 },
   platformPickerRule: { height: 1, backgroundColor: colors.line, marginVertical: 6, marginHorizontal: 10 },
   platformPickerEmpty: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: 'center', paddingVertical: 28 },

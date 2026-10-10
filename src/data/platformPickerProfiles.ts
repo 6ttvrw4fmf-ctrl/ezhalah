@@ -201,6 +201,11 @@ export function platformRegionShare(name: string, regionId: number): number {
   return (entry as PickerCoverage & { region?: { id: number } }).region?.id === regionId ? 1 : 0;
 }
 
+/** A site's measured listings in one region (the «162 إعلان» beside its row while that region is tapped). */
+export function platformRegionListings(name: string, regionId: number): number {
+  return coverage[name]?.regions.find(r => r.id === regionId)?.count ?? 0;
+}
+
 export function pickerSourceSlugs(names: string[]): string[] {
   return [...new Set(names.flatMap(name => {
     const entry = coverageSnapshot.platforms[name as keyof typeof coverageSnapshot.platforms];
