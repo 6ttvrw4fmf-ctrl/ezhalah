@@ -176,6 +176,13 @@ export const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: str
     RentAnnual: ['street_width', 'direction'],
     Buy: ['street_width', 'direction'],
   },
+  // أرض خام (owner 2026-10-09: «make an advanced filter for أرض خام»). Profiled on the 6,008 tagged rows:
+  // Buy 5,939 / Rent 69 → Buy only (Rent is too thin to certify). street width known 92% (p25 15 m,
+  // p75 25 m — a real split), direction known 84% over 8 values. NO utility chips: «no electricity/
+  // water/sewage» is what makes a land raw, so those chips can only ever answer «no».
+  'Raw Land': {
+    Buy: ['street_width', 'direction'],
+  },
   'Rest House': {
     RentAnnual: ['property_age', 'street_width', 'amenities'],
     Buy: ['property_age', 'street_width', 'direction', 'amenities'],

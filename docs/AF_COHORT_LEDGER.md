@@ -433,3 +433,11 @@ RPC — the oracle now covers the published spellings; `p_rent_period='كلاه�
 cells have truth coverage); `verify-af-independent-oracle.ts` left the required `npm test` for the live
 workflow. Deferred for the owner: the `p_has_license=false` clause arm reads a missing licence as
 «unlicensed» (no sender today, pinned); whether the card should offer the 8 rich tokens.
+
+### أرض خام / Raw Land — BUY — ✅ CERTIFIED 2026-10-09 (owner: «make an advanced filter for أرض خام»)
+- A FILTER box under تجاري → «الأراضي», not a stored type: raw lands keep their source type_ar and carry
+  the tag `unit_subtype_ar = 'أرض خام'` (sync_raw_land_subtype, source evidence only). The type token
+  'أرض خام' matches the tag inside af_eligibility_clause (20261009235607), so every surface reads it.
+- Questions: street_width · direction. n = 5,939 Buy (Rent 69 → not certified). Street known 92%
+  (p25 15 m / p75 25 m), direction known 84% over 8 values. No utility chips (raw = no services).
+- Parity, RPC vs SQL: street ≥ 20 m 2,816 = 2,816; Riyadh + شمال 220 = 220. Registry row 20261010000246.

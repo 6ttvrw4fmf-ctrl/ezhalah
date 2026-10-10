@@ -43,7 +43,13 @@ export const HIERARCHY: Record<Macro, SubGroup[]> = {
     // category, the misfile-recovery scopes, the DeepSeek vocabulary — keeps reading Residential; only the
     // filter OFFERS it on the commercial side, and the RPC category gate is dropped for such a scope
     // (scopeCrossesMacro in src/lib/searchDefaults.ts) because the type_ar list is already exact.
-    { group: 'Commercial & Industrial Plots',     types: ['Commercial Land', 'Industrial Land', 'Residential Land'] },
+    // 'Raw Land' (أرض خام, owner 2026-10-09: «our own separate property type … under the Commercial
+    // section, الأراضي»). A FILTER box, not a source type: a raw land keeps its own type_ar (أرض تجارية /
+    // سكنية / صناعية / زراعية — the card still shows the source's word) and is TAGGED raw in the index
+    // (unit_subtype_ar = 'أرض خام', sync_raw_land_subtype, only on the source's own word). Its p_types
+    // token 'أرض خام' matches that tag in af_eligibility_clause (migration 20261009235607), so every
+    // count/result surface reads one definition and a raw residential plot is found under تجاري too.
+    { group: 'Commercial & Industrial Plots',     types: ['Commercial Land', 'Industrial Land', 'Residential Land', 'Raw Land'] },
   ],
 };
 
@@ -208,6 +214,7 @@ const RAW_TO_CLEAN: Record<string, string> = {
   'مخازن سحابية': 'Warehouse',         // cloud / self-storage, titled مستودع
   'درايف ثرو': 'Shop',                // drive-thru kiosk (كشك)
   'حوش': 'Residential Land',           // walled yard / plot, titled ارض
+  'أرض خام': 'Raw Land',               // the raw-land TAG token (see HIERARCHY 'Raw Land'); no source stores it as a type
   // Match-their-architecture sweep (2026-07-27): real raw types with zero taxonomy entry, each
   // verified live-in-DB before mapping (never guessed). [[feedback_ambiguous-mapping-ask-first-rule]]
   'إستراحة': 'Rest House',              // aqarcity hamza spelling variant of استراحة (11 rows, res table)
@@ -309,6 +316,9 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   // Commercial — Plots (physically in RES tables on Aqar → both)
   'Commercial Land':     { rawTypes: ['Commercial Land'], kinds: BOTH },
   'Industrial Land':     { rawTypes: ['Industrial Land'], kinds: BOTH },
+  // أرض خام (owner 2026-10-09): the TAG token, not a stored type — matched against
+  // search_listings_ar.unit_subtype_ar by af_eligibility_clause. BOTH: raw lands sit in either kind.
+  'Raw Land':            { rawTypes: ['أرض خام'], kinds: BOTH },
 };
 
 // «مرافق خدمية» (Service Facilities) = EXACTLY these 5 facility types, nothing else, EVER (owner 2026-07-07,

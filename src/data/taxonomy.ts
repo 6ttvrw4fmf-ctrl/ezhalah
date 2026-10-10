@@ -31,6 +31,9 @@ const SIZE_BY_TYPE: Record<string, string[]> = {
   Factory: ['Under 1,000 m²', '1,000–3,000 m²', '3,000–10,000 m²', '10,000+ m²'],
   'Commercial Land': ['Under 500 m²', '500–1,500 m²', '1,500–5,000 m²', '5,000+ m²'],
   'Industrial Land': ['Under 1,000 m²', '1,000–5,000 m²', '5,000–20,000 m²', '20,000+ m²'],
+  // أرض خام (2026-10-09): measured on the 6,008 tagged rows — median 660 m², p90 3,284 m², a long tail of
+  // very large plots; the Industrial Land ladder fits that spread.
+  'Raw Land': ['Under 1,000 m²', '1,000–5,000 m²', '5,000–20,000 m²', '20,000+ m²'],
   Farm: ['Under 5,000 m²', '5,000–20,000 m²', '20,000–100,000 m²', '100,000+ m²'],
   'Agriculture Plot': ['Under 1,000 m²', '1,000–5,000 m²', '5,000–20,000 m²', '20,000+ m²'],
   Hotel: ['Under 1,000 m²', '1,000–3,000 m²', '3,000–10,000 m²', '10,000+ m²'],
@@ -138,6 +141,12 @@ const PRICE_BY_TYPE: Record<string, Record<string, PriceBands>> = {
     '5,000+ m²': { Rent: ['Under SAR 1M', 'SAR 1M–2.5M', 'SAR 2.5M–5M', 'SAR 5M+'], Buy: ['Under SAR 15M', 'SAR 15M–40M', 'SAR 40M–80M', 'SAR 80M+'] },
   },
   'Industrial Land': {
+    'Under 1,000 m²': { Rent: ['Under SAR 100k', 'SAR 100k–300k', 'SAR 300k–600k', 'SAR 600k+'], Buy: ['Under SAR 1M', 'SAR 1M–3M', 'SAR 3M–7M', 'SAR 7M+'] },
+    '1,000–5,000 m²': { Rent: ['Under SAR 250k', 'SAR 250k–700k', 'SAR 700k–1.5M', 'SAR 1.5M+'], Buy: ['Under SAR 3M', 'SAR 3M–10M', 'SAR 10M–25M', 'SAR 25M+'] },
+    '5,000–20,000 m²': { Rent: ['Under SAR 700k', 'SAR 700k–2M', 'SAR 2M–4M', 'SAR 4M+'], Buy: ['Under SAR 10M', 'SAR 10M–30M', 'SAR 30M–70M', 'SAR 70M+'] },
+    '20,000+ m²': { Rent: ['Under SAR 2M', 'SAR 2M–5M', 'SAR 5M–10M', 'SAR 10M+'], Buy: ['Under SAR 30M', 'SAR 30M–80M', 'SAR 80M–150M', 'SAR 150M+'] },
+  },
+  'Raw Land': {
     'Under 1,000 m²': { Rent: ['Under SAR 100k', 'SAR 100k–300k', 'SAR 300k–600k', 'SAR 600k+'], Buy: ['Under SAR 1M', 'SAR 1M–3M', 'SAR 3M–7M', 'SAR 7M+'] },
     '1,000–5,000 m²': { Rent: ['Under SAR 250k', 'SAR 250k–700k', 'SAR 700k–1.5M', 'SAR 1.5M+'], Buy: ['Under SAR 3M', 'SAR 3M–10M', 'SAR 10M–25M', 'SAR 25M+'] },
     '5,000–20,000 m²': { Rent: ['Under SAR 700k', 'SAR 700k–2M', 'SAR 2M–4M', 'SAR 4M+'], Buy: ['Under SAR 10M', 'SAR 10M–30M', 'SAR 30M–70M', 'SAR 70M+'] },

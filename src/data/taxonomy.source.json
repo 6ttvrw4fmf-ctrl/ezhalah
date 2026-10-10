@@ -550,7 +550,15 @@
           "Resort",
           "منتجع",
           "ATM Site",
-          "موقع صراف"
+          "موقع صراف",
+          "Event Hall",
+          "قاعة",
+          "Meeting Room",
+          "غرفة اجتماعات",
+          "Storage Yard",
+          "ساحة تخزين",
+          "Self Storage",
+          "تخزين ذاتي"
         ],
         "kinds": [
           "res",
@@ -589,6 +597,25 @@
       "query": {
         "rawTypes": [
           "Industrial Land"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Raw Land",
+      "macro": "Commercial",
+      "hierarchy": {
+        "macro": "Commercial",
+        "group": "Commercial & Industrial Plots"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "أرض خام"
         ],
         "kinds": [
           "res",

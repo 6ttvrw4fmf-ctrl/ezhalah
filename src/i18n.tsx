@@ -247,6 +247,7 @@ const AR: Record<string, string> = {
   'Workshop': 'ورشة',
   'Commercial Land': 'أرض تجارية',
   'Industrial Land': 'أرض صناعية',
+  'Raw Land': 'أرض خام',
   'Farm': 'مزرعة',
   'Agriculture Plot': 'أرض زراعية',
   'Camp': 'مخيم',

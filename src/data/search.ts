@@ -1060,10 +1060,16 @@ const cleanOf = (l: Listing): string => l.cleanType ?? l.type;
 // (agent path) as a 1-element list, else empty. One code path covers single + multi everywhere.
 export { effectiveTypes, effectiveGroups } from '@/lib/searchDefaults';
 
+// «أرض خام» is a TAG on a land row, not its type: the card keeps the source's own land type, and the
+// SERVER already restricted the pool to tagged rows (p_types token 'أرض خام', af_eligibility_clause).
+// So client-side the box matches any land clean type — never a non-land row.
+const RAW_LAND_CARRIERS = ['Commercial Land', 'Industrial Land', 'Residential Land', 'Agriculture Plot'];
+
 function matchesType(l: Listing, q: SearchQuery): boolean {
   const c = cleanOf(l);
   const sel = effectiveTypes(q);
-  if (sel.length) return sel.some((s) => s === c || (SUBGROUPS[s]?.includes(c) ?? false)); // OR across selected clean types; a subgroup box (مرافق خدمية) matches any of its member types
+  if (sel.length) return sel.some((s) => s === c || (SUBGROUPS[s]?.includes(c) ?? false)
+    || (s === 'Raw Land' && RAW_LAND_CARRIERS.includes(c))); // OR across selected clean types; a subgroup box (مرافق خدمية) matches any of its member types
   // OR across every selected group: a listing qualifies by belonging to ANY of them.
   const grps = effectiveGroups(q);
   if (grps.length) return grps.some((g) => groupMembers(g).includes(c));
