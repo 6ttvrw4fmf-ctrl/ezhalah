@@ -53,7 +53,8 @@ const problems = (may: May): string[] => {
 const real = problems(await lift(LIB));
 check('a down or empty site is never offered; a live one always is', real.length === 0, real.join('\n      '));
 
-const memo = windowBetween(AGENT, 'const pickerPlatforms = useMemo(', '}, [platformPickerSearch, t, pickerLiveTick]);', 'agent.tsx');
+// offeredPlatforms = the live-filtered list; pickerPlatforms (2026-10-10) is its view through the regions map.
+const memo = windowBetween(AGENT, 'const offeredPlatforms = useMemo(', '}, [platformPickerSearch, t, pickerLiveTick]);', 'agent.tsx');
 const wired = (memoSrc: string, libSrc: string) =>
   /if \(!pickerMayOffer\(platform\.name, liveNames, downNames\)\) continue;/.test(memoSrc)
   && /const liveNames = livePickerNames\(\);/.test(memoSrc) && /const downNames = hiddenPlatformNames\(\);/.test(memoSrc)

@@ -16,7 +16,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, MAX_PICKER_SOURCES } from '@/data/platformPickerProfiles';
+import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, platformRegionIds, platformRegionShare, platformRegionListings } from '@/data/platformPickerProfiles';
+import PickerRegionsMap, { regionLabel } from '@/components/PickerRegionsMap';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { COMPOSER_INPUT, TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
@@ -684,6 +685,8 @@ export default function Agent() {
   // The source picker owns the exact websites selected for this conversation.
   const [platformPickerOpen, setPlatformPickerOpen] = useState(false);
   const [platformPickerSearch, setPlatformPickerSearch] = useState('');
+  // The picker's regions map (owner 2026-10-10): the tapped catalogue region, or null = whole kingdom.
+  const [pickerRegion, setPickerRegion] = useState<number | null>(null);
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [pickerSourceExplicit, setPickerSourceExplicit] = useState(false);
   const selectedPlatforms = useMemo(
@@ -697,7 +700,7 @@ export default function Agent() {
     void loadLivePickerNames().then(() => { if (alive) setPickerLiveTick((n) => n + 1); });
     return () => { alive = false; };
   }, []);
-  const pickerPlatforms = useMemo(() => {
+  const offeredPlatforms = useMemo(() => {
     const needle = platformPickerSearch.replace(/\s+/g, '').toLocaleLowerCase();
     const unique = new Map<string, LoaderPlatform>();
     const liveNames = livePickerNames();
@@ -715,6 +718,33 @@ export default function Agent() {
       return `${platform.name} ${t(platform.i18nKey)}`.replace(/\s+/g, '').toLocaleLowerCase().includes(needle);
     });
   }, [platformPickerSearch, t, pickerLiveTick]);
+  // THE REGIONS MAP (owner 2026-10-10: «highlight the entire region … so users are aware of where they
+  // cover»). A tapped region is a VIEW over the offered list — only the sites with listings there — and
+  // never a change to the search: the restriction still comes solely from selectedSources/choosePlatform.
+  const pickerRegionCounts = useMemo(() => {
+    const counts: Record<number, number> = {};
+    for (const platform of offeredPlatforms) for (const id of platformRegionIds(platform.name)) counts[id] = (counts[id] ?? 0) + 1;
+    return counts;
+  }, [offeredPlatforms]);
+  // Measured listings per region across the offered sites — the «4,120 إعلان» beside a tapped region.
+  const pickerRegionListings = useMemo(() => {
+    const sums: Record<number, number> = {};
+    for (const platform of offeredPlatforms) for (const id of platformRegionIds(platform.name)) sums[id] = (sums[id] ?? 0) + platformRegionListings(platform.name, id);
+    return sums;
+  }, [offeredPlatforms]);
+  // A tapped region lists the sites with listings there, its own offices first (the share of their
+  // inventory in that region, highest first), the nationwide portals after.
+  const pickerPlatforms = useMemo(
+    () => (pickerRegion === null ? offeredPlatforms : offeredPlatforms.filter((platform) => platformRegionIds(platform.name).includes(pickerRegion))
+      .sort((a, b) => platformRegionShare(b.name, pickerRegion) - platformRegionShare(a.name, pickerRegion))),
+    [offeredPlatforms, pickerRegion],
+  );
+  // The regions the lit sites cover — the map glows there so the user sees the reach of their picks.
+  // «كل المواقع» (nothing lit) = every site, so the whole kingdom glows (owner 2026-10-10).
+  const pickerCoveredRegions = useMemo(
+    () => new Set(selectedSources.length ? selectedSources.flatMap((name) => platformRegionIds(name)) : Object.keys(pickerRegionCounts).map(Number)),
+    [selectedSources, pickerRegionCounts],
+  );
   const [loaderBottomInset, setLoaderBottomInset] = useState<number>();
   // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): a search that arrived via Normal Filter's
   // «بحث» (the `?filter=` param — see the effect below, the ONE place this flips true) shows its
@@ -3939,7 +3969,9 @@ export default function Agent() {
   const choosePlatform = (source: string | null) => {
     setPickerSourceExplicit(true);
     setSelectedSources(names => source === null ? [] : togglePickerSource(names, source));
-    closePlatformPicker();
+    // Lighting a site keeps the sheet open so several can be picked in one visit; only «كل المواقع», the ✕
+    // or a tap outside closes it (owner 2026-10-10: «it doesn't take him out … till he clicks x»).
+    if (source === null) { setPickerRegion(null); closePlatformPicker(); }
   };
 
   return (
@@ -4066,9 +4098,6 @@ export default function Agent() {
               <View style={s.platformPickerHeading}>
                 <Text style={s.platformPickerTitle}>{t('Deep search across websites')}</Text>
                 <Text style={s.platformPickerSubtitle}>{t('Focus your search on one or more specific websites. We show only their listings.')}</Text>
-                <Text testID="platform-picker-limit" style={[s.platformPickerSubtitle, selectedSources.length >= MAX_PICKER_SOURCES && { color: colors.primary }]}>
-                  {t('You can choose up to 3 websites')}
-                </Text>
               </View>
               <Pressable
                 accessibilityRole="button"
@@ -4081,35 +4110,49 @@ export default function Agent() {
               </Pressable>
             </View>
 
-            <View style={s.platformPickerSearchBox}>
-              <Ionicons name="search-outline" size={17} color={colors.muted} />
-              <TextInput
-                value={platformPickerSearch}
-                onChangeText={setPlatformPickerSearch}
-                placeholder={t('Search websites…')}
-                placeholderTextColor={colors.muted}
-                style={s.platformPickerSearchInput}
-                accessibilityLabel={t('Search websites…')}
-                returnKeyType="search"
-              />
-              {platformPickerSearch ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={t('Clear all')}
-                  onPress={() => setPlatformPickerSearch('')}
-                  hitSlop={8}
-                >
-                  <Ionicons name="close-circle" size={17} color={colors.muted} />
-                </Pressable>
-              ) : null}
-            </View>
-
             <ScrollView
               style={s.platformPickerList}
               contentContainerStyle={s.platformPickerListContent}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={true}
             >
+              <PickerRegionsMap
+                locale={locale}
+                t={t}
+                fontFamily={CHAT_FONT}
+                selectedRegion={pickerRegion}
+                coveredRegions={pickerCoveredRegions}
+                counts={pickerRegionCounts}
+                listings={pickerRegionListings}
+                totalCount={offeredPlatforms.length}
+                onSelectRegion={(id) => setPickerRegion((current) => (current === id ? null : id))}
+                compact={pickerSheet}
+              />
+
+              {/* Step 2 (owner 2026-10-10): the websites — searched by name or picked from the list below. */}
+              <Text accessibilityRole="header" style={[s.platformPickerStep, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>{t('Step 2 · Choose the websites')}</Text>
+              <View style={s.platformPickerSearchBox}>
+                <Ionicons name="search-outline" size={17} color={colors.muted} />
+                <TextInput
+                  value={platformPickerSearch}
+                  onChangeText={setPlatformPickerSearch}
+                  placeholder={t('Search websites…')}
+                  placeholderTextColor={colors.muted}
+                  style={s.platformPickerSearchInput}
+                  accessibilityLabel={t('Search websites…')}
+                  returnKeyType="search"
+                />
+                {platformPickerSearch ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('Clear all')}
+                    onPress={() => setPlatformPickerSearch('')}
+                    hitSlop={8}
+                  >
+                    <Ionicons name="close-circle" size={17} color={colors.muted} />
+                  </Pressable>
+                ) : null}
+              </View>
               <Pressable
                 testID="platform-picker-all"
                 accessibilityRole="button"
@@ -4130,9 +4173,6 @@ export default function Agent() {
               <View style={s.platformPickerRule} />
               {pickerPlatforms.map((platform, index) => {
                 const selected = selectedSources.includes(platform.name);
-                // At the limit, a site not already chosen cannot be added: the row is dimmed and inert, so the
-                // tap neither closes the sheet nor silently does nothing (togglePickerSource refuses it too).
-                const atLimit = !selected && selectedSources.length >= MAX_PICKER_SOURCES;
                 const profile = PLATFORM_PICKER_PROFILES[platform.name];
                 // What the site is and where it covers — the measured coverage sentence, one quiet line
                 // under the name, never truncated (owner 2026-10-09 round 2: «it had a sentence and
@@ -4140,21 +4180,23 @@ export default function Agent() {
                 // sites first, then one section per region for the offices that cover one place.
                 const description = profile[locale];
                 const group = profile.group[locale];
-                const startsGroup = index === 0 || PLATFORM_PICKER_PROFILES[pickerPlatforms[index - 1].name].group[locale].key !== group.key;
+                // A tapped map region is the one heading (owner 2026-10-10: «say the region title, then the
+                // websites»); otherwise the measured-coverage sections.
+                const startsGroup = pickerRegion !== null ? index === 0 : index === 0 || PLATFORM_PICKER_PROFILES[pickerPlatforms[index - 1].name].group[locale].key !== group.key;
+                const sectionLabel = pickerRegion !== null ? t('Websites covering {region}', { region: regionLabel(pickerRegion, locale) }) : group.label;
                 // The reviewed 96×48 logo layout, drawn into a 56×28 slot.
                 const k = 28 / 48;
                 return (
                   <View key={platform.name} style={{ width: '100%' }}>
-                    {startsGroup ? <Text accessibilityRole="header" style={[s.platformPickerSectionTitle, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>{group.label}</Text> : null}
+                    {startsGroup ? <Text accessibilityRole="header" style={[s.platformPickerSectionTitle, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>{sectionLabel}</Text> : null}
                     <Pressable
                       testID={`platform-picker-${platform.name}`}
                       accessibilityRole="button"
                       accessibilityLabel={`${t(platform.i18nKey)}. ${description}`}
-                      accessibilityState={{ selected, disabled: atLimit }}
+                      accessibilityState={{ selected }}
                       aria-pressed={selected}
-                      disabled={atLimit}
                       onPress={() => choosePlatform(platform.name)}
-                      style={({ pressed }: any) => [s.platformPickerItem, pressed && s.platformPickerItemPressed, atLimit && { opacity: 0.4 }]}
+                      style={({ pressed }: any) => [s.platformPickerItem, selected && s.platformPickerItemOn, pressed && s.platformPickerItemPressed]}
                     >
                       <View style={s.platformPickerLogoFrame}>
                         <Image source={profile.logo} tintColor={profile.layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: profile.layout.width * k, height: profile.layout.height * k, left: profile.layout.left * k, top: profile.layout.top * k }} contentFit="contain" accessible={false} />
@@ -4167,6 +4209,8 @@ export default function Agent() {
                           {description}
                         </Text>
                       </View>
+                      {/* While a region is tapped: this site's measured listings there (owner: real numbers). */}
+                      {pickerRegion !== null ? <Text style={s.platformPickerItemCount}>{t('{count} listings', { count: platformRegionListings(platform.name, pickerRegion).toLocaleString('en-US') })}</Text> : null}
                       {selected ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
                     </Pressable>
                   </View>
@@ -5409,6 +5453,7 @@ const s = StyleSheet.create({
   platformPickerListContent: { paddingBottom: 4 },
   platformPickerItem: { width: '100%', minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: colors.paper },
   platformPickerItemPressed: { backgroundColor: colors.segTrack },
+  platformPickerItemOn: { backgroundColor: colors.tint },
   platformPickerLogoFrame: { width: 56, height: 28, alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' },
   // A column (name over sentence) — no flex: 1 on either Text (iOS collapses a column child to 0px).
   platformPickerItemCopy: { flex: 1, minWidth: 0 },
@@ -5416,6 +5461,8 @@ const s = StyleSheet.create({
   platformPickerItemName: { fontFamily: CHAT_FONT, color: colors.body, fontSize: 17, lineHeight: 24, fontWeight: '400', textAlign: 'right' },
   platformPickerItemNameOn: { color: colors.ink, fontWeight: '500' },
   platformPickerItemHint: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: 1, textAlign: 'right' },
+  platformPickerItemCount: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 16, flexShrink: 0 },
+  platformPickerStep: { fontFamily: CHAT_FONT, color: colors.ink, fontSize: 13, lineHeight: 18, fontWeight: '600', paddingHorizontal: 10, paddingTop: 14, paddingBottom: 8 },
   platformPickerSectionTitle: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 16, fontWeight: '500', paddingHorizontal: 10, paddingTop: 14, paddingBottom: 4 },
   platformPickerRule: { height: 1, backgroundColor: colors.line, marginVertical: 6, marginHorizontal: 10 },
   platformPickerEmpty: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: 'center', paddingVertical: 28 },

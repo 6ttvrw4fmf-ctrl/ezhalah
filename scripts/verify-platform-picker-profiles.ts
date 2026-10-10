@@ -37,6 +37,16 @@ function verify(text: string, helperText = helper) {
       assert.equal(profile.group.ar.label, 'في مختلف مناطق المملكة', `${name}: multi-region site belongs in the nationwide list`);
     }
   }
+  // The regions map reads each site's reach from the same snapshot (owner 2026-10-10).
+  const regionIds = load(text, 'platformRegionIds', helperText);
+  assert.ok(regionIds('Aqar').length >= 6, 'Aqar reaches many regions');
+  assert.deepEqual(regionIds('Al Humaidan'), [4], 'a site with no listings carries the region it names (Qassim)');
+  assert.deepEqual(regionIds('No such site'), []);
+  const share = load(text, 'platformRegionShare', helperText);
+  assert.equal(share('Al Humaidan', 4), 1, 'a no-listings site is wholly in its named region');
+  assert.ok(share('Aqar', 6) > 0 && share('Aqar', 6) < 0.5, 'a nationwide portal has a small share in Asir');
+  assert.ok(share('Eastabha', 6) > share('Aqar', 6), 'an Asir office outranks a nationwide portal in Asir');
+  assert.equal(share('No such site', 1), 0);
   // Preserve the collected ZIP pack, including variants replaced by an owner-approved original asset.
   for (const match of text.matchAll(/require\("([^"]*\/platform-logos\/[^"]+)"\)/g)) files.add(match[1]);
   assert.equal(profiles['Deal App'].logo, roster.find((p: any) => p.name === 'Deal App').logo, 'Deal uses its original yellow listing-card asset');
@@ -83,10 +93,11 @@ function verifyRendering(text: string) {
   const actualItemStyle = new Function('colors', `return (${itemStyle});`)({});
   assert.equal(actualItemStyle.width, '100%', 'every desktop/phone row uses the full list width');
   const h = (type: string, props: any, ...children: any[]) => ({ type, props, children });
-  const render = new Function('pickerPlatforms', 'PLATFORM_PICKER_PROFILES', 'locale', 'selectedSources', 'choosePlatform', 't', 's', 'pickerTwoColumns', 'colors', 'h', 'Pressable', 'View', 'Text', 'Image', 'Ionicons', 'MAX_PICKER_SOURCES', js + '\nreturn cards;');
+  // pickerRegion / regionLabel: the regions map's heading (2026-10-10) — rendered here with no region tapped.
+  const render = new Function('pickerPlatforms', 'PLATFORM_PICKER_PROFILES', 'locale', 'selectedSources', 'choosePlatform', 't', 's', 'pickerTwoColumns', 'colors', 'h', 'Pressable', 'View', 'Text', 'Image', 'Ionicons', 'pickerRegion', 'regionLabel', 'platformRegionListings', js + '\nreturn cards;');
   for (const locale of ['ar', 'en']) {
     for (const twoColumns of [true, false]) {
-      const cards = render(roster, profiles, locale, [], () => {}, (key: string) => key, { platformPickerItem: actualItemStyle }, twoColumns, {ink:'#253831'}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons', 3);
+      const cards = render(roster, profiles, locale, [], () => {}, (key: string) => key, { platformPickerItem: actualItemStyle }, twoColumns, {ink:'#253831'}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons', null, () => '', () => 0);
       for (let i = 0; i < cards.length; i++) {
         const root = cards[i]; const profile = profiles[roster[i].name];
         const nodes: any[] = [];
@@ -147,12 +158,12 @@ assert.throws(() => slugs(['nonexistent']), /Unknown picker source/);
 let selected = toggle([], 'Aqar');
 selected = toggle(selected, 'Wasalt');
 assert.deepEqual(selected, ['Aqar', 'Wasalt']);
-// Deep search caps at 3 sites (owner 2026-10-10): a 4th is refused, removing one frees a slot.
+// No cap (owner 2026-10-10, reversing the cap of 3): a 4th and a 5th site are accepted; unlighting still works.
 const three = toggle(toggle(toggle([], 'Aqar'), 'Wasalt'), 'Deal App');
-assert.deepEqual(toggle(three, 'Gathern'), three, 'a 4th website must be refused');
-assert.deepEqual(toggle(toggle(three, 'Wasalt'), 'Gathern'), ['Aqar', 'Deal App', 'Gathern'], 'removing one frees a slot');
-const uncapped = (names: string[], name: string) => names.includes(name) ? names.filter((v) => v !== name) : [...names, name];
-assert.notDeepEqual(uncapped(three, 'Gathern'), three, 'mutation: the pre-cap toggle lets a 4th through, so the check above can fail');
+assert.deepEqual(toggle(toggle(three, 'Gathern'), 'Sanadak'), ['Aqar', 'Wasalt', 'Deal App', 'Gathern', 'Sanadak'], 'any number of websites may be lit');
+assert.deepEqual(toggle(toggle(three, 'Gathern'), 'Wasalt'), ['Aqar', 'Deal App', 'Gathern'], 'a lit site unlights');
+const capped = (names: string[], name: string) => names.includes(name) ? names.filter((v) => v !== name) : names.length >= 3 ? names : [...names, name];
+assert.deepEqual(capped(three, 'Gathern'), three, 'mutation: a capped toggle refuses the 4th, so the check above can fail');
 assert.deepEqual(toggle(selected, 'Aqar'), ['Wasalt']);
 assert.deepEqual(slugs(['Aqar', 'Aqar']), ['aqar', 'aqarmonthly']);
 for (const name of names as string[]) {
@@ -233,7 +244,14 @@ const chooseMatch = agent.match(/const choosePlatform = \(source: string \| null
 assert.ok(chooseMatch);
 const chooseJS = ts.transpile(chooseMatch[1], { target: ts.ScriptTarget.ES2022 });
 let chosen: string[] = []; let closed = 0; let explicit = false;
-const choose = new Function('source', 'setPickerSourceExplicit', 'setSelectedSources', 'togglePickerSource', 'closePlatformPicker', chooseJS);
-choose('Aqar', (v: boolean) => explicit = v, (fn: any) => chosen = fn(chosen), load(source, 'togglePickerSource'), () => closed++);
-assert.equal(explicit, true); assert.deepEqual(chosen, ['Aqar']); assert.equal(closed, 1, 'a selection saves immediately and closes the sheet');
-console.log('PASS: original brand colors, readable monochrome marks without backplates, and immediate selection/close.');
+const choose = new Function('source', 'setPickerSourceExplicit', 'setSelectedSources', 'togglePickerSource', 'closePlatformPicker', 'setPickerRegion', chooseJS);
+let tappedRegion: number | null = 6;
+const run = (src: string | null) => choose(src, (v: boolean) => explicit = v, (fn: any) => chosen = fn(chosen), load(source, 'togglePickerSource'), () => closed++, (v: number | null) => tappedRegion = v);
+run('Aqar');
+assert.equal(explicit, true); assert.deepEqual(chosen, ['Aqar']); assert.equal(closed, 0, 'lighting a site saves at once and KEEPS the sheet open (owner 2026-10-10)');
+run('Wasalt'); assert.deepEqual(chosen, ['Aqar', 'Wasalt']); assert.equal(closed, 0);
+run(null); assert.deepEqual(chosen, []); assert.equal(closed, 1, '«كل المواقع» clears and closes'); assert.equal(tappedRegion, null, '«كل المواقع» clears the tapped region');
+// The ways out: the ✕ and a tap on the backdrop (owner 2026-10-10: no Done button — «till he clicks x»).
+assert.equal((agent.match(/accessibilityLabel=\{t\('Close'\)\}\s*onPress=\{closePlatformPicker\}/g) ?? []).length, 2, 'the backdrop and the ✕ both close the sheet');
+assert.ok(!/platform-picker-done/.test(agent), 'no Done button');
+console.log('PASS: original brand colors, readable monochrome marks without backplates, selection keeps the sheet open, ✕/backdrop/all-websites close it.');
