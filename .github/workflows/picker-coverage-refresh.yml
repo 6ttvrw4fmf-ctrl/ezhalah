@@ -49,3 +49,17 @@ jobs:
           git push -u origin "$branch"
           gh pr create --head "$branch" --title "Picker coverage: weekly re-measure $(date -u +%Y-%m-%d)" \
             --body "Automatic weekly refresh of \`src/data/platformPickerCoverage.json\` (the picker map + each site's coverage line), re-measured from production through the public RPC. Merge on green."
+
+      # ── Failure→alert bridge (issue #1349): unattended, so a red run must reach a human. The picker's
+      # coverage is search surface → 🧪 Search & Matching QA. `always()` so a failing run still gets here.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind search_live_check_failed
+          --workflow picker-coverage-refresh.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
