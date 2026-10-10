@@ -56,6 +56,8 @@ const problems = ({ mapPoint }: Fns): string[] => {
 const real = problems(await lift(DATA));
 check('a pin needs BOTH published coordinates — strings or numbers, never a half, never (0,0)', real.length === 0, real.join('\n      '));
 
+const sourceMutant = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  (mutation) catches ${label}`); };
+
 // ── asking prices: each house once, down sites out, junk out, never under 10 houses ──────────────
 type Stats = (rows: Record<string, unknown>[], down: Set<string>) => { houses: number; p10: number; median: number; p90: number; medianPpm: number | null } | null;
 const liftStats = async (file: string): Promise<Stats> => (await liftSymbols(file, [
@@ -86,6 +88,7 @@ const statsProblems = (stats: Stats): string[] => {
   if (Math.abs(r.p90 - 1.8 * M) > 1) out.push(`p90 ${r.p90} ≠ 1.8M (the down site's 9M or the 50k typo got in)`);
   if (r.medianPpm == null || Math.abs(r.medianPpm - 7000) > 1) out.push(`median per m² ${r.medianPpm} ≠ 7,000`);
   if (stats(FIXTURE.slice(0, 9), new Set()) !== null) out.push('nine houses still produced numbers (floor is 10)');
+  if (r.each.length !== 11) out.push(`the deduped set has ${r.each.length} houses ≠ 11`);
   return out;
 };
 const statsReal = statsProblems(await liftStats(DATA));
@@ -102,6 +105,140 @@ await mustCatchStats('a house counted once per row', 'if (!cur || price < cur.pr
 await mustCatchStats('a down site counted', 'if (!platform || downSlugs.has(platform)) continue;', 'if (!platform) continue;');
 await mustCatchStats('a junk price counted', 'if (!Number.isFinite(price) || price < PRICE_MIN || price > PRICE_MAX) continue;', 'if (!Number.isFinite(price)) continue;');
 await mustCatchStats('numbers shown from a handful of houses', 'if (best.size < MIN_HOUSES) return null;', 'if (best.size < 1) return null;');
+
+// ── the «الأسعار» block's other three rules (owner 2026-10-10) ──────────────────────────────────
+type Block = {
+  isSameAd: (a: Row, b: Row) => boolean;
+  dearerTenths: (each: { price: number; area: number }[], adPpm: number) => number | null;
+  mojFacts: (row: Row | null) => { deals: number; avgDeal: number; avgPpm: number; from: string; to: string } | null;
+};
+const liftBlock = async (file: string): Promise<Block & Stats> => {
+  const mod = await liftSymbols(file, [
+    { header: 'const num = (', endsWith: /: NaN;$/ },
+    { header: 'const PRICE_MIN', endsWith: /;$/ }, { header: 'const PRICE_MAX', endsWith: /;$/ }, { header: 'const MIN_HOUSES', endsWith: /;$/ }, { header: 'const MOJ_MIN_DEALS', endsWith: /;$/ },
+    { header: 'const percentile = (' },
+    { header: 'export function askingPriceStats(' },
+    { header: 'export function dearerTenths(' },
+    { header: 'export function isSameAd(' },
+    { header: 'export function mojFacts(' },
+  ], ['askingPriceStats', 'dearerTenths', 'isSameAd', 'mojFacts']);
+  return Object.assign(mod.askingPriceStats as Stats, mod) as unknown as Block & Stats;
+};
+// The real pair (2026-10-10): aqar 13462300 and wasalt 7392441 — licence 7201079013, 199 m², different prices.
+const SAME_A: Row = { source_table: 'aqar_residential_listings', listing_id: 13462300, platform: 'aqar', license_number: '7201079013', area_m2: 199, price_total: '1100000' };
+const SAME_B: Row = { source_table: 'wasalt_residential_listings', listing_id: 7392441, platform: 'wasalt', license_number: '7201079013', area_m2: '199', price_total: '1250000' };
+// Ten houses at 5,000…9,500 per m², the dearest one listed on FIVE more sites: deduped, 5 of 10 cost more
+// than 7,000 per m² → k = 5; counted per row, 10 of 15 → k = 7.
+const K_FIXTURE: Row[] = [
+  ...Array.from({ length: 10 }, (_, i) => ({ platform: 'aqar', license_number: `K${i}`, area_m2: 200, price_total: String(M + i * 100_000) })),
+  ...['wasalt', 'sakan', 'dealapp', 'sukna', 'aqargate'].map((platform) => ({ platform, license_number: 'K9', area_m2: 200, price_total: '1900000' })),
+];
+// The seeded ministry row (الرياض · حي الرمال, 2026-10-10): the period ends in May 2026, not today.
+const MOJ_ROW: Row = { deals: 285, avg_deal: '1390633.21', avg_ppm: '4449.37', window_from: '2025-10-10', window_to: '2026-05-18', source_refreshed_at: '2026-10-10T03:09:39+00:00' };
+const blockProblems = (b: Block & Stats): string[] => {
+  const out: string[] = [];
+  if (!b.isSameAd(SAME_A, SAME_B) || !b.isSameAd(SAME_B, SAME_A)) out.push('the real aqar/wasalt pair (same licence + area, different price) was not matched');
+  if (b.isSameAd(SAME_A, { ...SAME_B, license_number: '7201079014' })) out.push('a DIFFERENT licence was shown as the same ad');
+  if (b.isSameAd(SAME_A, { ...SAME_B, area_m2: 200 })) out.push('a different area was shown as the same ad');
+  if (b.isSameAd(SAME_A, { ...SAME_B, platform: 'aqar' })) out.push('the same platform was offered as another site');
+  if (b.isSameAd({ ...SAME_A, license_number: '' }, { ...SAME_B, license_number: '' })) out.push('two rows WITHOUT a licence were matched');
+  const ks = b(K_FIXTURE, new Set());
+  const k = ks ? b.dearerTenths(ks.each, 7000) : null;
+  if (k !== 5) out.push(`k = ${k} ≠ 5 (not computed from the deduped set)`);
+  if (b.dearerTenths([], 7000) !== null || b.dearerTenths([{ price: M, area: 200 }], 0) !== null) out.push('k shown without houses or without an ad m² price');
+  const f = b.mojFacts(MOJ_ROW);
+  if (!f) return [...out, 'the seeded ministry row produced no facts'];
+  if (f.deals !== 285) out.push(`deals ${f.deals} ≠ 285`);
+  if (f.avgPpm !== 4449.37) out.push(`avg_ppm ${f.avgPpm} ≠ 4449.37 (recomputed, not the ministry’s own mean)`);
+  if (f.avgDeal !== 1390633.21) out.push(`avg_deal ${f.avgDeal} ≠ 1390633.21`);
+  if (f.from !== '2025-10-10' || f.to !== '2026-05-18') out.push(`period ${f.from} → ${f.to} ≠ the row’s own 2025-10-10 → 2026-05-18 (taken from the clock?)`);
+  if (b.mojFacts({ ...MOJ_ROW, deals: 9 }) !== null) out.push('nine deals still produced a card (floor is 10)');
+  if (b.mojFacts(null) !== null) out.push('no row produced a card');
+  return out;
+};
+const blockReal = blockProblems(await liftBlock(DATA));
+check('same ad = licence + area, other platform; k from the deduped set; the ministry’s numbers and period as the row carries them', blockReal.length === 0, blockReal.join('\n      '));
+const mustCatchBlock = async (what: string, from: string, to: string) => {
+  if (!DATA_SRC.includes(from)) { failed++; console.log(`FAIL  mutation anchor missing: ${what}`); return; }
+  const file = join(mkdtempSync(join(tmpdir(), 'ad-block-')), 'adPageData.ts');
+  writeFileSync(file, DATA_SRC.replace(from, to));
+  const caught = blockProblems(await liftBlock(file)).length > 0;
+  if (!caught) failed++;
+  console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
+};
+await mustCatchBlock('a different licence shown as the same ad', "if (!lic || lic !== String(other.license_number ?? '').trim()) return false;", 'if (!lic) return false;');
+await mustCatchBlock('a different area shown as the same ad', 'if (!Number.isFinite(a) || !(a > 0) || a !== b) return false;', 'if (!Number.isFinite(a) || !(a > 0)) return false;');
+await mustCatchBlock('k computed from every row instead of the deduped set', 'each: [...best.values()],', 'each: rows.map((r) => ({ price: num(r.price_total), area: num(r.area_m2) })),');
+await mustCatchBlock('the ministry period taken from the clock', "const from = String(row.window_from ?? '').slice(0, 10), to = String(row.window_to ?? '').slice(0, 10);", "const from = String(row.window_from ?? '').slice(0, 10), to = new Date().toISOString().slice(0, 10);");
+await mustCatchBlock('avg_ppm recomputed instead of shown', 'const deals = num(row.deals), avgDeal = num(row.avg_deal), avgPpm = num(row.avg_ppm);', 'const deals = num(row.deals), avgDeal = num(row.avg_deal), avgPpm = Math.round(num(row.avg_deal) / 312);');
+await mustCatchBlock('the ministry card shown from a handful of deals', 'deals < MOJ_MIN_DEALS', 'deals < 1');
+// The tiles multiply the SHOWN averages by the ad's own area; k comes from the deduped set.
+const tilesWired = (p: string) => /dearerTenths\(prices\.stats\.each, adPpm\)/.test(p) && /round1000\(prices\.moj\.avgPpm \* prices\.area\)/.test(p) && /round1000\(prices\.stats\.medianPpm \* prices\.area\)/.test(p);
+check('the tiles multiply the shown averages by this ad’s area and k reads the deduped set', tilesWired(PREVIEW));
+sourceMutant('a tile recomputing the ministry’s per-m² figure', !tilesWired(PREVIEW.replace('round1000(prices.moj.avgPpm * prices.area)', 'round1000(prices.moj.avgDeal)')));
+
+// ── the embed URL: the official Maps Embed API (satellite) with a key, the keyless embed without ───
+type Embed = (p: { lat: number; lng: number }, hl?: string, z?: 14 | 15) => string;
+const liftEmbed = async (file: string): Promise<Embed> => (await liftSymbols(file, [{ header: 'export const mapEmbedUrl = (' }], ['mapEmbedUrl'])).mapEmbedUrl as Embed;
+const PIN = { lat: 24.920875653372303, lng: 46.780616430492536 };
+const embedProblems = (embed: Embed): string[] => {
+  const out: string[] = [];
+  const prev = process.env.EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY;
+  try {
+    delete process.env.EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY;
+    const free = embed(PIN, 'ar', 14);
+    if (!/^https:\/\/maps\.google\.com\/maps\?q=24\.920875653372303,46\.780616430492536&z=14&t=h&hl=ar&output=embed$/.test(free)) out.push(`without a key the keyless satellite embed is expected, got ${free}`);
+    process.env.EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY = 'TEST-KEY';
+    const official = embed(PIN, 'ar', 15);
+    if (!official.startsWith('https://www.google.com/maps/embed/v1/place?key=TEST-KEY&')) out.push(`with a key the official Maps Embed API is expected, got ${official}`);
+    if (!official.includes('maptype=satellite')) out.push('the official embed is not satellite');
+    if (!official.includes('q=24.920875653372303,46.780616430492536') || !official.includes('zoom=15') || !official.includes('language=ar')) out.push(`the official embed lost the pin, the zoom or the language: ${official}`);
+  } finally {
+    if (prev === undefined) delete process.env.EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY; else process.env.EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY = prev;
+  }
+  return out;
+};
+const embedReal = embedProblems(await liftEmbed(DATA));
+check('with the owner’s key the official satellite embed, without it the keyless one — both carrying both coordinates', embedReal.length === 0, embedReal.join('\n      '));
+const mustCatchEmbed = async (what: string, from: string, to: string) => {
+  if (!DATA_SRC.includes(from)) { failed++; console.log(`FAIL  mutation anchor missing: ${what}`); return; }
+  const file = join(mkdtempSync(join(tmpdir(), 'ad-embed-')), 'adPageData.ts');
+  writeFileSync(file, DATA_SRC.replace(from, to));
+  const caught = embedProblems(await liftEmbed(file)).length > 0;
+  if (!caught) failed++;
+  console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
+};
+await mustCatchEmbed('the official embed losing satellite', '&maptype=satellite&language=', '&language=');
+await mustCatchEmbed('the keyless fallback gone when no key is set', 'return key\n    ?', 'return true\n    ?');
+await mustCatchEmbed('the official embed dropping the longitude', '&q=${p.lat},${p.lng}&zoom=', '&q=${p.lat}&zoom=');
+
+// ── scope: the prices block is for Aqar SALE ads only (owner update 22) ──────────────────────────
+type Eligible = (row: Row | null) => boolean;
+const liftEligible = async (file: string): Promise<Eligible> => (await liftSymbols(file, [{ header: 'export function pricesBlockEligible(' }], ['pricesBlockEligible'])).pricesBlockEligible as Eligible;
+const eligibleProblems = (e: Eligible): string[] => {
+  const out: string[] = [];
+  if (!e({ platform: 'aqar', deal_ar: 'بيع' })) out.push('an Aqar sale ad got no prices block');
+  if (!e({ platform: 'AQAR', deal_ar: 'بيع', type_ar: 'محل' })) out.push('an Aqar commercial sale ad got no prices block');
+  if (e({ platform: 'aqar', deal_ar: 'إيجار' })) out.push('an Aqar RENT ad got a prices block');
+  if (e({ platform: 'wasalt', deal_ar: 'بيع' })) out.push('a non-Aqar sale ad got a prices block');
+  if (e({ platform: 'aqar', deal_ar: null }) || e(null)) out.push('a row without a deal (or no row) got a prices block');
+  return out;
+};
+const eligibleReal = eligibleProblems(await liftEligible(DATA));
+check('the prices block: Aqar + sale only; rent ads and other platforms render none', eligibleReal.length === 0, eligibleReal.join('\n      '));
+const mustCatchEligible = async (what: string, from: string, to: string) => {
+  if (!DATA_SRC.includes(from)) { failed++; console.log(`FAIL  mutation anchor missing: ${what}`); return; }
+  const file = join(mkdtempSync(join(tmpdir(), 'ad-scope-')), 'adPageData.ts');
+  writeFileSync(file, DATA_SRC.replace(from, to));
+  const caught = eligibleProblems(await liftEligible(file)).length > 0;
+  if (!caught) failed++;
+  console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
+};
+await mustCatchEligible('a rent ad getting the block', " && String(row.deal_ar ?? '').trim() === 'بيع';", ';');
+await mustCatchEligible('a non-Aqar ad getting the block', "String(row.platform ?? '').trim().toLowerCase() === 'aqar' && ", '');
+const gated = (p: string) => /if \(!pricesBlockEligible\(row\)\) return;\s*const price = Number\(row\?\.price_total\)/.test(p) && /fetchMojSales\(row, commercial \? 'تجاري' : 'سكني'\)/.test(p);
+check('the page fetches the block only behind pricesBlockEligible(row), with the ministry class by macro', gated(PREVIEW));
+sourceMutant('the page fetching the block for every ad', !gated(PREVIEW.replace('if (!pricesBlockEligible(row)) return;', '')));
 
 // ── wiring: the page draws only the fetched pin; the data module never guesses one ────────────────
 const wired = (dataSrc: string, previewSrc: string) =>
@@ -125,10 +262,9 @@ const mustCatch = async (what: string, from: string, to: string) => {
 };
 await mustCatch('a pin from one coordinate', 'if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;', 'if (!Number.isFinite(lat) && !Number.isFinite(lng)) return null;');
 await mustCatch('a pin from the (0,0) default', 'if (lat === 0 || lng === 0) return null;', '');
-const sourceMutant = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  (mutation) catches ${label}`); };
 sourceMutant('a district-centroid fallback for the pin', !wired(codeOnly(DATA_SRC).replace('const geo = mapPoint(own);', 'const geo = mapPoint(own) ?? { lat: 24.7136, lng: 46.6753 };'), PREVIEW));
 sourceMutant('the page drawing a map without a pin', !wired(codeOnly(DATA_SRC), PREVIEW.replace('{geo && IS_WEB ? (', '{IS_WEB ? (')));
 sourceMutant('the map opening a new tab from our UI', !wired(codeOnly(DATA_SRC), PREVIEW.replace('const openMap = () => {', "const openMap = () => { window.open(mapEmbedUrl(geo, locale, 15), '_blank');")));
 
-console.log(failed === 0 ? '\n✅ the ad page pins only what the source published.\n' : `\n❌ ${failed} check(s) failed — a guessed pin can reach the page.\n`);
+console.log(failed === 0 ? '\n✅ the ad page pins only what the source published, and its prices block shows only computed-for-this-ad, source-true numbers.\n' : `\n❌ ${failed} check(s) failed — a guessed pin or a wrong number can reach the page.\n`);
 process.exit(failed === 0 ? 0 : 1);

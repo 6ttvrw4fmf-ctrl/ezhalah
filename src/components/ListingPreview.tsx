@@ -13,7 +13,8 @@ import { useAtLeast } from '@/lib/useAtLeast';
 import { PICKER_SHEET_BREAKPOINT } from '@/lib/responsive';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SourceBadge, FEATURE_META, arAttrValue } from '@/components/ResultCard';
-import { fetchAdPage, fetchAskingPrices, mapEmbedUrl, type AskingPrices, type GeoPoint } from '@/data/adPageData';
+import { dearerTenths, fetchAdPage, fetchAskingPrices, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, typePluralAr, typeWordAr, type AskingPrices, type GeoPoint, type MojFacts } from '@/data/adPageData';
+import { listingOpenUrl } from '@/lib/openListing';
 import type { Listing } from '@/data/listings';
 
 // THE IN-APP AD PAGE for the sites that cannot be framed (lib/inAppViewer.ts IN_APP_PREVIEW_HOSTS):
@@ -42,8 +43,6 @@ const MAP_MIN = 150;
 // Marker on the history entry the expanded map pushes (same approach as AdViewer's HISTORY_MARK): the
 // browser's Back closes the map and lands on the viewer's own marked entry, which it treats as «show».
 const SHEET_MARK = 'ezAdMap';
-// The asking-price box: a figure's place on the p10→p90 bar (0–100%).
-const pct = (v: number, r: { p10: number; p90: number }) => Math.round(Math.max(0, Math.min(100, r.p90 > r.p10 ? ((v - r.p10) / (r.p90 - r.p10)) * 100 : 50)));
 // THE TAP MOMENT (owner 2026-10-10): the open happens OPEN_DELAY_MS after the tap — inside the browser's
 // user-activation window, so Safari lets the new tab through — while confetti marks the hand-off. Keep
 // it under ~1s or the tab is blocked.
@@ -84,9 +83,9 @@ export default function ListingPreview({ listing: l, url, onClose }: {
   const [main, setMain] = useState(0);
   // window.open(url, '_blank', 'noopener') ALWAYS returns null, so a blocked tab could not be told from an
   // opened one; open plainly, then sever the opener by hand. null here = genuinely blocked.
-  const open = (): boolean => {
-    if (Platform.OS !== 'web' || !url) return false;
-    const w = window.open(url, '_blank');
+  const open = (href: string = url): boolean => {
+    if (Platform.OS !== 'web' || !href) return false;
+    const w = window.open(href, '_blank');
     if (w) w.opener = null;
     return !!w;
   };
@@ -189,20 +188,30 @@ export default function ListingPreview({ listing: l, url, onClose }: {
 
   // ── the source's pin + the asking prices around this ad (web only; native keeps the card data alone) ──
   const [geo, setGeo] = useState<GeoPoint | null>(null);
-  const [range, setRange] = useState<{ stats: AskingPrices; price: number | null } | null>(null);
+  // The «الأسعار» block's three sources, fetched together once the ad's own row is known: the asking
+  // prices around it (each house once), the ministry's actual sales, the same ad on other sites.
+  type Prices = { stats: AskingPrices | null; moj: MojFacts | null; same: Listing[]; price: number | null; area: number | null; typeAr: string };
+  const [prices, setPrices] = useState<Prices>({ stats: null, moj: null, same: [], price: null, area: null, typeAr: '' });
+  const commercial = l.macro === 'Commercial';
   useEffect(() => {
     if (!IS_WEB) return;
     let alive = true;
     void fetchAdPage(l).then(({ geo: pin, row }) => {
       if (!alive) return;
       setGeo(pin);
-      void fetchAskingPrices(row).then((stats) => {
-        const own = Number(row?.price_total);
-        if (alive && stats) setRange({ stats, price: Number.isFinite(own) ? own : null });
+      // Aqar sale ads only for now (owner update 22): nothing is even fetched for the rest.
+      if (!pricesBlockEligible(row)) return;
+      const price = Number(row?.price_total), area = Number(row?.area_m2);
+      void Promise.all([fetchAskingPrices(row), fetchMojSales(row, commercial ? 'تجاري' : 'سكني'), fetchSameAd(row)]).then(([stats, moj, same]) => {
+        if (alive) setPrices({ stats, moj, same, price: Number.isFinite(price) && price > 0 ? price : null, area: Number.isFinite(area) && area > 0 ? area : null, typeAr: String(row?.type_ar ?? '') });
       });
     });
     return () => { alive = false; };
-  }, [l]);
+  }, [l]); // eslint-disable-line react-hooks/exhaustive-deps
+  // This ad's own m² price (its price ÷ its area, both as the source published them) and its place among
+  // the deduped houses: k of every 10 cost more per m².
+  const adPpm = prices.price != null && prices.area != null ? prices.price / prices.area : null;
+  const k = adPpm != null && prices.stats ? dearerTenths(prices.stats.each, adPpm) : null;
 
   // ── the expanded map: a full-pane sheet over this page; ✕ / Escape / Back close it in place ─────
   const [mapOpen, setMapOpen] = useState(false);
@@ -326,10 +335,26 @@ export default function ListingPreview({ listing: l, url, onClose }: {
   if (l.driver_room) chips.push(t('Driver room'));
   const rows = [...facts, ...extra];
   const tx = { textAlign: (isRTL ? 'right' : 'left') as 'right' | 'left', writingDirection: (isRTL ? 'rtl' : 'ltr') as 'rtl' | 'ltr' };
-  // «1.95 مليون» (two decimals at most, trailing zeros dropped) or «850,000».
-  const fmtSar = (v: number) => v >= 1e6
-    ? t('{n} million', { n: String(Math.round(v / 1e4) / 100) })
-    : Math.round(v).toLocaleString('en-US');
+  // «1.95» (millions, two decimals at most, trailing zeros dropped) · «6,500» · «1,293,000».
+  const fmtM = (v: number) => String(Math.round(v / 1e4) / 100);
+  const fmtInt = (v: number) => Math.round(v).toLocaleString('en-US');
+  const round1000 = (v: number) => Math.round(v / 1000) * 1000;
+  // The ministry's period, from the row's own two dates (Gregorian, Western digits): «أكتوبر 2025».
+  const monthLabel = (iso: string) => {
+    try { return new Intl.DateTimeFormat(locale === 'ar' ? 'ar-u-nu-latn-ca-gregory' : 'en-u-ca-gregory', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`)); }
+    catch { return iso.slice(0, 7); }
+  };
+  // The type's word, following the count in Arabic («8 فلل» / «1,500 فيلا») and the plural in English.
+  const typeWord = (n: number) => locale === 'ar'
+    ? typeWordAr(n, prices.typeAr || typeLabel)
+    : (n === 1 || /s$/i.test(typeLabel) ? typeLabel : `${typeLabel}s`);
+  const typePlural = () => (locale === 'ar' ? typePluralAr(prices.typeAr || typeLabel) : (/s$/i.test(typeLabel) ? typeLabel : `${typeLabel}s`));
+  const bullet = (text: string, key?: string) => (
+    <View key={key ?? text} style={s.bullet}>
+      <View style={s.bulletDot} />
+      <Text style={[s.bulletTx, tx]}>{text}</Text>
+    </View>
+  );
   const Frame: any = 'iframe';
   const Canvas: any = 'canvas';
   const mapTitle = t('Property location on Google Maps');
@@ -516,28 +541,104 @@ export default function ListingPreview({ listing: l, url, onClose }: {
           {cta('listing-preview-contact')}
         </View>
 
-        {/* the continuation starts here: the asking prices around this ad — numbers only, each house once;
-            nothing when < 10 houses. Below the first screen on purpose: the hero and the map are at their floors. */}
+        {/* the continuation starts here: the «الأسعار» block — three cards, every number computed for THIS
+            listing and district at runtime, facts only. Below the first screen on purpose. */}
         <View testID="listing-preview-range">
-          {range ? (
-            <View style={s.range}>
-              <Text style={[s.h, tx]}>{t('Asking prices: {type} {deal} in {district}', { type: typeLabel, deal: t('for Sale'), district: district || city })}</Text>
-              <View style={s.rangeBarWrap}>
-                <View style={s.rangeTrack}>
-                  <View style={[s.rangeMedian, { [isRTL ? 'right' : 'left']: `${pct(range.stats.median, range.stats)}%` }]} />
-                  {range.price != null && <View style={[s.rangeDot, { [isRTL ? 'right' : 'left']: `${pct(range.price, range.stats)}%` }]} />}
+          {prices.stats || prices.moj ? (
+            <View style={s.prices}>
+              <Text style={[s.h, tx]}>{t('Prices')}</Text>
+
+              {prices.stats && (
+                <View testID="listing-preview-prices-asking" style={s.pcard}>
+                  <View style={s.pcardHead}>
+                    <Text style={[s.pcardTitle, tx]}>{t('Asking prices now')}</Text>
+                    <View style={s.tag}><Text style={s.tagTx}>{t('Ezhalah')}</Text></View>
+                  </View>
+                  {bullet(t('{n} {type} listed {deal} in {district}', { n: fmtInt(prices.stats.houses), type: typeWord(prices.stats.houses), deal: t('for Sale'), district: district || city }))}
+                  {bullet(t('8 of every 10 are between {lo} and {hi} million', { lo: fmtM(prices.stats.p10), hi: fmtM(prices.stats.p90) }))}
+                  {bullet(t('Median price: {n} million', { n: fmtM(prices.stats.median) }))}
+                  {prices.stats.medianPpm != null ? bullet(t('Price per m²: {n} SAR on average', { n: fmtInt(prices.stats.medianPpm) })) : null}
+                  {prices.same.length > 0 && (
+                    <View testID="listing-preview-same-ad" style={s.same}>
+                      <Text style={[s.sameH, tx]}>{prices.same.length === 1
+                        ? t('This same property is listed on two sites (same licence number):')
+                        : t('This same property is listed on {k} sites (same licence number):', { k: prices.same.length + 1 })}</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.sameRow}>
+                        {[{ card: l, href: url, me: true }, ...prices.same.map((sib) => ({ card: sib, href: listingOpenUrl(sib) ?? '', me: false }))].map(({ card, href, me }) => (
+                          <Pressable
+                            key={`${card.source}:${card.id}`}
+                            testID="listing-preview-same-ad-site"
+                            onPress={() => open(href)}
+                            disabled={!href}
+                            accessibilityRole="link"
+                            accessibilityLabel={t('Open the ad on {name} to contact', { name: t(sourceName(card.source)) })}
+                            style={({ hovered }: any) => [s.siteCard, me && s.siteCardMe, hovered && s.siteCardHover]}
+                          >
+                            <View style={s.siteLogo} pointerEvents="none"><View style={{ transform: [{ scale: 0.5 }] }}><SourceBadge source={card.source} /></View></View>
+                            <Text numberOfLines={1} style={s.siteName}>{t(sourceName(card.source))}</Text>
+                            <Text numberOfLines={1} style={s.sitePrice}>{listingPrice(card, locale)}</Text>
+                            <Text numberOfLines={1} style={[s.siteHint, me && s.siteHintMe]}>{me ? t('this ad') : t('Tap to view it')}</Text>
+                          </Pressable>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  )}
                 </View>
-                <View style={s.rangeEnds}>
-                  <Text style={s.rangeEnd}>{fmtSar(range.stats.p10)}</Text>
-                  <Text style={s.rangeEnd}>{fmtSar(range.stats.p90)}</Text>
+              )}
+
+              {prices.moj && (
+                <View testID="listing-preview-prices-moj" style={[s.pcard, s.pcardGov]}>
+                  <View style={s.pcardHead}>
+                    <Text style={[s.pcardTitle, tx]}>{t('Actual sale prices')}</Text>
+                    <View style={[s.tag, s.tagGov]}><Text style={[s.tagTx, s.tagGovTx]}>{t('Ministry of Justice')}</Text></View>
+                  </View>
+                  {bullet(t(commercial ? '{n} commercial properties sold in {district}' : '{n} residential properties sold in {district}', { n: fmtInt(prices.moj.deals), district: district || city }))}
+                  {bullet(t('Period: {from} – {to} (the latest data the ministry published)', { from: monthLabel(prices.moj.from), to: monthLabel(prices.moj.to) }))}
+                  {bullet(t('Average sale price: {n} million', { n: fmtM(prices.moj.avgDeal) }))}
+                  {bullet(t('Sold price per m²: {n} SAR on average (average of the district’s deals)', { n: fmtInt(prices.moj.avgPpm) }))}
+                  {bullet(t(commercial ? 'Includes every commercial type: shops, offices and land' : 'Includes every type: villas, apartments and land'))}
+                  <Text style={[s.mojSrc, tx]}>{t('Source: Ministry of Justice')}</Text>
                 </View>
-              </View>
-              <Text style={[s.rangeMid, tx]}>
-                <Text style={s.rangeK}>{t('median')} </Text><Text style={s.rangeV}>{fmtSar(range.stats.median)}</Text>
-                {range.stats.medianPpm != null ? <><Text style={s.rangeK}>{`  ·  ${t('per m²')} `}</Text><Text style={s.rangeV}>{Math.round(range.stats.medianPpm).toLocaleString('en-US')}</Text></> : null}
-                {range.price != null ? <Text style={s.rangeK}>{`  ·  ● ${t('this ad')}`}</Text> : null}
-              </Text>
-              <Text style={[s.rangeNote, tx]}>{t('From {n} {type} listed {deal} in {district}, each house counted once. Just numbers — the decision is yours.', { n: range.stats.houses.toLocaleString('en-US'), type: typeLabel, deal: t('for Sale'), district: district || city })}</Text>
+              )}
+
+              {adPpm != null && k != null && prices.stats && prices.price != null && prices.area != null && (
+                <View testID="listing-preview-prices-ppm" style={s.pcard}>
+                  <View style={s.pcardHead}>
+                    <Text style={[s.pcardTitle, tx]}>{t('Price per m²: {n} SAR', { n: fmtInt(adPpm) })}</Text>
+                  </View>
+                  <View style={s.houses} accessible accessibilityLabel={t('Of every 10 {type} listed in the district: {k} cost more per m² than this ad, and {rest} less', { type: typePlural(), k, rest: 10 - k })}>
+                    {Array.from({ length: 10 }, (_, i) => (
+                      <View key={i} style={[s.house, i < k ? s.houseUp : s.houseDn]}>
+                        <Ionicons name={commercial ? 'business' : 'home'} size={14} color={i < k ? colors.onFill : colors.chipIcon} />
+                      </View>
+                    ))}
+                  </View>
+                  {bullet(t('Of every 10 {type} listed in the district: {k} cost more per m² than this ad, and {rest} less', { type: typePlural(), k, rest: 10 - k }))}
+                  <Text style={[s.pcardSub, tx]}>{t('The same property ({area} m²) priced at the district average:', { area: fmtInt(prices.area) })}</Text>
+                  <View style={s.tiles}>
+                    <View style={[s.tile, s.tileMe]}>
+                      <Text style={s.tileK}>{t('Price in the ad')}</Text>
+                      <Text style={s.tileV}>{fmtInt(prices.price)}</Text>
+                    </View>
+                    {prices.stats.medianPpm != null && (
+                      <View style={s.tile}>
+                        <Text style={s.tileK}>{t('At the listed average ≈')}</Text>
+                        <Text style={s.tileV}>{fmtInt(round1000(prices.stats.medianPpm * prices.area))}</Text>
+                        <Text style={s.tileSmall}>{`${fmtInt(prices.stats.medianPpm)} × ${fmtInt(prices.area)}`}</Text>
+                      </View>
+                    )}
+                    {prices.moj && (
+                      <View style={s.tile}>
+                        <Text style={s.tileK}>{t('At the sold average ≈')}</Text>
+                        <Text style={s.tileV}>{fmtInt(round1000(prices.moj.avgPpm * prices.area))}</Text>
+                        <Text style={s.tileSmall}>{`${fmtInt(prices.moj.avgPpm)} × ${fmtInt(prices.area)} · ${t('all types')}`}</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              )}
+
+              <Text style={[s.pricesFinal, tx]}>{t('Just numbers — the decision is yours.')}</Text>
             </View>
           ) : null}
         </View>
@@ -684,18 +785,43 @@ const s = StyleSheet.create({
     position: 'absolute', top: 12, width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, boxShadow: '0 2px 10px rgba(20,40,30,0.18)',
   },
-  // the asking-price box
-  range: { marginTop: 14, marginHorizontal: 16, gap: 8, borderWidth: 1, borderColor: colors.line, borderRadius: radius.card, padding: 12 },
-  rangeBarWrap: { gap: 4 },
-  rangeTrack: { height: 8, borderRadius: radius.pill, backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
-  rangeMedian: { position: 'absolute', top: -3, width: 2, height: 12, marginLeft: -1, backgroundColor: colors.muted, borderRadius: 1 },
-  rangeDot: { position: 'absolute', top: -5, width: 16, height: 16, marginLeft: -8, borderRadius: 8, backgroundColor: colors.primary, borderWidth: 2, borderColor: colors.surface },
-  rangeEnds: { flexDirection: 'row', justifyContent: 'space-between' },
-  rangeEnd: { fontSize: 12, color: colors.muted, fontFamily: NUM_FONT },
-  rangeMid: { fontSize: 13.5, color: colors.ink },
-  rangeK: { color: colors.muted },
-  rangeV: { fontWeight: '700', color: colors.ink, fontFamily: NUM_FONT },
-  rangeNote: { fontSize: 12, lineHeight: 18, color: colors.muted },
+  // the «الأسعار» block: three cards, bullets, the site row, the house glyphs, the three tiles
+  prices: { marginTop: 14, marginHorizontal: 16, gap: 10 },
+  pcard: { borderWidth: 1, borderColor: colors.line, borderRadius: radius.card, paddingVertical: 12, paddingHorizontal: 14, backgroundColor: colors.surface, gap: 6 },
+  pcardGov: { backgroundColor: colors.surface2, borderColor: colors.fieldLine },
+  pcardHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
+  pcardTitle: { flexGrow: 1, flexShrink: 1, minWidth: 0, fontSize: 15, fontWeight: '700', color: colors.ink },
+  pcardSub: { marginTop: 6, fontSize: 13, color: colors.muted },
+  tag: { borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 3, backgroundColor: colors.tint, flexShrink: 0 },
+  tagTx: { fontSize: 11.5, fontWeight: '600', color: colors.primary },
+  tagGov: { backgroundColor: colors.rnplBg },
+  tagGovTx: { color: colors.rnplInk },
+  bullet: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  bulletDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary, marginTop: 8, flexShrink: 0 },
+  bulletTx: { flexShrink: 1, fontSize: 14, lineHeight: 21, color: colors.ink },
+  same: { marginTop: 6, gap: 6 },
+  sameH: { fontSize: 13.5, color: colors.ink },
+  sameRow: { gap: 8 },
+  siteCard: { width: 128, borderWidth: 1, borderColor: colors.line, borderRadius: 12, padding: 8, gap: 2, alignItems: 'center', backgroundColor: colors.surface },
+  siteCardMe: { borderColor: colors.tintLine, backgroundColor: colors.tint },
+  siteCardHover: { borderColor: colors.primary },
+  siteLogo: { width: 48, height: 24, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  siteName: { fontSize: 12, color: colors.muted },
+  sitePrice: { fontSize: 13.5, fontWeight: '700', color: colors.dark, fontFamily: NUM_FONT },
+  siteHint: { fontSize: 11, color: colors.muted },
+  siteHintMe: { color: colors.primary, fontWeight: '600' },
+  houses: { flexDirection: 'row', gap: 4, marginVertical: 4 },
+  house: { flex: 1, aspectRatio: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  houseUp: { backgroundColor: colors.primary },
+  houseDn: { backgroundColor: colors.tint, borderWidth: 1, borderColor: colors.tintLine },
+  tiles: { flexDirection: 'row', gap: 6, marginTop: 4 },
+  tile: { flex: 1, minWidth: 0, borderWidth: 1, borderColor: colors.line, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 6, alignItems: 'center', gap: 2 },
+  tileMe: { backgroundColor: colors.tint, borderColor: colors.tintLine },
+  tileK: { fontSize: 11, color: colors.muted, textAlign: 'center' },
+  tileV: { fontSize: 14, fontWeight: '700', color: colors.dark, fontFamily: NUM_FONT },
+  tileSmall: { fontSize: 10.5, color: colors.muted, textAlign: 'center' },
+  mojSrc: { marginTop: 4, fontSize: 11.5, color: colors.muted },
+  pricesFinal: { fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 2 },
   // sections
   section: { marginTop: 14, paddingHorizontal: 16, gap: 8 },
   h: { fontSize: 13, fontWeight: '600', color: colors.muted },

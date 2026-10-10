@@ -1934,6 +1934,18 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
   return null;
 }
 
+// The in-app ad page's «same ad on other sites» row (owner 2026-10-10) loads each sibling's REAL card
+// through the same finalize() path, by its own (table, id) — never fetchListingById, whose id walk
+// across DEEPLINK_TABLES could hand back another table's row that merely shares the id.
+export async function fetchListingCards(table: string, ids: number[]): Promise<Listing[]> {
+  if (!supabase || !ids.length || !SEARCHABLE_TABLES.includes(table)) return [];
+  const { data, error } = await bounded(supabase.from(table).select(LIST_SELECT).in('id', ids).eq('active', true).limit(ids.length));
+  if (error || !data) return [];
+  const rows = finalize(data, table.includes('_commercial') ? 'com' : 'res');
+  for (const r of rows) r.sourceTable = table;
+  return rows;
+}
+
 // Fetches the REAL Aqar listings + every column the new card design needs (rank/photo/title/
 // All columns the rich card design needs (rank/photo/title/price/RNPL badge/stat row/features grid).
 // Shared by every fetch so the row shape is consistent.
