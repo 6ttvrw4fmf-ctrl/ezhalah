@@ -62,3 +62,10 @@ def test_both_producing_paths_use_it():
     assert "property_type" in enrich.split('.select("ad_number,listing_url')[1].split(")")[0]
     run = _RUN_PY.read_text(encoding="utf-8")
     assert "**land_service_fields(property_type, addl_info)" in run
+
+
+def test_a_breaker_refusal_is_a_failed_run_not_a_green_one():
+    # 2026-10-08..10: the residential enrich job refused every night (27,119 pending) and reported success.
+    from scrapers.wasalt.enrich import exit_code
+    assert exit_code({"deep": 0, "empty": 0, "fail": 0, "aborted": 27119}) == 2
+    assert exit_code({"deep": 12, "empty": 1, "fail": 0}) == 0
