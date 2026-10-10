@@ -56,6 +56,10 @@ const eq = (label: string, actual: string, expected: string) => {
 };
 
 eq('real repro: "من 300000 الى 1500000" -> HIGH bound (1500000), not the low one', extractPrice('أبغى شقة للبيع في جدة 3 غرف بسعر من 300000 الى 1500000'), '1500000');
+// English «m²»/«m2» is a SIZE, never «m» = million (probe 2026-10-10: «150 m²» → price 150,000,000).
+eq('«around 150 m²» is a size, not 150 million', extractPrice('Office for rent in Riyadh, around 150 m²'), '');
+eq('«500 m2» is a size, not 500 million', extractPrice('Residential land in Jeddah, 500 m2'), '');
+eq('…while «1.5m» and «3m SAR» stay millions', extractPrice('villa up to 1.5m') + '|' + extractPrice('budget 3m SAR'), '1500000|3000000');
 eq('range with commas + ريال', extractPrice('من 300,000 إلى 1,500,000 ريال'), '1500000');
 eq('بين X و Y range', extractPrice('بين 300 الف و 1.5 مليون ريال'), '1500000');
 eq('English "from X to Y"', extractPrice('from 300k to 1.5m SAR'), '1500000');

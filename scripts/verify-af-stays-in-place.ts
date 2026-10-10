@@ -86,9 +86,10 @@ const stayProblems = (agentSrc: string, cardSrc: string): string[] => {
   const at = code.indexOf('onLayout={(e) => { msgYRef.current[m.id] = e.nativeEvent.layout.y; }}');
   const turn = at < 0 ? '' : code.slice(at, code.indexOf('>', code.indexOf('style={{', at)));
   if (!turn) out.push('the results-turn container could not be located');
-  if (/display:\s*searchingVisibleRef\.current/.test(turn) || /'none'/.test(turn))
+  if (/display:\s*(?:searchingVisibleRef\.current|newSearchLoading)/.test(turn) || /'none'/.test(turn))
     out.push('earlier results turns are REMOVED (display none) while a search loads — the page collapses and the reader is thrown to the top');
-  if (!/opacity:\s*searchingVisibleRef\.current[^\n]*\?\s*0\.35\s*:\s*1/.test(turn))
+  // A NEW search dims them; an Advanced Filter round does not (owner 2026-10-10, verify-af-round-checks-your-picks.ts).
+  if (!/opacity:\s*newSearchLoading[^\n]*\?\s*0\.35\s*:\s*1/.test(turn))
     out.push('earlier results turns are not dimmed while a search loads (the old count must still read as the old one)');
   if (!/const echoId = uid\(\);/.test(code) || !/role: 'user', text: label/.test(code))
     out.push('a round does not give its answers bubble an id the view can ease to');
@@ -129,7 +130,7 @@ const swap = (src: string, from: string | RegExp, to: string) => {
   return out;
 };
 mustCatch('#5400 coming back — earlier turns hidden with display:none',
-  stayProblems(swap(AGENT, /opacity: searchingVisibleRef\.current \|\| /, "display: searchingVisibleRef.current || "), CARD).length > 0);
+  stayProblems(swap(AGENT, /opacity: newSearchLoading \|\| /, "display: newSearchLoading || "), CARD).length > 0);
 mustCatch('earlier turns neither dimmed nor hidden',
   stayProblems(swap(AGENT, /\? 0\.35 : 1/, '? 1 : 1'), CARD).length > 0);
 mustCatch('the round no longer eases to its own answers bubble',
