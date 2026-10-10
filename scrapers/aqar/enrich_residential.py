@@ -256,6 +256,27 @@ def _own_photos(obj: Optional[dict[str, Any]]) -> Optional[list[str]]:
     return list(dict.fromkeys(out))
 
 
+def _own_coordinates(obj: Optional[dict[str, Any]]) -> Optional[dict[str, float]]:
+    """The pin aqar itself shows for the ad: `listing.location {lat, lng}` (ld+json `geo` carries the
+    same). `precise_location` is null on most ads, so it is not required — `location` IS aqar's pin.
+
+    Written as `additional_info = {"latitude", "longitude"}`, the shape listing_rich_attrs already
+    reads for every generic platform. None (→ the upsert keeps what is stored) when the payload is
+    unreadable, the pin is absent, (0,0), or outside Saudi Arabia (lat 16–33, lng 34–56) — which
+    also rejects a swapped pair instead of guessing which number is which.
+    """
+    loc = obj.get("location") if isinstance(obj, dict) else None
+    if not isinstance(loc, dict):
+        return None
+    lat, lng = loc.get("lat"), loc.get("lng")
+    if isinstance(lat, bool) or isinstance(lng, bool) or not isinstance(lat, (int, float)) \
+            or not isinstance(lng, (int, float)):
+        return None
+    if not (16 <= lat <= 33 and 34 <= lng <= 56):
+        return None
+    return {"latitude": float(lat), "longitude": float(lng)}
+
+
 def _structured_price(obj: Optional[dict[str, Any]]) -> tuple[Optional[int], bool]:
     """aqar's OWN published price, plus whether aqar settled the question at all.
 
@@ -1019,6 +1040,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
         **features,
         # media
         "photo_urls":              photos,
+        "additional_info":         _own_coordinates(obj),
         "images_evidence":         {"observed": obj is not None, "container_present": obj is not None,
                                     "key_present": isinstance(obj, dict) and "imgs" in obj,
                                     "count": len(photos) if photos is not None else None},

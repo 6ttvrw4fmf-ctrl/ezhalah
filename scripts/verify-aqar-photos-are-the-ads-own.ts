@@ -5,6 +5,8 @@
 // each photo, and JSON-escaped junk ending in a backslash. All 160,450 live residential rows were
 // polluted: ad 6815040 stored 86 entries for its 21 photos (5 of them another villa); ad 6438846 has
 // NO photos on Aqar and stored only other ads' houses. The fix reads aqar's own `listing.imgs`.
+// The same fetch now also carries aqar's own pin (`listing.location`) — Aqar was 0% coordinates —
+// which must never be dropped, swapped, (0,0) or outside Saudi Arabia.
 //
 // Inputs are what PRODUCTION sees, not values this repo chose:
 //   • scripts/fixtures/aqar-ad-{6815040,6438846}.html.gz — the real server HTML of both ads,
@@ -15,6 +17,7 @@
 // Ground truth (opened on sa.aqar.fm 2026-10-10): 6815040 shows 21 photos, first
 // 003757760_1786380520839.jpg; 6438846 shows none.
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
@@ -51,14 +54,25 @@ def _barrier_photos(ad, type_slug, deal_slug, shell):
     global _BARRIER_SHELL
     _BARRIER_SHELL = shell
     row = enrich_residential("https://sa.aqar.fm/x/x-%s" % ad, type_slug=type_slug, deal_slug=deal_slug)
-    return {"row": row is not None, "photo_urls": (row or {}).get("photo_urls")}
+    return {"row": row is not None, "photo_urls": (row or {}).get("photo_urls"),
+            "coords": (row or {}).get("additional_info")}
 `;
 const real = readFileSync(SRC, 'utf8');
-type Out = { row: boolean; photo_urls: string[] | null };
+type Coords = { latitude: number; longitude: number } | null;
+type Out = { row: boolean; photo_urls: string[] | null; coords: Coords };
 const CALLS = [['6815040', 'villa', 'sale', false], ['6438846', 'apartment', 'rent', false],
                ['6815040', 'villa', 'sale', true]];
 const run = (source: string): Out[] => pyCall(ROOT, MOD, '_barrier_photos', CALLS, source + HARNESS) as Out[];
 
+// The pin each page itself publishes in its ld+json `geo` — read here independently of the extractor
+// (which reads `listing.location`), so the two sources on the real page must agree.
+const geoOf = (ad: string) => {
+  const html = gunzipSync(readFileSync(join(ROOT, `scripts/fixtures/aqar-ad-${ad}.html.gz`))).toString('utf8');
+  const m = html.match(/"geo":\{[^}]*"latitude":(-?[0-9.]+),"longitude":(-?[0-9.]+)/);
+  return m ? { latitude: Number(m[1]), longitude: Number(m[2]) } : null;
+};
+const GEO = [geoOf('6815040'), geoOf('6438846')];
+const samePin = (c: Coords, g: Coords) => !!c && !!g && c.latitude === g.latitude && c.longitude === g.longitude;
 const OWN_FIRST = 'https://images.aqar.fm/webp/750x0/props/003757760_1786380520839.jpg';
 const verdict = (o: Out[]) => {
   const villa = o[0].photo_urls ?? [];
@@ -68,6 +82,8 @@ const verdict = (o: Out[]) => {
       && new Set(villa).size === 21,
     noPhotoAdEmpty: Array.isArray(o[1].photo_urls) && o[1].photo_urls.length === 0,
     shellUntouched: o[2].photo_urls === null,
+    pins: samePin(o[0].coords, GEO[0]) && samePin(o[1].coords, GEO[1]),
+    shellPinUntouched: o[2].coords === null,
   };
 };
 
@@ -81,6 +97,21 @@ check('ad 6438846: Aqar says imgs:null → photo_urls = [] (no other ad\'s house
   `got ${JSON.stringify(o[1].photo_urls)?.slice(0, 160)}`);
 check('a fetch without aqar\'s payload leaves photos UNKNOWN (None → the upsert keeps the stored ones)',
   v.shellUntouched, `got ${JSON.stringify(o[2].photo_urls)?.slice(0, 160)}`);
+
+check('the page\'s ld+json geo is readable (else the pin checks prove nothing)',
+  GEO[0]?.latitude === 24.920876 && GEO[0]?.longitude === 46.780616 && GEO[1] !== null);
+check('both ads carry aqar\'s own pin, equal to the page\'s ld+json geo (not dropped, not swapped)', v.pins,
+  `got ${JSON.stringify([o[0].coords, o[1].coords])}`);
+check('a fetch without aqar\'s payload writes no pin (None → the stored one survives)', v.shellPinUntouched);
+const box = pyCall(ROOT, MOD, '_own_coordinates', [
+  [{ location: { lat: 0, lng: 0 } }], [{ location: { lat: 46.78, lng: 24.92 } }],
+  [{ location: { lat: '24.9', lng: '46.7' } }], [{ location: null }], [{}], [null],
+  [{ location: { lat: 24.920876, lng: 46.780616 } }],
+]);
+check('(0,0), a swapped pair, strings, null and a missing pin are all rejected — never written',
+  box.slice(0, 6).every((x) => x === null), JSON.stringify(box));
+check('…while a real Saudi pin passes through unchanged',
+  samePin(box[6] as Coords, { latitude: 24.920876, longitude: 46.780616 }));
 
 // ── mutation proof: each mutant must turn at least one check red ────────────────────────────────
 const mutate = (label: string, fn: (s: string) => string) => {
@@ -102,6 +133,19 @@ mustCatch('imgs:null treated as "unknown" (6438846 keeps other ads\' houses)', b
 const c = mutate('(c)', (s) => s.replace('    if not isinstance(obj, dict) or "imgs" not in obj:\n        return None\n',
   '    if not isinstance(obj, dict) or "imgs" not in obj:\n        return []\n'));
 mustCatch('a failed/shell fetch blanking the stored photos', c !== null && !c.shellUntouched);
+
+// (d) the row stops carrying the pin — photos still arrive, the coordinates are silently dropped.
+const d = mutate('(d)', (s) => s.replace('        "additional_info":         _own_coordinates(obj),\n', ''));
+mustCatch('the extractor returning photos but dropping the coordinates', d !== null && d.villaExact && !d.pins);
+// (e) lat/lng swapped on the way out.
+const e = mutate('(e)', (s) => s.replace('return {"latitude": float(lat), "longitude": float(lng)}',
+  'return {"latitude": float(lng), "longitude": float(lat)}'));
+mustCatch('lat/lng swapped', e !== null && !e.pins);
+// (f) the Saudi box removed — (0,0) would be written as a pin in the Gulf of Guinea.
+const fSrc = real.replace('    if not (16 <= lat <= 33 and 34 <= lng <= 56):\n        return None\n', '');
+check('MUTATION (f): anchor intact', fSrc !== real);
+const fOut = fSrc === real ? [] : pyCall(ROOT, MOD, '_own_coordinates', [[{ location: { lat: 0, lng: 0 } }]], fSrc);
+mustCatch('the Saudi box removed, letting (0,0) through', fOut[0] !== null);
 
 // ── client-side safety net (src/lib/photoUrl.ts), fed the row production stored ────────────────
 const STORED: string[] = JSON.parse(readFileSync(join(ROOT, 'scripts/fixtures/aqar-ad-6815040.stored-photo_urls.json'), 'utf8'));
