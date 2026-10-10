@@ -11,6 +11,12 @@ import { memo } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
+/** The region's display name — the list heading while a region is tapped. */
+export function regionLabel(id: number, locale: 'ar' | 'en'): string {
+  const region = regionMap.regions.find((r) => r.id === id);
+  return !region ? '' : locale === 'ar' ? region.name : `${region.en} Region`;
+}
+
 const IS_WEB = Platform.OS === 'web';
 const SvgRoot: any = IS_WEB ? 'svg' : Svg;
 const Shape: any = IS_WEB ? 'path' : Path;

@@ -17,7 +17,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, MAX_PICKER_SOURCES, platformRegionIds } from '@/data/platformPickerProfiles';
-import PickerRegionsMap from '@/components/PickerRegionsMap';
+import PickerRegionsMap, { regionLabel } from '@/components/PickerRegionsMap';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { COMPOSER_INPUT, TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
@@ -731,7 +731,11 @@ export default function Agent() {
     [offeredPlatforms, pickerRegion],
   );
   // The regions the lit sites cover — the map glows there so the user sees the reach of their picks.
-  const pickerCoveredRegions = useMemo(() => new Set(selectedSources.flatMap((name) => platformRegionIds(name))), [selectedSources]);
+  // «كل المواقع» (nothing lit) = every site, so the whole kingdom glows (owner 2026-10-10).
+  const pickerCoveredRegions = useMemo(
+    () => new Set(selectedSources.length ? selectedSources.flatMap((name) => platformRegionIds(name)) : Object.keys(pickerRegionCounts).map(Number)),
+    [selectedSources, pickerRegionCounts],
+  );
   const [loaderBottomInset, setLoaderBottomInset] = useState<number>();
   // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): a search that arrived via Normal Filter's
   // «بحث» (the `?filter=` param — see the effect below, the ONE place this flips true) shows its
@@ -4169,12 +4173,15 @@ export default function Agent() {
                 // sites first, then one section per region for the offices that cover one place.
                 const description = profile[locale];
                 const group = profile.group[locale];
-                const startsGroup = index === 0 || PLATFORM_PICKER_PROFILES[pickerPlatforms[index - 1].name].group[locale].key !== group.key;
+                // A tapped map region is the one heading (owner 2026-10-10: «say the region title, then the
+                // websites»); otherwise the measured-coverage sections.
+                const startsGroup = pickerRegion !== null ? index === 0 : index === 0 || PLATFORM_PICKER_PROFILES[pickerPlatforms[index - 1].name].group[locale].key !== group.key;
+                const sectionLabel = pickerRegion !== null ? regionLabel(pickerRegion, locale) : group.label;
                 // The reviewed 96×48 logo layout, drawn into a 56×28 slot.
                 const k = 28 / 48;
                 return (
                   <View key={platform.name} style={{ width: '100%' }}>
-                    {startsGroup ? <Text accessibilityRole="header" style={[s.platformPickerSectionTitle, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>{group.label}</Text> : null}
+                    {startsGroup ? <Text accessibilityRole="header" style={[s.platformPickerSectionTitle, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>{sectionLabel}</Text> : null}
                     <Pressable
                       testID={`platform-picker-${platform.name}`}
                       accessibilityRole="button"
