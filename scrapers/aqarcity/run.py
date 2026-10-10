@@ -115,6 +115,31 @@ SERVICE_COLS = {
     "تصريف الفيضانات": None, "غاز": None,
 }
 
+LAND_UTILITY_COLS = ("electricity", "water_supply", "sanitation")
+
+
+def land_utilities(mapped_type, services_raw: str) -> dict:
+    """A LAND's three utilities from its own «خدمات العقار» checklist (backlog 325, owner 2026-10-09).
+
+    The field is aqarcity's structured checklist: a ticked utility is listed by name, and
+    «لايوجد خدمات» is the site's explicit «no services». On a land, a utility the checklist does not
+    tick is therefore a stated NO, not silence: 61 live lands said «لايوجد خدمات» while we stored
+    NULL/NULL/NULL, so a raw-land search could not find them. Listed -> True, unlisted -> False.
+    LAND ONLY: on a flat, an unticked «مياه» is not a statement that it has no water. An empty field
+    is silence and returns {} (never a guessed False).
+    """
+    if not (mapped_type and str(mapped_type).endswith("Land")):
+        return {}
+    raw = (services_raw or "").strip()
+    if not raw:
+        return {}
+    out = {col: False for col in LAND_UTILITY_COLS}
+    for ar, col in SERVICE_COLS.items():
+        if col in out and ar in raw:
+            out[col] = True
+    return out
+
+
 # Amenities the description may state. NOT the utilities: خدمات العقار publishes those structurally.
 PROSE_AMENITY_COLUMNS = frozenset({"elevator", "kitchen", "air_conditioner", "parking", "maid_room",
                                    "driver_room", "laundry_room", "balcony_terrace", "private_entrance",
@@ -859,6 +884,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     for ar, col in SERVICE_COLS.items():
         if col and ar in services_raw:
             amenities[col] = True
+    amenities.update(land_utilities(mapped_type, services_raw))
     # ── Advanced Filter amenities from the ad's own description (🔬 AF engineer, 2026-10-06) ──
     # 1,729 production listings stored 0 kitchen/elevator/parking/AC answers while the ads list them
     # («3 غرف نوم · مطبخ · 4 دورات مياه · مستودع · مدخل سيارة», /property/30751). The details list
