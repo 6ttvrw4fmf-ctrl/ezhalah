@@ -1,4 +1,4 @@
-5729634a9d8bd4b672ccb47b59b6b5276edabf6c
+c6b5d3af406b03d21a80fbce8d7f1bed5d1d52a4
 # APPROVED PRODUCTION BASELINE — the commit currently live & approved on ezhalah-app.vercel.app.
 # 2026-09-21  53e2ecb  advanced MANUALLY, AHEAD of its deploy, to clear preflight-verify.sh's
 #   deletion guard. preflight refused on run 35548585451 with exactly one deleted file:
@@ -386,3 +386,4 @@
 # 2026-10-09  76cad9c  deployed via safe-deploy.sh
 # 2026-10-09  da05a78  deployed via safe-deploy.sh
 # 2026-10-10  5729634  deployed via safe-deploy.sh
+# 2026-10-10  c6b5d3a  deployed via safe-deploy.sh
