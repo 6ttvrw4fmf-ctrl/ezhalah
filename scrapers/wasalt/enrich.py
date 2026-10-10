@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -157,6 +158,10 @@ def pending_count(c, table: str, flag: str, sel: str) -> int:
     return int(res.count)
 
 
+# Over the cap, only rows scraped this recently are fetched: see enrich_table.
+ARRIVALS_WINDOW_H = 48
+
+
 def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: int = 1,
                  max_pending: int = MAX_PENDING_DEFAULT, allow_backfill: bool = False) -> dict[str, int]:
     c = db.sb()
@@ -165,13 +170,28 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
     # all of it through the metered Saudi proxy is exactly what exhausted the free tier (25-26 Jun). Refuse
     # unless explicitly authorised, so a stray flag reset can never silently re-crawl ~57k rows.
     pending = pending_count(c, table, "detail_enriched", "ad_number")
+    # ARRIVALS MODE (New Listings Engineer, 2026-10-10 — the same fix as enrich_ar.py, PR #6650). Over
+    # the cap this refused the WHOLE run, so from 10-08 no new wasalt ad got facade / meters / street
+    # width (Advanced Filter fields per arrival 0.6 vs 1.1 over 7 days). Over the cap we now take only
+    # rows scraped in the last ARRIVALS_WINDOW_H hours; a flag reset re-queues OLD rows, which the
+    # window excludes, and if even the window exceeds the cap the run still refuses.
+    arrivals_since = None
     if pending > max_pending and not allow_backfill:
-        print(f"⚠ CIRCUIT BREAKER: {pending} un-enriched rows in {table} (> {max_pending}). Steady state "
-              f"is a few/day — this looks like a flag reset or a backfill. Refusing to crawl the backlog "
-              f"through the metered proxy. Re-run with --allow-backfill to override.", flush=True)
-        return {"deep": 0, "empty": 0, "fail": 0, "aborted": pending}
+        arrivals_since = (datetime.now(timezone.utc) - timedelta(hours=ARRIVALS_WINDOW_H)).isoformat()
+        fresh = (c.table(table).select("ad_number", count="exact").eq("active", True)
+                 .eq("detail_enriched", False).gte("scraped_at", arrivals_since).limit(1).execute())
+        if fresh.count is None or int(fresh.count) > max_pending:
+            print(f"⚠ CIRCUIT BREAKER: {pending} un-enriched rows in {table} (> {max_pending}), and the "
+                  f"last {ARRIVALS_WINDOW_H}h alone holds {fresh.count}. This looks like a flag reset or a "
+                  f"backfill. Refusing to crawl through the metered proxy. Re-run with --allow-backfill "
+                  f"to override.", flush=True)
+            return {"deep": 0, "empty": 0, "fail": 0, "aborted": pending}
+        print(f"⚠ {pending} un-enriched rows (> {max_pending}): arrivals mode — only the {fresh.count} "
+              f"scraped in the last {ARRIVALS_WINDOW_H}h; the old backlog waits.", flush=True)
     q = (c.table(table).select("ad_number,listing_url,property_type")
          .eq("active", True).eq("detail_enriched", False))
+    if arrivals_since is not None:
+        q = q.gte("scraped_at", arrivals_since)
     # Cloud matrix sharding: 10 parallel jobs, each claims a DISJOINT slice by the last digit of
     # ad_number (WST…N). Server-side, ~even, zero overlap → no duplicate proxy fetches. Only valid
     # for shards==10 (single trailing digit). shards==1 (local) skips sharding entirely.
