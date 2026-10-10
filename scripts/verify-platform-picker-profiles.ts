@@ -42,6 +42,11 @@ function verify(text: string, helperText = helper) {
   assert.ok(regionIds('Aqar').length >= 6, 'Aqar reaches many regions');
   assert.deepEqual(regionIds('Al Humaidan'), [4], 'a site with no listings carries the region it names (Qassim)');
   assert.deepEqual(regionIds('No such site'), []);
+  const share = load(text, 'platformRegionShare', helperText);
+  assert.equal(share('Al Humaidan', 4), 1, 'a no-listings site is wholly in its named region');
+  assert.ok(share('Aqar', 6) > 0 && share('Aqar', 6) < 0.5, 'a nationwide portal has a small share in Asir');
+  assert.ok(share('Eastabha', 6) > share('Aqar', 6), 'an Asir office outranks a nationwide portal in Asir');
+  assert.equal(share('No such site', 1), 0);
   // Preserve the collected ZIP pack, including variants replaced by an owner-approved original asset.
   for (const match of text.matchAll(/require\("([^"]*\/platform-logos\/[^"]+)"\)/g)) files.add(match[1]);
   assert.equal(profiles['Deal App'].logo, roster.find((p: any) => p.name === 'Deal App').logo, 'Deal uses its original yellow listing-card asset');

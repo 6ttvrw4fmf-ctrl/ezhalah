@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, MAX_PICKER_SOURCES, platformRegionIds } from '@/data/platformPickerProfiles';
+import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, MAX_PICKER_SOURCES, platformRegionIds, platformRegionShare } from '@/data/platformPickerProfiles';
 import PickerRegionsMap, { regionLabel } from '@/components/PickerRegionsMap';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { COMPOSER_INPUT, TAP44 } from '@/theme/palette';
@@ -726,8 +726,11 @@ export default function Agent() {
     for (const platform of offeredPlatforms) for (const id of platformRegionIds(platform.name)) counts[id] = (counts[id] ?? 0) + 1;
     return counts;
   }, [offeredPlatforms]);
+  // A tapped region lists the sites with listings there, its own offices first (the share of their
+  // inventory in that region, highest first), the nationwide portals after.
   const pickerPlatforms = useMemo(
-    () => (pickerRegion === null ? offeredPlatforms : offeredPlatforms.filter((platform) => platformRegionIds(platform.name).includes(pickerRegion))),
+    () => (pickerRegion === null ? offeredPlatforms : offeredPlatforms.filter((platform) => platformRegionIds(platform.name).includes(pickerRegion))
+      .sort((a, b) => platformRegionShare(b.name, pickerRegion) - platformRegionShare(a.name, pickerRegion))),
     [offeredPlatforms, pickerRegion],
   );
   // The regions the lit sites cover — the map glows there so the user sees the reach of their picks.

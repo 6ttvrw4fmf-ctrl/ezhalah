@@ -189,6 +189,18 @@ export function platformRegionIds(name: string): number[] {
   return measured.length ? measured : named ? [named] : [];
 }
 
+// How much of a site's inventory sits in one region (0..1): a tapped region lists its own offices first
+// (owner 2026-10-10: «should show the sites in that region»). A site with no listings = the region it names.
+export function platformRegionShare(name: string, regionId: number): number {
+  const entry = coverage[name];
+  if (!entry) return 0;
+  if (entry.total && entry.regions.length) {
+    const region = entry.regions.find(r => r.id === regionId);
+    return region ? region.count / entry.total : 0;
+  }
+  return (entry as PickerCoverage & { region?: { id: number } }).region?.id === regionId ? 1 : 0;
+}
+
 export function pickerSourceSlugs(names: string[]): string[] {
   return [...new Set(names.flatMap(name => {
     const entry = coverageSnapshot.platforms[name as keyof typeof coverageSnapshot.platforms];
