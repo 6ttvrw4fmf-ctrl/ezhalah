@@ -296,11 +296,12 @@ type Eligible = (row: Row | null) => boolean;
 const liftEligible = async (file: string): Promise<Eligible> => (await liftSymbols(file, [{ header: 'export function pricesBlockEligible(' }], ['pricesBlockEligible'])).pricesBlockEligible as Eligible;
 const eligibleProblems = (e: Eligible): string[] => {
   const out: string[] = [];
-  if (!e({ platform: 'aqar', deal_ar: 'بيع' })) out.push('an Aqar sale ad got no prices block');
+  if (!e({ platform: 'aqar', deal_ar: 'بيع', type_ar: 'فيلا' })) out.push('an Aqar sale ad got no prices block');
   if (!e({ platform: 'AQAR', deal_ar: 'بيع', type_ar: 'محل' })) out.push('an Aqar commercial sale ad got no prices block');
-  if (e({ platform: 'aqar', deal_ar: 'إيجار' })) out.push('an Aqar RENT ad got a prices block');
-  if (e({ platform: 'wasalt', deal_ar: 'بيع' })) out.push('a non-Aqar sale ad got a prices block');
-  if (e({ platform: 'aqar', deal_ar: null }) || e(null)) out.push('a row without a deal (or no row) got a prices block');
+  if (e({ platform: 'aqar', deal_ar: 'إيجار', type_ar: 'فيلا' })) out.push('an Aqar RENT ad got a prices block');
+  if (e({ platform: 'wasalt', deal_ar: 'بيع', type_ar: 'فيلا' })) out.push('a non-Aqar sale ad got a prices block');
+  if (e({ platform: 'aqar', deal_ar: null, type_ar: 'فيلا' }) || e(null)) out.push('a row without a deal (or no row) got a prices block');
+  if (e({ platform: 'aqar', deal_ar: 'بيع', type_ar: 'غير معروف' }) || e({ platform: 'aqar', deal_ar: 'بيع', type_ar: '' })) out.push('an ad whose type the source never stated got a prices block (our guess of its group)');
   return out;
 };
 const eligibleReal = eligibleProblems(await liftEligible(DATA));
@@ -313,7 +314,8 @@ const mustCatchEligible = async (what: string, from: string, to: string) => {
   if (!caught) failed++;
   console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
 };
-await mustCatchEligible('a rent ad getting the block', " && String(row.deal_ar ?? '').trim() === 'بيع';", ';');
+await mustCatchEligible('a rent ad getting the block', " && String(row.deal_ar ?? '').trim() === 'بيع'\n", '\n');
+await mustCatchEligible('an unknown-type ad getting the block', "\n    && !['', 'غير معروف'].includes(String(row.type_ar ?? '').trim());", ';');
 await mustCatchEligible('a non-Aqar ad getting the block', "String(row.platform ?? '').trim().toLowerCase() === 'aqar' && ", '');
 const gated = (p: string) => /if \(!pricesBlockEligible\(row\)\) return;\s*const price = Number\(row\?\.price_total\)/.test(p) && /fetchMojSales\(row, commercial \? 'تجاري' : 'سكني'\)/.test(p);
 check('the page fetches the block only behind pricesBlockEligible(row), with the ministry class by macro', gated(PREVIEW));
