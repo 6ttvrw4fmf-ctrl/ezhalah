@@ -4112,35 +4112,49 @@ export default function Agent() {
               </Pressable>
             </View>
 
-            <View style={s.platformPickerSearchBox}>
-              <Ionicons name="search-outline" size={17} color={colors.muted} />
-              <TextInput
-                value={platformPickerSearch}
-                onChangeText={setPlatformPickerSearch}
-                placeholder={t('Search websites…')}
-                placeholderTextColor={colors.muted}
-                style={s.platformPickerSearchInput}
-                accessibilityLabel={t('Search websites…')}
-                returnKeyType="search"
-              />
-              {platformPickerSearch ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={t('Clear all')}
-                  onPress={() => setPlatformPickerSearch('')}
-                  hitSlop={8}
-                >
-                  <Ionicons name="close-circle" size={17} color={colors.muted} />
-                </Pressable>
-              ) : null}
-            </View>
-
             <ScrollView
               style={s.platformPickerList}
               contentContainerStyle={s.platformPickerListContent}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={true}
             >
+              <PickerRegionsMap
+                locale={locale}
+                t={t}
+                fontFamily={CHAT_FONT}
+                selectedRegion={pickerRegion}
+                coveredRegions={pickerCoveredRegions}
+                counts={pickerRegionCounts}
+                listings={pickerRegionListings}
+                totalCount={offeredPlatforms.length}
+                onSelectRegion={(id) => setPickerRegion((current) => (current === id ? null : id))}
+                compact={pickerSheet}
+              />
+
+              {/* Step 2 (owner 2026-10-10): the websites — searched by name or picked from the list below. */}
+              <Text accessibilityRole="header" style={[s.platformPickerStep, { textAlign: locale === 'ar' ? 'right' : 'left' }]}>{t('Step 2 · Choose the websites (up to 3)')}</Text>
+              <View style={s.platformPickerSearchBox}>
+                <Ionicons name="search-outline" size={17} color={colors.muted} />
+                <TextInput
+                  value={platformPickerSearch}
+                  onChangeText={setPlatformPickerSearch}
+                  placeholder={t('Search websites…')}
+                  placeholderTextColor={colors.muted}
+                  style={s.platformPickerSearchInput}
+                  accessibilityLabel={t('Search websites…')}
+                  returnKeyType="search"
+                />
+                {platformPickerSearch ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('Clear all')}
+                    onPress={() => setPlatformPickerSearch('')}
+                    hitSlop={8}
+                  >
+                    <Ionicons name="close-circle" size={17} color={colors.muted} />
+                  </Pressable>
+                ) : null}
+              </View>
               <Pressable
                 testID="platform-picker-all"
                 accessibilityRole="button"
@@ -4157,19 +4171,6 @@ export default function Agent() {
                 </View>
                 {!selectedSources.length ? <Ionicons name="checkmark" size={20} color={colors.primary} /> : null}
               </Pressable>
-
-              <PickerRegionsMap
-                locale={locale}
-                t={t}
-                fontFamily={CHAT_FONT}
-                selectedRegion={pickerRegion}
-                coveredRegions={pickerCoveredRegions}
-                counts={pickerRegionCounts}
-                listings={pickerRegionListings}
-                totalCount={offeredPlatforms.length}
-                onSelectRegion={(id) => setPickerRegion((current) => (current === id ? null : id))}
-                compact={pickerSheet}
-              />
 
               <View style={s.platformPickerRule} />
               {pickerPlatforms.map((platform, index) => {
@@ -5466,6 +5467,7 @@ const s = StyleSheet.create({
   platformPickerItemNameOn: { color: colors.ink, fontWeight: '500' },
   platformPickerItemHint: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: 1, textAlign: 'right' },
   platformPickerItemCount: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 16, flexShrink: 0 },
+  platformPickerStep: { fontFamily: CHAT_FONT, color: colors.ink, fontSize: 13, lineHeight: 18, fontWeight: '600', paddingHorizontal: 10, paddingTop: 14, paddingBottom: 8 },
   platformPickerSectionTitle: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 12, lineHeight: 16, fontWeight: '500', paddingHorizontal: 10, paddingTop: 14, paddingBottom: 4 },
   platformPickerRule: { height: 1, backgroundColor: colors.line, marginVertical: 6, marginHorizontal: 10 },
   platformPickerEmpty: { fontFamily: CHAT_FONT, color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: 'center', paddingVertical: 28 },

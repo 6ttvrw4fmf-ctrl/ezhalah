@@ -71,32 +71,26 @@ function PickerRegionsMap({ locale, t, fontFamily, selectedRegion, coveredRegion
   const isSolid = (id: number) => (selectedRegion === null ? coveredRegions.has(id) : id === selectedRegion);
   return (
     <View style={styles.wrap}>
-      {/* What this part is for — the user should not have to work the map out (owner). */}
-      <Text style={[styles.eyebrow, { fontFamily, textAlign: align }]}>
-        <Ionicons name="map-outline" size={13} color={colors.primary} />{'  '}{t('By coverage')}
-      </Text>
+      {/* Step 1 of the sheet (owner 2026-10-10): pick the region, then the websites below. «كل المملكة» is
+          a real button, lit when nothing is tapped, so nobody has to guess what the default is. */}
+      <Text style={[styles.step, { fontFamily, textAlign: align }]}>{t('Step 1 · Choose the region')}</Text>
       <View style={[styles.caption, { flexDirection: ar ? 'row-reverse' : 'row' }]}>
-        {picked ? (
-          <>
-            <Text style={[styles.captionTitle, { fontFamily, textAlign: align }]} numberOfLines={1}>
-              {ar ? picked.name : `${picked.en} Region`} · {t('{count} websites', { count: counts[picked.id] ?? 0 })} · {t('{count} listings', { count: fmt(listings[picked.id] ?? 0) })}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('All regions')}
-              onPress={() => onSelectRegion(picked.id)}
-              hitSlop={6}
-              style={({ pressed }: any) => [styles.clear, pressed && { backgroundColor: colors.segTrack }]}
-            >
-              <Ionicons name="close" size={13} color={colors.body} />
-              <Text style={[styles.clearText, { fontFamily }]}>{t('All regions')}</Text>
-            </Pressable>
-          </>
-        ) : (
-          <Text style={[styles.captionTitle, { fontFamily, textAlign: align }]} numberOfLines={1}>
-            {t('Saudi Arabia')} · {t('{count} websites', { count: totalCount })}
-          </Text>
-        )}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: !picked }}
+          accessibilityLabel={t('Whole kingdom')}
+          onPress={() => picked && onSelectRegion(picked.id)}
+          hitSlop={6}
+          style={({ pressed }: any) => [styles.kingdom, !picked && styles.kingdomOn, pressed && picked && { backgroundColor: colors.segTrack }]}
+        >
+          {!picked ? <Ionicons name="checkmark" size={14} color={colors.onFill} /> : null}
+          <Text style={[styles.kingdomText, !picked && styles.kingdomTextOn, { fontFamily }]}>{t('Whole kingdom')}</Text>
+        </Pressable>
+        <Text style={[styles.captionTitle, { fontFamily, textAlign: align }]} numberOfLines={1}>
+          {picked
+            ? `${ar ? picked.name : `${picked.en} Region`} · ${t('{count} websites', { count: counts[picked.id] ?? 0 })} · ${t('{count} listings', { count: fmt(listings[picked.id] ?? 0) })}`
+            : `${t('Saudi Arabia')} · ${t('{count} websites', { count: totalCount })}`}
+        </Text>
       </View>
       {picked ? null : <Text style={[styles.captionHint, { fontFamily, textAlign: align }]}>{t('Tap a region to see the websites that cover it')}</Text>}
       <SvgRoot width="100%" height={compact ? 236 : 256} viewBox={regionMap.viewBox} preserveAspectRatio="xMidYMid meet">
@@ -158,11 +152,13 @@ export default memo(PickerRegionsMap);
 
 const styles = StyleSheet.create({
   wrap: { paddingTop: 10, paddingBottom: 2, paddingHorizontal: 10 },
-  eyebrow: { fontSize: 12, lineHeight: 16, fontWeight: '600', color: colors.primary, marginBottom: 4 },
-  caption: { alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 28 },
+  step: { fontSize: 13, lineHeight: 18, fontWeight: '600', color: colors.ink, marginBottom: 6 },
+  caption: { alignItems: 'center', justifyContent: 'space-between', gap: 10, minHeight: 30 },
+  kingdom: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 5, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, flexShrink: 0 },
+  kingdomOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  kingdomText: { fontSize: 13, lineHeight: 17, fontWeight: '500', color: colors.body },
+  kingdomTextOn: { color: colors.onFill },
   captionHint: { fontSize: 13, lineHeight: 18, color: colors.muted },
   captionTitle: { flex: 1, minWidth: 0, fontSize: 15, lineHeight: 20, fontWeight: '500', color: colors.ink },
-  clear: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line },
-  clearText: { fontSize: 12, lineHeight: 16, color: colors.body },
   attribution: { fontSize: 10, lineHeight: 14, color: colors.muted, textAlign: 'center', marginTop: 2 },
 });

@@ -198,6 +198,10 @@ const AR: Record<string, string> = {
   // Owner 2026-10-10: the sheet must say its purpose — one site, several, or all, chosen by coverage.
   'Focus your search on one or more specific websites. We show only their listings.': 'اختر موقعاً معيّناً أو أكثر، أو كل المواقع، ونعرض لك إعلاناتها فقط.',
   'By coverage': 'حسب التغطية',
+  // The sheet reads as two steps (owner 2026-10-10: «search on the region you want, then choose the websites below»).
+  'Step 1 · Choose the region': '١ · اختر المنطقة',
+  'Step 2 · Choose the websites (up to 3)': '٢ · اختر المواقع (حتى ٣)',
+  'Whole kingdom': 'كل المملكة',
   'Websites covering {region}': 'المواقع التي تغطي {region}',
   '{count} listings': '{count} إعلان',
   'You can choose up to 3 websites': 'يمكنك اختيار ثلاثة مواقع كحدٍّ أقصى.',
