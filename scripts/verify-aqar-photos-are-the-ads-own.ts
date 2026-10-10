@@ -203,8 +203,8 @@ def _barrier_recovery(ad, stored_type):
         p = os.path.join(${JSON.stringify(join(ROOT, 'scripts/fixtures'))}, "aqar-ad-%s.html.gz" % n)
         return types.SimpleNamespace(text=gzip.open(p, "rb").read().decode("utf-8"))
     _E.get = _get
-    writable = set(_N.SLUG_TO_TYPE.values()) | set(_re.findall(r'property_type = "([A-Za-z ]+)"',
-                                                               open(_E.__file__, encoding="utf-8").read()))
+    writable = (set(_N.SLUG_TO_TYPE.values()) | set(_E.AQAR_LAND_USAGE.values())
+                | set(_re.findall(r'property_type = "([A-Za-z ]+)"', open(_E.__file__, encoding="utf-8").read())))
     row = {"id": 1, "ad_number": ad, "listing_url": "https://sa.aqar.fm/x/x-%s" % ad,
            "property_type": stored_type, "transaction_type": "Buy"}
     import contextlib, io
@@ -217,8 +217,10 @@ def _barrier_recovery(ad, stored_type):
 type Rec = { unresolved: string[]; derived: string[]; fetched: number; skipped: number };
 const recRun = (src: string) => pyCall(ROOT, REC, '_barrier_recovery', [['6772165', 'Commercial Land']], src + REC_HARNESS)[0] as Rec;
 const rec = recRun(REC_SRC);
+// Since 2026-10-10 a plot's type is Aqar's own «نوع العقار» (AQAR_LAND_USAGE); Industrial Land /
+// Agriculture Plot are only legacy stored values now, still mapped in TYPE_TO_SLUG for those rows.
 check('the class barrier can see the enricher\'s derived land types (else it proves nothing)',
-  ['Agriculture Plot', 'Commercial Land', 'Industrial Land'].every((t) => rec.derived.includes(t)),
+  rec.derived.includes('Commercial Land'),
   JSON.stringify(rec.derived));
 check('every property_type the enricher can write resolves to an aqar slug', rec.unresolved.length === 0,
   `unresolved: ${rec.unresolved.join(', ')}`);
