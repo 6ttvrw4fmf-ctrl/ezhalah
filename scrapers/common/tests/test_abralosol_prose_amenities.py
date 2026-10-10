@@ -56,3 +56,23 @@ def test_fibre_and_furnished_are_never_read_from_prose():
     row = _row("شقة\nسكنية\nللايجار", "شقة مفروشة مع ألياف بصرية ومطبخ")
     assert row.get("furnished") is None and row.get("optical_fibers") is None
     assert row.get("kitchen") is True
+
+
+# ── street width: the index cell «شارع N» is structured and now reaches street_width_m ──────────
+def _row_area(area):
+    mapped = R.map_listing(_index("9002", CELL_TOTAL, "أرض\n\nللبيع", area=area), {})
+    return mapped[0]
+
+
+def test_one_street_width_is_stored_in_metres():
+    row = _row_area("المساحة\n511م\n<br>شارع\n40")
+    assert row["street_width_m"] == 40
+    assert row["additional_info"]["street_width"] == "40"
+
+
+def test_two_streets_are_not_collapsed_into_one_width():
+    assert _row_area("المساحة\n511م\n<br>شارع\n15+15")["street_width_m"] is None
+
+
+def test_no_street_cell_is_silence():
+    assert _row_area("المساحة\n511م")["street_width_m"] is None

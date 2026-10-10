@@ -547,6 +547,10 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
         "region": region,
         "neighborhood": ix["district"],
         "area_m2": N.to_int(ix["area_raw"]),
+        # The index cell «شارع 40» is the site's structured street width. It was kept only in
+        # additional_info, so 1,890 ads (1,526 of 1,653 lands) answered no street-width question
+        # (🔬 2026-10-10). One number → metres; «15+15» is two streets → NULL, never a pick.
+        "street_width_m": N.one_street_width(ix["street_width"]),
         # Bedrooms/bathrooms: the facet field exists but is populated on ~11 rows site-wide; both
         # otherwise live only in narrative prose («3 غرف ومجلس», «دورتين مياه»). NULL, not parsed.
         "bedrooms": None,
