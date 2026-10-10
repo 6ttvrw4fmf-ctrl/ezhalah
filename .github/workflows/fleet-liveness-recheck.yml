@@ -4,9 +4,14 @@
 # removed from ours»). Same oracle, same known-live controls, same per-site cap, same three readings
 # — only sooner (scrapers/common/fleet_liveness.py, RECHECK). A site with no struck row is not touched.
 #
-# Triggered by pg_cron (job gh-fleet-liveness-recheck, 19:17 UTC): twelve hours after the daily run
-# starts and twelve before the next one, so a row's three readings are daily, recheck, daily. A row
-# read less than 6 hours ago is left for the next run. pg_cron dispatches with NO inputs. Shares the daily run's concurrency group so the two never write at once.
+# Triggered by pg_cron twice a day (jobs gh-fleet-liveness-recheck 14:17 UTC and
+# gh-fleet-liveness-recheck-2 20:47 UTC, since 2026-10-10): seven hours after the daily run starts and
+# six and a half hours later, so a row the daily run read dead takes its second reading at 14:17 and its
+# third at 20:47 and is hidden the same day (about 13 h); a row the daily run reached after 08:17 is
+# read at 20:47 and hidden at the next 07:17 (about 23 h). Until 2026-10-10 the single 19:17 recheck
+# left a reinvest ad its own API answered 404 for on a customer's screen all day (dead-visible score
+# 2026-10-10). A row read less than 6 hours ago is left for the next run. pg_cron dispatches with NO
+# inputs. Shares the daily run's concurrency group so the two never write at once.
 name: Fleet liveness recheck (struck rows)
 
 on:

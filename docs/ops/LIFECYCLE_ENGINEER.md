@@ -326,11 +326,14 @@ Recompute every Sunday, and the day a website is added:
   each site may read for 320 minutes, so a cancelled job keeps its work and the big sites (dwelleo
   11k, muhaysini, nofodh, tuba) finish inside their 48 h window. Before that a site stopped at 95
   minutes and a cancelled job lost everything it had read.
-- **The recheck** (`fleet-liveness-recheck.yml`, 19:17 UTC, pg_cron job
-  `gh-fleet-liveness-recheck`) opens only the ads that already carry a strike, at least 6 hours
-  after their last reading. Same controls, same cap, same three "gone" readings (daily, recheck,
-  daily): an ad its site removed is hidden 24 hours after its first "gone" instead of 3 days, and a
-  strike that was a blip is cleared the same day. Its run notes start with `APPLY RECHECK`.
+- **The recheck** (`fleet-liveness-recheck.yml`, twice a day since 2026-10-10: 14:17 UTC, pg_cron job
+  `gh-fleet-liveness-recheck`, and 20:47 UTC, `gh-fleet-liveness-recheck-2`) opens only the ads that
+  already carry a strike, at least 6 hours after their last reading. Same controls, same cap, same
+  three "gone" readings (daily, recheck, recheck): an ad its site removed at the daily read is hidden
+  at 20:47 the same day (about 13 h), one the daily run reached after 08:17 at the next 07:17 (about
+  23 h); before 2026-10-10 a single 19:17 recheck meant 24 h, and a dead reinvest ad at strike 2 sat
+  on customers' screens all day. A strike that was a blip is cleared the same day. Its run notes
+  start with `APPLY RECHECK`.
 - **Prove it every night:** yesterday's recheck ran (`scrape_runs` rows noted `RECHECK`, or no row
   for a site where no ad carried a strike), no fleet site holds an active row with strikes older than 36
   hours, and the daily run's `covered=` is 100% for every site (a site below 100% two days running
@@ -1024,6 +1027,11 @@ or rewrite another engineer's work, and never start a big change in another engi
   design (absence tiers at `missing_count >= 3` are graded by `mon_detect_unknown_treated_as_dead`),
   so "0 unverified" is only half the answer: read the open `unknown_treated_as_dead` alerts too.
 - **2026-10-08 (♻️, copied by 🔧):** every reader of one site must share that site's «no answer» rules. Gathern's prune oracle still read a home-page landing as live, so those rows became the sweep's controls, and the sweep checked nothing for ~16 h.
+- **2026-10-10 (♻️):** the dead ad the score finds is usually one between strike 1 and strike 3, not one the
+  checker missed (reinvest 13257993: own API 404 at the 07:35 daily read, 2 of 3 strikes, on screen at
+  09:05). Shorten the window instead of hunting a bug: the fleet recheck now runs at 14:17 and 20:47 UTC.
+  And a quarantine note that prints «alive_rate=89.9% below 20%» is naming the wrong gate: read
+  `canary_ok=` and the control statuses in the same note before calling gathern blocked.
 - **2026-10-09 (♻️, copied by 🔧):** a score that reads a site by HTTP status alone can only ever say «live»; check each site's method before you trust its «0 gone». And when the key number moves the wrong way two nights running (dead-visible 0.76% → 0.85% → over the line on rakez + wasalt), shrink the list to the sites over the line and nothing else.
 
 ## Rating (must be earned)
