@@ -184,13 +184,45 @@ await mustCatchBlock('avg_ppm recomputed instead of shown', 'const deals = num(r
 await mustCatchBlock('the ministry spread invented from its average', "const p10 = num(row.p10_deal), p90 = num(row.p90_deal);", 'const p10 = num(row.avg_deal) * 0.3, p90 = num(row.avg_deal) * 1.2;');
 await mustCatchBlock('the ministry card shown from a handful of deals', 'deals < MOJ_MIN_DEALS', 'deals < 1');
 // The tiles multiply the SHOWN averages by the ad's own area; k comes from the deduped set.
-const tilesWired = (p: string) => /dearerTenths\(prices\.stats\.each, adPpm\)/.test(p) && /round1000\(prices\.moj\.avgPpm \* prices\.area\)/.test(p) && /round1000\(prices\.stats\.meanPpm \* prices\.area\)/.test(p)
+const tilesWired = (p: string) => /dearerTenths\(prices\.stats\.each, adPpm\)/.test(p)
+  // each product tile is computed from the SHOWN figures (tileFromShown) and prints exactly those figures beneath it
+  && /fmtInt\(tileFromShown\(prices\.moj\.avgPpm, prices\.area\)\)/.test(p) && /fmtInt\(tileFromShown\(prices\.stats\.meanPpm, prices\.area\)\)/.test(p)
+  && /\$\{fmtInt\(prices\.moj\.avgPpm\)\} × \$\{fmtInt\(prices\.area\)\}/.test(p) && /\$\{fmtInt\(prices\.stats\.meanPpm\)\} × \$\{fmtInt\(prices\.area\)\}/.test(p)
   // the split card prints our MEANS beside the ministry's means, and the same four labels on both halves
   && /fmtM\(st\.mean\)/.test(p) && /fmtInt\(st\.meanPpm\)/.test(p) && /fmtInt\(mj\.avgPpm\)/.test(p) && /labels\.map\(\(label, i\) => cell\(label, h\.rows\[i\]/.test(p)
   // the ministry half names its source and its window; a figure the row lacks is a hidden cell («—»), never an estimate
   && /h\.gov \? <Text[^>]*>\{t\('Source: Ministry of Justice'\)\}/.test(p) && /mj\.p10 != null && mj\.p90 != null \? `\$\{fmtM\(mj\.p10\)\} – \$\{fmtM\(mj\.p90\)\} \$\{t\('million'\)\}` : null/.test(p);
 check('the tiles multiply the shown averages by this ad’s area and k reads the deduped set', tilesWired(PREVIEW));
-sourceMutant('a tile recomputing the ministry’s per-m² figure', !tilesWired(PREVIEW.replace('round1000(prices.moj.avgPpm * prices.area)', 'round1000(prices.moj.avgDeal)')));
+sourceMutant('a tile recomputing the ministry’s per-m² figure', !tilesWired(PREVIEW.replace('tileFromShown(prices.moj.avgPpm, prices.area)', 'Math.round(prices.moj.avgDeal)')));
+sourceMutant('a tile multiplying the unrounded figure instead of the shown one', !tilesWired(PREVIEW.replace('fmtInt(tileFromShown(prices.moj.avgPpm, prices.area))', 'fmtInt(Math.round(prices.moj.avgPpm * prices.area / 1000) * 1000)')));
+
+// ── the tile equals the formula it displays (owner: a reader who multiplies the two printed numbers gets our number) ──
+type Tile = (ppm: number, area: number) => number;
+const liftTile = async (file: string): Promise<Tile> => (await liftSymbols(file, [{ header: 'export function tileFromShown(' }], ['tileFromShown'])).tileFromShown as Tile;
+const shown = (v: number) => Math.round(v);
+const tileProblems = (tile: Tile): string[] => {
+  const out: string[] = [];
+  // the real case from the review: 4,449.37 × 275 — the PRINTED 4,449 × 275 = 1,223,475 → 1,223,000, never 1,224,000
+  if (tile(4449.37, 275) !== 1_223_000) out.push(`tile(4449.37, 275) = ${tile(4449.37, 275)} ≠ 1,223,000 (= round(4,449 × 275, -3))`);
+  if (tile(6586.3, 275) !== 1_811_000) out.push(`tile(6586.3, 275) = ${tile(6586.3, 275)} ≠ 1,811,000`);
+  for (const [p, a] of [[4449.37, 199], [6498.28, 199], [7815.4, 360], [10714.49, 267], [3724.9, 500]] as [number, number][]) {
+    const want = Math.round((shown(p) * shown(a)) / 1000) * 1000;
+    if (tile(p, a) !== want) out.push(`tile(${p}, ${a}) = ${tile(p, a)} ≠ round(${shown(p)} × ${shown(a)}, -3) = ${want}`);
+  }
+  return out;
+};
+const tileReal = tileProblems(await liftTile(DATA));
+check('every product tile equals round(shown per-m² × shown area, -3) — the formula printed under it', tileReal.length === 0, tileReal.join('\n      '));
+const mustCatchTile = async (what: string, from: string, to: string) => {
+  if (!DATA_SRC.includes(from)) { failed++; console.log(`FAIL  mutation anchor missing: ${what}`); return; }
+  const file = join(mkdtempSync(join(tmpdir(), 'ad-tile-')), 'adPageData.ts');
+  writeFileSync(file, DATA_SRC.replace(from, to));
+  const caught = tileProblems(await liftTile(file)).length > 0;
+  if (!caught) failed++;
+  console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
+};
+await mustCatchTile('the tile multiplying the unrounded per-m² figure (prints 1,224,000 under «4,449 × 275»)', 'return Math.round((Math.round(ppm) * Math.round(area)) / 1000) * 1000;', 'return Math.round((ppm * area) / 1000) * 1000;');
+await mustCatchTile('the tile not rounded to the thousand', 'return Math.round((Math.round(ppm) * Math.round(area)) / 1000) * 1000;', 'return Math.round(ppm) * Math.round(area);');
 
 // ── the embed URL: the official Maps Embed API (satellite) with a key, the keyless embed without ───
 type Embed = (p: { lat: number; lng: number }, hl?: string, z?: 14 | 15) => string;

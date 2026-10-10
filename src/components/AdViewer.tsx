@@ -391,7 +391,7 @@ export default function AdViewer({ tabs, active, split, hidden, hint, onSelect, 
       {tabs.map((tab, i) => {
         if (tab.listing) return (
           <View key={`${adTabKey(tab)}#${reloads[adTabKey(tab)] ?? 0}`} style={[s.page, i !== active && s.pageHidden]}>
-            <ListingPreview listing={tab.listing} url={tab.url} onClose={() => closeTab(i)} />
+            <ListingPreview listing={tab.listing} url={tab.url} onClose={() => closeTab(i)} inViewer />
           </View>
         );
         const k = adTabKey(tab);

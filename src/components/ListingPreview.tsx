@@ -13,7 +13,7 @@ import { useAtLeast } from '@/lib/useAtLeast';
 import { PICKER_SHEET_BREAKPOINT } from '@/lib/responsive';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SourceBadge, FEATURE_META, arAttrValue } from '@/components/ResultCard';
-import { dearerTenths, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, typePluralAr, type AskingPrices, type GeoPoint, type MojFacts } from '@/data/adPageData';
+import { dearerTenths, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojFacts } from '@/data/adPageData';
 import { listingOpenUrl } from '@/lib/openListing';
 import type { Listing } from '@/data/listings';
 
@@ -72,10 +72,12 @@ function Chevron({ dir }: { dir: 'left' | 'right' }) {
 // Pin the row to physical LTR (web DOM dir), like AdViewer's browser chrome.
 const setLtr = (node: any) => { if (IS_WEB && node?.setAttribute) node.setAttribute('dir', 'ltr'); };
 
-export default function ListingPreview({ listing: l, url, onClose }: {
+export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
   listing: Listing; url: string;
   /** The viewer's own close for this tab (the ✕ in the page's top bar). */
   onClose?: () => void;
+  /** Rendered inside AdViewer, whose tab strip already names the site and closes the tab: no bar of our own. */
+  inViewer?: boolean;
 }) {
   const { t, locale, isRTL } = useI18n();
   const name = t(sourceName(l.source));
@@ -340,7 +342,6 @@ export default function ListingPreview({ listing: l, url, onClose }: {
   // «1.95» (millions, two decimals at most, trailing zeros dropped) · «6,500» · «1,293,000».
   const fmtM = (v: number) => String(Math.round(v / 1e4) / 100);
   const fmtInt = (v: number) => Math.round(v).toLocaleString('en-US');
-  const round1000 = (v: number) => Math.round(v / 1000) * 1000;
   // The ministry's period, from the row's own two dates (Gregorian, Western digits): «أكتوبر 2025».
   const monthLabel = (iso: string) => {
     try { return new Intl.DateTimeFormat(locale === 'ar' ? 'ar-u-nu-latn-ca-gregory' : 'en-u-ca-gregory', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`)); }
@@ -403,7 +404,8 @@ export default function ListingPreview({ listing: l, url, onClose }: {
 
   return (
     <View testID="listing-preview" style={s.root} onLayout={onRoot} ref={rootRef}>
-      {/* (1) slim top bar: the source pill + this tab's ✕ */}
+      {/* (1) slim top bar: the source pill + this tab's ✕ — only where no viewer chrome names the site */}
+      {!inViewer && (
       <View style={s.bar} onLayout={measure('bar')}>
         <View style={s.srcPill}>
           <View style={s.srcLogo} pointerEvents="none"><View style={{ transform: [{ scale: 0.4 }] }}><SourceBadge source={l.source} /></View></View>
@@ -423,8 +425,9 @@ export default function ListingPreview({ listing: l, url, onClose }: {
           </Pressable>
         ) : null}
       </View>
+      )}
 
-      <ScrollView style={s.scroll} contentContainerStyle={s.content} scrollEventThrottle={48} onScroll={onBodyScroll} onLayout={(e: any) => { viewH.current = e.nativeEvent.layout.height; }}>
+      <ScrollView style={[s.scroll, inViewer && s.scrollBare]} contentContainerStyle={s.content} scrollEventThrottle={48} onScroll={onBodyScroll} onLayout={(e: any) => { viewH.current = e.nativeEvent.layout.height; }}>
         {/* (2) hero: edge to edge, swipeable, the flexible block */}
         {photos.length > 0 && <View testID="listing-preview-gallery" style={[s.hero, { height: heroH }]}>
           <ScrollView
@@ -638,14 +641,14 @@ export default function ListingPreview({ listing: l, url, onClose }: {
                     {prices.stats.meanPpm != null && (
                       <View style={s.tile}>
                         <Text style={s.tileK}>{t('At the listed average ≈')}</Text>
-                        <Text style={s.tileV}>{fmtInt(round1000(prices.stats.meanPpm * prices.area))}</Text>
+                        <Text style={s.tileV}>{fmtInt(tileFromShown(prices.stats.meanPpm, prices.area))}</Text>
                         <Text style={s.tileSmall}>{`${fmtInt(prices.stats.meanPpm)} × ${fmtInt(prices.area)}`}</Text>
                       </View>
                     )}
                     {prices.moj && (
                       <View style={s.tile}>
                         <Text style={s.tileK}>{t('At the sold average ≈')}</Text>
-                        <Text style={s.tileV}>{fmtInt(round1000(prices.moj.avgPpm * prices.area))}</Text>
+                        <Text style={s.tileV}>{fmtInt(tileFromShown(prices.moj.avgPpm, prices.area))}</Text>
                         <Text style={s.tileSmall}>{`${fmtInt(prices.moj.avgPpm)} × ${fmtInt(prices.area)} · ${t(commercial ? 'all commercial types' : 'all residential types')}`}</Text>
                       </View>
                     )}
@@ -742,6 +745,7 @@ const s = StyleSheet.create({
   iconBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   // scroll body
   scroll: { position: 'absolute', top: 56, left: 0, right: 0, bottom: 0 },
+  scrollBare: { top: 0 },
   content: { paddingBottom: 96 },
   // hero
   hero: { width: '100%', backgroundColor: colors.chipFill, overflow: 'hidden' },

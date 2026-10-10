@@ -148,6 +148,13 @@ export function askingPriceStats(rows: PriceRow[], downSlugs: Set<string>): Aski
   };
 }
 
+/** A product tile equals the formula it DISPLAYS: the shown (rounded) per-m² figure × the shown area, to the
+ *  nearest 1,000 — a reader who multiplies the two printed numbers gets our number (4,449 × 275 = 1,223,475
+ *  → 1,223,000; the unrounded 4,449.37 would have printed 1,224,000). */
+export function tileFromShown(ppm: number, area: number): number {
+  return Math.round((Math.round(ppm) * Math.round(area)) / 1000) * 1000;
+}
+
 /** Of every 10 houses in the DEDUPED set, how many cost more per m² than this ad (0–10); null without an ad m² price. */
 export function dearerTenths(each: House[], adPpm: number): number | null {
   if (!Number.isFinite(adPpm) || adPpm <= 0) return null;

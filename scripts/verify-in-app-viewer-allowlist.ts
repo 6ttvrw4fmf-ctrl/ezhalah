@@ -453,7 +453,7 @@ const i18n = await liftSymbols(new URL('../src/i18n.tsx', import.meta.url).pathn
   [{ header: 'const AR:' }, { header: 'function fill' }, { header: 'const EN:' }, { header: 'export function translate' }], ['translate']);
 const translate = i18n.translate as (locale: string, key: string, vars?: Record<string, string | number>) => string;
 type Node = { type: string; props: Record<string, any> };
-const renderPreview = (src: string, source: string, locale: string, photos: string[] = []) => {
+const renderPreview = (src: string, source: string, locale: string, photos: string[] = [], extra: Record<string, unknown> = {}) => {
   const jsx = (type: string, props: Record<string, any>) => ({ type, props });
   const output = ts.transpileModule(src, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const modules: Record<string, unknown> = {
@@ -476,7 +476,7 @@ const renderPreview = (src: string, source: string, locale: string, photos: stri
     if (!(name in modules)) throw new Error(`Unexpected preview dependency: ${name}`);
     return modules[name];
   }, exports);
-  return exports.default({ listing: { source, photos, photo: null, city: 'Riyadh', district: '', type: 'Apartment', area: 0, beds: 0 }, url: 'https://example.com/ad/1' }) as Node;
+  return exports.default({ listing: { source, photos, photo: null, city: 'Riyadh', district: '', type: 'Apartment', area: 0, beds: 0 }, url: 'https://example.com/ad/1', ...extra }) as Node;
 };
 const nodes = (root: any): Node[] => !root || typeof root !== 'object' ? [] : Array.isArray(root)
   ? root.flatMap(nodes) : [root, ...nodes(root.props?.children)];
@@ -527,6 +527,18 @@ mustCatch('the open drifts past the activation window', !tapMomentPass(preview.r
 mustCatch('the party opens the ad some other way', !tapMomentPass(preview.replace('const fire = () => {', "const fire = () => {\n      window.location.assign(url); return;")));
 mustCatch('reduced motion still waits for the party', !tapMomentPass(preview.replace('if (reduced || blockedOnce.current || !IS_WEB)', 'if (blockedOnce.current || !IS_WEB)')));
 mustCatch('host badge opens something else', !hostBadgePass(preview.replace(/testID="listing-preview-host"\s+onPress=\{goOpen\}/, 'testID="listing-preview-host" onPress={openMap}')));
+// INSIDE THE VIEWER THE PAGE HAS NO BAR OF ITS OWN (owner 2026-10-10): the viewer's tab strip already names
+// the site and closes the tab, so the page's source pill + ✕ repeated it right underneath. AdViewer passes
+// `inViewer`; the page then renders no bar — and keeps it wherever no viewer chrome exists.
+const bareInViewerPass = (previewSrc: string, viewerSrc: string) => {
+  const bare = nodes(renderPreview(previewSrc, 'AQAR', 'ar', [], { inViewer: true }));
+  const alone = nodes(renderPreview(previewSrc, 'AQAR', 'ar'));
+  const hasBar = (ns: Node[]) => ns.some((n) => n.props.testID === 'listing-preview-close') || ns.filter((n) => n.type === 'Text').some((n) => textOf(n).startsWith('عقار · '));
+  return !hasBar(bare) && hasBar(alone) && /<ListingPreview listing=\{tab\.listing\} url=\{tab\.url\} onClose=\{\(\) => closeTab\(i\)\} inViewer \/>/.test(codeOnly(viewerSrc));
+};
+check('inside AdViewer the page renders no source bar of its own (no double header); alone it keeps it', bareInViewerPass(preview, viewer));
+mustCatch('AdViewer no longer tells the page it is inside', !bareInViewerPass(preview, viewer.replace(' inViewer />', ' />')));
+mustCatch('the page ignores inViewer and draws its bar anyway', !bareInViewerPass(preview.replace('{!inViewer && (\n      <View style={s.bar}', '{(\n      <View style={s.bar}'), viewer));
 check('zero photos renders complete details without image/empty gallery; one photo renders one image', noPhotoPass(preview));
 mustCatch('no-photo listing gets an empty gallery/broken image', !noPhotoPass(preview.replace('photos.length > 0 &&', 'true &&')));
 mustCatch('single-photo listing loses its gallery', !noPhotoPass(preview.replace('photos.length > 0 &&', 'photos.length > 1 &&')));
