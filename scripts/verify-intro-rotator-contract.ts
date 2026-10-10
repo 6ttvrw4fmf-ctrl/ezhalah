@@ -47,7 +47,7 @@ const staticWelcome = (src: string) => {
 check('1b. complete static welcome only renders on the empty chat', staticWelcome(agent));
 // English UI (owner 2026-10-10: «it didn't just say ezhalah»): the English greeting is the Arabic's
 // meaning, not the bare brand name, and reads left-to-right.
-const GREETING_EN = 'What property are you after?\nDescribe it, and Ezhalah it.';
+const GREETING_EN = 'What property are you after?\nDescribe it, and leave it to Ezhalah.';
 const greetingEnOk = (src: string) => src.includes(JSON.stringify(GREETING_EN).slice(1, -1)) &&
   /<Text style=\{\[s\.greetingText, locale === 'en' && s\.greetingEn\]\}>\{title\}<\/Text>/.test(src) &&
   /greetingEn: \{ writingDirection: 'ltr'/.test(src);

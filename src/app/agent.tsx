@@ -197,7 +197,7 @@ const bedsLabel = (n: string, ar: boolean): string => {
 const greetingText = (locale: Locale): string =>
   locale === 'ar'
     ? 'وش العقار اللي في بالك؟\nقل لنا مواصفاته، وإزهله.'
-    : 'What property are you after?\nDescribe it, and Ezhalah it.';
+    : 'What property are you after?\nDescribe it, and leave it to Ezhalah.';
 
 // Ezhalah's SEARCHING-phase voice — one Najdi-flavoured swagger line chosen at random before each
 // search (its recognizable Saudi personality, NOT generic "searching now"). Shown ONLY while searching,
