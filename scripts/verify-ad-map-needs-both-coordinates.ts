@@ -274,11 +274,14 @@ const groupWired = (p: string, dataSrc: string) =>
   && /const st = prices\.group, mj = prices\.moj;/.test(p)
   && /dearerTenths\(prices\.stats\.each, adPpm\)/.test(p)            // card 3 stays same-type
   && /\.in\('type_ar', \[\.\.\.scope\.types\]\)/.test(dataSrc)
+  // paged reads are ORDERED on a stable key, or the pages overlap and houses go missing (measured: 3,192 vs 3,728)
+  && /\.order\('source_table'\)\.order\('listing_id'\)\.range\(page \* PAGE, page \* PAGE \+ PAGE - 1\)/.test(dataSrc)
   && /types: groupTypesAr\(group\), key: `group:\$\{group\}`/.test(dataSrc)
   && /RESIDENTIAL_GROUP_AR: readonly string\[\] = \['فيلا', 'شقة', 'دور', 'أرض سكنية', 'تاون هاوس', 'عمارة', 'ملحق علوي'\]/.test(dataSrc);
 check('the split card’s right half is the macro group the ministry’s half is built on; card 3 stays same-type', groupWired(PREVIEW, codeOnly(DATA_SRC)));
 sourceMutant('a residential ad’s right half filtered to its own type', !groupWired(PREVIEW.replace('const st = prices.group, mj = prices.moj;', 'const st = prices.stats, mj = prices.moj;'), codeOnly(DATA_SRC)));
 sourceMutant('the group read narrowed to the ad’s type', !groupWired(PREVIEW, codeOnly(DATA_SRC).replace('types: groupTypesAr(group), key: `group:${group}`', 'types: [row.type_ar as string], key: `group:${group}`')));
+sourceMutant('the paged read losing its order (overlapping pages)', !groupWired(PREVIEW, codeOnly(DATA_SRC).replace(".order('source_table').order('listing_id').range(", '.range(')));
 
 // ── wiring: the page draws only the fetched pin; the data module never guesses one ────────────────
 const wired = (dataSrc: string, previewSrc: string) =>

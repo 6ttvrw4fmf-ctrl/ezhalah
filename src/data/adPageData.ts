@@ -274,10 +274,13 @@ function fetchScopeStats(row: AdRow, scope: { types: readonly string[]; key: str
       await loadHiddenPlatformNames();   // the registry's down list, once per session (bounded inside)
       const rows: PriceRow[] = [];
       for (let page = 0; page < MAX_PAGES; page++) {
+        // ORDERED paging, or the pages overlap: Postgres returns an unordered scan in any order it likes,
+        // so page 2 repeats rows of page 1 and skips others — measured 2026-10-10 on الرمال residential:
+        // 5,706 rows read for 3,192 houses, against 3,728 with a stable order. One key, every page.
         const { data, error } = await boundedRpc<PriceRow[]>(
           client.from('search_listings_ar').select('platform,license_number,area_m2,price_total,type_ar')
             .in('type_ar', [...scope.types]).eq('deal_ar', 'بيع').eq('city_ar', row.city_ar as string).eq('district_ar', row.district_ar as string)
-            .not('price_total', 'is', null).range(page * PAGE, page * PAGE + PAGE - 1),
+            .not('price_total', 'is', null).order('source_table').order('listing_id').range(page * PAGE, page * PAGE + PAGE - 1),
         );
         if (error) { pricesCache.delete(key); return null; }
         rows.push(...(data ?? []));
