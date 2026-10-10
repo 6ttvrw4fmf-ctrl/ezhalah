@@ -17,13 +17,14 @@ function verify(text: string) {
   visit(ast);
   const wrapper = styles.find(s => s.includes('gap: 10') && s.includes("'76%'"))!;
   const row = styles.find(s => s.includes('s.reply,') && s.includes('alignSelf:'))!;
-  const results = styles.find(s => s.includes('searchingVisibleRef.current') && s.includes('alignItems:'))!;
+  // The results turn dims on `newSearchLoading` (renamed 2026-10-10: an Advanced Filter round no longer dims).
+  const results = styles.find(s => s.includes('newSearchLoading') && s.includes('alignItems:'))!;
   const slogan = styles.find(s => s.includes('s.reply,') && s.includes("alignItems: 'center'"))!;
   assert.ok(wrapper && row && results && slogan, 'all reply paths found');
   function run(expression: string, message: string) {
     const js = ts.transpileModule(`const value = (${expression});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-    return new Function('rtl', 'msgRTL', 'IS_WEB', 's', 'm', 'searchingVisibleRef', 'latestResult', 'doneTyping', js + '\nreturn value;')(
-      msgRTL(message), msgRTL, true, {reply:{}}, {id:'test', slogan:message}, {current:false}, null, {},
+    return new Function('rtl', 'msgRTL', 'IS_WEB', 's', 'm', 'newSearchLoading', 'latestResult', 'doneTyping', js + '\nreturn value;')(
+      msgRTL(message), msgRTL, true, {reply:{}}, {id:'test', slogan:message}, false, null, {},
     );
   }
   for (const message of ['هلا', 'عذراً، ما قدرت أحدد مدينة أو حي لبحثك.', 'لقيت 12 شقة في الرياض', 'Hello', 'I found 12 apartments in Riyadh']) {
