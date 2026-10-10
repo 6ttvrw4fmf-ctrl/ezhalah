@@ -92,7 +92,9 @@ function PickerRegionsMap({ locale, t, fontFamily, selectedRegion, coveredRegion
             : `${t('Saudi Arabia')} · ${t('{count} websites', { count: totalCount })}`}
         </Text>
       </View>
-      {picked ? null : <Text style={[styles.captionHint, { fontFamily, textAlign: align }]}>{t('Tap a region to see the websites that cover it')}</Text>}
+      {/* Always rendered: removing it on the first tap moved the map up under the user's finger, so a
+          quick second tap missed its region (found in the 2026-10-10 real-user check on production). */}
+      <Text style={[styles.captionHint, { fontFamily, textAlign: align }]}>{t('Tap a region to see the websites that cover it')}</Text>
       <SvgRoot width="100%" height={compact ? 236 : 256} viewBox={regionMap.viewBox} preserveAspectRatio="xMidYMid meet">
         {regionMap.regions.map((region) => {
           const count = counts[region.id] ?? 0;

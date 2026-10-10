@@ -41,6 +41,10 @@ const shapesOk = (paths: any): string[] => {
 const shapeProblems = shapesOk(PATHS);
 check('13 catalogue regions, real outlines, catalogue names, OSM attribution', shapeProblems.length === 0, shapeProblems.join('\n      '));
 check('the component prints the attribution and draws every region', /OpenStreetMap contributors/.test(MAP) && /regionMap\.regions\.map\(/.test(MAP));
+// The map must not move between taps: the hint line is unconditional (a conditional one shifted the map).
+const steady = (src: string) => /\n\s*<Text style=\{\[styles\.captionHint[^\n]*Tap a region to see the websites that cover it/.test(src) && !/picked \? null : <Text style=\{\[styles\.captionHint/.test(src);
+check('the map stays put between taps (hint line always rendered)', steady(MAP));
+if (steady(MAP.replace("<Text style={[styles.captionHint", "{picked ? null : <Text style={[styles.captionHint"))) { failed++; console.log('FAIL  (mutation) a conditional hint line was not caught'); } else console.log('PASS  (mutation) catches the hint line made conditional again');
 
 // ── 2 + 3. wiring ────────────────────────────────────────────────────────────────────────────────
 const wired = (src: string) =>
