@@ -27,6 +27,7 @@ def _norm(s: Optional[str]) -> str:
     s = re.sub(r"[ًٌٍَُِّْـ]", "", s)                  # tashkeel + tatweel
     s = re.sub(r"[أإآ]", "ا", s)
     s = s.replace("ى", "ي").replace("ة", "ه")
+    s = re.sub(r"(.)\1{2,}", r"\1", s)                 # «مطلوووببب» -> «مطلوب» (shadow 2026-10-10)
     return re.sub(r"\s+", " ", s).strip()
 
 
@@ -42,10 +43,15 @@ _REQUEST = re.compile(
 _OTHER = re.compile(
     _B + r"(?:"
     r"عامل|عماله|عمال|حارس|سائق|سواق|خادمه|عاملات|وظيفه|وظائف|عن عمل|راتب|نقل كفاله|كفاله|"
-    r"نقل عفش|عفش|غرفه نوم|غرف نوم|كنب|سياره|سيارات|جوال|تقبيل|مقاول|مقاولات|ترميم|صيانه|"
-    r"دهانات|سباك|تنظيف|مكافحه حشرات|مظلات|سواتر|عزل|تشطيب|نقوم ب|نوفر لكم"
+    r"نقل عفش|عفش|سياره|سيارات|جوال|تقبيل|مقاول|مقاولات|ترميم|صيانه|"
+    r"دهانات|سباك|تنظيف|مكافحه حشرات|مظلات|سواتر|عزل|تشطيب|نقوم ب|نوفر لكم|نقدم لكم|خدمه الاعلان|"
+    r"خدمه تسويق|نسوق لك|معلن عقاري"
     r")" + _E
 )
+
+# Furniture words count only in the TITLE: «غرفة نوم» in an apartment offer's BODY describes the flat
+# (shadow 2026-10-10, 11190241633), while a furniture post names it in its title.
+_OTHER_TITLE = re.compile(_B + r"(?:غرفه نوم|غرف نوم|كنب|كنبه|طقم|دولاب|مطبخ مستعمل)" + _E)
 
 # The REGA (الهيئة العامة للعقار) ad block every licensed Saudi property ad carries.
 _REGA = re.compile(
@@ -71,7 +77,7 @@ def classify(title: Optional[str], body: Optional[str]) -> tuple[str, str]:
     m = _REQUEST.search(both)
     if m:
         return "request", f"request word «{m.group(0)}»"
-    m = _OTHER.search(both)
+    m = _OTHER.search(both) or _OTHER_TITLE.search(t)
     if m:
         return "other", f"non-property word «{m.group(0)}»"
     if _REGA.search(b) and _TYPE.search(both):

@@ -43,3 +43,17 @@ def test_vague_is_not_shown(t):
 
 def test_request_in_body_beats_offer_title():
     assert classify("شقة للبيع", "مطلوب شقة بنفس المواصفات")[0] == "request"
+
+
+# Shadow crawl 2026-10-10 (CI run 38027005483), the hand-check's three misses:
+def test_elongated_request_is_a_request():
+    assert classify("مطلوووببب وحدتين ببصك واحد للبيع", "")[0] == "request"          # 11190238937
+
+
+def test_broker_service_post_is_not_an_offer():
+    assert classify("انصاف اراضي للبيع", "نقدم لكم بكل سرور خدمة الاعلان عن العروض لديكم")[0] == "other"  # 11190241825
+
+
+def test_bedroom_in_an_apartment_body_does_not_kill_the_offer():
+    assert classify("شقة مفروشة للايجار", "تتكون من غرفة نوم وصالة كبيرة ومطبخ")[0] == "offer"  # 11190241633
+    assert classify("غرفة نوم للبيع نظيفة", "")[0] == "other"

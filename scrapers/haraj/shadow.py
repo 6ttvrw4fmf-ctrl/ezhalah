@@ -68,6 +68,10 @@ def read_post(pid: str) -> dict:
     out["ld_types"] = re.findall(r'"@type"\s*:\s*"([A-Za-z]+)"', " ".join(
         re.findall(r'<script[^>]*application/ld\+json[^>]*>(.*?)</script>', h, re.S)))[:8]
     out["has_tag"] = TAG in h or quote(TAG) in h
+    for blob in re.findall(r'<script[^>]*application/ld\+json[^>]*>(.*?)</script>', h, re.S):
+        if "RealEstateListing" in blob:
+            out["ld_listing"] = redact_pii(blob) or ""
+            break
     out["geo"] = bool(re.search(r'"(?:lat|latitude|geo)"\s*:', h))
     out["len"] = len(h)
     if nd:
@@ -83,6 +87,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-posts", type=int, default=150)
     ap.add_argument("--seed", type=int, default=20261010)
+    ap.add_argument("--want", type=int, default=110, help="stop after this many real-estate posts")
     a = ap.parse_args()
 
     ids: list[str] = []
@@ -102,7 +107,7 @@ def main() -> int:
         print(f"  sitemap file {u}: {st2} posts={len(got)}", flush=True)
         sm_ids = [i for i in got if i not in ids]
         random.Random(a.seed).shuffle(sm_ids)
-        ids += sm_ids[:400]
+        ids += sm_ids[:900]
     print(f"\ncandidate posts: {len(ids)}", flush=True)
 
     rows, n_fetch = [], 0
@@ -111,6 +116,9 @@ def main() -> int:
             break
         p = read_post(pid)
         n_fetch += 1
+        if p.get("ld_listing") and sum(1 for r in rows if r.get("printed_ld")) < 3:
+            p["printed_ld"] = True
+            print(f"LD-JSON {pid}: {p['ld_listing'][:1500]}", flush=True)
         if n_fetch <= 2:
             print(f"STRUCTURE {pid}: { {k: v for k, v in p.items() if k not in ('title', 'body')} }", flush=True)
         if p.get("status") != 200:
@@ -121,6 +129,8 @@ def main() -> int:
         verdict, why = classify(p.get("title"), p.get("body"))
         p["verdict"], p["why"] = verdict, why
         rows.append(p)
+        if len(rows) >= a.want:
+            break
 
     c = Counter(r["verdict"] for r in rows)
     print(f"\nfetched={n_fetch} real-estate-tagged={len(rows)} verdicts={dict(c)}\n", flush=True)

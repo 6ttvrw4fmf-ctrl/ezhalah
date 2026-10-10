@@ -9,7 +9,7 @@ on:
     inputs:
       max_posts:
         description: "How many posts to read (1 request a second)"
-        default: "160"
+        default: "900"
   pull_request:
     paths:
       - "scrapers/haraj/**"
@@ -21,7 +21,7 @@ permissions:
 jobs:
   shadow:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,4 +34,4 @@ jobs:
       - name: Classifier tests
         run: pip install pytest && python -m pytest -q scrapers/common/tests/test_haraj_classify.py
       - name: Shadow crawl (prints only)
-        run: python -m scrapers.haraj.shadow --max-posts "${{ github.event.inputs.max_posts || '160' }}"
+        run: python -m scrapers.haraj.shadow --max-posts "${{ github.event.inputs.max_posts || '900' }}"
