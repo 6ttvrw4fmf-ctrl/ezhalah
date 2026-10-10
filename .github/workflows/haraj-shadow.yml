@@ -1,0 +1,37 @@
+# Haraj SHADOW crawl (backlog 311, owner order 2026-10-09). Reads haraj.com.sa with our honest bot
+# user-agent, classifies each real-estate post as offer / request / other / doubt, and PRINTS the
+# sample for the hand-check the owner requires before Haraj may go live. It writes NOTHING: no
+# database secret is given to it, so it cannot. Runs on PRs that touch the Haraj crawler and on demand.
+name: Haraj shadow crawl
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_posts:
+        description: "How many posts to read (1 request a second)"
+        default: "160"
+  pull_request:
+    paths:
+      - "scrapers/haraj/**"
+      - ".github/workflows/haraj-shadow.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Classifier tests
+        run: pip install pytest && python -m pytest -q scrapers/common/tests/test_haraj_classify.py
+      - name: Shadow crawl (prints only)
+        run: python -m scrapers.haraj.shadow --max-posts "${{ github.event.inputs.max_posts || '160' }}"
