@@ -89,6 +89,12 @@ const statsProblems = (stats: Stats): string[] => {
   if (r.medianPpm == null || Math.abs(r.medianPpm - 7000) > 1) out.push(`median per m² ${r.medianPpm} ≠ 7,000`);
   if (stats(FIXTURE.slice(0, 9), new Set()) !== null) out.push('nine houses still produced numbers (floor is 10)');
   if (r.each.length !== 11) out.push(`the deduped set has ${r.each.length} houses ≠ 11`);
+  // 11 prices summing to 15.7M → mean 1,427,273; 11 per-m² prices summing to 76,500 → mean 6,955.
+  if (Math.abs(r.mean - 15_700_000 / 11) > 1) out.push(`mean ${r.mean} ≠ 1,427,273`);
+  if (r.meanPpm == null || Math.abs(r.meanPpm - 76_500 / 11) > 1) out.push(`mean per m² ${r.meanPpm} ≠ 6,955`);
+  // The key carries the TYPE (owner update 24): the same licence + area as a villa AND as a floor is two houses.
+  const typed = stats([...FIXTURE, { platform: 'aqar', license_number: 'L1', area_m2: 200, price_total: '900000', type_ar: 'دور' }], new Set(['toor']));
+  if (!typed || typed.houses !== 12) out.push(`a different TYPE under the same licence + area was folded into one house (${typed?.houses})`);
   return out;
 };
 const statsReal = statsProblems(await liftStats(DATA));
@@ -105,12 +111,13 @@ await mustCatchStats('a house counted once per row', 'if (!cur || price < cur.pr
 await mustCatchStats('a down site counted', 'if (!platform || downSlugs.has(platform)) continue;', 'if (!platform) continue;');
 await mustCatchStats('a junk price counted', 'if (!Number.isFinite(price) || price < PRICE_MIN || price > PRICE_MAX) continue;', 'if (!Number.isFinite(price)) continue;');
 await mustCatchStats('numbers shown from a handful of houses', 'if (best.size < MIN_HOUSES) return null;', 'if (best.size < 1) return null;');
+await mustCatchStats('the type dropped from the dedupe key', 'const key = lic ? `${lic}|${type}|${area}` : `${platform}|${type}|${price}|${area}`;', 'const key = lic ? `${lic}|${area}` : `${platform}|${price}|${area}`;');
 
 // ── the «الأسعار» block's other three rules (owner 2026-10-10) ──────────────────────────────────
 type Block = {
   isSameAd: (a: Row, b: Row) => boolean;
   dearerTenths: (each: { price: number; area: number }[], adPpm: number) => number | null;
-  mojFacts: (row: Row | null) => { deals: number; avgDeal: number; avgPpm: number; from: string; to: string } | null;
+  mojFacts: (row: Row | null) => { deals: number; avgDeal: number; avgPpm: number; p10: number | null; p90: number | null; from: string; to: string } | null;
 };
 const liftBlock = async (file: string): Promise<Block & Stats> => {
   const mod = await liftSymbols(file, [
@@ -134,7 +141,7 @@ const K_FIXTURE: Row[] = [
   ...['wasalt', 'sakan', 'dealapp', 'sukna', 'aqargate'].map((platform) => ({ platform, license_number: 'K9', area_m2: 200, price_total: '1900000' })),
 ];
 // The seeded ministry row (الرياض · حي الرمال, 2026-10-10): the period ends in May 2026, not today.
-const MOJ_ROW: Row = { deals: 285, avg_deal: '1390633.21', avg_ppm: '4449.37', window_from: '2025-10-10', window_to: '2026-05-18', source_refreshed_at: '2026-10-10T03:09:39+00:00' };
+const MOJ_ROW: Row = { deals: 285, avg_deal: '1390633.21', avg_ppm: '4449.37', p10_deal: '430000', p90_deal: '1650000', window_from: '2025-10-10', window_to: '2026-05-18', source_refreshed_at: '2026-10-10T03:09:39+00:00' };
 const blockProblems = (b: Block & Stats): string[] => {
   const out: string[] = [];
   if (!b.isSameAd(SAME_A, SAME_B) || !b.isSameAd(SAME_B, SAME_A)) out.push('the real aqar/wasalt pair (same licence + area, different price) was not matched');
@@ -152,6 +159,9 @@ const blockProblems = (b: Block & Stats): string[] => {
   if (f.avgPpm !== 4449.37) out.push(`avg_ppm ${f.avgPpm} ≠ 4449.37 (recomputed, not the ministry’s own mean)`);
   if (f.avgDeal !== 1390633.21) out.push(`avg_deal ${f.avgDeal} ≠ 1390633.21`);
   if (f.from !== '2025-10-10' || f.to !== '2026-05-18') out.push(`period ${f.from} → ${f.to} ≠ the row’s own 2025-10-10 → 2026-05-18 (taken from the clock?)`);
+  if (f.p10 !== 430000 || f.p90 !== 1650000) out.push(`the ministry spread ${f.p10} – ${f.p90} ≠ the row’s 430,000 – 1,650,000`);
+  const half = b.mojFacts({ ...MOJ_ROW, p90_deal: null });
+  if (!half || half.p10 !== null || half.p90 !== null) out.push('a half-filled spread was shown (or the row dropped)');
   if (b.mojFacts({ ...MOJ_ROW, deals: 9 }) !== null) out.push('nine deals still produced a card (floor is 10)');
   if (b.mojFacts(null) !== null) out.push('no row produced a card');
   return out;
@@ -171,9 +181,12 @@ await mustCatchBlock('a different area shown as the same ad', 'if (!Number.isFin
 await mustCatchBlock('k computed from every row instead of the deduped set', 'each: [...best.values()],', 'each: rows.map((r) => ({ price: num(r.price_total), area: num(r.area_m2) })),');
 await mustCatchBlock('the ministry period taken from the clock', "const from = String(row.window_from ?? '').slice(0, 10), to = String(row.window_to ?? '').slice(0, 10);", "const from = String(row.window_from ?? '').slice(0, 10), to = new Date().toISOString().slice(0, 10);");
 await mustCatchBlock('avg_ppm recomputed instead of shown', 'const deals = num(row.deals), avgDeal = num(row.avg_deal), avgPpm = num(row.avg_ppm);', 'const deals = num(row.deals), avgDeal = num(row.avg_deal), avgPpm = Math.round(num(row.avg_deal) / 312);');
+await mustCatchBlock('the ministry spread invented from its average', "const p10 = num(row.p10_deal), p90 = num(row.p90_deal);", 'const p10 = num(row.avg_deal) * 0.3, p90 = num(row.avg_deal) * 1.2;');
 await mustCatchBlock('the ministry card shown from a handful of deals', 'deals < MOJ_MIN_DEALS', 'deals < 1');
 // The tiles multiply the SHOWN averages by the ad's own area; k comes from the deduped set.
-const tilesWired = (p: string) => /dearerTenths\(prices\.stats\.each, adPpm\)/.test(p) && /round1000\(prices\.moj\.avgPpm \* prices\.area\)/.test(p) && /round1000\(prices\.stats\.medianPpm \* prices\.area\)/.test(p);
+const tilesWired = (p: string) => /dearerTenths\(prices\.stats\.each, adPpm\)/.test(p) && /round1000\(prices\.moj\.avgPpm \* prices\.area\)/.test(p) && /round1000\(prices\.stats\.meanPpm \* prices\.area\)/.test(p)
+  // the split card prints our MEANS beside the ministry's means, and the same four labels on both halves
+  && /fmtM\(st\.mean\)/.test(p) && /fmtInt\(st\.meanPpm\)/.test(p) && /fmtInt\(mj\.avgPpm\)/.test(p) && /labels\.map\(\(label, i\) => cell\(label, h\.rows\[i\]/.test(p);
 check('the tiles multiply the shown averages by this ad’s area and k reads the deduped set', tilesWired(PREVIEW));
 sourceMutant('a tile recomputing the ministry’s per-m² figure', !tilesWired(PREVIEW.replace('round1000(prices.moj.avgPpm * prices.area)', 'round1000(prices.moj.avgDeal)')));
 
@@ -239,6 +252,31 @@ await mustCatchEligible('a non-Aqar ad getting the block', "String(row.platform 
 const gated = (p: string) => /if \(!pricesBlockEligible\(row\)\) return;\s*const price = Number\(row\?\.price_total\)/.test(p) && /fetchMojSales\(row, commercial \? 'تجاري' : 'سكني'\)/.test(p);
 check('the page fetches the block only behind pricesBlockEligible(row), with the ministry class by macro', gated(PREVIEW));
 sourceMutant('the page fetching the block for every ad', !gated(PREVIEW.replace('if (!pricesBlockEligible(row)) return;', '')));
+
+// ── a duplicate site card opens THAT platform's own listing_url (owner update 25): real cards through
+//    finalize() (source_url = the source table's listing_url), the href through listingOpenUrl — never a URL
+//    built from our internal id ──────────────────────────────────────────────────────────────────────
+const siteHrefWired = (p: string, dataSrc: string, remoteSrc: string) =>
+  /href: listingOpenUrl\(sib\) \?\? ''/.test(p)
+  && !/href: `[^`]*\$\{(?:sib|card)\.id\}/.test(p) && !/listing_id/.test(p)
+  && /const cards = await Promise\.all\(\[\.\.\.byTable\]\.map\(\(\[t, ids\]\) => fetchListingCards\(t, ids\)\)\);/.test(dataSrc)
+  && /source_url: r\.listing_url,/.test(remoteSrc);
+const REMOTE = codeOnly(readFileSync(join(ROOT, 'src/data/remote.ts'), 'utf8'));
+check('a duplicate site card opens the platform’s own listing_url (real card → listingOpenUrl), never an id-built URL', siteHrefWired(PREVIEW, codeOnly(DATA_SRC), REMOTE));
+sourceMutant('a site card href built from our id', !siteHrefWired(PREVIEW.replace("href: listingOpenUrl(sib) ?? ''", 'href: `https://wasalt.sa/ar/listing/${sib.id}`'), codeOnly(DATA_SRC), REMOTE));
+sourceMutant('the siblings handed over as index rows instead of real cards', !siteHrefWired(PREVIEW, codeOnly(DATA_SRC).replace('const cards = await Promise.all([...byTable].map(([t, ids]) => fetchListingCards(t, ids)));', 'const cards = [[...byTable].map(([t, ids]) => ({ source: t, id: ids[0] }))];'), REMOTE));
+
+// ── the split card follows the ministry's GROUP (owner update 24): our half is the macro group, never this ad's type ──
+const groupWired = (p: string, dataSrc: string) =>
+  /fetchGroupPrices\(row, commercial \? 'Commercial' : 'Residential'\)/.test(p)
+  && /const st = prices\.group, mj = prices\.moj;/.test(p)
+  && /dearerTenths\(prices\.stats\.each, adPpm\)/.test(p)            // card 3 stays same-type
+  && /\.in\('type_ar', \[\.\.\.scope\.types\]\)/.test(dataSrc)
+  && /types: groupTypesAr\(group\), key: `group:\$\{group\}`/.test(dataSrc)
+  && /RESIDENTIAL_GROUP_AR: readonly string\[\] = \['فيلا', 'شقة', 'دور', 'أرض سكنية', 'تاون هاوس', 'عمارة', 'ملحق علوي'\]/.test(dataSrc);
+check('the split card’s right half is the macro group the ministry’s half is built on; card 3 stays same-type', groupWired(PREVIEW, codeOnly(DATA_SRC)));
+sourceMutant('a residential ad’s right half filtered to its own type', !groupWired(PREVIEW.replace('const st = prices.group, mj = prices.moj;', 'const st = prices.stats, mj = prices.moj;'), codeOnly(DATA_SRC)));
+sourceMutant('the group read narrowed to the ad’s type', !groupWired(PREVIEW, codeOnly(DATA_SRC).replace('types: groupTypesAr(group), key: `group:${group}`', 'types: [row.type_ar as string], key: `group:${group}`')));
 
 // ── wiring: the page draws only the fetched pin; the data module never guesses one ────────────────
 const wired = (dataSrc: string, previewSrc: string) =>

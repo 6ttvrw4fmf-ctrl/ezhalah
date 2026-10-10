@@ -468,7 +468,7 @@ const renderPreview = (src: string, source: string, locale: string, photos: stri
     '@/lib/translitPlace': { translitPlace: (x: string) => x }, '@/lib/afEvidence': { DIRECTION_LABEL: {} },
     '@/lib/useAtLeast': { useAtLeast: () => false }, '@/lib/responsive': { PICKER_SHEET_BREAKPOINT: 768 }, '@/lib/useReducedMotion': { useReducedMotion: () => true },
     '@/components/ResultCard': { SourceBadge: 'SourceBadge', FEATURE_META: [], arAttrValue: (_l: string, v: string) => v },
-    '@/data/adPageData': { fetchAdPage: () => Promise.resolve({ geo: null, row: null }), fetchAskingPrices: () => Promise.resolve(null), fetchMojSales: () => Promise.resolve(null), fetchSameAd: () => Promise.resolve([]), dearerTenths: () => null, pricesBlockEligible: () => false, typePluralAr: (x: string) => x, typeWordAr: (_n: number, x: string) => x, mapEmbedUrl: () => '' },
+    '@/data/adPageData': { fetchAdPage: () => Promise.resolve({ geo: null, row: null }), fetchAskingPrices: () => Promise.resolve(null), fetchGroupPrices: () => Promise.resolve(null), fetchMojSales: () => Promise.resolve(null), fetchSameAd: () => Promise.resolve([]), dearerTenths: () => null, pricesBlockEligible: () => false, typePluralAr: (x: string) => x, typeWordAr: (_n: number, x: string) => x, mapEmbedUrl: () => '' },
     '@/lib/openListing': { listingOpenUrl: () => '' },
   };
   const exports: Record<string, any> = {};

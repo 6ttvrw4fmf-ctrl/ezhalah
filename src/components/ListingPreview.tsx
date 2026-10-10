@@ -13,7 +13,7 @@ import { useAtLeast } from '@/lib/useAtLeast';
 import { PICKER_SHEET_BREAKPOINT } from '@/lib/responsive';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SourceBadge, FEATURE_META, arAttrValue } from '@/components/ResultCard';
-import { dearerTenths, fetchAdPage, fetchAskingPrices, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, typePluralAr, typeWordAr, type AskingPrices, type GeoPoint, type MojFacts } from '@/data/adPageData';
+import { dearerTenths, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, typePluralAr, type AskingPrices, type GeoPoint, type MojFacts } from '@/data/adPageData';
 import { listingOpenUrl } from '@/lib/openListing';
 import type { Listing } from '@/data/listings';
 
@@ -190,8 +190,10 @@ export default function ListingPreview({ listing: l, url, onClose }: {
   const [geo, setGeo] = useState<GeoPoint | null>(null);
   // The «الأسعار» block's three sources, fetched together once the ad's own row is known: the asking
   // prices around it (each house once), the ministry's actual sales, the same ad on other sites.
-  type Prices = { stats: AskingPrices | null; moj: MojFacts | null; same: Listing[]; price: number | null; area: number | null; typeAr: string };
-  const [prices, setPrices] = useState<Prices>({ stats: null, moj: null, same: [], price: null, area: null, typeAr: '' });
+  // stats = this ad's OWN type (card 3); group = the whole macro group, the split card's right half — the
+  // same group the ministry's left half is built on (owner update 24).
+  type Prices = { stats: AskingPrices | null; group: AskingPrices | null; moj: MojFacts | null; same: Listing[]; price: number | null; area: number | null; typeAr: string };
+  const [prices, setPrices] = useState<Prices>({ stats: null, group: null, moj: null, same: [], price: null, area: null, typeAr: '' });
   const commercial = l.macro === 'Commercial';
   useEffect(() => {
     if (!IS_WEB) return;
@@ -202,8 +204,8 @@ export default function ListingPreview({ listing: l, url, onClose }: {
       // Aqar sale ads only for now (owner update 22): nothing is even fetched for the rest.
       if (!pricesBlockEligible(row)) return;
       const price = Number(row?.price_total), area = Number(row?.area_m2);
-      void Promise.all([fetchAskingPrices(row), fetchMojSales(row, commercial ? 'تجاري' : 'سكني'), fetchSameAd(row)]).then(([stats, moj, same]) => {
-        if (alive) setPrices({ stats, moj, same, price: Number.isFinite(price) && price > 0 ? price : null, area: Number.isFinite(area) && area > 0 ? area : null, typeAr: String(row?.type_ar ?? '') });
+      void Promise.all([fetchAskingPrices(row), fetchGroupPrices(row, commercial ? 'Commercial' : 'Residential'), fetchMojSales(row, commercial ? 'تجاري' : 'سكني'), fetchSameAd(row)]).then(([stats, group, moj, same]) => {
+        if (alive) setPrices({ stats, group, moj, same, price: Number.isFinite(price) && price > 0 ? price : null, area: Number.isFinite(area) && area > 0 ? area : null, typeAr: String(row?.type_ar ?? '') });
       });
     });
     return () => { alive = false; };
@@ -344,10 +346,7 @@ export default function ListingPreview({ listing: l, url, onClose }: {
     try { return new Intl.DateTimeFormat(locale === 'ar' ? 'ar-u-nu-latn-ca-gregory' : 'en-u-ca-gregory', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`)); }
     catch { return iso.slice(0, 7); }
   };
-  // The type's word, following the count in Arabic («8 فلل» / «1,500 فيلا») and the plural in English.
-  const typeWord = (n: number) => locale === 'ar'
-    ? typeWordAr(n, prices.typeAr || typeLabel)
-    : (n === 1 || /s$/i.test(typeLabel) ? typeLabel : `${typeLabel}s`);
+  // The type's plural for card 3's sentence («من كل 10 فلل»), in Arabic and in English.
   const typePlural = () => (locale === 'ar' ? typePluralAr(prices.typeAr || typeLabel) : (/s$/i.test(typeLabel) ? typeLabel : `${typeLabel}s`));
   const bullet = (text: string, key?: string) => (
     <View key={key ?? text} style={s.bullet}>
@@ -544,60 +543,75 @@ export default function ListingPreview({ listing: l, url, onClose }: {
         {/* the continuation starts here: the «الأسعار» block — three cards, every number computed for THIS
             listing and district at runtime, facts only. Below the first screen on purpose. */}
         <View testID="listing-preview-range">
-          {prices.stats || prices.moj ? (
+          {prices.group || prices.moj ? (
             <View style={s.prices}>
               <Text style={[s.h, tx]}>{t('Prices')}</Text>
 
-              {prices.stats && (
-                <View testID="listing-preview-prices-asking" style={s.pcard}>
-                  <View style={s.pcardHead}>
-                    <Text style={[s.pcardTitle, tx]}>{t('Asking prices now')}</Text>
-                    <View style={s.tag}><Text style={s.tagTx}>{t('Ezhalah')}</Text></View>
+              {/* ONE card, two halves side by side (RTL: ours on the right, the ministry's on the left), the
+                  SAME label on every row so the two read like for like — our MEANS beside the ministry's. */}
+              {(() => {
+                // OUR half is the macro GROUP — the same group the ministry's half is built on — never this ad's type.
+                const st = prices.group, mj = prices.moj;
+                if (!st && !mj) return null;
+                const cell = (label: string, value: string | null, key: string) => (
+                  <View key={key} style={s.cell2}>
+                    <Text numberOfLines={1} style={[s.cellK2, tx]}>{label}</Text>
+                    <Text numberOfLines={1} style={[s.cellV2, tx]}>{value ?? '—'}</Text>
                   </View>
-                  {bullet(t('{n} {type} listed {deal} in {district}', { n: fmtInt(prices.stats.houses), type: typeWord(prices.stats.houses), deal: t('for Sale'), district: district || city }))}
-                  {bullet(t('8 of every 10 are between {lo} and {hi} million', { lo: fmtM(prices.stats.p10), hi: fmtM(prices.stats.p90) }))}
-                  {bullet(t('Median price: {n} million', { n: fmtM(prices.stats.median) }))}
-                  {prices.stats.medianPpm != null ? bullet(t('Price per m²: {n} SAR on average', { n: fmtInt(prices.stats.medianPpm) })) : null}
-                  {prices.same.length > 0 && (
-                    <View testID="listing-preview-same-ad" style={s.same}>
-                      <Text style={[s.sameH, tx]}>{prices.same.length === 1
-                        ? t('This same property is listed on two sites (same licence number):')
-                        : t('This same property is listed on {k} sites (same licence number):', { k: prices.same.length + 1 })}</Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.sameRow}>
-                        {[{ card: l, href: url, me: true }, ...prices.same.map((sib) => ({ card: sib, href: listingOpenUrl(sib) ?? '', me: false }))].map(({ card, href, me }) => (
-                          <Pressable
-                            key={`${card.source}:${card.id}`}
-                            testID="listing-preview-same-ad-site"
-                            onPress={() => open(href)}
-                            disabled={!href}
-                            accessibilityRole="link"
-                            accessibilityLabel={t('Open the ad on {name} to contact', { name: t(sourceName(card.source)) })}
-                            style={({ hovered }: any) => [s.siteCard, me && s.siteCardMe, hovered && s.siteCardHover]}
-                          >
-                            <View style={s.siteLogo} pointerEvents="none"><View style={{ transform: [{ scale: 0.5 }] }}><SourceBadge source={card.source} /></View></View>
-                            <Text numberOfLines={1} style={s.siteName}>{t(sourceName(card.source))}</Text>
-                            <Text numberOfLines={1} style={s.sitePrice}>{listingPrice(card, locale)}</Text>
-                            <Text numberOfLines={1} style={[s.siteHint, me && s.siteHintMe]}>{me ? t('this ad') : t('Tap to view it')}</Text>
-                          </Pressable>
-                        ))}
-                      </ScrollView>
+                );
+                const ours = st ? {
+                  key: 'ours', title: t('Listed now'), sub: t(commercial ? 'commercial property' : 'residential property'), tag: t('Ezhalah'), gov: false,
+                  rows: [fmtInt(st.houses), `${fmtM(st.mean)} ${t('million')}`, st.meanPpm != null ? fmtInt(st.meanPpm) : null, `${fmtM(st.p10)} – ${fmtM(st.p90)} ${t('million')}`],
+                  foot: `${district || city} · ${t('now')} · ${t(commercial ? 'shops, offices and land' : 'villas, apartments, floors and land')}`,
+                } : null;
+                const gov = mj ? {
+                  key: 'moj', title: t('Actual sales'), sub: t(commercial ? 'commercial property' : 'residential property'), tag: t('Ministry of Justice'), gov: true,
+                  rows: [fmtInt(mj.deals), `${fmtM(mj.avgDeal)} ${t('million')}`, fmtInt(mj.avgPpm), mj.p10 != null && mj.p90 != null ? `${fmtM(mj.p10)} – ${fmtM(mj.p90)} ${t('million')}` : null],
+                  foot: `${district || city} · ${monthLabel(mj.from)} – ${monthLabel(mj.to)} · ${t(commercial ? 'shops, offices and land' : 'villas, apartments and land')}`,
+                } : null;
+                const halves = [ours, gov].filter((h): h is NonNullable<typeof h> => !!h);
+                const labels = [t('Count'), t('Average price'), t('Average price per m²'), t('8 of every 10 between')];
+                return (
+                  <View testID="listing-preview-prices-split" style={s.pcard}>
+                    <View style={s.split}>
+                      {halves.map((h) => (
+                        <View key={h.key} style={[s.half, h.gov && s.halfGov]}>
+                          <Text numberOfLines={1} style={[s.halfTitle, tx]}>{h.title}</Text>
+                          <Text numberOfLines={1} style={[s.halfSub, tx]}>{h.sub}</Text>
+                          <View style={[s.tag, h.gov && s.tagGov, s.halfTag]}><Text style={[s.tagTx, h.gov && s.tagGovTx]}>{h.tag}</Text></View>
+                          {labels.map((label, i) => cell(label, h.rows[i], `${h.key}-${i}`))}
+                          <Text style={[s.halfFoot, tx]}>{h.foot}</Text>
+                        </View>
+                      ))}
                     </View>
-                  )}
-                </View>
-              )}
-
-              {prices.moj && (
-                <View testID="listing-preview-prices-moj" style={[s.pcard, s.pcardGov]}>
-                  <View style={s.pcardHead}>
-                    <Text style={[s.pcardTitle, tx]}>{t('Actual sale prices')}</Text>
-                    <View style={[s.tag, s.tagGov]}><Text style={[s.tagTx, s.tagGovTx]}>{t('Ministry of Justice')}</Text></View>
                   </View>
-                  {bullet(t(commercial ? '{n} commercial properties sold in {district}' : '{n} residential properties sold in {district}', { n: fmtInt(prices.moj.deals), district: district || city }))}
-                  {bullet(t('Period: {from} – {to} (the latest data the ministry published)', { from: monthLabel(prices.moj.from), to: monthLabel(prices.moj.to) }))}
-                  {bullet(t('Average sale price: {n} million', { n: fmtM(prices.moj.avgDeal) }))}
-                  {bullet(t('Sold price per m²: {n} SAR on average (average of the district’s deals)', { n: fmtInt(prices.moj.avgPpm) }))}
-                  {bullet(t(commercial ? 'Includes every commercial type: shops, offices and land' : 'Includes every type: villas, apartments and land'))}
-                  <Text style={[s.mojSrc, tx]}>{t('Source: Ministry of Justice')}</Text>
+                );
+              })()}
+
+              {prices.same.length > 0 && (
+                <View testID="listing-preview-same-ad" style={[s.pcard, s.same]}>
+                  <Text style={[s.sameH, tx]}>{prices.same.length === 1
+                    ? t('This same property is listed on two sites (same licence number):')
+                    : t('This same property is listed on {k} sites (same licence number):', { k: prices.same.length + 1 })}</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.sameRow}>
+                    {/* Each site's OWN listing_url (through listingOpenUrl, the same resolver the tabs use) — never a URL built from an id. */}
+                    {[{ card: l, href: url, me: true }, ...prices.same.map((sib) => ({ card: sib, href: listingOpenUrl(sib) ?? '', me: false }))].map(({ card, href, me }) => (
+                      <Pressable
+                        key={`${card.source}:${card.id}`}
+                        testID="listing-preview-same-ad-site"
+                        onPress={() => open(href)}
+                        disabled={!href}
+                        accessibilityRole="link"
+                        accessibilityLabel={t('Open the ad on {name} to contact', { name: t(sourceName(card.source)) })}
+                        style={({ hovered }: any) => [s.siteCard, me && s.siteCardMe, hovered && s.siteCardHover]}
+                      >
+                        <View style={s.siteLogo} pointerEvents="none"><View style={{ transform: [{ scale: 0.5 }] }}><SourceBadge source={card.source} /></View></View>
+                        <Text numberOfLines={1} style={s.siteName}>{t(sourceName(card.source))}</Text>
+                        <Text numberOfLines={1} style={s.sitePrice}>{listingPrice(card, locale)}</Text>
+                        <Text numberOfLines={1} style={[s.siteHint, me && s.siteHintMe]}>{me ? t('this ad') : t('Tap to view it')}</Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
                 </View>
               )}
 
@@ -620,18 +634,18 @@ export default function ListingPreview({ listing: l, url, onClose }: {
                       <Text style={s.tileK}>{t('Price in the ad')}</Text>
                       <Text style={s.tileV}>{fmtInt(prices.price)}</Text>
                     </View>
-                    {prices.stats.medianPpm != null && (
+                    {prices.stats.meanPpm != null && (
                       <View style={s.tile}>
                         <Text style={s.tileK}>{t('At the listed average ≈')}</Text>
-                        <Text style={s.tileV}>{fmtInt(round1000(prices.stats.medianPpm * prices.area))}</Text>
-                        <Text style={s.tileSmall}>{`${fmtInt(prices.stats.medianPpm)} × ${fmtInt(prices.area)}`}</Text>
+                        <Text style={s.tileV}>{fmtInt(round1000(prices.stats.meanPpm * prices.area))}</Text>
+                        <Text style={s.tileSmall}>{`${fmtInt(prices.stats.meanPpm)} × ${fmtInt(prices.area)}`}</Text>
                       </View>
                     )}
                     {prices.moj && (
                       <View style={s.tile}>
                         <Text style={s.tileK}>{t('At the sold average ≈')}</Text>
                         <Text style={s.tileV}>{fmtInt(round1000(prices.moj.avgPpm * prices.area))}</Text>
-                        <Text style={s.tileSmall}>{`${fmtInt(prices.moj.avgPpm)} × ${fmtInt(prices.area)} · ${t('all types')}`}</Text>
+                        <Text style={s.tileSmall}>{`${fmtInt(prices.moj.avgPpm)} × ${fmtInt(prices.area)} · ${t(commercial ? 'all commercial types' : 'all residential types')}`}</Text>
                       </View>
                     )}
                   </View>
@@ -799,7 +813,20 @@ const s = StyleSheet.create({
   bullet: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   bulletDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary, marginTop: 8, flexShrink: 0 },
   bulletTx: { flexShrink: 1, fontSize: 14, lineHeight: 21, color: colors.ink },
-  same: { marginTop: 6, gap: 6 },
+  // the split card: two halves, the same label on every row; VALUES carry their own colour and weight
+  // (no nested numeral span may inherit the label's muted colour — the prototype's bug).
+  split: { flexDirection: 'row', gap: 10 },
+  half: { flex: 1, minWidth: 0, gap: 6 },
+  halfGov: { borderStartWidth: 1, borderStartColor: colors.line, paddingStart: 10 },
+  halfTitle: { fontSize: 15, fontWeight: '700', color: colors.ink },
+  halfSub: { fontSize: 12, color: colors.muted, marginTop: -4 },
+  halfTag: { alignSelf: 'flex-start', marginBottom: 2 },
+  cell2: { gap: 1 },
+  cellK2: { fontSize: 11.5, color: colors.muted },
+  // The value does NOT stretch (alignSelf start): it sits under its label at the RTL start, numerals LTR inside.
+  cellV2: { alignSelf: 'flex-start', fontSize: 14.5, fontWeight: '700', color: colors.dark, fontVariant: ['tabular-nums'] },
+  halfFoot: { fontSize: 11, lineHeight: 15, color: colors.muted, marginTop: 2 },
+  same: { gap: 6 },
   sameH: { fontSize: 13.5, color: colors.ink },
   sameRow: { gap: 8 },
   siteCard: { width: 128, borderWidth: 1, borderColor: colors.line, borderRadius: 12, padding: 8, gap: 2, alignItems: 'center', backgroundColor: colors.surface },
