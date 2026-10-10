@@ -6,6 +6,8 @@ export type PickerCoverage = {
   topCity?: { name: string; en?: string; count: number } | null;
   focusCounts?: { Residential: number | null; Commercial: number | null };
   examples?: { ar: string; en: string }[];
+  /** source-examples only: the one region the site itself names (al-humaidan.inblaj.net: «القصيم», office in بريدة). */
+  region?: { id: number; name: string; en: string };
 };
 
 function locationSentence(coverage: PickerCoverage | undefined, locale: 'ar' | 'en'): string {
@@ -69,6 +71,8 @@ export function platformCoverageSentence(coverage: PickerCoverage | undefined, l
 export function platformCoverageGroup(coverage: PickerCoverage | undefined, locale: 'ar' | 'en') {
   const ar = locale === 'ar';
   const nationwide = { key: 'nationwide', order: 0, label: ar ? 'في مختلف مناطق المملكة' : 'Across Saudi Arabia' };
+  const named = coverage?.state === 'source-examples' ? coverage.region : undefined;
+  if (named) return { key: `region-${named.id}`, order: named.id, label: ar ? named.name : `${named.en} Region` };
   if (coverage?.state === 'known' && coverage.total && coverage.regions.length) {
     const first = coverage.regions.slice().sort((a, b) => b.count - a.count)[0];
     if (coverage.regions.length >= 6 && first.count / coverage.total < 0.7) return nationwide;
