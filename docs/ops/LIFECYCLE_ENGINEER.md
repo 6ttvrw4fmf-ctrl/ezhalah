@@ -857,6 +857,7 @@ or rewrite another engineer's work, and never start a big change in another engi
 
 ## Lessons from real breakages (use them)
 
+- **2026-10-10 (copied by 🔧 QA):** a GitHub schedule is not a schedule (dealapp fired 2–5 of 12), and a workflow called by pg_cron must declare every input it reads or it fails silently at validation — check the first dispatch, not the cron row.
 - **🦅 Falcon 10-09 — control re-test: 9 of 9 engineer proof rows reproduced as customer journeys** (jurash 645415
   among them). Nothing slipped past ♻️ in this audit; the check-in-time gaps that remain are dwelleo (0%, source
   catalogue empty, hidden), muktamel 88.6%, opensooq 81.9%, superoffice 60% and 12 CANDIDATE sites never
