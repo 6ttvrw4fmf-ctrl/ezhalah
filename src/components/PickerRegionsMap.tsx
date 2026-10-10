@@ -7,7 +7,7 @@
 // Fills use the LITERAL palette (useThemePalette): an SVG fill cannot digest the web var() tokens.
 // On web the map is plain DOM <svg>/<path> (React DOM takes a click directly; react-native-svg's web
 // onPress wires responder props onto the DOM and React rejects them); native keeps react-native-svg.
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Path, Text as SvgText } from 'react-native-svg';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -27,9 +27,10 @@ const Shape: any = IS_WEB ? 'path' : Path;
 const Label: any = IS_WEB ? 'text' : SvgText;
 const Hit: any = IS_WEB ? 'circle' : Circle;
 
-// Names drawn on the map: only the regions wide enough to carry one at picker size.
-const LABELLED = new Set([1, 2, 3, 5, 6, 7, 9]);
-// Thumb-sized invisible tap zones for the small regions (owner plan: a thumb must hit جازان/الباحة/نجران).
+// Every region carries its name (owner 2026-10-10: «some don't even show»); the type size follows the
+// room each shape has at picker size.
+const LABEL_SIZE: Record<number, number> = { 1: 10, 2: 9.5, 3: 9.5, 5: 10, 7: 9.5, 9: 9, 13: 8.5, 8: 8.5, 4: 8.5, 6: 8.5, 11: 8.5, 10: 7, 12: 6.5 };
+// Thumb-sized invisible tap zones for the small regions (a thumb must hit جازان/الباحة/نجران).
 const SMALL = new Set([10, 11, 12]);
 // Map labels: the everyday short names (the full catalogue name stays in the caption and headings).
 const SHORT_AR: Record<number, string> = { 2: 'مكة', 3: 'المدينة', 9: 'الشمالية' };
@@ -55,12 +56,19 @@ type Props = {
 
 function PickerRegionsMap({ locale, t, fontFamily, selectedRegion, coveredRegions, counts, listings, totalCount, onSelectRegion, compact }: Props) {
   const pal = useThemePalette();
+  const [hovered, setHovered] = useState<number | null>(null);
   const ar = locale === 'ar';
   const align = ar ? 'right' : 'left';
   const picked = selectedRegion === null ? null : regionMap.regions.find((region) => region.id === selectedRegion) ?? null;
   const fmt = (n: number) => n.toLocaleString(ar ? 'ar-SA-u-nu-latn' : 'en-US');
-  const tap = (id: number) => (IS_WEB ? { onClick: () => onSelectRegion(id), style: { cursor: 'pointer' } } : { onPress: () => onSelectRegion(id) });
-  const a11y = (name: string) => (IS_WEB ? { role: 'button', 'aria-label': name, tabIndex: 0 } : { accessible: true, accessibilityRole: 'button', accessibilityLabel: name });
+  // Web: a hover lift says «tappable» before the user commits (owner: «people won't know if it's clickable»).
+  const tap = (id: number) => (IS_WEB
+    ? { onClick: () => onSelectRegion(id), onMouseEnter: () => setHovered(id), onMouseLeave: () => setHovered((h) => (h === id ? null : h)) }
+    : { onPress: () => onSelectRegion(id) });
+  const a11y = (name: string) => (IS_WEB ? { role: 'button', 'aria-label': name } : { accessible: true, accessibilityRole: 'button', accessibilityLabel: name });
+  // Solid green = «in scope»: the whole kingdom under «كل المواقع» / the lit sites' reach, or ONLY the
+  // tapped region once one is tapped (owner: the entire map highlighted vs. one region highlighted).
+  const isSolid = (id: number) => (selectedRegion === null ? coveredRegions.has(id) : id === selectedRegion);
   return (
     <View style={styles.wrap}>
       {/* What this part is for — the user should not have to work the map out (owner). */}
@@ -94,43 +102,43 @@ function PickerRegionsMap({ locale, t, fontFamily, selectedRegion, coveredRegion
       <SvgRoot width="100%" height={compact ? 236 : 256} viewBox={regionMap.viewBox} preserveAspectRatio="xMidYMid meet">
         {regionMap.regions.map((region) => {
           const count = counts[region.id] ?? 0;
-          const isPicked = region.id === selectedRegion;
-          const covered = !isPicked && coveredRegions.has(region.id);
-          // Cut-paper look: light-green regions parted by white seams; the picked one solid green, the
-          // lit sites' reach a softer green, a region with no site a quiet neutral.
+          const solid = isSolid(region.id);
+          const lift = !solid && count > 0 && hovered === region.id;
+          // Cut-paper look: regions parted by white seams; in-scope regions solid green, a hovered one
+          // lifted toward it, the rest light green, a region with no site a quiet neutral.
           return (
             <Shape
               key={region.id}
               {...(IS_WEB ? { 'data-testid': `picker-region-${region.id}` } : { testID: `picker-region-${region.id}` })}
               {...(count ? a11y(ar ? region.name : `${region.en} Region`) : {})}
               d={region.d}
-              fill={isPicked || covered ? pal.primary : count ? pal.userBubble : pal.segTrack}
-              fillOpacity={covered ? 0.45 : 1}
+              fill={solid || lift ? pal.primary : count ? pal.userBubble : pal.segTrack}
+              fillOpacity={lift ? 0.55 : 1}
               stroke={pal.surface}
               strokeWidth={1.6}
               strokeLinejoin="round"
               {...(count ? tap(region.id) : {})}
-              {...(IS_WEB ? { style: { cursor: count ? 'pointer' : 'default', transition: 'fill 200ms ease, fill-opacity 200ms ease' } } : {})}
+              {...(IS_WEB ? { style: { cursor: count ? 'pointer' : 'default', outline: 'none', transition: 'fill 200ms ease, fill-opacity 200ms ease' } } : {})}
             />
           );
         })}
         {picked ? (
           <Shape d={picked.d} fill="none" stroke={pal.dark} strokeWidth={1.8} strokeLinejoin="round" {...(IS_WEB ? { style: { pointerEvents: 'none', filter: 'drop-shadow(0 2px 5px rgba(29,74,55,0.45))' } } : {})} />
         ) : null}
-        {regionMap.regions.filter((region) => LABELLED.has(region.id) || region.id === selectedRegion).map((region) => {
+        {regionMap.regions.map((region) => {
           const isPicked = region.id === selectedRegion;
-          const covered = coveredRegions.has(region.id);
+          const solid = isSolid(region.id) || (hovered === region.id && (counts[region.id] ?? 0) > 0);
           return (
             <Label
               key={`label-${region.id}`}
               x={region.cx}
               y={region.cy + 3}
               textAnchor="middle"
-              fontSize={isPicked ? 11 : 9.5}
-              fontWeight={isPicked ? '600' : '500'}
+              fontSize={isPicked ? LABEL_SIZE[region.id] + 1.5 : LABEL_SIZE[region.id]}
+              fontWeight={isPicked ? '700' : '500'}
               fontFamily={fontFamily}
-              fill={isPicked || covered ? pal.surface : pal.dark}
-              fillOpacity={isPicked ? 1 : 0.85}
+              fill={solid ? pal.surface : pal.dark}
+              fillOpacity={isPicked || solid ? 1 : 0.8}
               {...(IS_WEB ? { style: { pointerEvents: 'none', userSelect: 'none' } } : {})}
             >
               {ar ? short(region.id, region.name) : region.en}

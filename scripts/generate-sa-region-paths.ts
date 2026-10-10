@@ -17,6 +17,9 @@ const NAMES: Record<string, number> = {
 };
 
 type Pt = [number, number];
+// Hand nudges: Eastern Province's centroid is deep in the Empty Quarter (label nearer the populated
+// north); الحدود الشمالية and الجوف centroids sit on one line and would collide.
+const LABEL_NUDGE: Record<number, [number, number]> = { 5: [300, 170], 9: [160, 50], 13: [92, 45] };
 // Douglas–Peucker, tolerance in projected units.
 function simplify(points: Pt[], tol: number): Pt[] {
   if (points.length < 3) return points;
@@ -47,7 +50,9 @@ for (const f of geo.features) {
   if (!id) throw new Error(`unmapped region: ${f.properties.shapeName}`);
   const polys: Pt[][] = f.geometry.type === 'Polygon' ? [f.geometry.coordinates[0]] : f.geometry.coordinates.map((p: Pt[][]) => p[0]);
   const parts: string[] = [];
-  let sx = 0, sy = 0, n = 0;
+  // Label anchor = the area centroid of the largest ring (a vertex average drifts toward wiggly coasts),
+  // nudged by hand where the centroid sits in empty desert or collides with a neighbour's name.
+  let best: { area: number; cx: number; cy: number } = { area: 0, cx: 0, cy: 0 };
   for (const ring of polys) {
     // Small islands (Red Sea / Gulf) are dropped: they add bytes, not meaning, at picker size.
     const projected = ring.map(project);
@@ -60,10 +65,17 @@ for (const f of geo.features) {
     for (let i = 1; i < open.length; i++) { const d = Math.hypot(open[i][0] - open[0][0], open[i][1] - open[0][1]); if (d > farD) { farD = d; far = i; } }
     const pts = [...simplify(open.slice(0, far + 1), 0.9).slice(0, -1), ...simplify([...open.slice(far), open[0]], 0.9).slice(0, -1)];
     parts.push('M' + pts.map(([x, y]) => `${x} ${y}`).join('L') + 'Z');
-    for (const [x, y] of projected) { sx += x; sy += y; n++; }
+    let a = 0, cx = 0, cy = 0;
+    for (let i = 0; i < projected.length; i++) {
+      const [x0, y0] = projected[i], [x1, y1] = projected[(i + 1) % projected.length];
+      const cross = x0 * y1 - x1 * y0;
+      a += cross; cx += (x0 + x1) * cross; cy += (y0 + y1) * cross;
+    }
+    if (Math.abs(a / 2) > best.area) best = { area: Math.abs(a / 2), cx: cx / (3 * a), cy: cy / (3 * a) };
   }
+  const nudge = LABEL_NUDGE[id];
   const row = catalog.regions.find((r: [number, string, string]) => r[0] === id);
-  regions[id] = { id, name: row[2], en: row[1], d: parts.join(''), cx: +(sx / n).toFixed(0), cy: +(sy / n).toFixed(0) };
+  regions[id] = { id, name: row[2], en: row[1], d: parts.join(''), cx: nudge?.[0] ?? +best.cx.toFixed(0), cy: nudge?.[1] ?? +best.cy.toFixed(0) };
 }
 const out = { viewBox: `0 0 ${W} ${H}`, attribution: '© OpenStreetMap contributors', regions: Object.values(regions).sort((a, b) => a.id - b.id) };
 writeFileSync(new URL('../src/data/saRegionPaths.json', import.meta.url), JSON.stringify(out));
