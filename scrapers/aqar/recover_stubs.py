@@ -106,6 +106,12 @@ _PRICE_AND_PERIOD = {"price_annual", "price_total", "price_per_meter", "rent_per
 
 # canonical property_type -> the aqar URL slug enrich_residential expects
 TYPE_TO_SLUG = {v: k for k, v in N.SLUG_TO_TYPE.items()}
+# enrich_residential re-derives a plot's zoning from the land page's own text («تجاري» / «صناعي» /
+# «زراعي»), so these stored types live under aqar's `land` slug but are NOT values of SLUG_TO_TYPE.
+# Missing here, every such row was skipped as "unfetchable" without a single fetch — 21,613 live land
+# rows kept other ads' photos through the 2026-10-10 repair. Guarded by
+# scripts/verify-aqar-photos-are-the-ads-own.ts (every type the enricher can write must resolve).
+TYPE_TO_SLUG.update({t: "land" for t in ("Commercial Land", "Industrial Land", "Agriculture Plot")})
 
 
 def _brief(d: dict[str, Any]) -> dict[str, Any]:
@@ -267,16 +273,20 @@ def amenity_repair_cohort(limit: int, deal: Optional[str], ptype: Optional[str])
 
 def recover(rows: list[dict[str, Any]], dry_run: bool, workers: int,
             structured_only: bool = True) -> dict[str, int]:
-    counter = {"done": 0, "fetched": 0, "written": 0, "unfetchable": 0, "no_gain": 0}
+    counter = {"done": 0, "fetched": 0, "written": 0, "unfetchable": 0, "no_gain": 0, "no_slug": 0}
     lock = threading.Lock()
 
     def work(r: dict[str, Any]) -> None:
         slug = TYPE_TO_SLUG.get(r.get("property_type") or "")
         deal_slug = "rent" if (r.get("transaction_type") == "Rent") else "buy"
         if not slug or not r.get("listing_url"):
+            # Never fetched — not the source's answer. Counted apart so it cannot hide inside
+            # "unfetchable" again (it did: 21,613 land rows on 2026-10-10).
             with lock:
                 counter["done"] += 1
-                counter["unfetchable"] += 1
+                counter["no_slug"] += 1
+                print(f"  ⚠ ad={r.get('ad_number')} NOT FETCHED: no aqar slug for "
+                      f"property_type={r.get('property_type')!r}")
             return
         fresh = enrich_residential(r["listing_url"], type_slug=slug, deal_slug=deal_slug)
         if fresh and structured_only:
@@ -381,7 +391,7 @@ def main() -> int:
     run_id = None if args.dry_run else db.begin_run(run_platform)
     c = recover(rows, args.dry_run, args.workers, structured_only=not args.include_price)
     print(f"\nfetched={c['fetched']} written={c['written']} "
-          f"unfetchable={c['unfetchable']} no_gain={c['no_gain']} of {len(rows)}")
+          f"unfetchable={c['unfetchable']} no_gain={c['no_gain']} no_slug={c['no_slug']} of {len(rows)}")
 
     # An environment aqar does not serve returns the app shell for EVERY row. Writing nothing is the
     # correct outcome there, but it must be loud — a silent 0 would look like "already clean".
