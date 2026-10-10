@@ -298,9 +298,9 @@ const eligibleProblems = (e: Eligible): string[] => {
   const out: string[] = [];
   if (!e({ platform: 'aqar', deal_ar: 'بيع', type_ar: 'فيلا' })) out.push('an Aqar sale ad got no prices block');
   if (!e({ platform: 'AQAR', deal_ar: 'بيع', type_ar: 'محل' })) out.push('an Aqar commercial sale ad got no prices block');
-  if (e({ platform: 'aqar', deal_ar: 'إيجار' })) out.push('an Aqar RENT ad got a prices block');
-  if (e({ platform: 'wasalt', deal_ar: 'بيع' })) out.push('a non-Aqar sale ad got a prices block');
-  if (e({ platform: 'aqar', deal_ar: null }) || e(null)) out.push('a row without a deal (or no row) got a prices block');
+  if (e({ platform: 'aqar', deal_ar: 'إيجار', type_ar: 'فيلا' })) out.push('an Aqar RENT ad got a prices block');
+  if (e({ platform: 'wasalt', deal_ar: 'بيع', type_ar: 'فيلا' })) out.push('a non-Aqar sale ad got a prices block');
+  if (e({ platform: 'aqar', deal_ar: null, type_ar: 'فيلا' }) || e(null)) out.push('a row without a deal (or no row) got a prices block');
   if (e({ platform: 'aqar', deal_ar: 'بيع', type_ar: 'غير معروف' }) || e({ platform: 'aqar', deal_ar: 'بيع', type_ar: '' })) out.push('an ad whose type the source never stated got a prices block (our guess of its group)');
   return out;
 };
