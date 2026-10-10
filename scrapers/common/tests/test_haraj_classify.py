@@ -68,3 +68,21 @@ def test_partnership_and_marketer_posts_are_not_offers():
 def test_ownership_and_yard_offers():
     assert classify("شقق تمليك 6 غرف فاخرة حي الروابي", "")[0] == "offer"            # 11190238312
     assert classify("حوش كبير للإيجار 5040م2", "")[0] == "offer"                       # 11190238317
+
+
+# Shadow v3 2026-10-10 (CI run 38028407965): a request with a suffixed request word reached «offer».
+@pytest.mark.parametrize("t,b", [
+    ("شقة للايجار", "تكفون محتاجه شقة عوائل بالسلي او السعادة تكون شهري"),   # 11190236890
+    ("شقة للايجار", "محتاجين شقة 3 غرف"),
+    ("فيلا للبيع", "ابيها قريبة من المدارس"),
+    ("ارض للبيع", "ادور ارض في الخرج"),
+    ("شقة للايجار", "اللي عنده شقة يكلمني"),
+])
+def test_suffixed_and_pleading_requests(t, b):
+    assert classify(t, b)[0] == "request"
+
+
+def test_real_offers_survive_the_wider_request_list():
+    assert classify("بيت دور وشقتين للبيع في حي العاصمة", "غرض الإعلان: بيع\nنوع العقار: فيلا")[0] == "offer"
+    assert classify("استراحة للايجار", "استراحة للايجار الموقع الفريع قريبة لجميع الخدمات")[0] == "offer"
+    assert classify("للبيع ارض سكني في حي القيروان", "للبيع ارض سكنية مقابل مسجد وحديقة")[0] == "offer"

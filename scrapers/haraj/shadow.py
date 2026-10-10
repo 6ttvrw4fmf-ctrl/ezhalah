@@ -87,7 +87,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-posts", type=int, default=150)
     ap.add_argument("--seed", type=int, default=20261010)
-    ap.add_argument("--skip-hours", type=int, default=3,
+    ap.add_argument("--skip-hours", type=int, default=6,
                     help="skip the newest N hourly sitemap files (already hand-checked in an earlier run)")
     ap.add_argument("--want", type=int, default=110, help="stop after this many real-estate posts")
     a = ap.parse_args()

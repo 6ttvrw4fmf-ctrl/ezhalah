@@ -243,8 +243,20 @@ def main() -> int:
     ap.add_argument("--allow-backfill", action="store_true",
                     help="Override the circuit breaker to deliberately crawl a large backlog through the proxy.")
     args = ap.parse_args()
-    enrich_table(args.table, args.limit, args.workers, args.shard, args.shards,
-                 args.max_pending, args.allow_backfill)
+    stats = enrich_table(args.table, args.limit, args.workers, args.shard, args.shards,
+                         args.max_pending, args.allow_backfill)
+    return exit_code(stats)
+
+
+def exit_code(stats: dict) -> int:
+    """Non-zero when the circuit breaker refused the run (2026-10-10). From 10-08 the residential job
+    refused every night (27,119 pending > 15,000) in 0 s and reported SUCCESS, so no new wasalt ad got
+    its detail fields (facade, meters, street width) for three nights and nothing turned red. A refusal
+    is a run that did not do its job: the workflow must fail where people look."""
+    if stats.get("aborted"):
+        print(f"✗ circuit breaker refused this run: {stats['aborted']} rows pending — nothing was enriched",
+              flush=True)
+        return 2
     return 0
 
 
