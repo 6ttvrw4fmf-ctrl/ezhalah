@@ -10,6 +10,7 @@ import { useI18n, t as tr, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish, attrDisplayLabel, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
+import { whenNear } from '@/lib/nearViewport';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
 import { isStayLengthPriced, listingPrice } from '@/lib/listingDisplay';
@@ -735,9 +736,19 @@ function ListingPhoto({ photos, style, t }: { photos: string[]; style: any; t: (
   //
   // The probe costs one extra request per candidate; the browser cache then serves the <img>
   // render for free, and a URL that loads is never probed twice (idx stops advancing).
+  //
+  // ONLY ONCE THE CARD IS NEAR THE SCREEN (2026-10-06). The <img> is lazy, but this probe was not:
+  // «عرض المزيد» 100 → 500 mounts ~400 cards below the fold and every one of them downloaded its
+  // photo at once (measured on a phone profile: ~325 photo requests averaging 200–470 KB, queued
+  // in front of the photos actually on screen). `near` holds the probe until the card is within
+  // NEAR_MARGIN of view (src/lib/nearViewport.ts); a blocked / 404 / deleted photo still ends at
+  // the next photo or the placeholder, just when the card is about to be seen.
+  const box = useRef<View>(null);
+  const [near, setNear] = useState(!IS_WEB);
+  useEffect(() => (near ? undefined : whenNear(box.current, () => setNear(true))), [near]);
   const key = photos.join('|');
   useEffect(() => {
-    if (!IS_WEB || typeof window === 'undefined') return;
+    if (!IS_WEB || !near || typeof window === 'undefined') return;
     const uri = photos[idx];
     if (!uri) return;
     let cancelled = false;
@@ -747,26 +758,29 @@ function ListingPhoto({ photos, style, t }: { photos: string[]; style: any; t: (
     probe.onerror = () => { if (!cancelled) setIdx((i) => (i === idx ? i + 1 : i)); };
     probe.src = uri;
     return () => { cancelled = true; probe.onerror = null; };
-  }, [key, idx]);
+  }, [key, idx, near]);
 
   const uri = photos[idx];
-  if (!uri) {
-    return (
-      <View style={[style, card.photoFallback]}>
-        <Ionicons name="image-outline" size={28} color={colors.muted} />
-        <Text style={card.photoFallbackText}>{t('No photo available')}</Text>
-      </View>
-    );
-  }
+  // `box` is the element `near` watches; it has the photo's own size, so the layout is unchanged.
   return (
-    <Image
-      key={uri}
-      source={{ uri }}
-      style={style}
-      contentFit="cover"
-      transition={150}
-      onError={() => setIdx((i) => i + 1)}
-    />
+    <View ref={box} style={style}>
+      {!uri ? (
+        <View style={[style, card.photoFallback]}>
+          <Ionicons name="image-outline" size={28} color={colors.muted} />
+          <Text style={card.photoFallbackText}>{t('No photo available')}</Text>
+        </View>
+      ) : (
+        <Image
+          key={uri}
+          source={{ uri }}
+          style={style}
+          contentFit="cover"
+          transition={150}
+          loading="lazy"
+          onError={() => setIdx((i) => i + 1)}
+        />
+      )}
+    </View>
   );
 }
 

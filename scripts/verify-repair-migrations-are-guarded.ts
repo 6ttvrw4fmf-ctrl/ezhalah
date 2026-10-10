@@ -48,6 +48,21 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // ⚡ Scraping engineer, 2026-10-10. Three NULL-only back-fills (each writes only where the column is NULL,
+  // never a rewrite of a known value) from the row's OWN stored source field, which the scraper now
+  // writes on every crawl — so a new row cannot re-open the gap, and each migration ends in a check block.
+  '20261010051214_wasalt_land_meters_are_services.sql':
+    'NULL-only back-fill of electricity/water_supply on wasalt LANDS from their own additional_info ' +
+    'electricityMeter/waterMeter; scrapers/wasalt/run.py + enrich.py land_service_fields() now write the same ' +
+    'on every read, pinned (with a mutation) by scrapers/common/tests/test_wasalt_land_meters_are_services.py',
+  '20261010052741_aqarcity_land_services_checklist.sql':
+    'NULL-only back-fill of electricity/water_supply/sanitation on aqarcity LANDS from their own stored ' +
+    '«خدمات العقار» checklist; scrapers/aqarcity/run.py land_utilities() now writes the same on every crawl, ' +
+    'pinned by scrapers/common/tests/test_aqarcity_land_services_checklist.py',
+  '20261010052859_wasalt_meter_parse_gap_leftovers.sql':
+    'NULL-only back-fill of separate_*_meter from each row\'s own additional_info for 7,403 rows enriched ' +
+    'before 2026-09-04; enrich.py meter_fields_from_deep() has written them on every enrichment since, pinned ' +
+    'by test_wasalt_enrich_meter_parse_gap.py, and mon_detect_wasalt_meter_parse_gap watches the class',
   // Owner session 2026-10-09 (owner: «make the call yourself»), for the 🦅 Falcon's repair below. The class it
   // fixes — a searchable listing served at exactly 0 for its own deal — is already watched fleet-wide.
   '20261009204020_bossbih_per_metre_ads_stale_zero_total_to_null.sql':

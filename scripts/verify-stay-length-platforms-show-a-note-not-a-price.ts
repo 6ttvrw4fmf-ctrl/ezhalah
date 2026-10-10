@@ -23,6 +23,7 @@ const NOTE_AR = 'اضغط للاطلاع على الأسعار حسب مدة ا�
 const i18n = await liftSymbols(join(root, 'src/i18n.tsx'), [
   { header: 'const AR: Record<string, string> = {' },
   { header: 'function fill(' },
+  { header: 'const EN: Record<string, string> = {' }, // translate() reads the English wording table
   { header: 'export function translate(' },
   { header: 'export function tPrice(' },
 ], ['translate', 'tPrice'], "type Locale = 'ar' | 'en';\nlet _locale: Locale = 'ar';");

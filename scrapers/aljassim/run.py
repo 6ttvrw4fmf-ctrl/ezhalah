@@ -264,10 +264,29 @@ _BATHS_ONE = re.compile(r"دور[ةه]\s*مياه")      # the numeral-less sing
 _DWELLINGS = {"Apartment", "Villa", "Duplex", "Studio", "Floor", "Room", "Chalet", "Rest House"}
 
 
-def session() -> cc.Session:
+def session(profile: str = "chrome") -> cc.Session:
     """impersonate OWNS the User-Agent — no UA header is set (an overridden UA contradicts the TLS
     fingerprint and, on other platforms, 403'd every endpoint)."""
-    return cc.Session(impersonate="chrome", timeout=40)
+    return cc.Session(impersonate=profile, timeout=40)
+
+
+# The index is fetched on a FRESH session per try, each with the next profile (2026-10-10). On 10-03
+# and 10-10 the nightly died «challenge unsolved» after three tries on ONE session, and the automatic
+# re-crawl minutes later — a new session — read all 93 ads both times: the session was stuck, not the site.
+INDEX_PROFILES = ("chrome", "safari17_0", "firefox133")
+
+
+def fetch_index(make_session=session, pause: float = 5.0) -> tuple[cc.Session, list]:
+    """(the session that read it, the index rows). Empty rows after every profile = a real failure."""
+    s, recs = None, []
+    for i, prof in enumerate(INDEX_PROFILES):
+        s = make_session(prof)
+        recs = index_rows(_get(s, f"{BASE}/") or "")
+        if recs:
+            break
+        if i < len(INDEX_PROFILES) - 1:
+            time.sleep(pause)
+    return s, recs
 
 
 def _solve_challenge(s: cc.Session, url: str) -> bool:
@@ -728,15 +747,13 @@ def map_listing(ix: dict, detail: dict) -> tuple[Optional[dict], str, str]:
 
 # ── crawl ───────────────────────────────────────────────────────────────────────────────────────
 def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[dict], int, dict]:
-    s = session()
     res: list[dict] = []
     com: list[dict] = []
     skips: dict[str, int] = {}
     stats = {"rows": 0, "seen": 0, "no_price": 0, "per_sqm": 0, "unlabelled_price": 0,
              "detail_failed": 0, "skips": skips}
 
-    page = _get(s, f"{BASE}/")
-    recs = index_rows(page or "")
+    s, recs = fetch_index()
     if not recs:
         raise RuntimeError("index table returned no Views rows (challenge unsolved or theme changed)")
     stats["seen"] = len(recs)

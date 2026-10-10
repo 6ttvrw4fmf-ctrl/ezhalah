@@ -453,6 +453,45 @@ try {
   const mobResults = await waitForBody(RESULT_COUNT, 40000);
   check('[mobile] a search produces results', mobResults);
 
+  // ---- Journey D2: «عرض المزيد» 100 → 500 must not download every new card's photo (2026-10-06). ----
+  // Each card's web probe (ResultCard ListingPhoto, the CORP / 404 safety net) used to start on
+  // mount, so the second press fetched ~325 photos at once (200–470 KB each) and the photo actually
+  // on screen waited 8–35 s behind them on a phone network. Photos must load as cards come NEAR the
+  // screen (src/lib/nearViewport.ts). This counts what the BUILT app really fetches, so it also
+  // catches the flood coming back by any other road: a prefetch, an eager <img>, an expo-image change.
+  {
+    const PHOTO_BUDGET = 100; // fixed build 14–31 (cards on and ~6 below the screen, broken-photo retries); flood 326–367
+    const cardsShown = () => page.evaluate(() => [...document.querySelectorAll('[data-testid="result-card-grid"]')].pop()
+      ?.querySelectorAll('[data-testid^="card-listing-"]').length ?? 0);
+    const pressPager = async () => {
+      const pager = page.locator('[data-testid="results-load-more"]').last();
+      await pager.waitFor({ state: 'attached', timeout: 40000 });
+      await pager.evaluate((el) => el.scrollIntoView({ block: 'center' })); // the inner ScrollView moves only this way
+      await page.waitForTimeout(600);
+      await pager.click({ timeout: 15000 });
+    };
+    const waitCards = async (min, ms) => { const until = Date.now() + ms; let n = 0;
+      while (Date.now() < until && (n = await cardsShown()) < min) await page.waitForTimeout(400); return n; };
+    try {
+      await pressPager();
+      const first = await waitCards(100, 30000);
+      await page.waitForTimeout(3000);
+      const photos = [];
+      const onReq = (r) => { const u = r.url();
+        if (r.resourceType() === 'image' && !u.startsWith(BASE) && !/^(data|blob):/.test(u)) photos.push(u); };
+      page.on('request', onReq);
+      await pressPager();
+      const second = await waitCards(first + 1, 20000);
+      await page.waitForTimeout(6000);
+      page.off('request', onReq);
+      if (second <= first) skipCheck('[mobile] «عرض المزيد» photo budget', `the second press revealed nothing (${first} → ${second} cards) — no reveal to measure`);
+      else check(`[mobile] «عرض المزيد» ${first} → ${second} downloads only the photos near the screen (${photos.length} ≤ ${PHOTO_BUDGET})`,
+        photos.length <= PHOTO_BUDGET, `${photos.length} photo requests in 6 s — every new card is downloading its photo at once`);
+    } catch (e) {
+      skipCheck('[mobile] «عرض المزيد» photo budget', `the pager was not reachable: ${String(e).split('\n')[0].slice(0, 140)}`);
+    }
+  }
+
   searchCalls = 0;
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(12000);

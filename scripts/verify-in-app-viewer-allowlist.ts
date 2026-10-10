@@ -450,7 +450,7 @@ mustCatch('missing area becomes a zero stat', !factsPass(preview.replace('if (l.
 const display = await liftSymbols(new URL('../src/lib/listingDisplay.ts', import.meta.url).pathname,
   [{ header: 'export function sourceName' }], ['sourceName']);
 const i18n = await liftSymbols(new URL('../src/i18n.tsx', import.meta.url).pathname,
-  [{ header: 'const AR:' }, { header: 'function fill' }, { header: 'export function translate' }], ['translate']);
+  [{ header: 'const AR:' }, { header: 'function fill' }, { header: 'const EN:' }, { header: 'export function translate' }], ['translate']);
 const translate = i18n.translate as (locale: string, key: string, vars?: Record<string, string | number>) => string;
 type Node = { type: string; props: Record<string, any> };
 const renderPreview = (src: string, source: string, locale: string, photos: string[] = []) => {

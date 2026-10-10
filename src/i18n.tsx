@@ -1601,11 +1601,25 @@ function fill(template: string, vars?: Record<string, string | number>): string 
   return out;
 }
 
+// English wording that differs from its lookup key. The key stays the stable id (the Arabic table, the code and the
+// tests use it); only what an English reader sees changes. Owner 2026-10-09: «the English is just the translation»
+// — each entry is the faithful translation of the Arabic value, in plain sentence-case English.
+const EN: Record<string, string> = {
+  'Listing bedrooms': 'Bedrooms',
+  'Smart Assistant': 'Smart Broker', // «الوسيط الذكي»
+  'One site to search every Saudi real-estate platform and website.': 'One site to search all Saudi real-estate platforms and websites.',
+  'Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.':
+    'Ezhalah is an AI-powered real-estate search engine for properties across Saudi Arabia.',
+  'Any count': 'Any', // «أي عدد»
+  'SAR currency': 'SAR', // «ريال»
+  'ads': 'listings', // «إعلان», after a count
+};
+
 // Pure translate for an explicit locale — no dependence on module state. The React provider binds
 // this to its `locale` state so screens re-render from a single source of truth (React state),
 // while the module-level `t` below serves the non-React data layer.
 export function translate(loc: Locale, en: string, vars?: Record<string, string | number>): string {
-  const base = loc === 'ar' ? AR[en] ?? en : en === 'Listing bedrooms' ? 'Bedrooms' : en;
+  const base = loc === 'ar' ? AR[en] ?? en : EN[en] ?? en;
   return fill(base, vars);
 }
 
