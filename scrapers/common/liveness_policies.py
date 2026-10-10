@@ -83,7 +83,9 @@ SOURCE_LIST_PRESENCE = "SOURCE_LIST_PRESENCE"
 # (6 CPTs, ~260 posts) re-read in full each run, with no per-listing revisit endpoint of its own.
 # haraj and propertyfinder (2026-10-10) are SHADOW readers only (their shadow.py writes nothing): each gets its
 # liveness policy in the same change that makes it production-searchable (backlog 311).
-NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "haraj", "propertyfinder"})
+# moj (2026-10-10) is not a listing platform at all: it reads the Ministry of Justice's district sales
+# aggregates into moj_district_sales (scrapers/moj/sales.py) and writes no listing.
+NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "haraj", "propertyfinder", "moj"})
 
 
 class _P(dict):
