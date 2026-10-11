@@ -15,6 +15,9 @@ import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
 import { isStayLengthPriced, listingPrice } from '@/lib/listingDisplay';
 import { afEvidence, AMENITY_COL, type ActiveAf } from '@/lib/afEvidence';
+import { typeImg } from '@/theme/propertyIcons';
+import { GoldShineButton } from './CardReveal';
+import { BuzzLayer } from './CardBuzzer';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -101,6 +104,8 @@ export function ResultCard({
   const tight = row === 'tight';
   // 'tight' only: the two truncated secondary lines, unfolded by a tap on them.
   const [unfolded, setUnfolded] = useState(false);
+  // Laptop photo-first card: bumped by a press on the photo or the gold button — plays the golden buzzer.
+  const [burst, setBurst] = useState(0);
   // Evidence for the «مطابق لطلبك» strip: NEVER read from listing.features / listing.bathrooms (raw,
   // NULL-coerced) — only from listing.canon, the canonical row the predicate actually passed on.
   const evidence = useMemo(() => afEvidence(activeAf ?? [], listing.canon, t), [activeAf, listing.canon, t]);
@@ -197,6 +202,146 @@ export function ResultCard({
   // data. Same filter AdditionalInformationPanel uses below, so the empty-state only fires when BOTH
   // panels would otherwise be blank. (owner-reported 2026-09-13, found while re-testing amlakalahsa.)
   const hasAddlInfo = !!listing.additional_info?.some((r) => r && r.label && r.value);
+
+
+  // ─── LAPTOP PHOTO-FIRST CARD (owner 2026-10-11) ───────────────────────────────────────────────
+  // `row` is only ever set on the laptop (web, ≥1024px), so the phone/tablet card below is untouched.
+  // A big photo on top, then the price with the gold «اضغط هنا» button right across from it, the
+  // location, the type icon + rooms + size, the chips (the Advanced-Filter picks first, with a ✓),
+  // the source's own small facts, and the source's logo. Every value is still the listing's own:
+  // nothing is derived, and a value the source did not give renders nothing.
+  if (row) {
+    const photos = listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []);
+    const stay = isStayLengthPriced(listing.source);
+    // PRESS = OPEN. The ad opens first, synchronously inside the click (a delayed window.open would be
+    // popup-blocked); the buzzer is bumped second and is pure decoration.
+    const fire = () => { onOpen(); setBurst((b) => b + 1); };
+    const typeIcon = typeImg(listing.cleanType ?? '');
+    const CHIP_CAP = 5;
+    const shownFeats = unfolded ? visible : visible.slice(0, CHIP_CAP);
+    const moreFeats = visible.length - shownFeats.length;
+    return (
+      <View testID={`card-listing-${listing.id}`} style={[card.wrap, card.lpWrap, { direction: wDir }]}>
+        <Pressable onPress={fire} accessibilityRole="link" accessibilityLabel={t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })} style={card.lpPhoto}>
+          <ListingPhoto photos={photos} style={card.photo} t={t} />
+          <View style={card.lpFade} pointerEvents="none" />
+          {rank ? (
+            <View style={card.rankBadge} pointerEvents="none">
+              <Text style={card.rankText}>#{rank}</Text>
+            </View>
+          ) : null}
+          <View style={card.lpPhotoFoot} pointerEvents="none">
+            <Text style={card.lpPhotoFootTx}>{typeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
+            {listing.source_url ? <Text style={[card.lpPhotoFootTx, card.lpHost]} numberOfLines={1}>{sourceHost(listing.source)}</Text> : null}
+          </View>
+        </Pressable>
+
+        <View style={card.lpBody}>
+          <View style={card.lpPriceRow}>
+            <View style={card.lpPriceCol}>
+              <Text style={stay ? card.stayNote : [card.price, card.lpPrice]} numberOfLines={stay ? 2 : 1}>{listingPrice(listing, locale)}</Text>
+            </View>
+            {listing.source_url ? (
+              <View style={card.lpCta}>
+                <GoldShineButton idle={false} onPress={fire} style={card.lpGold} testID="card-open-gold">
+                  <Text style={card.lpGoldTx}>{t('Click here 👆')}</Text>
+                </GoldShineButton>
+                <Text style={card.lpCtaNote}>{t('To confirm availability and details')}</Text>
+              </View>
+            ) : null}
+          </View>
+          {(listing.price === 'Price on request' || listing.priceIsDerived) && listing.pricePerMeter != null && listing.pricePerMeter > 1 ? (
+            <Text style={card.pricePerMeter} numberOfLines={1}>
+              {t('Price Per m²')} <Text style={card.pricePerMeterStrong}>{Number(listing.pricePerMeter).toLocaleString('en-US')} {t('SAR/m²')}</Text>
+            </Text>
+          ) : null}
+          {listing.priceIsDerived ? (() => {
+            const eq = derivedTotalEquation(listing.pricePerMeter, listing.area);
+            return eq ? (
+              <Text style={card.derivedTotalEquation} numberOfLines={1}>
+                {`${eq.perMeter.toLocaleString('en-US')} ${t('SAR/m²')} × ${eq.area.toLocaleString('en-US')} ${t('m²')} = ${eq.total.toLocaleString('en-US')} ${t('SAR')}`}
+              </Text>
+            ) : null;
+          })() : null}
+          {listing.priceIsDerived ? (
+            <Text style={card.derivedTotalNote} numberOfLines={1}>{t('Calculated from price per m² × area — not published by the source')}</Text>
+          ) : null}
+
+          <Text style={[card.title, card.lpTitle, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={2}>
+            {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
+          </Text>
+
+          {ratingVal != null ? (
+            <View style={card.ratingRow}>
+              <Ionicons name="star" size={13} color="#f5a623" />
+              <Text style={card.ratingText}>
+                {ratingVal}
+                {reviewsCount != null ? <Text style={card.ratingCount}>{`  (${t('{n} reviews', { n: reviewsCount })})`}</Text> : null}
+              </Text>
+            </View>
+          ) : null}
+          {listing.rent_now_pay_later ? <RnplBanner monthly={listing.rent_now_pay_later_monthly ?? undefined} source={listing.source} t={t} /> : null}
+
+          {/* The main filter line: the TYPE first (its own icon from the Filter), then rooms, baths, size. */}
+          <View style={card.statsRow}>
+            <View style={card.lpType}>
+              {typeIcon ? <Image source={typeIcon} style={card.lpTypeIcon} contentFit="contain" tintColor={colors.primary} /> : <Ionicons name="business-outline" size={16} color={colors.primary} />}
+              <Text style={card.lpTypeTx} numberOfLines={1}>{typeLabel}</Text>
+            </View>
+            {listing.beds > 0 ? <Stat icon="bed-outline" big={String(listing.beds)} small={t(listing.beds === 1 ? 'Bed' : 'Beds')} /> : null}
+            {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} picked={bathPicked} /> : null}
+            {listing.area > 0 ? <Stat icon="resize-outline" big={`${listing.area} ${tr('m²')}`} small={t('Area')} /> : null}
+            {listedClean ? <Stat icon="calendar-outline" big={t('Added')} small={listedClean} /> : null}
+          </View>
+
+          {evidence.length > 0 ? (
+            <View style={card.afRow} testID="card-af-evidence">
+              <Text style={card.afLabel}>{t('Matches your request')}</Text>
+              {evidence.map((c, i) => (
+                <View key={`${c.id}:${i}`} style={card.afChip} testID={`card-af-evidence-${c.id}`}>
+                  <Ionicons name="checkmark-circle" size={12} color={colors.primary} />
+                  <Text style={card.afChipText}>{c.text}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          {visible.length > 0 ? (
+            <View style={card.lpChips}>
+              {shownFeats.map((f) => {
+                const picked = pickedFeatures.has(f.key);
+                return (
+                  <View key={f.key} style={[card.lpChip, picked && card.lpChipPicked]} testID={picked ? `card-feature-picked-${f.key}` : undefined}>
+                    {picked ? <Ionicons name="checkmark" size={12} color={colors.onFill} /> : null}
+                    <Text style={[card.lpChipTx, picked && card.lpChipTxPicked]}>{t(f.label)}</Text>
+                  </View>
+                );
+              })}
+              {moreFeats > 0 ? (
+                <Pressable onPress={() => setUnfolded(true)} accessibilityRole="button" style={[card.lpChip, card.lpChipMore]}>
+                  <Text style={card.lpChipTx}>{t('See {n} more', { n: moreFeats })}</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : hasAddlInfo ? null : (
+            <Text style={card.noFeat}>{t('No additional features listed')}</Text>
+          )}
+
+          {/* The source's own small facts (age, facade, street width, boundaries, plan/land number …) —
+              exactly the rows the source gave, nothing invented; absent when the source was silent. */}
+          <AdditionalInformationPanel listing={listing} t={t} locale={locale} />
+
+          <View style={card.lpFoot}>
+            <View style={card.hostHead}>
+              <View style={card.hostBadge}><SourceBadge source={listing.source} /></View>
+              <Text style={card.hostedOn}>{t('Hosted on {name}', { name: t(sourceName(listing.source)) })}</Text>
+            </View>
+          </View>
+        </View>
+        <BuzzLayer burst={burst} />
+      </View>
+    );
+  }
 
   return (
     // Keep the linked photo above a content-sized body on every screen.
@@ -1278,6 +1423,41 @@ const card = StyleSheet.create({
   },
   sourceText: { color: '#fff', fontSize: 10, fontWeight: '500', writingDirection: 'ltr' },
   photoAction: { color: '#fff', fontSize: 12, fontWeight: '700' },
+
+
+  // ─── LAPTOP PHOTO-FIRST CARD (owner 2026-10-11) ───
+  lpWrap: { borderRadius: radius.card, position: 'relative' },
+  lpPhoto: { width: '100%', aspectRatio: 1.6, position: 'relative', backgroundColor: colors.tint, overflow: 'hidden' } as object,
+  // a soft dark fade behind the rank badge so it always reads, whatever the photo is
+  lpFade: { position: 'absolute', top: 0, left: 0, right: 0, height: 64, backgroundColor: 'rgba(14,32,22,0.28)' },
+  lpPhotoFoot: {
+    position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 12, paddingVertical: 8,
+    backgroundColor: 'rgba(14,32,22,0.55)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+  },
+  lpPhotoFootTx: { color: colors.onFill, fontSize: 12, fontWeight: '500' },
+  lpHost: { writingDirection: 'ltr', flexShrink: 1 },
+  lpBody: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14, gap: 8, minWidth: 0 },
+  lpPriceRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
+  lpPriceCol: { flexShrink: 1, minWidth: 0 },
+  lpPrice: { fontSize: 24, lineHeight: 28 },
+  lpCta: { alignItems: 'center', gap: 4, flexShrink: 0 },
+  lpGold: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  lpGoldTx: { color: colors.goldOnFill, fontSize: 12.5, fontWeight: '800' },
+  lpCtaNote: { fontSize: 11, color: colors.muted },
+  lpTitle: { fontSize: 16, lineHeight: 22 },
+  lpType: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  lpTypeIcon: { width: 22, height: 22 },
+  lpTypeTx: { fontSize: 13, fontWeight: '700', color: colors.ink },
+  lpChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  lpChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.tint, borderRadius: 999,
+    borderWidth: 1, borderColor: colors.tintLine, paddingHorizontal: 10, paddingVertical: 4,
+  },
+  lpChipPicked: { backgroundColor: colors.selFill, borderColor: colors.selFill },
+  lpChipTx: { fontSize: 12, color: colors.primary, fontWeight: '500' },
+  lpChipTxPicked: { color: colors.onFill, fontWeight: '700' },
+  lpChipMore: { backgroundColor: colors.surface, borderStyle: 'dashed' },
+  lpFoot: { borderTopWidth: 1, borderTopColor: colors.fieldLine, borderStyle: 'dashed', paddingTop: 8, marginTop: 2 },
 
   // MIDDLE: property info
   midCol: { minWidth: 0, paddingHorizontal: 10, paddingTop: 5, paddingBottom: 2, gap: 3 },

@@ -148,12 +148,15 @@ function ShineSweep() {
 // so the call site's behavior is unchanged — only the paint is now three layers instead of one flat
 // color. `style` still owns layout (padding/radius/minWidth); this component adds `overflow:hidden`
 // so the gradient and the sweep both respect the pill's rounded corners.
-export function GoldShineButton({ children, style, onPress, disabled, testID }: {
+export function GoldShineButton({ children, style, onPress, disabled, testID, idle = true }: {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   onPress?: (e: GestureResponderEvent) => void;
   disabled?: boolean;
   testID?: string;
+  // false = still gradient, no looping glint. A results grid of hundreds of cards must not each run its
+  // own forever-animation; the laptop card plays its own one-shot buzzer on press instead.
+  idle?: boolean;
 }) {
   const pal = useThemePalette();
   return (
@@ -166,7 +169,7 @@ export function GoldShineButton({ children, style, onPress, disabled, testID }: 
             end={{ x: 1, y: 1 }}
             style={StyleSheet.absoluteFill}
           />
-          <ShineSweep />
+          {idle ? <ShineSweep /> : null}
           {children}
         </>
       )}
