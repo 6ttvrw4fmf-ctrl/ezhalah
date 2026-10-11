@@ -215,8 +215,14 @@ export function pickerSourceSlugs(names: string[]): string[] {
 }
 // Any number of sites may be lit (owner 2026-10-10, reversing the earlier cap of 3: «user can select more
 // than 3 websites»). Tapping a lit site unlights it.
+// Deep search picks at most 5 websites (owner 2026-10-10, after lifting the cap of 3 the same day: «yes make
+// the max 5»). Measured on the coverage snapshot: the five biggest sites already hold 86% of all listings, and
+// five logos are what fit side by side in the composer chip. A 6th is refused; removing one frees a slot.
+export const MAX_PICKER_SOURCES = 5;
+
 export function togglePickerSource(names: string[], name: string): string[] {
-  return names.includes(name) ? names.filter(value => value !== name) : [...names, name];
+  if (names.includes(name)) return names.filter(value => value !== name);
+  return names.length >= MAX_PICKER_SOURCES ? names : [...names, name];
 }
 
 export function applyPickerSources<Q extends { sources?: string[] }>(query: Q, slugs: string[], explicit: boolean): Q {

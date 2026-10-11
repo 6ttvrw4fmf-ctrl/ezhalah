@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, platformRegionIds, platformRegionShare, platformRegionListings } from '@/data/platformPickerProfiles';
+import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, MAX_PICKER_SOURCES, platformRegionIds, platformRegionShare, platformRegionListings } from '@/data/platformPickerProfiles';
 import PickerRegionsMap, { regionLabel } from '@/components/PickerRegionsMap';
 import { pickAfCourtesyOpening } from '@/data/afCourtesyOpeners';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
@@ -165,7 +165,7 @@ type GuidedFacet = { id: string; keys: string[]; labels: string[] };
 
 type ChatMsg =
   | { id: string; role: 'user'; text: string; typing?: boolean }
-  | { id: string; role: 'agent'; text: string; typing?: boolean; greeting?: boolean; refine?: RefinePrompt; refineDone?: boolean }
+  | { id: string; role: 'agent'; text: string; typing?: boolean; greeting?: boolean; refine?: RefinePrompt; refineDone?: boolean; stopNote?: boolean }
   | { id: string; role: 'results'; text: string; result: SearchResult; typing?: boolean; slogan?: string; summary?: string;
       /** This turn was produced by a COMPLETED Advanced Filter round — it reveals up to AF_REVEAL_MAX
        *  instead of the first-screen width (owner 2026-09-20). Carried ON the message, not in state:
@@ -1684,11 +1684,12 @@ export default function Agent() {
 
     setStopped(true); // hide the "I can get you something more precise" CTA on the stopped results
     setBusy(false);   // search no longer running
-    // Drop the in-flight thinking/searching bubbles; the cards already shown stay frozen. Add Ezhalah's
-    // stop acknowledgement directly under the user's request (shown instantly, no typewriter). (user request.)
+    // Drop the in-flight thinking/searching bubbles; the cards already shown stay frozen. Then one quiet line
+    // under the request, like ChatGPT's «Stopped searching» (owner 2026-10-10) — not a full reply with a
+    // question; the composer is right there for whatever comes next.
     setMsgs((m) => [
       ...m.filter((x) => x.role !== 'status'),
-      { id: uid(), role: 'agent', text: tr("I've stopped the search. Is there anything else I can help you with today?"), typing: false },
+      { id: uid(), role: 'agent', text: tr('Search stopped'), typing: false, stopNote: true },
     ]);
     toBottom();
   };
@@ -4116,6 +4117,9 @@ export default function Agent() {
               <View style={s.platformPickerHeading}>
                 <Text style={s.platformPickerTitle}>{t('Deep search across websites')}</Text>
                 <Text style={s.platformPickerSubtitle}>{t('Focus your search on one or more specific websites. We show only their listings.')}</Text>
+                <Text testID="platform-picker-limit" style={[s.platformPickerSubtitle, selectedSources.length >= MAX_PICKER_SOURCES && { color: colors.primary }]}>
+                  {t('You can choose up to 5 websites')}
+                </Text>
               </View>
               <Pressable
                 accessibilityRole="button"
@@ -4191,6 +4195,9 @@ export default function Agent() {
               <View style={s.platformPickerRule} />
               {pickerPlatforms.map((platform, index) => {
                 const selected = selectedSources.includes(platform.name);
+                // At the limit, a site not already chosen cannot be added: the row is dimmed and inert, so the
+                // tap neither closes the sheet nor silently does nothing (togglePickerSource refuses it too).
+                const atLimit = !selected && selectedSources.length >= MAX_PICKER_SOURCES;
                 const profile = PLATFORM_PICKER_PROFILES[platform.name];
                 // What the site is and where it covers — the measured coverage sentence, one quiet line
                 // under the name, never truncated (owner 2026-10-09 round 2: «it had a sentence and
@@ -4211,10 +4218,11 @@ export default function Agent() {
                       testID={`platform-picker-${platform.name}`}
                       accessibilityRole="button"
                       accessibilityLabel={`${t(platform.i18nKey)}. ${description}`}
-                      accessibilityState={{ selected }}
+                      accessibilityState={{ selected, disabled: atLimit }}
                       aria-pressed={selected}
+                      disabled={atLimit}
                       onPress={() => choosePlatform(platform.name)}
-                      style={({ pressed }: any) => [s.platformPickerItem, selected && s.platformPickerItemOn, pressed && s.platformPickerItemPressed]}
+                      style={({ pressed }: any) => [s.platformPickerItem, selected && s.platformPickerItemOn, pressed && s.platformPickerItemPressed, atLimit && { opacity: 0.4 }]}
                     >
                       <View style={s.platformPickerLogoFrame}>
                         <Image source={profile.logo} tintColor={profile.layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: profile.layout.width * k, height: profile.layout.height * k, left: profile.layout.left * k, top: profile.layout.top * k }} contentFit="contain" accessible={false} />
@@ -4299,6 +4307,10 @@ export default function Agent() {
                 // Per-message direction: each reply follows its own language: Arabic on the right with the sparkle on the right; English on the left.
                 const txt = m.text;
                 const rtl = msgRTL(txt);
+                // Stop's quiet line: muted, no sparkle, the reply's own side (ChatGPT «Stopped searching»).
+                if (m.stopNote) {
+                  return <Text key={m.id} testID="chat-stop-note" style={[s.stopNote, { alignSelf: rtl ? 'flex-end' : 'flex-start', writingDirection: rtl ? 'rtl' : 'ltr' }]}>{txt}</Text>;
+                }
                 return (
                   <View key={m.id} style={{ gap: 10, alignSelf: rtl ? 'flex-end' : 'flex-start', maxWidth: IS_WEB ? '76%' : '88%' }}>
                     <View style={[s.reply, { alignSelf: rtl ? 'flex-end' : 'flex-start', flexDirection: rtl ? 'row-reverse' : 'row' }]}>
@@ -4834,8 +4846,9 @@ export default function Agent() {
                   same target and clips the single frame of difference. */}
               {/* ONE ROW (owner 2026-10-05: «this box is still big» → «One row»): «بحث» at the far left,
                   the text in the middle, mic + Send on the right. The chip is a flex SIBLING of the input,
-                  never laid over it, so English text starting at the left can't run into it. */}
-              {!busy && !revealing && (
+                  never laid over it, so English text starting at the left can't run into it.
+                  ALWAYS there, also while Ezhalah searches (owner 2026-10-10: «it goes away» — the row
+                  must not rearrange mid-turn; ChatGPT keeps its tools in place and only Send turns to Stop). */}
                 <Pressable
                   testID="initial-chat-search"
                   accessibilityRole="button"
@@ -4883,7 +4896,6 @@ export default function Agent() {
                   )}
                   <Ionicons name="chevron-down" size={13} color={colors.muted} />
                 </Pressable>
-              )}
               <View style={s.composerInputColumn}>
               <View style={[s.inputGrow, INPUT_EASE, { height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) }]}>
               <TextInput
@@ -4939,44 +4951,49 @@ export default function Agent() {
               {showIntroExamples ? <IntroExampleRotator reducedMotion={reducedMotion} /> : null}
               </View>
               </View>
+              {/* Mic — enters recording mode (owner brief §2): immediate press feedback, then the
+                  composer itself morphs. Sits immediately left of Send, same 34px control family.
+                  Hidden ONLY where isVoiceInputSupported() is false — a LIVE, capability-only
+                  runtime check with NO browser-name exclusion of any kind (owner ruling,
+                  2026-08-25: capability-based detection, never a UA guess — iOS Safari shows the
+                  mic like every other capable browser; a runtime failure there gets its own
+                  honest, specific message instead — see voiceInput.ts's own comment for the full
+                  evidence trail). Showing a mic that can only ever flash a failure toast and
+                  revert reads as broken — but hiding a mic the runtime genuinely supports, on a
+                  guess about the browser's name, is the same mistake in the other direction.
+                  While Ezhalah searches it stays in place, dimmed and inert (owner 2026-10-10: the row
+                  never rearranges mid-turn — «شاهين 2.2» sits under it). */}
+              {isVoiceInputSupported() && !completed ? (
+              <Pressable
+                testID="voice-mic"
+                onPress={() => { void startVoice(); }}
+                disabled={busy || revealing}
+                hitSlop={8}
+                // @ts-expect-error web-only DOM props on the RNW host node
+                dataSet={{ ...TAP44 }}
+                accessibilityLabel={t('Voice input')}
+                style={({ pressed }: any) => [s.micBtn, pressed && s.micBtnPressed, (busy || revealing) && s.sendDisabled]}
+              >
+                <Ionicons name="mic-outline" size={19} color={colors.body} />
+              </Pressable>
+              ) : null}
               {busy || revealing ? (
-                // While Ezhalah is thinking/searching OR the cards are still popping in, the Send button
-                // is a Stop box — tap it to cancel the search and freeze the cards shown. (user request.)
+                // While Ezhalah is thinking/searching OR the cards are still popping in, Send becomes Stop IN
+                // ITS OWN SLOT — same circle, same size, dark with a white square, like ChatGPT (owner
+                // 2026-10-10). Tap it to cancel the search and freeze the cards shown.
                 <Pressable
                   onPress={stop}
-                  style={s.stopBtn}
-                  hitSlop={8}
+                  hitSlop={6}
                   // @ts-expect-error web-only DOM props on the RNW host node
                   dataSet={{ ...TAP44 }}
                   accessibilityLabel={t('Stop')}
                 >
-                  <Ionicons name="stop" size={15} color="#fff" />
+                  <View style={[s.sendBtn, s.stopCircle]}>
+                    <Ionicons name="stop" size={14} color="#fff" />
+                  </View>
                 </Pressable>
               ) : (
                 <>
-                  {/* Mic — enters recording mode (owner brief §2): immediate press feedback, then the
-                      composer itself morphs. Sits immediately left of Send, same 34px control family.
-                      Hidden ONLY where isVoiceInputSupported() is false — a LIVE, capability-only
-                      runtime check with NO browser-name exclusion of any kind (owner ruling,
-                      2026-08-25: capability-based detection, never a UA guess — iOS Safari shows the
-                      mic like every other capable browser; a runtime failure there gets its own
-                      honest, specific message instead — see voiceInput.ts's own comment for the full
-                      evidence trail). Showing a mic that can only ever flash a failure toast and
-                      revert reads as broken — but hiding a mic the runtime genuinely supports, on a
-                      guess about the browser's name, is the same mistake in the other direction. */}
-                  {isVoiceInputSupported() && !completed ? (
-                  <Pressable
-                    testID="voice-mic"
-                    onPress={() => { void startVoice(); }}
-                    hitSlop={8}
-                    // @ts-expect-error web-only DOM props on the RNW host node
-                    dataSet={{ ...TAP44 }}
-                    accessibilityLabel={t('Voice input')}
-                    style={({ pressed }: any) => [s.micBtn, pressed && s.micBtnPressed]}
-                  >
-                    <Ionicons name="mic-outline" size={19} color={colors.body} />
-                  </Pressable>
-                  ) : null}
                   {/* COMPLETED (owner request 2026-09-05): the send arrow becomes a lock — same
                       composer, same button, no separate card. It never fires (the real "start
                       over" action is the hamburger, top left), so it always renders disabled. */}
@@ -5499,6 +5516,9 @@ const s = StyleSheet.create({
   // fixed-width controls, whatever the amplitude (owner brief §1/§4).
   voiceWaveWrap: { flex: 1, alignSelf: 'stretch', minHeight: 34, overflow: 'hidden' },
   stopBtn: { width: 34, height: 34, borderRadius: 12, backgroundColor: colors.dark, alignItems: 'center', justifyContent: 'center' },
+  // Send's own circle in Stop's colour (the composer's Stop shares sendBtn's size, so nothing moves).
+  stopCircle: { backgroundColor: colors.dark },
+  stopNote: { fontSize: 13, lineHeight: 18, color: colors.muted, paddingHorizontal: 4 },
   // marginTop 2: the model label above is already the breathing room (owner 2026-10-09: no «big space»).
   disc: { fontSize: 11, lineHeight: 16, color: colors.muted, textAlign: 'center', marginTop: 2, paddingHorizontal: 12 },
   // Centered Filter/AI pill band under the header (see the JSX note). Explicit height on BOTH ends

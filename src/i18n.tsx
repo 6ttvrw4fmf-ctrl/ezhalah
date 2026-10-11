@@ -197,6 +197,9 @@ const AR: Record<string, string> = {
   'Deep search across websites': 'بحث عميق في المواقع',
   // Owner 2026-10-10: the sheet must say its purpose — one site, several, or all, chosen by coverage.
   'Focus your search on one or more specific websites. We show only their listings.': 'اختر موقعاً معيّناً أو أكثر، أو كل المواقع، ونعرض لك إعلاناتها فقط.',
+  'You can choose up to 5 websites': 'تقدر تختار 5 مواقع كحد أقصى',
+  // ChatGPT-style quiet stop line (owner 2026-10-10) — one muted line, no question, no sparkle.
+  'Search stopped': 'وقفت البحث',
   'By coverage': 'حسب التغطية',
   // The sheet reads as two steps (owner 2026-10-10: «search on the region you want, then choose the websites below»).
   'Step 1 · Choose the region': '١ · اختر المنطقة',
