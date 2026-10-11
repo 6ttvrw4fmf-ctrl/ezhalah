@@ -143,3 +143,35 @@ def test_a_real_not_found_is_not_retried():
     s = _Refusing(99, 400)
     assert run.fetch_listings(s, fresh=lambda _a: s) == []
     assert s.calls == 1, s.calls
+
+
+class _Refuses:
+    def __init__(self, status=403):
+        self.status, self.calls = status, 0
+
+    def get(self, url, timeout=None):
+        self.calls += 1
+        return _Resp([], self.status)
+
+
+def test_refused_by_every_direct_profile_falls_back_to_the_proxy_once():
+    # 2026-10-11: page 1 answered 403 to all three DIRECT profiles twice in a night (backlog 375).
+    # The residential proxy is a different caller IP: it is the last try, used once.
+    direct = _Refuses()
+    proxy = _Flaky(0)
+    rows = run.fetch_listings(direct, fresh=lambda _a: direct, proxied=lambda: proxy)
+    assert len(rows) == 1 and proxy.calls == 1, (rows, proxy.calls)
+    assert direct.calls == 3
+
+
+def test_no_proxy_configured_keeps_the_honest_refusal_note():
+    direct = _Refuses()
+    assert run.fetch_listings(direct, fresh=lambda _a: direct, proxied=lambda: None) == []
+    assert run.LAST_FETCH_NOTE == "page 1 returned HTTP 403"
+
+
+def test_direct_route_is_the_default_session(monkeypatch):
+    monkeypatch.setenv("WASALT_PROXY_URL", "http://proxy.invalid:1")
+    monkeypatch.delenv("SCRAPE_PROXY_FALLBACK_URL", raising=False)
+    assert not getattr(run.session(), "proxies", None)
+    assert run._proxy_session() is None

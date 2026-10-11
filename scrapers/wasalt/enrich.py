@@ -143,6 +143,8 @@ def meter_fields_from_deep(deep: list[dict[str, Any]]) -> dict[str, bool]:
 # runaway re-crawl (a flag reset re-queuing ~57k rows), not to throttle ordinary new listings: on
 # 2026-10-05 ~13k genuinely new rows were pending, which the old 5,000 would have refused.
 MAX_PENDING_DEFAULT = 15000
+# Over the cap a run fetches at most this many rows (newest first) instead of refusing: see enrich_table.
+DRAIN_BATCH = 2000
 
 
 def pending_count(c, table: str, flag: str, sel: str) -> int:
@@ -165,11 +167,17 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
     # all of it through the metered Saudi proxy is exactly what exhausted the free tier (25-26 Jun). Refuse
     # unless explicitly authorised, so a stray flag reset can never silently re-crawl ~57k rows.
     pending = pending_count(c, table, "detail_enriched", "ad_number")
-    if pending > max_pending and not allow_backfill:
-        print(f"⚠ CIRCUIT BREAKER: {pending} un-enriched rows in {table} (> {max_pending}). Steady state "
-              f"is a few/day — this looks like a flag reset or a backfill. Refusing to crawl the backlog "
-              f"through the metered proxy. Re-run with --allow-backfill to override.", flush=True)
-        return {"deep": 0, "empty": 0, "fail": 0, "aborted": pending}
+    # DRAIN, don't refuse (owner, 2026-10-10: «fix the root — drain in batches under the cap»). From
+    # 10-08 the backlog sat at 27,119 > 15,000 and every run refused, so NO new wasalt ad got its detail
+    # fields for three nights while the backlog only grew. The spend a run can make was never the
+    # backlog: it is `limit` rows (2,000/day by default), far under the 15,000 cap. Over the cap a run
+    # now fetches at most DRAIN_BATCH rows, NEWEST FIRST so today's arrivals get their fields before the
+    # old backlog; a flag reset of ~57k therefore costs at most DRAIN_BATCH fetches per run, never 57k.
+    draining = pending > max_pending and not allow_backfill
+    if draining:
+        limit = min(limit, DRAIN_BATCH)
+        print(f"⚠ {pending} un-enriched rows in {table} (> {max_pending}): drain mode — newest first, at most "
+              f"{limit} rows this run; the rest drains on later runs.", flush=True)
     q = (c.table(table).select("ad_number,listing_url,property_type")
          .eq("active", True).eq("detail_enriched", False))
     # Cloud matrix sharding: 10 parallel jobs, each claims a DISJOINT slice by the last digit of
@@ -179,6 +187,8 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
         q = q.like("ad_number", f"%{shard}")
     # Fair drain: least-recently-attempted first (NULLs = never tried). Prevents new high-id rows
     # from permanently starving older un-enriched rows when daily inflow exceeds the cap.
+    if draining:
+        q = q.order("scraped_at", desc=True)
     rows = (q.order("enrich_attempted_at", desc=False, nullsfirst=True)
             .limit(limit).execute().data) or []
     print(f"── {table} shard {shard}/{shards}: {len(rows)} un-enriched rows to process (cap {limit})")

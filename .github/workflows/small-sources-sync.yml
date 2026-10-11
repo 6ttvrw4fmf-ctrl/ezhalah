@@ -365,7 +365,9 @@ jobs:
           # and amaall ran every 2 days for no bandwidth reason (no proxy, 133 ads between them), and
           # remal and amaall are now SOURCE_LIST_PRESENCE with a 48 h window a 2-day cadence cannot keep.
           - { source: alta,         cmd: "python -m scrapers.alta.run --type all" }
-          - { source: shmoualshmal, cmd: "python -m scrapers.shmoualshmal.run --type all" }
+          # shmoualshmal: `proxy: true` (2026-10-11, Scraping Engineer, backlog 375) — page 1 answered 403 to
+          # all three DIRECT profiles at 04:51 and 05:02 UTC. Direct stays first; the proxy is the last try.
+          - { source: shmoualshmal, cmd: "python -m scrapers.shmoualshmal.run --type all", proxy: true }
           # Two more GREEN-audited additions (owner-instructed 2026-09-06).
           #   remal   87 posts -> 84 listings. class_list carries city/type/offer; images bind by
           #           attachment PARENT because the detail page renders OTHER listings' photos.

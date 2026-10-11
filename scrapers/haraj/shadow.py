@@ -19,7 +19,7 @@ import re
 import sys
 import time
 from collections import Counter
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from curl_cffi import requests as cc  # NO impersonate: an honest client, owner rule
 
@@ -49,6 +49,24 @@ _POST_RE = re.compile(r'(?:https://haraj\.com\.sa)?/(1\d{9,11})/([^"\'\s<>?#]*)'
 
 def post_ids(text: str) -> list[str]:
     return list(dict.fromkeys(m.group(1) for m in _POST_RE.finditer(text)))
+
+
+# The hourly sitemap lists EVERY category (cars, phones, jobs …): on 2026-10-10 1,100 fetches found 63
+# real-estate posts and 18 offers, so a 100-offer hand-check needed ~6,000 fetches. The URL slug is the
+# post's own title, so a property word in it picks the candidates worth fetching. Selection only: every
+# fetched post still needs the real-estate tag AND passes the same classifier.
+_PROPERTY_SLUG_RE = re.compile(
+    r"شق|ارض|أرض|اراضي|أراضي|فيل|فلة|فله|دبلكس|دوبلكس|عمار|استراح|محل|مكتب|مستودع|عقار|ملحق|بيت|حوش|"
+    r"مزرع|شاليه|استديو|ستوديو|غرف|دور|للبيع|للايجار|للإيجار|للاجار|ايجار|إيجار|تمليك|مخطط|بركس")
+
+
+def property_slug_ids(text: str) -> list[str]:
+    """Post ids whose URL slug (the title) carries a property word."""
+    out = []
+    for m in _POST_RE.finditer(text):
+        if _PROPERTY_SLUG_RE.search(unquote(m.group(2)).replace("_", " ")):
+            out.append(m.group(1))
+    return list(dict.fromkeys(out))
 
 
 def _meta(html: str, prop: str) -> str:
@@ -90,6 +108,11 @@ def main() -> int:
     ap.add_argument("--skip-hours", type=int, default=6,
                     help="skip the newest N hourly sitemap files (already hand-checked in an earlier run)")
     ap.add_argument("--want", type=int, default=110, help="stop after this many real-estate posts")
+    ap.add_argument("--want-offers", type=int, default=0,
+                    help="instead, stop after this many posts classified «offer» (the hand-check sample)")
+    ap.add_argument("--files", type=int, default=3, help="how many hourly sitemap files to read")
+    ap.add_argument("--slug-filter", action="store_true",
+                    help="fetch only sitemap posts whose URL slug carries a property word")
     a = ap.parse_args()
 
     ids: list[str] = []
@@ -103,11 +126,12 @@ def main() -> int:
     st, sm = fetch(f"{BASE}/sitemap.xml")
     locs = re.findall(r"<loc>([^<]+)</loc>", sm) if st == 200 else []
     print(f"sitemap.xml: {st} locs={len(locs)} first={locs[:3]} last={locs[-3:]}", flush=True)
-    files = locs[-(3 + a.skip_hours):len(locs) - a.skip_hours] if a.skip_hours else locs[-3:]
+    n = a.files
+    files = locs[-(n + a.skip_hours):len(locs) - a.skip_hours] if a.skip_hours else locs[-n:]
     for u in files[::-1]:
         st2, t = fetch(u)
-        got = post_ids(t) if st2 == 200 else []
-        print(f"  sitemap file {u}: {st2} posts={len(got)}", flush=True)
+        got = (property_slug_ids(t) if a.slug_filter else post_ids(t)) if st2 == 200 else []
+        print(f"  sitemap file {u}: {st2} posts={len(got)} slug_filter={a.slug_filter}", flush=True)
         sm_ids = [i for i in got if i not in ids]
         random.Random(a.seed).shuffle(sm_ids)
         ids += sm_ids
@@ -132,7 +156,10 @@ def main() -> int:
         verdict, why = classify(p.get("title"), p.get("body"))
         p["verdict"], p["why"] = verdict, why
         rows.append(p)
-        if len(rows) >= a.want:
+        if a.want_offers:
+            if sum(1 for r in rows if r["verdict"] == "offer") >= a.want_offers:
+                break
+        elif len(rows) >= a.want:
             break
 
     c = Counter(r["verdict"] for r in rows)
