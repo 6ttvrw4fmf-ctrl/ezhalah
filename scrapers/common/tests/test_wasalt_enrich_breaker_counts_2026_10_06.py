@@ -70,7 +70,9 @@ def _no_catalog(monkeypatch):
     monkeypatch.setattr(EAR, "_browser_fetch_enabled", lambda: False, raising=False)
 
 
-@pytest.mark.parametrize("mod,table", [(EAR, "wasalt_residential_listings"), (EN, "wasalt_residential_listings")])
+# EN no longer refuses over the cap: it drains a bounded batch (owner 2026-10-10) —
+# test_wasalt_enrich_drains_over_cap_2026_10_11.py. EAR keeps its arrivals-mode refusal.
+@pytest.mark.parametrize("mod,table", [(EAR, "wasalt_residential_listings")])
 def test_cap_trips_at_15001(monkeypatch, mod, table):
     monkeypatch.setattr(mod.db, "sb", lambda: _C(15001))
     out = mod.enrich_table(table, limit=10, workers=1)
