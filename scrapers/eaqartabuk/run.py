@@ -568,6 +568,7 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
 
     title = _redact(_strip_tags(item.get("title")))
     description = _redact(_strip_tags(desc_html) or _strip_tags(item.get("excerpt")))
+    street_w, facade = normalize.street_from_prose(description)
 
     # Featured first (it is slide 1 on the live flexslider AND our card thumbnail), then the rest
     # of the post's own gallery in attachment-id order (see _gallery). `not in` dedupes the
@@ -619,6 +620,11 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
         "neighborhood": district,
         "title": title,
         "description": description,
+        # eaqartabuk publishes no facade or street field, so the ad text is the only place they are stated
+        # («غربيه شارع 25 متر»). 168 served lands, which answer ONLY street width and direction, had neither
+        # (🔬 2026-10-11). normalize.street_from_prose: one street or nothing; a corner plot stays NULL.
+        "street_width_m": street_w,
+        "direction": facade,
         "photo_urls": photos,
         "date_added": item.get("date") or None,
         "additional_info": info,
