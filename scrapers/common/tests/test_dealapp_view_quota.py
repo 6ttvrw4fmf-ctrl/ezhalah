@@ -167,3 +167,23 @@ def test_a_full_shard_still_fetches_its_newest_new_ads_first(monkeypatch):
     newest10 = sorted(new, key=int, reverse=True)[:10]
     assert ids[:10] == newest10                               # the newest ads, first
     assert sorted(ids) == sorted(newest10 + known + tail)     # and the whole own slice kept
+
+
+def test_the_crawl_stamps_alive_only_from_a_copy_the_sweep_would_also_believe(monkeypatch):
+    """2026-10-11 (dealapp 9252915): the sweep read the ad gone three times on fresh renders, the
+    crawl read a CloudFront copy up to 24 h old, stamped it «alive now» and so outvoted them (and,
+    since #6678, held the kill). Both readers now share liveness.FRESH_MAX_AGE_S: an edge copy older
+    than that still ingests the row, but is never a fresh read, so it cannot certify the ad alive."""
+    from scrapers.dealapp import liveness as L
+    import scrapers.dealapp.liveness_run as LR
+    assert LR.FRESH_MAX_AGE_S == L.FRESH_MAX_AGE_S == run._MAX_EDGE_AGE_S
+
+    run._fresh_reads.clear()
+    stale = L.FRESH_MAX_AGE_S + 1
+    out, _ = _fetch(monkeypatch, [lambda u: _Resp(_PRICED, u, cache="Hit from cloudfront", age=stale)])
+    assert out == (_PRICED, "7")              # the row is still built from it…
+    assert "7" not in run._fresh_reads        # …but it is not a current read: no alive stamp
+
+    out, _ = _fetch(monkeypatch, [lambda u: _Resp(_PRICED, u, cache="Hit from cloudfront", age=60)])
+    assert out == (_PRICED, "7") and "7" in run._fresh_reads
+    run._fresh_reads.clear()

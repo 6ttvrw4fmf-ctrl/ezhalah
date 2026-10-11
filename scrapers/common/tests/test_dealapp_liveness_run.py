@@ -354,7 +354,10 @@ def test_the_sweep_runs_often_enough_to_cover_the_catalogue_in_days_not_weeks():
     assert re.search(r"apply:\s*true", wrapper), "the pg_cron path must apply, or it is a dry run"
     assert "workflow_call" in wf, "the real workflow must be callable by the wrapper"
     assert "cancel-in-progress: false" in wf, "runs must queue, never cut a paced sweep short"
-    assert "cancel-in-progress: false" in wrapper
+    # 2026-10-11: the wrapper must NOT hold a concurrency group of its own. It held the callee's
+    # `dealapp-liveness`, GitHub read caller+callee as a deadlock, and all 12 pg_cron dispatches
+    # 10-10 12:40 -> 10-11 10:40 UTC failed with zero jobs. The callee's own block serialises sweeps.
+    assert not re.search(r"^concurrency:", wrapper, re.M), "a caller sharing its callee's group deadlocks"
 
 
 def test_a_kill_is_held_when_the_ad_was_proven_alive_after_this_sweep_read_it(wire, monkeypatch):

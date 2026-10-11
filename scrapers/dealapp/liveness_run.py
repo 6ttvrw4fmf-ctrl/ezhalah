@@ -46,8 +46,8 @@ from scrapers.common.liveness_contract import (
     ALIVE, DEAD, UNKNOWN, EvidenceKind, decide, verification_patch,
 )
 from scrapers.common.liveness_policies import policy_for
-from scrapers.dealapp.liveness import (
-    OriginBudget, classify_dealapp, environment_is_trustworthy, from_edge, sitemap_candidate_rank,
+from scrapers.dealapp.liveness import (  # FRESH_MAX_AGE_S: one rule, shared with the crawl's alive stamp
+    FRESH_MAX_AGE_S, OriginBudget, classify_dealapp, environment_is_trustworthy, from_edge, sitemap_candidate_rank,
 )
 
 BASE = "https://dealapp.sa"
@@ -180,7 +180,6 @@ def _canaries(client, s, budget: Optional[RequestBudget]) -> dict:
 # the bare URL never recovered (dealapp-fetch-diagnostic retry mode: 0/49 up to 120 s). So: never
 # read an old cached copy as an answer; when the copy we got is stale, ask the next cache key (an
 # edge hit is refunded to the quota). A fresh render is final.
-FRESH_MAX_AGE_S = 3600
 
 
 def _variants(listing_url: str) -> list[str]:

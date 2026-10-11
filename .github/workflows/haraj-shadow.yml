@@ -9,7 +9,13 @@ on:
     inputs:
       max_posts:
         description: "How many posts to read (1 request a second)"
-        default: "1100"
+        default: "1500"
+      files:
+        description: "How many hourly sitemap files to read"
+        default: "6"
+      skip_hours:
+        description: "Skip the newest N hourly files (use a window no earlier hand-check used)"
+        default: "18"
   # A PUSH that changes the Haraj crawler (push path filters read the pushed commits only, so an
   # unrelated push on the same PR does not re-crawl Haraj — a pull_request filter reads the whole PR).
   push:
@@ -27,7 +33,7 @@ permissions:
 jobs:
   shadow:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -40,4 +46,8 @@ jobs:
       - name: Classifier tests
         run: pip install pytest && python -m pytest -q scrapers/common/tests/test_haraj_classify.py
       - name: Shadow crawl (prints only)
-        run: exec python -m scrapers.haraj.shadow --max-posts "${{ github.event.inputs.max_posts || '1100' }}"
+        # --slug-filter + --want-offers: the owner's gate is a hand-check of 100 «offer» verdicts; the sitemap
+        # is every category, so pick property-titled posts and stop at 110 offers (2026-10-11).
+        run: >-
+          exec python -m scrapers.haraj.shadow --max-posts "${{ github.event.inputs.max_posts || '1500' }}"
+          --slug-filter --files ${{ github.event.inputs.files || '6' }} --skip-hours ${{ github.event.inputs.skip_hours || '18' }} --want-offers 110
