@@ -71,9 +71,12 @@ const mutants: Array<[string, (s: string) => string]> = [
   ['town guard dropped', (s) => s.replace(/and not exists \(select 1 from public\.loc_catalog_city cc[\s\S]*?\) then/, 'then')],
   ['numeric brackets let in', (s) => s.replace("v ~ '\\([^)0-9٠-٩]+\\)' then", "v ~ '\\([^)]+\\)' then")],
 ];
+const mustCatch = (label: string, caught: boolean) => {
+  if (!caught) { console.error(`✗ ${label} was NOT caught`); process.exit(1); }
+};
 for (const [name, mutate] of mutants) {
   const m = mutate(sql);
   if (m === sql) { console.error(`✗ mutant «${name}» did not apply — the barrier lost its grip on the arm`); process.exit(1); }
-  if (problems(m).length === 0) { console.error(`✗ mutant «${name}» survived`); process.exit(1); }
+  mustCatch(`mutant «${name}»`, problems(m).length > 0);
 }
 console.log(`✓ parenthetical district alias: ${newest} resolves «X ( Y )» to X only when Y cannot mean elsewhere (${mutants.length} mutants caught)`);
