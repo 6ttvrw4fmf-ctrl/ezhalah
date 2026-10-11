@@ -45,6 +45,11 @@ check('the component prints the attribution and draws every region', /OpenStreet
 const steady = (src: string) => /\n\s*<Text style=\{\[styles\.captionHint[^\n]*Tap a region to see the websites that cover it/.test(src) && !/picked \? null : <Text style=\{\[styles\.captionHint/.test(src);
 check('the map stays put between taps (hint line always rendered)', steady(MAP));
 if (steady(MAP.replace("<Text style={[styles.captionHint", "{picked ? null : <Text style={[styles.captionHint"))) { failed++; console.log('FAIL  (mutation) a conditional hint line was not caught'); } else console.log('PASS  (mutation) catches the hint line made conditional again');
+// The region line is never cut («9,664 إع…» on a phone, owner 2026-10-10) and never changes height between
+// taps: up to two lines, and the caption row always reserves both (row minHeight = 2 × the line height).
+const captionWhole = (src: string) => /<Text style=\{\[styles\.captionTitle[^\n]*numberOfLines=\{2\}>/.test(src)
+  && /caption: \{[^}]*minHeight: 40 \}/.test(src) && /captionTitle: \{[^}]*lineHeight: 20,/.test(src);
+check('the region line shows in full (two lines, both reserved, so the map still never moves)', captionWhole(MAP));
 
 // ── 2 + 3. wiring ────────────────────────────────────────────────────────────────────────────────
 const wired = (src: string) =>
@@ -68,6 +73,8 @@ const mustCatch = (what: string, caught: boolean) => {
   if (!caught) failed++;
   console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
 };
+mustCatch('a region line cut to one line again', !captionWhole(MAP.replace('numberOfLines={2}>', 'numberOfLines={1}>')));
+mustCatch('a region line whose height follows its text (map moves between taps)', !captionWhole(MAP.replace('gap: 10, minHeight: 40 }', 'gap: 10, minHeight: 30 }')));
 mustCatch('a map with a region missing', shapesOk({ ...PATHS, regions: PATHS.regions.slice(1) }).length > 0);
 mustCatch('a collapsed outline', shapesOk({ ...PATHS, regions: PATHS.regions.map((r: any, i: number) => (i ? r : { ...r, d: 'M1 1L2 2Z' })) }).length > 0);
 mustCatch('a dropped attribution', shapesOk({ ...PATHS, attribution: '' }).length > 0);
