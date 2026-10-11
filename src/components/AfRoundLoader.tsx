@@ -2,8 +2,12 @@
 // «نبحث عن …», whose ending CHANGES pick by pick: «نبحث عن الفلل والبيوت…» → «نبحث عن فيلا…» → «نبحث عن عمر
 // حتى ٥ سنوات…» → «نبحث عن مصعد…». The whole beat is AF_LOADER_MS (5 s) in agent.tsx; the picks are paced
 // to fit inside it, and the last one stays until the results arrive.
+// THE LINE LOOKS AND MOVES LIKE THE SEARCH LINE ON TOP OF THE LOGO LOADER (owner 2026-10-11, pointing at «نفحص أكثر
+// من 349,793 عقار…»: «keep it like this color and animation»): one soft colour for every word (colors.body, semibold
+// 14.5 px — the same style as SearchLoader's headline), the same gentle continuous pulse (0.55 ↔ 1, 650 ms each way),
+// and a cross-fade on every change. The picked option used to be the one dark-ink bold word against a muted lead.
 import { memo, useEffect, useRef, useState } from 'react';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, StyleSheet, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
@@ -11,6 +15,9 @@ import { useReducedMotion } from '@/lib/useReducedMotion';
 
 /** Pacing for n picks: the LAST pick lands by 4.2 s of the 5 s beat, whatever n is. `share` is one pick's
  *  turn (≤ 1.58 s), `swap` the fade out+in inside it (≤ 380 ms, a third of the share), `wait` the rest. */
+// The ease SearchLoader's headline uses (its EASE_OUT), so the pulse breathes the same way.
+const EASE_OUT = Easing.bezier(0.22, 1, 0.36, 1);
+
 export function afPickTiming(n: number): { wait: number; swap: number } {
   if (n <= 1) return { wait: 0, swap: 0 };
   const share = Math.min(1580, Math.floor(4200 / (n - 1)));
@@ -23,6 +30,16 @@ function AfRoundLoader({ items, exiting, fontFamily }: { items: string[]; exitin
   const reduced = useReducedMotion();
   const [index, setIndex] = useState(0);
   const fade = useRef(new Animated.Value(1)).current;
+  const pulse = useRef(new Animated.Value(1)).current;   // SearchLoader's continuous soft shimmer, same numbers
+  useEffect(() => {
+    if (reduced) { pulse.setValue(1); return; }
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 0.55, duration: 650, easing: EASE_OUT, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 1, duration: 650, easing: EASE_OUT, useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [reduced, pulse]);
   useEffect(() => {
     if (index >= items.length - 1) return;
     const { wait, swap } = afPickTiming(items.length);
@@ -44,10 +61,10 @@ function AfRoundLoader({ items, exiting, fontFamily }: { items: string[]; exitin
   return (
     <View testID="af-round-loader" style={[styles.wrap, exiting && styles.exiting, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
       <Ionicons name="sparkles" size={16} color={colors.primary} />
-      <Text style={[styles.line, { fontFamily, textAlign: isRTL ? 'right' : 'left', writingDirection: isRTL ? 'rtl' : 'ltr' }]} numberOfLines={1}>
-        <Text style={styles.lead}>{t('Searching for')} </Text>
-        <Animated.Text style={[styles.pick, { opacity: fade }]}>{pick}…</Animated.Text>
-      </Text>
+      <Animated.Text style={[styles.line, { fontFamily, textAlign: isRTL ? 'right' : 'left', writingDirection: isRTL ? 'rtl' : 'ltr', opacity: pulse }]} numberOfLines={1}>
+        {t('Searching for')}{' '}
+        <Animated.Text style={{ opacity: fade }}>{pick}…</Animated.Text>
+      </Animated.Text>
     </View>
   );
 }
@@ -57,7 +74,6 @@ export default memo(AfRoundLoader);
 const styles = StyleSheet.create({
   wrap: { alignItems: 'center', gap: 8, paddingHorizontal: 4, paddingVertical: 10 },
   exiting: { opacity: 0 },
-  line: { flex: 1, minWidth: 0, fontSize: 15, lineHeight: 24, color: colors.body },
-  lead: { color: colors.muted },
-  pick: { color: colors.ink, fontWeight: '600' },
+  // Same type as SearchLoader's `title` (14.5 px, 600, colors.body) — every word one colour, none darker.
+  line: { flex: 1, minWidth: 0, fontSize: 14.5, lineHeight: 24, fontWeight: '600', color: colors.body },
 });
