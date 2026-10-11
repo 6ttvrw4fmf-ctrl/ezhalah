@@ -165,18 +165,21 @@ mustCatch('a deadline that forgets the wave still has to RISE and HOLD on the la
 mustCatch('a catalogue that outgrows the reveal budget',
   !everyPlatformSeen(SEARCH_MIN_MS, 200));
 
-// AN ADVANCED FILTER ROUND SKIPS THE PLATFORM SHOW (owner 2026-10-05: «the advanced filter takes time …
-// should never ever have this» — measured 12 s of which ≤1.3 s was the round's own queries). The floor and
-// the page-dwell gate above are for a NEW search; playListings must keep them for every non-AF search and
-// skip them only when afCompleted.
+// AN ADVANCED FILTER ROUND SHOWS THE PLATFORM ANIMATION FOR 10 SECONDS (owner 2026-10-10; the 2026-10-05
+// skip is reversed). The 10.6 s floor + page-dwell gate are for a NEW search; an AF round waits a plain
+// AF_LOADER_MS = 10000 from when the loader appeared, never more.
 {
   const play = windowBetween(agentSrc, 'const playListings = async', '// 2) RESULTS: ONE consolidated bubble', 'src/app/agent.tsx playListings');
   check('a NEW search still waits the full floor and the page-dwell gate', /if \(!afCompleted\) \{[\s\S]{0,200}SEARCH_MIN_MS - \(Date\.now\(\) - since\)[\s\S]{0,400}loaderPresentedRef\.current\[statusId\] !== true/.test(play));
   check('…and only an Advanced Filter round (afCompleted) skips them — no other condition widens the skip',
     (play.match(/if \(!afCompleted\) \{/g) ?? []).length === 1 && !/if \(!afCompleted \|\|/.test(play) && !/if \(!afCompleted &&/.test(play));
+  const afTen = (src: string, body: string) => /const AF_LOADER_MS = 10000;/.test(src) && /\} else \{[\s\S]{0,400}const remaining = AF_LOADER_MS - \(Date\.now\(\) - since\);\s*if \(remaining > 0\) await waitRun\(run, remaining\);\s*\}/.test(body);
+  check('an Advanced Filter round shows the animation for 10 seconds (owner 2026-10-10)', afTen(agentSrc, play));
+  mustCatch('an AF round that skips the animation again', !afTen(agentSrc, play.replace(/\} else \{[\s\S]{0,400}?await waitRun\(run, remaining\);\s*\}/, '}')));
+  mustCatch('an AF animation that is not 10 seconds', !afTen(agentSrc.replace('const AF_LOADER_MS = 10000;', 'const AF_LOADER_MS = 3000;'), play));
 }
 
 console.log(failures === 0
-  ? '\n✓ ten seconds, and every platform both appears and is highlighted before the loader may leave\n'
+  ? '\n✓ ten seconds, and every platform both appears and is highlighted before the loader may leave; an AF round shows it for 10 s\n'
   : `\n✗ ${failures} check(s) FAILED — a search could hide platforms the owner asked to be shown\n`);
 process.exit(failures === 0 ? 0 : 1);
