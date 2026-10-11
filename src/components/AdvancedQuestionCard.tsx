@@ -87,9 +87,6 @@ function Shell({ children, onClose, countChip, pills }: {
     // (Load more / Show more / See more), and a global text match reads listing cards instead.
     <View style={s.overlay} testID="af-card">
       <Pressable style={s.backdrop} onPress={onClose} />
-      {pills ? (
-        <CommittedPills facets={pills.facets} />
-      ) : null}
       <Reveal style={s.card}>
         <View style={s.bar}>
           <View style={s.titleWrap}>
@@ -103,6 +100,10 @@ function Shell({ children, onClose, countChip, pills }: {
             </Pressable>
           </View>
         </View>
+        {/* The committed answers sit INSIDE the card, under its title bar (owner 2026-10-11: «I don't like
+            how that popped up» — the row floated over the page above the card). Still visible in every
+            phase of the round and never covered (#155), read-only (2026-10-03). */}
+        {pills ? <CommittedPills facets={pills.facets} /> : null}
         {children}
       </Reveal>
     </View>
@@ -572,14 +573,14 @@ const s = StyleSheet.create({
     width: '100%', maxWidth: 380, maxHeight: '100%', backgroundColor: colors.paper,
     borderRadius: radius.sheet, overflow: 'hidden', borderWidth: 1, borderColor: colors.fieldLine, ...cardShadow,
   },
-  // The committed-selection pills, in the overlay ABOVE the card: same tinted-chip idiom as the
-  // transcript row they are no longer hidden behind, sized to the card so they read as one column.
-  pillRow: { flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'center', width: '100%', maxWidth: 380, marginBottom: 10 },
+  // The committed-selection pills, INSIDE the card under the title bar: the same tinted-chip idiom as
+  // the transcript row, smaller, so they read as a quiet record of the round.
+  pillRow: { flexWrap: 'wrap', gap: 6, alignItems: 'center', justifyContent: 'flex-start', paddingHorizontal: space.card, paddingBottom: 8, backgroundColor: colors.paper },
   pill: {
     flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.tint,
-    borderWidth: 1, borderColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 11, paddingVertical: 5,
+    borderWidth: 1, borderColor: colors.tintLine, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 3,
   },
-  pillTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
+  pillTx: { fontSize: 12, fontWeight: '600', color: colors.primary },
   bar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: space.card, paddingTop: space.card, paddingBottom: 10, backgroundColor: colors.paper },
   titleWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
   brandMark: { width: 32, height: 32, borderRadius: 10, backgroundColor: colors.tint, alignItems: 'center', justifyContent: 'center' },
