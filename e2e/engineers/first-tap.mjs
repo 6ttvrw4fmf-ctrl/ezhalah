@@ -16,10 +16,15 @@ const exe = CONTAINER ? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' : u
 const b = await chromium.launch({ ...(exe ? { executablePath: exe } : {}), args: ['--no-sandbox','--disable-dev-shm-usage','--disable-background-networking', ...(CONTAINER ? ['--ssl-version-max=tls1.2'] : []), ...(CONTAINER && process.env.HTTPS_PROXY ? [`--proxy-server=${process.env.HTTPS_PROXY}`] : [])] });
 const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ar' });
 const page = await ctx.newPage();
+// The empty-city note is the picker's NON-RESULT hint, read from src/i18n.tsx by its English key so this
+// file never restates the app's zero vocabulary (scripts/verify-zero-vocabulary-is-derived-not-restated.ts).
+const i18n = require('node:fs').readFileSync(new URL('../../src/i18n.tsx', import.meta.url), 'utf8');
+const PANEL_HINT = /'No listings here right now':\s*'([^']+)'/.exec(i18n)?.[1] ?? '';
+if (!PANEL_HINT) { console.error('first-tap: the empty-city hint is not in src/i18n.tsx under its English key'); process.exit(2); }
 const out = {};
 const ms = () => Date.now();
 // visible leaf elements whose text starts with a city word, and whether a count (digits) sits in the same row
-const probe = (city) => page.evaluate((city) => {
+const probe = (city) => page.evaluate(({ city, hint }) => {
   const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.top < innerHeight; };
   let names = 0, counts = 0;
   document.querySelectorAll('div,span').forEach((e) => {
@@ -30,8 +35,8 @@ const probe = (city) => page.evaluate((city) => {
     names++;
     let p = e.parentElement; for (let i = 0; i < 4 && p; i++) { if (/[0-9٠-٩][0-9٠-٩,٬.]{1,}/.test(p.innerText || '')) { counts++; break; } p = p.parentElement; }
   });
-  return { names, counts, empty: /لا توجد إعلانات هنا حالياً|ما فيه إعلانات/.test(document.body.innerText) };
-}, city);
+  return { names, counts, empty: document.body.innerText.includes(hint) };
+}, { city, hint: PANEL_HINT });
 const measure = async (label, city = 'الرياض', expectCounts = true) => {
   const t0 = ms(); let tn = null, tc = null;
   await page.click('[data-testid="city-input"]');
