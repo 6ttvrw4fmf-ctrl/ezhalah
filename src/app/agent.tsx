@@ -4406,14 +4406,14 @@ export default function Agent() {
                   key={m.id}
                   ref={(n: any) => { msgNodeRef.current[m.id] = n; }}
                   onLayout={(e) => { msgYRef.current[m.id] = e.nativeEvent.layout.y; }}
-                  // FADED, NEVER REMOVED (owner 2026-10-03: «he shouldn't go up — he's still in that same
-                  // screen»). #5400 hid every earlier results turn (`display:'none'`) while a search
-                  // loaded so an old count could not pass for the new answer. Removing them collapsed
-                  // the page under the reader — an 8,800 px thread became one screen and the browser
-                  // threw them to the top — and when they came back above the new turn the view jumped
-                  // again. Dimming keeps #5400's purpose (the old count is plainly the old one) with no
-                  // layout change at all, so the reader stays exactly where they were.
-                  style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%', opacity: searchingVisibleRef.current || (latestResult?.id !== m.id && latestResult?.typing && !doneTyping[latestResult.id]) ? 0.35 : 1 }}
+                  // NEVER REMOVED, NEVER DIMMED. Removed (owner 2026-10-03: «he shouldn't go up — he's still in
+                  // that same screen»): #5400 hid every earlier results turn (`display:'none'`) while a search
+                  // loaded, which collapsed an 8,800 px thread to one screen and threw the browser to the top.
+                  // Dimmed (the fix after that) read as a washed-out ghost over the whole turn — image, text,
+                  // buttons — every time an Advanced Filter round started (owner 2026-10-11: «I don't like this
+                  // highlight … fix it»). Now an earlier turn is simply left alone: no layout change, no fade. What
+                  // marks the NEW answer is the new turn itself — the answers bubble, then its own loader and count.
+                  style={{ gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%' }}
                 >
                   {/* 1) BRANDED SLOGAN — the Ezhalah mark + its personality line. The row sizes to its
                       content and is pushed to the correct edge by the parent's alignItems. ENGLISH →

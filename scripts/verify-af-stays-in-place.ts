@@ -88,8 +88,10 @@ const stayProblems = (agentSrc: string, cardSrc: string): string[] => {
   if (!turn) out.push('the results-turn container could not be located');
   if (/display:\s*searchingVisibleRef\.current/.test(turn) || /'none'/.test(turn))
     out.push('earlier results turns are REMOVED (display none) while a search loads — the page collapses and the reader is thrown to the top');
-  if (!/opacity:\s*searchingVisibleRef\.current[^\n]*\?\s*0\.35\s*:\s*1/.test(turn))
-    out.push('earlier results turns are not dimmed while a search loads (the old count must still read as the old one)');
+  // Not dimmed either (owner 2026-10-11: «I don't like this highlight … fix it» — the whole earlier turn went
+  // a washed-out ghost every time an Advanced Filter round started). The turn's style carries no opacity at all.
+  if (/opacity/.test(turn))
+    out.push('earlier results turns are DIMMED while a search loads — the washed-out ghost the owner asked to remove');
   if (!/const echoId = uid\(\);/.test(code) || !/role: 'user', text: label/.test(code))
     out.push('a round does not give its answers bubble an id the view can ease to');
   if (!/for \(const d of \[80, 700, 1500\]\) easeToMsgTop\(echoId, d\);/.test(code))
@@ -129,9 +131,9 @@ const swap = (src: string, from: string | RegExp, to: string) => {
   return out;
 };
 mustCatch('#5400 coming back — earlier turns hidden with display:none',
-  stayProblems(swap(AGENT, /opacity: searchingVisibleRef\.current \|\| /, "display: searchingVisibleRef.current || "), CARD).length > 0);
-mustCatch('earlier turns neither dimmed nor hidden',
-  stayProblems(swap(AGENT, /\? 0\.35 : 1/, '? 1 : 1'), CARD).length > 0);
+  stayProblems(swap(AGENT, "gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%' }}", "gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%', display: searchingVisibleRef.current ? 'none' : 'flex' }}"), CARD).length > 0);
+mustCatch('the dimming coming back (earlier turns faded while a search loads)',
+  stayProblems(swap(AGENT, "gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%' }}", "gap: 6, alignItems: rtl ? 'flex-end' : 'flex-start', width: '100%', opacity: searchingVisibleRef.current ? 0.35 : 1 }}"), CARD).length > 0);
 mustCatch('the round no longer eases to its own answers bubble',
   stayProblems(swap(AGENT, 'for (const d of [80, 700, 1500]) easeToMsgTop(echoId, d);', ''), CARD).length > 0);
 mustCatch('the user bubble losing its node registration',

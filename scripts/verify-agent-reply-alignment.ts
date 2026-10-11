@@ -17,7 +17,7 @@ function verify(text: string) {
   visit(ast);
   const wrapper = styles.find(s => s.includes('gap: 10') && s.includes("'76%'"))!;
   const row = styles.find(s => s.includes('s.reply,') && s.includes('alignSelf:'))!;
-  const results = styles.find(s => s.includes('searchingVisibleRef.current') && s.includes('alignItems:'))!;
+  const results = styles.find(s => s.includes('gap: 6, alignItems: rtl') && s.includes("width: '100%'"))!;
   const slogan = styles.find(s => s.includes('s.reply,') && s.includes("alignItems: 'center'"))!;
   assert.ok(wrapper && row && results && slogan, 'all reply paths found');
   function run(expression: string, message: string) {
