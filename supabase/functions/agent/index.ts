@@ -51,7 +51,7 @@ const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
 // Deterministic post-model rules (owner ruling 2026-08-29). Pure functions, unit-tested and
 // mutation-proven by scripts/verify-agent-postmodel-rules.ts. The model proposes; these decide.
-import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWesternDigits, arabicWordAmounts, fillBathroomsIfAbsent, dropAbshirOpener } from "./postModel.ts";
+import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWesternDigits, arabicWordAmounts, fillBathroomsIfAbsent, dropAbshirOpener, insertBeforeTrailingEmoji } from "./postModel.ts";
 // THE SINGLE DECISION AUTHORITY for kind (owner-approved architecture consolidation, 2026-08-30).
 // See decide.ts's header for the full rationale. The model's own `kind` field is read ONLY to
 // decide whether to retry for wrong language; it is never trusted as the final answer again after
@@ -1159,7 +1159,7 @@ Deno.serve(async (req: Request) => {
       // Belt-and-braces on the no-language-mixing rule: if we're replying in English, strip a leading
       // Arabic interjection the model sometimes adds for flavor ("أبشر! ...", "يا هلا، ...").
       if (locale === "en") {
-        body = body.replace(/^\s*(?:أبشر|يا\s*هلا|هلا|أهلاً?|أهلين|تم|حياك(?:\s*الله)?|أكيد|إن\s*شاء\s*الله)[\s,!.،؛-]*/u, "").trim();
+        body = body.replace(/^\s*(?:أبشر|يا\s*هلا|هلا|أهلاً?|أهلين|تم|حياك(?:\s*الله)?|أكيد|إن\s*شاء\s*الله)[\s,!.،؛\-–—]*/u, "").trim();
         if (body && /[a-z]/.test(body[0])) body = body[0].toUpperCase() + body.slice(1);
       } else {
         // Brand greeting normalization (Arabic): the model occasionally still opens with "يا هلا" /
@@ -1496,7 +1496,7 @@ Deno.serve(async (req: Request) => {
       const isSizeDetail = detailStr !== "" && !/^([1-4]|5\+?)$/.test(detailStr);
       let replyOut = lead(out.reply);
       if (isSizeDetail && !replyOut.includes(detailStr)) {
-        replyOut = locale === "en" ? `${replyOut} (${detailStr} m²)` : `${replyOut} (${detailStr} م²)`;
+        replyOut = insertBeforeTrailingEmoji(replyOut, locale === "en" ? `(${detailStr} m²)` : `(${detailStr} م²)`);
       }
 
       // Sanitized once, reused by both the response's query.askAbout field and (indirectly, via
