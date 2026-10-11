@@ -69,8 +69,19 @@ check('the real composer is gated behind `!filterOrigin` (never a wider conditio
 const twoWayEnd = /\)\s*\n\s*\}\s*<\/View>\s*\n\s*<\/View>\s*\n\s*<Pressable/;  // sanity: outer composer wrap closes cleanly
 // The branch must close with `) : null}` and MUST NOT open a `(busy || revealing) ?` sub-branch
 // (the earlier Stop-alone tightening this second tightening removes).
+// The branch's OWN closer sits at the gate's indentation; nested `) : null}` closers inside the box
+// (voice overlay, stop/send) are deeper and must not be mistaken for it. Returns the index just past it.
+const branchClose = (c: string): number => {
+  const open = c.indexOf('{!filterOrigin && !completed ? (');
+  if (open < 0) return -1;
+  const indent = c.slice(c.lastIndexOf('\n', open) + 1, open).match(/^ */)?.[0] ?? '';
+  const at = c.indexOf(`\n${indent}) : null}`, open);
+  return at < 0 ? -1 : at + `\n${indent}) : null}`.length;
+};
 const composerBranchStart = code.indexOf('{!filterOrigin && !completed ? (');
-const nullCloseIdx = composerBranchStart >= 0 ? code.indexOf(') : null}', composerBranchStart) : -1;
+// The branch's own closer (indent-aware): the mic's `) : null}` sits before Stop since 2026-10-10 and must
+// not be mistaken for the end of the composer.
+const nullCloseIdx = branchClose(code) >= 0 ? branchClose(code) - ') : null}'.length : -1;
 const midBranch = composerBranchStart >= 0 && nullCloseIdx >= 0
   ? code.slice(composerBranchStart, nullCloseIdx + ') : null}'.length)
   : '';
@@ -93,7 +104,7 @@ check('no Stop Pressable renders under a filterOrigin path (the Stop-alone regre
 console.log('\n── the composer that DOES exist for AI-Agent conversations still keeps Stop reachable mid-search ──');
 // Inside the `!filterOrigin` composer branch, the pre-existing busy/revealing ternary (Stop OR
 // mic+send, never both) must still be intact — this fix must not regress the AI-Agent path.
-const composerBranchEnd = composerBranchStart >= 0 ? code.indexOf(') : null}', composerBranchStart) : -1;
+const composerBranchEnd = nullCloseIdx;
 const composerBranch = composerBranchStart >= 0 && composerBranchEnd >= 0 ? code.slice(composerBranchStart, composerBranchEnd) : '';
 check('the composer branch still has its own busy||revealing → Stop ternary (AI-Agent Stop unaffected)',
   /busy \|\| revealing \?/.test(composerBranch) && /onPress=\{stop\}/.test(composerBranch));
@@ -112,15 +123,6 @@ console.log('\n── mutation proof: this check actually fails on the regressio
 // branch — and may render nowhere else, so it can never show on Filter-origin results. (Until round 4
 // it sat between the branch and the disclaimer under its own copy of the gate; closeThenDisc above
 // still tolerates that shape, this check forbids any copy OUTSIDE the branch.)
-// The branch's OWN closer sits at the gate's indentation; nested `) : null}` closers inside the box
-// (voice overlay, stop/send) are deeper and must not be mistaken for it. Returns the index just past it.
-const branchClose = (c: string): number => {
-  const open = c.indexOf('{!filterOrigin && !completed ? (');
-  if (open < 0) return -1;
-  const indent = c.slice(c.lastIndexOf('\n', open) + 1, open).match(/^ */)?.[0] ?? '';
-  const at = c.indexOf(`\n${indent}) : null}`, open);
-  return at < 0 ? -1 : at + `\n${indent}) : null}`.length;
-};
 const selectorOnlyInsideBranch = (c: string) => {
   const open = c.indexOf('{!filterOrigin && !completed ? (');
   const close = branchClose(c);
@@ -166,6 +168,26 @@ const mutatedDiscInside = agent.replace(
 );
 mustCatch('pulling the disclaimer inside the branch (it would vanish on Filter-origin too)',
   mutatedDiscInside !== agent && !closeThenDisc.test(decomment(mutatedDiscInside)));
+
+// THE AI-AGENT COMPOSER NEVER REARRANGES MID-SEARCH (owner 2026-10-10, screenshot: «allign it well … like
+// chatgpt»). While Ezhalah searches, the «بحث» chip and the mic stay where they are and Send becomes Stop in
+// its own slot, in Send's own circle — so nothing moves and «شاهين 2.2» stays under the mic. Measured on a
+// local build at 1100 px: chip, text, mic, model label and the 38×38 button at identical pixels idle vs busy.
+const steadyRow = (c: string) => {
+  const open = c.indexOf('{!filterOrigin && !completed ? (');
+  const close = branchClose(c);
+  const box = open >= 0 && close > open ? c.slice(open, close) : '';
+  const chip = box.indexOf('testID="initial-chat-search"');
+  const mic = box.indexOf('testID="voice-mic"');
+  const ternary = box.indexOf('{busy || revealing ? (');
+  const chipGate = box.slice(Math.max(0, chip - 200), chip);
+  return chip > 0 && !/busy|revealing/.test(chipGate)            // the chip is never hidden by a running search
+    && mic > 0 && ternary > mic                                   // the mic sits before (outside) the Send/Stop swap
+    && /onPress=\{stop\}[\s\S]{0,260}?<View style=\{\[s\.sendBtn, s\.stopCircle\]\}>/.test(box.slice(ternary)); // Stop wears Send's circle
+};
+check('the AI-Agent composer keeps chip, mic and the Send/Stop slot in place while a search runs', steadyRow(code));
+mustCatch('the «بحث» chip hidden again while a search runs', !steadyRow(code.replace('<Pressable\n                  testID="initial-chat-search"', '{!busy && !revealing && <Pressable\n                  testID="initial-chat-search"')));
+mustCatch('a Stop button of its own size and shape (the row shifts)', !steadyRow(code.replace('<View style={[s.sendBtn, s.stopCircle]}>', '<View style={s.stopBtn}>')));
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll filter-results-no-composer checks passed');
 process.exit(failed ? 1 : 0);

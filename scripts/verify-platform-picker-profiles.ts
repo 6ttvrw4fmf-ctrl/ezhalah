@@ -94,10 +94,10 @@ function verifyRendering(text: string) {
   assert.equal(actualItemStyle.width, '100%', 'every desktop/phone row uses the full list width');
   const h = (type: string, props: any, ...children: any[]) => ({ type, props, children });
   // pickerRegion / regionLabel: the regions map's heading (2026-10-10) — rendered here with no region tapped.
-  const render = new Function('pickerPlatforms', 'PLATFORM_PICKER_PROFILES', 'locale', 'selectedSources', 'choosePlatform', 't', 's', 'pickerTwoColumns', 'colors', 'h', 'Pressable', 'View', 'Text', 'Image', 'Ionicons', 'pickerRegion', 'regionLabel', 'platformRegionListings', js + '\nreturn cards;');
+  const render = new Function('pickerPlatforms', 'PLATFORM_PICKER_PROFILES', 'locale', 'selectedSources', 'choosePlatform', 't', 's', 'pickerTwoColumns', 'colors', 'h', 'Pressable', 'View', 'Text', 'Image', 'Ionicons', 'pickerRegion', 'regionLabel', 'platformRegionListings', 'MAX_PICKER_SOURCES', js + '\nreturn cards;');
   for (const locale of ['ar', 'en']) {
     for (const twoColumns of [true, false]) {
-      const cards = render(roster, profiles, locale, [], () => {}, (key: string) => key, { platformPickerItem: actualItemStyle }, twoColumns, {ink:'#253831'}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons', null, () => '', () => 0);
+      const cards = render(roster, profiles, locale, [], () => {}, (key: string) => key, { platformPickerItem: actualItemStyle }, twoColumns, {ink:'#253831'}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons', null, () => '', () => 0, load(source, 'MAX_PICKER_SOURCES'));
       for (let i = 0; i < cards.length; i++) {
         const root = cards[i]; const profile = profiles[roster[i].name];
         const nodes: any[] = [];
@@ -112,6 +112,13 @@ function verifyRendering(text: string) {
         assert.equal(card.props['aria-pressed'], false, 'unselected toggle communicates its state');
         if (!twoColumns) assert.ok(card.props.style({ pressed: false }).some((v: any) => v?.width === '100%'), 'phone cards use readable full width');
       }
+      // At the cap (5 lit), every site not already lit renders inert and dimmed; a lit one stays tappable.
+      const lit = roster.slice(0, 5).map((p: any) => p.name);
+      const full = render(roster, profiles, locale, lit, () => {}, (key: string) => key, { platformPickerItem: actualItemStyle }, twoColumns, {ink:'#253831'}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons', null, () => '', () => 0, load(source, 'MAX_PICKER_SOURCES'));
+      const press = (root: any): any => { if (root?.type === 'Pressable') return root; for (const c of root?.children ?? []) { const f = press(c); if (f) return f; } return null; };
+      assert.equal(press(full[5]).props.disabled, true, 'at the cap a 6th site is inert');
+      assert.ok(press(full[5]).props.style({ pressed: false }).some((v: any) => v?.opacity === 0.4), 'at the cap a 6th site is dimmed');
+      assert.ok(!press(full[0]).props.disabled, 'a lit site stays tappable at the cap (removing frees a slot)');
     }
   }
 }
@@ -121,6 +128,7 @@ function mustCatchRender(mutant: string) {
   assert.throws(() => verifyRendering(mutant), assert.AssertionError);
 }
 mustCatchRender(agent.replace('source={profile.logo}', 'source={"../../assets/images/platform-placeholder.png"}'));
+mustCatchRender(agent.replace('                      disabled={atLimit}\n', ''));
 mustCatchRender(agent.replace('tintColor={profile.layout.monochrome ? colors.ink : undefined}', 'tintColor="#000"'));
 mustCatchRender(agent.replace('{description}\n', '{""}\n'));
 console.log(`PASS: ${names.length} bilingual descriptions; 142 original ZIP logos; missing copy and wrong artwork mutations rejected.`);
@@ -158,12 +166,15 @@ assert.throws(() => slugs(['nonexistent']), /Unknown picker source/);
 let selected = toggle([], 'Aqar');
 selected = toggle(selected, 'Wasalt');
 assert.deepEqual(selected, ['Aqar', 'Wasalt']);
-// No cap (owner 2026-10-10, reversing the cap of 3): a 4th and a 5th site are accepted; unlighting still works.
-const three = toggle(toggle(toggle([], 'Aqar'), 'Wasalt'), 'Deal App');
-assert.deepEqual(toggle(toggle(three, 'Gathern'), 'Sanadak'), ['Aqar', 'Wasalt', 'Deal App', 'Gathern', 'Sanadak'], 'any number of websites may be lit');
-assert.deepEqual(toggle(toggle(three, 'Gathern'), 'Wasalt'), ['Aqar', 'Deal App', 'Gathern'], 'a lit site unlights');
-const capped = (names: string[], name: string) => names.includes(name) ? names.filter((v) => v !== name) : names.length >= 3 ? names : [...names, name];
-assert.deepEqual(capped(three, 'Gathern'), three, 'mutation: a capped toggle refuses the 4th, so the check above can fail');
+// Deep search caps at 5 sites (owner 2026-10-10: «yes make the max 5», after lifting the cap of 3 that day):
+// a 6th is refused; removing one frees a slot.
+assert.equal(load(source, 'MAX_PICKER_SOURCES'), 5, 'the deep-search cap is 5 websites');
+const five = ['Aqar', 'Wasalt', 'Deal App', 'Gathern', 'Sanadak'].reduce((a: string[], n) => toggle(a, n), []);
+assert.deepEqual(five, ['Aqar', 'Wasalt', 'Deal App', 'Gathern', 'Sanadak'], 'five websites may be lit');
+assert.deepEqual(toggle(five, 'Muktamel'), five, 'a 6th website must be refused');
+assert.deepEqual(toggle(toggle(five, 'Wasalt'), 'Muktamel'), ['Aqar', 'Deal App', 'Gathern', 'Sanadak', 'Muktamel'], 'removing one frees a slot');
+const uncapped = (names: string[], name: string) => names.includes(name) ? names.filter((v) => v !== name) : [...names, name];
+assert.notDeepEqual(uncapped(five, 'Muktamel'), five, 'mutation: the uncapped toggle lets a 6th through, so the check above can fail');
 assert.deepEqual(toggle(selected, 'Aqar'), ['Wasalt']);
 assert.deepEqual(slugs(['Aqar', 'Aqar']), ['aqar', 'aqarmonthly']);
 for (const name of names as string[]) {
