@@ -339,3 +339,19 @@ export function fillBathroomsIfAbsent(af: unknown, text: string): Record<string,
   if (stated !== null) base.bathrooms = stated;
   return base;
 }
+
+/**
+ * «أبشر» IS RETIRED AS AN OPENER (owner 2026-10-11, rulebook chapter 11). The model keeps reaching for it out of
+ * its "Saudi friend" persona (about 4 replies in 10 in the 2026-10-11 DeepInfra test even after the prompt said
+ * never), so the opener is removed deterministically: «أبشر، أدور لك…» → «أدور لك…», «ارحب! أبشر، …» → «ارحب! …».
+ * Only a whole word at the very start («أبشرك» is a different word and stays), and never leaves an empty reply.
+ */
+export function dropAbshirOpener(s: string): string {
+  const text = String(s ?? "");
+  const m = text.match(/^(\s*ارحب[\s,!.،؛-]*)?\s*أبشر(?![\p{L}])[\s,!.،؛-]*/u);
+  if (!m) return text;
+  const rest = text.slice(m[0].length).trim();
+  if (!rest) return text;
+  const greet = (m[1] ?? "").trim();
+  return greet ? `${greet} ${rest}` : rest;
+}
