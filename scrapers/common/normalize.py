@@ -822,6 +822,25 @@ def one_direction(raw, *, diagonal: bool = False) -> Optional[str]:
     return None
 
 
+# The Nuzul SaaS (aldarim, abwbna, alobid, bahadhabab) publishes the facade as an English slug cell — «south»,
+# «north_west», «north_south_east_west» — and up to five width cells (street_width + one per side). Until
+# 2026-10-11 all four filed them only in additional_info: on 308 active ads with a facade and 299 with a width,
+# direction and street_width_m were NULL, so the Advanced Filter's direction and street-width questions never
+# found them (🔬 AF engineer; aldarim 576280: facade west, street_width_west 30). One slug = one facade; a
+# compound slug lists several facades (it reaches four), i.e. a corner plot, never a diagonal → None. Widths:
+# exactly one stated cell → that width; two streets → None, the same rule as one_street_width.
+_FACADE_SLUG = {"north": "شمال", "south": "جنوب", "east": "شرق", "west": "غرب"}
+
+
+def facade_from_slug(raw) -> Optional[str]:
+    return _FACADE_SLUG.get(str(raw or "").strip().lower())
+
+
+def one_street_width_of(*cells) -> Optional[int]:
+    stated = [c for c in cells if c not in (None, "", 0, "0")]
+    return one_street_width(stated[0]) if len(stated) == 1 else None
+
+
 # «شمالية شارع 15», «الواجهة شمالية الشارع 20 متر», «شارع 15 م شمالي», «جنوبية شارع : 18» — ONE street
 # stated in prose (masar, almotmkenah 2026-09-21). A number after «شارع» counts only with a unit or a
 # bearing beside it («شارع 15» alone can be a street's NAME), and a second street → (None, None):
