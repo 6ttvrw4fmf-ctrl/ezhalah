@@ -274,6 +274,8 @@ export function orderByScope<L extends { cleanType?: string | null; rentPeriod?:
 //   min(genuine matches, max(1, distinct matching platforms))
 // so the first screen carries EXACTLY one listing per platform that has a real match — no more,
 // no fewer, and never padded up to a fixed floor from whichever platform has the most inventory.
+// ONE matching site is the exception (owner 2026-10-11): it fills the normal first page, since there
+// is no other site to be fair to (initialReveal.ts SINGLE_SITE_FIRST_PAGE).
 // This function supplies the "distinct matching platforms" term.
 //
 // DERIVED, NEVER LISTED. The count is read from the eligible rows themselves — no allowlist, no
