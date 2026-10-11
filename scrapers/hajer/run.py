@@ -413,6 +413,10 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
         # invisible to the Advanced Filter's direction question (🔬 AF engineer, 2026-10-06). Stored as
         # published; canon_direction_ar() folds it for search, and a two-way «جنوب*غرب» stays unknown there.
         "direction": (f.get("واجهة العقار") or "").strip() or None,
+        # «عرض الشارع» is a structured REM cell on 113 of 120 live ads but reached additional_info only, so the
+        # street-width question never found a hajer listing (🔬 2026-10-11). One width or nothing: «15م*20م» is
+        # two streets → NULL, the raw cell stays in additional_info.
+        "street_width_m": normalize.one_street_width(f.get("عرض الشارع")),
         # Amenities from the ad's own body (WordPress `content`): «مطبخ مغلق», «غرفة خادمة», «غرفة غسيل».
         # hajer's REM block has NO amenity field (its 20 labels are rooms/area/facade/street/age/…), so
         # the law allows prose here, four outcomes, line by line (🔬 AF engineer 2026-10-07: 0/4 hajer
