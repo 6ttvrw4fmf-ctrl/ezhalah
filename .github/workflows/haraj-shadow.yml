@@ -27,7 +27,7 @@ permissions:
 jobs:
   shadow:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -40,4 +40,8 @@ jobs:
       - name: Classifier tests
         run: pip install pytest && python -m pytest -q scrapers/common/tests/test_haraj_classify.py
       - name: Shadow crawl (prints only)
-        run: exec python -m scrapers.haraj.shadow --max-posts "${{ github.event.inputs.max_posts || '1100' }}"
+        # --slug-filter + --want-offers: the owner's gate is a hand-check of 100 «offer» verdicts; the sitemap
+        # is every category, so pick property-titled posts and stop at 110 offers (2026-10-11).
+        run: >-
+          exec python -m scrapers.haraj.shadow --max-posts "${{ github.event.inputs.max_posts || '1500' }}"
+          --slug-filter --files 12 --want-offers 110
