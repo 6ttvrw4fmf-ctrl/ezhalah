@@ -772,6 +772,10 @@ export default function Agent() {
   const COMPOSER_MIN_H = 22;
   const COMPOSER_MAX_H = 112;
   const [inputH, setInputH] = useState(COMPOSER_MIN_H);
+  // EMPTY = ONE LINE (owner 2026-10-11, iPhone: placeholder at the top, buttons dropped to the bottom). An empty box's
+  // height never comes from measuring its PLACEHOLDER (iOS Safari wraps it onto a second line and reports that height):
+  // the box is as tall as the text typed, and exactly one line when nothing is typed.
+  const composerH = typed ? Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) : COMPOSER_MIN_H;
   // Focus glow — border eases fieldLine→primary and the lift deepens slightly (s.composerFocused +
   // COMPOSER_EASE). Same calm register as ModeSwitch's raised indicator: a state change you feel
   // more than notice.
@@ -4897,12 +4901,12 @@ export default function Agent() {
                   <Ionicons name="chevron-down" size={13} color={colors.muted} />
                 </Pressable>
               <View style={s.composerInputColumn}>
-              <View style={[s.inputGrow, INPUT_EASE, { height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) }]}>
+              <View style={[s.inputGrow, INPUT_EASE, { height: composerH }]}>
               <TextInput
                 ref={inputRef}
                 // writingDirection RTL for Arabic (the parent col is LTR-pinned, so without this the
                 // placeholder's trailing «...» lands on the wrong side — it must read «…السعودية»). (owner 2026-07-09)
-                style={[s.input, { flex: 1, alignSelf: 'stretch', textAlign: typed.trim() ? (msgRTL(typed) ? 'right' : 'left') : (locale === 'en' ? 'left' : 'right'), writingDirection: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : (locale === 'en' ? 'ltr' : 'rtl'), direction: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : (locale === 'en' ? 'ltr' : 'rtl'), paddingRight: 0, paddingLeft: 0, height: Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, inputH)) } as any]}
+                style={[s.input, { flex: 1, alignSelf: 'stretch', textAlign: typed.trim() ? (msgRTL(typed) ? 'right' : 'left') : (locale === 'en' ? 'left' : 'right'), writingDirection: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : (locale === 'en' ? 'ltr' : 'rtl'), direction: typed.trim() ? (msgRTL(typed) ? 'rtl' : 'ltr') : (locale === 'en' ? 'ltr' : 'rtl'), paddingRight: 0, paddingLeft: 0, height: composerH } as any]}
                 // While the rotating examples occupy the placeholder slot, the input's own static
                 // placeholder yields (empty string) so the two never overlap; the moment the
                 // rotation stops (any interaction) the familiar static placeholder returns.
@@ -4920,7 +4924,7 @@ export default function Agent() {
                 // Grows only as text wraps, capped at COMPOSER_MAX_H (then scrolls internally); the
                 // TARGET comes from RN's own line metrics (native + web), the MOTION from INPUT_EASE.
                 // (owner 2026-07-08 metrics; owner 2026-08-16 smooth growth.)
-                onContentSizeChange={(e: any) => setInputH(Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, e.nativeEvent.contentSize.height)))}
+                onContentSizeChange={(e: any) => setInputH(typed ? Math.min(COMPOSER_MAX_H, Math.max(COMPOSER_MIN_H, e.nativeEvent.contentSize.height)) : COMPOSER_MIN_H)}
                 // Clicking/tapping into the composer counts as interaction — the rotating examples
                 // stop cleanly and the static placeholder takes over (owner brief §6).
                 onFocus={() => { setComposerFocused(true); setIntroInteracted(true); }}
