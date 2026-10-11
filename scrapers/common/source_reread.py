@@ -70,6 +70,12 @@ def page_evidence(body: str) -> dict:
     }
 
 
+# Blocks of a page's JSON-LD that describe a PERSON, never the property: their `image` is an avatar or
+# a logo (dealapp's offers.seller.image showed «page images 1» on an ad with no photo). We store no
+# seller data and never read these blocks (PDPL), so they count for nothing.
+_NOT_THE_PROPERTY = ("seller", "author", "agent", "provider", "contactPoint", "brand", "publisher")
+
+
 def page_image_count(page: dict) -> int | None:
     """How many images the PAGE's own structured data lists (JSON-LD `image`, any depth), counted
     without our parser; None when the page carried no JSON-LD to count from. Photos are part of the
@@ -83,6 +89,8 @@ def page_image_count(page: dict) -> int | None:
         if isinstance(node, dict):
             n = 0
             for k, v in node.items():
+                if k in _NOT_THE_PROPERTY:
+                    continue   # the agent's avatar is not a photo of the property (backlog 8, dealapp)
                 if k == "image":
                     n += len(v) if isinstance(v, list) else (1 if v else 0)
                 else:
