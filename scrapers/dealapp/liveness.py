@@ -111,6 +111,13 @@ class OriginBudget:
             self._pause_until = max(self._pause_until, self.clock() + self.window + 10)
 
 AD_PATH = "/ad-details/"
+# The oldest CloudFront copy that may count as a CURRENT read of an ad, for BOTH readers: the
+# liveness sweep (liveness_run.probe) and the crawl's alive stamp (run.fetch_one → mark_direct_alive).
+# 2026-10-11: the crawl accepted copies up to 24 h old while the sweep accepted 1 h, so a removed
+# ad's day-old cached page stamped it «alive now» — resetting the strikes the sweep's fresh reads
+# had earned, and since #6678 holding the kill outright (dealapp 9252915: sweep read gone 3x fresh,
+# crawl stamped alive at 02:44:16 10-10; its own page reads gone again 10-11). One rule, one place.
+FRESH_MAX_AGE_S = 3600
 
 # A run must positively verify at least this share of its probes before any deactivation is
 # trusted. Healthy runs sit far above it; a shelled environment sits at ~0.

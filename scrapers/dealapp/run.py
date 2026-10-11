@@ -874,7 +874,7 @@ _DEADLINE = time.monotonic() + 60 * float(os.environ.get("DEALAPP_TIME_BUDGET_MI
 _render_lock = threading.Lock()
 _origin_renders: list[tuple[str, str]] = []
 # adids whose accepted page was a CURRENT read (see fetch_one) — the only ones main() may stamp.
-_MAX_EDGE_AGE_S = 24 * 3600
+_MAX_EDGE_AGE_S = dealapp_liveness.FRESH_MAX_AGE_S   # the sweep's own rule (liveness.py), never looser
 _fresh_reads: set[str] = set()
 
 
@@ -958,8 +958,9 @@ def fetch_one(adid: str) -> Optional[tuple[str, str]]:
             continue
         if has_ad:
             if has_priced_schema(body):
-                # An origin render, or an edge copy under a day old, is a current read of this ad.
-                # CloudFront keeps a page for days, and a days-old copy must not certify «alive now».
+                # An origin render, or an edge copy no older than the liveness sweep accepts, is a
+                # current read of this ad. CloudFront keeps a page for days, and an older copy must
+                # not certify «alive now» (2026-10-11: a 24 h allowance here outvoted the sweep).
                 if not edge or int(getattr(r, "headers", {}).get("age") or 0) <= _MAX_EDGE_AGE_S:
                     with _render_lock:
                         _fresh_reads.add(adid)
