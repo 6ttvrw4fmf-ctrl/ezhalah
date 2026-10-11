@@ -70,3 +70,19 @@ def test_helper_reads_null_as_untouched_and_any_count_as_filled():
     assert N.room_block_unfilled({}) is True
     assert N.room_block_unfilled({"bedrooms": "0", "bathrooms": 0}) is True
     assert N.room_block_unfilled({"bedrooms": 0, "bathrooms": 2}) is False
+
+
+@pytest.mark.parametrize("site", ["aldarim", "abwbna", "alobid", "bahadhabab"])
+def test_land_payload_without_room_keys_never_says_no(site):
+    # 🔬 2026-10-11, backlog 246 residual: abwbna land ads (abwbna_residential_listings:10777660) carry no
+    # elevators / parking_spots / is_ac_installed key at all. The writer must not turn that into «no»; the
+    # three stored «no» from before 2026-10-09 were reverted by 20261011091948 and are watched by
+    # mon_detect_aldarim_saas_unfilled_block_false (key zero_amenity_as_no).
+    mod = importlib.import_module(f"scrapers.{site}.run")
+    land = {k: v for k, v in _L(type="land").items()
+            if k not in ("bedrooms", "bathrooms", "living_rooms", "kitchens", "is_kitchen_installed",
+                         "maid_rooms", "driver_rooms", "balconies")}
+    row, _ = mod.map_listing(land)
+    assert row is not None
+    assert False not in [row.get(c) for c in ("elevator", "parking", "air_conditioner", "electricity",
+                                              "water_supply", "sanitation")]

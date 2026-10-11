@@ -195,6 +195,24 @@ def session() -> cc.Session:
     return s
 
 
+# OUR DISTRICT NEVER CARRIES A NUMBER (owner rule 2026-09-14, migration 20260914204035): «we just match it with
+# ours, and in their property card, if they kept a number, we include that number». hajer writes a subdivision
+# plan number into أسم الحي — «الورود (1100/4)», «الصقور (787/4)», «مخطط النخيل (الجشة) 258/4». Stored verbatim
+# in district_ar, norm_district_tok() kept the number, so no district option reached these listings and a
+# customer who picked «حي الورود» never saw them (🔬 backlog 184/247, journey FAIL hajer_residential_listings:
+# 584515). Only the «n/m» plan number is dropped; every word the source wrote stays, and `neighborhood` keeps the
+# whole string for the card.
+_PLAN_NUMBER = re.compile(r"[\s\-–]*[(\[]?\s*[0-9٠-٩]+\s*/\s*[0-9٠-٩]+\s*[)\]]?")
+
+
+def _district_without_plan_number(raw: Optional[str]) -> Optional[str]:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    out = re.sub(r"\s{2,}", " ", _PLAN_NUMBER.sub(" ", s)).strip(" -–")
+    return out or None
+
+
 def _clean(s: str) -> str:
     s = ihtml.unescape(s or "")
     # rem_fields() bounds a field's value at the START of the next field's title marker text
@@ -347,7 +365,7 @@ def map_listing(p: dict, html_text: str) -> tuple[Optional[dict], str, bool]:
     # region hint = the scraper's region (twin disambiguation). source_capture = the full REM field table +
     # WP basics (the source spec table carries NO broker PII). Numbers unchanged.
     city_ar = raw_city or "الأحساء"
-    district_ar = (f.get("أسم الحي") or "").strip() or None
+    district_ar = _district_without_plan_number(f.get("أسم الحي"))
     cid, rid = to_catalog(city_ar, region_hint=region)
     cap = {"rem_fields": f, "wp_id": p.get("id"), "link": p.get("link"),
            "title": _clean((p.get("title") or {}).get("rendered", ""))}
