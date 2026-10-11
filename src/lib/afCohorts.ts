@@ -183,6 +183,11 @@ export const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: str
   'Raw Land': {
     Buy: ['street_width', 'direction'],
   },
+  // أرض أخرى (owner 2026-10-10): a plot whose source states no usage. Only what every land type already
+  // shares — street width and facade, true of ANY plot whatever its usage; no usage-specific question.
+  'Other Land': {
+    Buy: ['street_width', 'direction'],
+  },
   'Rest House': {
     RentAnnual: ['property_age', 'street_width', 'amenities'],
     Buy: ['property_age', 'street_width', 'direction', 'amenities'],

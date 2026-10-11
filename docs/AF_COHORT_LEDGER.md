@@ -450,3 +450,12 @@ workflow. Deferred for the owner: the `p_has_license=false` clause arm reads a m
   «أرض بكر», «غير مخطط» / «غير مقسم», and no source field says a service exists. → 309 tagged (Buy 303;
   ialqarawi 145 · aqarcity 61 · aqar 48 · dealapp 29 · others). Coverage on this set: street 50%, direction
   35% — the live usefulness gates (>25 scope, option floors) decide when each is actually asked.
+
+### أرض / Other Land (أرض أخرى) — BUY — ✅ CERTIFIED 2026-10-11 UTC (owner 2026-10-10: land with no stated type)
+- A real stored type: an Aqar plot whose page shows no «نوع العقار» AND whose seller's own description states
+  no usage is stored as the source's category word «أرض» → clean type Other Land, a box in تجاري → «الأراضي».
+- Questions: street_width · direction — only what every land type already shares (true of any plot, whatever
+  its usage). n = 4,040 Buy. Street known 99% (p25 15 m / p75 30 m; ≥ 20 m 2,249), direction known 88%
+  (شمال 716 · شرق 671 · جنوب 605 · غرب 595 · diagonals 142–195 · 3/4 شوارع 154/96). Riyadh + شمال 177.
+- Registry row 20261011022451. Keeps «Commercial & Industrial Plots» / Buy reachable (the group intersects
+  every box's cohort; an uncertified box would zero it).
