@@ -96,14 +96,24 @@ REFUSED = {403, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
 ROTATION = ("chrome124", "safari17_0", "firefox133")
 
 
-def _session_as(profile: str) -> cc.Session:
+def _session_as(profile: str, proxy_url: str = "") -> cc.Session:
     s = cc.Session(impersonate=profile)   # impersonate OWNS the User-Agent; never set one
     s.headers.update({"Accept": "application/json,text/html;q=0.9",
                       "Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
-    purl = os.environ.get("WASALT_PROXY_URL", "").strip()
-    if purl:
-        s.proxies = {"http": purl, "https": purl}
+    if proxy_url:
+        s.proxies = {"http": proxy_url, "https": proxy_url}
     return s
+
+
+# DIRECT FIRST, PROXY LAST (2026-10-11, Scraping Engineer, backlog 375). On 10-11 page 1 answered
+# HTTP 403 to all three DIRECT profiles twice (04:51 and 05:02 UTC); 10-09 the same, ok 50 minutes
+# later. Three profiles from the same runner IP are the same caller to a WAF. The residential proxy
+# is a different IP, so it is the last try, used only when the workflow opts in (`proxy: true` sets
+# SCRAPE_PROXY_FALLBACK_URL). This scraper no longer routes EVERY request through WASALT_PROXY_URL:
+# on 09-10..09-14 that hop timed out while the direct route answered in under a second.
+def _proxy_session() -> Optional[cc.Session]:
+    purl = os.environ.get("SCRAPE_PROXY_FALLBACK_URL", "").strip()
+    return _session_as("chrome124", purl) if purl else None
 
 
 def _fresh_session(attempt: int) -> cc.Session:
@@ -276,7 +286,7 @@ def _make_verify_gone(control: Optional[dict]):
     return lambda ad_number: probe(ad_number, canary=canary)
 
 
-def fetch_listings(s: cc.Session, fresh=_fresh_session) -> list[dict]:
+def fetch_listings(s: cc.Session, fresh=_fresh_session, proxied=_proxy_session) -> list[dict]:
     """Every property post. An unparseable body ends enumeration rather than raising — the guard
     awal's 2026-07-27 parking incident put in every WP scraper."""
     out: list[dict] = []
@@ -308,6 +318,14 @@ def fetch_listings(s: cc.Session, fresh=_fresh_session) -> list[dict]:
                 s = fresh(attempt + 1)          # a refusal is the handshake, not a ban
                 continue
             break
+        if r is not None and r.status_code in REFUSED:
+            ps = proxied()
+            if ps is not None:
+                try:
+                    r = ps.get(f"{REST}/properties?per_page=100&page={page}", timeout=40)
+                    s = ps                       # the rest of the walk keeps the route that answered
+                except Exception as e:  # noqa: BLE001 — keep the direct refusal as the note
+                    print(f"  proxy fallback for page {page} raised {type(e).__name__}", flush=True)
         if r is None:
             LAST_FETCH_NOTE = (f"page {page} raised {type(last_exc).__name__} on all 3 attempts: "
                                f"{str(last_exc)[:110]}")
