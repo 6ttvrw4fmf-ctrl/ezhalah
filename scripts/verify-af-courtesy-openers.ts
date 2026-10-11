@@ -21,7 +21,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 
 const APPROVED = [
   'لاهنت 🤍، أبغى ', 'يعطيك العافية 🌿، أدوّر على ', 'الله يعافيك 🙏، تأكد لي من ', 'لو سمحت 😊، ابحث لي عن ',
-  'الله يسعدك ✨، يهمني ', 'ممكن 🙂، تشوف لي ', 'يا هلا 👋، أبي أشوف ', 'الله يجزاك خير 🤲، طلّع لي ',
+  'الله يسعدك ✨، يهمني ', 'ممكن 🙂، تشوف لي ', 'يا هلا 👋، أبي أشوف ',
   'يا ليت 🌟، تدوّر لي على ', 'تسلم 💚، أبغى أتأكد من ',
 ];
 
@@ -33,17 +33,17 @@ const shapes = (list: typeof AF_COURTESY_OPENERS): string[] => {
   return out;
 };
 const real = shapes(AF_COURTESY_OPENERS);
-check('exactly the 10 approved openers, each «opener emoji، ask »', real.length === 0, real.join('\n      '));
+check('exactly the 9 approved openers (owner 10-11 removed «الله يجزاك خير»), each «opener emoji، ask »', real.length === 0, real.join('\n      '));
 
 // Rotation: every pick is one of the 10, and a «random» that keeps returning the same index still never
 // repeats the previous pick.
 const stuck = () => 0.05;
 const a = pickAfCourtesyOpening(stuck), b = pickAfCourtesyOpening(stuck), c = pickAfCourtesyOpening(stuck);
-check('a pick is always one of the 10', [a, b, c].every((x) => APPROVED.includes(x)));
+check('a pick is always one of the 9', [a, b, c].every((x) => APPROVED.includes(x)));
 check('never the same opener twice in a row', a !== b && b !== c);
 const seen = new Set<string>();
 for (let i = 0; i < 400; i++) seen.add(pickAfCourtesyOpening());
-check('all 10 appear over many rounds (real rotation)', seen.size === 10, `saw ${seen.size}`);
+check('all 9 appear over many rounds (real rotation)', seen.size === 9, `saw ${seen.size}`);
 
 const wired = (src: string) =>
   /import \{ pickAfCourtesyOpening \} from '@\/data\/afCourtesyOpeners';/.test(src)
@@ -60,5 +60,5 @@ mustCatch('a comma before the emoji', shapes(AF_COURTESY_OPENERS.map((o, i) => (
 mustCatch('the courtesy no longer prepended', !wired(AGENT.replace('pickAfCourtesyOpening() + roundLabel', 'roundLabel')));
 mustCatch('the courtesy leaking into the English UI', !wired(AGENT.replace("locale === 'ar' && roundLabel ?", 'roundLabel ?')));
 
-console.log(failed === 0 ? '\n✅ the Advanced Filter bubble opens with one of the 10 approved courtesies, rotating.\n' : `\n❌ ${failed} check(s) failed.\n`);
+console.log(failed === 0 ? '\n✅ the Advanced Filter bubble opens with one of the 9 approved courtesies, rotating.\n' : `\n❌ ${failed} check(s) failed.\n`);
 process.exit(failed === 0 ? 0 : 1);
