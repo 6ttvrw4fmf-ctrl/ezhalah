@@ -45,3 +45,20 @@ def test_a_two_way_facade_is_kept_as_published():
 def test_silence_is_unknown():
     row, _, _ = H.map_listing(P, _page(*BASE))
     assert row["direction"] is None
+
+
+# 🔬 2026-10-11: «عرض الشارع» is the same kind of structured REM cell (113 of 120 live ads) and reached only
+# additional_info, so no street-width answer found a hajer listing.
+def test_the_published_street_width_is_stored_in_the_column():
+    row, _, _ = H.map_listing(P, _page(*BASE, ("عرض الشارع", "15م")))
+    assert row["street_width_m"] == 15
+
+
+def test_two_streets_are_not_one_width():
+    row, _, _ = H.map_listing(P, _page(*BASE, ("عرض الشارع", "15م* نافذ 8م")))
+    assert row["street_width_m"] is None
+
+
+def test_no_street_cell_is_unknown():
+    row, _, _ = H.map_listing(P, _page(*BASE))
+    assert row["street_width_m"] is None

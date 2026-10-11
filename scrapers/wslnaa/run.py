@@ -76,6 +76,28 @@ def _int(v: Any) -> Optional[int]:
         return None
 
 
+# BATHROOMS FROM THE AD'S OWN LAYOUT SENTENCE (🔬 AF engineer 2026-10-11, backlog 263). The tRPC payload has no
+# bathroom field, so the description is the only place wslnaa states one («تتكون من غرفتي نوم وصالة ومطبخ ودورتي
+# مياه»); ops_af_score 10-08 read it on the page while we stored none on 61 of 61. A digit count wins
+# (normalize.baths_from_leading_count, «و3 دورات مياه»); a lone dual «دورتي/دورتين مياه» is 2; a lone singular
+# «دورة مياه» is 1. Any mix («غرفة ماستر بدورة مياه، ودورتي مياه» = 3 in total) is NOT added up: unknown, NULL.
+_BATH_ANY = re.compile(r"[\d٠-٩]\s*(?:دورات|دورة|حمامات)\s*(?:ال)?مي[اآ][هة]")
+_BATH_DUAL = re.compile(r"دورت(?:ي|ين)\s*(?:ال)?مي[اآ][هة]")
+_BATH_ONE = re.compile(r"دورة\s*(?:ال)?مي[اآ][هة]")
+
+
+def _bathrooms_from_text(text: Optional[str]) -> Optional[int]:
+    t = str(text or "")
+    if _BATH_ANY.search(t):
+        return normalize.baths_from_leading_count(t)
+    duals, ones = len(_BATH_DUAL.findall(t)), len(_BATH_ONE.findall(t))
+    if duals == 1 and ones == 0:
+        return 2
+    if ones == 1 and duals == 0:
+        return 1
+    return None
+
+
 def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
     if not p.get("active") or p.get("deletedAt"):
         return None, "residential", "inactive"
@@ -146,6 +168,8 @@ def map_listing(p: dict) -> tuple[Optional[dict], str, str]:
         "area_m2": _int(p.get("area")),
         "bedrooms": (_int(p.get("rooms"))
                      if (p.get("type") or "").strip().lower() in _DWELLING_TYPES else None),
+        "bathrooms": (_bathrooms_from_text(p.get("description"))
+                      if (p.get("type") or "").strip().lower() in _DWELLING_TYPES else None),
         "photo_urls": imgs[:20] or None,
     }
     if deal == "Rent":
