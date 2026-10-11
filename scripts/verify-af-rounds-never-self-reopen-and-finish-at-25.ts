@@ -90,7 +90,7 @@ check('a MEASURED "no" after an AF round stays SILENT (no chat bubble, no dangli
   !/noMoreSaidRef/.test(agent)
   && !/No further truthful narrowing question exists for this scope/.test(agent)
   && !read('src/i18n.tsx').includes("No further truthful narrowing question exists for this scope")
-  && /setAfCanNarrow\(\(c\) => \(\{ \.\.\.c, \[m\.id\]: verdict === 'yes' \}\)\);/.test(agent));
+  && /setAfCanNarrow\(\(c\) => \(\{ \.\.\.c, \[m\.id\]: offersNarrowing\(verdict\) \}\)\);/.test(agent));
 // Generalized 2026-09-11, extended 2026-09-14 (owner rules: a plain search or typed AI message
 // landing at <= the threshold finishes cleanly too, not only an AF round; AND the reveal hitting the
 // 500 cap or the true end — `revealIsTerminal` — finishes at ANY total) from "exactly one site" to

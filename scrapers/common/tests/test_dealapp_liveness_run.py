@@ -335,10 +335,64 @@ def test_the_sweep_runs_often_enough_to_cover_the_catalogue_in_days_not_weeks():
     cycle over ~16.5k ads; the owner wants Aqar's 48 h window, which needs cadence."""
     import re
     from pathlib import Path
-    wf = (Path(__file__).resolve().parents[3] / ".github/workflows/dealapp-liveness.yml").read_text()
-    crons = re.findall(r'cron:\s*"([^"]+)"', wf)
-    assert crons, "the sweep must stay scheduled"
+    root = Path(__file__).resolve().parents[3]
+    wf = (root / ".github/workflows/dealapp-liveness.yml").read_text()
+    # Since 2026-10-10 the cadence is a pg_cron row (gh-dealapp-liveness), not a GitHub `schedule:`:
+    # GitHub fired the YAML cron 2-5 of 12 slots a day. The committed migration is the schedule's
+    # mirror; the wrapper it dispatches must call this workflow with apply=true, or every run is a
+    # dry run.
+    mig = sorted((root / "supabase/migrations").glob("*_dealapp_liveness_pg_cron.sql"))
+    assert mig, "the pg_cron row for gh-dealapp-liveness must be committed"
+    crons = re.findall(r"cron\.schedule\('gh-dealapp-liveness',\s*'([^']+)'", mig[-1].read_text())
+    assert crons, "the sweep must stay scheduled (pg_cron gh-dealapp-liveness)"
     hour = crons[0].split()[1]
     runs_per_day = 24 // int(hour.split("/")[1]) if hour.startswith("*/") else len(hour.split(","))
     assert runs_per_day >= 12
+    wrapper = (root / ".github/workflows/dealapp-liveness-cron.yml").read_text()
+    assert "dealapp-liveness-cron.yml" in mig[-1].read_text(), "pg_cron must dispatch the wrapper"
+    assert "uses: ./.github/workflows/dealapp-liveness.yml" in wrapper
+    assert re.search(r"apply:\s*true", wrapper), "the pg_cron path must apply, or it is a dry run"
+    assert "workflow_call" in wf, "the real workflow must be callable by the wrapper"
     assert "cancel-in-progress: false" in wf, "runs must queue, never cut a paced sweep short"
+    assert "cancel-in-progress: false" in wrapper
+
+
+def test_a_kill_is_held_when_the_ad_was_proven_alive_after_this_sweep_read_it(wire, monkeypatch):
+    """2026-10-10: dealapp 9252915 was read dead by the sweep (run 01:54-02:44), the crawl read its
+    own page ALIVE at 02:44:16 and stamped last_verified_alive_at, and the sweep's end-of-run kill
+    landed at 02:44:31 over that fresher answer — the day's one unverified hide. A live answer
+    between strikes resets them, whoever wrote it: the kill (and a strike) must be HELD."""
+    from datetime import datetime, timedelta, timezone
+
+    alive = {i: _row(i, strikes=0) for i in range(1, 36)}      # 35 alive → trusted
+    dead = {i: _row(i, strikes=2) for i in range(36, 41)}      # 5 at grace-1 → would deactivate
+    struck = {41: _row(41, strikes=0)}                         # 1 first strike
+    rows = [*alive.values(), *dead.values(), *struck.values()]
+    responses = {REQ.format(i): (200, SCHEMA.format(i), REQ.format(i)) for i in alive}
+    responses.update({REQ.format(i): (404, "", REQ.format(i)) for i in [*dead, *struck]})
+
+    # Another writer (the crawl) stamps rows 36 and 41 alive AFTER the sweep read them.
+    real_probe = R.probe_listing
+    def _probe_then_crawl_stamps(s, url, budget):
+        out = real_probe(s, url, budget)
+        if url.rstrip("/").endswith(("/36", "/41")):
+            later = (datetime.now(timezone.utc) + timedelta(seconds=5)).isoformat()
+            for r in rows:
+                if r["listing_url"] == url:
+                    r["last_verified_alive_at"] = later
+        return out
+    monkeypatch.setattr(R, "probe_listing", _probe_then_crawl_stamps)
+
+    client = wire(rows, responses, ["--limit", "41", "--apply"])
+    deactivations = {i for i, p in client.writes if p.get("active") is False}
+    assert deactivations == {37, 38, 39, 40}, "row 36 was proven alive after the read: no kill"
+    strikes = {i for i, p in client.writes if p.get("missing_count") == 1}
+    assert 41 not in strikes, "a first strike over a newer alive stamp is just as unearned"
+
+
+def test_alive_since_read_is_strict_and_fails_closed():
+    assert R.alive_since_read("2026-10-10T02:44:16+00:00", "2026-10-10T02:30:00+00:00") is True
+    assert R.alive_since_read("2026-10-10T02:44:16+00:00", "2026-10-10T02:44:16+00:00") is False
+    assert R.alive_since_read("2026-10-10T02:00:00Z", "2026-10-10T02:30:00+00:00") is False
+    assert R.alive_since_read(None, "2026-10-10T02:30:00+00:00") is False
+    assert R.alive_since_read("garbage", "2026-10-10T02:30:00+00:00") is False

@@ -61,7 +61,8 @@ const real = readFileSync(SRC, 'utf8');
 type Coords = { latitude: number; longitude: number } | null;
 type Out = { row: boolean; photo_urls: string[] | null; coords: Coords };
 const CALLS = [['6815040', 'villa', 'sale', false], ['6438846', 'apartment', 'rent', false],
-               ['6815040', 'villa', 'sale', true]];
+               ['6815040', 'villa', 'sale', true], ['6772165', 'land', 'sale', false],
+               ['6753755', 'apartment', 'rent', false]];
 const run = (source: string): Out[] => pyCall(ROOT, MOD, '_barrier_photos', CALLS, source + HARNESS) as Out[];
 
 // The pin each page itself publishes in its ld+json `geo` — read here independently of the extractor
@@ -71,7 +72,9 @@ const geoOf = (ad: string) => {
   const m = html.match(/"geo":\{[^}]*"latitude":(-?[0-9.]+),"longitude":(-?[0-9.]+)/);
   return m ? { latitude: Number(m[1]), longitude: Number(m[2]) } : null;
 };
-const GEO = [geoOf('6815040'), geoOf('6438846')];
+const GEO = [geoOf('6815040'), geoOf('6438846'), geoOf('6772165'), geoOf('6753755')];
+const BRACE_FIRST = 'https://images.aqar.fm/webp/750x0/props/002560473_1782818506095.jpg';
+const LAND_FIRST = 'https://images.aqar.fm/webp/750x0/props/003239080_1783961654587.jpg';
 const samePin = (c: Coords, g: Coords) => !!c && !!g && c.latitude === g.latitude && c.longitude === g.longitude;
 const OWN_FIRST = 'https://images.aqar.fm/webp/750x0/props/003757760_1786380520839.jpg';
 const verdict = (o: Out[]) => {
@@ -84,6 +87,13 @@ const verdict = (o: Out[]) => {
     shellUntouched: o[2].photo_urls === null,
     pins: samePin(o[0].coords, GEO[0]) && samePin(o[1].coords, GEO[1]),
     shellPinUntouched: o[2].coords === null,
+    // A LAND page (ad 6772165, «أرض للبيع», 9 photos on aqar) — the shape the 2026-10-10 repair skipped.
+    land: (o[3]?.photo_urls ?? []).length === 9 && o[3].photo_urls![0] === LAND_FIRST
+      && samePin(o[3].coords, GEO[2]),
+    // An ad whose OWN TEXT holds «{»/«}» (6753755, 4 photos on aqar): the old brace counter closed
+    // the payload mid-string and read the whole listing as None — 43 rows kept other ads' photos.
+    braces: (o[4]?.photo_urls ?? []).length === 4 && o[4].photo_urls![0] === BRACE_FIRST
+      && samePin(o[4].coords, GEO[3]),
   };
 };
 
@@ -91,6 +101,10 @@ const verdict = (o: Out[]) => {
 const o = run(real);
 const v = verdict(o);
 check('both real pages enrich to a row', o[0].row && o[1].row);
+check('an ad whose own text holds { } (6753755) still yields its 4 photos and its pin', v.braces,
+  `got ${o[4]?.photo_urls?.length} photos, pin ${JSON.stringify(o[4]?.coords)}`);
+check('a real LAND page (6772165) yields its own 9 photos and its own pin', v.land,
+  `got ${o[3]?.photo_urls?.length} photos, pin ${JSON.stringify(o[3]?.coords)}`);
 check('ad 6815040: exactly its 21 own photos, one 750px URL each, Aqar\'s first photo first', v.villaExact,
   `got ${o[0].photo_urls?.length} — first ${o[0].photo_urls?.[0]}`);
 check('ad 6438846: Aqar says imgs:null → photo_urls = [] (no other ad\'s house on its card)', v.noPhotoAdEmpty,
@@ -146,6 +160,78 @@ const fSrc = real.replace('    if not (16 <= lat <= 33 and 34 <= lng <= 56):\n  
 check('MUTATION (f): anchor intact', fSrc !== real);
 const fOut = fSrc === real ? [] : pyCall(ROOT, MOD, '_own_coordinates', [[{ location: { lat: 0, lng: 0 } }]], fSrc);
 mustCatch('the Saudi box removed, letting (0,0) through', fOut[0] !== null);
+
+// (h) the brace counter the payload reader used until 2026-10-10, verbatim.
+const BRACE_COUNTER = `    for m in _LISTING_OBJ_RE.finditer(blob):
+        start = blob.index("{", m.start() + len('"listing"'))
+        depth = 0
+        for i in range(start, min(len(blob), start + 200_000)):
+            ch = blob[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        obj = _json.loads(blob[start:i + 1])
+                    except Exception:  # noqa: BLE001
+                        break
+                    if isinstance(obj, dict) and obj.get("id") is not None:
+                        return obj
+                    break
+    return None`;
+const h = mutate('(h)', (s) => s.replace(/    dec = _json\.JSONDecoder\(\)\n[\s\S]*?\n    return None/, BRACE_COUNTER));
+mustCatch('a payload reader that counts braces inside the ad\'s own text', h !== null && h.villaExact && !h.braces);
+
+// ── the repair must REACH every row: each stored property_type resolves to an aqar slug ─────────
+// 2026-10-10: the recovery mapped type→slug by inverting SLUG_TO_TYPE, so the zoning types the
+// enricher derives for land («تجاري»/«صناعي»/«زراعي» → Commercial Land / Industrial Land /
+// Agriculture Plot) had no slug, and 21,613 live land rows were skipped as "unfetchable" without one
+// fetch. (a) the class: every type the enricher can WRITE — SLUG_TO_TYPE's values plus every
+// `property_type = "…"` it assigns, discovered from its source by shape — must resolve. (b) the
+// path: recover() over the real land page, with the row as production stores it, must fetch it.
+const REC = 'scrapers.aqar.recover_stubs';
+const REC_SRC = readFileSync(join(ROOT, 'scrapers/aqar/recover_stubs.py'), 'utf8');
+const REC_HARNESS = `
+
+def _barrier_recovery(ad, stored_type):
+    import gzip, os, re as _re, types
+    import scrapers.aqar.enrich_residential as _E
+    from scrapers.common import normalize as _N
+    def _get(url, *a, **k):
+        n = _re.search(r"(\\d{6,})$", url).group(1)
+        p = os.path.join(${JSON.stringify(join(ROOT, 'scripts/fixtures'))}, "aqar-ad-%s.html.gz" % n)
+        return types.SimpleNamespace(text=gzip.open(p, "rb").read().decode("utf-8"))
+    _E.get = _get
+    writable = (set(_N.SLUG_TO_TYPE.values()) | set(_E.AQAR_LAND_USAGE.values())
+                | set(_re.findall(r'property_type = "([A-Za-z ]+)"', open(_E.__file__, encoding="utf-8").read())))
+    row = {"id": 1, "ad_number": ad, "listing_url": "https://sa.aqar.fm/x/x-%s" % ad,
+           "property_type": stored_type, "transaction_type": "Buy"}
+    import contextlib, io
+    with contextlib.redirect_stdout(io.StringIO()):
+        c = recover([row], True, 1)
+    return {"unresolved": sorted(t for t in writable if t not in TYPE_TO_SLUG),
+            "derived": sorted(writable - set(_N.SLUG_TO_TYPE.values())),
+            "fetched": c["fetched"], "skipped": c.get("no_slug", 0) + c["unfetchable"]}
+`;
+type Rec = { unresolved: string[]; derived: string[]; fetched: number; skipped: number };
+const recRun = (src: string) => pyCall(ROOT, REC, '_barrier_recovery', [['6772165', 'Commercial Land']], src + REC_HARNESS)[0] as Rec;
+const rec = recRun(REC_SRC);
+// Since 2026-10-10 a plot's type is Aqar's own «نوع العقار» (AQAR_LAND_USAGE); Industrial Land /
+// Agriculture Plot are only legacy stored values now, still mapped in TYPE_TO_SLUG for those rows.
+check('the class barrier can see the enricher\'s derived land types (else it proves nothing)',
+  rec.derived.includes('Commercial Land'),
+  JSON.stringify(rec.derived));
+check('every property_type the enricher can write resolves to an aqar slug', rec.unresolved.length === 0,
+  `unresolved: ${rec.unresolved.join(', ')}`);
+check('recover() FETCHES a land row stored as «Commercial Land» (never skipped unfetched)',
+  rec.fetched === 1 && rec.skipped === 0, JSON.stringify(rec));
+const noLand = REC_SRC.replace(/\nTYPE_TO_SLUG\.update\(\{t: "land"[^\n]*\n/, '\n');
+check('MUTATION (g): anchor intact', noLand !== REC_SRC);
+if (noLand !== REC_SRC) {
+  const g = recRun(noLand);
+  mustCatch('the recovery losing the land slug (21,613 rows skipped unfetched)', g.unresolved.length > 0 && g.fetched === 0);
+}
 
 // ── client-side safety net (src/lib/photoUrl.ts), fed the row production stored ────────────────
 const STORED: string[] = JSON.parse(readFileSync(join(ROOT, 'scripts/fixtures/aqar-ad-6815040.stored-photo_urls.json'), 'utf8'));

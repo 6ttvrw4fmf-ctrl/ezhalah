@@ -26,9 +26,24 @@ export const AMENITY_TOKEN_COLUMN = {
 /** The 1–2 Advanced Filter answers this listing is KNOWN (in the DB) to satisfy.
  *  Amenity chips need the column true; the furnished question (Rent-only cohort) needs
  *  furnished === true. Tri-state law: NULL is unknown and never a target. */
+// Cohort chips (src/lib/afCohorts.ts COHORT_CHIPS + the Villa-only branch of AMENITIES_QUESTION):
+// a pure-Villa scope adds مدخل سيارة / صرف صحي; a Rest House or Agriculture Plot scope renders ONLY
+// its listed chips (the utility trio, + kitchen for Rest House). Without these the journey could
+// never prove a utility answer (backlog 332: Deal App electricity/water/sewage), so a lost one went
+// unseen. Keyed by type_ar; a type not listed keeps the residential base chips.
+export const COHORT_TOKENS = {
+  'فيلا': { only: null, extra: ['car_entrance', 'sanitation'] },
+  'استراحة': { only: ['kitchen', 'electricity', 'water_supply', 'sanitation'], extra: [] },
+  'أرض زراعية': { only: ['electricity', 'water_supply', 'sanitation'], extra: [] },
+};
+const UTILITY_COLUMN = { car_entrance: 'car_entrance', sanitation: 'sanitation', electricity: 'electricity', water_supply: 'water_supply' };
+
 export const afTargetsFor = (row, max = 2) => {
   const t = [];
-  for (const [token, col] of Object.entries(AMENITY_TOKEN_COLUMN)) {
+  const cohort = COHORT_TOKENS[row.type_ar] ?? { only: null, extra: [] };
+  const tokens = cohort.only ?? [...Object.keys(AMENITY_TOKEN_COLUMN), ...cohort.extra];
+  for (const token of tokens) {
+    const col = AMENITY_TOKEN_COLUMN[token] ?? UTILITY_COLUMN[token];
     if (row[col] === true) t.push({ kind: 'amenity', token });
   }
   if (row.deal_ar === 'إيجار' && row.furnished === true) t.push({ kind: 'furnished' });
@@ -151,6 +166,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const row = { deal_ar: 'إيجار', furnished: true, elevator: true, kitchen: null, parking: false };
   assert.deepEqual(afTargetsFor(row), [{ kind: 'amenity', token: 'elevator' }, { kind: 'furnished' }],
     'NULL is unknown and false is no — neither is a target');
+  // cohort chips: a Rest House answers only its own chips; a villa adds sewage after the base set;
+  // an apartment never targets a utility chip it is never offered
+  assert.deepEqual(afTargetsFor({ type_ar: 'استراحة', deal_ar: 'بيع', elevator: true, electricity: true, sanitation: true }),
+    [{ kind: 'amenity', token: 'electricity' }, { kind: 'amenity', token: 'sanitation' }]);
+  assert.deepEqual(afTargetsFor({ type_ar: 'فيلا', deal_ar: 'بيع', sanitation: true, electricity: true }),
+    [{ kind: 'amenity', token: 'sanitation' }]);
+  assert.deepEqual(afTargetsFor({ type_ar: 'شقة', deal_ar: 'بيع', electricity: true, sanitation: true }), []);
   assert.ok(carriedOnRequest({ p_amenities: ['elevator'], p_furnished: true },
     afTargetsFor(row)).carried);
   assert.ok(!carriedOnRequest({ p_amenities: [] }, [{ kind: 'amenity', token: 'elevator' }]).carried);

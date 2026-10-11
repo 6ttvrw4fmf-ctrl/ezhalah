@@ -60,6 +60,7 @@ type Bus = {
   state: Record<string, number>; renders: number[]; revealing: boolean[]; frames: (() => void)[];
   timers: (() => void)[]; active: { id: string; count: number } | null; ref: Record<string, number>;
   cardRow?: 'roomy' | 'tight';
+  live?: Set<string>; // results turns a search produced live in this conversation (liveTurnsRef)
 };
 const gb = globalThis as unknown as { __bus: Bus };
 const PRELUDE = [
@@ -68,6 +69,7 @@ const PRELUDE = [
   'const LOAD_MORE_STEP_MS = 55;',
   'const cardRow = bus.cardRow;',
   'const cascadeWindowRef: any = { current: {} };',
+  'const liveTurnsRef: any = { get current() { return bus.live; } };',
   'const revealCountRef: any = { get current() { return bus.ref; } };',
   'const revealActiveRef: any = { get current() { return bus.active; }, set current(v) { bus.active = v; } };',
   'const revealTimers: any = { current: [] };',
@@ -82,7 +84,7 @@ const lift = (file: string) => liftSymbols(file, [
 ], ['cascadeIn', 'cardInMotion'], PRELUDE);
 const flush = (b: Bus) => { while (b.frames.length || b.timers.length) { b.frames.splice(0).forEach((f) => f()); b.timers.splice(0).forEach((f) => f()); } };
 const press = async (file: string, from: number, target: number, seed: Partial<Bus> = {}, between?: (b: Bus) => void) => {
-  const b: Bus = { state: { mid: from }, renders: [], revealing: [], frames: [], timers: [], active: null, ref: { mid: from }, ...seed };
+  const b: Bus = { state: { mid: from }, renders: [], revealing: [], frames: [], timers: [], active: null, ref: { mid: from }, live: new Set(['mid', 'other']), ...seed };
   gb.__bus = b;
   const m = await lift(file);
   (m.cascadeIn as (mid: string, f: number, t: number) => void)('mid', from, target);
@@ -108,7 +110,16 @@ check('CardIn: every card past the on-screen batch mounts still (phone placehold
 const laptop = await press(AGENT, 100, 500, { cardRow: 'roomy' });
 check('CardIn: on a laptop the still placeholder is the row card (140px), not the phone card',
   JSON.stringify(laptop.cardInMotion('mid', 200)) === '{"stillHeight":140}');
-check('CardIn: a turn no press touched animates as before', JSON.stringify(p2.cardInMotion('other', 3)) === '{}');
+check('CardIn: a LIVE turn no press touched animates as before', JSON.stringify(p2.cardInMotion('other', 3)) === '{}');
+// A REOPENED chat renders in its final state (owner 2026-10-10, iPhone: switching chats went blank). Its
+// turns are not live, so every card mounts still — measured locally before this: switching to a 100-card
+// chat started 100 mount-ins at once and the cards on screen sat at opacity 0 for 10 samples in a row.
+const reopened = await press(AGENT, 100, 500, { live: new Set() });
+const still = (i: number, mid = 'restored') => JSON.stringify(reopened.cardInMotion(mid, i));
+check('CardIn: a reopened turn mounts every card still (no mount-in replayed on a chat switch)',
+  still(0) === '{"stillHeight":340}' && still(3) === '{"stillHeight":340}', still(0));
+check('CardIn: «عرض المزيد» on a reopened turn still cascades its new batch; its earlier cards stay still',
+  still(99, 'mid') === '{"stillHeight":340}' && still(100, 'mid') === '{"delayMs":0}', `${still(99, 'mid')} ${still(100, 'mid')}`);
 
 const small = await press(AGENT, 24, 30);
 check('a press that fits on screen is ONE render with nothing left pending',
@@ -139,6 +150,10 @@ await mustCatch('dropping the ownership guard is caught',
   "      if (revealActiveRef.current?.id !== mid) return;   // finalize/Stop/new turn owns it now\n",
   '',
   async (f) => (await press(f, 100, 500, {}, (b) => { b.active = { id: 'newer-turn', count: 7 }; })).b.state.mid === 114);
+await mustCatch('a reopened chat replaying every card\'s mount-in is caught',
+  '    if (!w || i < w.from) return liveTurnsRef.current.has(mid) ? {} : still;',
+  '    if (!w || i < w.from) return {};',
+  async (f) => JSON.stringify((await press(f, 100, 500, { live: new Set() })).cardInMotion('restored', 0)) === '{"stillHeight":340}');
 check('loadMore still hands its reveal to cascadeIn(mid, cur, revealTo)', /else cascadeIn\(mid, cur, revealTo\);/.test(agentSrc));
 
 // ── 1. the prompt observer ignores mutations that cannot touch a prompt ─────────────────────────

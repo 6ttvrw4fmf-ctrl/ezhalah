@@ -296,11 +296,12 @@ type Eligible = (row: Row | null) => boolean;
 const liftEligible = async (file: string): Promise<Eligible> => (await liftSymbols(file, [{ header: 'export function pricesBlockEligible(' }], ['pricesBlockEligible'])).pricesBlockEligible as Eligible;
 const eligibleProblems = (e: Eligible): string[] => {
   const out: string[] = [];
-  if (!e({ platform: 'aqar', deal_ar: 'بيع' })) out.push('an Aqar sale ad got no prices block');
+  if (!e({ platform: 'aqar', deal_ar: 'بيع', type_ar: 'فيلا' })) out.push('an Aqar sale ad got no prices block');
   if (!e({ platform: 'AQAR', deal_ar: 'بيع', type_ar: 'محل' })) out.push('an Aqar commercial sale ad got no prices block');
-  if (e({ platform: 'aqar', deal_ar: 'إيجار' })) out.push('an Aqar RENT ad got a prices block');
-  if (e({ platform: 'wasalt', deal_ar: 'بيع' })) out.push('a non-Aqar sale ad got a prices block');
-  if (e({ platform: 'aqar', deal_ar: null }) || e(null)) out.push('a row without a deal (or no row) got a prices block');
+  if (e({ platform: 'aqar', deal_ar: 'إيجار', type_ar: 'فيلا' })) out.push('an Aqar RENT ad got a prices block');
+  if (e({ platform: 'wasalt', deal_ar: 'بيع', type_ar: 'فيلا' })) out.push('a non-Aqar sale ad got a prices block');
+  if (e({ platform: 'aqar', deal_ar: null, type_ar: 'فيلا' }) || e(null)) out.push('a row without a deal (or no row) got a prices block');
+  if (e({ platform: 'aqar', deal_ar: 'بيع', type_ar: 'غير معروف' }) || e({ platform: 'aqar', deal_ar: 'بيع', type_ar: '' })) out.push('an ad whose type the source never stated got a prices block (our guess of its group)');
   return out;
 };
 const eligibleReal = eligibleProblems(await liftEligible(DATA));
@@ -313,7 +314,8 @@ const mustCatchEligible = async (what: string, from: string, to: string) => {
   if (!caught) failed++;
   console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
 };
-await mustCatchEligible('a rent ad getting the block', " && String(row.deal_ar ?? '').trim() === 'بيع';", ';');
+await mustCatchEligible('a rent ad getting the block', " && String(row.deal_ar ?? '').trim() === 'بيع'\n", '\n');
+await mustCatchEligible('an unknown-type ad getting the block', "\n    && !['', 'غير معروف'].includes(String(row.type_ar ?? '').trim());", ';');
 await mustCatchEligible('a non-Aqar ad getting the block', "String(row.platform ?? '').trim().toLowerCase() === 'aqar' && ", '');
 const gated = (p: string) => /if \(!pricesBlockEligible\(row\)\) return;\s*const price = Number\(row\?\.price_total\)/.test(p) && /fetchMojSales\(row, commercial \? 'تجاري' : 'سكني'\)/.test(p);
 check('the page fetches the block only behind pricesBlockEligible(row), with the ministry class by macro', gated(PREVIEW));
@@ -372,6 +374,34 @@ await mustCatch('a pin from the (0,0) default', 'if (lat === 0 || lng === 0) ret
 sourceMutant('a district-centroid fallback for the pin', !wired(codeOnly(DATA_SRC).replace('const geo = mapPoint(own);', 'const geo = mapPoint(own) ?? { lat: 24.7136, lng: 46.6753 };'), PREVIEW));
 sourceMutant('the page drawing a map without a pin', !wired(codeOnly(DATA_SRC), PREVIEW.replace('{geo && IS_WEB ? (', '{IS_WEB ? (')));
 sourceMutant('the map opening a new tab from our UI', !wired(codeOnly(DATA_SRC), PREVIEW.replace('const openMap = () => {', "const openMap = () => { window.open(mapEmbedUrl(geo, locale, 15), '_blank');")));
+
+// ── the page counts only what search shows (owner 2026-10-10: a site the engineer marks dead/suspended
+// is hidden EVERYWHERE). Search's own switch is production_ready (a dormant platform's rows are false);
+// both search_listings_ar reads behind the block must carry it, on top of the registry's down list.
+const prodGated = (src: string) => {
+  const reads = codeOnly(src).match(/from\('search_listings_ar'\)[^;]*?\.(limit|range)\(/g) ?? [];
+  const block = reads.filter((r) => /license_number|deal_ar/.test(r));   // the duplicates + asking-price reads
+  return block.length === 2 && block.every((r) => /\.eq\('production_ready', true\)/.test(r));
+};
+check('the duplicates and asking-price reads count only rows search shows (production_ready)', prodGated(DATA_SRC));
+sourceMutant('the duplicates read without search\'s switch', !prodGated(DATA_SRC.replace(".eq('area_m2', area).eq('production_ready', true)", ".eq('area_m2', area)")));
+sourceMutant('the asking-price read without search\'s switch', !prodGated(DATA_SRC.replace(".eq('district_ar', row.district_ar as string).eq('production_ready', true)", ".eq('district_ar', row.district_ar as string)")));
+
+// ── the gold buzzer's motion must reach the browser. react-native-web DROPS transform arrays inside
+// animationKeyframes — the generated @keyframes come out empty (measured live 2026-10-10: the shine's
+// rule was `0% { } 28% { } 100% { }`, so it never moved on any listing; the tap ring never burst).
+// String properties survive (boxShadow, backgroundPosition, backgroundColor). So: no transform in any
+// keyframe on this page, and the shine moves by background position.
+const PREVIEW_RAW = readFileSync(join(ROOT, 'src/components/ListingPreview.tsx'), 'utf8');
+const keyframeBlocks = (src: string) => codeOnly(src).match(/animationKeyframes: \[\{[\s\S]*?\}\]/g) ?? [];
+const motionOk = (src: string) => {
+  const blocks = keyframeBlocks(src);
+  const shine = /goldShine: \{[\s\S]*?animationKeyframes: \[\{[^\]]*backgroundPosition: '110% 0'[^\]]*backgroundPosition: '-10% 0'/.test(codeOnly(src));
+  return blocks.length >= 3 && blocks.every((b) => !/transform/.test(b)) && shine;
+};
+check('every keyframe on the ad page uses properties react-native-web keeps (no transform); the shine sweeps by background position', motionOk(PREVIEW_RAW));
+sourceMutant('a transform keyframe (silently empty on web)', !motionOk(PREVIEW_RAW.replace("'60%': { backgroundPosition: '-10% 0' }", "'60%': { backgroundPosition: '-10% 0', transform: [{ translateX: '-130%' }] }")));
+sourceMutant('a shine that never moves', !motionOk(PREVIEW_RAW.replace("'0%': { backgroundPosition: '110% 0' }, '60%': { backgroundPosition: '-10% 0' }", "'0%': { opacity: 1 }, '60%': { opacity: 1 }")));
 
 console.log(failed === 0 ? '\n✅ the ad page pins only what the source published, and its prices block shows only computed-for-this-ad, source-true numbers.\n' : `\n❌ ${failed} check(s) failed — a guessed pin or a wrong number can reach the page.\n`);
 process.exit(failed === 0 ? 0 : 1);

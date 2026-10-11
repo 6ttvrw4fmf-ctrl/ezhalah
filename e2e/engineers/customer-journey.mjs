@@ -91,7 +91,7 @@ const log = (...m) => { if (!JSON_ONLY) console.log(...m); };
 const ROW_COLS = 'platform,source_table,listing_id,city_ar,district_ar,region_ar,deal_ar,type_ar,' +
   'rent_period_ar,price_total,price_annual,price_total_effective,area_m2,furnished,elevator,kitchen,' +
   'parking,air_conditioner,private_entrance,maid_room,driver_room,balcony,pool,garden,gym,' +
-  'laundry_room,optical_fibers,first_seen_at,production_ready';
+  'laundry_room,optical_fibers,car_entrance,sanitation,electricity,water_supply,first_seen_at,production_ready';
 
 const fetchRow = async (l) => {
   const rows = await rest(`search_listings_ar?select=${ROW_COLS}` +

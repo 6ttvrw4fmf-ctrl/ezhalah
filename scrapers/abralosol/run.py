@@ -547,6 +547,10 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
         "region": region,
         "neighborhood": ix["district"],
         "area_m2": N.to_int(ix["area_raw"]),
+        # The index cell «شارع 40» is the site's structured street width. It was kept only in
+        # additional_info, so 1,890 ads (1,526 of 1,653 lands) answered no street-width question
+        # (🔬 2026-10-10). One number → metres; «15+15» is two streets → NULL, never a pick.
+        "street_width_m": N.one_street_width(ix["street_width"]),
         # Bedrooms/bathrooms: the facet field exists but is populated on ~11 rows site-wide; both
         # otherwise live only in narrative prose («3 غرف ومجلس», «دورتين مياه»). NULL, not parsed.
         "bedrooms": None,
@@ -588,7 +592,18 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
             "detail_photos": detail.get("photo_urls") or [],
         }),
     }
+    # Amenities: abralosol publishes NO structured amenity field (DOM only, fact blocks carry area /
+    # street / age / price), so the ad's own prose is the only source (ADVANCED_FILTER_SOURCE_TRUTH
+    # §2): yes or nothing, never no. 535 built ads named a kitchen / parking / maid room while all
+    # 2,803 stored NULL (🔬 2026-10-10, ops_af_score abralosol kitchen we_miss). Land and farms are
+    # skipped: «شرقا مواقف سيارات» on a plot describes a neighbour, not the property.
+    if not property_type.endswith("Land") and property_type != "Farm":
+        row.update(N.prose_amenities_yes(detail.get("description"), skip=_PROSE_SKIP))
     return row, N.category_for_type(property_type).lower()
+
+
+# Read from prose never: fibre is a neighbourhood service line, furnished is a rent-time fact.
+_PROSE_SKIP = ("optical_fibers", "furnished")
 
 
 # ── crawl ───────────────────────────────────────────────────────────────────────────────────────

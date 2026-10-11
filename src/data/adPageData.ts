@@ -65,8 +65,11 @@ export const mapEmbedUrl = (p: GeoPoint, hl: string = 'ar', z: 14 | 15 = 14): st
 
 // THE PRICES BLOCK SHIPS FOR AQAR SALE ADS ONLY for now (owner 2026-10-10, update 22): platform «aqar» and
 // deal «بيع», every property type. A rent ad or any other platform renders no block at all.
+// A type the source never stated («غير معروف» — e.g. an Aqar plot whose page carries no «نوع العقار»,
+// 7,039 of them on 2026-10-10) gets NO block: comparing it to «عقار سكني» or «تجاري» would be our guess.
 export function pricesBlockEligible(row: AdRow | null | undefined): boolean {
-  return !!row && String(row.platform ?? '').trim().toLowerCase() === 'aqar' && String(row.deal_ar ?? '').trim() === 'بيع';
+  return !!row && String(row.platform ?? '').trim().toLowerCase() === 'aqar' && String(row.deal_ar ?? '').trim() === 'بيع'
+    && !['', 'غير معروف'].includes(String(row.type_ar ?? '').trim());
 }
 
 // The words follow the type (owner: never «فلل» on a non-villa). Arabic counts 3–10 with the plural and
@@ -249,7 +252,7 @@ export function fetchSameAd(row: AdRow | null): Promise<Listing[]> {
       await loadHiddenPlatformNames();   // the registry's down list, once per session (bounded inside)
       const { data, error } = await boundedRpc<AdRow[]>(
         supabase!.from('search_listings_ar').select('source_table,listing_id,platform,license_number,area_m2,price_total')
-          .eq('license_number', lic).eq('area_m2', area).limit(50),
+          .eq('license_number', lic).eq('area_m2', area).eq('production_ready', true).limit(50),
       );
       if (error) { sameCache.delete(key); return []; }
       // The predicate is re-run on the client: the row IS what the page shows.
@@ -307,7 +310,7 @@ function fetchScopeStats(row: AdRow, scope: { types: readonly string[]; key: str
         // 5,706 rows read for 3,192 houses, against 3,728 with a stable order. One key, every page.
         const { data, error } = await boundedRpc<PriceRow[]>(
           client.from('search_listings_ar').select('platform,license_number,area_m2,price_total,type_ar')
-            .in('type_ar', [...scope.types]).eq('deal_ar', 'بيع').eq('city_ar', row.city_ar as string).eq('district_ar', row.district_ar as string)
+            .in('type_ar', [...scope.types]).eq('deal_ar', 'بيع').eq('city_ar', row.city_ar as string).eq('district_ar', row.district_ar as string).eq('production_ready', true)
             .not('price_total', 'is', null).order('source_table').order('listing_id').range(page * PAGE, page * PAGE + PAGE - 1),
         );
         if (error) { pricesCache.delete(key); return null; }

@@ -140,6 +140,27 @@ def land_utilities(mapped_type, services_raw: str) -> dict:
     return out
 
 
+def ld_ticked_features(ld: Optional[dict]) -> list[str]:
+    """Names of the JSON-LD amenityFeature entries the page marks true, at any depth (the listing
+    object nests them under mainEntity). An entry whose value is not true is not a tick."""
+    out: list[str] = []
+
+    def walk(x) -> None:
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if k == "amenityFeature" and isinstance(v, list):
+                    out.extend(str(f.get("name") or "").strip() for f in v
+                               if isinstance(f, dict) and f.get("value") is True and f.get("name"))
+                else:
+                    walk(v)
+        elif isinstance(x, list):
+            for i in x:
+                walk(i)
+
+    walk(ld)
+    return list(dict.fromkeys(out))
+
+
 # Amenities the description may state. NOT the utilities: خدمات العقار publishes those structurally.
 PROSE_AMENITY_COLUMNS = frozenset({"elevator", "kitchen", "air_conditioner", "parking", "maid_room",
                                    "driver_room", "laundry_room", "balcony_terrace", "private_entrance",
@@ -881,10 +902,17 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
     # ── amenity columns from خدمات العقار ──
     amenities: dict[str, bool] = {}
     services_raw = pi.get("خدمات العقار", "")
+    # The page's JSON-LD amenityFeature is a SECOND structured checklist of the same ad, and it can tick
+    # a utility the «خدمات العقار» row omits: /property/30982 lists «لايوجد خدمات» in the row while its
+    # amenityFeature ticks «كهرباء» — we stored electricity = no and served it as «أرض خام» (🔬
+    # 2026-10-10, source re-read run 38041288181). Both are the site's own structured statements, so a
+    # utility ticked in either is ticked (the 10-09 ruling: a contradictory checklist keeps what is ticked).
+    ticked = ld_ticked_features(ld)
+    checklist = ",".join([services_raw, *ticked]) if services_raw else ""
     for ar, col in SERVICE_COLS.items():
-        if col and ar in services_raw:
+        if col and (ar in services_raw or ar in ticked):
             amenities[col] = True
-    amenities.update(land_utilities(mapped_type, services_raw))
+    amenities.update(land_utilities(mapped_type, checklist))
     # ── Advanced Filter amenities from the ad's own description (🔬 AF engineer, 2026-10-06) ──
     # 1,729 production listings stored 0 kitchen/elevator/parking/AC answers while the ads list them
     # («3 غرف نوم · مطبخ · 4 دورات مياه · مستودع · مدخل سيارة», /property/30751). The details list
@@ -911,6 +939,7 @@ def map_listing(body: str, url: str) -> tuple[Optional[dict], str]:
         "facade": pi.get("واجهة العقار"),
         "street_width": pi.get("عرض الشارع"),
         "services": services_raw or None,
+        "amenity_features": ticked or None,   # the JSON-LD checklist, verbatim names
         "plan_number": pi.get("رقم المخطط"),
         "parcel_number": pi.get("رقم القطعة"),
         "deed_location_text": pi.get("وصف موقع العقار حسب الصك"),

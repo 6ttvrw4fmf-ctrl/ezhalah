@@ -397,6 +397,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
       >
         <View style={[{ transform: [{ scale: 88 / 96 }] }, s.goldLogo]}><SourceBadge source={l.source} /></View>
         {!reduced && <View style={s.goldShine} pointerEvents="none" />}
+        {!reduced && IS_WEB && <Text style={s.goldSpark} pointerEvents="none" accessible={false}>✦</Text>}
         {burst > 0 && <View key={burst} style={s.goldRing} pointerEvents="none" />}
       </View>
     </Pressable>
@@ -893,40 +894,58 @@ const s = StyleSheet.create({
   gold: {
     width: 112, height: 54, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0,
     backgroundColor: BUZZER_GOLD.mid,
-    ...(IS_WEB ? { backgroundImage: `radial-gradient(ellipse at 35% 30%, ${BUZZER_GOLD.light} 0%, ${BUZZER_GOLD.mid} 38%, ${BUZZER_GOLD.deep} 72%, ${BUZZER_GOLD.dark} 100%)` } as any : {}),
+    // A polished-coin gloss (white fading down the top half) over the radial gold.
+    ...(IS_WEB ? { backgroundImage: `linear-gradient(180deg, rgba(255,255,255,0.7) 0%, rgba(255,255,255,0.28) 40%, rgba(255,255,255,0) 54%), radial-gradient(ellipse at 35% 30%, ${BUZZER_GOLD.light} 0%, ${BUZZER_GOLD.mid} 38%, ${BUZZER_GOLD.deep} 72%, ${BUZZER_GOLD.dark} 100%)` } as any : {}),
     boxShadow: `inset 0 0 0 2px ${BUZZER_GOLD.ring}, 0 0 0 3px ${BUZZER_GOLD.rim}, 0 6px 16px ${BUZZER_GOLD.shade}, 0 0 14px ${BUZZER_GOLD.glow}`,
   },
   goldPulse: IS_WEB ? ({
     animationKeyframes: [{
       '0%': { boxShadow: `inset 0 0 0 2px ${BUZZER_GOLD.ring}, 0 0 0 3px ${BUZZER_GOLD.rim}, 0 6px 16px ${BUZZER_GOLD.shade}, 0 0 14px ${BUZZER_GOLD.glow}` },
-      '50%': { boxShadow: `inset 0 0 0 2px ${BUZZER_GOLD.ring}, 0 0 0 3px ${BUZZER_GOLD.rim}, 0 6px 16px ${BUZZER_GOLD.shade}, 0 0 28px ${BUZZER_GOLD.glowPeak}` },
+      '50%': { boxShadow: `inset 0 0 0 2px ${BUZZER_GOLD.ring}, 0 0 0 3px ${BUZZER_GOLD.rim}, 0 6px 16px ${BUZZER_GOLD.shade}, 0 0 34px ${BUZZER_GOLD.glowPeak}` },
       '100%': { boxShadow: `inset 0 0 0 2px ${BUZZER_GOLD.ring}, 0 0 0 3px ${BUZZER_GOLD.rim}, 0 6px 16px ${BUZZER_GOLD.shade}, 0 0 14px ${BUZZER_GOLD.glow}` },
     }],
-    animationDuration: '2.4s', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out',
+    animationDuration: '2s', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out',
   } as any) : {},
   // Pressed anywhere on the bar: only the buzzer goes down.
   goldDown: {
     transform: [{ translateY: 3 }, { scale: 0.93 }],
     boxShadow: `inset 0 3px 8px rgba(122,82,8,0.45), inset 0 0 0 2px ${BUZZER_GOLD.ring}, 0 0 0 3px ${BUZZER_GOLD.rim}, 0 2px 6px ${BUZZER_GOLD.shade}`,
   },
-  // A gold ring bursting outward from the buzzer on tap (.55s).
+  // A light flash inside the buzzer on tap (.55s). Colour + inset shadow, not transform: react-native-web
+  // drops transform arrays inside animationKeyframes (the generated @keyframes come out EMPTY — measured live
+  // 2026-10-10) while string properties survive; and inset, because the pill clips (overflow hidden).
   goldRing: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: radius.pill, borderWidth: 3, borderColor: BUZZER_GOLD.ring,
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: radius.pill,
     ...(IS_WEB ? {
-      animationKeyframes: [{ '0%': { opacity: 0.9, transform: [{ scale: 1 }] }, '100%': { opacity: 0, transform: [{ scale: 2.2 }] } }],
+      animationKeyframes: [{ '0%': { backgroundColor: 'rgba(255,255,255,0.6)', boxShadow: `inset 0 0 0 4px ${BUZZER_GOLD.ring}` }, '100%': { backgroundColor: 'rgba(255,255,255,0)', boxShadow: 'inset 0 0 0 0 rgba(249,224,138,0)' } }],
       animationDuration: '0.55s', animationTimingFunction: 'ease-out', animationFillMode: 'forwards',
     } as any : {}),
   },
   goldLogo: IS_WEB ? ({ filter: 'drop-shadow(0 1px 0 rgba(255,255,255,0.6))' } as any) : {},
   // The confetti overlay (pointer-events none).
   party: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 3 },
-  // A white shine that sweeps the gold pill only, once every ~3s.
+  // A white shine that sweeps the gold pill only, once every ~3s. It moves by BACKGROUND POSITION, not
+  // transform: react-native-web drops transform arrays inside animationKeyframes (the shine's @keyframes
+  // were empty, so it never moved on any listing — owner 2026-10-10). A 300%-wide gradient slid from
+  // 100% to 0% carries the streak across the pill and parks it outside at both ends; inset 0 on all
+  // four sides, so RTL's left/right flip changes nothing.
   goldShine: {
-    position: 'absolute', top: -12, bottom: -12, left: 0, width: '60%',
+    position: 'absolute', top: 0, bottom: 0, left: 0, right: 0,
     ...(IS_WEB ? {
-      backgroundImage: 'linear-gradient(110deg, rgba(255,255,255,0) 35%, rgba(255,255,255,0.85) 50%, rgba(255,255,255,0) 65%)',
-      animationKeyframes: [{ '0%': { transform: [{ translateX: '130%' }] }, '28%': { transform: [{ translateX: '-130%' }] }, '100%': { transform: [{ translateX: '-130%' }] } }],
-      animationDuration: '3s', animationDelay: '0.8s', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out',
+      // a wide bright band + a thin trailing glint (owner 2026-10-10: «make it shiny»)
+      backgroundImage: 'linear-gradient(110deg, rgba(255,255,255,0) 30%, rgba(255,255,255,0.55) 40%, rgba(255,255,255,1) 46%, rgba(255,255,255,0.55) 52%, rgba(255,255,255,0) 60%, rgba(255,255,255,0) 63%, rgba(255,255,255,0.85) 66%, rgba(255,255,255,0) 69%)',
+      backgroundSize: '250% 100%', backgroundRepeat: 'no-repeat', mixBlendMode: 'screen',   // the keyframes own the position (a static two-value one is rejected by RNW)
+      animationKeyframes: [{ '0%': { backgroundPosition: '110% 0' }, '60%': { backgroundPosition: '-10% 0' }, '100%': { backgroundPosition: '-10% 0' } }],
+      animationDuration: '2.4s', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out',
     } as any : {}),
+  },
+  // A small twinkle on the rim as the shine passes — opacity only (RNW keeps it), same 2.4s beat.
+  goldSpark: {
+    position: 'absolute', top: 3, left: 14, fontSize: 13, lineHeight: 15, color: '#fff',
+    ...(IS_WEB ? {
+      textShadow: '0 0 6px #fff, 0 0 12px #ffe9a0', opacity: 0,   // RNW wants the string form on web
+      animationKeyframes: [{ '0%': { opacity: 0 }, '45%': { opacity: 0 }, '55%': { opacity: 1 }, '68%': { opacity: 0 }, '100%': { opacity: 0 } }],
+      animationDuration: '2.4s', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out',
+    } as any : { opacity: 0 }),
   },
 });

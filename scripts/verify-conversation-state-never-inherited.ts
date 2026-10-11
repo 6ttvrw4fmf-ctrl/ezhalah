@@ -86,6 +86,8 @@ const CONVERSATION_SCOPED = [
   { name: "stopped", kind: "probe", cleared: (v: any) => v === false, why: "a Stop pressed in the previous conversation" },
   { name: "ageFlow", kind: "probe", cleared: (v: any) => v === null, why: "the guided AF card the abandoned conversation had open" },
   { name: "chatIdRef", kind: "ref", cleared: (v: any) => v === null, why: "the previous conversation's sidebar identity" },
+  { name: "liveTurnsRef", kind: "ref", cleared: (v: any) => v instanceof Set && v.size === 0,
+    why: "the results turns a search produced live (2026-10-10) — inherited, a reopened chat's turns replay every card's mount-in at once and the screen goes blank" },
   { name: "afCarryRef", kind: "ref", cleared: (v: any) => v === null, why: "the Advanced-Filter answered set (New Chat used to inherit it)" },
   { name: "afSkippedByMsgRef", kind: "ref", cleared: (v: any) => v && typeof v === "object" && Object.keys(v).length === 0,
     why: "the Advanced-Filter skip-only rounds per results turn (2026-10-06) — inherited, a new chat would skip questions it never asked" },
@@ -129,6 +131,7 @@ const setRestoringId = rec("restoringId");
 const setFilterOrigin = rec("filterOrigin");
 const setAgeFlow = rec("ageFlow");
 const chatIdRef = { current: "PREVIOUS-CHAT" as unknown };
+const liveTurnsRef = { current: new Set(["PREVIOUS-RESULTS-TURN"]) };
 const pendingRefineRef = { current: { q: { location: "جدة" }, dim: "budget" } as unknown };
 const refineMsgIdRef = { current: "PREVIOUS-RESULTS-TURN" as unknown };
 const saidRef = { current: ["شقة", "بالقرب من البحر"] as unknown };
@@ -154,7 +157,7 @@ const liftFrom = async (file: string) =>
       { header: "    const startFresh = () => {", endsWith: /^    \};$/ },
     ],
     ["resetConversationState", "startFresh", "probe", "calls",
-     "chatIdRef", "afCarryRef", "afSkippedByMsgRef", "pendingScopeRef", "pendingCityRef", "lastQueryRef", "runRef",
+     "chatIdRef", "liveTurnsRef", "afCarryRef", "afSkippedByMsgRef", "pendingScopeRef", "pendingCityRef", "lastQueryRef", "runRef",
      "pendingRefineRef", "refineMsgIdRef", "saidRef", "askCountRef", "ageFlowTokenRef",
      "conversationEpochRef"],
     PRELUDE,

@@ -179,6 +179,33 @@ export const PLATFORM_PICKER_PROFILES: Record<string, PlatformPickerProfile> = O
   }]),
 );
 
+// The catalogue regions (sa-locations ids) a site has listings in — measured coverage, or the one region
+// a site with no listings names itself. Feeds the picker's regions map (owner 2026-10-10).
+export function platformRegionIds(name: string): number[] {
+  const entry = coverage[name];
+  if (!entry) return [];
+  const measured = entry.regions.filter(region => region.count > 0).map(region => region.id);
+  const named = (entry as PickerCoverage & { region?: { id: number } }).region?.id;
+  return measured.length ? measured : named ? [named] : [];
+}
+
+// How much of a site's inventory sits in one region (0..1): a tapped region lists its own offices first
+// (owner 2026-10-10: «should show the sites in that region»). A site with no listings = the region it names.
+export function platformRegionShare(name: string, regionId: number): number {
+  const entry = coverage[name];
+  if (!entry) return 0;
+  if (entry.total && entry.regions.length) {
+    const region = entry.regions.find(r => r.id === regionId);
+    return region ? region.count / entry.total : 0;
+  }
+  return (entry as PickerCoverage & { region?: { id: number } }).region?.id === regionId ? 1 : 0;
+}
+
+/** A site's measured listings in one region (the «162 إعلان» beside its row while that region is tapped). */
+export function platformRegionListings(name: string, regionId: number): number {
+  return coverage[name]?.regions.find(r => r.id === regionId)?.count ?? 0;
+}
+
 export function pickerSourceSlugs(names: string[]): string[] {
   return [...new Set(names.flatMap(name => {
     const entry = coverageSnapshot.platforms[name as keyof typeof coverageSnapshot.platforms];
@@ -186,13 +213,10 @@ export function pickerSourceSlugs(names: string[]): string[] {
     return entry.slugs;
   }))];
 }
-// Deep search is a FOCUSED search (owner 2026-10-10: «for the deep search we allow how many websites he can
-// choose … let's make it 3»). A 4th pick is refused here — the one function every pick goes through — and the
-// sheet shows the limit and dims the rows that cannot be added. Removing a site is always allowed.
-export const MAX_PICKER_SOURCES = 3;
+// Any number of sites may be lit (owner 2026-10-10, reversing the earlier cap of 3: «user can select more
+// than 3 websites»). Tapping a lit site unlights it.
 export function togglePickerSource(names: string[], name: string): string[] {
-  if (names.includes(name)) return names.filter(value => value !== name);
-  return names.length >= MAX_PICKER_SOURCES ? names : [...names, name];
+  return names.includes(name) ? names.filter(value => value !== name) : [...names, name];
 }
 
 export function applyPickerSources<Q extends { sources?: string[] }>(query: Q, slugs: string[], explicit: boolean): Q {

@@ -188,12 +188,18 @@ const s = StyleSheet.create({
   // unit for the parked/off-screen positions to land where the comment above claims they do.
   shineBand: { position: 'absolute', top: -20, bottom: -20, left: -70, width: 34 },
   // CardInWeb's keyframes — the same 260ms fade + 10px rise (150ms fade only on reduced motion).
+  // Fill BACKWARDS, not both: the `from` state holds through a stagger delay, and once the rise ends
+  // nothing stays pinned on the card — hundreds of finished cards no longer each hold an animated
+  // opacity/transform (a compositing layer apiece on iPhone Safari).
+  // The transform is a CSS STRING: react-native-web compiles a transform array inside
+  // animationKeyframes to `transform:[object Object]`, which the browser drops — the cards only faded
+  // until 2026-10-10. Pinned repo-wide by scripts/verify-keyframe-transforms-are-css-strings.ts.
   cardRise: {
-    animationKeyframes: [{ from: { opacity: 0, transform: [{ translateY: 10 }] }, to: { opacity: 1, transform: [{ translateY: 0 }] } }],
-    animationDuration: '260ms', animationTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)', animationFillMode: 'both',
+    animationKeyframes: [{ from: { opacity: 0, transform: 'translateY(10px)' }, to: { opacity: 1, transform: 'translateY(0px)' } }],
+    animationDuration: '260ms', animationTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)', animationFillMode: 'backwards',
   } as object,
   cardFade: {
     animationKeyframes: [{ from: { opacity: 0 }, to: { opacity: 1 } }],
-    animationDuration: '150ms', animationTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)', animationFillMode: 'both',
+    animationDuration: '150ms', animationTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)', animationFillMode: 'backwards',
   } as object,
 });

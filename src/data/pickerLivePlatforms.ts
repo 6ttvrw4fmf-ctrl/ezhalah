@@ -32,7 +32,13 @@ export function loadLivePickerNames(): Promise<void> {
   return inFlight;
 }
 
+// A healthy site whose whole inventory is rented/sold keeps its logo and stays pickable (owner 2026-10-10:
+// «even though they have 0 lets add it as part of the logos and deep search»). Never a DOWN site.
+// ponytail: named list — a second empty-but-healthy site is added here by name.
+export const OFFERED_WHILE_EMPTY = new Set(['Al Humaidan']);
+
 /** Whether the picker may offer `name`: live list first, the down-status list until it lands. */
 export function pickerMayOffer(name: string, liveNames: Set<string> | null, downNames: Set<string> | null): boolean {
+  if (OFFERED_WHILE_EMPTY.has(name)) return !downNames?.has(name);
   return liveNames ? liveNames.has(name) : !downNames?.has(name);
 }

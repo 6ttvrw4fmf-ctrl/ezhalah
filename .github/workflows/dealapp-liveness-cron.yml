@@ -1,0 +1,29 @@
+# DEALAPP LIVENESS ON pg_cron, EVERY 2 HOURS (♻️ Lifecycle Engineer, 2026-10-10).
+#
+# dealapp-liveness.yml carried a GitHub `schedule:` (40 */2 * * *) and GitHub fired it 2-5 times a
+# day instead of 12 (scrape_runs dealapp_liveness, 10-02..10-10: 1,200-3,000 ads a day for ~20,900
+# active rows), so dealapp's checked-in-time share rode on the crawl re-reading pages and fell
+# 96.0% -> 82.8% in one day when five crawl shards hit their time budget. A workflow's own schedule
+# is not a schedule here: every lifecycle job is dispatched by a pg_cron trigger_gh_workflow() row
+# (LIFECYCLE_ENGINEER.md), and trigger_gh_workflow cannot pass inputs, which is why this wrapper
+# exists (the same reason gathern-recheck-dead.yml is its own file): it calls the real workflow with
+# apply=true, so the pg_cron path writes exactly as the GitHub schedule did, while a bare manual
+# dispatch of dealapp-liveness.yml stays a dry run.
+#
+# Same job, same code, same 600-ad limit and view-quota pacing, same concurrency group as the
+# workflow it calls, so two sweeps never overlap.
+name: Dealapp liveness (pg_cron, apply)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: dealapp-liveness
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    uses: ./.github/workflows/dealapp-liveness.yml
+    with:
+      apply: true
+    secrets: inherit

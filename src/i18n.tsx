@@ -195,9 +195,22 @@ const AR: Record<string, string> = {
   'Search across {count} real-estate websites': 'نبحث عبر {count} موقع عقاري',
   'Choose websites': 'اختر المواقع',
   'Deep search across websites': 'بحث عميق في المواقع',
-  'Focus your search on one or more specific websites. We show only their listings.': 'خصّص بحثك في موقع معيّن أو أكثر، ونعرض لك إعلاناتها فقط.',
-  'You can choose up to 3 websites': 'يمكنك اختيار ثلاثة مواقع كحدٍّ أقصى.',
+  // Owner 2026-10-10: the sheet must say its purpose — one site, several, or all, chosen by coverage.
+  'Focus your search on one or more specific websites. We show only their listings.': 'اختر موقعاً معيّناً أو أكثر، أو كل المواقع، ونعرض لك إعلاناتها فقط.',
+  'By coverage': 'حسب التغطية',
+  // The sheet reads as two steps (owner 2026-10-10: «search on the region you want, then choose the websites below»).
+  'Step 1 · Choose the region': '١ · اختر المنطقة',
+  'Step 2 · Choose the websites': '٢ · اختر المواقع',
+  'Whole kingdom': 'كل المملكة',
+  'Websites covering {region}': 'المواقع التي تغطي {region}',
+  '{count} listings': '{count} إعلان',
   'Search across Saudi Arabia': 'ابحث في جميع المواقع داخل المملكة',
+  // The regions map inside the picker (owner 2026-10-10: «highlight the entire region … so users are
+  // aware of where they cover»): tap a region to see only the websites with listings there.
+  'Tap a region to see the websites that cover it': 'اضغط على منطقة لعرض المواقع التي تغطيها',
+  'All regions': 'كل المناطق',
+  '{count} websites': '{count} موقع',
+  'Map data © OpenStreetMap contributors': 'بيانات الخريطة © مساهمو OpenStreetMap',
   'Choose a website': 'اختر موقعاً',
   'Search one website': 'ابحث في موقع واحد',
   'Select a website to narrow your search.': 'حدّد موقعاً لتضييق البحث.',
@@ -1631,6 +1644,7 @@ function fill(template: string, vars?: Record<string, string | number>): string 
 // — each entry is the faithful translation of the Arabic value, in plain sentence-case English.
 const EN: Record<string, string> = {
   'Listing bedrooms': 'Bedrooms',
+  'Focus your search on one or more specific websites. We show only their listings.': 'Choose one or more specific websites, or all of them. We show only their listings.',
   'Smart Assistant': 'Smart Broker', // «الوسيط الذكي»
   'One site to search every Saudi real-estate platform and website.': 'One site to search all Saudi real-estate platforms and websites.',
   'Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.':

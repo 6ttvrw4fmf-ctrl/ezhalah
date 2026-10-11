@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import json as _json
 import re
+import sys
 from typing import Any, Optional
 from urllib.parse import urlparse, unquote
 
 from scrapers.common.http import get
 from scrapers.common import normalize as N
-from scrapers.common.db import AUTHORITATIVE_NULL
+from scrapers.common.db import AUTHORITATIVE_NULL, _AuthoritativeNull
 
 
 # PDPL: never store broker/advertiser contact. Strip Saudi mobile numbers from any free text we keep.
@@ -205,25 +206,50 @@ def _listing_json(html: str) -> Optional[dict[str, Any]]:
             blob = blob.encode("latin-1", "ignore").decode("utf-8", "ignore")
         except UnicodeError:      # already clean on some payload shapes — keep what we have
             pass
+    # raw_decode, not a brace counter: the counter ignored strings, so an ad whose own text holds a
+    # «{» or «}» closed the object mid-string, failed to parse, and the WHOLE payload read as None —
+    # photos, pin, price and amenities all unknown. Live 2026-10-10: ad 6753755 and 42 more rows kept
+    # other ads' photos through every re-scrape that way.
+    dec = _json.JSONDecoder()
     for m in _LISTING_OBJ_RE.finditer(blob):
         start = blob.index("{", m.start() + len('"listing"'))
-        depth = 0
-        for i in range(start, min(len(blob), start + 200_000)):
-            ch = blob[i]
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    try:
-                        obj = _json.loads(blob[start:i + 1])
-                    except Exception:  # noqa: BLE001
-                        break
-                    # The first `"listing":{` in the payload is an i18n label bundle with no id.
-                    if isinstance(obj, dict) and obj.get("id") is not None:
-                        return obj
-                    break
+        try:
+            obj, _ = dec.raw_decode(blob, start)
+        except ValueError:
+            continue
+        # The first `"listing":{` in the payload is an i18n label bundle with no id.
+        if isinstance(obj, dict) and obj.get("id") is not None:
+            return obj
     return None
+
+
+# Aqar's «نوع العقار» on a plot: listing.specs[name="type"], dictionary 1 سكني · 2 تجاري · 3 سكني/تجاري
+# (the only three values Aqar defines for land — it has no industrial or agricultural land usage).
+# «سكني/تجاري» = Commercial Land: owner's mixed-use rule (2026-09-27, Mobasher «أرض سكني تجاري»).
+AQAR_LAND_USAGE = {"سكني": "Residential Land", "تجاري": "Commercial Land", "سكني/تجاري": "Commercial Land"}
+# Aqar lists a plot's specs but no usage: the upsert writes this as NULL over a stale guessed type (it
+# writes every _AuthoritativeNull as NULL). Its own name, so the price sentinel stays price-only.
+LAND_USAGE_SILENT = _AuthoritativeNull()
+
+
+def _land_type(obj: Optional[dict[str, Any]], ad_number: str) -> Any:
+    """A plot's type from Aqar's own «نوع العقار». SOURCE IS TRUTH — never a default:
+    payload unread, or no spec list at all (a closed ad shows none) → None (unknown; the upsert keeps
+    the stored value) · Aqar lists the plot's specs but no usage → LAND_USAGE_SILENT (Aqar is silent;
+    NULL, never a guessed commercial — this includes payload `type: 4`, which Aqar's own dictionary
+    does not label and its page does not show) · a word we do not map → None, loudly."""
+    specs = obj.get("specs") if isinstance(obj, dict) else None
+    if not isinstance(specs, list) or not specs:
+        return None
+    spec = next((s for s in specs if isinstance(s, dict) and s.get("name") == "type"), None)
+    word = spec.get("value") if spec else None
+    word = "".join(word.split()) if isinstance(word, str) and not word.startswith("$") else ""
+    if not word:
+        return LAND_USAGE_SILENT
+    if word not in AQAR_LAND_USAGE:
+        print(f"⚠ aqar: UNMAPPED land usage «{word}» (ad {ad_number}) — type left unknown; owner to place it",
+              file=sys.stderr, flush=True)
+    return AQAR_LAND_USAGE.get(word)
 
 
 AQAR_PHOTO_BASE = "https://images.aqar.fm/webp/750x0/props/"
@@ -629,16 +655,12 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
               flush=True)
     transaction_type = "Rent" if deal_slug == "rent" else "Buy"
 
-    # Land ZONING split: Aqar lumps every plot under one أراضي category (→ "Residential Land"). Read the
-    # listing text to tag the real zoning so commercial/industrial/agricultural plots aren't all labelled
-    # residential. Most-specific wins; no keyword → residential (Aqar's default). (user: split the land.)
+    # Land USAGE is Aqar's own field — never a guess. This used to keyword-scan the WHOLE page text,
+    # where the nav menu always says «مكتب تجاري» and the city's district list often says «حي الصناعية»:
+    # on 2026-10-10 every live Aqar plot was typed commercial/industrial/agricultural and 0 residential,
+    # while Aqar's own «نوع العقار» said سكني on 18,522 of 26,889 of them (ad 6772165: «سكني»).
     if property_type == "Residential Land":
-        if re.search(r"صناعي", text):
-            property_type = "Industrial Land"
-        elif re.search(r"زراعي|مزرع", text):
-            property_type = "Agriculture Plot"
-        elif re.search(r"تجاري", text):
-            property_type = "Commercial Land"
+        property_type = _land_type(obj, ad_number)
 
     # ─── Basic info ──────────────────────────────────────────────────────────
     # AREA IS SPEC-TABLE-ONLY — the same anchoring the room counts already use, and for the same
