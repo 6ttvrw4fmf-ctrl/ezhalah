@@ -47,15 +47,26 @@ _REQUEST = re.compile(
 _OTHER = re.compile(
     _B + r"(?:"
     r"عامل|عماله|عمال|حارس|سائق|سواق|خادمه|عاملات|وظيفه|وظائف|عن عمل|راتب|نقل كفاله|كفاله|"
-    r"نقل عفش|عفش|سياره|سيارات|جوال|تقبيل|مقاول|مقاولات|ترميم|صيانه|"
+    r"نقل عفش|عفش|سياره|سيارات|جوال|(?:لل|ل|و|ب)?تقبيل|مقاول|مقاولات|ترميم|صيانه|"
     r"دهانات|سباك|تنظيف|مكافحه حشرات|مظلات|سواتر|عزل|تشطيب|نقوم ب|نوفر لكم|نقدم لكم|خدمه الاعلان|"
-    r"خدمه تسويق|نسوق لك|معلن عقاري|شريك|شراكه|تسوقه|نخدمك"
+    r"خدمه تسويق|نسوق لك|معلن عقاري|شريك|شراكه|تسوقه|نخدمك|"
+    # An agency's catalogue ad («يتوفر لدينا شقق وأراضي ومزارع») names no unit: not a listing
+    # (shadow 2026-10-11, 11190296071).
+    r"يتوفر لدينا|تتوفر لدينا|متوفر لدينا|متوفره لدينا"
     r")" + _E
 )
 
 # Furniture words count only in the TITLE: «غرفة نوم» in an apartment offer's BODY describes the flat
 # (shadow 2026-10-10, 11190241633), while a furniture post names it in its title.
-_OTHER_TITLE = re.compile(_B + r"(?:غرفه نوم|غرف نوم|كنب|كنبه|طقم|دولاب|مطبخ مستعمل)" + _E)
+# Shadow 2026-10-11 (105 «offer» verdicts hand-checked): a «محل … للبيع» on Haraj is usually a
+# BUSINESS for sale (a tailor's, a clothing shop with its stock), and a car model in the title is a car
+# (11190298600, 11190299205, 11190299633). Title-only, like the furniture words: a flat's body may say
+# «قريب من مطعم».
+_OTHER_TITLE = re.compile(
+    _B + r"(?:غرفه نوم|غرف نوم|كنب|كنبه|طقم|دولاب|مطبخ مستعمل|"
+    r"كماليات|ملابس|خياط|خياطه|بضاعه|معدات|مطعم|كوفي|كافيه|بقاله|صالون|حلاق|مشغل|"
+    r"كامري|كورولا|هايلكس|لاندكروزر|يوكن|تاهو|سوناتا|النترا|اكسنت|جمس|ددسن|لكزس|مرسيدس|افالون|اكورد|"
+    r"كابرس|شاص|فورد|نيسان|هونداي|تويوتا)" + _E)
 
 # The REGA (الهيئة العامة للعقار) ad block every licensed Saudi property ad carries.
 _REGA = re.compile(
