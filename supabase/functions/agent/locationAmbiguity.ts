@@ -1,3 +1,4 @@
+import { cityExampleAr, PIN } from "./questionExamples.ts";
 // ─────────────────────────────────────────────────────────────────────────────
 // locationAmbiguity — the three LOST cases restored (round-2 fix, "LOST LOCATION-AMBIGUITY CASES").
 //
@@ -34,7 +35,7 @@ const WANTS_WHOLE_RE = /كامل|كاملة|بالكامل|كلها|كل\s*(?:ا
  */
 export function plainRegionQuestion(nm: string, text: string): string | null {
   if (WANTS_WHOLE_RE.test(text)) return null;
-  return `تقصد ${nm} كاملة، أو مدينة معيّنة؟`;
+  return `تقصد ${nm} كاملة، أو مدينة معيّنة؟ ${PIN}`;
 }
 
 // A generic "near <phrase>" construct — Arabic + English. Deliberately NOT the deleted client's full
@@ -63,7 +64,7 @@ const GEOGRAPHY_CUE_RE = /بحر|شاطئ|ساحل|كورنيش|واجهة\s*ب�
  */
 export function emptyLocationQuestion(text: string): string | null {
   const near = text.match(NEAR_PHRASE_RE);
-  if (near) return `في أي مدينة تبحث عن عقار ${near[1].trim()}؟`;
-  if (GEOGRAPHY_CUE_RE.test(text)) return "تقصد في أي مدينة أو منطقة؟";
+  if (near) return `في أي مدينة تبحث عن عقار ${near[1].trim()}؟ ${cityExampleAr()} ${PIN}`;
+  if (GEOGRAPHY_CUE_RE.test(text)) return `تقصد في أي مدينة أو منطقة؟ ${cityExampleAr()} ${PIN}`;
   return null;
 }
