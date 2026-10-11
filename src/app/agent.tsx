@@ -18,6 +18,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, platformRegionIds, platformRegionShare, platformRegionListings } from '@/data/platformPickerProfiles';
 import PickerRegionsMap, { regionLabel } from '@/components/PickerRegionsMap';
+import { pickAfCourtesyOpening } from '@/data/afCourtesyOpeners';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { COMPOSER_INPUT, TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
@@ -430,6 +431,8 @@ const SEARCH_MS = 600;
 // therefore needs a real decision — a longer floor, or a wave that lights more than one pill per
 // step — and MAX_ROSTER is the guard that will stop it silently slipping through.
 const SEARCH_MIN_MS = 10600;
+// An Advanced Filter round's platform animation (owner 2026-10-10: 10 seconds).
+const AF_LOADER_MS = 10000;
 // Soft completion (owner v4): before morphing to results, flag the loader `exiting` and give its
 // fade-out this long — the strip glides away into the results state instead of vanishing in a frame.
 const LOADER_EXIT_MS = 450;
@@ -1740,17 +1743,20 @@ export default function Agent() {
     // network, so in practice it's already consumed → results morph in IMMEDIATELY on resolve.
     const since = searchingAtRef.current[statusId] ?? Date.now();
     searchingAtRef.current[statusId] = since;
-    // AN ADVANCED FILTER ROUND SKIPS THE PLATFORM SHOW (owner 2026-10-05: «the advanced filter takes
-    // time … should never ever have this»). Measured live: the round's own queries finish in ≤1.3 s,
-    // and the user then waited 12 s for the 10.6 s every-platform loader floor + its page dwell. That
-    // floor exists to show every platform being searched on a NEW search; a round narrows results the
-    // user is already looking at, so its results show the moment they are ready (exit fade only).
+    // A NEW search waits the 10.6 s every-platform floor + its page dwell. An Advanced Filter round
+    // (2026-10-05 skipped it entirely; owner 2026-10-10 now wants 10 s) waits AF_LOADER_MS instead.
     if (!afCompleted) {
       const remaining = SEARCH_MIN_MS - (Date.now() - since);
       if (remaining > 0) await waitRun(run, remaining);
       // Presentation-only gate: each logo/name page must finish its actual visible dwell.
       // The search has already completed; this changes only when its results are revealed.
       while (!run.cancelled && loaderPresentedRef.current[statusId] !== true) await waitRun(run, 100);
+    } else {
+      // AN ADVANCED FILTER ROUND SHOWS THE PLATFORM ANIMATION FOR 10 SECONDS (owner 2026-10-10: «for the
+      // advanced filter the animation time make it 10 seconds»; reverses the 2026-10-05 skip). A plain
+      // floor from when the loader appeared — no page-dwell gate, so it is never longer than 10 s.
+      const remaining = AF_LOADER_MS - (Date.now() - since);
+      if (remaining > 0) await waitRun(run, remaining);
     }
     delete loaderPresentedRef.current[statusId];
     delete searchingAtRef.current[statusId];
@@ -2777,7 +2783,9 @@ export default function Agent() {
     const roundLog = buildAfRoundLog(askedThisRound, ageFlowFacetsRef.current);
     const roundCommitted = buildAfSummary(ageFlowFacetsRef.current);
     if (carry && roundCommitted) setAfReceipt((r) => ({ ...r, [carry.msgId]: roundLog }));
-    void runRefine(q, '__guided__', '', ageFlowLabelsRef.current.join('، '), {
+    // The user's bubble opens with a rotating Saudi courtesy + request (owner 2026-10-10: «لاهنت 🤍، أبغى …»).
+    const roundLabel = ageFlowLabelsRef.current.join('، ');
+    void runRefine(q, '__guided__', '', locale === 'ar' && roundLabel ? pickAfCourtesyOpening() + roundLabel : roundLabel, {
       guided,
       onFetched: (total) => {
         const msgId = refineMsgIdRef.current;
