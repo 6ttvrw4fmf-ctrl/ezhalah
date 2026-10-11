@@ -26,15 +26,19 @@ function AfRoundLoader({ items, exiting, fontFamily }: { items: string[]; exitin
   useEffect(() => {
     if (index >= items.length - 1) return;
     const { wait, swap } = afPickTiming(items.length);
+    let swapId: ReturnType<typeof setTimeout> | undefined;
     const id = setTimeout(() => {
       if (reduced) { setIndex((i) => i + 1); return; }
-      // Out, swap the word, back in — the line itself never moves.
-      Animated.timing(fade, { toValue: 0, duration: Math.round(swap * 0.4), easing: Easing.in(Easing.quad), useNativeDriver: true }).start(() => {
+      // Out, swap the word, back in — the line itself never moves. The swap rides a timer, not an
+      // animation callback, so the hand-off never depends on an animation frame (nav barrier).
+      const outMs = Math.round(swap * 0.4);
+      Animated.timing(fade, { toValue: 0, duration: outMs, easing: Easing.in(Easing.quad), useNativeDriver: true }).start();
+      swapId = setTimeout(() => {
         setIndex((i) => i + 1);
         Animated.timing(fade, { toValue: 1, duration: Math.round(swap * 0.6), easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-      });
+      }, outMs);
     }, reduced ? wait + swap : wait);
-    return () => clearTimeout(id);
+    return () => { clearTimeout(id); if (swapId) clearTimeout(swapId); };
   }, [index, items.length, reduced, fade]);
   const pick = items[Math.min(index, items.length - 1)] ?? '';
   return (
