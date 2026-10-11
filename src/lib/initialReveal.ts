@@ -40,6 +40,13 @@ export const AF_REVEAL_MAX = 400;
 // note 21). Live journeys must therefore expect a screenful ON ARRIVAL and scroll to reach the
 // target — asserting the whole first page renders immediately is the PRE-2026-09-20 contract.
 export const CASCADE_MAX = 12;
+// THE FIRST PAGE WHEN ONLY ONE WEBSITE MATCHES (owner 2026-10-11): «Only عقار has results → you see just
+// 1 ad … that's a bug … make sure we never get them». The 2026-09-25 rule below keeps the first screen at
+// ONE card per platform so a big site's inventory never out-shows a small site's single match — but
+// with a single matching site there is no other site to be fair to, and one card is just a broken page
+// («أرض أخرى» الرياض: 1 of 1,027). So one matching site fills the normal first page: 10, the first-page
+// size every earlier owner rule named («Ezhalah shows 10», 2026-08-30; FIRST_PAGE before 2026-09-25).
+export const SINGLE_SITE_FIRST_PAGE = 10;
 
 export function initialReveal(args: {
   fetched: number; honestTotal: number | null; stopAt: number;
@@ -72,6 +79,12 @@ export function initialReveal(args: {
   // already guarantees none is dropped, so the historical floor is no longer needed for coverage
   // either — `platforms` alone (both ordering layers already emit one row per platform first)
   // delivers full coverage whether that number is 2 or 33.
+  //
+  // ONE MATCHING SITE FILLS THE FIRST PAGE (owner 2026-10-11, refining the 2026-09-25 rule above): with
+  // exactly one distinct matching platform there is nobody for padding to be unfair to, so the page is
+  // SINGLE_SITE_FIRST_PAGE cards of that site (all of them when it has fewer). Two or more platforms
+  // keep the 2026-09-25 rule exactly: one card per platform. A 0 count stays the 1-card safety floor.
   const platforms = Math.max(0, Math.floor(args.platforms ?? 0));
+  if (platforms === 1) return Math.min(SINGLE_SITE_FIRST_PAGE, fetched);
   return Math.min(Math.max(1, platforms), fetched);
 }
