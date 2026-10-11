@@ -14,7 +14,7 @@ from urllib.parse import urlparse, unquote
 
 from scrapers.common.http import get
 from scrapers.common import normalize as N
-from scrapers.common.db import AUTHORITATIVE_NULL, _AuthoritativeNull
+from scrapers.common.db import AUTHORITATIVE_NULL
 
 
 # PDPL: never store broker/advertiser contact. Strip Saudi mobile numbers from any free text we keep.
@@ -227,29 +227,70 @@ def _listing_json(html: str) -> Optional[dict[str, Any]]:
 # (the only three values Aqar defines for land — it has no industrial or agricultural land usage).
 # «سكني/تجاري» = Commercial Land: owner's mixed-use rule (2026-09-27, Mobasher «أرض سكني تجاري»).
 AQAR_LAND_USAGE = {"سكني": "Residential Land", "تجاري": "Commercial Land", "سكني/تجاري": "Commercial Land"}
-# Aqar lists a plot's specs but no usage: the upsert writes this as NULL over a stale guessed type (it
-# writes every _AuthoritativeNull as NULL). Its own name, so the price sentinel stays price-only.
-LAND_USAGE_SILENT = _AuthoritativeNull()
+
+# When Aqar's field is silent (owner 2026-10-10): the seller's OWN description (listing.content — never
+# the page's menus, district lists or similar-ads strip) may state the usage, as the adjacent phrase
+# أرض|ارض|الأرض|الارض (a leading و/ب/ف allowed) + سكني/ة · تجاري/ة · صناعي/ة · زراعي/ة (ة also typed ه). One
+# usage → that type, stored as the seller's own word («أرض صناعي») so the card shows it; «سكني تجاري» →
+# Commercial Land (mixed-use rule); two different usages → unknown. «قريبة من المنطقة الصناعية», «مزرعه», «للسكن والاستثمار» never
+# match. No usage anywhere → «أرض» (Other Land, owner: «don't show it in a specific property type»).
+_USAGE_KIND = {"سكني": "res", "سكنية": "res", "تجاري": "com", "تجارية": "com",
+               "صناعي": "ind", "صناعية": "ind", "زراعي": "agri", "زراعية": "agri"}
+_USAGE_WORD = "سكنية|سكنيه|سكني|تجارية|تجاريه|تجاري|صناعية|صناعيه|صناعي|زراعية|زراعيه|زراعي"
+_LAND_PHRASE_RE = re.compile(
+    rf"(?<![\u0621-\u064A])[وبف]?(?:ال)?[أا]رض\s+({_USAGE_WORD})(?![\u0621-\u064A])(?:\s*[/-]?\s*(\S+))?")
+LAND_MIXED = "أرض سكني تجاري"
+LAND_OTHER = "أرض"
+# Every type the description path can store → its clean type (mirrors RAW_TO_CLEAN in propertyTypes.ts).
+LAND_DESCRIPTION_TYPES = {f"أرض {w}": c for w, c in (
+    ("سكني", "Residential Land"), ("سكنية", "Residential Land"), ("تجاري", "Commercial Land"),
+    ("تجارية", "Commercial Land"), ("صناعي", "Industrial Land"), ("صناعية", "Industrial Land"),
+    ("زراعي", "Agriculture Plot"), ("زراعية", "Agriculture Plot"))}
+LAND_DESCRIPTION_TYPES[LAND_MIXED] = "Commercial Land"
 
 
-def _land_type(obj: Optional[dict[str, Any]], ad_number: str) -> Any:
-    """A plot's type from Aqar's own «نوع العقار». SOURCE IS TRUTH — never a default:
-    payload unread, or no spec list at all (a closed ad shows none) → None (unknown; the upsert keeps
-    the stored value) · Aqar lists the plot's specs but no usage → LAND_USAGE_SILENT (Aqar is silent;
-    NULL, never a guessed commercial — this includes payload `type: 4`, which Aqar's own dictionary
-    does not label and its page does not show) · a word we do not map → None, loudly."""
+def _usage_from_description(content: Any) -> Optional[str]:
+    """The seller's own stated usage as a stored type («أرض صناعي»), or None when the description states
+    none, or states two different ones."""
+    if not isinstance(content, str):
+        return None
+    kinds: dict[str, str] = {}
+    for m in _LAND_PHRASE_RE.finditer(content):
+        # «سكنيه» is «سكنية» typed with ه: same word, stored in its standard spelling.
+        word = re.sub("ه$", "ة", m.group(1))
+        nxt = re.sub("ه$", "ة", re.match(r"[\u0621-\u064A]*", m.group(2) or "").group(0))
+        kind, stored = _USAGE_KIND[word], f"أرض {word}"
+        if re.match(r"(سكن|تجار|صناع|زراع)", nxt):          # a second usage word right after the first
+            k2 = _USAGE_KIND.get(nxt)
+            if k2 is not None and {kind, k2} == {"res", "com"}:
+                kind, stored = "mix", LAND_MIXED
+            elif k2 != kind:
+                return None                                   # «تجارية صناعية», «سكني تجاريه» → unknown
+        kinds.setdefault(kind, stored)
+    return next(iter(kinds.values())) if len(kinds) == 1 else None
+
+
+def _land_type(obj: Optional[dict[str, Any]], ad_number: str) -> tuple[Optional[str], Optional[str]]:
+    """(type, provenance) for a plot. SOURCE IS TRUTH — never a default:
+    payload unread, or no spec list at all (a closed ad shows none) → (None, None): unknown, the upsert
+    keeps the stored value · Aqar's own «نوع العقار» → ("Residential Land"/"Commercial Land", "aqar_field")
+    — it always wins · Aqar silent (incl. payload `type: 4`, unlabelled by Aqar and not shown) → the
+    seller's own description: (e.g. "أرض صناعي", "description") · neither → ("أرض", "none") · a field
+    word we do not map → (None, None), loudly."""
     specs = obj.get("specs") if isinstance(obj, dict) else None
     if not isinstance(specs, list) or not specs:
-        return None
+        return None, None
     spec = next((s for s in specs if isinstance(s, dict) and s.get("name") == "type"), None)
     word = spec.get("value") if spec else None
     word = "".join(word.split()) if isinstance(word, str) and not word.startswith("$") else ""
-    if not word:
-        return LAND_USAGE_SILENT
-    if word not in AQAR_LAND_USAGE:
-        print(f"⚠ aqar: UNMAPPED land usage «{word}» (ad {ad_number}) — type left unknown; owner to place it",
-              file=sys.stderr, flush=True)
-    return AQAR_LAND_USAGE.get(word)
+    if word:
+        if word not in AQAR_LAND_USAGE:
+            print(f"⚠ aqar: UNMAPPED land usage «{word}» (ad {ad_number}) — type left unknown; owner to place it",
+                  file=sys.stderr, flush=True)
+            return None, None
+        return AQAR_LAND_USAGE[word], "aqar_field"
+    stated = _usage_from_description(obj.get("content"))
+    return (stated, "description") if stated else (LAND_OTHER, "none")
 
 
 AQAR_PHOTO_BASE = "https://images.aqar.fm/webp/750x0/props/"
@@ -659,8 +700,9 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # where the nav menu always says «مكتب تجاري» and the city's district list often says «حي الصناعية»:
     # on 2026-10-10 every live Aqar plot was typed commercial/industrial/agricultural and 0 residential,
     # while Aqar's own «نوع العقار» said سكني on 18,522 of 26,889 of them (ad 6772165: «سكني»).
+    land_usage_from = None
     if property_type == "Residential Land":
-        property_type = _land_type(obj, ad_number)
+        property_type, land_usage_from = _land_type(obj, ad_number)
 
     # ─── Basic info ──────────────────────────────────────────────────────────
     # AREA IS SPEC-TABLE-ONLY — the same anchoring the room counts already use, and for the same
@@ -990,6 +1032,9 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     pin = source_pin(html)
     if pin:
         source_capture["pin"] = pin
+    # Where a plot's type came from (owner 2026-10-10 audit): aqar_field · description · none.
+    if land_usage_from:
+        source_capture["land_usage_from"] = land_usage_from
 
     return {
         "ad_number":               ad_number,

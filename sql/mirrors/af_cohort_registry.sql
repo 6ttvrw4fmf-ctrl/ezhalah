@@ -1,4 +1,9 @@
 -- MIRROR of the LIVE production TABLE public.af_cohort_registry. NOT a migration — this file is
+-- Re-verified 2026-10-11 (migration 20261011022451_other_land_af_cohort_certified): CHANGED — ONE row
+--   added — deal بيع, no period, type «أرض», enabled: the Other Land (أرض أخرى) Buy cohort, certified on the
+--   4,040 plots whose source states no usage (street width 99%, direction 88%).
+--   Production ROWS md5 with the recipe below = fb1fa4c99a73605e4467b1546382855e, 61 rows, 0 disabled.
+--   File body md5 (verify-sql-mirrors-not-stale): 9d8e20d92a377643ea211c3962cc05fd
 -- Re-verified 2026-10-10 (migration 20261010000246_raw_land_af_cohort_certified, owner session): CHANGED —
 --   ONE row added — deal بيع, no period, type «أرض خام», enabled: the raw-land Buy cohort, certified on the
 --   6,008 tagged rows (street width 92%, direction 84%; RPC = SQL parity 2,816 = 2,816 and 220 = 220).
@@ -69,6 +74,7 @@ insert into public.af_cohort_registry (deal_ar, rent_period_ar, type_ar, enabled
   ('إيجار', 'شهري', 'شقة', true),
   ('إيجار', 'شهري', 'غرفة', true),
   ('إيجار', 'شهري', 'فيلا', true),
+  ('بيع', NULL, 'أرض', true),
   ('بيع', NULL, 'أرض تجارية', true),
   ('بيع', NULL, 'أرض خام', true),
   ('بيع', NULL, 'أرض زراعية', true),

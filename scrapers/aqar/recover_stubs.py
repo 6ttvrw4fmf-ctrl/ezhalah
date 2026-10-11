@@ -49,6 +49,7 @@ if str(ROOT.parent) not in sys.path:
 
 from scrapers.common import db, normalize as N  # noqa: E402
 from scrapers.aqar.enrich_residential import enrich_residential  # noqa: E402
+from scrapers.aqar.enrich_residential import LAND_DESCRIPTION_TYPES, LAND_OTHER  # noqa: E402
 
 # TABLE is module-level state, set by main() from --table before any cohort/recover function runs.
 # GENERALIZED 2026-08-10: aqar_commercial_listings has the exact same June `backfill.v1` stub-capture
@@ -113,6 +114,9 @@ TYPE_TO_SLUG = {v: k for k, v in N.SLUG_TO_TYPE.items()}
 # rows kept other ads' photos through the 2026-10-10 repair. Guarded by
 # scripts/verify-aqar-photos-are-the-ads-own.ts (every type the enricher can write must resolve).
 TYPE_TO_SLUG.update({t: "land" for t in ("Commercial Land", "Industrial Land", "Agriculture Plot")})
+# Since 2026-10-10 (owner) a plot Aqar leaves silent is typed from the seller's own words («أرض صناعي») or
+# stored as «أرض» (Other Land) — every one of those lives under the `land` slug too.
+TYPE_TO_SLUG.update({t: "land" for t in (*LAND_DESCRIPTION_TYPES, LAND_OTHER)})
 
 
 def _brief(d: dict[str, Any]) -> dict[str, Any]:
@@ -232,10 +236,15 @@ def remaining_marked() -> int:
 LAND_GUESS_TYPES = ["Commercial Land", "Industrial Land", "Agriculture Plot"]
 
 
-def _land_usage_query(c: Any, cols: str, before: str) -> Any:
-    return (c.table(TABLE).select(cols, count="exact").eq("active", True)
-            .in_("property_type", LAND_GUESS_TYPES).lt("raw_captured_at", before)
-            .not_.is_("listing_url", "null"))
+LAND_URL = "%/أراضي-%"     # aqar's own land category in the ad's path — how a type-less plot is found
+
+
+def _land_usage_query(c: Any, cols: str, before: str, untyped: bool = False) -> Any:
+    """`untyped`: live plots with NO type (Aqar silent before the description reading, 2026-10-10)."""
+    q = (c.table(TABLE).select(cols, count="exact").eq("active", True).lt("raw_captured_at", before)
+         .not_.is_("listing_url", "null"))
+    return q.is_("property_type", "null").like("listing_url", LAND_URL) if untyped \
+        else q.in_("property_type", LAND_GUESS_TYPES)
 
 
 def land_usage_cohort(limit: int, before: str, shard: int = 0, shards: int = 1) -> list[dict[str, Any]]:
@@ -244,19 +253,23 @@ def land_usage_cohort(limit: int, before: str, shard: int = 0, shards: int = 1) 
     cols = "id, ad_number, listing_url, property_type, transaction_type, " + ", ".join(REPORT_FIELDS)
     digits = ",".join(f"ad_number.like.*{d}" for d in range(10) if d % shards == shard)
     out: list[dict[str, Any]] = []
-    while len(out) < limit:
-        want = min(1000, limit - len(out))
-        batch = (_land_usage_query(c, cols, before).or_(digits).order("id", desc=True)
-                 .range(len(out), len(out) + want - 1).execute().data or [])
-        out += batch
-        if len(batch) < want:
-            break
+    for untyped in (True, False):
+        got = 0
+        while len(out) < limit:
+            want = min(1000, limit - len(out))
+            batch = (_land_usage_query(c, cols, before, untyped).or_(digits).order("id", desc=True)
+                     .range(got, got + want - 1).execute().data or [])
+            out += batch
+            got += len(batch)
+            if len(batch) < want:
+                break
     return out
 
 
 def remaining_land_guesses(before: str) -> int:
     """The land chain's stop signal; an unreadable count reads as 0 so it can never loop."""
-    return _land_usage_query(db.sb(), "id", before).limit(1).execute().count or 0
+    c = db.sb()
+    return sum(_land_usage_query(c, "id", before, u).limit(1).execute().count or 0 for u in (True, False))
 
 
 AMENITY_REPAIR_TABLE = "aqar_amenity_fabrication_repair_20260809"
@@ -311,7 +324,8 @@ def recover(rows: list[dict[str, Any]], dry_run: bool, workers: int,
     lock = threading.Lock()
 
     def work(r: dict[str, Any]) -> None:
-        slug = TYPE_TO_SLUG.get(r.get("property_type") or "")
+        slug = TYPE_TO_SLUG.get(r.get("property_type") or "") or (
+            "land" if r.get("property_type") is None and "/أراضي-" in (r.get("listing_url") or "") else None)
         deal_slug = "rent" if (r.get("transaction_type") == "Rent") else "buy"
         if not slug or not r.get("listing_url"):
             # Never fetched — not the source's answer. Counted apart so it cannot hide inside

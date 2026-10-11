@@ -302,6 +302,8 @@ const eligibleProblems = (e: Eligible): string[] => {
   if (e({ platform: 'wasalt', deal_ar: 'بيع', type_ar: 'فيلا' })) out.push('a non-Aqar sale ad got a prices block');
   if (e({ platform: 'aqar', deal_ar: null, type_ar: 'فيلا' }) || e(null)) out.push('a row without a deal (or no row) got a prices block');
   if (e({ platform: 'aqar', deal_ar: 'بيع', type_ar: 'غير معروف' }) || e({ platform: 'aqar', deal_ar: 'بيع', type_ar: '' })) out.push('an ad whose type the source never stated got a prices block (our guess of its group)');
+  // «أرض» = Other Land: the source states no usage (owner 2026-10-10) — no group to compare it with.
+  if (e({ platform: 'aqar', deal_ar: 'بيع', type_ar: 'أرض' })) out.push('an Other Land plot («أرض», no stated usage) got a prices block');
   return out;
 };
 const eligibleReal = eligibleProblems(await liftEligible(DATA));
@@ -315,7 +317,8 @@ const mustCatchEligible = async (what: string, from: string, to: string) => {
   console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
 };
 await mustCatchEligible('a rent ad getting the block', " && String(row.deal_ar ?? '').trim() === 'بيع'\n", '\n');
-await mustCatchEligible('an unknown-type ad getting the block', "\n    && !['', 'غير معروف'].includes(String(row.type_ar ?? '').trim());", ';');
+await mustCatchEligible('an unknown-type ad getting the block', "\n    && !['', 'غير معروف', 'أرض'].includes(String(row.type_ar ?? '').trim());", ';');
+await mustCatchEligible('an Other Land plot («أرض») getting the block', "'غير معروف', 'أرض']", "'غير معروف']");
 await mustCatchEligible('a non-Aqar ad getting the block', "String(row.platform ?? '').trim().toLowerCase() === 'aqar' && ", '');
 const gated = (p: string) => /if \(!pricesBlockEligible\(row\)\) return;\s*const price = Number\(row\?\.price_total\)/.test(p) && /fetchMojSales\(row, commercial \? 'تجاري' : 'سكني'\)/.test(p);
 check('the page fetches the block only behind pricesBlockEligible(row), with the ministry class by macro', gated(PREVIEW));
