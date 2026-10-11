@@ -4847,16 +4847,18 @@ export default function Agent() {
                       accessible={false}
                       importantForAccessibility="no-hide-descendants"
                     >
-                      {/* EVERY picked site's logo, tightly overlapped, never a «+N» (owner 2026-10-09 round 2:
-                          «always show those small websites»). The strip is capped at five discs so the text
-                          box keeps its width; beyond that it scrolls sideways — every logo stays reachable. */}
+                      {/* EVERY picked site's logo, never a «+N» (owner 2026-10-09 round 2: «always show those
+                          small websites»). The strip keeps its width so the text box keeps its own; the logos
+                          shrink to fit it side by side (owner 2026-10-10: «try small … very small») — five fit
+                          at 14 px; only past the 12 px floor does it scroll sideways. */}
                       {selectedPlatforms.map((platform, i) => {
                         const { logo, layout } = PLATFORM_PICKER_PROFILES[platform.name];
                         // ONE site: its logo fills the pill (owner 2026-10-10: «make it big; small only when
-                        // more than 1»). Two or three share the space side by side.
-                        const single = selectedPlatforms.length === 1;
-                        const W = single ? 74 : 22;
-                        const H = single ? 24 : 22;
+                        // more than 1»). More share the strip: 22 px for two or three, smaller as more are lit.
+                        const n = selectedPlatforms.length;
+                        const single = n === 1;
+                        const W = single ? 74 : Math.max(12, Math.min(22, Math.floor((CHIP_STRIP_W - (n - 1) * CHIP_GAP) / n)));
+                        const H = single ? 24 : W;
                         const k = Math.min((H - 2) / layout.height, (W - 2) / layout.width);
                         return (
                           <View key={platform.name} style={[s.chipBadge, { width: W, height: H }, i > 0 && s.chipBadgeOverlap]}>
@@ -5194,6 +5196,9 @@ export default function Agent() {
   );
 }
 
+// The composer chip's picked-logo strip: its width, and the gap between logos (see the chip's render).
+const CHIP_STRIP_W = 78;
+const CHIP_GAP = 2;
 const s = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space.screenSide, paddingBottom: 8 },
   // Guided-interview summary + removable pills on the results turn (owner 2026-08-16). fontWeight
@@ -5428,14 +5433,14 @@ const s = StyleSheet.create({
   initialSearchIcon: { width: 17, height: 17 },
   initialSearchText: { color: colors.ink, fontSize: 14, lineHeight: 20, maxWidth: 148, flexShrink: 1 },
   // flexGrow 0: the strip hugs its discs (a ScrollView grows by default) so the pill stays centred.
-  chipStack: { maxWidth: 78, flexGrow: 0, flexShrink: 1 },
+  chipStack: { maxWidth: CHIP_STRIP_W, flexGrow: 0, flexShrink: 1 },
   chipStackContent: { flexDirection: 'row', alignItems: 'center' },
   // A 22px disc with a 1.5px ring in the pill's own fill, so overlapping marks stay separated.
   // No disc behind the logo (owner 2026-10-10: «I don't like how the logo has a background behind it») — the mark
   // sits straight on the pill; with at most 3 picks they stand side by side instead of overlapping.
   chipBadge: { width: 22, height: 22, overflow: 'hidden' },
   // The FIRST pick sits on top (zIndex inline), the rest peek out from behind it.
-  chipBadgeOverlap: { marginLeft: 3 },
+  chipBadgeOverlap: { marginLeft: CHIP_GAP },
   micBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   micBtnPressed: { backgroundColor: colors.segTrack, transform: [{ scale: 0.96 }] },
 
