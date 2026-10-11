@@ -62,3 +62,14 @@ def test_the_og_image_value_reaches_the_log_not_only_its_presence():
     lines = log_lines({"table": "t", "id": 1, "url": "u", "stored": {}, "page": page})
     assert "   og:image value: https://example.invalid/wp-content/uploads/2025/11/default-share.jpg" in lines
     assert not any("og:image value" in x for x in log_lines({"table": "t", "id": 1, "url": "u", "stored": {}, "page": {}}))
+
+
+def test_the_sellers_avatar_is_not_a_photo_of_the_property():
+    """Backlog 8 (2026-10-03): dealapp's JSON-LD carries offers.seller.image (the agent's avatar); an ad
+    with no photo read «page images 1». Only the property's own images count."""
+    from scrapers.common.source_reread import page_image_count
+    page = {"jsonld": [{"@type": "Product", "image": ["a.jpg", "b.jpg"],
+                        "offers": {"@type": "Offer", "seller": {"@type": "Person", "image": "avatar.jpg"}}}]}
+    assert page_image_count(page) == 2
+    only_seller = {"jsonld": [{"@type": "Product", "offers": {"seller": {"image": "avatar.jpg"}}}]}
+    assert page_image_count(only_seller) == 0
