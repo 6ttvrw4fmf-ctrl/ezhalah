@@ -27,7 +27,7 @@ export const SHARE_MESSAGE_AR = `${SHARE_LEAD_AR}\n${SHARE_LINK}`;
 export const SHARE_MESSAGE_EN = `${SHARE_LEAD_EN}\n${SHARE_LINK}`;
 // og:description and the in-app preview get the sentence WITHOUT the link (a preview card already shows
 // the domain under it). It ends on 🦅😉 — owner 2026-10-11: «add an eagle emoji … wink».
-export const SHARE_BLURB_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، الطريقة الأذكى للبحث عن العقار في المملكة 🦅😉';
+export const SHARE_BLURB_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، الطريقة الأذكى للبحث على العقار في المملكة 🦅😉';
 export const SHARE_BLURB_EN = 'Looking for a property and want to see everything on offer in one place? Ezhalah, the smarter way to find properties in the Kingdom 🦅😉';
 export const SHARE_TITLE_AR = 'إزهله';
 const SHARE = {
