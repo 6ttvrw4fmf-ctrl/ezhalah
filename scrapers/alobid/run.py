@@ -333,6 +333,11 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         # _flag() above; one shared definition rather than a fifth private copy.
         "parking":          _yes_or_silence(normalize.count_flag(L.get("parking_spots"))),
         "elevator":         _yes_or_silence(normalize.count_flag(L.get("elevators"))),
+        # structured facade + street-width cells (2026-10-11, normalize.facade_from_slug): they used to reach
+        # additional_info only, so no direction / street-width answer could find the ad.
+        "direction":        normalize.facade_from_slug(L.get("facade")),
+        "street_width_m":   normalize.one_street_width_of(*(L.get(k) for k in (
+            "street_width", "street_width_north", "street_width_south", "street_width_east", "street_width_west"))),
         "maid_room":        _yes_or_silence(normalize.count_flag(L.get("maid_rooms"))),
         "driver_room":      _yes_or_silence(normalize.count_flag(L.get("driver_rooms"))),
         "balcony_terrace":  _yes_or_silence(normalize.count_flag(L.get("balconies"))),

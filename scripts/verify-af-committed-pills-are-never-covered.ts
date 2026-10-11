@@ -19,7 +19,8 @@
 // uses. Three things have to stay true:
 //
 //   1. the pills render in every phase of a round (loading, intro, question);
-//   2. they sit ABOVE the scrim and OUTSIDE the card, so nothing of the round's is on top of them;
+//   2. they sit INSIDE the card, directly under its title bar (owner 2026-10-11: «I don't like how that
+//      popped up» — above the card they floated over the page), so the card itself is what shows them;
 //   3. NO pill is removable.
 //
 // AMENDED 2026-10-03 (owner: «we should not show any X button on this»). The pills stay exactly where
@@ -56,21 +57,27 @@ const agentCode = stripComments(agent);
 
 console.log('\nThe AF round card must not cover the committed pill row\n');
 
-// ── 1. THE PILLS ARE IN THE OVERLAY, ABOVE THE SCRIM ────────────────────────────────────────────
-// Structure, read as ORDER inside the overlay: backdrop first, pills second, card third. If the
-// pills ever move below <Reveal style={s.card}> they are inside the card; if they move above the
-// backdrop they are under the scrim. Both are the defect, in opposite directions.
+// ── 1. THE PILLS ARE INSIDE THE CARD, UNDER ITS TITLE BAR ───────────────────────────────────────
+// Structure, read as ORDER inside the overlay: backdrop, card, title bar, pills, the round's body. If the
+// pills move out above the card they float over the page again (owner 2026-10-11); if they move below
+// {children} they scroll away with the question. Both are the defect.
+const placement = (code: string): string[] => {
+  const out: string[] = [];
+  const overlay = code.indexOf('style={s.overlay}');
+  const backdrop = code.indexOf('style={s.backdrop}', overlay);
+  const cardEl = code.indexOf('<Reveal style={s.card}>', overlay);
+  const bar = code.indexOf('<View style={s.bar}>', cardEl);
+  const pills = code.indexOf('<CommittedPills', overlay);
+  const body = code.indexOf('{children}', cardEl);
+  if (!(overlay >= 0 && pills > overlay)) out.push('no <CommittedPills> inside the AF overlay');
+  if (!(backdrop >= 0 && pills > backdrop)) out.push('the pills are rendered before the backdrop — the scrim would cover them');
+  if (!(cardEl >= 0 && pills > cardEl)) out.push('the pills float above the card again');
+  if (!(bar > cardEl && pills > bar && body > pills)) out.push('the pills are not directly under the title bar, before the round body');
+  return out;
+};
 {
-  const overlay = cardCode.indexOf('style={s.overlay}');
-  const backdrop = cardCode.indexOf('style={s.backdrop}', overlay);
-  const pills = cardCode.indexOf('<CommittedPills', overlay);
-  const cardEl = cardCode.indexOf('<Reveal style={s.card}>', overlay);
-  check('the Shell renders the committed pills inside the overlay',
-    overlay >= 0 && pills > overlay, 'no <CommittedPills> inside the AF overlay');
-  check('…ABOVE the scrim, so nothing is painted on top of them',
-    backdrop >= 0 && pills > backdrop, 'the pills are rendered before the backdrop — the scrim would cover them');
-  check('…and OUTSIDE the card, so the round card cannot cover them',
-    cardEl >= 0 && pills < cardEl, 'the pills moved inside the card body');
+  const p = placement(cardCode);
+  check('the committed pills render inside the card, under the title bar, above the round body', p.length === 0, p.join('; '));
 }
 
 // ── 2. EVERY STATE OF THE ROUND CARRIES THEM ────────────────────────────────────────────────────
@@ -141,12 +148,8 @@ mustCatch('an overlay that renders no committed pills (the state this fix replac
   return before.indexOf('<CommittedPills') === -1;
 })());
 
-// M-2: the pills pushed INSIDE the card — visible, but back under the round's own chrome and
-// scrolling with it rather than standing clear of it.
-mustCatch('pills moved inside the card body instead of above it', (() => {
-  const moved = '<View style={s.overlay}>\n<Pressable style={s.backdrop} />\n<Reveal style={s.card}>\n<CommittedPills />';
-  return moved.indexOf('<CommittedPills') > moved.indexOf('<Reveal style={s.card}>');
-})());
+// M-2: the pills floating ABOVE the card again (the shape the owner rejected on 2026-10-11).
+mustCatch('pills floating above the card again', placement('<View style={s.overlay}>\n<Pressable style={s.backdrop} />\n<CommittedPills />\n<Reveal style={s.card}>\n<View style={s.bar}></View>\n{children}').length > 0);
 
 // M-3: the pills under the SCRIM — rendered, dimmed, and unclickable. The subtlest version.
 mustCatch('pills rendered before the backdrop, so the scrim covers them', (() => {
@@ -180,11 +183,8 @@ mustCatch('a pill row with a Pressable and a close icon', (() => {
 })());
 
 // M-7: and a correct implementation must NOT be flagged.
-mustCatch('the shipped implementation is not flagged', (() => {
-  const overlay = cardCode.indexOf('style={s.overlay}');
-  return cardCode.indexOf('<CommittedPills', overlay) > cardCode.indexOf('style={s.backdrop}', overlay)
-    && cardCode.indexOf('<CommittedPills', overlay) < cardCode.indexOf('<Reveal style={s.card}>', overlay);
-})());
+mustCatch('the shipped implementation is not flagged', placement(cardCode).length === 0);
+mustCatch('pills pushed below the round body', placement(cardCode.replace('{pills ? <CommittedPills facets={pills.facets} /> : null}\n        {children}', '{children}\n        {pills ? <CommittedPills facets={pills.facets} /> : null}')).length > 0);
 
 if (mutFail > 0) failed += mutFail;
 

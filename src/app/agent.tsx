@@ -19,13 +19,14 @@ import { Image } from 'expo-image';
 import { PLATFORM_PICKER_PROFILES, pickerSourceSlugs, togglePickerSource, applyPickerSources, MAX_PICKER_SOURCES, platformRegionIds, platformRegionShare, platformRegionListings } from '@/data/platformPickerProfiles';
 import PickerRegionsMap, { regionLabel } from '@/components/PickerRegionsMap';
 import { pickAfCourtesyOpening } from '@/data/afCourtesyOpeners';
+import AfRoundLoader from '@/components/AfRoundLoader';
 import { colors, radius, space, cardShadow } from '@/theme/tokens';
 import { COMPOSER_INPUT, TAP44 } from '@/theme/palette';
 import { runAfterAnimation } from '@/lib/afterAnimation';
 import { shouldRenderModeSwitch } from '@/lib/shouldRenderModeSwitch';
 import { isAppSessionStarted } from '@/lib/appSession';
 import { msgRTL } from '@/lib/textDirection';
-import { stopReadAloud, subscribeReadAloud } from '@/lib/readAloud';
+import { stopReadAloud, subscribeReadAloud, stripEmoji } from '@/lib/readAloud';
 import { startVoiceInput, stopVoiceInput, cancelVoiceInput, isVoiceInputSupported } from '@/lib/voiceInput';
 import VoiceWaveform from '@/components/VoiceWaveform';
 import AgentModelSelector from '@/components/AgentModelSelector';
@@ -175,7 +176,7 @@ type ChatMsg =
   // `query` + `resultSources` feed the search-loading animation's platform strip (which real
   // platforms to show while searching); they never affect the search itself. `exiting` tells the
   // loader to fade out softly just before the morph to results (owner v4: no hard cut).
-  | { id: string; role: 'status'; phase: 'thinking' | 'searching'; slogan?: string; summary?: string; query?: SearchQuery; resultSources?: string[]; exiting?: boolean };
+  | { id: string; role: 'status'; phase: 'thinking' | 'searching'; slogan?: string; summary?: string; query?: SearchQuery; resultSources?: string[]; exiting?: boolean; afRound?: { items: string[] } };
 
 const uid = () => 'm' + Date.now() + Math.round(Math.random() * 1e6);
 
@@ -431,8 +432,8 @@ const SEARCH_MS = 600;
 // therefore needs a real decision — a longer floor, or a wave that lights more than one pill per
 // step — and MAX_ROSTER is the guard that will stop it silently slipping through.
 const SEARCH_MIN_MS = 10600;
-// An Advanced Filter round's platform animation (owner 2026-10-10: 10 seconds).
-const AF_LOADER_MS = 10000;
+// An Advanced Filter round's search beat (owner 2026-10-11: 5 seconds, «نبحث عن …» changing pick by pick — AfRoundLoader).
+const AF_LOADER_MS = 5000;
 // Soft completion (owner v4): before morphing to results, flag the loader `exiting` and give its
 // fade-out this long — the strip glides away into the results state instead of vanishing in a frame.
 const LOADER_EXIT_MS = 450;
@@ -1736,7 +1737,7 @@ export default function Agent() {
     // completion signal and must never drive checkmarks (owner: no ✓ in the loader, ever).
     const resultSources = Array.from(new Set(result.listings.map((l) => l.source).filter(Boolean)));
     setMsgs((m) => m.map((x) => (x.id === statusId
-      ? { id: statusId, role: 'status', phase: 'searching', slogan, summary, query: result.query ?? (x.role === 'status' ? x.query : undefined), resultSources }
+      ? { id: statusId, role: 'status', phase: 'searching', slogan, summary, query: result.query ?? (x.role === 'status' ? x.query : undefined), resultSources, afRound: x.role === 'status' ? x.afRound : undefined }
       : x)));
     toBottom();
     // Wait only the REMAINDER of the minimum searching beat (counted from when the searching loader
@@ -1745,7 +1746,7 @@ export default function Agent() {
     const since = searchingAtRef.current[statusId] ?? Date.now();
     searchingAtRef.current[statusId] = since;
     // A NEW search waits the 10.6 s every-platform floor + its page dwell. An Advanced Filter round
-    // (2026-10-05 skipped it entirely; owner 2026-10-10 now wants 10 s) waits AF_LOADER_MS instead.
+    // (2026-10-05 skipped it; 10-10 10 s of logos; owner 2026-10-11: 5 s, one sentence) waits AF_LOADER_MS instead.
     if (!afCompleted) {
       const remaining = SEARCH_MIN_MS - (Date.now() - since);
       if (remaining > 0) await waitRun(run, remaining);
@@ -1753,9 +1754,9 @@ export default function Agent() {
       // The search has already completed; this changes only when its results are revealed.
       while (!run.cancelled && loaderPresentedRef.current[statusId] !== true) await waitRun(run, 100);
     } else {
-      // AN ADVANCED FILTER ROUND SHOWS THE PLATFORM ANIMATION FOR 10 SECONDS (owner 2026-10-10: «for the
-      // advanced filter the animation time make it 10 seconds»; reverses the 2026-10-05 skip). A plain
-      // floor from when the loader appeared — no page-dwell gate, so it is never longer than 10 s.
+      // AN ADVANCED FILTER ROUND HOLDS ITS ONE-SENTENCE BEAT FOR 5 SECONDS (owner 2026-10-11: «make it 5
+      // seconds … one sentence of what he selected»; 10-10 was 10 s of logos, 10-05 skipped it). A plain
+      // floor from when the beat appeared — no page-dwell gate, so it is never longer than 5 s.
       const remaining = AF_LOADER_MS - (Date.now() - since);
       if (remaining > 0) await waitRun(run, remaining);
     }
@@ -2422,7 +2423,7 @@ export default function Agent() {
   // `opts.guided` attaches the interview's facets to the results turn for the removable pills.
   const runRefine = async (
     baseQ: SearchQuery, dim: string, value: string, label: string,
-    opts?: { onFetched?: (total: number | null) => void; guided?: { baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[] } },
+    opts?: { onFetched?: (total: number | null) => void; guided?: { baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[] }; afRound?: { items: string[] } },
   ) => {
     pendingRefineRef.current = null;
     finalizeReveal();
@@ -2438,7 +2439,7 @@ export default function Agent() {
     // Guaranteed search → the searching loader (roster + wave) starts IMMEDIATELY, no thinking beat.
     searchingAtRef.current[statusId] = Date.now();
     const echoId = uid();
-    setMsgs((m) => [...m, { id: echoId, role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined }]);
+    setMsgs((m) => [...m, { id: echoId, role: 'user', text: label }, { id: statusId, role: 'status', phase: 'searching', query: refined, afRound: opts?.afRound }]);
     toBottom();
     // STAY IN THE SECTION YOU ARE IN (owner 2026-10-03). The round just closed on the old turn's
     // «تحديد أكثر» button, so the new answers bubble and the loader are appended directly below it —
@@ -2788,6 +2789,8 @@ export default function Agent() {
     const roundLabel = ageFlowLabelsRef.current.join('، ');
     void runRefine(q, '__guided__', '', locale === 'ar' && roundLabel ? pickAfCourtesyOpening() + roundLabel : roundLabel, {
       guided,
+      // The picks in the chips' own words, without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات») — clearer than the raw labels.
+      afRound: { items: buildAfSummaryItems(ageFlowFacetsRef.current).map((x) => stripEmoji(x).trim()).filter(Boolean) },
       onFetched: (total) => {
         const msgId = refineMsgIdRef.current;
         if (!stillMining()) return;
@@ -4291,6 +4294,8 @@ export default function Agent() {
                 // The branded slogan + search summary are NOT shown here anymore (owner: keep loading
                 // clean/focused); they still appear in the RESULTS bubble below, unchanged. RTL is
                 // handled inside SearchLoader (the message column is LTR-pinned).
+                // An Advanced Filter round: one sentence of the user's picks, each landing in turn (owner 2026-10-11).
+                if (m.afRound) return <AfRoundLoader key={m.id} items={m.afRound.items} exiting={m.exiting} fontFamily={CHAT_FONT} />;
                 return <SearchLoader key={m.id} bottomInset={loaderBottomInset} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} />;
               }
               if (m.role === 'agent') {

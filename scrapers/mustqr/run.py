@@ -766,6 +766,11 @@ def map_listing(p: dict, n_to_region: dict[str, str]) -> tuple[Optional[dict], s
         "area_m2": area,
         "bedrooms": bedrooms,
         "bathrooms": _int(p.get("bathrooms")),
+        # mustqr's structured facade cell («شمالي», «جنوبي غربي», «3 شوارع») reached additional_info only, so on
+        # 103 active ads with a single bearing the direction question never found them (🔬 2026-10-11). One
+        # bearing → that direction; a pair, «3 شوارع» or anything else → NULL (the cell's own set also holds
+        # «شمالي جنوبي», so a pair can be two streets, not a diagonal). Raw stays in additional_info.
+        "direction": normalize.one_direction(p.get("direction")),
         "city": DEFAULT_CITY,
         "region": DEFAULT_REGION,
         "neighborhood": raw_neigh,
