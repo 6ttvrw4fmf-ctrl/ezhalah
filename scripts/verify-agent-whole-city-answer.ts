@@ -106,7 +106,7 @@ check('wholeCityQuestionSubject() is exported from agent.tsx', !!subjMatch);
 if (tplMatch) {
   // Rebuild both halves from the source text and prove they agree for real city names.
   const tplBody = tplMatch[1].slice(1, -1); // strip the backticks
-  const render = (city: string) => tplBody.replace('${cityAr}', city);
+  const render = (city: string) => tplBody.replace('${cityAr}', city).replace('${PIN}', '📍'); // PIN = the question's closing emoji (src/data/questionExamples.ts)
   const reMatch = /const m = (\/\^.*?\/u)\.exec/.exec(agentSrc);
   check('the subject parser uses a single anchored regex', !!reMatch);
   if (reMatch) {
