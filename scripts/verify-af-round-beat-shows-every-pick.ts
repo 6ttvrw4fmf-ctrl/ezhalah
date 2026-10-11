@@ -3,10 +3,13 @@
 // the first pacing, 5 picks needed ~6.4 s, so the last one («مصعد») never appeared before the results.
 // This executes the real pacing function against the real 5 s floor for 1..10 picks.
 //   node --experimental-strip-types scripts/verify-af-round-beat-shows-every-pick.ts   (in `npm test`)
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { liftSymbols } from './lib/liftSymbols.ts';
 import { stripComments } from './lib/stripComments.ts';
+import { buildAfBeatSteps, type AfFacet } from '../src/lib/afSummary.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const FILE = join(ROOT, 'src/components/AfRoundLoader.tsx');
@@ -63,6 +66,52 @@ mustCatch('the dark-ink bold pick coming back', !likeTheTopLine(AF_SRC.replace('
 mustCatch('a muted lead against the pick again', !likeTheTopLine(AF_SRC.replace('  line: {', '  lead: { color: colors.muted },\n  line: {'), SL_SRC));
 mustCatch('the pulse being removed', !likeTheTopLine(AF_SRC.replace('opacity: pulse', 'opacity: 1'), SL_SRC));
 mustCatch('a different weight from the search line', !likeTheTopLine(AF_SRC.replace("fontWeight: '600', color: colors.body", "fontWeight: '800', color: colors.body"), SL_SRC));
+
+// THE BEAT SAYS «نفحص N عقار…» — CHECKING, WITH THE REAL SIZE OF THE SET EACH ANSWER IS CHECKED AGAINST (owner
+// 2026-10-11: «the animation should be checking like this», pointing at «نفحص أكثر من 349,793 عقار…», then «do that»
+// for «نفحص 830 عقار…» → «نفحص 177 عقار…»). The sizes are the interview's own: the set each question was ASKED against.
+// Executed against the real step builder, then the loader and its wiring pinned by source shape.
+const F = (id: string, keys: string[], labels: string[], total?: number): AfFacet => ({ id, keys, labels, total });
+const age = F('property_age', ['new'], ['جديد'], 1425);
+const lift = F('amenities', ['elevator', 'ac'], ['مصعد', 'تكييف'], 830);
+type Steps = typeof buildAfBeatSteps;
+// What a beat builder must do — judged on ANY copy of it, so a mutant of the real source is held to the same list.
+const beatProblems = (fn: Steps): string[] => {
+  const out: string[] = [];
+  if (JSON.stringify(fn([age, lift])) !== JSON.stringify([{ label: 'عمر جديد ✨', pool: 1425 }, { label: 'مصعد 🛗، وتكييف ❄️', pool: 830 }]))
+    out.push('not one beat per answered question with the set size it was checked against');
+  if (fn([lift]).length !== 1) out.push('a multi-select answer (elevator + A/C) is more than one beat');
+  if (!fn([F('property_age', ['new'], ['جديد']), F('property_age', ['old'], ['قديم'], 0)]).every((x) => x.pool === null))
+    out.push('a size that was never known is not null (the beat would invent a count)');
+  if (fn([age, age]).length !== 1) out.push('the same answer twice is more than one beat');
+  return out;
+};
+// A mutant is the REAL afSummary.ts with one line broken, loaded from a temp copy (the file has no imports).
+const SUMMARY_SRC = readFileSync(join(ROOT, 'src/lib/afSummary.ts'), 'utf8');
+const loadMutant = async (from: string, to: string): Promise<Steps> => {
+  if (!SUMMARY_SRC.includes(from)) throw new Error(`mutation anchor missing: ${from.slice(0, 70)}`);
+  const f = join(mkdtempSync(join(tmpdir(), 'af-beat-')), 'afSummary.ts');
+  writeFileSync(f, SUMMARY_SRC.replace(from, to));
+  return ((await import(`${pathToFileURL(f).href}?m=${Math.random()}`)) as { buildAfBeatSteps: Steps }).buildAfBeatSteps;
+};
+const REAL_POOL = "typeof f.total === 'number' && f.total > 0 ? f.total : null";
+const realProblems = beatProblems(buildAfBeatSteps);
+check('one beat per answered question, each with the set size it was checked against; a multi-select is ONE beat; an unknown size is null',
+  realProblems.length === 0, realProblems.join('\n      '));
+mustCatch('a beat per pick (a multi-select answer showing the same number twice)',
+  beatProblems(await loadMutant(`steps.push({ label: joinAr(fresh), pool: ${REAL_POOL} });`, `fresh.forEach((it) => steps.push({ label: it, pool: ${REAL_POOL} }));`)).length > 0);
+mustCatch('a beat that drops the size (every pool null)', beatProblems(await loadMutant(`pool: ${REAL_POOL}`, 'pool: null')).length > 0);
+mustCatch('a beat that invents a size when none was known (0 treated as a count)', beatProblems(await loadMutant("typeof f.total === 'number' && f.total > 0 ?", "typeof f.total === 'number' ?")).length > 0);
+mustCatch('the same answer shown twice (no dedupe)', beatProblems(await loadMutant('.filter((it) => !seen.has(it));', ';')).length > 0);
+const LOADER_NUMBER = /pool != null \? t\('Checking \{count\} properties…', \{ count: grouped\(pool\) \}\) : `\$\{t\('Checking'\)\} \$\{pick\}…`/;
+const AGENT_STRIPPED = stripComments(AGENT);
+const wiredToSteps = (loader: string, agent: string) => LOADER_NUMBER.test(loader)
+  && /<AfRoundLoader key=\{m\.id\} items=\{m\.afRound\.items\} pools=\{m\.afRound\.pools\}/.test(agent)
+  && /buildAfBeatSteps\(ageFlowFacetsRef\.current\)/.test(agent) && !/Searching for/.test(loader);
+check('the loader says «نفحص N عقار…» (or names the pick when no size is known) and the round hands it the sizes', wiredToSteps(AF_SRC, AGENT_STRIPPED));
+mustCatch('the loader going back to «نبحث عن»', !wiredToSteps(AF_SRC.replace("t('Checking {count} properties…'", "t('Searching for'"), AGENT_STRIPPED));
+mustCatch('the round no longer handing the loader the sizes', !wiredToSteps(AF_SRC, AGENT_STRIPPED.replace('pools={m.afRound.pools}', '')));
+mustCatch('the round building its beats from the picks alone (no sizes)', !wiredToSteps(AF_SRC, AGENT_STRIPPED.replace('buildAfBeatSteps(ageFlowFacetsRef.current)', 'buildAfSummaryItems(ageFlowFacetsRef.current)')));
 
 console.log(failed === 0 ? '\n✅ every Advanced Filter pick gets its turn inside the 5 s beat.\n' : `\n❌ ${failed} check(s) failed.\n`);
 process.exit(failed === 0 ? 0 : 1);

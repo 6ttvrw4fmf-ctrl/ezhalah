@@ -11,6 +11,7 @@ import { Animated, Easing, StyleSheet, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '@/theme/tokens';
 import { useI18n } from '@/i18n';
+import { grouped } from '@/data/search';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 
 /** Pacing for n picks: the LAST pick lands by 4.2 s of the 5 s beat, whatever n is. `share` is one pick's
@@ -25,7 +26,7 @@ export function afPickTiming(n: number): { wait: number; swap: number } {
   return { wait: share - swap, swap };
 }
 
-function AfRoundLoader({ items, exiting, fontFamily }: { items: string[]; exiting?: boolean; fontFamily?: string }) {
+function AfRoundLoader({ items, pools, exiting, fontFamily }: { items: string[]; pools?: Array<number | null>; exiting?: boolean; fontFamily?: string }) {
   const { t, isRTL } = useI18n();
   const reduced = useReducedMotion();
   const [index, setIndex] = useState(0);
@@ -57,13 +58,18 @@ function AfRoundLoader({ items, exiting, fontFamily }: { items: string[]; exitin
     }, reduced ? wait + swap : wait);
     return () => { clearTimeout(id); if (swapId) clearTimeout(swapId); };
   }, [index, items.length, reduced, fade]);
-  const pick = items[Math.min(index, items.length - 1)] ?? '';
+  const at = Math.min(index, items.length - 1);
+  const pick = items[at] ?? '';
+  // «نفحص 830 عقار…» — CHECKING, with the real size of the set this pick is checked against (owner 2026-10-11: «the
+  // animation should be checking like this», pointing at «نفحص أكثر من 349,793 عقار…»). Where that size was never
+  // known the line names the pick instead («نفحص مصعد…») — it never invents a number.
+  const pool = pools?.[at] ?? null;
+  const text = pool != null ? t('Checking {count} properties…', { count: grouped(pool) }) : `${t('Checking')} ${pick}…`;
   return (
     <View testID="af-round-loader" style={[styles.wrap, exiting && styles.exiting, { flexDirection: isRTL ? 'row-reverse' : 'row' }]}>
       <Ionicons name="sparkles" size={16} color={colors.primary} />
       <Animated.Text style={[styles.line, { fontFamily, textAlign: isRTL ? 'right' : 'left', writingDirection: isRTL ? 'rtl' : 'ltr', opacity: pulse }]} numberOfLines={1}>
-        {t('Searching for')}{' '}
-        <Animated.Text style={{ opacity: fade }}>{pick}…</Animated.Text>
+        <Animated.Text style={{ opacity: fade }}>{text}</Animated.Text>
       </Animated.Text>
     </View>
   );

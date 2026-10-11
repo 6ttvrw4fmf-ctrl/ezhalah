@@ -615,8 +615,10 @@ const AR: Record<string, string> = {
   // Live-number variants (owner 2026-09-12) — {count}/{cities}/{districts} are real, derived
   // figures (loaderScaleStats.ts), never hardcoded; see SEARCH_TITLES's comment in SearchLoader.tsx.
   'Checking more than {count} properties…': 'نفحص أكثر من {count} عقار…',
-  // The Advanced Filter round's beat (owner 2026-10-11): «نبحث عن فيلا…» → «نبحث عن مصعد…», one pick at a time.
-  'Searching for': 'نبحث عن',
+  // The Advanced Filter round's beat (owner 2026-10-11): CHECKING with the real size of the set each answer is checked
+  // against — «نفحص 1,425 عقار…» → «نفحص 830 عقار…» (and «نفحص مصعد…» when that size was never known).
+  'Checking {count} properties…': 'نفحص {count} عقار…',
+  'Checking': 'نفحص',
   'Reviewing {count} real-estate platforms…': 'نراجع {count} منصة عقارية…',
   // ONE combined place count (owner 2026-09-12), not a separate cities+districts pair — see
   // SearchLoader.tsx's own comment at the coverage line for why.
