@@ -47,6 +47,34 @@ web page is NOT their liveness oracle: use Gathern's own search list (the unit s
 hide a whole city or cohort in one run without that proof (the cardinality guard). Report a daily line: «🏕️ Gathern: live N ·
 checked today N · hidden today N · oldest unchecked N h». Anything above 26 h unchecked is RED.
 
+## 🧹 BUGS MUST DISAPPEAR, EVERY DAY (owner, 2026-10-11: «my goal is everyday making the bugs disappear … better and better»)
+The owner judges each night by one question: **are there fewer bugs on screen than yesterday?** A bug that is
+found, written down and still there tomorrow counts against you. This block is the order of every night:
+
+1. **Broken robots first (first 10 min).** Read open `alert_event` rows of kind `liveness_job_silent`,
+   `liveness_checking_stalled` and `workflow_failed` for lifecycle jobs. A checker that is not running hides
+   nothing, so it beats every other bug. Lesson of 2026-10-11: the dealapp sweep failed 12 runs in a row for
+   26 h (pg_cron's own log said `succeeded`) while `liveness_job_silent:dealapp_liveness` sat open from 07:59 UTC.
+2. **Yesterday's open items next, to the end.** Every `lifecycle:followup` item from yesterday is either closed
+   with a proof row tonight, or carries the exact new blocker. The same blocker two nights running means change
+   the approach (rule above: «the same blocker two nights in a row means you change your approach»).
+3. **Then every site over the line in `ops_dead_visible_fleet`.** For each `gone_ids` ad: is its checker about
+   to hide it (strikes, next run time)? If not, that is a bug. Fix the checker, never hide around it.
+4. **Never wait on a person for something a better tool removes.** If a step needs a human click (example: the
+   registry reseed's DELETE is held by the DB connector, 10-09 and again 10-11), do the step's work, then build
+   the path that removes the human from it next time and put that path in the PR for one approval.
+5. **Tiny websites are not exempt.** A site with 1–5 ads can never pass the 5-control gate or the 80% coverage
+   floor, so its dead ads stay forever (manzo 13621247, 10-11). Those sites retire an ad only on its own page's
+   «gone» reading (strike only the ads read gone, as muktamel's `_strike_read_gone` does), never on absence.
+6. **Plan proofs around the clock.** The search index syncs at :22 every hour. Finish each fix before a :22 so
+   its proof lands inside the slot; a fix with no proof row is not a fixed bug.
+7. **Before restoring a hidden ad, check that its "alive" evidence was a fresh read.** On 10-10 a stamp from a
+   cached page up to 24 h old outvoted three fresh «gone» reads, and a dead ad went back on screen for a day.
+
+**The end row adds one line:** «🧹 Bugs on screen: yesterday N → tonight M», counted as the over-the-line ads
+in `ops_dead_visible_fleet` plus the open P1 lifecycle backlog items. It must fall every night. If it doesn't,
+the first line of the report says why.
+
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «I trust the lifecycle engineer … I don't want to go back and forth with it … make it
 powerful so it does an amazing job.» So this section is the whole plan, written to be followed without
