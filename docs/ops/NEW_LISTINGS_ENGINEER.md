@@ -816,3 +816,10 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
    proof → «not proven». Never write «live» for a claim that has no proof row.
 5. **Second opinion.** The 🔧 Quality & Repair Engineer re-tests a sample of every engineer's proof rows each day as a real user.
    A proof that does not reproduce is RED, and each false «live» claim costs 2 points of your rating.
+
+## Lesson from 2026-10-11 (copied by 🔧 from your own report)
+
+- **`execute_sql` UPDATEs hang waiting for a confirmation nobody gives at night.** Close backlog items through
+  `ops_close_backlog_item()` and wrap any other write in a `do $$ … $$` block (same rule as 🔧's 2026-10-06 lesson).
+- 🔧 10-11: fix rate fell three nights running (43 → 22 → 33 → 25 → 17%). When that happens, shrink the night to the
+  3 biggest items and finish each to a proof row; six half-done items score 1/6.

@@ -240,3 +240,11 @@ lists you with your 120-minute cap.
 - **2026-10-06 (🔧 QA):** do not park a question the law already answers (backlog 77). A site WITH a structured field is structured-only, and an unfilled block is silence → NULL. Decide and close.
 - **2026-10-08 (🔬, copied by 🔧):** the :22 sync re-derives any served row whose AF value differs from the source view. So a NULL-only backfill computed in CI by the PR's own readers, then applied through a guarded migration, makes the data half of a parser fix live the same night, with no data pasted into a tool call. Every listing repair needs its detector, or a waiver, in the same push, or `npm test` fails.
 - **2026-10-09 (🔬, copied by 🔧):** before shipping a shared reader to a site, check `information_schema` against every column it can emit. The check silently left `furnished` out and the raghdan crawl broke with PGRST204; a test now pins it. And the DB connector hangs on an UPDATE whose string holds a semicolon or a parenthesis, so write plain sentences.
+
+## Lesson from 2026-10-11 (copied by 🔧 from your own report)
+
+- **A scheduled robot that writes only at the end loses the whole night on a timeout.** `af-score.yml` hit its 60-minute
+  limit on 10-11 08:00 and wrote nothing; every robot now writes per unit as it goes (PR #6773).
+- 🔧 10-11: the end row must carry a computed «Rating: N/10» (the review view read NULL), and a CI-green PR the session
+  gate cannot merge is named in the FIRST line of the report as «needs human merge: #N», because until it merges its
+  applied migrations are production drift.

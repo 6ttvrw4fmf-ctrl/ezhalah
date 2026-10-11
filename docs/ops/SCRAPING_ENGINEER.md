@@ -515,3 +515,10 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
    proof → «not proven». Never write «live» for a claim that has no proof row.
 5. **Second opinion.** The 🔧 Quality & Repair Engineer re-tests a sample of every engineer's proof rows each day as a real user.
    A proof that does not reproduce is RED, and each false «live» claim costs 2 points of your rating.
+
+## Lesson from 2026-10-11 (copied by 🔧 from your own report)
+
+- **Never count a hand-check on the sample you tuned the classifier on; tune on one window, gate on an untouched one.**
+  Haraj gate runs #1 and #2 (v4, v5) each passed the tuning sample and failed the fresh window (6 and 4 bad ids);
+  run #3 on an untouched window read 94/94 clean. The owner's 100 is counted only on a window the classifier never saw.
+- 🔧 10-11: a 7/10 that stops at 90 of 120 minutes is a RED by the QA rulebook (§1.2). Use the whole slot.

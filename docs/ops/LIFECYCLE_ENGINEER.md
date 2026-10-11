@@ -1184,3 +1184,13 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
    proof → «not proven». Never write «live» for a claim that has no proof row.
 5. **Second opinion.** The 🔧 Quality & Repair Engineer re-tests a sample of every engineer's proof rows each day as a real user.
    A proof that does not reproduce is RED, and each false «live» claim costs 2 points of your rating.
+
+## Lesson from 2026-10-11 (copied by 🔧 from your own report)
+
+- **Before restoring a hide, check that both readers apply the same freshness rule. A stamp from a cached copy is not a
+  live reading.** dealapp 9252915 was restored on 10-10 over a crawl stamp taken from a CloudFront copy up to 24 h old,
+  while the sweep believes copies only up to 1 h; it was dead on its own page. One constant (`liveness.FRESH_MAX_AGE_S`)
+  now governs both readers (#6779).
+- 🔧 10-11: write the `lifecycle:start` row first (without it `ops_engineer_review` reads the night as NOT RUN), and
+  name every open P0 in your lane in line 1 of the report (alert 9067 deleted_but_source_live:gathern was open all night
+  and unreported; the shape was benign, the silence was not).
