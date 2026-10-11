@@ -49,6 +49,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
 BASE = "https://sa.opensooq.com"
@@ -233,6 +234,51 @@ def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
     cap = {k: v for k, v in x.items() if k not in _NEVER_STORE}
     row["source_capture"] = strip_pii_fields({"schema": "opensooq.serp.v1", "item": cap})
     return (row, category), ""
+
+
+RES_TABLE, COM_TABLE = "opensooq_residential_listings", "opensooq_commercial_listings"
+_ARCHIVED = "هذا الإعلان غير متوفر"      # the «Archive Listing» page of a removed ad (measured 2026-10-02)
+
+
+def _signal_for(post_id: str):
+    """'live' | 'gone' | None for the ad's OWN page /ar/search/<id> — only what it says about ITSELF.
+
+    Measured 2026-10-02 on the two ads the SERP had dropped (284834558, 286273548): the page is an
+    «Archive Listing» that prints «هذا الإعلان غير متوفر». A hard 404/410 is gone too. A live page is
+    a 200 that carries this ad's own id and no archive banner. A redirect elsewhere, a block, a 5xx,
+    or a 200 that does not name this ad is UNKNOWN — never read as dead (LISTING_LIVENESS.md §3)."""
+    def signal(status, body, moved) -> Optional[str]:
+        if status in (404, 410):
+            return "gone"
+        if status != 200 or moved:
+            return None
+        if _ARCHIVED in body:
+            return "gone"
+        return "live" if post_id and post_id in body else None
+    return signal
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for the daily direct check (fleet_liveness.SITES). 2026-10-11: OpenSooq's
+    prune never hid anything — its guard trips on a 100-row catalogue (re-saw 54 of 72) and absence
+    never hides on its own — so 19 ads its SERP had dropped (since 09-28) stayed on screen. A removal
+    is believed only while a known-live ad from the same run still reads live through this session."""
+    url_for = stored_listing_url((RES_TABLE, COM_TABLE))
+    s = cc.Session(impersonate=IMPERSONATE)
+    s.headers.update({"Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
+
+    def probe(ad_number: str, canary=None):
+        post_id = str(ad_number or "").removeprefix(PREFIX)
+        return LivenessProbe(platform=SLUG, signal=_signal_for(post_id), session=lambda: s,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no known-live row to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
 
 
 def main() -> int:
