@@ -63,9 +63,10 @@ const GOOD = 'on:\n  workflow_dispatch:\n\njobs:\n  sweep:\n    uses: ./.github/
 const INLINE = 'concurrency: dealapp-liveness\njobs:\n  sweep:\n    uses: ./.github/workflows/callee.yml\n';
 const stub = (f: string) => (f === 'callee.yml' ? CALLEE : null);
 const proof: string[] = [];
-if (deadlocks('bad.yml', BAD, stub).length !== 1) proof.push('the 2026-10-10 deadlock shape was NOT caught');
-if (deadlocks('inline.yml', INLINE, stub).length !== 1) proof.push('the short-form concurrency shape was NOT caught');
-if (deadlocks('good.yml', GOOD, stub).length !== 0) proof.push('a caller without a group was flagged');
+const mustCatch = (label: string, caught: boolean) => { if (!caught) proof.push(label); };
+mustCatch('the 2026-10-10 deadlock shape (mapping form) is caught', deadlocks('bad.yml', BAD, stub).length === 1);
+mustCatch('the short-form concurrency shape is caught', deadlocks('inline.yml', INLINE, stub).length === 1);
+mustCatch('a caller with no group of its own is NOT flagged', deadlocks('good.yml', GOOD, stub).length === 0);
 if (proof.length) {
   console.error('✗ verify-reusable-workflow-concurrency-no-deadlock: mutation proof failed\n  ' + proof.join('\n  '));
   process.exit(1);
