@@ -551,6 +551,15 @@ def main() -> int:
             row = new_row(night, p, note=f"error: {type(e).__name__}: {e}"[:300])
         rows.append(row)
         print(_line(row), flush=True)
+        # WRITE AS YOU GO (🔬 2026-10-11): the 08:00 run of 2026-10-11 hit the job's 60-minute timeout after
+        # ~140 websites and was cancelled before the single write at the end, so the night had NO score rows.
+        # Each website's row is upserted the moment it is scored (night+platform, idempotent); the final write
+        # below re-sends them all. A failed incremental write is retried by that final write, never fatal here.
+        if not a.dry_run:
+            try:
+                write_rows(client, [row])
+            except Exception as e:  # noqa: BLE001
+                print(f"  ! incremental write failed for {p}: {type(e).__name__}: {e}"[:300], flush=True)
     try:
         from scrapers.common.cleanup import _close_wasalt_browser
         _close_wasalt_browser()
