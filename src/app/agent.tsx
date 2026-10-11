@@ -176,7 +176,7 @@ type ChatMsg =
   // `query` + `resultSources` feed the search-loading animation's platform strip (which real
   // platforms to show while searching); they never affect the search itself. `exiting` tells the
   // loader to fade out softly just before the morph to results (owner v4: no hard cut).
-  | { id: string; role: 'status'; phase: 'thinking' | 'searching'; slogan?: string; summary?: string; query?: SearchQuery; resultSources?: string[]; exiting?: boolean; afRound?: { count: number | null; items: string[] } };
+  | { id: string; role: 'status'; phase: 'thinking' | 'searching'; slogan?: string; summary?: string; query?: SearchQuery; resultSources?: string[]; exiting?: boolean; afRound?: { items: string[] } };
 
 const uid = () => 'm' + Date.now() + Math.round(Math.random() * 1e6);
 
@@ -432,7 +432,7 @@ const SEARCH_MS = 600;
 // therefore needs a real decision — a longer floor, or a wave that lights more than one pill per
 // step — and MAX_ROSTER is the guard that will stop it silently slipping through.
 const SEARCH_MIN_MS = 10600;
-// An Advanced Filter round's search beat (owner 2026-10-11: 5 seconds, one sentence of the picks — AfRoundLoader).
+// An Advanced Filter round's search beat (owner 2026-10-11: 5 seconds, «نبحث عن …» changing pick by pick — AfRoundLoader).
 const AF_LOADER_MS = 5000;
 // Soft completion (owner v4): before morphing to results, flag the loader `exiting` and give its
 // fade-out this long — the strip glides away into the results state instead of vanishing in a frame.
@@ -1243,8 +1243,6 @@ export default function Agent() {
   // Latest KNOWN size of the narrowed set (from the ranked probes) — feeds the intro count and the
   // mining transition's «نراجع N عقار» line with real numbers, never placeholders.
   const ageFlowTotalRef = useRef<number | null>(null);
-  // The set the round STARTED from — «نفحص 173 إعلان لنجد لك …» in the round's search beat.
-  const afRoundBaseTotalRef = useRef<number | null>(null);
   // The interview's answers as removable FACETS (owner 2026-08-16): each committed answer records
   // {question id, picked keys, labels}. The results pills rebuild the query from baseQ by re-applying
   // the REMAINING facets — removal is pure recomputation, never an ad-hoc inverse per question.
@@ -2425,7 +2423,7 @@ export default function Agent() {
   // `opts.guided` attaches the interview's facets to the results turn for the removable pills.
   const runRefine = async (
     baseQ: SearchQuery, dim: string, value: string, label: string,
-    opts?: { onFetched?: (total: number | null) => void; guided?: { baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[] }; afRound?: { count: number | null; items: string[] } },
+    opts?: { onFetched?: (total: number | null) => void; guided?: { baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[] }; afRound?: { items: string[] } },
   ) => {
     pendingRefineRef.current = null;
     finalizeReveal();
@@ -2540,7 +2538,6 @@ export default function Agent() {
       const total = answered ? fresh!.total : st.total;
       ageFlowStepsRef.current = steps.map((x, i) => (i === stepIndex ? { ...x, options, unknownCount, total } : x));
       ageFlowTotalRef.current = total;
-      if (afRoundBaseTotalRef.current == null) afRoundBaseTotalRef.current = total;
       setAgeFlow({
         phase: 'asking', stepIndex, question: st.question, options,
         unknownCount, initialKeys: st.keys ?? [],
@@ -2580,7 +2577,6 @@ export default function Agent() {
       }
       ageFlowStepsRef.current = [...steps, { question, options: opts, unknownCount: res!.unknownCount, total: res!.total, keys: null }];
       ageFlowTotalRef.current = res!.total;
-      if (afRoundBaseTotalRef.current == null) afRoundBaseTotalRef.current = res!.total;
       setAgeFlow({
         phase: 'asking', stepIndex, question, options: opts, unknownCount: res!.unknownCount, initialKeys: [],
         // The advanced plan does not exist yet (it cannot be ranked until this answer lands), so the
@@ -2794,7 +2790,7 @@ export default function Agent() {
     void runRefine(q, '__guided__', '', locale === 'ar' && roundLabel ? pickAfCourtesyOpening() + roundLabel : roundLabel, {
       guided,
       // The picks in the chips' own words, without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات») — clearer than the raw labels.
-      afRound: { count: afRoundBaseTotalRef.current ?? ageFlowTotalRef.current, items: buildAfSummaryItems(ageFlowFacetsRef.current).map((x) => stripEmoji(x).trim()).filter(Boolean) },
+      afRound: { items: buildAfSummaryItems(ageFlowFacetsRef.current).map((x) => stripEmoji(x).trim()).filter(Boolean) },
       onFetched: (total) => {
         const msgId = refineMsgIdRef.current;
         if (!stillMining()) return;
@@ -2866,7 +2862,6 @@ export default function Agent() {
     ageFlowFacetsRef.current = [];
     ageFlowStepsRef.current = [];
     ageFlowTotalRef.current = opts?.total ?? null;
-    afRoundBaseTotalRef.current = opts?.total ?? null;
     introBeginRef.current = false;
     // AUTO entry (owner 2026-08-16, supersedes the 2026-08-03 results-first rule): an eligible
     // Filter search with > 25 results opens on the calm INTRO — the count + invitation — never a
@@ -4300,7 +4295,7 @@ export default function Agent() {
                 // clean/focused); they still appear in the RESULTS bubble below, unchanged. RTL is
                 // handled inside SearchLoader (the message column is LTR-pinned).
                 // An Advanced Filter round: one sentence of the user's picks, each landing in turn (owner 2026-10-11).
-                if (m.afRound) return <AfRoundLoader key={m.id} count={m.afRound.count} items={m.afRound.items} exiting={m.exiting} fontFamily={CHAT_FONT} />;
+                if (m.afRound) return <AfRoundLoader key={m.id} items={m.afRound.items} exiting={m.exiting} fontFamily={CHAT_FONT} />;
                 return <SearchLoader key={m.id} bottomInset={loaderBottomInset} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} />;
               }
               if (m.role === 'agent') {
