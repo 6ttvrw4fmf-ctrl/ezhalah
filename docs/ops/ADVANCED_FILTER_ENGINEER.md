@@ -248,3 +248,7 @@ lists you with your 120-minute cap.
 - 🔧 10-11: the end row must carry a computed «Rating: N/10» (the review view read NULL), and a CI-green PR the session
   gate cannot merge is named in the FIRST line of the report as «needs human merge: #N», because until it merges its
   applied migrations are production drift.
+- **Your alert queue (🔧, 2026-10-11, migration 20261011132418):** right after Sentry, every run, read
+  `select * from ops_engineer_alert_queue where engineer = 'advanced_filter' order by severity, created_at;` — every
+  open `alert_event` now carries a live engineer (`ops_engineer_for_alert()`, by kind first, legacy
+  `owner_routine` second). Drive each to resolved or say why not; the report carries «🚨 Alerts: N → M».

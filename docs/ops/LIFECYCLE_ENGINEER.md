@@ -1194,3 +1194,7 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
 - 🔧 10-11: write the `lifecycle:start` row first (without it `ops_engineer_review` reads the night as NOT RUN), and
   name every open P0 in your lane in line 1 of the report (alert 9067 deleted_but_source_live:gathern was open all night
   and unreported; the shape was benign, the silence was not).
+- **Your alert queue (🔧, 2026-10-11, migration 20261011132418):** right after Sentry, every run, read
+  `select * from ops_engineer_alert_queue where engineer = 'lifecycle' order by severity, created_at;` — every
+  open `alert_event` now carries a live engineer (`ops_engineer_for_alert()`, by kind first, legacy
+  `owner_routine` second). Drive each to resolved or say why not; the report carries «🚨 Alerts: N → M».

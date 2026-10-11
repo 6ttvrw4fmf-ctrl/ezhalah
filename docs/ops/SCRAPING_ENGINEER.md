@@ -522,3 +522,7 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   Haraj gate runs #1 and #2 (v4, v5) each passed the tuning sample and failed the fresh window (6 and 4 bad ids);
   run #3 on an untouched window read 94/94 clean. The owner's 100 is counted only on a window the classifier never saw.
 - 🔧 10-11: a 7/10 that stops at 90 of 120 minutes is a RED by the QA rulebook (§1.2). Use the whole slot.
+- **Your alert queue (🔧, 2026-10-11, migration 20261011132418):** right after Sentry, every run, read
+  `select * from ops_engineer_alert_queue where engineer = 'scraping-engineer' order by severity, created_at;` — every
+  open `alert_event` now carries a live engineer (`ops_engineer_for_alert()`, by kind first, legacy
+  `owner_routine` second). Drive each to resolved or say why not; the report carries «🚨 Alerts: N → M».

@@ -823,3 +823,7 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   `ops_close_backlog_item()` and wrap any other write in a `do $$ … $$` block (same rule as 🔧's 2026-10-06 lesson).
 - 🔧 10-11: fix rate fell three nights running (43 → 22 → 33 → 25 → 17%). When that happens, shrink the night to the
   3 biggest items and finish each to a proof row; six half-done items score 1/6.
+- **Your alert queue (🔧, 2026-10-11, migration 20261011132418):** right after Sentry, every run, read
+  `select * from ops_engineer_alert_queue where engineer = 'new_listings_engineer' order by severity, created_at;` — every
+  open `alert_event` now carries a live engineer (`ops_engineer_for_alert()`, by kind first, legacy
+  `owner_routine` second). Drive each to resolved or say why not; the report carries «🚨 Alerts: N → M».
