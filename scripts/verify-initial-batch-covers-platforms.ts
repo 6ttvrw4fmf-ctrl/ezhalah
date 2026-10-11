@@ -33,10 +33,12 @@
 // code"). The SQL half is read through rpcReplay, the same replay the RNPL guard uses, so it checks
 // the body that is actually DEPLOYED rather than a hopeful comment.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { distinctPlatformCount, orderByScope, interleaveRanked, platformIdentity } from '../src/lib/platformDiversity.ts';
-import { initialReveal } from '../src/lib/initialReveal.ts';
+import { initialReveal, SINGLE_SITE_FIRST_PAGE } from '../src/lib/initialReveal.ts';
 import { PLATFORMS } from '../src/data/platforms.ts';
 import { replayFunction, codeOnly } from './lib/rpcReplay.ts';
 
@@ -79,10 +81,17 @@ const rowsFor = (platforms: string[]) =>
   ];
   for (const [name, got, want] of cases) check(got === want, name, `got ${got}, want ${want}`);
 
-  // The defect the 2026-09-25 rule exists to kill: a low platform count must never be padded above
-  // its own platform count, no matter how much a single matching platform has to give.
-  check(reveal(500, 1) === 1, 'a single matching platform is never padded up with its own extra inventory');
-  check(reveal(500, 2) === 2, 'two matching platforms are never padded up — see case above too');
+  // The defect the 2026-09-25 rule exists to kill: with TWO OR MORE matching platforms the first screen
+  // is never padded above the platform count, however much one of them has to give.
+  check(reveal(500, 2) === 2, 'two matching platforms × 500 → exactly 2, never padded from the bigger one');
+  check(reveal(500, 24) === 24, '24 matching platforms → 24, one card each');
+  // …and the defect the 2026-10-11 owner decision kills: ONE matching site showed ONE card
+  // («أرض أخرى» الرياض: «عرضت لك أول 1 من أصل 1,027»). A single site fills the normal first page.
+  check(reveal(1027, 1) === SINGLE_SITE_FIRST_PAGE, `one matching site × 1,027 → the full first page (${SINGLE_SITE_FIRST_PAGE})`,
+    `got ${reveal(1027, 1)}`);
+  check(reveal(3, 1) === 3, 'one matching site × 3 fetched → 3 (never more than were fetched)', `got ${reveal(3, 1)}`);
+  check(reveal(33, 1, 33) === SINGLE_SITE_FIRST_PAGE,
+    'one matching site × 33 (above the 25 line, «أرض صناعية» الرياض) → the full first page', `got ${reveal(33, 1, 33)}`);
   // The safety floor only guards a true zero-platform miscount; it is not a fairness floor.
   check(reveal(500, 0) === SAFETY_FLOOR, 'a platform-count of exactly 0 (a miscount, since matches exist) still shows something, not a blank screen');
   // A pre-existing guarantee that must survive: a small FINAL set still renders in full.
@@ -296,6 +305,43 @@ const rowsFor = (platforms: string[]) =>
   const orderInside = /partition\s+by[^)]*platform[^)]*order\s+by\s*\(?\s*case\s+when\s+m?\.?has_photo/i.test(body);
   check(orderInside,
     'photo preference sits INSIDE the per-platform partition — it orders WITHIN a platform, it cannot evict one');
+}
+
+// MUTATION PROOF (owner 2026-10-11, «make sure we never get them»): the REAL src/lib/initialReveal.ts
+// with the single-site line deleted — i.e. reverted to max(1, platforms) — must turn these checks red,
+// while a two-platform scope stays exactly as the 2026-09-25 rule says.
+{
+  const SRC = read('src/lib/initialReveal.ts');
+  const ANCHOR = '  if (platforms === 1) return Math.min(SINGLE_SITE_FIRST_PAGE, fetched);\n';
+  check(SRC.includes(ANCHOR), 'mutation anchor present in src/lib/initialReveal.ts');
+  const file = join(mkdtempSync(join(tmpdir(), 'reveal-')), 'initialReveal.ts');
+  writeFileSync(file, SRC.replace(ANCHOR, ''));
+  const mutant = (await import(pathToFileURL(file).href)).initialReveal as typeof initialReveal;
+  const m = (fetched: number, platforms: number) => mutant({ fetched, honestTotal: null, stopAt: 25, platforms });
+  const caught = m(1027, 1) !== SINGLE_SITE_FIRST_PAGE;
+  check(caught, 'MUTATION: catches a revert to max(1, platforms) — one site × 1,027 shows 1 card again',
+    `mutant gave ${m(1027, 1)}`);
+  check(m(500, 2) === 2, '…and the mutant still agrees on two platforms (the proof isolates the single-site line)');
+}
+
+// ONE FUNCTION, EVERY SURFACE (owner 2026-10-11): the Filter, Advanced Filter rounds, the AI chat, a
+// strict one-site picker search, rent and monthly all render through agent.tsx, whose ONE wrapper calls
+// initialReveal(). A second copy of the first-page rule anywhere would let a surface keep the bug.
+{
+  const { readdirSync, statSync } = await import('node:fs');
+  const walk = (d: string): string[] => readdirSync(join(root, d)).flatMap((f) => {
+    const rel = `${d}/${f}`;
+    return statSync(join(root, rel)).isDirectory() ? walk(rel) : /\.tsx?$/.test(f) ? [rel] : [];
+  });
+  const files = walk('src');
+  const importers = files.filter((f) => /from ['"]@\/lib\/initialReveal['"]|from ['"]\.\.?\/[^'"]*initialReveal['"]/.test(read(f)));
+  check(JSON.stringify(importers) === JSON.stringify(['src/app/agent.tsx']),
+    'only agent.tsx (the one results surface) imports initialReveal', JSON.stringify(importers));
+  const calls = (stripComments(read('src/app/agent.tsx')).match(/initialRevealPure\(/g) ?? []).length;
+  check(calls === 1, 'agent.tsx calls initialReveal() from exactly one wrapper', `found ${calls}`);
+  const copies = files.filter((f) => f !== 'src/lib/initialReveal.ts'
+    && /Math\.max\(\s*1\s*,\s*platforms\s*\)|platforms\s*===\s*1\b/.test(stripComments(read(f))));
+  check(copies.length === 0, 'no second copy of the first-page rule anywhere in src', JSON.stringify(copies));
 }
 
 console.log(failed === 0
