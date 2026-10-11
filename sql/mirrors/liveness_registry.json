@@ -601,7 +601,7 @@
   },
   {
     "platform": "opensooq",
-    "strategy": "SOURCE_LIST_PRESENCE",
+    "strategy": "DIRECT_REVISIT",
     "sla_hours": 48,
     "grace": 3
   },
