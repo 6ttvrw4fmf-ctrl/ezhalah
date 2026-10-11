@@ -89,7 +89,10 @@ SITES: dict[str, str] = {
         "mustqr",
         # 2026-10-08: its own-page oracle (node 404 / retired title) was callable only by its crawl,
         # so a removed ad waited three crawl misses; dead-visible had it over the line (2 of 10).
-        "aqalemhajer")},
+        "aqalemhajer",
+        # 2026-10-11: its prune guard trips on a 100-row catalogue every night (re-saw 54 of 72), so
+        # 19 ads its own SERP dropped since 09-28 were never read. Own-page oracle; shadow first.
+        "opensooq")},
 }
 
 # NOT here, and why (shadow run 36490769167, 2026-09-28): mizlaj, nowaisiry, eastabha and muktamel —
