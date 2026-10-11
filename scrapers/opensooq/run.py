@@ -347,9 +347,10 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
         complete = len(items) >= declared > 0 and "status_unreadable" not in skipped
-        for tbl, rr in (("opensooq_residential_listings", res), ("opensooq_commercial_listings", com)):
+        verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+        for tbl, rr in ((RES_TABLE, res), (COM_TABLE, com)):
             if rr and complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE, verify_gone=verify_gone)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:
