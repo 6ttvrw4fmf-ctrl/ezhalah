@@ -16,7 +16,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 console.log('\nCASE 1 — a plain (non-twin) region: whole-region-vs-a-named-city\n');
 {
   const r = plainRegionQuestion('عسير', 'أبغى شقة في عسير');
-  check('a plain region with no "whole" wording -> asks whole-region-vs-city', r === 'تقصد عسير كاملة، أو مدينة معيّنة؟', String(r));
+  check('a plain region with no "whole" wording -> asks whole-region-vs-city', r === 'تقصد عسير كاملة، أو مدينة معيّنة؟ 📍', String(r));
 
   const whole = plainRegionQuestion('عسير', 'أبغى شقة في عسير كاملة');
   check('the user already said "كاملة" this turn -> no ambiguity (null)', whole === null, String(whole));
@@ -28,7 +28,7 @@ console.log('\nCASE 1 — a plain (non-twin) region: whole-region-vs-a-named-cit
 console.log('\nCASE 2 — an empty-location proximity phrase: smart question echoing the user\'s own words\n');
 {
   const r = emptyLocationQuestion('أبغى شقة قريبة من مستشفى الحبيب');
-  check('a named proximity phrase -> echoes it back', r === 'في أي مدينة تبحث عن عقار قريبة من مستشفى الحبيب؟', String(r));
+  check('a named proximity phrase -> echoes it back', r === 'في أي مدينة تبحث عن عقار قريبة من مستشفى الحبيب؟ مثلاً الرياض أو جدة 📍', String(r));
 
   const en = emptyLocationQuestion('a villa near the mall please');
   check('an English "near" phrase is recognised too', en !== null && en.includes('near the mall please'), String(en));
@@ -44,10 +44,10 @@ console.log('\nCASE 3 — a bare geography cue with no city\n');
 
   const bare = emptyLocationQuestion('أبي شقة على الكورنيش');
   check('a bare geography cue with NO "near/قرب" wording -> the generic geography question',
-    bare === 'تقصد في أي مدينة أو منطقة؟', String(bare));
+    bare === 'تقصد في أي مدينة أو منطقة؟ مثلاً الرياض أو جدة 📍', String(bare));
 
   const mountain = emptyLocationQuestion('أدور شي بالجبال أجواء باردة');
-  check('a mountain/highlands cue -> the generic geography question', mountain === 'تقصد في أي مدينة أو منطقة؟', String(mountain));
+  check('a mountain/highlands cue -> the generic geography question', mountain === 'تقصد في أي مدينة أو منطقة؟ مثلاً الرياض أو جدة 📍', String(mountain));
 }
 
 console.log('\nNEGATIVE — an ordinary message with neither cue must not be turned into an ambiguity\n');

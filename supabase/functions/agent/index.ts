@@ -63,6 +63,7 @@ import { buildTurnDecision } from "./turnWiring.ts";
 // The three location-ambiguity cases restored from the deleted client-side locationClarification()
 // (round 2 fix, "lost location-ambiguity cases") — see its own header.
 import { plainRegionQuestion, emptyLocationQuestion } from "./locationAmbiguity.ts";
+import { cityExampleAr, cityExampleEn, EXAMPLE_SEARCH_AR, EXAMPLE_SEARCH_EN, PIN, HOUSE } from "./questionExamples.ts";
 
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
 // AI behavior notes live in the `agent_notes` table so they can be edited WITHOUT redeploying this
@@ -1566,11 +1567,11 @@ Deno.serve(async (req: Request) => {
         // question below, which is the right answer for a real search that is only missing a place.
         const noIntentReply = !unsearchableReply && !ambiguityReply && !hasEnoughToSearch(wired.establishedState)
           ? (locale === "en"
-              ? "I'm Ezhalah — I find real estate across Saudi Arabia from every platform. Tell me what you're looking for."
-              : "أنا إزهله — أدور لك عقارات في السعودية من كل المنصات. قلّي وش تدور عليه؟")
+              ? `I'm Ezhalah — I find real estate across Saudi Arabia from every platform. Tell me what you're looking for, for example: ${EXAMPLE_SEARCH_EN} ${HOUSE}`
+              : `أنا إزهله — أدور لك عقارات في السعودية من كل المنصات. قلّي وش تدور عليه؟ مثلاً: ${EXAMPLE_SEARCH_AR} ${HOUSE}`)
           : null;
         const noPlaceReply = !unsearchableReply && !ambiguityReply && !noIntentReply && !hasUsableLocation(wired.establishedState)
-          ? (locale === "en" ? "Which city are you searching in?" : "في أي مدينة تبحث؟")
+          ? (locale === "en" ? `Which city are you searching in? ${cityExampleEn()} ${PIN}` : `في أي مدينة تبحث؟ ${cityExampleAr()} ${PIN}`)
           : null;
         // ASKING ABOUT PROPERTY TYPE IS GONE (owner, 2026-09-11 — supersedes the 2026-09-06
         // "location + type ⇒ ask" rule). Ezhalah's ONLY clarifying question is about location; a
