@@ -131,7 +131,9 @@ check('bounded() accepts an external AbortSignal and forwards it into the SAME c
 check('an already-aborted signal aborts immediately, before the network call even starts',
   /if \(signal\.aborted\) ctrl\.abort\(\);/.test(remote));
 check('fetchRawByIds checks the signal between chunked requests, not only at the start',
-  /for \(let i = 0; i < ids\.length; i \+= ID_CHUNK\) \{\s*\n\s*if \(signal\?\.aborted\)/.test(remote));
+  // The chunk loop became a bounded worker pool on 2026-10-10 (verify-raw-card-chunks-run-concurrently);
+  // every worker still checks the signal before EACH chunk request it starts.
+  /while \(!failed && next \* ID_CHUNK < ids\.length\) \{\s*\n\s*if \(signal\?\.aborted\)/.test(remote));
 check('fetchListingsForQuery threads the SAME signal into both the main RPC call and the raw-card fetch',
   /opts\?\.signal/.test(remote) && /fetchRawByIds\(q, tbl, ids, signal\)/.test(remote)
   // Budget widened 400->900 (2026-08-29, controlled-rotation change), then 900->1400 (2026-09-26,
