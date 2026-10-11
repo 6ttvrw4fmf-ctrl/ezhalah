@@ -576,6 +576,14 @@ export function parseAreaConstraint(text: string): { areaMin?: number; areaMax?:
 // «أرض خام» / «اراضي خام» / «ارض غير مخدومة» / raw land — whole-word خام (never «الخامس»).
 const RAW_LAND_PHRASE = /(أرض|ارض|أراضي|اراضي|اراضى|أراضى)\s+(?:(ال)?خام(?![\u0621-\u064A])|غير\s+مخدوم|غير\s+مطور)|\braw\s+lands?\b|\bundeveloped\s+lands?\b/i;
 const RAW_LAND_LIFTABLE = new Set(['Residential Land', 'Commercial Land', 'Industrial Land', 'Agriculture Plot']);
+// A BARE land word («أرض للبيع في البديعة», «اراضي بالرياض») names no usage, so the user asked for land, not
+// residential land (owner 2026-10-10: a plot whose source states no usage is «أرض أخرى» and must be
+// findable). The bare word opens the whole land group «الأراضي» — the same scope the Filter's group gives
+// — instead of the edge's guess of one usage. Any usage/raw qualifier the user typed keeps its own type.
+const BARE_LAND_WORD = /(^|[^\u0621-\u064A])(ال)?(أرض|ارض|أراضي|اراضي|اراضى|أراضى)(?![\u0621-\u064A])/;
+const LAND_QUALIFIER = /سكن|تجار|صناع|زراع|مزرع|خام|غير\s+مخدوم|غير\s+مطور|أخرى|اخرى|\b(residential|commercial|industrial|agricultur|farm|raw)/i;
+const LAND_GROUP = 'Commercial & Industrial Plots';
+const OTHER_LAND_PHRASE = /(أرض|ارض|أراضي|اراضي|اراضى|أراضى)\s+(أخرى|اخرى|أخرى)|\bother\s+lands?\b/i;
 
 export function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts?: string[]): SearchQuery {
   let q = emptyQuery();
@@ -622,6 +630,14 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   if (RAW_LAND_PHRASE.test(userText) && (q.type == null || RAW_LAND_LIFTABLE.has(q.type))) {
     q.type = 'Raw Land';
     q.category = CLEAN_MACRO['Raw Land'];
+  } else if (OTHER_LAND_PHRASE.test(userText) && (q.type == null || RAW_LAND_LIFTABLE.has(q.type))) {
+    q.type = 'Other Land';                 // the edge's vocabulary predates the box, same as Raw Land
+    q.category = CLEAN_MACRO['Other Land'];
+  } else if (BARE_LAND_WORD.test(userText) && !LAND_QUALIFIER.test(userText)
+             && (q.type == null || RAW_LAND_LIFTABLE.has(q.type))) {
+    q.type = null;
+    q.typeGroups = [LAND_GROUP];
+    q.category = 'Commercial';
   }
 
   // `detail` may be a bedroom count (1–5+) OR a size in m² — for a home the user can give EITHER (their
