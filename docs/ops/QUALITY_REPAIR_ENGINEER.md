@@ -271,3 +271,15 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
 - **2026-10-09:** check the measuring stick before you judge anyone with it. The owner's feeds gate, 🆕's whole scope and four detectors read `search_listings_ar.first_seen_at`, which was stamped only for rows without `last_updated`: 135,079 served rows had none, and «new in 24 h» read 82 against 3,305 real arrivals. One cross-check of the index count against the source tables' `scraped_at` found it in minutes. And a «count ≠ results» at the RPC level is not a bug until you read what the app shows: الهفوف 5,199 vs 9,070 was the cluster union `applyClusterUnion()` already adds on screen.
 - **2026-10-10:** a district name the source states on many ads is not yet a district of the ad's city: check the ads' own map pins first. Of 25 dealapp/aqar candidates, the pins put الفرحانية 77 km outside حائل and عقرباء / البطين 29–60 km outside الرياض (villages tagged with the governorate's city); only names whose every ad sits ≤ 12 km from the city's median pin, with distinct pins, went into the catalog (13 names, 80 ads, 20261010131452). And the connector holds a destructive statement (`DROP TABLE`) for a human to confirm, which a night run cannot do: it times out and nothing lands, even inside `do $$ … $$`. Route a drop to a human the first time; don't retry it.
 - **2026-10-10 (E1):** «المرموثة» is no longer an empty city under شراء (1 dealapp farm plot since 10-10; picker 1 = search 1), so the empty-city check must run under إيجار (still 0: «ما فيه إعلانات») or on a city whose `top_cities_by_deal_ar` count is 0 for the scope you test. Read the scope's count first; a city that was empty last week is not a fixture.
+- **2026-10-11:** the session merge gate refuses `safe-pr-merge.ts` for routines («Merge Without Review»), the same as
+  10-06: do not retry it, and do not plan a repair that only reaches customers through a merge. A night engineer's
+  CI-green PR with applied migrations (🔬 #6773, 5 migrations) is drift until a human merges it, so «needs human merge»
+  goes in line 1 of the report. And `ops_engineer_review` keys «ran» on the `<engineer>:start` row: an engineer that
+  wrote proofs and an end row but no start row reads as NOT RUN — check the raw rows before calling anyone absent.
+- **2026-10-11 (item 159, approach changed after six deferrals):** the full roster rewrite (TS router + CHECK
+  constraint + four barriers) cannot land from a routine, so the additive half shipped instead:
+  `ops_engineer_for_alert(kind, legacy_owner)` + view `ops_engineer_alert_queue` (20261011132418/132505).
+  Your queue: `select * from ops_engineer_alert_queue where engineer = 'repair' order by severity, created_at;`
+  (280 open on 10-11: located_row_unreachable 80, rows_collapse 19, field_integrity 18, card_link_identity 16,
+  aqar_proven_wrong_resolution 16, district_contradicts_source 15, …). Read it right after Sentry. The roster
+  rewrite stays item 159, for a human-merged PR.
