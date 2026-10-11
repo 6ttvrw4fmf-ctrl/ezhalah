@@ -103,7 +103,7 @@ const CURRENCY_RATES: Record<string, number> = {
 const TYPE_SYNONYMS: Record<string, string> = {
   flat: 'Apartment', apt: 'Apartment', studio: 'Studio', penthouse: 'Apartment', duplex: 'Duplex',
   mansion: 'Villa', palace: 'Villa', townhouse: 'Villa', home: 'Villa', dwelling: 'Villa',
-  plot: 'Residential Land', cabin: 'Chalet', 'raw land': 'Raw Land', 'undeveloped land': 'Raw Land',
+  plot: 'Residential Land', cabin: 'Chalet', 'raw land': 'Raw Land', 'undeveloped land': 'Raw Land', 'other land': 'Other Land',
   workspace: 'Office', clinic: 'Office', storage: 'Warehouse', depot: 'Warehouse',
   store: 'Shop', retail: 'Shop', boutique: 'Shop', gallery: 'Showroom', garage: 'Workshop',
   plant: 'Factory', ranch: 'Farm', orchard: 'Agriculture Plot', campsite: 'Camp',
@@ -209,6 +209,8 @@ const AR_TYPE: Record<string, string> = {
   // أرض خام (owner 2026-10-09) — before the bare أرض/ارض for the same prefix reason.
   'أرض خام': 'Raw Land', 'ارض خام': 'Raw Land', 'أراضي خام': 'Raw Land', 'اراضي خام': 'Raw Land',
   'أرض غير مخدومة': 'Raw Land', 'ارض غير مخدومة': 'Raw Land',
+  // أرض أخرى (owner 2026-10-10: land whose source states no usage) — before the bare أرض/ارض, same reason.
+  'أرض أخرى': 'Other Land', 'ارض اخرى': 'Other Land', 'ارض أخرى': 'Other Land', 'أراضي أخرى': 'Other Land', 'اراضي اخرى': 'Other Land',
   'أرض': 'Residential Land', 'ارض': 'Residential Land',
 };
 const RES_TYPES = new Set(Object.entries(CLEAN_MACRO).filter(([, c]) => c === 'Residential').map(([t]) => t));

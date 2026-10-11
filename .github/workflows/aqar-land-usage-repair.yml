@@ -1,9 +1,10 @@
 name: Aqar land usage repair
 
 # Re-reads live Aqar plots typed by the pre-2026-10-10 page-text guess (every plot commercial /
-# industrial / agricultural, 0 residential) through the production enricher + upsert
-# (scrapers/aqar/recover_stubs.py --cohort land-usage), so each takes Aqar's OWN «نوع العقار»:
-# سكني → Residential Land · تجاري and سكني/تجاري → Commercial Land · no usage shown → NULL.
+# industrial / agricultural, 0 residential) — and plots left untyped — through the production enricher +
+# upsert (scrapers/aqar/recover_stubs.py --cohort land-usage), so each takes Aqar's OWN «نوع العقار»:
+# سكني → Residential Land · تجاري and سكني/تجاري → Commercial Land; Aqar silent → the seller's own
+# adjacent words («أرض صناعي»); neither → «أرض» (Other Land).
 # A failed fetch writes nothing (the enricher returns None, the upsert drops it); a re-read row's
 # raw_captured_at moves past `before`, so it is never picked twice.
 #

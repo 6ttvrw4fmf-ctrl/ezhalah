@@ -49,7 +49,11 @@ export const HIERARCHY: Record<Macro, SubGroup[]> = {
     // (unit_subtype_ar = 'أرض خام', sync_raw_land_subtype, only on the source's own word). Its p_types
     // token 'أرض خام' matches that tag in af_eligibility_clause (migration 20261009235607), so every
     // count/result surface reads one definition and a raw residential plot is found under تجاري too.
-    { group: 'Commercial & Industrial Plots',     types: ['Commercial Land', 'Industrial Land', 'Residential Land', 'Raw Land'] },
+    // 'Other Land' («أرض أخرى», owner 2026-10-10: «don't show it in a specific property type, just other
+    // things»): a plot whose source states NO usage — Aqar's «نوع العقار» absent AND the seller's own
+    // description silent. Stored as the source's own category word «أرض» (card shows «أرض»), findable
+    // here and never under أرض سكنية / تجارية / صناعية / زراعية.
+    { group: 'Commercial & Industrial Plots',     types: ['Commercial Land', 'Industrial Land', 'Residential Land', 'Raw Land', 'Other Land'] },
   ],
 };
 
@@ -171,8 +175,18 @@ const RAW_TO_CLEAN: Record<string, string> = {
   // decision — it outnumbered Farm 5:1 live, so a merged "Farm" button mostly surfaced bare land).
   'Farm': 'Farm', 'Agriculture Plot': 'Agriculture Plot',
   // Land family
-  'Residential Land': 'Residential Land', 'Land': 'Residential Land',
+  'Residential Land': 'Residential Land',
   'Commercial Land': 'Commercial Land', 'Industrial Land': 'Industrial Land',
+  // Generic land with no stated usage → Other Land (owner 2026-10-10). Was 'Residential Land' — a guess;
+  // no live row stored 'Land' that day (0 «أرض» in search_listings_ar).
+  'Land': 'Other Land', 'أرض': 'Other Land',
+  // Aqar plots whose usage comes from the SELLER'S OWN description (Aqar's field silent, owner
+  // 2026-10-10) are stored as the seller's word so the card shows it — scrapers/aqar/enrich_residential.py
+  // LAND_DESCRIPTION_TYPES. «سكني تجاري» = Commercial Land (mixed-use rule, 2026-09-27).
+  'أرض سكني': 'Residential Land', 'أرض سكنية': 'Residential Land',
+  'أرض تجاري': 'Commercial Land', 'أرض تجارية': 'Commercial Land', 'أرض سكني تجاري': 'Commercial Land',
+  'أرض صناعي': 'Industrial Land', 'أرض صناعية': 'Industrial Land',
+  'أرض زراعي': 'Agriculture Plot', 'أرض زراعية': 'Agriculture Plot',
   // Commercial — retail & workspace
   'Office': 'Office', 'Showroom': 'Showroom', 'Bank': 'Bank',
   'Shop': 'Shop', 'Kiosk': 'Shop',
@@ -278,9 +292,9 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   'Chalet':              { rawTypes: ['Chalet'], kinds: ['res'] },
   'Camp':                { rawTypes: ['Camp'], kinds: ['res'] },
   'Farm':                { rawTypes: ['Farm'], kinds: BOTH },
-  'Agriculture Plot':    { rawTypes: ['Agriculture Plot'], kinds: BOTH }, // split from Farm 2026-07-21 (owner: 1,254 vs 259 live, was masking real farms)
+  'Agriculture Plot':    { rawTypes: ['Agriculture Plot', 'أرض زراعي', 'أرض زراعية'], kinds: BOTH }, // split from Farm 2026-07-21 (owner: 1,254 vs 259 live, was masking real farms)
   // Residential — Plots (Residential Land + generic Land; appears in com tables too → both)
-  'Residential Land':    { rawTypes: ['Residential Land', 'Land', 'حوش'], kinds: BOTH },
+  'Residential Land':    { rawTypes: ['Residential Land', 'حوش', 'أرض سكني', 'أرض سكنية'], kinds: BOTH },
   // Commercial — Retail & Workspace
   'Office':              { rawTypes: ['Office', 'مكاتب مشتركة'], kinds: ['com'], extraTables: ['dealapp_residential_listings'] }, // مكاتب مشتركة = an office dealapp misfiled into its RES table; extraTables reaches it via مكتب WITHOUT widening kinds (which would dilute every office search)
   'Shop':                { rawTypes: ['Shop', 'Kiosk', 'درايف ثرو'], kinds: ['com'] },
@@ -314,8 +328,10 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   'Gas Station':         { rawTypes: ['Gas Station', 'Station', 'محطة بنزين'], kinds: BOTH },
   'Staff Housing':       { rawTypes: ['سكن عمال'], kinds: BOTH },
   // Commercial — Plots (physically in RES tables on Aqar → both)
-  'Commercial Land':     { rawTypes: ['Commercial Land'], kinds: BOTH },
-  'Industrial Land':     { rawTypes: ['Industrial Land'], kinds: BOTH },
+  'Commercial Land':     { rawTypes: ['Commercial Land', 'أرض تجاري', 'أرض تجارية', 'أرض سكني تجاري'], kinds: BOTH },
+  'Industrial Land':     { rawTypes: ['Industrial Land', 'أرض صناعي', 'أرض صناعية'], kinds: BOTH },
+  // أرض أخرى (owner 2026-10-10): land whose source states no usage — see HIERARCHY 'Other Land'.
+  'Other Land':          { rawTypes: ['Land', 'أرض'], kinds: BOTH },
   // أرض خام (owner 2026-10-09): the TAG token, not a stored type — matched against
   // search_listings_ar.unit_subtype_ar by af_eligibility_clause. BOTH: raw lands sit in either kind.
   'Raw Land':            { rawTypes: ['أرض خام'], kinds: BOTH },
@@ -326,7 +342,7 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
 // selection (p_types) keeps the token; the raw-table card fetch, which only re-reads ids the server
 // already chose, must ask for the land types those rows really carry.
 export const RAW_LAND_TOKEN = 'أرض خام';
-export const RAW_LAND_CARRIER_TYPES = ['Commercial Land', 'Industrial Land', 'Residential Land', 'Agriculture Plot'];
+export const RAW_LAND_CARRIER_TYPES = ['Commercial Land', 'Industrial Land', 'Residential Land', 'Agriculture Plot', 'Other Land'];
 export function storedRawTypes(rawTypes: string[]): string[] {
   if (!rawTypes.includes(RAW_LAND_TOKEN)) return rawTypes;
   const carriers = RAW_LAND_CARRIER_TYPES.flatMap((t) => CLEAN_TO_QUERY[t]?.rawTypes ?? []);

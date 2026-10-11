@@ -65,11 +65,12 @@ export const mapEmbedUrl = (p: GeoPoint, hl: string = 'ar', z: 14 | 15 = 14): st
 
 // THE PRICES BLOCK SHIPS FOR AQAR SALE ADS ONLY for now (owner 2026-10-10, update 22): platform «aqar» and
 // deal «بيع», every property type. A rent ad or any other platform renders no block at all.
-// A type the source never stated («غير معروف» — e.g. an Aqar plot whose page carries no «نوع العقار»,
-// 7,039 of them on 2026-10-10) gets NO block: comparing it to «عقار سكني» or «تجاري» would be our guess.
+// A type the source never stated gets NO block: comparing it to «عقار سكني» or «تجاري» would be our guess.
+// That is «غير معروف», and «أرض» — Other Land, a plot whose source states no usage at all (Aqar's
+// «نوع العقار» absent and the seller silent; 4,040 Aqar plots on 2026-10-10, owner: no specific type).
 export function pricesBlockEligible(row: AdRow | null | undefined): boolean {
   return !!row && String(row.platform ?? '').trim().toLowerCase() === 'aqar' && String(row.deal_ar ?? '').trim() === 'بيع'
-    && !['', 'غير معروف'].includes(String(row.type_ar ?? '').trim());
+    && !['', 'غير معروف', 'أرض'].includes(String(row.type_ar ?? '').trim());
 }
 
 // The words follow the type (owner: never «فلل» on a non-villa). Arabic counts 3–10 with the plural and

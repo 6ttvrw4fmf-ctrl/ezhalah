@@ -262,6 +262,7 @@ const AR: Record<string, string> = {
   'Commercial Land': 'أرض تجارية',
   'Industrial Land': 'أرض صناعية',
   'Raw Land': 'أرض خام',
+  'Other Land': 'أرض أخرى',
   'Farm': 'مزرعة',
   'Agriculture Plot': 'أرض زراعية',
   'Camp': 'مخيم',

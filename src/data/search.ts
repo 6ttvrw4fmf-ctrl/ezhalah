@@ -1063,7 +1063,7 @@ export { effectiveTypes, effectiveGroups } from '@/lib/searchDefaults';
 // «أرض خام» is a TAG on a land row, not its type: the card keeps the source's own land type, and the
 // SERVER already restricted the pool to tagged rows (p_types token 'أرض خام', af_eligibility_clause).
 // So client-side the box matches any land clean type — never a non-land row.
-const RAW_LAND_CARRIERS = ['Commercial Land', 'Industrial Land', 'Residential Land', 'Agriculture Plot'];
+const RAW_LAND_CARRIERS = ['Commercial Land', 'Industrial Land', 'Residential Land', 'Agriculture Plot', 'Other Land'];
 
 function matchesType(l: Listing, q: SearchQuery): boolean {
   const c = cleanOf(l);

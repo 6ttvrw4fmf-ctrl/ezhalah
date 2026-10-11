@@ -67,6 +67,7 @@ const TYPE_PLURAL_AR: Record<string, string> = {
   'Commercial Land': 'الأراضي التجارية',
   'Industrial Land': 'الأراضي الصناعية',
   'Raw Land': 'الأراضي الخام',
+  'Other Land': 'الأراضي الأخرى',
   Bank: 'البنوك',
   School: 'المدارس',
   'Health Center': 'المراكز الصحية',

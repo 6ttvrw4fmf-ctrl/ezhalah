@@ -297,7 +297,9 @@
       "serviceFacility": false,
       "query": {
         "rawTypes": [
-          "Agriculture Plot"
+          "Agriculture Plot",
+          "أرض زراعي",
+          "أرض زراعية"
         ],
         "kinds": [
           "res",
@@ -317,8 +319,9 @@
       "query": {
         "rawTypes": [
           "Residential Land",
-          "Land",
-          "حوش"
+          "حوش",
+          "أرض سكني",
+          "أرض سكنية"
         ],
         "kinds": [
           "res",
@@ -577,7 +580,10 @@
       "serviceFacility": false,
       "query": {
         "rawTypes": [
-          "Commercial Land"
+          "Commercial Land",
+          "أرض تجاري",
+          "أرض تجارية",
+          "أرض سكني تجاري"
         ],
         "kinds": [
           "res",
@@ -596,7 +602,9 @@
       "serviceFacility": false,
       "query": {
         "rawTypes": [
-          "Industrial Land"
+          "Industrial Land",
+          "أرض صناعي",
+          "أرض صناعية"
         ],
         "kinds": [
           "res",
@@ -616,6 +624,26 @@
       "query": {
         "rawTypes": [
           "أرض خام"
+        ],
+        "kinds": [
+          "res",
+          "com"
+        ]
+      },
+      "pythonCategoryOverride": null
+    },
+    {
+      "clean": "Other Land",
+      "macro": "Commercial",
+      "hierarchy": {
+        "macro": "Commercial",
+        "group": "Commercial & Industrial Plots"
+      },
+      "serviceFacility": false,
+      "query": {
+        "rawTypes": [
+          "Land",
+          "أرض"
         ],
         "kinds": [
           "res",
