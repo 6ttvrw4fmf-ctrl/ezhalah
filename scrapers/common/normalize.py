@@ -847,10 +847,12 @@ def one_street_width_of(*cells) -> Optional[int]:
 # «شمالاً: عرض شارع 15 متر … غرباً: عرض شارع 15 متر» is a corner plot, not one facade.
 _BEARING = r"(?:ال)?(?:شمال|جنوب|شرق|غرب)(?:ي(?:ة|ه)?|ا|أ)?"
 _PROSE_STREET_RE = re.compile(
-    rf"(?:(?<![ء-ي])(?P<d1>{_BEARING})\s+)?(?:ال)?شارع\s*:?\s*(?P<w>[\d٠-٩]{{1,3}})(?![\d٠-٩.,٫])"
+    rf"(?:(?<![ء-ي])و?(?P<d1>{_BEARING})\s+)?(?:ال)?شارع\s*:?\s*(?P<w>[\d٠-٩]{{1,3}})(?![\d٠-٩.,٫])"
     rf"\s*(?P<u>م(?![ء-ي])|متر)?(?:\s*(?P<d2>{_BEARING})(?![ء-ي]))?")
 
 
+# «شمالية شارع 15 وغربية شارع 20»: the second bearing carries the conjunction «و», and without «و?» above it was
+# not a bearing, so that street went uncounted and a corner plot read as ONE north street of 15 (🔬 2026-10-11).
 def street_from_prose(text) -> tuple[Optional[int], Optional[str]]:
     hits = [m for m in _PROSE_STREET_RE.finditer(str(text or "")) if m["d1"] or m["u"] or m["d2"]]
     if len(hits) != 1:
