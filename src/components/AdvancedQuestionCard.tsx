@@ -102,7 +102,7 @@ function Shell({ children, onClose, countChip, pills }: {
         </View>
         {/* The committed answers sit INSIDE the card, under its title bar (owner 2026-10-11: «I don't like
             how that popped up» — the row floated over the page above the card). Still visible in every
-            phase of the round and never covered (#155), read-only (2026-10-03). */}
+            phase of the round and never covered (issue 155), read-only (2026-10-03). */}
         {pills ? <CommittedPills facets={pills.facets} /> : null}
         {children}
       </Reveal>
