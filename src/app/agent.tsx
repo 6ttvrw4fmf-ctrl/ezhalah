@@ -1162,8 +1162,7 @@ export default function Agent() {
   const LAND_PASSES_MS = [1400, 3200];
   // NO FLOOR ANYMORE (owner PERMANENT rule 2026-09-25, reversing 2026-09-02's fixed floor of 10 —
   // full history in src/lib/initialReveal.ts): the initial batch is exactly one card per matching
-  // platform, never padded — EXCEPT a single matching site, which fills the normal first page (owner
-  // 2026-10-11: «Only عقار has results → you see just 1 ad … that's a bug»). «عرض المزيد» pages the rest.
+  // platform, never padded. «عرض المزيد» pages the rest.
   // SMALL FINAL SET RENDERS IN FULL (owner 2026-08-30): "I can have 13 results, Ezhalah shows 10 and asks
   // me to press عرض المزيد. That is unnecessary." The cutoff is NOT a new number — it is the canonical
   // INTERVIEW_STOP_AT (25, owner 2026-09-20 — briefly 50 under the 2026-09-04 rule): the line at which Advanced
