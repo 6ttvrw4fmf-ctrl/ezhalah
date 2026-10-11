@@ -86,7 +86,10 @@ function PickerRegionsMap({ locale, t, fontFamily, selectedRegion, coveredRegion
           {!picked ? <Ionicons name="checkmark" size={14} color={colors.onFill} /> : null}
           <Text style={[styles.kingdomText, !picked && styles.kingdomTextOn, { fontFamily }]}>{t('Whole kingdom')}</Text>
         </Pressable>
-        <Text style={[styles.captionTitle, { fontFamily, textAlign: align }]} numberOfLines={1}>
+        {/* Up to two lines (owner 2026-10-10: «9,664 إع…» — the count was cut on a phone). The row reserves
+            both (styles.caption minHeight), so a region that wraps where the kingdom fits on one line never
+            moves the map under the finger between taps (#6711), and one line sits centred by the chip. */}
+        <Text style={[styles.captionTitle, { fontFamily, textAlign: align }]} numberOfLines={2}>
           {picked
             ? `${ar ? picked.name : `${picked.en} Region`} · ${t('{count} websites', { count: counts[picked.id] ?? 0 })} · ${t('{count} listings', { count: fmt(listings[picked.id] ?? 0) })}`
             : `${t('Saudi Arabia')} · ${t('{count} websites', { count: totalCount })}`}
@@ -155,7 +158,7 @@ export default memo(PickerRegionsMap);
 const styles = StyleSheet.create({
   wrap: { paddingTop: 10, paddingBottom: 2, paddingHorizontal: 10 },
   step: { fontSize: 13, lineHeight: 18, fontWeight: '600', color: colors.ink, marginBottom: 6 },
-  caption: { alignItems: 'center', justifyContent: 'space-between', gap: 10, minHeight: 30 },
+  caption: { alignItems: 'center', justifyContent: 'space-between', gap: 10, minHeight: 40 },   // two caption lines, always reserved
   kingdom: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 5, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.line, flexShrink: 0 },
   kingdomOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   kingdomText: { fontSize: 13, lineHeight: 17, fontWeight: '500', color: colors.body },

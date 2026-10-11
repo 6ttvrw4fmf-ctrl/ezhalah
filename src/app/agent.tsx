@@ -1764,6 +1764,7 @@ export default function Agent() {
     //    [slogan] → [Search Summary] → [Result intro] → [Sort line] → [Property cards].
     //    The slogan + summary CARRY OVER from the searching status into this same bubble — they don't
     //    disappear and don't appear as a duplicate block. (user-reported order bug.)
+    liveTurnsRef.current.add(statusId); // a live turn: its cards play the mount-in (cardInMotion)
     setMsgs((m) =>
       m.map((x) =>
         x.id === statusId
@@ -1831,11 +1832,19 @@ export default function Agent() {
   const CASCADE_VISIBLE = 14;
   // Which cards the latest press staggers and which it mounts still, per turn (read by CardIn at mount).
   const cascadeWindowRef = useRef<Record<string, { from: number; animEnd: number }>>({});
+  // Results turns a search produced LIVE in this conversation (added where the turn is created, cleared
+  // by resetConversationState). Only their cards play the mount-in.
+  const liveTurnsRef = useRef(new Set<string>());
   const cardInMotion = (mid: string, i: number) => {
     const w = cascadeWindowRef.current[mid];
-    if (!w || i < w.from) return {};
     // A still card's placeholder height until it nears the screen: the median phone card / laptop row.
-    return i >= w.animEnd ? { stillHeight: cardRow ? 140 : 340 } : { delayMs: (i - w.from) * LOAD_MORE_STEP_MS };
+    const still = { stillHeight: cardRow ? 140 : 340 };
+    // A RESTORED turn (sidebar open, snapshot, replay) renders in its final state. Its cards used to replay
+    // the mount-in all at once, each held at opacity 0 by an animation that could not start while hundreds
+    // of cards mounted — switching chats went blank on the owner's iPhone (2026-10-10; measured locally:
+    // 8 frames in 5 s, the cards on screen at opacity 0 throughout).
+    if (!w || i < w.from) return liveTurnsRef.current.has(mid) ? {} : still;
+    return i >= w.animEnd ? still : { delayMs: (i - w.from) * LOAD_MORE_STEP_MS };
   };
   // TWO RENDERS PER PRESS, NOT FOURTEEN (owner 2026-10-05: «عرض المزيد takes time … should never
   // ever have this»). The drip re-rendered the whole unvirtualized list once per card, then mounted
@@ -3446,6 +3455,7 @@ export default function Agent() {
     setSelectedSources([]);
     setPickerSourceExplicit(false);
     setMsgs([]);
+    liveTurnsRef.current = new Set(); // a reopened chat's turns are restored, never live — they mount still
     setRestoringId(null);
     setCompleted(false);      // terminality is per-conversation — never inherited (see openStatic/openSaved)
     chatIdRef.current = null; // new conversation → new sidebar chat (a restore re-sets it)

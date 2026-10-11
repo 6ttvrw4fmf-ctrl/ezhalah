@@ -4,6 +4,21 @@
 import { readFileSync } from 'node:fs';
 
 const src = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
+const reveal = readFileSync(new URL('../src/components/CardReveal.tsx', import.meta.url), 'utf8');
+
+// A REOPENED CHAT NEVER GOES BLANK (owner 2026-10-10, iPhone: «when I switch between chats … always a
+// glitch»). Its cards used to replay the mount-in all at once, each held at opacity 0 by an animation that
+// could not start while hundreds of cards mounted. Only a turn a search produced LIVE plays it
+// (cardInMotion, executed in verify-loadmore-reveal-is-instant.ts); this pins the two halves around it.
+function neverBlank(a: string, r: string): string[] {
+  const bad: string[] = [];
+  const reset = /const resetConversationState = \(\) => \{[\s\S]*?\n  \};\n/.exec(a)?.[0] ?? '';
+  if (!/liveTurnsRef\.current = new Set\(\);/.test(reset)) bad.push('switching chats does not forget the old conversation\'s live turns (a reopened turn could replay its mount-in)');
+  if (!/liveTurnsRef\.current\.add\(statusId\);[^\n]*\n\s*setMsgs\(\(m\) =>\n\s*m\.map\(\(x\) =>\n\s*x\.id === statusId\n\s*\? \{ id: statusId, role: 'results'/.test(a)) bad.push('a live results turn is not registered where it is created');
+  const fills = r.match(/animationFillMode: '([a-z]+)'/g) ?? [];
+  if (fills.length !== 2 || fills.some((f) => !f.includes("'backwards'"))) bad.push(`card mount-in fill is not backwards (${fills.join(', ')}) — a finished card keeps an animated opacity/transform pinned`);
+  return bad;
+}
 
 function wiring(a: string): string[] {
   const bad: string[] = [];
@@ -25,6 +40,10 @@ const mustCatch = (label: string, bad: string[]) => { if (!bad.length) failed++;
 
 console.log('\nOpening a saved chat fades out, lands while hidden, fades in (owner 2026-10-03)\n');
 check('wiring', wiring(src));
+check('a reopened chat never goes blank (its cards mount still; nothing stays pinned on a card)', neverBlank(src, reveal));
+mustCatch('a chat switch that keeps the old live turns', neverBlank(src.replace('    liveTurnsRef.current = new Set();', '   '), reveal));
+mustCatch('a live turn that is never registered', neverBlank(src.replace('    liveTurnsRef.current.add(statusId);', '   '), reveal));
+mustCatch('a card fill pinned again (both)', neverBlank(src, reveal.replace("animationFillMode: 'backwards'", "animationFillMode: 'both'")));
 mustCatch('the hard cut coming back (no fade-out)', wiring(src.replace('(onFinished) => Animated.timing(freshFade, { toValue: 0, duration: 110, useNativeDriver: true }).start(onFinished)', '(onFinished) => onFinished()')));
 mustCatch('showing the chat before it landed', wiring(src.replace(/(const turnToSavedChat[\s\S]*?)\}, 180\)(\)?);/, '$1}, 0)$2;')));
 mustCatch('a stale open swapping over the newer chat', wiring(src.replace('if (token !== savedOpenTokenRef.current || epochAtTap !== conversationEpochRef.current) return;', '')));
