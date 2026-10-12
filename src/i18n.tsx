@@ -980,6 +980,7 @@ const AR: Record<string, string> = {
   // the {name} / {host} placeholder. The English value is the FALLBACK if a key is missing.
   'Click here 👆':                     'اضغط هنا 👆',
   'To confirm availability and details': 'للتأكد من التوفر والتفاصيل',
+  'See {n} more':                     'عرض {n} أخرى',
   'Hosted on {name}':                  'مستضاف على {name}',
   // Source BRAND names — must localize in Arabic too (rule: Arabic UI = everything Arabic except
   // numbers/domains). The card translates the source name through t() before display, so an Arabic
