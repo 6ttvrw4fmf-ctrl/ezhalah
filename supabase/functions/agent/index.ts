@@ -164,18 +164,18 @@ function oneQuestionOnly(reply: string): string {
 // it is groundReply() below, which strips the whole reply rather than leaving a false claim in.
 const AMENITY_MENTION_RE: Record<string, RegExp> = {
   kitchen: /مطبخ|\bkitchen\b/i,
-  parking: /موقف|مواقف|\bparking\b/i,
-  elevator: /مصعد|\belevator\b|\blift\b/i,
+  parking: /موقف|مواقف|كراج|قراج|\bparking\b|\bgarage\b/i,
+  elevator: /مصعد|ليفت|اسانسير|أسانسير|\belevator\b|\blift\b/i,
   ac: /تكييف|مكيف|air.?condition|\bA\/?C\b/i,
   private_entrance: /مدخل\s*خاص|private\s*entrance/i,
-  maid_room: /غرفة\s*خادمة|maid'?s?\s*room/i,
-  driver_room: /غرفة\s*سائق|driver'?s?\s*room/i,
+  maid_room: /غرفة\s*(?:ال)?(?:خادمة|خادمه|خدم|شغالة|شغاله)|خادمة|maid'?s?\s*room/i,
+  driver_room: /غرفة\s*(?:ال)?سائق|driver'?s?\s*room/i,
   car_entrance: /مدخل\s*سيارة|car\s*entrance/i,
   sanitation: /صرف\s*صحي|\bsanitation\b|\bsewage\b/i,
   electricity: /كهرباء|\belectricity\b/i,
   water_supply: /مياه|water\s*supply/i,
   gym: /نادي|صالة\s*رياضية|جيم|\bgym\b/i,
-  pool: /مسبح|حمام\s*سباحة|\bpool\b|\bswimming\b/i,
+  pool: /مسبح|حمام\s*سباحة|بركة\s*سباحة|\bpool\b|\bswimming\b/i,
   garden: /حديقة|\bgarden\b/i,
   balcony: /شرفة|بلكونة|تراس|\bbalcony\b|\bterrace\b/i,
   laundry_room: /غرفة\s*غسيل|\blaundry\b/i,
@@ -187,10 +187,20 @@ const AMENITY_MENTION_RE: Record<string, RegExp> = {
 /** True when the reply names a certified amenity that `amenities` does not carry. */
 function replyClaimsUnlistedAmenity(reply: string, amenities: string[]): boolean {
   const has = new Set(amenities.map((a) => String(a).toLowerCase()));
+  // A sentence that is a QUESTION OFFERS the feature («تبي فلتر المصعد؟»): it claims nothing, so only the statements are checked
+  // (owner 2026-10-11: a need the user states is offered by name, never silently turned into a filter).
+  const statements = String(reply ?? "").split(/(?<=[.!؟?…\n])/).filter((x) => !/[؟?]\s*(?:\p{Extended_Pictographic}\uFE0F?)?\s*$/u.test(x.trim())).join(" ");
   for (const [token, re] of Object.entries(AMENITY_MENTION_RE)) {
-    if (!has.has(token) && re.test(reply)) return true;
+    if (!has.has(token) && re.test(statements)) return true;
   }
   return false;
+}
+
+/** An amenity FILTER is only applied for a feature the user NAMED (owner 2026-10-11: never silently filter on a guess). A need
+ *  («أمي ما تقدر تطلع درج») is offered in the reply, not turned into the elevator filter. Tokens with no word list pass. */
+function amenitiesUserNamed(tokens: string[], userTexts: string[]): string[] {
+  const said = userTexts.join("\n");
+  return tokens.filter((t) => { const re = AMENITY_MENTION_RE[t]; return !re || re.test(said); });
 }
 
 function groundReply(reply: string, locale: string, amenities: string[] = [], seed = "", avoid = ""): string {
@@ -589,7 +599,7 @@ PURPOSE (not a type): if the user gives a PURPOSE instead of a type, infer the l
 UTILITY / NON-SEARCH (answer directly, kind="message", NEVER a search): a utility request is not a property search — do NOT enter search mode or show the "searching" choreography. CURRENCY CONVERSION: if the user asks to convert money to SAR, do it using the rates in FOREIGN CURRENCY (e.g. "100,000 USD" → "≈ SAR 375,000"); if they only ask whether you can ("can you convert currencies?"), say yes and ask for the amount + currency. UNIT CONVERSION: convert sqft/قدم/feet → m² (1 sqft ≈ 0.0929 m²) and back on request. Also answer explanations, brand questions, and general/support questions directly (see WHAT EZHALAH IS and HUMAN/SUPPORT). Only switch to a search when the user actually asks to FIND properties.
 CAPABILITIES: if asked "what can you do / what are you / how do you help", give a SHORT answer (not a feature dump): you search across multiple third-party property platforms at once and bring matching listings into one place (NEVER name the platforms — see PLATFORM CONFIDENTIALITY); they can give a city, district, type, budget, area, bedrooms, or a purpose; you can sort, compare card facts, and explain listing details; you do NOT give investment advice, valuations, financing, legal advice, or brokerage. End with 2-3 quick examples ("Villa in Riyadh under 2m", "3-bed apartment in Jeddah") and ask what they're looking for.
 PERSONAL INFO: if the user volunteers personal data (phone, email, ID, salary, bank details, "I'm a doctor relocating from Egypt"), use ONLY what helps the property search (relocating → search the destination city) and IGNORE the rest. NEVER store, repeat, or act on phone/email/ID/financial details, and NEVER ask for them. Acknowledge briefly and steer to the search.
-PERSONAL CONTEXT (owner 2026-10-11): help the user, but never guess for them and never say the results suit them. The search runs now with what is clear. In the same short reply: a COUNT of people (عائلة من ٥, family of 5, ثلاث أطفال) → leave bedrooms empty and ask which bedrooms they need, offering two options: 1-2 people → ١ أو ٢, 3-4 → ٢ أو ٣, 5-6 → ٣ أو ٤, 7 or more → ٤ أو ٥ (example: أدور لك شقة في الرياض. كم غرفة نوم تحتاجون؟ مثلاً ٣ أو ٤ 🏡). TASTE words (هادي, راقي, مريح, فخم, quiet, stylish) → say in one clause that taste differs between people and they can judge from each listing photos and details (الذوق يختلف من شخص لشخص، وتقدر تشوف الصور والتفاصيل في كل إعلان), and never claim a listing is quiet or stylish. A NEED one of our filters can serve (stairs → elevator, small children → garden, several cars → parking) → offer that filter by name in one question, and never claim a filter we do not have (ground floor, quiet street, view). FACTS about the person (job, relocating, age) → acknowledge in a few words, use only the city. These replies never ask about property type, budget or district, and end with the single emoji.
+PERSONAL CONTEXT (owner 2026-10-11): help the user, but never guess for them and never say the results suit them. The search runs now with what is clear. In the same short reply: a COUNT of people (عائلة من ٥, family of 5, ثلاث أطفال) → leave bedrooms empty and ask which bedrooms they need, offering two options: 1-2 people → ١ أو ٢, 3-4 → ٢ أو ٣, 5-6 → ٣ أو ٤, 7 or more → ٤ أو ٥ (example: أدور لك شقة في الرياض. كم غرفة نوم تحتاجون؟ مثلاً ٣ أو ٤ 🏡). TASTE words (هادي, راقي, مريح, فخم, quiet, stylish) → say in one clause that taste differs between people and they can judge from each listing photos and details (الذوق يختلف من شخص لشخص، وتقدر تشوف الصور والتفاصيل في كل إعلان), and never claim a listing is quiet or stylish. A NEED one of our filters can serve (stairs → elevator, small children → garden, several cars → parking) → ask by name, in one question, whether they want that filter (like «تبي فلتر المصعد؟»); never put that feature in amenities yourself, never say it will comfort or suit anyone, and never claim a filter we do not have (ground floor, quiet street, view). FACTS about the person (job, relocating, age) → acknowledge in a few words, use only the city. These replies never ask about property type, budget or district, and end with the single emoji.
 SAVES & ALERTS: saving favourites or price-drop alerts are not part of Ezhalah — say so warmly and keep helping them search.
 MISSING FEATURES: if the user asks for something Ezhalah does not do — mortgage/financing calculator, installments (تقسيط), virtual tours, contacting/booking an agent or owner, paperwork — this is kind="message" but DO NOT use the generic "I can only help you find properties" line. Instead say warmly that THAT specific thing isn't part of Ezhalah (Ezhalah is search only), point them to the listing's original platform when that's where it happens, and offer to keep searching. NEVER promise a future feature, timeline, or "coming soon".
 CONTRADICTORY / IMPOSSIBLE: if a request is self-contradictory or physically impossible (e.g. "buy a villa for 50,000 SAR", "5-bedroom studio", "beachfront in Riyadh" — Riyadh is inland), classify it kind="listings" and SEARCH the CLOSEST realistic match (e.g. the cheapest villas in Riyadh) — do NOT reply with only a question. In your reply, briefly note the conflict and what you adjusted. NEVER invent an impossible listing, location, or property type to satisfy it.
@@ -1311,10 +1321,11 @@ Deno.serve(async (req: Request) => {
       // location/regionPin/districtPin above): out.amenities is the raw model JSON and is never
       // reassigned after this point, so there is no pre-resolution value to freeze early.
       const outAmenities: string[] = Array.isArray(out.amenities)
-        ? [...new Set(out.amenities
+        ? amenitiesUserNamed([...new Set(out.amenities
             .filter((a: unknown) => typeof a === "string")
             .map((a: string) => a.trim().toLowerCase())
-            .filter(Boolean))]
+            .filter(Boolean))] as string[],
+          [text, ...history.filter((h) => h?.role !== "model").map((h) => String(h?.text ?? ""))])
         : [];
 
       const understoodState = () => ({

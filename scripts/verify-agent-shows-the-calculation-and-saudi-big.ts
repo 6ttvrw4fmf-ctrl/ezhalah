@@ -49,9 +49,10 @@ check('«big» is NEVER a bedroom count: the villa threshold is an area, far abo
 const agentSrc = read('src/data/agent.ts');
 const wire = windowBetween(agentSrc, '// «كبير» / "big" (owner 2026-10-11)', "q.priceInput = String(b.price", 'agent.ts');
 const wired = (src: string) => /q\.areaMin == null && q\.areaMax == null && _areaTexts\.some\(bigWanted\)/.test(src)
-  && /const bigMin = bigAreaMin\(q\.type\);/.test(src) && /if \(bigMin\) \{ q\.areaMin = String\(bigMin\); q\.areaNote = 'big'; \}/.test(src);
+  && /const bigMin = bigAreaMin\(q\.type\) \?\? \(!q\.type && q\.typeGroups\?\.length === 1 && q\.typeGroups\[0\] === LAND_GROUP \? bigAreaMin\('Residential Land'\) : null\);/.test(src) && /if \(bigMin\) \{ q\.areaMin = String\(bigMin\); q\.areaNote = 'big'; \}/.test(src);
 check('queryFromBackend sets areaMin from the Saudi threshold only when no explicit size was given', wired(wire));
 mustCatch('the explicit-size guard being dropped (it would overwrite «فوق ٧٠٠ متر»)', !wired(wire.replace('q.areaMin == null && q.areaMax == null && ', '')));
+mustCatch('a bare «أرض كبيرة» getting no threshold (the land group must read as residential land)', !wired(wire.replace("q.typeGroups[0] === LAND_GROUP ? bigAreaMin('Residential Land') : null)", 'false ? 0 : null)')));
 mustCatch('the threshold being applied when the type has none', !wired(wire.replace('if (bigMin) {', 'if (true) {')));
 mustCatch('the word being read from anything but the user text', !wired(wire.replace('_areaTexts.some(bigWanted)', 'true')));
 

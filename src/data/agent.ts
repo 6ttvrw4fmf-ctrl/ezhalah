@@ -669,7 +669,8 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   // type, never a bedroom count. Only from the user's OWN words, only when no explicit size was given, and only for a
   // type that has a measured threshold; otherwise the word stays what it was: a largest-first ordering (vagueOrdering).
   if (q.areaMin == null && q.areaMax == null && _areaTexts.some(bigWanted)) {
-    const bigMin = bigAreaMin(q.type);
+    // a bare «أرض» (no usage said) is the whole land group, whose «big» is the residential-land figure (900 m², the Saudi big plot)
+    const bigMin = bigAreaMin(q.type) ?? (!q.type && q.typeGroups?.length === 1 && q.typeGroups[0] === LAND_GROUP ? bigAreaMin('Residential Land') : null);
     if (bigMin) { q.areaMin = String(bigMin); q.areaNote = 'big'; }
   }
 
