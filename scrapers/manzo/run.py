@@ -208,15 +208,26 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
         complete = unreadable == 0 and len(listing) >= declared > 0
+        seen_all = {r["ad_number"] for r in res + com}
         for tbl, rr in (("manzo_residential_listings", res), ("manzo_commercial_listings", com)):
             if rr and complete:
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
                 if n < 0:
-                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
+                    print(f"  ⚠ {tbl}: prune guard tripped — reading the unseen ads' own pages", flush=True)
+                    n = db.strike_read_gone(tbl, seen_all, SOURCE)
                 elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
+            elif seen_all:
+                # 2026-10-12: a 2-ad catalogue whose walk never matched the API's count skipped the
+                # prune every night, so MNZ1403 (its own page 404, dead-visible 10-11 and 10-12)
+                # froze at 2 strikes, on screen. Absence still decides nothing: only an unseen ad
+                # whose OWN page reads gone (a seen ad answering live first) takes a strike.
+                n = db.strike_read_gone(tbl, seen_all, SOURCE)
+                if n > 0:
+                    print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:
-            print(f"  NOT pruning: {unreadable} unreadable detail(s) or a short walk", flush=True)
+            print(f"  absence prune skipped: {unreadable} unreadable detail(s) or a short walk "
+                  f"(listed {len(listing)}, API total {declared}); own-page readings only", flush=True)
         # The API ANSWERED (a failed fetch raises above) and itself declares total_count=0 with no
         # results: the source published its own empty catalogue (2026-10-01/02: its one ad came
         # down). That is an answer, not a blocked crawl, so the run is not demoted to red for it.

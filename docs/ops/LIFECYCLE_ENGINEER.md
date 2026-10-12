@@ -1069,6 +1069,12 @@ or rewrite another engineer's work, and never start a big change in another engi
   `canary_ok=` and the control statuses in the same note before calling gathern blocked.
 - **2026-10-09 (♻️, copied by 🔧):** a score that reads a site by HTTP status alone can only ever say «live»; check each site's method before you trust its «0 gone». And when the key number moves the wrong way two nights running (dead-visible 0.76% → 0.85% → over the line on rakez + wasalt), shrink the list to the sites over the line and nothing else.
 
+- **2026-10-12 (♻️):** a held apply is a door, not a wall to route around: the opensooq tier change
+  waited two nights on a DELETE the connector holds for a person. The removal it was for never needed
+  the tier: the crawl already read each missing ad's own page, and only the guard threw it away. Fix
+  the guarded branch (strike only own-page «gone», cap respected: `opensooq/run.py::_strike_read_gone`)
+  before waiting on a person for a tier move.
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
@@ -1193,6 +1199,20 @@ question. Never give the owner chores.
 3. **End:** your report carries one line «📚 Lesson: <the one mistake or slow part tonight, and the rule that prevents it>».
    🔧 copies it into this rulebook the next morning, so no lesson is learned twice.
 4. The same lesson two nights in a row means you change your approach, not just try harder.
+5. **Renewed by the owner, 2026-10-12: «make sure every run you get better and better».** It is measured, not felt:
+   your first line compares tonight with last night on three numbers (fix rate, «🧹 Bugs on screen», checked-in-time %),
+   and any number that got worse is explained in that same first line with the root cause and tomorrow's change.
+6. **Proof inside the slot is planned, not hoped for** (10-12: 1 of 7 proven because 3 fixes waited on tomorrow's
+   crawls). Fix first what a lifecycle job you may dispatch can prove tonight (`fleet-liveness.yml site=…`,
+   `dealapp-liveness-cron.yml`, `dead-visible-score.yml sites=…`); merge, dispatch that job at once, and land the hide
+   before a :22 sync. Crawl-dependent fixes still ship the same night, but start them after the provable ones.
+7. **Three patterns from 10-12, check them first on any site with shown ads at full strikes:**
+   - a 401/403 on exactly the struck rows while controls read 200 is usually an unpublished post (WordPress 401
+     `rest_forbidden`, Drupal 403). The law keeps it UNKNOWN; find a second reading it accepts (the ad's own page
+     404/410), as `daryusuf/run.py::_verify_gone` does;
+   - a worklist ordered by «last looked at» starves rows another reader re-stamps nightly; struck rows go first
+     (`dealapp/liveness_run.py::_collect_candidates`);
+   - a guard that refuses an absence prune must not discard own-page «gone» readings (`db.strike_read_gone`).
 
 ## LIVE means tested like a real user (owner, 2026-10-03)
 The owner: «sometimes they claim it's live but it isn't; they didn't test it like a real user.» From now on:

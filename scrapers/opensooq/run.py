@@ -352,7 +352,8 @@ def main() -> int:
             if rr and complete:
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE, verify_gone=verify_gone)
                 if n < 0:
-                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
+                    print(f"  ⚠ {tbl}: prune guard tripped — reading the unseen ads' own pages", flush=True)
+                    n = db.strike_read_gone(tbl, {r["ad_number"] for r in rr}, SOURCE, verify_gone)
                 elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:
