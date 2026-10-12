@@ -42,9 +42,14 @@ const files = readdirSync(dir).filter((n) => n.endsWith('.sql')).map((name) => (
 const errs = problems(lastSchedules(files));
 
 // Mutation proof: the pre-fix tree (without the 2026-10-12 reschedule) must fail.
+const mustCatch = (label: string, caught: boolean) => {
+  if (!caught) errs.push(`mutation not caught: ${label}`);
+};
 const pre = files.filter((f) => !f.name.startsWith('20261012051131'));
 const mutErrs = problems(lastSchedules(pre));
-if (mutErrs.length === 0) errs.push('mutation: the tree without 20261012051131 still passes, so this check cannot fail');
+mustCatch('the pre-fix tree (early warning at 04:55, 33 min into the 04:22 crawl)', mutErrs.length > 0);
+mustCatch('an early warning 10 min after the nightly dispatch',
+  problems({ 'scraper-early-warning': '32 4 * * *', 'gh-small-sources': '22 4 * * *' }).length > 0);
 
 if (errs.length) {
   console.error('❌ verify-scraper-early-warning-runs-after-nightly-crawl\n  ' + errs.join('\n  '));
