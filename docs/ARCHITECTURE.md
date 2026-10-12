@@ -915,7 +915,7 @@ migration-drift-guard rule in `AGENTS.md`).
 
 ## 20. Permanent rules (the non-negotiables)
 
-**Share preview (owner, 2026-10-11):** use the existing green eagle and rooftops on white, identical to `public/icon-512.png`, for both the in-app share preview and external link artwork. Keep the owner’s conversational Arabic message and its AI-search wording in `src/lib/share.ts`; every share target uses those constants. Version the image URL when artwork changes.
+**Share preview (owner, 2026-10-11):** use the existing green eagle and rooftops on white, identical to `public/icon-512.png`, for both the in-app share preview and external link artwork. Keep the owner’s original conversational Arabic message and approved English translation in `src/lib/share.ts`, without an AI sentence or dashes; every share target uses the constants for the selected language. Version the image URL when artwork changes.
 
 - **Response feedback (owner 2026-10-01):** selecting either thumb moves both visible thumbs together until they touch, then fades the unselected thumb, leaving one selected thumb; tapping it again restores both choices. Keep share/read-aloud stationary, mirror the layout for Arabic/English, and skip motion when reduced motion is enabled. Keep the existing top-of-chat confirmation popup. Feedback storage and response scope remain unchanged.
 
