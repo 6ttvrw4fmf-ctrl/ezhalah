@@ -370,3 +370,10 @@ def test_spec_table_value_on_its_own_line_is_kept_with_its_label():
     assert "عدد غرف النوم 1" in pe["evidence_lines"]
     r = compare_listing({"bedrooms": 1, "bathrooms": 1}, pe)
     assert r["bedrooms"] == MATCH and r["bathrooms"] == MATCH
+
+
+@pytest.mark.parametrize("area,want", [(163, PAGE_SILENT), (101, MATCH), (300, MISMATCH)])
+def test_unit_inside_a_project_span_is_silence_not_a_mismatch(area, want):
+    # wahadat 17399567: project page «101 - 259 م²» / «131 - 168 م²»; stored unit 163 m² (unit 9 in the payload).
+    r = compare_listing({"area_m2": area}, page("101 - 259 م²", "131 - 168 م²"))
+    assert r["area"] == want
