@@ -10,7 +10,7 @@
 // `danger` is checked FIRST and wins over everything: the agent never searches in answer to it.
 import { variantText, EXAMPLE_SEARCH_AR, EXAMPLE_SEARCH_EN } from "./questionExamples.ts";
 
-export type Situation = "danger" | "complaint" | "protected" | "financial" | "advice" | "sell" | "outside";
+export type Situation = "danger" | "complaint" | "protected" | "financial" | "advice" | "sell" | "outside" | "link" | "phone";
 
 const L = "(?<![\\p{L}])", R = "(?![\\p{L}])";
 const re = (src: string) => new RegExp(src, "iu");
@@ -22,11 +22,17 @@ const ADVICE = re(`${L}(?:تنصحني|تنصح|انصحني|أنصحني|نصي
 const SELL = re(`(?:ابي|أبي|ابغى|أبغى|ودي)\\s*(?:ابيع|أبيع|اعلن|أعلن|انشر|أنشر|اأجر|أأجر|اؤجر|أؤجر)|(?:انشر|أنشر|اضيف|أضيف)\\s*(?:اعلان|إعلان|عقاري)|\\b(?:i\\s+want\\s+to\\s+(?:sell|rent\\s+out|list)|sell\\s+my|list\\s+my|post\\s+(?:an?\\s+)?(?:ad|listing)|advertise\\s+my)\\b`);
 const OUTSIDE = re(`${L}(?:دبي|ابوظبي|أبوظبي|الشارقة|عجمان|الكويت|القاهرة|الاسكندرية|الإسكندرية|عمّان|عمان|الدوحة|المنامة|مسقط|بيروت|دمشق|بغداد|اسطنبول|إسطنبول|لندن|باريس|مدريد|تركيا|مصر|الاردن|الأردن|لبنان)${R}|\\b(?:dubai|abu\\s*dhabi|sharjah|kuwait(?:\\s*city)?|cairo|alexandria|amman|doha|manama|muscat|beirut|damascus|baghdad|istanbul|london|paris|madrid|turkey|egypt|jordan|lebanon|qatar|uae|bahrain|oman)\\b`);
 
+// A pasted listing link or an ad number is not a search («only a link or ad number», rulebook preset 25); a phone number is something the user
+// should never need to give (PDPL), and we never repeat it.
+const LINK = re(`https?:\\/\\/|\\bwww\\.|(?:[a-z0-9-]+\\.)+(?:sa|com|fm|app|net|co|org)(?:\\/|\\b)|(?:رقم\\s*(?:ال)?(?:اعلان|إعلان|ترخيص|رخصة)|ad\\s*(?:number|no\\.?|id)|license\\s*(?:number|no\\.?))\\s*[:#]?\\s*\\d{4,}`);
+const PHONE = re(`(?:^|[^\\d])(?:\\+?966|00966|0)?5\\d{8}(?!\\d)|^[\\s\\d+()\\-]{9,}$`);
 /** What a message that is not a property search IS, or null. `danger` first; the order after it is the order of the checks. */
 export function situationKind(text: string): Situation | null {
   const s = String(text ?? "").trim();
   if (!s) return null;
   if (DANGER.test(s)) return "danger";
+  if (PHONE.test(s)) return "phone";
+  if (LINK.test(s)) return "link";
   if (PROTECTED.test(s)) return "protected";
   if (COMPLAINT.test(s)) return "complaint";
   if (FINANCIAL.test(s)) return "financial";
@@ -107,6 +113,30 @@ const POOLS: Record<Situation, { ar: readonly string[]; en: readonly string[] }>
       "Ezhalah only searches properties, we don't post ads or sell. Want me to search for something? For example: {ex} 🏡",
       "We can't publish a listing here, we show the ads of other platforms. If you want to look for a property, for example: {ex} 🏡",
       "Ads are posted on the platforms themselves, and I search them for you. What should I look for? For example: {ex} 🏡",
+    ],
+  },
+  link: {
+    ar: [
+      "ما أقدر أفتح الروابط ولا أبحث برقم الإعلان. اكتب لي وش تدور عليه، مثلاً: {ex} 🏡",
+      "الرابط أو رقم الإعلان ما يفيدني في البحث. قلّي النوع والمدينة، مثلاً: {ex} 🏡",
+      "أبحث لك بكلامك العادي بدل الروابط. اكتب النوع والمدينة، مثلاً: {ex} 🏡",
+    ],
+    en: [
+      "I can't open links or search by an ad number. Tell me what you're looking for, for example: {ex} 🏡",
+      "A link or an ad number doesn't help me search. Tell me the type and the city, for example: {ex} 🏡",
+      "I search from plain words rather than links. Type the property and the city, for example: {ex} 🏡",
+    ],
+  },
+  phone: {
+    ar: [
+      "ما تحتاج تكتب رقم جوالك هنا، ولا أحتفظ به. اكتب لي وش تدور عليه، مثلاً: {ex} 🏡",
+      "رقم الجوال ما له داعي في البحث. قلّي النوع والمدينة، مثلاً: {ex} 🏡",
+      "خلّ رقمك عندك، أنا أحتاج بس وش تدور عليه، مثلاً: {ex} 🏡",
+    ],
+    en: [
+      "You don't need to type your phone number here, and I don't keep it. Tell me what you're looking for, for example: {ex} 🏡",
+      "A phone number isn't needed for a search. Tell me the type and the city, for example: {ex} 🏡",
+      "Keep your number to yourself, I only need what you're looking for, for example: {ex} 🏡",
     ],
   },
   outside: {

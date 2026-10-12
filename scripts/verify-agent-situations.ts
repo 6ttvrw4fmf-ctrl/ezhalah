@@ -23,8 +23,9 @@ const T: Array<[string, Situation | null]> = [
   ['أبغى قرض عقاري', 'financial'], ['mortgage rates?', 'financial'], ['استثمار عقاري', 'financial'],
   ['تنصحني أشتري ولا أأجر؟', 'advice'], ['is this a good time to buy?', 'advice'], ['which is better Aqar or Wasalt', 'advice'], ['هل هذي صفقة حلوة؟', 'advice'], ['قارن لي بين الملقا والياسمين', 'advice'], ['وش أفضل حي', 'advice'],
   ['أبي أبيع شقتي', 'sell'], ['I want to sell my apartment', 'sell'], ['ابغى انشر اعلان', 'sell'],
+  ['https://sa.aqar.fm/ar/123456', 'link'], ['رقم الاعلان 7200909248', 'link'], ['www.aqar.fm/xyz', 'link'], ['ad number 7200909248', 'link'], ['0555123456', 'phone'], ['+966555123456', 'phone'], ['966 55 512 3456', 'phone'],
   ['ابي شقة في دبي', 'outside'], ['apartment in Cairo', 'outside'], ['villa in London', 'outside'],
-  ['ابي شقة في الرياض', null], ['شقة للإيجار في جدة', null], ['villa for sale in Jeddah', null], ['مرحبا', null], ['شكراً', null], ['وش تقدر تسوي', null],
+  ['شقة ٣ غرف في الرياض ٦٠ ألف', null], ['ابي شقة في الرياض', null], ['شقة للإيجار في جدة', null], ['villa for sale in Jeddah', null], ['مرحبا', null], ['شكراً', null], ['وش تقدر تسوي', null],
   ['ابي شقة قريبة من جامعة الملك سعود', null], ['ابغى فيلا بحي النرجس', null], ['شقة عائلية', null], ['', null],
 ];
 const wrong = T.filter(([t, k]) => situationKind(t) !== k);

@@ -399,12 +399,16 @@ export function alignBasisWithStatedPeriod(basis: string, said: "monthly" | "ann
  */
 const MONEY_IN_REPLY = /(?:\d[\d,.٠-٩،]*\s*(?:ألف|الف|آلاف|مليون|ملايين|k|m|million|thousand)?\s*(?:ريال|ر\.?س|﷼|sar|sr|riyals?|دينار|دولار|درهم|usd|aed|kwd|bhd|eur|dollars?|dinars?|dirhams?))|(?:مليون|ملايين)\s*(?:ريال|دينار|دولار)|(?:ميزانية|الميزانية|بميزانية|ميزانيتك|budget)\s*(?:\S+\s+){0,2}(?:\d|مليون|ألف|الف|million|thousand)/i;
 const TYPE_QUESTION = /(?:وش|ايش|إيش|أي|اي)\s*نوع\s*(?:ال)?(?:عقار|مبنى|سكن)|what\s+(?:kind|type)\s+of\s+(?:property|home|place)|which\s+(?:kind|type)\s+of\s+(?:property|home|place)/i;
+const CITY_QUESTION_WHILE_SEARCHING = /(?:أي|اي|وش)\s*(?:ال)?مدينة[^؟?]*[؟?]|which\s+city[^?]*\?/i;
+const BUDGET_QUESTION_WHILE_SEARCHING = /(?:وش|ايش|إيش|كم)\s*(?:هي\s*)?(?:ال)?ميزانية|(?:ميزانيتك|ميزانية)[^؟?]{0,25}[؟?]|what(?:'s|\s+is)\s+your\s+budget|(?:budget|price\s+range)[^?]{0,25}\?/i;
 const BEDROOM_QUESTION = /(?:كم|how\s+many)[^؟?]{0,30}(?:غرف|غرفة|bedrooms?|rooms?)[^؟?]*[؟?]/i;
 const BEDROOMS_GIVEN = /(?:[0-9٠-٩]+\s*(?:غرف|غرفة|bedrooms?|beds?|br)(?![\p{L}]))|(?:غرفتين|غرفتان|(?:ثلاث|اربع|أربع|خمس|ست|سبع)\s*غرف|\b(?:one|two|three|four|five)\s*(?:bed)?rooms?\b)/iu;
 export function replyBreaksSearchRules(reply: string, userText: string): boolean {
   const r = String(reply ?? "");
   if (MONEY_IN_REPLY.test(r)) return true;
   if (TYPE_QUESTION.test(r)) return true;
+  if (BUDGET_QUESTION_WHILE_SEARCHING.test(r)) return true;  // only the PLACE may be asked about (owner rule 2026-09-11), never the budget
+  if (CITY_QUESTION_WHILE_SEARCHING.test(r)) return true;   // the search is running, so asking «which city?» in the same breath contradicts itself
   if (BEDROOMS_GIVEN.test(String(userText ?? "")) && BEDROOM_QUESTION.test(r)) return true;
   return false;
 }

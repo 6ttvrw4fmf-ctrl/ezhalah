@@ -20,6 +20,7 @@ import { certifyAfOnMergedState as certifyAf, type CertifiableBackendQuery } fro
 import { mergeConversationState, rescuedFields, describeKnownState } from '@/lib/conversationState';
 import { landmarkHint, ensureLandmarks } from './landmarks';
 import { bigWanted, bigAreaMin } from './bigSize';
+import { parsePriceBounds } from '@/lib/priceBounds';
 import { normalizeType, isCleanType, CLEAN_MACRO } from './propertyTypes';
 
 // askCount (owner-approved consolidation, 2026-08-30): the SERVER's own running clarifying-question
@@ -672,6 +673,21 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
 
   q.priceInput = String(b.price ?? '').replace(/[^\d]/g, '');
   if (typeof b.priceOriginal === 'string' && b.priceOriginal.trim()) q.priceOriginal = b.priceOriginal.trim();
+  // «MORE THAN 3 MILLION» IS A FLOOR (owner 2026-10-11; found by the live battery): the edge's single price slot is applied as a CEILING, so
+  // «فيلا أكثر من ٣ مليون» searched villas UNDER 3 million, and «من ١ الى ٣ مليون» lost its lower bound. A floor or a range the user wrote
+  // becomes real priceMin/priceMax (the same fields the Filter uses, so the summary and the search both show «من … إلى …»).
+  if (!q.bothDeals && !q.dealCombined && q.rentPeriod !== 'monthly') {
+    const edgeSar = Number(String(b.price ?? '').replace(/[^\d]/g, '')) || null;
+    for (const _tx of _areaTexts) {
+      const pb = parsePriceBounds(_tx, edgeSar);
+      if (pb.min == null || (q.deal === 'Rent' && pb.min < 20_000)) continue;       // a small rent figure is a monthly one: leave it to the edge
+      q.priceMin = String(Math.round(pb.min));
+      if (pb.max != null) q.priceMax = String(Math.round(pb.max));
+      q.priceInput = '';
+      q.priceIsAnnual = false;
+      break;
+    }
+  }
   if (typeof b.sort === 'string' && b.sort.trim() && b.sort !== 'none') q.sort = b.sort.trim() as SearchQuery['sort'];
   if (typeof b.count === 'number' && b.count >= 1) q.count = Math.min(Math.floor(b.count), 25);
   // Layer on the explicit district resolution from the raw user text — area phrases ("North
