@@ -30,43 +30,53 @@ safety rules (deploy lock, `safe-pr-merge.ts`, source truth, migration rules) st
 > your report with the reason and the plan. Your report gets one line: «🛰️ Sentry: N open in my area · fixed N · resolved N».
 
 ## 🎯 NEXT RUN ORDERS — written by ⚡ for itself (owner, 2026-10-12: «give yourself instructions so you do a good job on the next run»)
-These win over THE PLAN's timeline below; THE PLAN's rules still hold. Replace this block with the next night's orders at the
-end of every run. Written at the end of the 2026-10-12 run.
+These win over THE PLAN's timeline below; THE PLAN's rules still hold. Replace this block at the end of every run.
 
-**The clock is the DATABASE's.** `select now()` at the start = minute 0; never stop before minute 110 unless 10/10.
+> **Owner, 2026-10-12, after a run rated 8/10 (3 of 8 bugs fixed and proven):** «tomorrow I need you to do a better run. Your
+> job is to get better on a daily basis, and I want everything fixed and good. This is your job.»
+> So the bar for 2026-10-13 is: **fix rate ≥ 6 of every 10 found, every number proven like a customer, rating ≥ 9, no
+> over-claim.** A night that ends with a fixable bug unfixed is not finished.
 
-**Minute 0–5 (things that take 25 min start first):**
-1. Haraj: read the result of gate #3 (run 38211044586, files 10-11-15 → 22 KSA) in the 10-12 proof rows. If it PASSED, go
-   straight to the live build (below). If it FAILED, fix the classifier root, push, and the branch push ITSELF starts a shadow
-   (push trigger, defaults `skip_hours=18 files=6`): **do not also dispatch one, concurrency cancels one of them.** Check that the
-   default window is untouched; if not, dispatch instead of pushing a second time.
-2. Haraj file names are **Saudi hours (UTC+3)**: `sitemap-2026-10-12-06.txt` = 03:00 UTC. USED windows (never gate on them again):
-   10-10 01–03, 10-10 ~07–12, 10-10 13 → 10-11 05, 10-11 08 → 13, 10-11 15 → 22, 10-11 23 → 10-12 06 (all KSA file hours).
-   Untouched next: 10-12 07 onwards (skip so the window starts at the newest file older than your run by ≥ 1 h).
-3. `ops_engineer_alert_queue` (scraping-engineer), Sentry, followup rows.
+**What cost 10-12 its rating (do not repeat):**
+- ~25 min lost waiting: two blocking 10-min polls with nothing else running, and a stale shadow run blocking the real one in
+  the same concurrency group. Rule: never block on a wait longer than 3 min; start the next item first. If a run in the same
+  concurrency group is stale, cancel it at once.
+- Branch push + manual dispatch of `haraj-shadow.yml` at the same moment: the push already starts a shadow (defaults
+  `skip_hours=18 files=6`), so one of the two gets cancelled or runs on the wrong window. Push OR dispatch, never both.
+- Window 3 overlapped window 2 by one file: compute the skip from the NEWEST file name the last run printed, not from the clock.
+- The `:end` row over-claimed (5 of 8) and could not be edited (the Supabase tool times out on UPDATE). Rule: write the
+  `:end` row ONCE, last, with `issues_fixed` = the count of tonight's `:proof` rows with `push_ok = true` (query it).
 
-**Minute 5–30, prove what is waiting (each one a proof row):**
-- `scraper-early-warning` now runs at **07:45 UTC** (20261012051131). Its 10-13 run must open NO «no run recorded in 20 h» item
-  for a site whose nightly job ran ok. Read `ops_engineer_backlog` items opened 10-13 07:45: any false «absent» = reopen 447.
-- The 3 source-verified Wasalt lands (14617139, 13320029, 16529693, `ops_price_source_verified` 10-12) must be production_ready
-  after the :22 sync → find one by its anon search replay → proof row; then the other 76 `located_row_unreachable` wasalt lands:
-  same `source-reread.yml` run (it now prints salePrice / averageSalePricePerSqm), register only those whose page prints the
-  stored figure (backlog 371/392).
-- muhaysini: nightly ends ~07:10 UTC; pins proven 10-12 (11,275 / 11,281).
+**Minute 0–10 (DB clock `select now()`):**
+1. PR #6870 (gate-3 business/goods titles) should be merged; if not, merge it on green with `safe-pr-merge.ts`.
+2. Haraj: write the careful rule for the 2 open gate-3 shapes, verbatim tests, re-classify all three 10-12 windows (only those
+   verdicts may move), push ONCE (that push runs the shadow). Gate window: files from **10-12-07 KSA** onwards, never used.
+   Shadow verdict ids: request 11190353094 («محلات ايجار … في حي الملقا او حطين او العارض», body «يكون في …»),
+   two-district catalogue 11190351267 («شقق للبيع بضاحية الجبيل الحي الاول والحي الثاني»).
+3. `ops_engineer_alert_queue`, Sentry, followup rows, `ops_engineer_backlog` (open).
 
-**Minute 30–110, Haraj live build if the gate passed — template = arsh, 2026-09-27 (read bodies LIVE):** migrations one at a time
-on a quiet database, mirrored byte-exact in the same PR; registry in three places (migration, `sql/mirrors/liveness_registry.json`,
-`scrapers/common/liveness_policies.py`); a NEW crawler module, run.py inside the scrapers haraj folder (tag page + hourly sitemap + slug filter → classify → parse →
-`redact_pii` → upsert; `begin_run` first; drop a post with no city); `scrapers/common/db.py` table map; one line in
-`small-sources-sync.yml`; `src/data/loaderPlatforms.ts` PLATFORM_META + SOURCE_TOKENS; deploy via `deploy-frontend.yml`; 5 cards
-proven like a customer. Cannot finish by minute 110 → stop HIDDEN (no registry row) and write which steps are done.
+**Minute 10–35, prove what 10-12 left pending (each a `:proof` row):**
+- Early-warning moved to 07:45 UTC: backlog items opened 10-13 by `scraper_early_warning` must name only sites whose nightly
+  job really failed or never ran (check each against `scrape_runs`). Zero false items → close 447.
+- 54 Wasalt lands registered 10-12 in `ops_price_source_verified`: production_ready after the :22 sync, one found by the anon
+  replay of `location_search_candidates_ar` (city + district + type, no price range). The 3 left: re-read 12915861 and
+  13746442; route 16532216 (dead at source) to ♻️.
+- shmoualshmal, muhaysini, wasalt-enrich: one line each from tonight's runs.
 
-**If the gate failed again:** while the next shadow runs, the class item from 10-12: `mon_detect_silent_partial_success` reads
-sliced crawlers (wasalt pages, aqar slices, gathern city shards) against one median → 26 standing P1s (backlog item opened 10-12).
-Baseline per slice signature; never drop pruned=0 runs blindly (the wasalt-enum lesson).
+**Minute 35–100, fix (in this order, while the Haraj shadow runs):**
+1. Haraj gate result → PASS: start the live build (arsh template, migrations one at a time on a quiet DB, registry in three
+   places, crawler module, `small-sources-sync.yml`, PLATFORM_META + SOURCE_TOKENS, deploy, 5 customer cards). FAIL: fix the
+   shape, push once, gate the next untouched window.
+2. `mon_detect_silent_partial_success` sliced-crawler class (backlog, 26 standing P1s): baseline per slice signature (wasalt
+   page slice, aqar slice, gathern city shard) or per crawl session total. Must still catch the wasalt-enum collapse (96 vs
+   105k): prove both directions in the migration's check block. Mirror byte-exact, barrier, PR.
+3. Anything the nightly crawl broke (read the failed jobs of the 04:22 run, not only `scrape_runs`).
 
-**Proof timing facts:** search sync :22 (commits ~:24–:26); Wasalt rich attrs 06:46 UTC; muhaysini nightly ends ~07:10 UTC.
-**Report:** «N fixed and proven of M found» first; «🚨 Alerts: N → M»; Haraj gate result with its confusion table.
+**Minute 100–110:** proof rows, `:end` row (counts by query), report, rulebook orders for 10-14. Never stop before minute 110.
+
+**Proof timing facts:** search sync :22 (commits ~:24–:26); Wasalt rich attrs 06:46 UTC; muhaysini nightly ends ~07:10 UTC;
+`scraper-early-warning` 07:45 UTC. Haraj sitemap file names are KSA hours (UTC+3). USED Haraj windows (never gate on them):
+10-10 01–03, 10-10 ~07–12, 10-10 13 → 10-11 05, 10-11 08 → 20, 10-11 23 → 10-12 06.
 
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «wire them so the next run turns out perfect … at the point where I don't need to check and agree on
