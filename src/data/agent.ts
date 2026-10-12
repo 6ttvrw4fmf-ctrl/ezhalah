@@ -532,9 +532,14 @@ function certifyAfOnMergedState(merged: SearchQuery, b: BackendQuery): SearchQue
 }
 export function statedKeys(b: BackendQuery): string[] {
   const said: string[] = [];
-  if (b.deal === 'Buy' || b.deal === 'Rent') said.push('deal');
-  if (b.rentPeriod === 'monthly' || b.rentPeriod === 'annual' || b.rentPeriod === 'both') said.push('rentPeriod');
+  // RENT OR BUY IS ONE DECISION (found live 2026-10-11, owner's real-user test): «ابغى شقة» leaves it open
+  // (bothDeals:true), then «الرياض ٢ غرف إيجار سنوي» says RENT — the edge answered deal:Rent, bothDeals:false, but
+  // `bothDeals` was not counted as stated, so the merge rescued the old «open» flag and the search ran as
+  // «rent OR buy» (the first card was a FOR-SALE apartment). A single stated deal closes the question, and
+  // `false` is a real answer.
   if (b.bothDeals === true) said.push('bothDeals', 'deal');
+  else if (b.deal === 'Buy' || b.deal === 'Rent') said.push('deal', 'bothDeals');
+  if (b.rentPeriod === 'monthly' || b.rentPeriod === 'annual' || b.rentPeriod === 'both') said.push('rentPeriod');
   if (b.priceIsAnnual === true) said.push('priceIsAnnual');
   // category is never sent by the edge; it is DERIVED from the type, so it is stated exactly when a
   // type was stated.
