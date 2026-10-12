@@ -1116,7 +1116,9 @@ export default function Agent() {
   // never paints one frame of the tall phone layout first. Phone and tablet pass nothing.
   const adPaneBeside = viewerSplit && adPane.tabs.length > 0 && !adPane.hidden;
   const cardRow = viewerSplit ? (adPaneBeside ? 'tight' as const : 'roomy' as const) : undefined;
-  const cardCols = viewerSplit ? ((adPaneBeside || !cardsThreeAcross) ? 2 as const : 3 as const) : undefined;
+  // The photo-first grid shows only while nothing is open beside the results; with the ad pane open the cards
+  // go back to the compact rows (cardRow 'tight'), like before.
+  const cardCols = viewerSplit && !adPaneBeside ? (cardsThreeAcross ? 3 as const : 2 as const) : undefined;
   // Which result messages have finished typing their reply. The property cards stay hidden until the
   // words above them are fully written out, so listings never appear before Ezhalah has spoken (user
   // request). Keyed by message id.
