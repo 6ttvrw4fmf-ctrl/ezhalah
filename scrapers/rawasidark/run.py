@@ -303,6 +303,11 @@ def map_object(o: dict) -> Optional[tuple[dict, str]]:
         "photo_urls": _photos(o),
         "title": _redact(o.get("title")),
         "description": _redact(o.get("description")),
+        # The catalog object carries no amenity key (source_capture: area / city / location / price /
+        # streetWidth / title / type / description), so the ad's own words are the only statement of
+        # kitchen / lift / parking / rooms: YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2). 36 of 101
+        # active ads named one and all were NULL (🔬 2026-10-12, «12 شقة من غرفتين وصاله وحمام ومطبخ»).
+        **N.prose_amenities_yes(o.get("description")),
         "additional_info": info,
         "source_capture": capture,
         "price_evidence": N.price_evidence(

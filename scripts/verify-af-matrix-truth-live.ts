@@ -230,13 +230,13 @@ async function verifyCell(cell: Cell) {
     L.setCounts(guided, age);
     const res = await f.question.resolveOptions(cell.query);   // REAL numbers from the REAL row
     check(`${tag}/${fid}: the question's total is the scope`, res.total === baseRpc, `total=${String(res.total)} base=${baseRpc}`);
-    let sum = 0;
+    let sum = 0, widest = 0;
     for (const o of res.options) {
       const m = optionMeaning(fid, o.key);
       if (!m) { check(`${tag}/${fid}=${o.key}: option has a meaning`, false); continue; }
       optionsChecked++;
       const chip = Number(o.count);
-      sum += chip;
+      sum += chip; widest = Math.max(widest, chip);
       const q1 = f.question.apply(cell.query, [o.key]);
       const params = L.rpcAdvancedFilterParams(q1);
       // (2) selection = predicate
@@ -326,7 +326,13 @@ async function verifyCell(cell: Cell) {
       const unknownFilter = optionMeaning(fid, res.options[0].key)!.unknown;
       const unkRest = await restCount(`${scopeQS}&${unknownFilter}`);
       check(`${tag}/${fid}: «did not mention» == NULL count`, Number(res.unknownCount) === unkRest, `caption=${String(res.unknownCount)} null=${unkRest}`);
-      check(`${tag}/${fid}: options + unknown == scope`, sum + Number(res.unknownCount) === baseRpc, `${sum} + ${String(res.unknownCount)} vs ${baseRpc}`);
+      if (fm.nested) {
+        const beyond = await restCount(`${scopeQS}&${fm.nested.beyond}`);
+        check(`${tag}/${fid}: widest rung + beyond the ladder + unknown == scope`,
+          widest + beyond + Number(res.unknownCount) === baseRpc, `${widest} + ${beyond} + ${String(res.unknownCount)} vs ${baseRpc}`);
+      } else {
+        check(`${tag}/${fid}: options + unknown == scope`, sum + Number(res.unknownCount) === baseRpc, `${sum} + ${String(res.unknownCount)} vs ${baseRpc}`);
+      }
     }
     // (4) two options of ONE field
     if (f.question.selection === 'multi' && res.options.length >= 2) {

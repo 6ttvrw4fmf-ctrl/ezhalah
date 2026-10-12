@@ -1030,7 +1030,10 @@ UTILITY_COLUMNS = {"electricity": "electricity", "waters": "water_supply", "wate
                    "sanitation": "sanitation", "fibreopt": "optical_fibers", "fiberopt": "optical_fibers"}
 PROSE_AMENITY_COLUMNS = frozenset({"elevator", "kitchen", "air_conditioner", "parking", "maid_room",
                                    "driver_room", "laundry_room", "balcony_terrace", "private_entrance",
-                                   "car_entrance", "optical_fibers"})
+                                   "car_entrance", "optical_fibers", "furnished"})
+# «furnished» (🔬 2026-10-12, backlog 386): the same four-outcome prose reading — «مفروشة» / «مؤثثة» yes,
+# «غير مفروشة» a stated no, silence NULL. Only dealapp_residential_listings has the column
+# (20261012 migration), so map_listing() drops it from a commercial row (a key the table lacks is PGRST204).
 
 
 def af_answers(aprops: dict, description: Optional[str]) -> dict[str, bool]:
@@ -1216,6 +1219,8 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
         "additional_info": info,
         **af_answers(aprops, _redact(schema.get("description"))),
     }
+    if category == "commercial":
+        row.pop("furnished", None)
     return row, category, sold
 
 
