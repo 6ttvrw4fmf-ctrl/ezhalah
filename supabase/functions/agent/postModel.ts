@@ -193,9 +193,13 @@ const FRAC_ALT = Object.keys(AR_FRACTION).sort((a, b) => b.length - a.length).jo
 const UNIT_ALT = AR_UNITS.map(([w]) => w).join("|");
 
 // [count|fraction]? UNIT [ونص|وربع]?   e.g. «مليون ونص», «نص مليون», «ثلاثة ملايين», «مليونين»
+// WHOLE WORDS ONLY (found live 2026-10-11): «ابغى شقة قريبة من الافنيوز» (the Avenues mall) was read as «الاف»
+// = 1,000 and silently became a price filter of 1,000 — the same for «الألفية» (الف) and «مليونير» (مليون).
+// A unit must start a word — optionally after ONE attached particle (بـ لـ وـ فـ: «بالف ريال», «بمليون ونص») —
+// and must not run on into more letters.
 const AR_AMOUNT_RE = new RegExp(
-  String.raw`(?:(${COUNT_ALT}|${FRAC_ALT})\s+)?(${UNIT_ALT})(?:\s*و\s*(${FRAC_ALT}))?`,
-  "g",
+  String.raw`(?<![\p{L}])[بلوف]?(?:(${COUNT_ALT}|${FRAC_ALT})\s+)?(${UNIT_ALT})(?![\p{L}])(?:\s*و\s*(${FRAC_ALT}))?`,
+  "gu",
 );
 
 /**
@@ -348,10 +352,20 @@ export function fillBathroomsIfAbsent(af: unknown, text: string): Record<string,
  */
 export function dropAbshirOpener(s: string): string {
   const text = String(s ?? "");
-  const m = text.match(/^(\s*ارحب[\s,!.،؛-]*)?\s*أبشر(?![\p{L}])[\s,!.،؛-]*/u);
+  const m = text.match(/^(\s*ارحب[\s,!.،؛\-–—]*)?\s*أبشر(?![\p{L}])[\s,!.،؛\-–—]*/u);
   if (!m) return text;
   const rest = text.slice(m[0].length).trim();
   if (!rest) return text;
   const greet = (m[1] ?? "").trim();
   return greet ? `${greet} ${rest}` : rest;
+}
+
+/**
+ * Put an addition (the «(150 م²)» size note) BEFORE the reply's closing emoji, so the reply still ENDS with its
+ * one emoji (owner 2026-10-11: every message ends with an emoji). Found live: «… بحدود ١٥٠ متر 🏢 (150 م²)».
+ */
+export function insertBeforeTrailingEmoji(reply: string, extra: string): string {
+  const text = String(reply ?? "").trimEnd();
+  const m = text.match(/^(.*?)\s*((?:\p{Extended_Pictographic}\uFE0F?)+)$/su);
+  return m ? `${m[1]} ${extra} ${m[2]}` : `${text} ${extra}`;
 }
