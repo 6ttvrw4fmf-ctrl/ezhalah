@@ -47,6 +47,24 @@ META = re.compile(r'<meta\s+[^>]*(?:property|name)=["\']([^"\']+)["\'][^>]*conte
 TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I)
 
 
+# A spec table renders its label and its value as two elements («عدد غرف النوم» / «1»): split on tags they
+# become two lines, and the bare value never matched EVIDENCE, so the reader kept the label and lost the
+# figure. reinvest 17384274 (2026-10-12) then showed only the description's «3 غرف نوم» and scored our
+# structured bedrooms = 1 a mismatch although the page's own table says «عدد غرف النوم 1». A short value
+# line straight after an evidence label is kept WITH its label.
+SHORT_VALUE = re.compile(r"^[\d٠-٩][\d٠-٩.,٬]*(?:\s*(?:م²|م2|متر|ريال|ر\.س|سنة|سنوات))?$|^(?:نعم|لا|جديد|يوجد|لا يوجد)$")
+
+
+def _with_values(lines: list[str]) -> list[str]:
+    out: list[str] = []
+    for i, x in enumerate(lines):
+        if not EVIDENCE.search(x):
+            continue
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        out.append(f"{x} {nxt}" if nxt and not EVIDENCE.search(nxt) and SHORT_VALUE.match(nxt) else x)
+    return out
+
+
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
     jsonld = []
@@ -65,7 +83,7 @@ def page_evidence(body: str) -> dict:
         "title": html.unescape(title.group(1).strip()) if title else None,
         "meta": meta,
         "jsonld": jsonld[:5],
-        "evidence_lines": [x for x in lines if EVIDENCE.search(x)][:60],
+        "evidence_lines": _with_values(lines)[:60],
         "text_head": " | ".join(lines)[:1500],
     }
 

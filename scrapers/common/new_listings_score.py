@@ -106,7 +106,7 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("area", "number", "area_m2", r"م²|م2|متر|مساحه"),
     ("bedrooms", "number", "bedrooms", r"غرف|غرفه نوم"),
     # Advanced Filter fields the app serves (the rulebook scorecard's af_n columns + bathrooms).
-    ("bathrooms", "number", "bathrooms", r"حمام|دوره مياه|دورات مياه"),
+    ("bathrooms", "number", "bathrooms", r"حمام|دوره مياه|دورات مياه|دوره المياه|دورات المياه"),
     ("property_age", "number", "property_age", AGE_KW),
     ("street_width_m", "number", "street_width_m", r"عرض الشارع"),
     ("floor_number", "number", "floor_number", r"الطابق|رقم الدور"),

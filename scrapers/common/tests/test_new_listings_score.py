@@ -358,3 +358,15 @@ def test_score_site_counts_other_ads_page_as_unreadable():
     })
     row = score_site(client, "fakesite", [("t", 1)], night="2026-10-12", pace=0, probe=lambda url: (200, body))
     assert row["unreadable_pages"] == 1 and row["normal_mismatch"] == 0 and row["mismatch_ids"] == []
+
+
+def test_spec_table_value_on_its_own_line_is_kept_with_its_label():
+    # reinvest 17384274: table «عدد غرف النوم» / «1» (structured), description «* 3 غرف نوم» (prose).
+    from scrapers.common.source_reread import page_evidence
+    body = ('<html><body><div><span>عدد غرف النوم</span><span>1</span></div>'
+            '<div><span>عدد دورات المياه</span><span>1</span></div>'
+            '<p>* 3 غرف نوم</p><p>* 3 دورات مياه</p></body></html>')
+    pe = page_evidence(body)
+    assert "عدد غرف النوم 1" in pe["evidence_lines"]
+    r = compare_listing({"bedrooms": 1, "bathrooms": 1}, pe)
+    assert r["bedrooms"] == MATCH and r["bathrooms"] == MATCH
