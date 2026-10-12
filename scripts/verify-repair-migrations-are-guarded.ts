@@ -72,6 +72,15 @@ const WAIVED: Record<string, string> = {
     'registration-gated un-hide of 15 rows whose source page prints the stored price (evidence string per ' +
     'row); enforce_price_size_sanity() re-reads ops_price_source_verified on every upsert, and ' +
     'mon_detect_located_row_unreachable watches exactly this cohort (it raised these 24; 9 stay hidden and open)',
+  // 🔧 Quality & Repair, 2026-10-12. The eleven aqar rows aqar_classify_shadow_drift() classified PROVEN_WRONG
+  // (own city + neighbourhood resolve under another city) rewritten to the function's fresh_* values, in the
+  // shadow row and the served row, logged to aqar_resolver_log, with a trailing assertion that the cohort is
+  // empty. The class is watched by the detector that raised it: mon_detect_aqar_proven_wrong_resolution (in the
+  // roster) re-runs the same function every sweep, so any row that drifts wrong again is raised again.
+  '20261012142822_qa_aqar_proven_wrong_city_resolutions_repaired_from_own_fields.sql':
+    'self-guarding repair of exactly the aqar_classify_shadow_drift() PROVEN_WRONG cohort (11 rows), each value ' +
+    'the function''s own reading of the listing''s raw_city + neighborhood; mon_detect_aqar_proven_wrong_resolution ' +
+    'watches the class every sweep and raised these rows (17 open alerts on 2026-10-12)',
   // Owner session 2026-10-09 (owner: «make the call yourself»), for the 🦅 Falcon's repair below. The class it
   // fixes — a searchable listing served at exactly 0 for its own deal — is already watched fleet-wide.
   '20261009204020_bossbih_per_metre_ads_stale_zero_total_to_null.sql':
