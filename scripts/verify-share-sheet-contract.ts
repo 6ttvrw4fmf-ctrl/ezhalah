@@ -79,7 +79,9 @@ check('all four share targets were extracted (WhatsApp / X / Telegram / Mail)',
 // The sheet's wording now lives in lib/share.ts, so the extracted statements reference imported
 // names. Feed the REAL exported values into the sandbox — extracted from share.ts, never retyped —
 // so this still executes the component's own template literals rather than a paraphrase of them.
-const shareConst = (name: string) => {
+const shareConst = (name: string): string => {
+  const alias = new RegExp(`export const ${name} = (SHARE_BLURB_AR|SHARE_BLURB_EN);`).exec(shareSrc);
+  if (alias) return shareConst(alias[1]);
   const m = new RegExp(`export const ${name} = '([\\s\\S]*?)';`).exec(shareSrc)
     ?? new RegExp(`export const ${name} = \`([\\s\\S]*?)\`;`).exec(shareSrc);
   if (!m) check(`lib/share.ts exports ${name}`, false, 'not found');

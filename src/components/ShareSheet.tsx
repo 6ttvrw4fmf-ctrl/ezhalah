@@ -109,7 +109,7 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
         <View style={s.grip} />
 
         <View style={s.preview}>
-          <RNImage source={require('../../assets/images/ezhalah-logo.png')} style={s.logo} resizeMode="cover" />
+          <RNImage source={require('../../public/og-image-v5.png')} style={s.logo} resizeMode="contain" />
           <View style={{ flex: 1 }}>
             <Text style={s.pvT}>{t('Ezhalah')}</Text>
             <Text style={s.pvS}>{locale === 'ar' ? SHARE_BLURB_AR : SHARE_BLURB_EN}</Text>
@@ -155,7 +155,7 @@ const s = StyleSheet.create({
   grip: { width: 38, height: 5, borderRadius: 3, backgroundColor: colors.line, alignSelf: 'center', marginTop: 2, marginBottom: 12 },
 
   preview: { flexDirection: 'row', alignItems: 'center', gap: 13, backgroundColor: colors.surface, borderRadius: 16, padding: 14 },
-  logo: { width: 50, height: 50, borderRadius: 12, backgroundColor: colors.selFill, alignItems: 'center', justifyContent: 'center' },
+  logo: { width: 50, height: 50, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   pvT: { fontSize: 15, fontWeight: '700', color: colors.ink },
   pvS: { fontSize: 12, color: colors.muted, lineHeight: 16, marginTop: 2 },
   pvL: { fontSize: 11.5, color: colors.primary, fontWeight: '600', marginTop: 4 },

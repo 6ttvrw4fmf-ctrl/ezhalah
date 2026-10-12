@@ -206,19 +206,34 @@ export function ResultCard({
 
   // ─── LAPTOP PHOTO-FIRST CARD (owner 2026-10-11) ───────────────────────────────────────────────
   // `row` is only ever set on the laptop (web, ≥1024px), so the phone/tablet card below is untouched.
+  // 'roomy' (nothing open beside the results) = this photo-first card. 'tight' (the ad pane is open beside) =
+  // the OLD compact row below, as it always was — «the layout changes» when a card is pressed (owner 2026-10-11).
   // A big photo on top, then the price with the gold «اضغط هنا» button right across from it, the
   // location, the type icon + rooms + size, the chips (the Advanced-Filter picks first, with a ✓),
   // the source's own small facts, and the source's logo. Every value is still the listing's own:
   // nothing is derived, and a value the source did not give renders nothing.
-  if (row) {
+  if (row === 'roomy') {
     const photos = listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []);
     const stay = isStayLengthPriced(listing.source);
     // PRESS = OPEN. The ad opens first, synchronously inside the click (a delayed window.open would be
     // popup-blocked); the buzzer is bumped second and is pure decoration.
     const fire = () => { onOpen(); setBurst((b) => b + 1); };
     const typeIcon = typeImg(listing.cleanType ?? '');
-    const CHIP_CAP = 5;
-    const shownFeats = unfolded ? visible : visible.slice(0, CHIP_CAP);
+    // PLAIN + SAME SIZE (owner 2026-10-11): every laptop card has the same fixed rows — one title line, one
+    // main line, ONE row of at most 3 chips (the Advanced-Filter picks come first) with a plain «+N».
+    // The white space under the chips holds the SOURCE's own key facts — age, facade, street width, plan number,
+    // usage — exactly as published, at most 3 on one fixed row (so every card stays the same size). A fact the
+    // source did not give is simply absent; nothing is derived or guessed.
+    const factRows = (listing.additional_info ?? []).filter((r) => r && r.label && r.value);
+    const FACT_ORDER = [/age|عمر/i, /facade|الواجهة/i, /street|عرض الشارع|الشارع/i, /plan|المخطط/i, /usage|استخدام/i];
+    const lpFacts: Array<{ k: string; label: string; value: string }> = [];
+    for (const re of FACT_ORDER) {
+      const r = factRows.find((x) => re.test(`${x.key} ${x.label}`) && !lpFacts.some((f) => f.k === x.key));
+      if (r && lpFacts.length < 3) lpFacts.push({ k: r.key, label: attrDisplayLabel(t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), value: arAttrValue(r.label, r.value, locale) });
+    }
+    if (listedClean && lpFacts.length < 3) lpFacts.push({ k: 'listed', label: t('Added'), value: listedClean });
+    const CHIP_CAP = 3;
+    const shownFeats = visible.slice(0, CHIP_CAP);
     const moreFeats = visible.length - shownFeats.length;
     return (
       <View testID={`card-listing-${listing.id}`} style={[card.wrap, card.lpWrap, { direction: wDir }]}>
@@ -243,7 +258,7 @@ export function ResultCard({
             </View>
             {listing.source_url ? (
               <View style={card.lpCta}>
-                <GoldShineButton idle={false} onPress={fire} style={card.lpGold} testID="card-open-gold">
+                <GoldShineButton shine="css" onPress={fire} style={card.lpGold} testID="card-open-gold">
                   <Text style={card.lpGoldTx}>{t('Click here 👆')}</Text>
                 </GoldShineButton>
                 <Text style={card.lpCtaNote}>{t('To confirm availability and details')}</Text>
@@ -267,7 +282,7 @@ export function ResultCard({
             <Text style={card.derivedTotalNote} numberOfLines={1}>{t('Calculated from price per m² × area — not published by the source')}</Text>
           ) : null}
 
-          <Text style={[card.title, card.lpTitle, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={2}>
+          <Text style={[card.title, card.lpTitle, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1}>
             {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
           </Text>
 
@@ -291,7 +306,6 @@ export function ResultCard({
             {listing.beds > 0 ? <Stat icon="bed-outline" big={String(listing.beds)} small={t(listing.beds === 1 ? 'Bed' : 'Beds')} /> : null}
             {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} picked={bathPicked} /> : null}
             {listing.area > 0 ? <Stat icon="resize-outline" big={`${listing.area} ${tr('m²')}`} small={t('Area')} /> : null}
-            {listedClean ? <Stat icon="calendar-outline" big={t('Added')} small={listedClean} /> : null}
           </View>
 
           {evidence.length > 0 ? (
@@ -306,30 +320,29 @@ export function ResultCard({
             </View>
           ) : null}
 
-          {visible.length > 0 ? (
-            <View style={card.lpChips}>
-              {shownFeats.map((f) => {
-                const picked = pickedFeatures.has(f.key);
-                return (
-                  <View key={f.key} style={[card.lpChip, picked && card.lpChipPicked]} testID={picked ? `card-feature-picked-${f.key}` : undefined}>
-                    {picked ? <Ionicons name="checkmark" size={12} color={colors.onFill} /> : null}
-                    <Text style={[card.lpChipTx, picked && card.lpChipTxPicked]}>{t(f.label)}</Text>
-                  </View>
-                );
-              })}
-              {moreFeats > 0 ? (
-                <Pressable onPress={() => setUnfolded(true)} accessibilityRole="button" style={[card.lpChip, card.lpChipMore]}>
-                  <Text style={card.lpChipTx}>{t('See {n} more', { n: moreFeats })}</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          ) : hasAddlInfo ? null : (
-            <Text style={card.noFeat}>{t('No additional features listed')}</Text>
-          )}
+          <View style={card.lpChips}>
+            {shownFeats.map((f) => {
+              const picked = pickedFeatures.has(f.key);
+              return (
+                <View key={f.key} style={[card.lpChip, picked && card.lpChipPicked]} testID={picked ? `card-feature-picked-${f.key}` : undefined}>
+                  {picked ? <Ionicons name="checkmark" size={12} color={colors.onFill} /> : null}
+                  <Text style={[card.lpChipTx, picked && card.lpChipTxPicked]} numberOfLines={1}>{t(f.label)}</Text>
+                </View>
+              );
+            })}
+            {moreFeats > 0 ? (
+              <View style={[card.lpChip, card.lpChipMore]}><Text style={card.lpChipTx}>{`+${moreFeats}`}</Text></View>
+            ) : null}
+          </View>
 
-          {/* The source's own small facts (age, facade, street width, boundaries, plan/land number …) —
-              exactly the rows the source gave, nothing invented; absent when the source was silent. */}
-          <AdditionalInformationPanel listing={listing} t={t} locale={locale} />
+          <View style={card.lpFacts} testID="card-lp-facts">
+            {lpFacts.map((f) => (
+              <Text key={f.k} style={card.lpFact} numberOfLines={1}>
+                <Text style={card.addlLabel}>{f.label} </Text>
+                <Text style={card.addlValue}>{f.value}</Text>
+              </Text>
+            ))}
+          </View>
 
           <View style={card.lpFoot}>
             <View style={card.hostHead}>
@@ -559,6 +572,8 @@ export function ResultCard({
       </View>
       )}
       </View>
+      {/* keeps the golden-buzzer party playing while this card re-flows into the compact row */}
+      {row ? <BuzzLayer burst={burst} /> : null}
     </View>
   );
 }
@@ -1448,16 +1463,18 @@ const card = StyleSheet.create({
   lpType: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   lpTypeIcon: { width: 22, height: 22 },
   lpTypeTx: { fontSize: 13, fontWeight: '700', color: colors.ink },
-  lpChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  lpChips: { flexDirection: 'row', flexWrap: 'nowrap', gap: 6, minHeight: 28, overflow: 'hidden' },
   lpChip: {
     flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.tint, borderRadius: 999,
-    borderWidth: 1, borderColor: colors.tintLine, paddingHorizontal: 10, paddingVertical: 4,
+    borderWidth: 1, borderColor: colors.tintLine, paddingHorizontal: 10, paddingVertical: 4, flexShrink: 1,
   },
   lpChipPicked: { backgroundColor: colors.selFill, borderColor: colors.selFill },
-  lpChipTx: { fontSize: 12, color: colors.primary, fontWeight: '500' },
+  lpChipTx: { fontSize: 12, color: colors.primary, fontWeight: '500', flexShrink: 1 },
   lpChipTxPicked: { color: colors.onFill, fontWeight: '700' },
   lpChipMore: { backgroundColor: colors.surface, borderStyle: 'dashed' },
-  lpFoot: { borderTopWidth: 1, borderTopColor: colors.fieldLine, borderStyle: 'dashed', paddingTop: 8, marginTop: 2 },
+  lpFacts: { flexDirection: 'row', flexWrap: 'nowrap', columnGap: 14, minHeight: 20, overflow: 'hidden', alignItems: 'center' },
+  lpFact: { flexShrink: 1 },
+  lpFoot: { marginTop: 'auto', borderTopWidth: 1, borderTopColor: colors.fieldLine, borderStyle: 'dashed', paddingTop: 8 },
 
   // MIDDLE: property info
   midCol: { minWidth: 0, paddingHorizontal: 10, paddingTop: 5, paddingBottom: 2, gap: 3 },
