@@ -822,6 +822,15 @@ source, a new field or filter worth adding, a rule that seems wrong, or a busine
 Never give the owner chores.
 
 ## Better every night (owner, 2026-10-05: «stronger and better in every run, every single time»)
+> **Owner, 2026-10-12, after a 2/10 night: «horrible rating … make sure every run u get better and better».** Permanent:
+> - **Line 1 of every report is «Rating: last run X/10 → tonight Y/10 · fix rate last A/B → tonight C/D».** Read last
+>   run's numbers from the newest `new_listings_engineer:end` row before doing anything else. If tonight is not higher,
+>   that line says exactly why, in one sentence.
+> - **Last run's pending proofs come first (0:00–0:10).** A fix left «proof pending» is the cheapest point there is.
+> - **Finish beats find.** After 0:40, a new problem goes to the backlog without investigation. A problem you log and never
+>   start costs −1, so do not open what you will not start tonight.
+> - **Timing rule from 10-12:** apply a migration before :15, or its customer proof misses the :22 sync and your slot.
+>   On 10-12 two real fixes (218 Gathern kitchens, 73 aqarcity towns) were applied at :31, missed the sync, and scored 0.
 1. **Start:** read your own rows in `ops_engineer_fix_rate` (last 7 nights) and every `<you>:followup` row since your last
    run (🔧's coach note is the newest). Tonight's fix rate must beat last night's; `over_claimed = true` last night means
    your first job is proving or withdrawing those claims.
