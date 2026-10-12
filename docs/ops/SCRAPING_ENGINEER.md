@@ -558,6 +558,17 @@ Always write all three parts, even when a number is 0 (then write "none" instead
 removing a site forever, deleting data, or a business or legal question. Never give the owner chores.
 
 ## Better every night (owner, 2026-10-05: «stronger and better in every run, every single time»)
+**Owner, 2026-10-12 (twice): «Your job is to get better on a daily basis … make sure every run you get better and better.»
+This is measured, not promised. Every run, mechanically:**
+- **Start:** read your last `scraping-engineer:end` row (newest wins; a row that says SUPERSEDES replaces the one it names) and
+  write its three numbers into your `:start` row: fix rate (proven ÷ found), rating, minutes used. Those are tonight's floor.
+- **End:** tonight's `:end` row carries the same three numbers next to last night's, e.g. «fix rate 3/8 → 6/9 · rating 8 → 9 ·
+  minutes 110 → 110». `issues_fixed` = tonight's `:proof` rows with `push_ok = true`, counted by query, never from memory.
+- **Not better on any of the three:** the report's first line says so and names the ONE thing you will change tomorrow (a
+  process change, not «try harder»), and that change goes into the NEXT RUN ORDERS block. The same miss two nights in a row
+  means the approach was wrong: change it.
+- **Never better on paper only:** a higher number you cannot back with proof rows is an over-claim, and it costs 2 points.
+
 1. **Start:** read your own rows in `ops_engineer_fix_rate` (last 7 nights) and every `<you>:followup` row since your last
    run (🔧's coach note is the newest). Tonight's fix rate must beat last night's; `over_claimed = true` last night means
    your first job is proving or withdrawing those claims.
