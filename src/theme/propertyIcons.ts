@@ -11,7 +11,7 @@ export const GROUP_IMG: Record<string, any> = {
   'Retail & Workspace':                require('../../assets/icons/retail-workspace.png'),
   'Industrial & Logistics':            require('../../assets/icons/industrial-logistics.png'),
   'Commercial Buildings & Facilities': require('../../assets/icons/commercial-buildings-facilities.png'),
-  'Commercial & Industrial Plots':     require('../../assets/icons/commercial-industrial-plots.png'),
+  'Commercial & Industrial Plots':     require('../../assets/icons/land-plots.png'),
 };
 
 export const TYPE_IMG: Record<string, any> = {

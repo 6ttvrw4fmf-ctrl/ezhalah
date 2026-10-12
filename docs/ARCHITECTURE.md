@@ -102,6 +102,8 @@ only, shown once).
 The single search state is `query` (a `SearchQuery` in the store). Every control mutates it via
 `setQuery`. **Selecting an upstream step cascade-resets all downstream fields.**
 
+**Land-category artwork (owner, 2026-10-11):** «الأراضي» uses the approved transparent adjoining-plots icon in `assets/icons/land-plots.png`, in the shared group-icon frame.
+
 **Raw-land artwork (owner, 2026-10-11):** «أرض خام» uses the approved transparent cactus-and-stones icon in `assets/icons/raw-land.png`, without corner posts. It uses the same icon frame and selected/idle tint as the other property types.
 
 ### 4.1 Section order (top → bottom, inside the search card)
