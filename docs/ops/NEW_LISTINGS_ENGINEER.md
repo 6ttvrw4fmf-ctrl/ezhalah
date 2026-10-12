@@ -47,6 +47,38 @@ normal filter (city, district, type, rent, monthly), with the card note «اضغ
 price (owner rule 2026-10-02), and its link opens the unit for a customer (test 10 by clicking, phone and laptop). A unit
 whose link does not open is not «live».
 
+## ▶ START HERE: instructions to myself (written by 🆕 after the 10-11 run, 5/10; the owner asked for them)
+These are HOW I work, not new rules: the owner's orders above and below still win. They exist because on 10-11
+I worked hard on the wrong thing first and the computed score capped me at 5.
+
+1. **The rating comes from `ops_new_listings_score`, so the score is my first work item, not my last.** At 0:00 read
+   tonight's rows next to the scorecard. Any site under 95% normal accuracy caps the night at 5, even with 2 sampled
+   ads. On 10-11 the cap came from nufouth (11 mismatches), mustqr 5, akariyoun 2, shomou 2, aqalemhajer 1, bossbih 1,
+   and I only looked at 08:03.
+2. **0:10–0:45: clear every capping mismatch.** Open the `new-listings-score.yml` job log (GitHub `get_job_logs`), and
+   for each mismatch decide: OUR bug (fix the parser/mapper, repair tonight's rows) or a SCORER artifact (fix
+   `scrapers/common/new_listings_score.py` with a known answer: backlog #61 mustqr nav «حي X», #124 rakez unit rooms,
+   #55 prose numbers). Never mark a real mismatch as an artifact to raise the number. Then re-dispatch
+   `new-listings-score.yml` and read the new cap before 1:30.
+3. **Then the queue's FIRST item** (10-12: #379 Gathern kitchen trapped on the unit page), then scorecard red cells.
+4. **Do not spend the slot on the fleet no-district gate.** Measured 10-11: the honest floor (source-silent 4,116 +
+   ضاحية هجر 324 + direction labels 592) is 1.44% by itself; what is left needs CITY decisions (#365, #269, #377), not
+   resolver arms. One look at the number, one line in the report, move on.
+5. **Tools that cost me time on 10-11, and the fix for each:**
+   - `execute_sql` UPDATE/DELETE hangs 60 s waiting for a confirmation nobody gives. Close queue items with
+     `select ops_close_backlog_item(<id>, 'done'|'wontfix', '<evidence>')`; change data only through migrations.
+   - A multi-statement `execute_sql` returns only the last result, and two columns with the same name overwrite each
+     other in the JSON: alias every column.
+   - Before pushing a new `scripts/verify-*.ts`, run `node --experimental-strip-types
+     scripts/verify-new-barriers-are-mutation-proven.ts` locally: mutants must go through `mustCatch(label, caught)`.
+     Missing it cost a 9-minute CI round.
+   - Robots waiting in `robot_gate()` inflate "active authenticator"; look at the non-gate queries and cron jobs too.
+   - A district fix reaches customers via recovery :10 → refresh :20 → sync :22. Prove it after :25 on a listing a
+     customer CAN reach (a rental with no stated period is outside both rent searches by rule, so the journey says 0).
+   - `customer-journey.mjs` runs here (`/opt/node22` Playwright); ≤ 2 browsers at once.
+6. **Do not stop before 1 h 50 min.** Use idle CI minutes for the next queue item, never for waiting.
+7. **Report honestly:** the rating is the score's cap minus my deductions; "proof pending" until a proof row exists.
+
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «we need it to do a good job … make a plan, and one rule: the numbers a customer sees must
 stay true when listings go dead.» You decide; you do not ask (only money, legal, secrets). The 3 hours are yours: **below 9
