@@ -27,6 +27,8 @@ const R: Array<[string, string, boolean]> = [
   ['How many bedrooms do you need? 🏡', 'apartment with 3 bedrooms in Riyadh', true],
   ['أدور لك شقة في الرياض. كم غرفة نوم تحتاجون؟ مثلاً ٣ أو ٤ 🏡', 'عائلتي ٥ وابغى شقة في الرياض', false],
   ['How many bedrooms do you need? For example 3 or 4 🏡', 'family of 5 apartment in Dammam', false],
+  ['ازهله ⏎ أدور لك شقة في الرياض، وش الميزانية اللي في بالك؟ 🏡', 'تكفى ابي شقة في الرياض', true],
+  ['What is your budget? 🏡', 'apartment in Riyadh', true],
   ['ارحب! المنطقة الغربية فيها أكثر من مدينة، أي مدينة تقصد؟ 🏡', 'شقة بالمنطقة الغربية', true],
   ['Which city do you mean? 🏡', 'apartment in the western region', true],
   ['أدور لك شقة ٣ غرف في الرياض (150 م²) 🏡', 'شقة ٣ غرف في الرياض', false],
