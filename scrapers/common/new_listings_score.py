@@ -106,7 +106,7 @@ FIELDS: list[tuple[str, str, str, str]] = [
     ("area", "number", "area_m2", r"م²|م2|متر|مساحه"),
     ("bedrooms", "number", "bedrooms", r"غرف|غرفه نوم"),
     # Advanced Filter fields the app serves (the rulebook scorecard's af_n columns + bathrooms).
-    ("bathrooms", "number", "bathrooms", r"حمام|دوره مياه|دورات مياه"),
+    ("bathrooms", "number", "bathrooms", r"حمام|دوره مياه|دورات مياه|دوره المياه|دورات المياه"),
     ("property_age", "number", "property_age", AGE_KW),
     ("street_width_m", "number", "street_width_m", r"عرض الشارع"),
     ("floor_number", "number", "floor_number", r"الطابق|رقم الدور"),
@@ -134,7 +134,13 @@ FIELDS: list[tuple[str, str, str, str]] = [
 AF_FIELDS = tuple(n for n, _, _, _ in FIELDS if n not in NORMAL_FIELDS)
 
 NEG = r"(?:بدون|لا يوجد|لايوجد|بلا|غير)\s*"
-DISTRICT_ON_PAGE = re.compile(r"حي\s+\S+")
+# «حي» as its OWN word (or glued to «ب», «بحي حطين»), never the tail of «الحي»: mustqr's app-shell meta
+# «تصفح حسب الحي والسعر» and aqalemhajer's «الضاحية الحي الاول» read as the page naming a district, so 4/4
+# mustqr ads scored district MISMATCH on 2026-10-12 although nothing on the page names one (backlog #61).
+DISTRICT_ON_PAGE = re.compile(r"(?<![^\s|،,(:\-–ب])حي\s+\S+")
+# A line carrying a phone, a commercial registration or the word «هاتف» is the OFFICE's contact block,
+# never the ad: aqalemhajer prints «الأحساء, الهفوف, حي الملك فهد, هاتف:…» under every ad (2026-10-12).
+CONTACT_LINE = re.compile(r"هاتف|جوال|واتس|س\.ت|السجل التجاري|tel:|<num>|\d{9,}", re.I)
 DEAL_KW = {"بيع": r"للبيع|شراء", "ايجار": r"للايجار|ايجار"}
 
 
@@ -165,6 +171,8 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False) -> di
     lines = [x for x in lines if x]
     jsonld = norm(json.dumps(page.get("jsonld") or [], ensure_ascii=False))
     whole = "\n".join(lines + ([jsonld] if page.get("jsonld") else []))
+    whole_loc = "\n".join([x for x in lines if not CONTACT_LINE.search(x)]
+                          + ([jsonld] if page.get("jsonld") else []))
     out: dict[str, str] = {}
     for name, kind, col, kw in FIELDS:
         if name == "price":
@@ -185,7 +193,7 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False) -> di
         elif kind == "bool":
             out[name] = _cmp_bool(stored.get(col), lines, kw)
         elif kind == "district":
-            out[name] = _cmp_district(stored.get(col), whole)
+            out[name] = _cmp_district(stored.get(col), whole_loc)
         elif kind == "deal":
             out[name] = _cmp_valued(stored.get(col), whole, DEAL_KW)
         else:
@@ -208,6 +216,9 @@ AREA_UNIT = re.compile(r"م²|م2|متر مربع")
 
 
 ONE_WORD = re.compile(r"(?<!\S)(?:واحد|واحده)(?!\S)")
+# Arabic states TWO with the dual, not the digit: bossbih 17388816 prints «غرفتين» for its 2 bedrooms
+# (2026-10-12: stored 2, scored MISMATCH). A dual on the keyword's own line states the figure 2.
+DUAL_WORD = re.compile(r"(?<![\u0621-\u064A])(?:غرفتين|غرفتان|حمامين|حمامان|دورتين|دورتان|صالتين|صالتان|مجلسين|مجلسان)(?![\u0621-\u064A])")
 
 
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
@@ -240,6 +251,8 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # 2026-10-07: gathern 12857258 / 13191014 / 13971729 stored 1, scored «mismatch» 3/3).
         if any(ONE_WORD.search(lines[i]) for i in kw_hits):
             return MATCH if float(stored) == 1 else MISMATCH
+        if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
+            return MATCH if float(stored) == 2 else MISMATCH
         if kw == AGE_KW and (NEW_BUILDING.search(" | ".join(lines[i] for i in kw_hits)) or any(
                 i + 1 < len(lines) and re.match(r"^\s*جديد\s*$", lines[i + 1]) for i in kw_hits)):
             return MATCH if float(stored) == 0 else MISMATCH
@@ -276,6 +289,25 @@ def _cmp_district(stored, whole: str) -> str:
     if d and d in whole:            # covers «حي X», bare «X», and a glued «X <city>» suffix
         return MATCH
     return MISMATCH if page_names_one else PAGE_SILENT
+
+
+def is_other_ads_page(stored: dict, page: dict) -> bool:
+    """The page lists OTHER ads, not this one: three or more different districts on its lines, none of
+    them ours, and a title naming none. nufouth's share link (/latest-offers?ads-N945=1) opens the ad in
+    a JS modal; the static HTML is the «جدول الشواغر» table of other units (حي المحمدية · حي البحيرة ·
+    حي الياسمين, «6 غرف», «4 غرف»), so 5/5 sampled ads scored district + rooms MISMATCH on 2026-10-12
+    against ads that were never theirs. Such a page has said nothing about the ad: unreadable."""
+    lines = [norm(x) for x in (page.get("evidence_lines") or []) + (page.get("text_head") or "").split(" | ")]
+    named = {norm_district(m.group(0)) for x in lines if not CONTACT_LINE.search(x)
+             for m in DISTRICT_ON_PAGE.finditer(x)}
+    named.discard("")
+    if len(named) < 3:
+        return False
+    ours = norm_district(stored.get("district_ar") or "")
+    if ours and any(ours in n or n in ours for n in named):
+        return False
+    title = norm(page.get("title") or "")
+    return not any(n in title for n in named)
 
 
 def _cmp_valued(stored, whole: str, value_kw: dict[str, str]) -> str:
@@ -476,7 +508,12 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
-        fold(row, key, compare_listing(stored, page_evidence(body), skip_price=platform in SKIP_PRICE), stored)
+        page = page_evidence(body)
+        if is_other_ads_page(stored, page):
+            row["sampled"] += 1
+            row["unreadable_pages"] += 1
+            continue
+        fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE), stored)
     if row["unreadable_pages"]:
         row["note"] = f"{row['unreadable_pages']} page(s) unreadable (never counted as wrong)"
     return row
