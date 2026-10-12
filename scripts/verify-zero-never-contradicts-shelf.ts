@@ -97,7 +97,7 @@ check(`a shelf under ${SHELF_FLOOR} never raises an alarm (count drift)`, !zeroC
 const SRC_SEARCH = readFileSync(join(ROOT, 'src/data/search.ts'), 'utf8');
 const fields = [...windowBetween(SRC_SEARCH, 'export type SearchQuery = {', '\n};', 'src/data/search.ts').matchAll(/^ {2}([a-zA-Z]+)\??:/gm)].map((m) => m[1]);
 const NOT_NARROWING = ['deal', 'location', 'category', 'bothDeals', 'priceIsAnnual', 'rentPeriod', 'dealCombined', 'locationMatch',
-  'regionPin', 'priceOriginal', 'sort', 'count', 'districts', 'districtLabel', 'districtListingCount', 'afFacets'];
+  'regionPin', 'priceOriginal', 'areaNote', 'sort', 'count', 'districts', 'districtLabel', 'districtListingCount', 'afFacets'];
 const unclassified = fields.filter((f) => !(NARROWING as readonly string[]).includes(f) && !NOT_NARROWING.includes(f));
 check(`every one of the ${fields.length} SearchQuery fields is classified narrowing / not`, fields.length > 40 && unclassified.length === 0,
   `unclassified: ${unclassified.join(', ')} — add each to NARROWING in src/lib/shelfCheck.ts (or NOT_NARROWING here, if it can never make a true zero)`);

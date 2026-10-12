@@ -24,7 +24,7 @@ const check = (label: string, ok: boolean) => {
 
 const src = readFileSync(new URL('../supabase/functions/agent/index.ts', import.meta.url), 'utf8');
 check('isSizeDetail excludes bedroom-shaped values (1-4, 5+)', /const isSizeDetail = detailStr !== "" && !\/\^\(\[1-4\]\|5\\\+\?\)\$\/\.test\(detailStr\);/.test(src));
-check('appends the size only when the reply does not already mention it', /if \(isSizeDetail && !replyOut\.includes\(detailStr\)\)/.test(src));
+check('appends the size only when the reply does not already mention it', /if \(isSizeDetail && !toWesternDigits\(replyOut\)\.replace\(\/,\/g, ""\)\.includes\(detailStr\)\)/.test(src));
 check('the listings reply now uses replyOut, not the raw lead(out.reply)',
   // replyOut is now wrapped by groundReply() (a reply may not claim inventory the DB has not
   // confirmed, nor an amenity the query does not carry — verify-agent-broker-grounding.ts). The

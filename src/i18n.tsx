@@ -704,6 +704,7 @@ const AR: Record<string, string> = {
   'Al Jawf': 'منطقة الجوف',
   'Budget': 'الميزانية',
   'Your budget': 'ميزانيتك',
+  'big by Saudi market standards': 'كبير بمقياس السوق السعودي',
   'Monthly Rent': 'الإيجار الشهري',
   'Annual Equivalent': 'المعادل السنوي',
   'Calculated from price per m² × area — not published by the source': 'محتسب من سعر المتر × المساحة — غير معلن من المصدر',

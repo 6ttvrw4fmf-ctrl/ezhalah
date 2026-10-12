@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { windowBetween } from './lib/sourceWindow.ts';
+import { liftSymbols } from './lib/liftSymbols.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const index = readFileSync(join(ROOT, 'supabase/functions/agent/index.ts'), 'utf8');
@@ -24,7 +25,7 @@ const has = (src: string) => {
   return /never guess for them/.test(c) && /never say the results suit them/.test(c)
     && /COUNT of people/.test(c) && /leave bedrooms empty and ask which bedrooms/.test(c)
     && /TASTE words/.test(c) && /taste differs between people/.test(c)
-    && /NEED one of our filters can serve/.test(c) && /never claim a filter we do not have/.test(c)
+    && /NEED one of our filters can serve/.test(c) && /never put that feature in amenities yourself/.test(c) && /never claim a filter we do not have/.test(c)
     && /never ask about property type, budget or district/.test(c);
 };
 check('the prompt has the personal-context rule: head-count → ask bedrooms, taste → differs, need → offer a filter', has(system));
@@ -42,6 +43,26 @@ mustCatch('the city-only guard being dropped', !cityOnly(lifestyle.replace('CITY
 const personal = system.split('\n').find((l) => l.startsWith('PERSONAL INFO')) ?? '';
 check('PERSONAL INFO no longer turns a family size into a larger home', !/family of 6 → larger home/.test(personal) && /relocating → search the destination city/.test(personal));
 mustCatch('«family of 6 → larger home» coming back', /family of 6 → larger home/.test(personal + ' family of 6 → larger home'));
+
+// ── a stated NEED is OFFERED, never silently turned into a filter ──────────────────────────────────────────────
+const lifted = await liftSymbols(join(ROOT, 'supabase/functions/agent/index.ts'), [
+  { header: 'const AMENITY_MENTION_RE: Record<string, RegExp> = {', endsWith: /^\};$/ },
+  { header: 'function replyClaimsUnlistedAmenity(' }, { header: 'function amenitiesUserNamed(' },
+], ['amenitiesUserNamed', 'replyClaimsUnlistedAmenity']);
+const named = lifted.amenitiesUserNamed as (t: string[], u: string[]) => string[];
+const claims = lifted.replyClaimsUnlistedAmenity as (r: string, a: string[]) => boolean;
+check('«أمي ما تقدر تطلع درج» does NOT become the elevator filter; «فيها مصعد» / «ليفت» / "elevator" do',
+  named(['elevator'], ['أمي كبيرة بالسن ما تقدر تطلع درج']).length === 0 && named(['elevator'], ['ابي شقة فيها مصعد']).join() === 'elevator'
+  && named(['elevator'], ['ابغى شقة بليفت']).join() === 'elevator' && named(['elevator'], ['an apartment with an elevator']).join() === 'elevator');
+check('a pool / maid room / parking the user named is kept, one they did not name is dropped, a token with no word list passes',
+  named(['pool', 'maid_room', 'garden'], ['فيلا بمسبح وغرفة خادمة']).join() === 'pool,maid_room' && named(['rnpl'], ['شقة']).join() === 'rnpl');
+check('an earlier message of the same chat counts as the user naming it', named(['pool'], ['فيلا في جدة', 'خلها بمسبح']).join() === 'pool');
+check('a QUESTION that offers the filter claims nothing: «تبي فلتر المصعد؟» passes, «فيها مصعد» is still a claim',
+  !claims('أدور لك شقة في الخبر. تبي فلتر المصعد؟ 🏡', []) && claims('أدور لك شقة في الخبر فيها مصعد 🏡', []) && !claims('أدور لك شقة فيها مصعد 🏡', ['elevator']));
+const edgeSrc = readFileSync(join(ROOT, 'supabase/functions/agent/index.ts'), 'utf8');
+const guarded = (src: string) => /const outAmenities: string\[\] = Array\.isArray\(out\.amenities\)\s*\? amenitiesUserNamed\(/.test(src);
+check('the amenities sent back go through that guard', guarded(edgeSrc));
+mustCatch('the guard being removed from outAmenities (a need would silently filter)', !guarded(edgeSrc.replace('? amenitiesUserNamed(', '? (')));
 
 if (failed) { console.error(`\n❌ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✓ agent: personal context helped, never recommended');

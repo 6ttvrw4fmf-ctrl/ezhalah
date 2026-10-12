@@ -19,6 +19,7 @@ import { partitionRequestedAmenities, cohortAllows } from '@/lib/afCohorts';
 import { certifyAfOnMergedState as certifyAf, type CertifiableBackendQuery } from '@/lib/afCertify';
 import { mergeConversationState, rescuedFields, describeKnownState } from '@/lib/conversationState';
 import { landmarkHint, ensureLandmarks } from './landmarks';
+import { bigWanted, bigAreaMin } from './bigSize';
 import { normalizeType, isCleanType, CLEAN_MACRO } from './propertyTypes';
 
 // askCount (owner-approved consolidation, 2026-08-30): the SERVER's own running clarifying-question
@@ -556,7 +557,9 @@ function _n(x: string): number { return parseInt(x.replace(/[,،\s]/g, ''), 10) 
 export function parseAreaConstraint(text: string): { areaMin?: number; areaMax?: number } {
   if (!text) return {};
   const s = text.replace(/[٠-٩]/g, (d) => String(_AR_DIGITS.indexOf(d)));
-  const U = '(?:م²|م2|م\\.?|متر\\s?مربع|متر|mts?|m²|m2|sq\\.?\\s?m|sqm|square\\s?met(?:er|re)s?|met(?:er|re)s?)';
+  // «م» alone is the unit «m», but it is also the FIRST LETTER of «مليون» / «ملايين» / «مئة»: without the lookahead «تحت ٣ مليون» read as
+  // «under 3 m» (max area 3 m², zero results) — found live 2026-10-11 on «فيلا للبيع في جدة تحت ٣ مليون».
+  const U = '(?:م²|م2|م(?![ء-ي])\\.?|متر\\s?مربع|متر|mts?|m²|m2|sq\\.?\\s?m|sqm|square\\s?met(?:er|re)s?|met(?:er|re)s?)';
   const N = '(\\d[\\d,،\\s]*\\d|\\d)';
   // RANGE first: «من X إلى Y (متر)» | «بين X و Y (متر)» | «X - Y متر»
   let m = s.match(new RegExp(`(?:من|from)\\s*${N}\\s*(?:إلى|الى|to|-|–|—|حتى)\\s*${N}\\s*${U}`, 'i'))
@@ -656,6 +659,15 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   if ((_area.areaMin != null || _area.areaMax != null) && q.detail
       && !/^([1-4]|5\+?)$/.test(q.detail) && /\d/.test(q.detail)) {
     q.detail = null;
+  }
+
+  // «كبير» / "big" (owner 2026-10-11): read on the SAUDI scale (src/data/bigSize.ts) — an area minimum for the chosen
+  // type, never a bedroom count. Only from the user's OWN words, only when no explicit size was given, and only for a
+  // type that has a measured threshold; otherwise the word stays what it was: a largest-first ordering (vagueOrdering).
+  if (q.areaMin == null && q.areaMax == null && _areaTexts.some(bigWanted)) {
+    // a bare «أرض» (no usage said) is the whole land group, whose «big» is the residential-land figure (900 m², the Saudi big plot)
+    const bigMin = bigAreaMin(q.type) ?? (!q.type && q.typeGroups?.length === 1 && q.typeGroups[0] === LAND_GROUP ? bigAreaMin('Residential Land') : null);
+    if (bigMin) { q.areaMin = String(bigMin); q.areaNote = 'big'; }
   }
 
   q.priceInput = String(b.price ?? '').replace(/[^\d]/g, '');
@@ -760,7 +772,10 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   //
   // Only when the user has not chosen a sort themselves — an explicit control always outranks a word.
   const ordering = vagueOrdering(userText);
-  if (ordering && !q.sort) q.sort = ordering;
+  // …EXCEPT «big» that already became a Saudi size threshold (src/data/bigSize.ts): the threshold IS what the word means now.
+  // Largest-first on top of it only surfaced source outliers (a «villa» of 337,650 m² as #1, twice) and pushed the permanent
+  // rule — match first, then diversify the platforms — aside (owner 2026-10-11).
+  if (ordering && !q.sort && !(ordering === 'area_desc' && q.areaNote === 'big')) q.sort = ordering;
 
   return q;
 }

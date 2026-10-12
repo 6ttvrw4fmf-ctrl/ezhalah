@@ -369,3 +369,23 @@ export function insertBeforeTrailingEmoji(reply: string, extra: string): string 
   const m = text.match(/^(.*?)\s*((?:\p{Extended_Pictographic}\uFE0F?)+)$/su);
   return m ? `${m[1]} ${extra} ${m[2]}` : `${text} ${extra}`;
 }
+
+/**
+ * THE RENT PERIOD THE USER WROTE IN THIS MESSAGE WINS (found live 2026-10-11: «شقة شهرية في الخبر» then «بحدود ٥٠ ألف بالسنة» came
+ * back `monthly` one time in eight — the model carried the old period over the new words). The user's own words are the
+ * source: «بالسنة / سنوي / per year» is annual, «بالشهر / شهري / per month» is monthly; a message that says BOTH, or neither,
+ * decides nothing and the model's reading stands.
+ */
+export function statedRentPeriod(text: string): "monthly" | "annual" | null {
+  const s = String(text ?? "");
+  const annual = /بالسنة|بالسنه|سنوي|سنويا|سنوياً|في\s*السنة|كل\s*سنة|\byearly\b|\bannual(?:ly)?\b|\bper\s*year\b|\ba\s*year\b|\/\s*(?:year|yr)\b/i.test(s);
+  const monthly = /بالشهر|شهري|شهريا|شهرياً|في\s*الشهر|كل\s*شهر|\bmonthly\b|\bper\s*month\b|\ba\s*month\b|\/\s*(?:month|mo)\b/i.test(s);
+  return annual === monthly ? null : annual ? "annual" : "monthly";
+}
+
+/** A model basis that contradicts the period the user just wrote is replaced by the matching one (daily/weekly/quarterly/sale bases are left alone). */
+export function alignBasisWithStatedPeriod(basis: string, said: "monthly" | "annual" | null): string {
+  if (said === "annual" && basis === "monthly_rent") return "annual_rent";
+  if (said === "monthly" && basis === "annual_rent") return "monthly_rent";
+  return basis;
+}
