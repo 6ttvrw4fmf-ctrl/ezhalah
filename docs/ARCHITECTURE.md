@@ -187,8 +187,14 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). All registered
 - **Model selector (owner, 2026-10-08):** a subtle label below the microphone area opens two
   Claude-style options: **شاهين 2.2 / Shaheen 2.2** (default) and **حُر 4.4 / Hurr 4.4**.
   Hurr is visible in light gray and disabled, like the unavailable Haiku option in the owner's reference.
-  Keep the menu compact: two name/version rows, then a separated «عن النماذج / About models» row
-  opening the descriptions within the same popup.
+  Keep the menu compact: two name/version rows with their descriptions, then a separated
+  «لماذا شاهين وحُر؟ / Why Shaheen and Hurr?» link opening the centered «نماذج إزهله» story card
+  (owner, 2026-10-10).
+  **Approved model marks (owner, 2026-10-11):** Shaheen uses the falcon head with the small swept
+  wing detail; Hurr uses the broader falcon head. Place the transparent marks beside each name:
+  16 px in the current-model trigger, 22 px in the menu, and 30 px in the story headings. Use green
+  for Shaheen and muted gray for unavailable Hurr. Marks are decorative, share their model's existing
+  tap target, and follow the reading direction in Arabic and English; they never create an extra button.
   Arabic descriptions are «سرعة خاطفة ودقة متناهية للإجابات السريعة» and
   «قوة وتحمل فائق لأصعب المهام والمعالجات»; English descriptions are
   “Lightning-fast precision for instant answers” and “Unmatched endurance for your toughest challenges”.
