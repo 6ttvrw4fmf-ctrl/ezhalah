@@ -77,6 +77,8 @@ const POOLS: Record<string, readonly string[]> = {
   SEARCHING_NOW_AR: q.SEARCHING_NOW_AR, SEARCHING_NOW_EN: q.SEARCHING_NOW_EN, REFINE_DISTRICT_AR: q.REFINE_DISTRICT_AR, REFINE_DISTRICT_EN: q.REFINE_DISTRICT_EN,
   REFINE_BUDGET_AR: q.REFINE_BUDGET_AR, REFINE_BUDGET_EN: q.REFINE_BUDGET_EN, REFINE_BEDS_AR: q.REFINE_BEDS_AR, REFINE_BEDS_EN: q.REFINE_BEDS_EN,
   REFINE_FREE_AR: q.REFINE_FREE_AR, REFINE_FREE_EN: q.REFINE_FREE_EN, SEARCH_FAILED_AR: q.SEARCH_FAILED_AR, SEARCH_FAILED_EN: q.SEARCH_FAILED_EN,
+  THANKS_AR: q.THANKS_AR, THANKS_EN: q.THANKS_EN, HELLO_AR: q.HELLO_AR, HELLO_EN: q.HELLO_EN, SALAM_AR: q.SALAM_AR, BYE_AR: q.BYE_AR, BYE_EN: q.BYE_EN,
+  OPENER_AR: q.OPENER_AR, OPENER_EN: q.OPENER_EN, OPENER_TYPED_AR: q.OPENER_TYPED_AR, OPENER_TYPED_EN: q.OPENER_TYPED_EN,
 };
 const small = Object.entries(POOLS).filter(([, p]) => p.length < 3 || new Set(p).size !== p.length);
 check(`all ${Object.keys(POOLS).length} message pools have at least 3 DIFFERENT phrasings`, small.length === 0, small.map(([n]) => n).join(', '));
@@ -114,6 +116,36 @@ check('the app\'s own questions and error line come in turn: two in a row are ne
   [q.REFINE_DISTRICT_AR, q.REFINE_BUDGET_AR, q.REFINE_BEDS_AR, q.REFINE_FREE_AR, q.SEARCH_FAILED_AR, q.REFINE_BUDGET_EN, q.SEARCH_FAILED_EN]
     .every((pool) => { const t = turn(pool); return t.every((x, i) => i === 0 || x !== t[i - 1]) && new Set(t).size === pool.length; }));
 mustCatch('a pool that collapsed to one phrasing', !(q.nextVariant(['واحدة']) !== q.nextVariant(['واحدة']) || false) || true);
+
+// ── chit-chat: «thanks» is not answered with the introduction (owner 2026-10-11) ─────────────────────────────
+const SOCIAL: Array<[string, 'thanks' | 'bye' | 'hello' | null]> = [
+  ['شكراً', 'thanks'], ['شكرا لك', 'thanks'], ['thanks', 'thanks'], ['Thank you!', 'thanks'], ['يعطيك العافية', 'thanks'], ['مرحبا', 'hello'], ['هلا', 'hello'],
+  ['السلام عليكم', 'hello'], ['hello', 'hello'], ['Hi!', 'hello'], ['مع السلامة', 'bye'], ['bye', 'bye'],
+  ['ابي شقة', null], ['مرحبا ابغى شقة', null], ['I want a house', null], ['وش تقدر تسوي', null], ['شكرا بس ابغى شقة بجدة', 'thanks'],
+];
+check('thanks / hello / goodbye are told apart from a property request', SOCIAL.every(([t, k]) => q.socialKind(t) === k), SOCIAL.filter(([t, k]) => q.socialKind(t) !== k).map(([t]) => t).join(' | '));
+check('«السلام عليكم» is answered «وعليكم السلام», never with «السلام عليكم» again', [0, 1, 2, 3, 4, 5].every((i) => q.socialReplyText('hello', false, `السلام عليكم ${i}`).startsWith('وعليكم السلام')));
+check('a thanks / hello / goodbye reply ends with its emoji, has no dash, and no placeholder is left',
+  SOCIAL.filter(([, k]) => k).every(([t, k]) => { const r = q.socialReplyText(k!, /^[a-z]/i.test(t), t); return done(r) && !/\{\w+\}/.test(r); }));
+check('80 different thanks messages get ≥ 3 different replies, and never the same wording after itself',
+  new Set(seeds.map((s) => q.socialReplyText('thanks', false, s))).size >= 3 && seeds.every((s) => { const a = q.socialReplyText('thanks', false, s); return q.socialReplyText('thanks', false, s, a) !== a; }));
+check('hello never uses the greeting words the persona bans («هلا», «أهلا»)', [...q.HELLO_AR, ...q.SALAM_AR].every((t) => !/(?<![\p{L}])(?:يا\s*)?(?:هلا|أهلا|اهلا)(?![\p{L}])/u.test(t)));
+check('the edge answers a no-property message through socialReplyText', /socialKind\(text\) \? socialReplyText\(socialKind\(text\)!, locale === "en", text, lastBotReply\)/.test(edge));
+mustCatch('the edge going back to the introduction for «thanks»', !/socialKind\(text\) \? socialReplyText\(socialKind\(text\)!, locale === "en", text, lastBotReply\)/.test(edge.replace('socialKind(text) ? socialReplyText(', 'false ? socialReplyText(')));
+
+// ── a warm opener, and the user's own property word echoed (owner 2026-10-11: «Okay, nice. Where do you want us to search?») ──
+const withType = seeds.map((s) => q.cityQuestionAr(s, '', 'Apartment'));
+const withoutType = seeds.map((s) => q.cityQuestionAr(s));
+check('most «which city?» questions open with a short acknowledgement (some deliberately do not, so the shape varies too)',
+  withoutType.filter((x) => q.OPENER_AR.some((o) => x.startsWith(o))).length >= 40 && withoutType.some((x) => !q.OPENER_AR.some((o) => x.startsWith(o))));
+check('when the user already named the property, the opener says it back: «حلو، شقة. …»', withType.filter((x) => /^(?:تمام|حلو|ممتاز|طيب|زين|ماشي)، شقة\./.test(x)).length >= 40);
+check('…and never invents one: an unknown or empty type gives a plain opener', ['', null, undefined, 'Unknown', 'XYZ'].every((t) => !q.cityQuestionAr('x1', '', t as string).includes('{t}') && !/شقة|فيلا/.test(q.cityQuestionAr('x1', '', t as string))));
+check('English: «Okay, nice. Which city are you after?» and «Nice, an apartment. Where should I search?»',
+  q.OPENER_EN.includes('Okay, nice.') && seeds.map((s) => q.cityQuestionEn(s, '', 'Apartment')).some((x) => /^(?:Okay|Nice|Great|Got it|Sure), an apartment\./.test(x)));
+check('the opener never repeats the one in the previous bot message', seeds.every((s) => { const a = q.cityQuestionAr(s, '', 'Villa'); const b = q.cityQuestionAr(s, a, 'Villa'); const o = (x: string) => x.split('.')[0]; return !/^\S+،? فيلا\./.test(a) || o(a) !== o(b); }));
+check('every opener and question still ends with the example and the 📍, with no dash and no placeholder left',
+  [...withType, ...withoutType, ...seeds.map((s) => q.cityQuestionEn(s, '', 'House'))].every((x) => done(x) && x.endsWith(q.PIN) && !/\{\w+\}/.test(x)));
+check('a typed Arabic word (what the model sometimes returns) is echoed as is, a long or odd one is not', q.typeWord('أرض سكنية', false) === 'أرض سكنية' && q.typeWord('some very long odd phrase here', false) === '' && q.typeWord('House', true) === 'a house');
 
 // ── 6. the app's own message lists ──────────────────────────────────────────────────────────────────────────
 const lines = (name: string) => [...windowBetween(agent, `const ${name} = [`, '];', 'agent.tsx').matchAll(/^\s*'([^']+)',?$/gm)].map((m) => m[1]);

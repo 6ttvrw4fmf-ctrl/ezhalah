@@ -28,7 +28,7 @@ export const EXAMPLE_PAIRS_EN: readonly (readonly [string, string])[] = [
 // «Which city?» — each a complete question; the example and the 📍 are added by cityQuestionAr/En.
 export const CITY_ASK_AR: readonly string[] = [
   'في أي مدينة تبحث؟', 'وين تبي نبحث؟', 'أي مدينة تقصد؟', 'في أي مدينة تحب أدوّر لك؟',
-  'أي مدينة في بالك؟', 'أبدأ البحث في أي مدينة؟', 'طيب، في أي مدينة؟', 'وش المدينة اللي تبي تبحث فيها؟',
+  'أي مدينة في بالك؟', 'أبدأ البحث في أي مدينة؟', 'في أي مدينة بالضبط؟', 'وش المدينة اللي تبي تبحث فيها؟',
 ];
 export const CITY_ASK_EN: readonly string[] = [
   'Which city are you searching in?', 'Where should I search?', 'Which city do you have in mind?', 'Which city should I look in?',
@@ -66,10 +66,10 @@ export function pickVariant(pool: readonly string[], seed: string, avoid = ''): 
 
 export const cityExampleAr = (seed = ''): string => `مثلاً ${(seed ? EXAMPLE_PAIRS_AR[hash(`${seed}#`) % EXAMPLE_PAIRS_AR.length] : EXAMPLE_PAIRS_AR[0]).join(' أو ')}`;
 export const cityExampleEn = (seed = ''): string => `For example ${(seed ? EXAMPLE_PAIRS_EN[hash(`${seed}#`) % EXAMPLE_PAIRS_EN.length] : EXAMPLE_PAIRS_EN[0]).join(' or ')}`;
-export const cityQuestionAr = (seed: string, avoid = ''): string => `${pickVariant(CITY_ASK_AR, seed, avoid)} ${cityExampleAr(seed)} ${PIN}`;
-export const cityQuestionEn = (seed: string, avoid = ''): string => `${pickVariant(CITY_ASK_EN, seed, avoid)} ${cityExampleEn(seed)} ${PIN}`;
+export const cityQuestionAr = (seed: string, avoid = '', type?: string | null): string => `${withOpener(false, seed, avoid, type)}${pickVariant(CITY_ASK_AR, seed, avoid)} ${cityExampleAr(seed)} ${PIN}`;
+export const cityQuestionEn = (seed: string, avoid = '', type?: string | null): string => `${withOpener(true, seed, avoid, type)}${pickVariant(CITY_ASK_EN, seed, avoid)} ${cityExampleEn(seed)} ${PIN}`;
 export const nearQuestionAr = (phrase: string, seed: string, avoid = ''): string => `${pickVariant(NEAR_ASK_AR, seed, avoid).replace('{p}', phrase)} ${cityExampleAr(seed)} ${PIN}`;
-export const geoQuestionAr = (seed: string, avoid = ''): string => `${pickVariant(GEO_ASK_AR, seed, avoid)} ${cityExampleAr(seed)} ${PIN}`;
+export const geoQuestionAr = (seed: string, avoid = '', type?: string | null): string => `${withOpener(false, seed, avoid, type)}${pickVariant(GEO_ASK_AR, seed, avoid)} ${cityExampleAr(seed)} ${PIN}`;
 export const wholeCityQuestionText = (cityAr: string, seed = cityAr, avoid = ''): string => `${pickVariant(WHOLE_CITY_ASK_AR, seed, avoid).replace('{c}', cityAr)} ${PIN}`;
 
 // ── EVERY OTHER MESSAGE THE CODE WRITES: several phrasings, never the same one twice in a row (owner 2026-10-11) ──────────
@@ -147,6 +147,71 @@ export function nextVariant(pool: readonly string[], vars: Record<string, string
   cursors.set(pool, at);
   return fillVars(pool[at], vars);
 }
+// ── A WARM OPENER BEFORE THE QUESTION, AND THE USER'S OWN PROPERTY WORD ECHOED (owner 2026-10-11) ──────────────────────────────
+// Owner: «don't always give the same message: «أبغى شقة في أي مدينة تبحث…» → «Okay, nice. Where do you want us to search?»». So the
+// «which city?» question usually starts with a short acknowledgement (3 in 4 times), and when the user already named the kind of
+// property the acknowledgement names it back: «حلو، شقة. وين تبي نبحث؟». Never the opener the previous bot message used.
+export const OPENER_AR: readonly string[] = ['تمام، حلو.', 'ممتاز.', 'طيب، زين.', 'ماشي.', 'حاضر.', 'تمام.', 'حلو.', 'زين.'];
+export const OPENER_EN: readonly string[] = ['Okay, nice.', 'Great.', 'Sure thing.', 'Got it.', 'Alright.', 'Sounds good.'];
+export const OPENER_TYPED_AR: readonly string[] = ['تمام، {t}.', 'حلو، {t}.', 'ممتاز، {t}.', 'طيب، {t}.', 'زين، {t}.', 'ماشي، {t}.'];
+export const OPENER_TYPED_EN: readonly string[] = ['Okay, {t}.', 'Nice, {t}.', 'Great, {t}.', 'Got it, {t}.', 'Sure, {t}.'];
+const TYPE_AR: Readonly<Record<string, string>> = {
+  Apartment: 'شقة', Villa: 'فيلا', House: 'بيت', Floor: 'دور', Duplex: 'دوبلكس', Studio: 'استديو', Room: 'غرفة', 'Rest House': 'استراحة', Chalet: 'شاليه', Camp: 'مخيم',
+  Farm: 'مزرعة', Building: 'عمارة', 'Residential Land': 'أرض', 'Commercial Land': 'أرض تجارية', 'Industrial Land': 'أرض صناعية', 'Raw Land': 'أرض خام', Land: 'أرض',
+  Office: 'مكتب', Shop: 'محل', Warehouse: 'مستودع', Showroom: 'معرض', Workshop: 'ورشة', Factory: 'مصنع', Hotel: 'فندق',
+};
+const TYPE_EN: Readonly<Record<string, string>> = {
+  Apartment: 'an apartment', Villa: 'a villa', House: 'a house', Floor: 'a floor', Duplex: 'a duplex', Studio: 'a studio', Room: 'a room', 'Rest House': 'a rest house', Chalet: 'a chalet',
+  Camp: 'a camp', Farm: 'a farm', Building: 'a building', 'Residential Land': 'a plot of land', 'Commercial Land': 'a commercial plot', 'Industrial Land': 'an industrial plot', 'Raw Land': 'raw land',
+  Land: 'a plot of land', Office: 'an office', Shop: 'a shop', Warehouse: 'a warehouse', Showroom: 'a showroom', Workshop: 'a workshop', Factory: 'a factory', Hotel: 'a hotel',
+};
+/** The user's property word in Arabic / English for the opener («شقة» / «an apartment»), from the canonical type or the Arabic word itself; '' when unknown. */
+export const typeWord = (type: string | null | undefined, en: boolean): string => {
+  const t = String(type ?? '').trim();
+  if (!t) return '';
+  if (en) return TYPE_EN[t] ?? '';
+  return TYPE_AR[t] ?? (/^[؀-ۿ ]{2,20}$/.test(t) ? t : '');
+};
+const withOpener = (en: boolean, seed: string, avoid: string, type?: string | null): string => {
+  if (hash(`${seed}!`) % 4 === 0) return '';                                   // one in four has no opener: not always the same shape either
+  const word = typeWord(type, en);
+  const pool = word ? (en ? OPENER_TYPED_EN : OPENER_TYPED_AR) : (en ? OPENER_EN : OPENER_AR);
+  return `${variantText(pool, seed, avoid, { t: word })} `;
+};
+// ── chit-chat is not a search: thanks, hello and goodbye each have their own phrasings (owner 2026-10-11: not a chatbot that
+// answers «thanks» with the same introduction it gives everyone) ────────────────────────────────────────────────────────────
+export const THANKS_AR: readonly string[] = ['العفو، أي وقت 🤍', 'حياك الله، أنا حاضر لو احتجت شي 🏡', 'الله يعافيك، تحت أمرك 🤍', 'العفو، إذا تبي أدور لك على شي ثاني قلّي 🏡'];
+export const THANKS_EN: readonly string[] = ["You're welcome, I'm here whenever you need me 🤍", 'Happy to help, just tell me what to search next 🏡', 'Anytime, tell me if you want another search 🏡', 'My pleasure 🤍'];
+export const HELLO_AR: readonly string[] = [
+  'ارحب فيك، وش تبي أدور لك؟ مثلاً: {ex}', 'حياك الله، أنا إزهله، وش تدور عليه؟ مثلاً: {ex}', 'ارحب، تحت أمرك. اكتب لي وش تبغى، مثلاً: {ex}', 'ارحب، وش تبغى أدور لك؟ مثلاً: {ex}',
+];
+export const SALAM_AR: readonly string[] = [
+  'وعليكم السلام ورحمة الله، ارحب فيك. وش تدور عليه؟ مثلاً: {ex}', 'وعليكم السلام، حياك الله. وش تبي أدور لك؟ مثلاً: {ex}',
+  'وعليكم السلام ورحمة الله وبركاته، تحت أمرك. اكتب لي وش تبغى، مثلاً: {ex}',
+];
+export const HELLO_EN: readonly string[] = [
+  'Welcome, what are you looking for? For example: {ex}', 'Hi there, tell me what to search for, for example: {ex}', 'Hello, I am Ezhalah. What can I find for you? For example: {ex}',
+  'Good to see you, what are you after? For example: {ex}',
+];
+export const BYE_AR: readonly string[] = ['مع السلامة، حياك الله في أي وقت 🤍', 'في أمان الله، أنا هنا لو احتجت شي 🤍', 'الله يحفظك، نشوفك على خير 🤍'];
+export const BYE_EN: readonly string[] = ['Goodbye, come back anytime 🤍', 'Take care, I am here when you need me 🤍', 'See you soon 🤍'];
+const THANKS_RE = /شكر|يعطيك\s*العافية|مشكور|يسلمو|\bthank|\bthx\b|\bcheers\b/i;
+const BYE_RE = /مع\s*السلامة|في\s*أمان\s*الله|\bbye\b|\bgoodbye\b|\bsee\s*you\b/i;
+const HELLO_RE = /^\s*(?:مرحبا|مرحبًا|مرحباً|ارحب|أرحب|هلا|هلا\s*والله|اهلا|أهلا|أهلاً|السلام\s*عليكم|سلام|صباح\s*الخير|مساء\s*الخير|هاي|hi|hello|hey|good\s*(?:morning|evening|afternoon))[\s!.،,؟?]*$/iu;
+/** What a message with no property in it is: thanks, goodbye, hello — or null (the generic introduction). */
+export const socialKind = (text: string): 'thanks' | 'bye' | 'hello' | null => {
+  const s = String(text ?? '').trim();
+  if (THANKS_RE.test(s)) return 'thanks';
+  if (BYE_RE.test(s)) return 'bye';
+  if (HELLO_RE.test(s)) return 'hello';
+  return null;
+};
+/** The reply to a thanks / goodbye / hello, one of several phrasings, never the one the previous bot message used. */
+export const socialReplyText = (kind: 'thanks' | 'bye' | 'hello', en: boolean, seed: string, avoid = ''): string => {
+  const pool = kind === 'hello' && !en && /السلام\s*عليكم/.test(seed) ? SALAM_AR : kind === 'thanks' ? (en ? THANKS_EN : THANKS_AR) : kind === 'bye' ? (en ? BYE_EN : BYE_AR) : (en ? HELLO_EN : HELLO_AR);
+  const t = variantText(pool, seed, avoid, { ex: en ? EXAMPLE_SEARCH_EN : EXAMPLE_SEARCH_AR });
+  return kind === 'hello' ? `${t} ${HOUSE}` : t;
+};
 export const noIntentReplyText = (en: boolean, seed: string, avoid = ''): string =>
   `${variantText(en ? NO_INTENT_EN : NO_INTENT_AR, seed, avoid, { ex: en ? EXAMPLE_SEARCH_EN : EXAMPLE_SEARCH_AR })} ${HOUSE}`;
 export const unsearchableText = (en: boolean, seed: string, avoid = ''): string => pickVariant(en ? UNSEARCHABLE_EN : UNSEARCHABLE_AR, seed, avoid);

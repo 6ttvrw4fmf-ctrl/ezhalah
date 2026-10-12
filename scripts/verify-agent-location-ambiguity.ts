@@ -44,7 +44,7 @@ console.log('\nCASE 3 — a bare geography cue with no city\n');
   check('"قرب البحر" is caught (via the proximity match, which is a superset of this cue)', r !== null, String(r));
 
   const bare = emptyLocationQuestion('أبي شقة على الكورنيش');
-  const isGeo = (t: string | null) => !!t && GEO_ASK_AR.some((p) => t.startsWith(p)) && t.includes('مثلاً ') && t.endsWith('📍');
+  const isGeo = (t: string | null) => !!t && GEO_ASK_AR.some((p) => t.includes(p)) && t.includes('مثلاً ') && t.endsWith('📍');
   check('a bare geography cue with NO "near/قرب" wording -> the generic geography question (one of the rotating phrasings)', isGeo(bare), String(bare));
 
   const mountain = emptyLocationQuestion('أدور شي بالجبال أجواء باردة');

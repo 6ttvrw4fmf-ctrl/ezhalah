@@ -60,17 +60,17 @@ mustCatch('a pool that collapsed to one sentence', new Set(msgs.map((m) => app.p
 // 3. the sources: the app's questions and the edge function's floor
 const agent = read('src/app/agent.tsx'), index = read('supabase/functions/agent/index.ts');
 const wired = (a: string, i: string) =>
-  /return nearQuestionAr\(prox\.join\(' و'\), userText\);\s*return cityQuestionAr\(userText\);/.test(a)
+  /return nearQuestionAr\(prox\.join\(' و'\), userText\);\s*return cityQuestionAr\(userText, '', q\.type\);/.test(a)
   && /return geoQuestionAr\(userText\);/.test(a)
   && /return twinDistrictQuestion\(arLabel\(lm\.label\)/.test(a)
-  && /cityQuestionEn\(text, lastBotReply\)/.test(i) && /cityQuestionAr\(text, lastBotReply\)/.test(i)
+  && /cityQuestionEn\(text, lastBotReply, wired\.establishedState\.type\)/.test(i) && /cityQuestionAr\(text, lastBotReply, wired\.establishedState\.type\)/.test(i)
   && /noIntentReplyText\(locale === "en", text, lastBotReply\)/.test(i)
   && [...Array(12)].every((_, k) => app.noIntentReplyText(false, `s${k}`).includes(app.EXAMPLE_SEARCH_AR) && app.noIntentReplyText(true, `s${k}`).includes(app.EXAMPLE_SEARCH_EN)
     && app.noIntentReplyText(false, `s${k}`).endsWith(app.HOUSE));
 check('the app and the edge function build their questions from the shared, rotating pools', wired(agent, index));
-mustCatch('the app\'s plain city question going back to one fixed sentence', !wired(agent.replace('return cityQuestionAr(userText);', 'return `في أي مدينة تبحث؟ ${PIN}`;'), index));
-mustCatch('the edge function\'s English city floor going back to one fixed sentence', !wired(agent, index.replace('cityQuestionEn(text, lastBotReply)', '`Which city are you searching in? ${PIN}`')));
-mustCatch('the edge function\'s city floor forgetting the previous bot message', !wired(agent, index.replace('cityQuestionAr(text, lastBotReply)', 'cityQuestionAr(text)')));
+mustCatch('the app\'s plain city question going back to one fixed sentence', !wired(agent.replace("return cityQuestionAr(userText, '', q.type);", 'return `في أي مدينة تبحث؟ ${PIN}`;'), index));
+mustCatch('the edge function\'s English city floor going back to one fixed sentence', !wired(agent, index.replace('cityQuestionEn(text, lastBotReply, wired.establishedState.type)', '`Which city are you searching in? ${PIN}`')));
+mustCatch('the edge function\'s city floor forgetting the previous bot message', !wired(agent, index.replace('cityQuestionAr(text, lastBotReply, wired.establishedState.type)', 'cityQuestionAr(text)')));
 mustCatch('the edge function\'s no-intent reply going back to one fixed sentence', !wired(agent, index.replace('noIntentReplyText(locale === "en", text, lastBotReply)', '`أنا إزهله`')));
 check('no example sentence recommends anything («best», «أفضل», «ننصح»)', ![app.EXAMPLE_SEARCH_AR, app.EXAMPLE_SEARCH_EN, app.cityExampleAr(), app.cityExampleEn(), ...arQs, ...enQs].some((t) => /(best|أفضل|ننصح|انصح|recommend)/i.test(t)));
 

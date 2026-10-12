@@ -63,7 +63,7 @@ import { buildTurnDecision } from "./turnWiring.ts";
 // The three location-ambiguity cases restored from the deleted client-side locationClarification()
 // (round 2 fix, "lost location-ambiguity cases") — see its own header.
 import { plainRegionQuestion, emptyLocationQuestion } from "./locationAmbiguity.ts";
-import { cityQuestionAr, cityQuestionEn, noIntentReplyText, unsearchableText, searchingNowText, twinRegionQuestion, twinDistrictQuestion } from "./questionExamples.ts";
+import { cityQuestionAr, cityQuestionEn, noIntentReplyText, socialKind, socialReplyText, unsearchableText, searchingNowText, twinRegionQuestion, twinDistrictQuestion } from "./questionExamples.ts";
 import { botMessage } from "./botMessage.ts";
 
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
@@ -1593,10 +1593,10 @@ Deno.serve(async (req: Request) => {
         // search. The moment ANY of those is present — «ابغى شقة» — this yields to the city
         // question below, which is the right answer for a real search that is only missing a place.
         const noIntentReply = !unsearchableReply && !ambiguityReply && !hasEnoughToSearch(wired.establishedState)
-          ? noIntentReplyText(locale === "en", text, lastBotReply)
+          ? (socialKind(text) ? socialReplyText(socialKind(text)!, locale === "en", text, lastBotReply) : noIntentReplyText(locale === "en", text, lastBotReply))
           : null;
         const noPlaceReply = !unsearchableReply && !ambiguityReply && !noIntentReply && !hasUsableLocation(wired.establishedState)
-          ? (locale === "en" ? cityQuestionEn(text, lastBotReply) : cityQuestionAr(text, lastBotReply))
+          ? (locale === "en" ? cityQuestionEn(text, lastBotReply, wired.establishedState.type) : cityQuestionAr(text, lastBotReply, wired.establishedState.type))
           : null;
         // ASKING ABOUT PROPERTY TYPE IS GONE (owner, 2026-09-11 — supersedes the 2026-09-06
         // "location + type ⇒ ask" rule). Ezhalah's ONLY clarifying question is about location; a

@@ -308,7 +308,7 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
       .map((p) => (p.text || `${p.phrase} ${p.name || p.categoryAr}`).trim())
       .filter(Boolean);
     if (prox.length) return nearQuestionAr(prox.join(' و'), userText);
-    return cityQuestionAr(userText);
+    return cityQuestionAr(userText, '', q.type);
   }
   // The user asked for the whole CITY or REGION — honour it, don't ask to narrow. Kingdom-wide is
   // deliberately NOT in this test any more: «الرياض كاملة» is a supported scope, «كل المملكة» is not.
