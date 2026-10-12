@@ -221,6 +221,17 @@ export function ResultCard({
     const typeIcon = typeImg(listing.cleanType ?? '');
     // PLAIN + SAME SIZE (owner 2026-10-11): every laptop card has the same fixed rows — one title line, one
     // main line, ONE row of at most 3 chips (the Advanced-Filter picks come first) with a plain «+N».
+    // The white space under the chips holds the SOURCE's own key facts — age, facade, street width, plan number,
+    // usage — exactly as published, at most 3 on one fixed row (so every card stays the same size). A fact the
+    // source did not give is simply absent; nothing is derived or guessed.
+    const factRows = (listing.additional_info ?? []).filter((r) => r && r.label && r.value);
+    const FACT_ORDER = [/age|عمر/i, /facade|الواجهة/i, /street|عرض الشارع|الشارع/i, /plan|المخطط/i, /usage|استخدام/i];
+    const lpFacts: Array<{ k: string; label: string; value: string }> = [];
+    for (const re of FACT_ORDER) {
+      const r = factRows.find((x) => re.test(`${x.key} ${x.label}`) && !lpFacts.some((f) => f.k === x.key));
+      if (r && lpFacts.length < 3) lpFacts.push({ k: r.key, label: attrDisplayLabel(t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), value: arAttrValue(r.label, r.value, locale) });
+    }
+    if (listedClean && lpFacts.length < 3) lpFacts.push({ k: 'listed', label: t('Added'), value: listedClean });
     const CHIP_CAP = 3;
     const shownFeats = visible.slice(0, CHIP_CAP);
     const moreFeats = visible.length - shownFeats.length;
@@ -322,6 +333,15 @@ export function ResultCard({
             {moreFeats > 0 ? (
               <View style={[card.lpChip, card.lpChipMore]}><Text style={card.lpChipTx}>{`+${moreFeats}`}</Text></View>
             ) : null}
+          </View>
+
+          <View style={card.lpFacts} testID="card-lp-facts">
+            {lpFacts.map((f) => (
+              <Text key={f.k} style={card.lpFact} numberOfLines={1}>
+                <Text style={card.addlLabel}>{f.label} </Text>
+                <Text style={card.addlValue}>{f.value}</Text>
+              </Text>
+            ))}
           </View>
 
           <View style={card.lpFoot}>
@@ -1452,6 +1472,8 @@ const card = StyleSheet.create({
   lpChipTx: { fontSize: 12, color: colors.primary, fontWeight: '500', flexShrink: 1 },
   lpChipTxPicked: { color: colors.onFill, fontWeight: '700' },
   lpChipMore: { backgroundColor: colors.surface, borderStyle: 'dashed' },
+  lpFacts: { flexDirection: 'row', flexWrap: 'nowrap', columnGap: 14, minHeight: 20, overflow: 'hidden', alignItems: 'center' },
+  lpFact: { flexShrink: 1 },
   lpFoot: { marginTop: 'auto', borderTopWidth: 1, borderTopColor: colors.fieldLine, borderStyle: 'dashed', paddingTop: 8 },
 
   // MIDDLE: property info

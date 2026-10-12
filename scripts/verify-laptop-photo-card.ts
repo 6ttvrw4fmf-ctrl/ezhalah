@@ -71,10 +71,10 @@ const rules = (card: string, buzz: string, grid: string, agent: string, i18n: st
       /pickedFeatures\.has\(f\.key\)/.test(lp) && /name="checkmark"/.test(lp) && /card-feature-picked-/.test(lp),
     'the «مطابق لطلبك» evidence strip is kept, never truncated':
       /card-af-evidence/.test(lp) && /evidence\.map/.test(lp),
-    'PLAIN + SAME SIZE: no additional-info panel, no date, one title line, one row of at most 3 chips; the logo is kept':
-      !/AdditionalInformationPanel/.test(lp) && !/listedClean/.test(lp) && /const CHIP_CAP = 3;/.test(lp)
+    'PLAIN + SAME SIZE: no additional-info panel, one title line, one row of ≤3 chips, one fixed facts row of ≤3 source facts; the logo is kept':
+      !/AdditionalInformationPanel/.test(lp) && /lpFacts\.length < 3/.test(lp) && /card-lp-facts/.test(lp) && /const CHIP_CAP = 3;/.test(lp)
       && /\[card\.title, card\.lpTitle[^\n]*\n?[^\n]*numberOfLines=\{1\}/.test(lp)
-      && /lpChips: \{ flexDirection: 'row', flexWrap: 'nowrap'/.test(styles) && /<SourceBadge source=\{listing\.source\} \/>/.test(lp),
+      && /lpChips: \{ flexDirection: 'row', flexWrap: 'nowrap'/.test(styles) && /lpFacts: \{ flexDirection: 'row', flexWrap: 'nowrap'[^}]*minHeight: 20/.test(styles) && /<SourceBadge source=\{listing\.source\} \/>/.test(lp),
     'price truth is kept: derived-total equation, per-metre line, stay-length note, rating, RNPL':
       /derivedTotalEquation/.test(lp) && /pricePerMeter/.test(lp) && /isStayLengthPriced|stay \?/.test(lp) && /ratingVal/.test(lp) && /RnplBanner/.test(lp),
     'new styles and the buzzer use theme colours only (no raw hex)':
@@ -113,9 +113,11 @@ mustCatch('the type icon row gone from the main line', 'the TYPE (with its Filte
   rules(CARD.replace('<View style={card.lpType}>', '<View style={card.lpTypeGone}>'), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('the AF picks no longer lit', 'the Advanced-Filter picks are the lit chips (✓), driven by pickedFeatures',
   rules(CARD.replace('const picked = pickedFeatures.has(f.key);\n              return (\n                <View key={f.key} style={[card.lpChip', 'const picked = false;\n              return (\n                <View key={f.key} style={[card.lpChip'), BUZZ, GRID, AGENT, I18N, RESP));
-mustCatch('the long facts panel creeping back (cards would differ in height)', 'PLAIN + SAME SIZE: no additional-info panel, no date, one title line, one row of at most 3 chips; the logo is kept',
+mustCatch('the long facts panel creeping back (cards would differ in height)', 'PLAIN + SAME SIZE: no additional-info panel, one title line, one row of ≤3 chips, one fixed facts row of ≤3 source facts; the logo is kept',
   rules(CARD.replace('          <View style={card.lpFoot}>', '          <AdditionalInformationPanel listing={listing} t={t} locale={locale} />\n          <View style={card.lpFoot}>'), BUZZ, GRID, AGENT, I18N, RESP));
-mustCatch('chips wrapping onto a second row', 'PLAIN + SAME SIZE: no additional-info panel, no date, one title line, one row of at most 3 chips; the logo is kept',
+mustCatch('the facts row wrapping and growing', 'PLAIN + SAME SIZE: no additional-info panel, one title line, one row of ≤3 chips, one fixed facts row of ≤3 source facts; the logo is kept',
+  rules(CARD.replace("lpFacts: { flexDirection: 'row', flexWrap: 'nowrap'", "lpFacts: { flexDirection: 'row', flexWrap: 'wrap'"), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('chips wrapping onto a second row', 'PLAIN + SAME SIZE: no additional-info panel, one title line, one row of ≤3 chips, one fixed facts row of ≤3 source facts; the logo is kept',
   rules(CARD.replace("lpChips: { flexDirection: 'row', flexWrap: 'nowrap'", "lpChips: { flexDirection: 'row', flexWrap: 'wrap'"), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('a raw hex colour in the buzzer', 'new styles and the buzzer use theme colours only (no raw hex)',
   rules(CARD, BUZZ.replace('colors.goldLight, colors.goldDeep', "'#ffd966', colors.goldDeep"), GRID, AGENT, I18N, RESP));
