@@ -81,7 +81,7 @@ for (let i = 0; i < 120; i++) {
   else if (form === 2 && deal === 'Buy') { const mil = [1, 2, 3, 5][i % 4]; text = `${op} ${tw} للبيع في ${cw} تحت ${mil} مليون`; exp.price = mil * 1e6; }
   else if (form === 3 && deal === 'Rent') { const k = [30, 50, 80, 120][i % 4]; text = `${op} ${tw} للإيجار في ${cw} ${k} ألف بالسنة`; exp.price = k * 1000; exp.period = 'annual'; }
   else if (form === 4) text = `${tw} ${rentWord} ${cw}`;
-  else text = `${op} ${tw} في ${cw}`;
+  else { text = `${op} ${tw} في ${cw}`; exp.deal = null; }                    // this form says no deal
   search.push({ g: 'search', text: text.replace(/\s+/g, ' ').trim(), exp });
 }
 const en = [
@@ -132,18 +132,34 @@ const convo = [
   ['فيلا للبيع في جدة', 'تحت ٣ مليون', { price: 3e6, deal: 'Buy', loc: 'جدة' }], ['شقة في الدمام للإيجار', 'غرفتين بس', { detail: '2', loc: 'الدمام' }], ['ابي بيت', 'في الدمام', { loc: 'الدمام' }],
 ].map(([t1, t2, exp]) => ({ g: 'convo', t1, t2, exp, text: t2 }));
 
-let ALL = [...search, ...en, ...special, ...social, ...situation, ...style, ...convo];
+// a chat of several turns, judged turn by turn (the app carries history, prevQuery and askCount between the turns)
+const chat = [
+  { name: 'asked once, then ONLY a district (the owner\'s «Narjis» bug)', turns: [['ابغى شقة', {}], ['النرجس', { kind: 'message', has: /مدينة/, hasCity: 'الرياض', never: /عذراً|عذرا|ما قدرت|للأسف|sorry|can't|couldn't/i }]] },
+  { name: 'a district, then «any city»', turns: [['النرجس', { kind: 'message' }], ['مو مهم', { kind: 'listings', loc: 'الرياض', has: /الرياض/ }]] },
+  { name: 'a district, then a city that has it', turns: [['النرجس', { kind: 'message' }], ['الرياض', { kind: 'listings', loc: 'الرياض' }]] },
+  { name: 'a district, then a city that does NOT have it', turns: [['النرجس', { kind: 'message' }], ['جدة', { kind: 'message', has: /مدينة/, never: /عذراً|ما قدرت|sorry/i }]] },
+  { name: 'three districts in a row', turns: [['النرجس', { kind: 'message' }], ['العليا', { kind: 'message', has: /مدينة/ }], ['الياسمين', { kind: 'message', has: /مدينة/ }]] },
+  { name: 'asked twice, a third district', turns: [['ابغى شقة', {}], ['ابي بيت', {}], ['حطين', { kind: 'message', has: /مدينة/, never: /عذراً|ما قدرت|sorry/i }]] },
+  { name: 'a district typed with حي', turns: [['حي النرجس', { kind: 'message', has: /مدينة/ }]] },
+  { name: 'a district + type, no city', turns: [['فيلا في العليا', { kind: 'message', has: /مدينة/ }]] },
+  { name: 'English district', turns: [['apartment in Olaya', { kind: 'message', has: /city|cities/i }]] },
+  { name: 'a region, then a city in it', turns: [['شقة في عسير', { kind: 'message' }], ['أبها', { kind: 'listings', loc: 'أبها' }]] },
+  { name: 'unclear answers never end in an apology', turns: [['ابغى شقة', {}], ['ما ادري', { never: /عذراً|ما قدرت|sorry|can't/i }], ['مدري', { never: /عذراً|ما قدرت|sorry|can't/i }], ['برضو مدري', { never: /عذراً|ما قدرت|sorry|can't/i }], ['لا ادري', { never: /عذراً|ما قدرت|sorry|can't/i }]] },
+].map((c) => ({ g: 'chat', text: c.name, chat: c }));
+
+let ALL = [...search, ...en, ...special, ...social, ...situation, ...style, ...convo, ...chat];
 if (process.env.ONLY) ALL = ALL.filter((c) => c.g === process.env.ONLY);
 if (process.env.N) ALL = ALL.slice(0, Number(process.env.N));
 
 const norm = (x) => String(x ?? '').replace(/[ً-ٰ]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه');
 function judgeSearch(q, e) {
   const f = [];
-  if (e.type && !e.type.map((x) => x.toLowerCase()).includes(String(q.type).toLowerCase()) && !(q.type && /شقه|فيلا|بيت|دور|استراحه|محل|مكتب|مستودع|عماره|شاليه|مزرعه/.test(norm(q.type)) && e.type.length === 0)) f.push(`type=${q.type}`);
+  const TYPE_ALIAS = { building: ['residential building', 'commercial building'], farm: ['farm', 'agriculture plot'], house: ['house', 'villa'], floor: ['floor', 'apartment'] };
+  if (e.type) { const ok = e.type.flatMap((x) => [x.toLowerCase(), ...(TYPE_ALIAS[x.toLowerCase()] ?? [])]); if (!ok.includes(String(q.type).toLowerCase())) f.push(`type=${q.type}`); }
   if (e.loc && !norm(q.location).includes(norm(e.loc).replace(/^ال/, ''))) f.push(`loc=${q.location}`);
   if (e.deal && !(q.deal === e.deal && !q.bothDeals)) f.push(`deal=${q.deal}${q.bothDeals ? '+both' : ''}`);
   if (e.price && Math.abs(Number(q.price) - e.price) > e.price * 0.02) f.push(`price=${q.price}`);
-  if (e.detail && String(q.detail) !== e.detail) f.push(`detail=${q.detail}`);
+  if (e.detail && String(q.detail) !== e.detail && !(e.detail === '5' && String(q.detail) === '5+')) f.push(`detail=${q.detail}`);
   if (e.period && q.rentPeriod !== e.period) f.push(`period=${q.rentPeriod}`);
   if (e.am && !(q.amenities ?? []).includes(e.am)) f.push(`am=${(q.amenities ?? []).join()}`);
   return f;
@@ -151,6 +167,20 @@ function judgeSearch(q, e) {
 
 async function run(c) {
   const lang = /[A-Za-z]/.test(c.text) && !/[؀-ۿ]/.test(c.text) ? 'en' : 'ar';
+  if (c.g === 'chat') {
+    let history = [], prevQuery = null, askCount = 0; const fails = []; let last = null;
+    for (const [t, e] of c.chat.turns) {
+      const d = await call({ text: t, history, prevQuery, askCount }); last = d; const q = d.query ?? {};
+      for (const x of lint(t, d.reply)) fails.push(`rule:${x}(${t})`);
+      if (e.kind && d.kind !== e.kind) fails.push(`chat:${t}→kind=${d.kind}(want ${e.kind})`);
+      if (e.has && !e.has.test(d.reply ?? '')) fails.push(`chat:${t}→reply-lacks ${e.has}`);
+      if (e.hasCity && !String(d.reply ?? '').includes(e.hasCity)) fails.push(`chat:${t}→reply-lacks-city-list`);
+      if (e.never && e.never.test(d.reply ?? '')) fails.push(`chat:${t}→dead-end(${String(d.reply).slice(0, 40)})`);
+      if (e.loc && !norm(q.location).includes(norm(e.loc).replace(/^ال/, ''))) fails.push(`chat:${t}→loc=${q.location}`);
+      history = [...history, { role: 'user', text: t }, { role: 'model', text: d.reply ?? '' }]; prevQuery = d.query ?? prevQuery; askCount = d.askCount ?? askCount;
+    }
+    return { c, d: last, fails, reply: last?.reply, lang: 'ar' };
+  }
   if (c.g === 'convo') {
     const d1 = await call({ text: c.t1 });
     const d2 = await call({ text: c.t2, history: [{ role: 'user', text: c.t1 }, { role: 'model', text: d1.reply ?? '' }], prevQuery: d1.query });
@@ -192,7 +222,7 @@ for (const [rule, rs] of Object.entries(byRule).sort((a, b) => b[1].length - a[1
   for (const r of rs.slice(0, 4)) console.log(`   «${r.c.text.slice(0, 60)}» → ${String(r.reply ?? '').replace(/\n/g, ' ⏎ ').slice(0, 110)}   ${r.fails.filter((x) => x.startsWith(rule.split('=')[0])).join(' ')}`);
 }
 // questions must differ: how many distinct wordings among the «which city?» questions
-const qs = {}; for (const r of results) if (/[؟?]/.test(r.reply ?? '') && r.d.kind === 'message') { const k = String(r.reply).replace(/\n.*$/s, '').replace(/(?:مثلاً|For example).*$/u, '').trim(); qs[k] = (qs[k] || 0) + 1; }
+const seenText = new Set(); const qs = {}; for (const r of results) if (/[؟?]/.test(r.reply ?? '') && r.d.kind === 'message' && !seenText.has(r.c.text)) { seenText.add(r.c.text); const k = String(r.reply).replace(/\n.*$/s, '').replace(/(?:مثلاً|For example).*$/u, '').trim(); qs[k] = (qs[k] || 0) + 1; }
 const nq = Object.values(qs).reduce((a, b) => a + b, 0), top = Object.entries(qs).sort((a, b) => b[1] - a[1]);
 console.log(`\n${nq} questions → ${top.length} different wordings; the most repeated: ${top.slice(0, 3).map(([k, c]) => `${c}× «${k.slice(0, 40)}»`).join(' · ')}`);
 const repeatShare = top.length ? top[0][1] / nq : 0;

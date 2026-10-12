@@ -389,3 +389,22 @@ export function alignBasisWithStatedPeriod(basis: string, said: "monthly" | "ann
   if (said === "monthly" && basis === "annual_rent") return "monthly_rent";
   return basis;
 }
+
+/**
+ * A SEARCH REPLY THAT BREAKS THE OWNER'S RULES IS REPLACED BY ONE THE CODE WRITES (owner 2026-10-11; found by the live battery).
+ * The model, told «never state a price», still wrote «… with an annual rent around 60,000 SAR» (2 in 250), asked «وش نوع العقار؟» while
+ * already searching, and asked «كم غرفة نوم تحتاجون؟» of someone who had just said «5 غرف» (the family-size rule over-firing).
+ * A reply that states a price / budget / conversion, asks about the property type, or asks about bedrooms the user already gave is
+ * not edited (surgery on prose breaks sentences): the caller swaps it for a short line built from the parsed search.
+ */
+const MONEY_IN_REPLY = /(?:\d[\d,.٠-٩،]*\s*(?:ألف|الف|آلاف|مليون|ملايين|k|m|million|thousand)?\s*(?:ريال|ر\.?س|﷼|sar|sr|riyals?|دينار|دولار|درهم|usd|aed|kwd|bhd|eur|dollars?|dinars?|dirhams?))|(?:مليون|ملايين)\s*(?:ريال|دينار|دولار)|(?:ميزانية|الميزانية|بميزانية|ميزانيتك|budget)\s*(?:\S+\s+){0,2}(?:\d|مليون|ألف|الف|million|thousand)/i;
+const TYPE_QUESTION = /(?:وش|ايش|إيش|أي|اي)\s*نوع\s*(?:ال)?(?:عقار|مبنى|سكن)|what\s+(?:kind|type)\s+of\s+(?:property|home|place)|which\s+(?:kind|type)\s+of\s+(?:property|home|place)/i;
+const BEDROOM_QUESTION = /(?:كم|how\s+many)[^؟?]{0,30}(?:غرف|غرفة|bedrooms?|rooms?)[^؟?]*[؟?]/i;
+const BEDROOMS_GIVEN = /(?:[0-9٠-٩]+\s*(?:غرف|غرفة|bedrooms?|beds?|br)(?![\p{L}]))|(?:غرفتين|غرفتان|(?:ثلاث|اربع|أربع|خمس|ست|سبع)\s*غرف|\b(?:one|two|three|four|five)\s*(?:bed)?rooms?\b)/iu;
+export function replyBreaksSearchRules(reply: string, userText: string): boolean {
+  const r = String(reply ?? "");
+  if (MONEY_IN_REPLY.test(r)) return true;
+  if (TYPE_QUESTION.test(r)) return true;
+  if (BEDROOMS_GIVEN.test(String(userText ?? "")) && BEDROOM_QUESTION.test(r)) return true;
+  return false;
+}

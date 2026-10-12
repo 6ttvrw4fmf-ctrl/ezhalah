@@ -143,7 +143,11 @@ export function hasUsableLocation(state: EstablishedState): boolean {
  * "the location question is unbounded — it may ask forever" ruling (also reversed: it is now ONE
  * question, like everything else, never more). The owner's own words: "Do not waste tokens with
  * unnecessary back-and-forth" and "Enough information + location = search immediately." */
-export const QUESTION_BUDGET_CEILING = 1;
+// OWNER 2026-10-11 («why didn't he keep it interactive going?»): was 1 — ONE location question, then «sorry, I couldn't pin it down».
+// A user who typed only a district («النرجس») after the agent had already asked once got that dead end. A location question is now
+// asked up to 3 times (each a different wording, listing the candidate cities), and past that the reply is still an invitation
+// to type the city next to the district, never an apology.
+export const QUESTION_BUDGET_CEILING = 3;
 
 export type DecideInput = {
   /** This turn's raw user message, verbatim — used ONLY for the deterministic phrase-match. */

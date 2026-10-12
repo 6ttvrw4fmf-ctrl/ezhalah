@@ -51,7 +51,7 @@ const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
 // Deterministic post-model rules (owner ruling 2026-08-29). Pure functions, unit-tested and
 // mutation-proven by scripts/verify-agent-postmodel-rules.ts. The model proposes; these decide.
-import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWesternDigits, arabicWordAmounts, fillBathroomsIfAbsent, statedRentPeriod, alignBasisWithStatedPeriod, dropAbshirOpener, insertBeforeTrailingEmoji } from "./postModel.ts";
+import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWesternDigits, arabicWordAmounts, fillBathroomsIfAbsent, replyBreaksSearchRules, statedRentPeriod, alignBasisWithStatedPeriod, dropAbshirOpener, insertBeforeTrailingEmoji } from "./postModel.ts";
 // THE SINGLE DECISION AUTHORITY for kind (owner-approved architecture consolidation, 2026-08-30).
 // See decide.ts's header for the full rationale. The model's own `kind` field is read ONLY to
 // decide whether to retry for wrong language; it is never trusted as the final answer again after
@@ -63,7 +63,7 @@ import { buildTurnDecision } from "./turnWiring.ts";
 // The three location-ambiguity cases restored from the deleted client-side locationClarification()
 // (round 2 fix, "lost location-ambiguity cases") — see its own header.
 import { plainRegionQuestion, emptyLocationQuestion } from "./locationAmbiguity.ts";
-import { cityQuestionAr, cityQuestionEn, noIntentReplyText, socialKind, socialReplyText, unsearchableText, searchingNowText, twinRegionQuestion, twinDistrictQuestion } from "./questionExamples.ts";
+import { cityQuestionAr, cityQuestionEn, noIntentReplyText, searchLineText, listCities, anyCityText, ANY_CITY_RE, socialKind, socialReplyText, unsearchableText, searchingNowText, twinRegionQuestion, twinDistrictQuestion } from "./questionExamples.ts";
 import { botMessage } from "./botMessage.ts";
 import { situationKind, situationReplyText } from "./situations.ts";
 
@@ -1366,6 +1366,7 @@ Deno.serve(async (req: Request) => {
       // because the exact wording differs by ambiguity shape; the ladder itself only needs to know
       // THAT one exists, never which one.
       let ambiguityReply: string | null = null;
+      let anyCityReply: string | null = null;
       // The previous bot message: the question the code writes never repeats the phrasing it already used (owner 2026-10-11).
       const lastBotReply = String([...history].reverse().find((h) => h?.role === "model")?.text ?? "");
       // Hoisted above the `location`-only branch (round-2 fix, LOST LOCATION-AMBIGUITY CASES) so the
@@ -1394,7 +1395,9 @@ Deno.serve(async (req: Request) => {
         // OWN canonical Arabic label — never a transliteration, never a guess. No Arabic canonical
         // available ⇒ the original passes through untouched, so unknown places are still searched.
         location = arabicCanonicalLocation({ location, canonicalArabic: nm, locale });
-        const hay = arNorm(`${text} ${history.map((h) => String(h?.text ?? "")).join(" ")}`);
+        // ONLY WHAT THE USER SAID counts as «said»: the bot's own earlier reply lists the candidate cities («الرياض، تاروت، القطيف…»),
+        // and reading those as the user's choice resolved «النرجس» to Riyadh after «مو مهم» and to Jeddah after «جدة» (found live 2026-10-11).
+        const hay = arNorm(`${text} ${history.filter((h) => h?.role !== "model").map((h) => String(h?.text ?? "")).join(" ")}`);
         const said = (s: string) => !!s && hay.includes(arNorm(s));
 
         if (ck === "region_or_city") {
@@ -1456,30 +1459,33 @@ Deno.serve(async (req: Request) => {
           const regions = (Array.isArray(cls?.regions) ? cls!.regions : []) as Array<Record<string, unknown>>;
           const pick = regions.find((r) => said(String(r.region_ar)) || said(String(r.region_ar).replace(/^منطقة\s+/, "")));
           if (pick) regionPin = String(pick.region_ar);
-          else if (!alreadyAsked && regions.length > 1) {
-            const list = regions.map((r) => String(r.region_ar)).join("، ");
-            ambiguityReply = twinRegionQuestion(nm, list, text, lastBotReply);
+          else if (regions.length > 1) {
+            const list = regions.map((r) => String(r.region_ar)).join(locale === "en" ? ", " : "، ");
+            ambiguityReply = twinRegionQuestion(nm, list, text, lastBotReply, locale === "en");
           }
         } else if (ck === "twin_district") {
           const cities = (Array.isArray(cls?.cities) ? cls!.cities : []) as Array<Record<string, unknown>>;
           const pick = cities.find((c) => said(String(c.city_ar)));
-          if (pick) { location = String(pick.city_ar); districtPin = `حي ${nm}`; }
-          else if (!alreadyAsked && cities.length > 1) {
+          // «مو مهم / أي مدينة / any city» after we listed the cities: start where the district has the most listings (the list comes
+          // inventory-first) and say so, instead of claiming «all cities» while searching one (found live 2026-10-11).
+          const anyCity = !pick && alreadyAsked && ANY_CITY_RE.test(text) && cities.length > 0;
+          if (pick || anyCity) {
+            const chosen = pick ?? cities[0];
+            location = String(chosen.city_ar); districtPin = `حي ${nm}`;
+            if (anyCity) anyCityReply = anyCityText(locale === "en", `${nm} ${location}`, lastBotReply, location, nm);
+          }
+          else if (cities.length > 1) {
             // Owner 2026-09-12: one natural sentence, not a bulleted list. "بالمناسبة، حي X موجود
             // في أكثر من مدينة — A، B، وC — أي وحدة منها تقصد؟"
             const top = cities.slice(0, 8).map((c) => String(c.city_ar));
-            const more = cities.length > top.length ? "، أو مدينة أخرى" : "";
-            const list = top.length > 1
-              ? `${top.slice(0, -1).join("، ")}، و${top[top.length - 1]}`
-              : top[0];
-            ambiguityReply = twinDistrictQuestion(nm, `${list}${more}`, text, lastBotReply);
+            ambiguityReply = twinDistrictQuestion(nm, listCities(top, locale === "en", cities.length > top.length), text, lastBotReply, locale === "en");
           }
-        } else if (ck === "region" && !alreadyAsked) {
+        } else if (ck === "region") {
           // RESTORED CASE (round 2, LOST LOCATION-AMBIGUITY CASES) — a plain region with no
           // same-named city (e.g. «عسير», «المنطقة الشرقية»; region_or_city above already handles the
           // same-name-as-a-city twins like الرياض/جازان). See ./locationAmbiguity.ts for the ported
           // logic and scripts/verify-agent-location-ambiguity.ts for its tests.
-          ambiguityReply = plainRegionQuestion(nm, text, lastBotReply);
+          ambiguityReply = plainRegionQuestion(nm, text, lastBotReply, locale === "en");
         }
         }
       } else if (!alreadyAsked) {
@@ -1491,7 +1497,7 @@ Deno.serve(async (req: Request) => {
         // KINGDOM_WIDE early-return there needs no port — an explicit "everywhere in the Kingdom"
         // statement already leaves `ambiguityReply` unset here, which is exactly "no ambiguity,
         // proceed" (decideAgentTurn's ladder takes it from there).
-        ambiguityReply = emptyLocationQuestion(text, lastBotReply);
+        ambiguityReply = emptyLocationQuestion(text, lastBotReply, locale === "en");
       }
 
       // The model's own reply SENTENCE is free-form and inconsistently mentions a SIZE the user gave —
@@ -1524,6 +1530,12 @@ Deno.serve(async (req: Request) => {
       const detailStr = typeof out.detail === "string" ? out.detail.trim() : "";
       const isSizeDetail = detailStr !== "" && !/^([1-4]|5\+?)$/.test(detailStr);
       let replyOut = lead(out.reply);
+      // A reply that states a price, asks about the property type, or asks for bedrooms already given is replaced by a line the code
+      // writes from the parsed search (owner 2026-10-11; found by the live battery: scripts/agent-live-battery.mjs).
+      if (anyCityReply) replyOut = anyCityReply;
+      else if (replyBreaksSearchRules(replyOut, text)) {
+        replyOut = searchLineText(locale === "en", typeof out.type === "string" ? out.type : null, location, text, lastBotReply);
+      }
       // «١٠٠٠ متر» in the reply IS the 1000 in `detail` — compare digits the same way, or the note repeats the size
       // («… أرض ١٠٠٠ متر … 🏡 (1000 م²)», found live 2026-10-11).
       if (isSizeDetail && !toWesternDigits(replyOut).replace(/,/g, "").includes(detailStr)) {
