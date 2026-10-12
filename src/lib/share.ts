@@ -11,9 +11,9 @@ export const SHARE_LINK = 'https://ezhalah-app.vercel.app';
 // for months. Replacing the bytes of og-image.jpg would leave everyone who has ever shared the link
 // on the old picture. RENAME THE FILE when the artwork changes; never overwrite it in place.
 export const OG_IMAGE = `${SHARE_LINK}/og-image-v5.png`;
-// Owner-approved AI wording (2026-10-11), shared by metadata and every share target.
-export const SHARE_BLURB_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهلها، ابحث بالذكاء الاصطناعي ولقَ اللي يناسبك — الطريقة الأذكى للبحث عن العقار في المملكة 🦅😉';
-export const SHARE_BLURB_EN = 'Looking for a property and want to see listings from different websites in one place? Ezhalah: search with AI and find what suits you — the smarter way to find properties in the Kingdom 🦅😉';
+// Owner-approved original wording, without the AI sentence or dashes (2026-10-11), shared by metadata and every share target.
+export const SHARE_BLURB_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، الطريقة الأذكى للبحث على العقار في المملكة 🦅😉';
+export const SHARE_BLURB_EN = 'Looking for a property and want to see everything on offer in one place? Ezhalah, the smarter way to find properties in the Kingdom 🦅😉';
 export const SHARE_LEAD_AR = SHARE_BLURB_AR;
 export const SHARE_LEAD_EN = SHARE_BLURB_EN;
 export const SHARE_MESSAGE_AR = `${SHARE_LEAD_AR}\n${SHARE_LINK}`;
