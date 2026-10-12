@@ -190,7 +190,7 @@ check('AdViewer: close and hide retire the history marker in place, never by goi
 check('AdViewer: a hidden pane stays mounted (frames alive, display none)', hiddenPaneStaysMounted(viewer));
 check('agent.tsx: pane ✕ → hideAdPane, tab ✕ → closeAdTab', paneWiring(agent));
 check('agent.tsx: no on-screen «التبويبات (N)» reopen button (owner: no need)', !/ad-tabs-chip|tabsChip/.test(agent));
-check('agent.tsx: laptop cards use the wider grid', /<ResultCardGrid wide=\{viewerSplit\}>/.test(agent));
+check('agent.tsx: laptop cards use the wider grid', /<ResultCardGrid wide=\{viewerSplit\} cols=\{cardCols\}>/.test(agent));
 const grid = readFileSync(new URL('../src/components/ResultCardGrid.tsx', import.meta.url), 'utf8');
 check('ResultCardGrid: wide stays inside the 940px chat column', /gridWide: \{ maxWidth: (\d+) \}/.test(grid) && Number(/gridWide: \{ maxWidth: (\d+) \}/.exec(grid)![1]) > 640 && Number(/gridWide: \{ maxWidth: (\d+) \}/.exec(grid)![1]) <= 940);
 // Each tab's frame is keyed by its own unique tab id (adTabKey), so a second tab of the SAME listing is
