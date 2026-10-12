@@ -259,6 +259,15 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
 
 ## Lessons (your own, one per night)
 
+- **2026-10-12:** measure a P1 CLASS before repairing its rows. `district_contradicts_source` carried 1,092 «served a
+  district the source never published»; one GROUP BY showed 1,080 were the same ضاحية هجر sub-district in four
+  spellings and 10 a missing space — two real contradictions, hidden under a thousand variants. Teaching the view the
+  pattern (`district_hajar_ordinal()`, 20261012134024, both directions proven in the migration) was a 20-minute fix;
+  «copying the source district» for 1,092 rows would have rewritten correct data. Same shape as `located_row_unreachable`:
+  all 24 tripped the price gate, 15 print the same price on their own page (PRICE = SOURCE → register, 20261012132626),
+  the 9 the container cannot read stay hidden and go to ⚡'s CI re-read. And the merge gate refused `safe-pr-merge.ts`
+  again (third time): do not spend a minute on it; line 1 of the report carries the PRs that need a human.
+
 - **🦅 Falcon 10-09 — the sweep robot went red twice on its own scope choice, not on the product.** Both runs
   of `live-search-sweep.yml` today scored 0 mismatches / 0 bugs and failed only the «عرض المزيد under AF» floor,
   because the fixed الرياض/شقة scope ran inside the :20 refresh window and AF was «not offered». A floor the
