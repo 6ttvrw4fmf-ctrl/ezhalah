@@ -203,7 +203,7 @@ async function run(c) {
     if (c.sit && c.sit !== 'danger' && /أنا إزهله|I'm Ezhalah|I am Ezhalah/.test(d.reply ?? '')) fails.push('situation:got-the-introduction');
   }
   if (c.g === 'social' && /^(?:شكر|يعطيك|thank|thx)/i.test(c.text) && /أنا إزهله|I'm Ezhalah/.test(d.reply ?? '')) fails.push('social:thanks-got-the-introduction');
-  if (c.g === 'style' && d.kind === 'message' && !q.location && /[؟?]\s*\p{Extended_Pictographic}?️?\s*$/u.test(d.reply ?? '') === false && /(?:أي مدينة|وين|which city|where)/i.test(d.reply ?? '')) fails.push('style:city-question-without-question-mark');
+  if (c.g === 'style' && d.kind === 'message' && !q.location && /(?:أي مدينة|وين|which city|where)/i.test(d.reply ?? '') && !/[؟?]/.test(d.reply ?? '')) fails.push('style:city-question-without-question-mark');
   return { c, d, fails, reply: d.reply, lang };
 }
 
@@ -219,7 +219,7 @@ console.log(`\n${results.length} messages · ${results.length - bad.length} clea
 const byRule = {}; for (const r of bad) for (const f of new Set(r.fails.map((x) => x.replace(/\(.*$/, '').replace(/=.*$/, '=')))) (byRule[f] ??= []).push(r);
 for (const [rule, rs] of Object.entries(byRule).sort((a, b) => b[1].length - a[1].length)) {
   console.log(`\n■ ${rule}  ×${rs.length}`);
-  for (const r of rs.slice(0, 4)) console.log(`   «${r.c.text.slice(0, 60)}» → ${String(r.reply ?? '').replace(/\n/g, ' ⏎ ').slice(0, 110)}   ${r.fails.filter((x) => x.startsWith(rule.split('=')[0])).join(' ')}`);
+  for (const r of rs.slice(0, process.env.ALL ? 99 : 4)) console.log(`   «${r.c.text.slice(0, 60)}» → ${String(r.reply ?? '').replace(/\n/g, ' ⏎ ').slice(0, 110)}   ${r.fails.filter((x) => x.startsWith(rule.split('=')[0])).join(' ')}`);
 }
 // questions must differ: how many distinct wordings among the «which city?» questions
 const seenText = new Set(); const qs = {}; for (const r of results) if (/[؟?]/.test(r.reply ?? '') && r.d.kind === 'message' && !seenText.has(r.c.text)) { seenText.add(r.c.text); const k = String(r.reply).replace(/\n.*$/s, '').replace(/(?:مثلاً|For example).*$/u, '').trim(); qs[k] = (qs[k] || 0) + 1; }
