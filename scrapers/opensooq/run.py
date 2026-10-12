@@ -281,6 +281,43 @@ def _make_verify_gone(control: Optional[dict]):
     return lambda ad_number: probe(ad_number, canary=canary)
 
 
+READ_GONE_MAX_READS = 60   # own-page reads per table per run when the guard trips (catalogue ~100)
+COLLAPSE_FRAC = 0.30       # prune_unseen's own collapse cap; never raised, only respected here
+
+
+def _strike_read_gone(tbl: str, seen_ads: set[str], verify_gone) -> int:
+    """Strike ONLY the unseen ads whose OWN page reads gone, when prune_unseen's guard trips.
+
+    WHY (2026-10-12, the muktamel lesson of 10-07 on opensooq). OpenSooq's catalogue is ~100 ads, so
+    27 removed ones are over the collapse/coverage guard every night (re-saw 49 of 72) and the whole
+    prune is thrown away: those 27 ads read «هذا الإعلان غير متوفر» on their own pages on four fleet
+    shadow runs (10-11 11:19 → 10-12 07:29, controls live) and stayed shown. Absence is never the
+    evidence here: each unseen ad's own page is read through the canary-gated oracle, unread or
+    UNKNOWN rows are counted as seen (kept), and only read-gone rows take a strike. The prune then
+    re-runs with its grace (3 strikes) and its at-grace re-read unchanged; the collapse cap is
+    respected by striking at most its worth (oldest-seen first), never raised."""
+    rows = db._execute(
+        db.sb().table(tbl).select("ad_number,last_seen_at").eq("active", True).eq("source", SOURCE)
+          .range(0, 999), what=tbl + ".read_gone_slice").data or []
+    active = [r["ad_number"] for r in rows if r.get("ad_number")]
+    unseen = sorted((r for r in rows if r.get("ad_number") and r["ad_number"] not in seen_ads),
+                    key=lambda r: str(r.get("last_seen_at") or ""))[:READ_GONE_MAX_READS]
+    gone: list[str] = []
+    for r in unseen:
+        verdict, why = verify_gone(r["ad_number"])
+        if verdict == "gone":
+            gone.append(r["ad_number"])
+    if len(active) >= 8:
+        gone = gone[:int(COLLAPSE_FRAC * len(active))]
+    if not gone:
+        print(f"  {tbl}: no unseen ad read gone on its own page — nothing struck", flush=True)
+        return 0
+    print(f"  {tbl}: guard tripped, striking only the {len(gone)} ad(s) whose own page read gone",
+          flush=True)
+    return db.prune_unseen(tbl, set(active) - set(gone), source=SOURCE, verify_gone=verify_gone,
+                           min_coverage=0.0)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", default="all")
@@ -352,7 +389,8 @@ def main() -> int:
             if rr and complete:
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE, verify_gone=verify_gone)
                 if n < 0:
-                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
+                    print(f"  ⚠ {tbl}: prune guard tripped — reading the unseen ads' own pages", flush=True)
+                    n = _strike_read_gone(tbl, {r["ad_number"] for r in rr}, verify_gone)
                 elif n:
                     print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:

@@ -1069,6 +1069,12 @@ or rewrite another engineer's work, and never start a big change in another engi
   `canary_ok=` and the control statuses in the same note before calling gathern blocked.
 - **2026-10-09 (♻️, copied by 🔧):** a score that reads a site by HTTP status alone can only ever say «live»; check each site's method before you trust its «0 gone». And when the key number moves the wrong way two nights running (dead-visible 0.76% → 0.85% → over the line on rakez + wasalt), shrink the list to the sites over the line and nothing else.
 
+- **2026-10-12 (♻️):** a held apply is a door, not a wall to route around: the opensooq tier change
+  waited two nights on a DELETE the connector holds for a person. The removal it was for never needed
+  the tier: the crawl already read each missing ad's own page, and only the guard threw it away. Fix
+  the guarded branch (strike only own-page «gone», cap respected: `opensooq/run.py::_strike_read_gone`)
+  before waiting on a person for a tier move.
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
