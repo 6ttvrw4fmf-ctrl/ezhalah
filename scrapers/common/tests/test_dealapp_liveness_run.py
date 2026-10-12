@@ -26,6 +26,7 @@ class _Table:
     def select(self, *a, **k): return self
     def eq(self, col, val): self._filters[col] = val; return self
     def in_(self, col, vals): self._filters[col] = tuple(vals); return self
+    def gt(self, col, val): self._gt = (col, val); return self
     def is_(self, *a, **k): return self
     @property
     def not_(self): return self
@@ -36,7 +37,11 @@ class _Table:
         if self._payload is not None:
             self.sink.writes.append((self._filters.get("id"), dict(self._payload)))
             return type("R", (), {"data": []})()
-        return type("R", (), {"data": list(self._rows)})()
+        rows = list(self._rows)
+        if getattr(self, "_gt", None):
+            c, v = self._gt
+            rows = [r for r in rows if (r.get(c) or 0) > v]
+        return type("R", (), {"data": rows})()
 
 
 class _Client:
