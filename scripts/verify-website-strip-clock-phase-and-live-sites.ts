@@ -47,15 +47,15 @@ const problems = (phase: Phase): string[] => {
     const p = phase(t, CYCLE);
     if (!(p >= 0 && p < CYCLE)) out.push(`phase ${p} is outside one cycle at t=${t}`);
   }
-  const advance = ((phase(T + 3000, CYCLE) - phase(T, CYCLE)) % CYCLE + CYCLE) % CYCLE;
-  if (Math.abs(advance - 108) > 1e-6) out.push(`3 s on the clock moved the strip ${advance.toFixed(3)}px, not one 108px slot (36 px/s)`);
-  if (Math.floor(phase(T, CYCLE) / 108) === Math.floor(phase(T + 3000, CYCLE) / 108)) out.push('two loads 3 s apart open on the same logo');
+  const advance = ((phase(T + 2400, CYCLE) - phase(T, CYCLE)) % CYCLE + CYCLE) % CYCLE;
+  if (Math.abs(advance - 108) > 1e-6) out.push(`2.4 s on the clock moved the strip ${advance.toFixed(3)}px, not one 108px slot (45 px/s)`);
+  if (Math.floor(phase(T, CYCLE) / 108) === Math.floor(phase(T + 2400, CYCLE) / 108)) out.push('two loads 2.4 s apart open on the same logo');
   if (phase(T, 0) !== 0) out.push('an empty site list breaks the phase (NaN)');
   return out;
 };
 
 const real = problems(await lift(SHARED));
-check('the strip phase is the wall clock at 36 px/s: same instant ⇒ same place, 3 s ⇒ one slot', real.length === 0, real.join('\n      '));
+check('the strip phase is the wall clock at 45 px/s: same instant ⇒ same place, 2.4 s ⇒ one slot', real.length === 0, real.join('\n      '));
 
 const filtered = (src: string) =>
   /ALL_NAMES\.filter\(\(name\) => pickerMayOffer\(name, liveNames, downNames\)\)/.test(src)

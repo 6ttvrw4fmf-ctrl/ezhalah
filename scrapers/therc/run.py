@@ -156,6 +156,20 @@ def _text(fragment: str) -> str:
 _BULLETS = re.compile(r"\s[*•]\s|[✔✅☑]\ufe0f?")
 
 
+# The amenities are read from the WHOLE «الوصف» card, before redaction (🔬 2026-10-12, backlog 460). The stored
+# description is cut at the first contact marker (_redact), so an ad that OPENS with «للتواصل واتس :» stored
+# NULL and one with a marker after line one stored that line only — and the amenity reader, fed the stored
+# text, lost every «مصعد متوفر» / «مطبخ راكب» / «مؤثثة بالكامل» below it (therc 11241522, 10283456;
+# source-reread 38231173123). Reading for yes/no stores no text, so no contact detail is ever kept.
+# It ends at the next card, the next header, or the «عقارات مشابهة» strip (another listing's text).
+_DESC_CARD = re.compile(r'>الوصف</h2>(.*?)(?:<div class="bg-white|<h2|عقارات مشابهة|$)', re.S)
+
+
+def card_amenities(body: str) -> dict[str, bool]:
+    m = _DESC_CARD.search(body)
+    return description_amenities(_text(m.group(1))) if m else {}
+
+
 def description_amenities(description: Optional[str]) -> dict[str, bool]:
     if not description:
         return {}
@@ -281,7 +295,7 @@ def map_listing(url: str, page: str, lastmod: Optional[str]) -> Optional[tuple[d
         price_total = price
 
     description = _redact(_text(_DESC.search(body).group(1))) if _DESC.search(body) else None
-    said = description_amenities(description)
+    said = card_amenities(body)
     photos = _gallery(body)
     if not photos and isinstance(ld.get("image"), str):
         photos = [ld["image"]]
