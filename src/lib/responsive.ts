@@ -87,5 +87,3 @@ export const PLATFORM_LOGO_BREAKPOINT = 720;
 // BESIDE the results (split view); below it, a full-screen sheet over them. Lives here, never
 // inline, so SSR (width 0) and the client agree through useAtLeast().
 export const VIEWER_SPLIT_BREAKPOINT = 1024;
-/** Laptop result cards sit 3 across (nothing open beside them) at/above this width; below it, 2 across. */
-export const CARDS_THREE_ACROSS_BREAKPOINT = 1360;
