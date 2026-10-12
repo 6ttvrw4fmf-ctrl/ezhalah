@@ -162,7 +162,7 @@ async function main() {
     'if (ck === "region_or_city")',
     'else if (ck === "twin_city")',
     'else if (ck === "twin_district")',
-    'else if (ck === "region" && !alreadyAsked)',
+    'else if (ck === "region")', // owner 2026-10-11: a new ambiguous place is always asked about (the ask-once gate is gone)
     "location = `منطقة ${nm}`", // the explicit «منطقة X» → Region reconstruction, byte-for-byte
   ]) {
     check(`untouched: ${mustStillExist}`, agentSrc.includes(mustStillExist));

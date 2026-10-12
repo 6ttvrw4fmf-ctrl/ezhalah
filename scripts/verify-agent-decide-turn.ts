@@ -21,7 +21,7 @@ const empty = {
 } as const;
 
 console.log('\n(0) ONE MAIN REQUEST + ONE LOCATION QUESTION (owner, 2026-09-11) — the new ceiling\n');
-check('(0) QUESTION_BUDGET_CEILING is exactly 1 (was 2)', QUESTION_BUDGET_CEILING === 1);
+check('(0) QUESTION_BUDGET_CEILING is exactly 3 (owner 2026-10-11: keep the location question interactive; was 1, before that 2)', QUESTION_BUDGET_CEILING === 3);
 
 // SUPERSEDED 2026-09-04 — read this before "fixing" a failure here.
 // This block used to assert that ANY single signal, WITH NO LOCATION, searched immediately
@@ -190,7 +190,7 @@ const mustCatch = (label: string, brokenResult: boolean) => check(`(mutation) ${
   mustCatch('M3 caught: unsearchable must NOT increment askCount (it is not a question)',
     r3.askCount === QUESTION_BUDGET_CEILING);
   // M4: the ceiling silently reverting to 2.
-  mustCatch('M4 caught: QUESTION_BUDGET_CEILING must be exactly 1, not 2', QUESTION_BUDGET_CEILING === 1);
+  mustCatch('M4 caught: QUESTION_BUDGET_CEILING must be exactly 3, not 1', QUESTION_BUDGET_CEILING === 3);
 }
 
 console.log(failures === 0
