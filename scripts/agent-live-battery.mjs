@@ -42,7 +42,7 @@ const EMOJI_END = /\p{Extended_Pictographic}️?\s*$/u;
 const DASH = /[-‐-―−]/;
 const MONEY = /(?:\d[\d,.٠-٩،]*\s*(?:ألف|الف|آلاف|مليون|ملايين|k|m|million|thousand)?\s*(?:ريال|ر\.?س|﷼|sar|sr|riyals?|دينار|دولار|درهم|usd|aed|kwd|bhd|eur|dollars?|dinars?|dirhams?))|(?:مليون|ملايين)\s*(?:ريال|دينار|دولار)/i;
 const RECOMMEND = /(?<![\p{L}])(?:أفضل|افضل|احسن|أحسن|أنصح|انصح|ننصح|أرشح|ارشح|أنصحك)(?![\p{L}])|\b(?:best|better|recommend\w*|good deal|worth it)\b/iu;
-const OVERRIDE_OK = /ما أقدر أنصح|ما أرشح|ما أرشّح|can't advise|don't recommend|don't advise/;
+const OVERRIDE_OK = /ما أقدر أنصح|ما أرشح|ما أرشّح|ما أقدر أرشح|can't (?:advise|pick|recommend|say which)|cannot (?:advise|pick|recommend)|don't (?:recommend|advise|rank)/i;
 const LEAK = /undefined|\bnull\b|\bNaN\b|\{\w+\}|\[object/;
 const sentences = (t) => t.replace(/\n.*$/s, (m) => ' ' + m.trim()).split(/(?<=[.!?؟…])\s+/).map((s) => s.trim()).filter((s) => s.replace(/\p{Extended_Pictographic}|️/gu, '').trim().length > 1);
 const isArabic = (t) => (t.match(/[؀-ۿ]/g) ?? []).length > (t.match(/[A-Za-z]/g) ?? []).length;
@@ -154,6 +154,15 @@ const edits = [
   ['شقة في الدمام', 'للإيجار بالشهر', { deal: 'Rent', period: 'monthly' }], ['فيلا في جدة للبيع', 'وفيها مسبح', { am: 'pool' }], ['شقة في الرياض للإيجار', 'فيها مصعد', { am: 'elevator' }],
 ].map(([t1, t2, exp]) => ({ g: 'edits', t1, t2, exp, text: t2 }));
 
+// English: the mirror of everything above (the reply must be English, with its emoji, no dash, no price, no recommendation)
+const english = [
+  'Olaya', 'Al Narjis', 'Hittin district', 'Yasmin', 'I want an apartment', 'villa', 'office for rent', 'land for sale', 'what can you do', 'hello', 'hi there', 'thanks', 'thank you so much', 'bye', 'good morning',
+  'which is the best district in Riyadh', 'should I buy or rent', 'compare Olaya and Malqa', 'is this a good deal', 'I want to sell my villa', 'I want a mortgage', 'only Saudi neighbours please', 'you are a scam', 'apartment in Dubai',
+  'family of 5 looking for an apartment in Dammam', 'my mother cannot climb stairs, apartment in Khobar please', 'a quiet and stylish villa in Jeddah', 'https://sa.aqar.fm/ar/123456', 'ad number 7200909248',
+  'apartment in Olaya', 'villa in Narjis', 'big villa in Riyadh', 'cheap apartment in Jeddah for rent', 'apartment for rent in Riyadh around 60k a year', '2 bedroom apartment in Khobar under 5000 a month', 'office in Dammam 120 sqm',
+  'I want a house', 'I want something near the sea', 'flat near KFUPM', 'shop for rent in Taif at least 100 sqm',
+].map((text) => ({ g: 'english', text }));
+
 // a chat of several turns, judged turn by turn (the app carries history, prevQuery and askCount between the turns)
 const chat = [
   { name: 'asked once, then ONLY a district (the owner\'s «Narjis» bug)', turns: [['ابغى شقة', {}], ['النرجس', { kind: 'message', has: /مدينة/, hasCity: 'الرياض', never: /عذراً|عذرا|ما قدرت|للأسف|sorry|can't|couldn't/i }]] },
@@ -169,7 +178,7 @@ const chat = [
   { name: 'unclear answers never end in an apology', turns: [['ابغى شقة', {}], ['ما ادري', { never: /عذراً|ما قدرت|sorry|can't/i }], ['مدري', { never: /عذراً|ما قدرت|sorry|can't/i }], ['برضو مدري', { never: /عذراً|ما قدرت|sorry|can't/i }], ['لا ادري', { never: /عذراً|ما قدرت|sorry|can't/i }]] },
 ].map((c) => ({ g: 'chat', text: c.name, chat: c }));
 
-let ALL = [...search, ...en, ...special, ...dialect, ...social, ...situation, ...style, ...convo, ...edits, ...chat];
+let ALL = [...search, ...en, ...special, ...dialect, ...social, ...situation, ...style, ...convo, ...edits, ...english, ...chat];
 if (process.env.ONLY) ALL = ALL.filter((c) => c.g === process.env.ONLY);
 if (process.env.N) ALL = ALL.slice(0, Number(process.env.N));
 
