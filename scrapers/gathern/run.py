@@ -767,6 +767,8 @@ def backfill_details(s: cc.Session, limit: int = 0, shard: Optional[int] = None,
         # The page's own count fills a bathroom count the list's icon never gave; a stored value stays.
         if r.get("bathrooms") is None and (n := _bathrooms_from_sections(d.get("extra_sections"))):
             payload["bathrooms"] = n
+        if _kitchen_from_sections(d.get("extra_sections")):
+            payload["kitchen"] = True
         if desc:
             payload["description"] = desc
         try:
@@ -900,6 +902,25 @@ def _bathrooms_from_sections(secs: Optional[list]) -> Optional[int]:
             return 1
         m = _BATH_N_RE.match(c)
         return int(m.group(1)) if m and int(m.group(1)) > 0 else None
+    return None
+
+
+# The unit page's «مرافق المطبخ» list names «مطبخ مجهز» (an equipped kitchen) as one of its items on
+# 218 of 4,754 active units (measured 2026-10-12; re-read run 38216215705, unit 196227: «فريزر · فرن ·
+# … · مطبخ مجهز · غسالة ملابس»). It was captured into additional_info.extra_sections all along and never
+# reached the `kitchen` column the Advanced Filter reads (🆕 backlog #379, rule 10 «nothing trapped»).
+# LISTED = YES; ABSENT = SILENCE, never «no»: a list of appliances without the item, an empty block or a
+# missing section all return None, and the column is left alone.
+_KITCHEN_SECTION = "مرافق المطبخ"
+_KITCHEN_ITEM = "مطبخ مجهز"
+
+
+def _kitchen_from_sections(secs: Optional[list]) -> Optional[bool]:
+    for sec in secs or []:
+        if not isinstance(sec, dict) or (sec.get("header") or "").strip() != _KITCHEN_SECTION:
+            continue
+        c = " ".join(str(sec.get("content") or "").split())
+        return True if _KITCHEN_ITEM in c else None
     return None
 
 
