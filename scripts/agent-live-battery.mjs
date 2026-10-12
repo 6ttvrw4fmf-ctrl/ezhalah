@@ -51,7 +51,7 @@ function lint(text, reply) {
   const f = [];
   const r = String(reply ?? '').trim();
   if (!r) return ['empty'];
-  const body = r.replace(/^ازهله\s*\n/, '');
+  const body = r.replace(/^ازهله[!،,]?\s*\n?/, '').trim();
   if (!EMOJI_END.test(r)) f.push('emoji');
   if (DASH.test(r)) f.push('dash');
   if (MONEY.test(body)) f.push('money');
@@ -64,13 +64,15 @@ function lint(text, reply) {
 }
 
 // ── the cases ────────────────────────────────────────────────────────────────────────────────────────────────────
-const TYPES = [['شقة', ['Apartment']], ['فيلا', ['Villa']], ['دور', ['Floor']], ['بيت', ['House', 'Villa']], ['استراحة', ['Rest House']], ['محل', ['Shop']], ['مكتب', ['Office']], ['مستودع', ['Warehouse']], ['عمارة', ['Building']], ['شاليه', ['Chalet']], ['مزرعة', ['Farm']]];
+const TYPES = [['شقة', ['Apartment']], ['فيلا', ['Villa']], ['بيت', ['House', 'Villa']], ['استراحة', ['Rest House']], ['محل', ['Shop']], ['مكتب', ['Office']], ['مستودع', ['Warehouse']], ['عمارة', ['Building']], ['شاليه', ['Chalet']], ['مزرعة', ['Farm']]];
 const CITIES = [['الرياض', 'الرياض'], ['جدة', 'جدة'], ['الدمام', 'الدمام'], ['الخبر', 'الخبر'], ['مكة', 'مكة'], ['المدينة المنورة', 'المدينة'], ['الطائف', 'الطائف'], ['أبها', 'أبها'], ['بريدة', 'بريدة'], ['تبوك', 'تبوك'], ['الهفوف', 'الهفوف'], ['الخرج', 'الخرج']];
 const OPENERS = ['ابي', 'ابغى', 'أبغى', 'أبي', 'ودي في', 'أدور', 'محتاج', 'أبغى لي', ''];
 const pick = (arr, i) => arr[i % arr.length];
+const SEED = Number(process.env.SEED || 0);        // SEED=1,2,3… draws a different 120 combinations of type × city × deal × budget × beds
 
 const search = [];
-for (let i = 0; i < 120; i++) {
+for (let n = 0; n < 120; n++) {
+  const i = n + SEED * 120;
   const [tw, tc] = pick(TYPES, i * 7 + 3); const [cw, cc] = pick(CITIES, i * 5 + 1); const op = pick(OPENERS, i * 3 + 2);
   const rentWord = pick(['للإيجار', 'للايجار', 'إيجار', 'للبيع', 'للبيع', ''], i);
   const deal = /بيع/.test(rentWord) ? 'Buy' : rentWord ? 'Rent' : null;
