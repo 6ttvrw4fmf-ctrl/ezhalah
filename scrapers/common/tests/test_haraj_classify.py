@@ -114,3 +114,44 @@ def test_business_car_and_catalogue_posts_are_not_offers(t, b):
 ])
 def test_real_offers_from_the_same_sample_survive(t, b):
     assert classify(t, b)[0] == "offer"
+
+
+# Shadow 2026-10-12 (run 38206642958, untouched window 10-11 21:00 → 10-12 04:00): of 92 «offer» verdicts
+# hand-checked, these 7 were not offers. Verbatim titles and the body words that decide them.
+@pytest.mark.parametrize("t,b", [
+    ("بحث بيت شعبي فالدويمة للإيجار", "بحث لبيت شعبي فالدويمة لا يتجاوز سعره 1000 لعائلة صغيرة"),
+    ("حوش مع مكتب للايجار", "نقل ثقيل وخفيف؛ نقل متخصص اجره عامه ؛ نقل تعليمي نستخلص كافة اجراءات الرخصه"),
+    ("مخطط طيبة الفرعية مكتب ابوراكان للعقار",
+     "🔵لديك الرغبة في شراء ارض 🔵او لديك الرغبة في بيع ارض 🔵او حاب تستفسر عن سعر ارضك 🔵نوفر لك السعر"),
+    ("شقق وملحق فلل للبيع في جده", ""),
+    ("ادوار وشقق للبيع", ""),
+    ("محل خضار وفواكهة للإيجار او التقبيل", "محل للإيجار الشهري او التقبيل الموقع : حي المغيسلة"),
+    ("شقة للإيجار والتقبيل حي الوشام الرياض", ""),
+])
+def test_shadow_2026_10_12_misses_are_not_offers(t, b):
+    assert classify(t, b)[0] != "offer"
+
+
+@pytest.mark.parametrize("t,b", [
+    # «نبينا» in the seller's blessing is not the request word «نبي» (it was dropped as a request).
+    ("للبيع شقة تمليك جديدة فاخره 5غرف حي جبرة بحوش للجادين",
+     "اللهم صل وسلم على نبينا محمد.. للبيع شقه تمليك جديدة فاخرة بحي قصر جبره"),
+    # One building that is a villa plus flats, and shops plus a plot on one deed, stay offers.
+    ("فيلا و3 شقق للبيع بحي الحسام بالدمام", "للبيع ( فيلا و3 شقق بحي الحسام الدمام )"),
+    ("محلات تجارية وأرض في الحسينيه شارع تجاري للبيع بصك اكتروني", ""),
+    ("للإيجار استراحه للشركات والعمال الدوادمي", "للايجار استراحه في الدوادمي مخطط ابن شميسان"),
+])
+def test_shadow_2026_10_12_real_offers_survive(t, b):
+    assert classify(t, b)[0] == "offer"
+
+
+# Shadow 2026-10-12 window 2 (run 38209047358, files 10-11-08 → 13 KSA): 110 offers hand-checked, 2 were
+# broker posts with no unit.
+@pytest.mark.parametrize("t,b", [
+    ("مكتب ابو طريخم البقمي للعقار في مخطط طيبه الفرعيه شمال جده",
+     "للبيع والشراء في مخططات طيبه الفرعيه احي الوداد مخطط 598-597 احي الندى"),
+    ("شقق مفروشة ايجار شهري بعدة مواقع",
+     "بسم الله ماشاءالله يوجد لدينا شقق مفروشة جاهزة للإيجار الشهري في جدة بعدة احياء مختلفة"),
+])
+def test_shadow_2026_10_12_window2_brokers_are_not_offers(t, b):
+    assert classify(t, b)[0] != "offer"

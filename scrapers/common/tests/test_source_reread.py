@@ -40,3 +40,16 @@ def test_ids_are_exact_and_malformed_ones_refused():
     for bad in ("aqar_residential_listings", "x:y", ":5"):
         with pytest.raises(ValueError):
             parse_ids(bad)
+
+
+def test_wasalt_prices_are_printed_whatever_the_fact_filter_keeps():
+    """Backlog 371/392 (2026-10-12): settling a wasalt land priced in the hundreds of billions needs the
+    page's own salePrice / conversionPrice / per-metre in the job log (PRICE = SOURCE)."""
+    from scrapers.common.source_reread import wasalt_fact_paths
+    d = {"props": {"pageProps": {"propertyDetailsV3": {"propertyInfo": {
+        "title": "Land 2250 SQM", "salePrice": 40500000000, "conversionPrice": 40500000000,
+        "pricePerMeter": 18000000, "isPriceNegotiable": True}}}}}
+    lines = wasalt_fact_paths(d)
+    assert "propertyDetailsV3.propertyInfo.salePrice = 40500000000" in lines
+    assert "propertyDetailsV3.propertyInfo.pricePerMeter = 18000000" in lines
+    assert not any("isPriceNegotiable" in l for l in lines)   # a flag is not a price

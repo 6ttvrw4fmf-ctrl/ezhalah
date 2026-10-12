@@ -36,8 +36,10 @@ def _norm(s: Optional[str]) -> str:
 # (shadow v3 2026-10-10: «تكفون محتاجه شقة عوائل» slipped through as an offer because only «محتاج»
 # was listed). «تكفون / تكفى» (please, I beg you) opens requests, never offers.
 _REQUEST = re.compile(
-    _B + r"(?:"
-    r"(?:مطلوب|نبي|ابغي|ابغا|ابي|ابحث|نبحث|يبحث|تبحث|احتاج|نحتاج|تحتاج|يحتاج|محتاج|بحاجه|ودي|"
+    # «نبينا» (our Prophet, in a seller's opening blessing) is not «نبي» + «نا» (shadow 2026-10-12,
+    # 11190371478 «للبيع شقة تمليك … اللهم صل وسلم على نبينا محمد» read as a request).
+    _B + r"(?!نبينا" + _E + r")(?:"
+    r"(?:بحث|مطلوب|نبي|ابغي|ابغا|ابي|ابحث|نبحث|يبحث|تبحث|احتاج|نحتاج|تحتاج|يحتاج|محتاج|بحاجه|ودي|"
     r"ارغب|نرغب|يرغب|ترغب|ادور|ندور|يدور|تدور)(?:ه|ها|ين|ون|هم|نا|ي)?|"
     r"تكفون|تكفي|من عنده|مين عنده|من لديه|احد عنده|ممكن احد|اللي عنده|الي عنده|اللي يعرف|الي يعرف"
     r")" + _E
@@ -47,9 +49,16 @@ _REQUEST = re.compile(
 _OTHER = re.compile(
     _B + r"(?:"
     r"عامل|عماله|عمال|حارس|سائق|سواق|خادمه|عاملات|وظيفه|وظائف|عن عمل|راتب|نقل كفاله|كفاله|"
-    r"نقل عفش|عفش|سياره|سيارات|جوال|(?:لل|ل|و|ب)?تقبيل|مقاول|مقاولات|ترميم|صيانه|"
+    r"نقل عفش|عفش|سياره|سيارات|جوال|(?:لل|ل|و|ب)?(?:ال)?تقبيل|مقاول|مقاولات|ترميم|صيانه|"
     r"دهانات|سباك|تنظيف|مكافحه حشرات|مظلات|سواتر|عزل|تشطيب|نقوم ب|نوفر لكم|نقدم لكم|خدمه الاعلان|"
     r"خدمه تسويق|نسوق لك|معلن عقاري|شريك|شراكه|تسوقه|نخدمك|"
+    # A broker's services post and a transport / licensing office (shadow 2026-10-12: 11190372375 «لديك
+    # الرغبة في شراء ارض او … بيع ارض … نوفر لك السعر», 11190376087 «نقل ثقيل وخفيف … نستخلص كافة اجراءات»).
+    r"نوفر لك|لديك الرغبه|حاب تستفسر|نقل ثقيل|نقل خفيف|نستخلص|"
+    # A broker's «we buy and sell in these plans» and a stock list across neighbourhoods name no unit
+    # (shadow 2026-10-12 window 2: 11190324509 «للبيع والشراء في مخططات طيبه الفرعيه», 11190324807
+    # «يوجد لدينا شقق مفروشة … بعدة احياء»).
+    r"للبيع والشراء|البيع والشراء|يوجد لدينا|بعده احياء|بعده مواقع|"
     # An agency's catalogue ad («يتوفر لدينا شقق وأراضي ومزارع») names no unit: not a listing
     # (shadow 2026-10-11, 11190296071).
     r"يتوفر لدينا|تتوفر لدينا|متوفر لدينا|متوفره لدينا"
@@ -72,6 +81,13 @@ _OTHER_TITLE = re.compile(
     r"عروض|العروض|جميع|جيمع|نستقبل|نستقل|لدينا)" + _E)
 
 # The REGA (الهيئة العامة للعقار) ad block every licensed Saudi property ad carries.
+# A catalogue title names two kinds of unit at once («ادوار وشقق للبيع», «شقق وملحق فلل للبيع في جده»,
+# shadow 2026-10-12) and no single unit. One building that IS a villa plus flats («فيلا و3 شقق») names a
+# singular first and is not caught.
+_CATALOGUE_TITLE = re.compile(
+    _B + r"(?:شقق|ادوار|فلل|اراضي|محلات|عمائر|مكاتب|مستودعات)\s+و\s*(?:ملحق\s+|ملاحق\s+)?"
+    r"(?:شقق|ادوار|فلل|اراضي|محلات|عمائر|مكاتب|مستودعات)" + _E)
+
 _REGA = re.compile(
     r"رقم ترخيص الاعلان|ترخيص الاعلان|رقم الترخيص|رخصه فال|رقم المعلن|سعر الوحده|نوع العقار|"
     r"اعلان\s*:\s*(?:بيع|ايجار|تاجير)"
@@ -95,7 +111,7 @@ def classify(title: Optional[str], body: Optional[str]) -> tuple[str, str]:
     m = _REQUEST.search(both)
     if m:
         return "request", f"request word «{m.group(0)}»"
-    m = _OTHER.search(both) or _OTHER_TITLE.search(t)
+    m = _OTHER.search(both) or _OTHER_TITLE.search(t) or _CATALOGUE_TITLE.search(t)
     if m:
         return "other", f"non-property word «{m.group(0)}»"
     if _REGA.search(b) and _TYPE.search(both):
