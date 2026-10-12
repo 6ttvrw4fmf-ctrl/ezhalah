@@ -105,6 +105,18 @@ const special = [
   ['شقة في الملقا للإيجار', { type: ['Apartment'], deal: 'Rent' }], ['فيلا في حي الشاطئ جدة للبيع', { type: ['Villa'], loc: 'جدة', deal: 'Buy' }],
 ].map(([text, exp]) => ({ g: 'search', text, exp }));
 
+// dialect, typos, number words, several types / cities, sites, counts, sorting — the way people really type
+const dialect = [
+  ['ابغى شقه في الرياض', { type: ['Apartment'], loc: 'الرياض' }], ['شقه للايجار في جده', { type: ['Apartment'], loc: 'جدة', deal: 'Rent' }], ['فله للبيع في الدمام', { type: ['Villa'], loc: 'الدمام', deal: 'Buy' }],
+  ['ابي شقة ثلاث غرف في الرياض', { type: ['Apartment'], loc: 'الرياض', detail: '3' }], ['شقة غرفتين وصالة للايجار في الخبر', { type: ['Apartment'], loc: 'الخبر', deal: 'Rent', detail: '2' }],
+  ['شقة بخمسين الف بالسنة في الدمام', { type: ['Apartment'], loc: 'الدمام', price: 50000 }], ['فيلا بمليون ونص في جدة', { type: ['Villa'], loc: 'جدة', price: 1500000 }], ['شقة بنص مليون في الرياض', { type: ['Apartment'], loc: 'الرياض', price: 500000 }],
+  ['شقة او فيلا في الرياض', { loc: 'الرياض' }], ['شقة للايجار في جدة او الدمام', {}], ['ابي شقة في الرياض بس من عقار', { type: ['Apartment'], loc: 'الرياض' }], ['وريني ١٠ شقق في الرياض', { type: ['Apartment'], loc: 'الرياض' }],
+  ['اخر الاعلانات شقق الرياض', { type: ['Apartment'], loc: 'الرياض' }], ['ارخص شقة للايجار في جدة', { type: ['Apartment'], loc: 'جدة', deal: 'Rent' }], ['شقة قريبة من جامعة الملك عبدالله جدة', { type: ['Apartment'], loc: 'جدة' }],
+  ['abgha shaqa fi riyadh', { type: ['Apartment'], loc: 'الرياض' }], ['ابي بيت حديث في الرياض', { type: ['House', 'Villa'], loc: 'الرياض' }], ['شقة عزاب للايجار في الرياض', { type: ['Apartment'], loc: 'الرياض', deal: 'Rent' }],
+  ['شقة عوائل في جدة للإيجار', { type: ['Apartment'], loc: 'جدة', deal: 'Rent' }], ['ابي مكتب تجاري للايجار في الرياض', { type: ['Office'], loc: 'الرياض', deal: 'Rent' }], ['معرض للايجار في الدمام', { loc: 'الدمام', deal: 'Rent' }],
+  ['ورشة للايجار في الرياض', { loc: 'الرياض', deal: 'Rent' }], ['مصنع للبيع في الدمام', { loc: 'الدمام', deal: 'Buy' }], ['ارض تجارية للبيع في جدة', { loc: 'جدة', deal: 'Buy' }], ['شاليه للايجار في جدة', { type: ['Chalet'], loc: 'جدة', deal: 'Rent' }],
+].map(([text, exp]) => ({ g: 'dialect', text, exp }));
+
 const social = [
   'مرحبا', 'هلا', 'السلام عليكم', 'صباح الخير', 'hello', 'hi', 'Good morning', 'شكراً', 'شكرا لك', 'يعطيك العافية', 'thanks', 'thank you', 'thx', 'مع السلامة', 'bye', 'وش تقدر تسوي', 'what can you do', 'مين انت', 'who are you', 'كيف حالك',
 ].map((text) => ({ g: 'social', text }));
@@ -132,6 +144,14 @@ const convo = [
   ['فيلا للبيع في جدة', 'تحت ٣ مليون', { price: 3e6, deal: 'Buy', loc: 'جدة' }], ['شقة في الدمام للإيجار', 'غرفتين بس', { detail: '2', loc: 'الدمام' }], ['ابي بيت', 'في الدمام', { loc: 'الدمام' }],
 ].map(([t1, t2, exp]) => ({ g: 'convo', t1, t2, exp, text: t2 }));
 
+// edits: the SECOND message changes one thing (the first stays in the app's merged state; here we judge what the second one says)
+const edits = [
+  ['شقة للإيجار في الرياض', 'خلها في جدة', { loc: 'جدة' }], ['فيلا للبيع في جدة', 'خلها شقة', { type: ['Apartment'] }], ['شقة للإيجار في الرياض', 'ضيف حي الملقا', { loc: 'الرياض' }],
+  ['شقة للإيجار في الرياض', 'ارخص', { sort: 'price_asc' }], ['شقة للإيجار في الرياض', 'بس من عقار', { plat: 'عقار|aqar' }], ['شقة للبيع في الرياض', 'الاحدث', { sort: 'newest' }],
+  ['شقة للإيجار في جدة', 'ابغاها ٣ غرف', { detail: '3' }], ['فيلا للبيع في الرياض', 'تحت ٤ مليون', { price: 4e6 }], ['شقة في الدمام', 'للبيع', { deal: 'Buy' }],
+  ['شقة في الدمام', 'للإيجار بالشهر', { deal: 'Rent', period: 'monthly' }], ['فيلا في جدة للبيع', 'وفيها مسبح', { am: 'pool' }], ['شقة في الرياض للإيجار', 'فيها مصعد', { am: 'elevator' }],
+].map(([t1, t2, exp]) => ({ g: 'edits', t1, t2, exp, text: t2 }));
+
 // a chat of several turns, judged turn by turn (the app carries history, prevQuery and askCount between the turns)
 const chat = [
   { name: 'asked once, then ONLY a district (the owner\'s «Narjis» bug)', turns: [['ابغى شقة', {}], ['النرجس', { kind: 'message', has: /مدينة/, hasCity: 'الرياض', never: /عذراً|عذرا|ما قدرت|للأسف|sorry|can't|couldn't/i }]] },
@@ -147,7 +167,7 @@ const chat = [
   { name: 'unclear answers never end in an apology', turns: [['ابغى شقة', {}], ['ما ادري', { never: /عذراً|ما قدرت|sorry|can't/i }], ['مدري', { never: /عذراً|ما قدرت|sorry|can't/i }], ['برضو مدري', { never: /عذراً|ما قدرت|sorry|can't/i }], ['لا ادري', { never: /عذراً|ما قدرت|sorry|can't/i }]] },
 ].map((c) => ({ g: 'chat', text: c.name, chat: c }));
 
-let ALL = [...search, ...en, ...special, ...social, ...situation, ...style, ...convo, ...chat];
+let ALL = [...search, ...en, ...special, ...dialect, ...social, ...situation, ...style, ...convo, ...edits, ...chat];
 if (process.env.ONLY) ALL = ALL.filter((c) => c.g === process.env.ONLY);
 if (process.env.N) ALL = ALL.slice(0, Number(process.env.N));
 
@@ -162,6 +182,8 @@ function judgeSearch(q, e) {
   if (e.detail && String(q.detail) !== e.detail && !(e.detail === '5' && String(q.detail) === '5+')) f.push(`detail=${q.detail}`);
   if (e.period && q.rentPeriod !== e.period) f.push(`period=${q.rentPeriod}`);
   if (e.am && !(q.amenities ?? []).includes(e.am)) f.push(`am=${(q.amenities ?? []).join()}`);
+  if (e.sort && q.sort !== e.sort) f.push(`sort=${q.sort}`);
+  if (e.plat && !(q.platforms ?? []).some((p) => new RegExp(e.plat, 'i').test(p))) f.push(`platforms=${(q.platforms ?? []).join()}`);
   return f;
 }
 
@@ -181,7 +203,7 @@ async function run(c) {
     }
     return { c, d: last, fails, reply: last?.reply, lang: 'ar' };
   }
-  if (c.g === 'convo') {
+  if (c.g === 'convo' || c.g === 'edits') {
     const d1 = await call({ text: c.t1 });
     const d2 = await call({ text: c.t2, history: [{ role: 'user', text: c.t1 }, { role: 'model', text: d1.reply ?? '' }], prevQuery: d1.query });
     const fails = judgeSearch(d2.query ?? {}, c.exp).map((x) => `convo:${x}`).concat(lint(c.t2, d2.reply).map((x) => `rule:${x}`));
