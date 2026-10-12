@@ -28,7 +28,9 @@ const AMENITY_EMOJI: Record<string, string> = {
   electricity: '⚡', water_supply: '💧',
 };
 
-export type AfFacet = { id: string; keys: string[]; labels: string[] };
+// `total` = the size of the set this question was asked against (what the pick is checked against) — only the
+// Advanced Filter round's search beat reads it; the summary sentences never do.
+export type AfFacet = { id: string; keys: string[]; labels: string[]; total?: number };
 
 // ONE committed facet → its finished, reader-facing item(s). Shared by the summary and the round
 // log, so an answer is worded identically wherever it appears; a multi-select facet explodes into
@@ -98,6 +100,23 @@ function facetItems(f: AfFacet): string[] {
 // same dedupe as the sentence below, so a chip and the sentence can never name different answers.
 export function buildAfSummaryItems(facets: AfFacet[]): string[] {
   return [...new Set(facets.flatMap(facetItems))];
+}
+
+// THE ADVANCED FILTER ROUND'S SEARCH BEAT (owner 2026-10-11: «نفحص أكثر من 349,793 عقار…» is how a search should read —
+// «checking», with the number): ONE step per answered question, carrying the size of the set that answer was checked
+// against («نفحص 1,425 عقار…» → «نفحص 830 عقار…»). A multi-select answer (elevator + A/C) is ONE step, not two with the
+// same number. `pool` is null when the size was never known, and the beat then names the pick instead of inventing a
+// count. Same items, same wording and the same dedupe as the chips, so the beat can never name an answer the chips don't.
+export function buildAfBeatSteps(facets: AfFacet[]): Array<{ label: string; pool: number | null }> {
+  const seen = new Set<string>();
+  const steps: Array<{ label: string; pool: number | null }> = [];
+  for (const f of facets) {
+    const fresh = facetItems(f).filter((it) => !seen.has(it));
+    fresh.forEach((it) => seen.add(it));
+    if (!fresh.length) continue;
+    steps.push({ label: joinAr(fresh), pool: typeof f.total === 'number' && f.total > 0 ? f.total : null });
+  }
+  return steps;
 }
 
 export function buildAfSummary(facets: AfFacet[]): string {

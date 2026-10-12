@@ -73,10 +73,10 @@ import { listingOpenUrl, openListing } from '@/lib/openListing';
 import {
   EMPTY_AD_PANE, closeAdTab, hideAdPane, inAppPreviewHost, inAppViewerHost, openAdTab, showAdPane, type AdPane, type AdTab,
 } from '@/lib/inAppViewer';
-import { PICKER_SHEET_BREAKPOINT, VIEWER_SPLIT_BREAKPOINT } from '@/lib/responsive';
+import { PICKER_SHEET_BREAKPOINT, VIEWER_SPLIT_BREAKPOINT, CARDS_THREE_ACROSS_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import AdViewer from '@/components/AdViewer';
-import { buildAfSummaryItems } from '@/lib/afSummary';
+import { buildAfSummaryItems, buildAfBeatSteps } from '@/lib/afSummary';
 import { filterToChat, searchSummary, guidedSearchSummary, buildAfSummary, buildAfRoundLog, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, NO_RESULTS_GENERIC_FALLBACK_EN, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
 import { migrateGroups, sanitizeForFilterRestore } from '@/lib/searchDefaults';
@@ -163,7 +163,7 @@ type RefinePrompt = { dim: string; baseQ: SearchQuery; options: { label: string;
 // One committed Advanced Filter answer: which question, which option keys, and the labels shown for
 // them. Skips never produce one (they write no predicate), which is what makes the summary EQUAL the
 // committed state by construction.
-type GuidedFacet = { id: string; keys: string[]; labels: string[] };
+type GuidedFacet = { id: string; keys: string[]; labels: string[]; total?: number };
 
 type ChatMsg =
   | { id: string; role: 'user'; text: string; typing?: boolean }
@@ -177,7 +177,7 @@ type ChatMsg =
   // `query` + `resultSources` feed the search-loading animation's platform strip (which real
   // platforms to show while searching); they never affect the search itself. `exiting` tells the
   // loader to fade out softly just before the morph to results (owner v4: no hard cut).
-  | { id: string; role: 'status'; phase: 'thinking' | 'searching'; slogan?: string; summary?: string; query?: SearchQuery; resultSources?: string[]; exiting?: boolean; afRound?: { items: string[] } };
+  | { id: string; role: 'status'; phase: 'thinking' | 'searching'; slogan?: string; summary?: string; query?: SearchQuery; resultSources?: string[]; exiting?: boolean; afRound?: { items: string[]; pools?: Array<number | null> } };
 
 const uid = () => 'm' + Date.now() + Math.round(Math.random() * 1e6);
 
@@ -1083,6 +1083,8 @@ export default function Agent() {
   const adPaneRef = useRef<AdPane<AdTab<Listing>>>(EMPTY_AD_PANE);
   const commitAdPane = (p: AdPane<AdTab<Listing>>) => { adPaneRef.current = p; setAdPane(p); };
   const viewerSplit = useAtLeast(VIEWER_SPLIT_BREAKPOINT);
+  // Laptop photo-first cards: 3 across on a wide screen with nothing open beside them, else 2 across.
+  const cardsThreeAcross = useAtLeast(CARDS_THREE_ACROSS_BREAKPOINT);
   // Phone: the site picker is a bottom sheet; wider: a floating card (owner 2026-10-09).
   const pickerSheet = !useAtLeast(PICKER_SHEET_BREAKPOINT);
   const pushAdTab = (tab: AdTab<Listing>) => {
@@ -1110,6 +1112,7 @@ export default function Agent() {
   // never paints one frame of the tall phone layout first. Phone and tablet pass nothing.
   const adPaneBeside = viewerSplit && adPane.tabs.length > 0 && !adPane.hidden;
   const cardRow = viewerSplit ? (adPaneBeside ? 'tight' as const : 'roomy' as const) : undefined;
+  const cardCols = viewerSplit ? ((adPaneBeside || !cardsThreeAcross) ? 2 as const : 3 as const) : undefined;
   // Which result messages have finished typing their reply. The property cards stay hidden until the
   // words above them are fully written out, so listings never appear before Ezhalah has spoken (user
   // request). Keyed by message id.
@@ -1252,7 +1255,7 @@ export default function Agent() {
   // {question id, picked keys, labels}. The results pills rebuild the query from baseQ by re-applying
   // the REMAINING facets — removal is pure recomputation, never an ad-hoc inverse per question.
   const ageFlowBaseQRef = useRef<SearchQuery | null>(null);
-  const ageFlowFacetsRef = useRef<Array<{ id: string; keys: string[]; labels: string[] }>>([]);
+  const ageFlowFacetsRef = useRef<Array<{ id: string; keys: string[]; labels: string[]; total?: number }>>([]);
   // THE interview record (owner 2026-08-22, «رجوع»): one ordered list of every question presented,
   // each carrying the answer given for it. `keys: null` = presented but not answered yet; `[]` =
   // skipped (no preference, NO predicate). A cursor walks it, so Back is simply "move the cursor
@@ -2428,7 +2431,7 @@ export default function Agent() {
   // `opts.guided` attaches the interview's facets to the results turn for the removable pills.
   const runRefine = async (
     baseQ: SearchQuery, dim: string, value: string, label: string,
-    opts?: { onFetched?: (total: number | null) => void; guided?: { baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[] }; afRound?: { items: string[] } },
+    opts?: { onFetched?: (total: number | null) => void; guided?: { baseQ: SearchQuery; facets: GuidedFacet[]; asked: string[] }; afRound?: { items: string[]; pools?: Array<number | null> } },
   ) => {
     pendingRefineRef.current = null;
     finalizeReveal();
@@ -2795,7 +2798,12 @@ export default function Agent() {
     void runRefine(q, '__guided__', '', locale === 'ar' && roundLabel ? pickAfCourtesyOpening() + roundLabel : roundLabel, {
       guided,
       // The picks in the chips' own words, without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات») — clearer than the raw labels.
-      afRound: { items: buildAfSummaryItems(ageFlowFacetsRef.current).map((x) => stripEmoji(x).trim()).filter(Boolean) },
+      // One beat per answered question, in the chips' own words without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات»),
+      // each with the size of the set it was checked against — the beat reads «نفحص 1,425 عقار…» → «نفحص 830 عقار…».
+      afRound: (() => {
+        const steps = buildAfBeatSteps(ageFlowFacetsRef.current).map((x) => ({ label: stripEmoji(x.label).trim(), pool: x.pool })).filter((x) => x.label);
+        return { items: steps.map((x) => x.label), pools: steps.map((x) => x.pool) };
+      })(),
       onFetched: (total) => {
         const msgId = refineMsgIdRef.current;
         if (!stillMining()) return;
@@ -4300,7 +4308,7 @@ export default function Agent() {
                 // clean/focused); they still appear in the RESULTS bubble below, unchanged. RTL is
                 // handled inside SearchLoader (the message column is LTR-pinned).
                 // An Advanced Filter round: one sentence of the user's picks, each landing in turn (owner 2026-10-11).
-                if (m.afRound) return <AfRoundLoader key={m.id} items={m.afRound.items} exiting={m.exiting} fontFamily={CHAT_FONT} />;
+                if (m.afRound) return <AfRoundLoader key={m.id} items={m.afRound.items} pools={m.afRound.pools} exiting={m.exiting} fontFamily={CHAT_FONT} />;
                 return <SearchLoader key={m.id} bottomInset={loaderBottomInset} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} />;
               }
               if (m.role === 'agent') {
@@ -4477,7 +4485,7 @@ export default function Agent() {
                           per user request ("remove that, not nice"). The cards just appear, no fade,
                           no scale, no stagger. The responsive grid fills the available result width
                           while keeping the original card order in either language. */}
-                      <ResultCardGrid wide={viewerSplit}>
+                      <ResultCardGrid wide={viewerSplit} cols={cardCols}>
                         {/* Live typed turn: default to 0 visible until startReveal begins the one-by-one
                             drip (prevents a full-grid flash if setDoneTyping flushes a render before
                             setRevealCount(0)). History/replay turns (not typing) show all immediately. */}

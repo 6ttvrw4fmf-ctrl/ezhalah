@@ -30,7 +30,7 @@ export type GuidedStep = {
 export const sameKeys = (a: string[], b: string[]) =>
   a.length === b.length && [...a].sort().join('|') === [...b].sort().join('|');
 
-export type GuidedFacet = { id: string; keys: string[]; labels: string[] };
+export type GuidedFacet = { id: string; keys: string[]; labels: string[]; total?: number };
 
 export type DerivedGuided = {
   query: SearchQuery | null;
@@ -68,7 +68,7 @@ export function deriveGuided(base: SearchQuery | null, steps: readonly GuidedSte
     if (!st.keys.length) continue;             // SKIPPED: asked, but contributes no predicate at all
     if (query) query = st.question.apply(query, st.keys);
     const ls = st.keys.map((k) => st.options.find((o) => o.key === k)?.label).filter(Boolean) as string[];
-    facets.push({ id: st.question.id, keys: st.keys, labels: ls });
+    facets.push({ id: st.question.id, keys: st.keys, labels: ls, total: st.total });   // total: the set this answer was checked against (the beat's «نفحص N عقار»)
   }
   // `labels` is DERIVED from the deduped facets, never built alongside them, so the flat summary
   // sentence ("gym، north، …") can never carry a stray duplicate the pill list itself doesn't have.
