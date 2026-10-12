@@ -99,7 +99,8 @@ import { useI18n, detectLocale, getLocale, translate, t as tr, type Locale, LOCA
 import { listingLocationAr, listingPrice } from '@/lib/listingDisplay';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
-import { cityExampleAr, PIN } from '@/data/questionExamples';
+import { botMessage } from '@/lib/botMessage';
+import { cityQuestionAr, nearQuestionAr, geoQuestionAr, wholeCityQuestionText, twinRegionQuestion, twinDistrictQuestion, regionOrCityQuestion, regionQuestionWithHint, nextVariant, REFINE_DISTRICT_AR, REFINE_DISTRICT_EN, REFINE_BUDGET_AR, REFINE_BUDGET_EN, REFINE_BEDS_AR, REFINE_BEDS_EN, REFINE_FREE_AR, REFINE_FREE_EN, SEARCH_FAILED_AR, SEARCH_FAILED_EN, wholeCityQuestionSubject as wholeCitySubject, PIN } from '@/data/questionExamples';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard, type ShellPills } from '@/components/AdvancedQuestionCard';
 import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes, offersNarrowing } from '@/lib/afProbe';
 import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, resolveScopeOptionsInBackground, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, primeLiveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
@@ -223,18 +224,25 @@ const HYPE_EN = ['Ezhalah'];
 // rendered as plain text directly under the Search Summary — NO "Ezhalah!" prefix, no sparkle icon,
 // so it doesn't look like a second slogan. The branded slogan above carries the personality. (user request.)
 const RESULT_AR = [
-  'وجدت بعض العقارات التي تطابق بحثك.',
-  'وجدت بعض الخيارات بناءً على طلبك.',
-  'هذه بعض العقارات التي قد تناسب بحثك.',
+  'وجدت بعض العقارات التي تطابق بحثك 🏡',
+  'وجدت بعض الخيارات بناءً على طلبك 🔍',
+  'هذه بعض العقارات التي تطابق بحثك ✨',
+  'طلعت لك عقارات حسب طلبك 🏘️',
 ];
 const RESULT_EN = [
-  'I found a few properties based on your search.',
-  'I found a few options based on what you asked for.',
-  'Here are some properties that match your search.',
+  'I found a few properties based on your search 🏡',
+  'I found a few options based on what you asked for 🔍',
+  'Here are some properties that match your search ✨',
+  'Here is what matches your request 🏘️',
 ];
+// Never the same line twice in a row (owner 2026-10-11: «not the same message, so it is not a chatbot that repeats itself»).
+let lastResultDone = -1;
 const resultDone = (locale: Locale): string => {
   const arr = locale === 'ar' ? RESULT_AR : RESULT_EN;
-  return arr[Math.floor(Math.random() * arr.length)];
+  let i = Math.floor(Math.random() * arr.length);
+  if (i === lastResultDone) i = (i + 1) % arr.length;
+  lastResultDone = i;
+  return arr[i];
 };
 // Pick a slogan in the LANGUAGE OF THE USER'S MESSAGE (not the UI locale). Counting Arabic vs
 // Latin word-runs in the text lets a user type "I want an apartment in Riyadh" inside an Arabic
@@ -265,12 +273,8 @@ const arLabel = (s: string) => arabicOrPlaceholder(s, 'ar', LOCATION_UNRESOLVED_
 // re-parsed that generic noun as المدينة المنورة and searched the wrong region entirely.
 // scripts/verify-agent-whole-city-answer.ts round-trips these two so the template cannot drift out
 // from under the parser.
-export const wholeCityQuestion = (cityAr: string) => `تقصد مدينة ${cityAr} كاملة، أو حي معيّن؟ ${PIN}`;
-export function wholeCityQuestionSubject(text: string | null | undefined): string | null {
-  const m = /^تقصد مدينة (.+) كاملة، أو حي معيّن؟(?:\s*\p{Extended_Pictographic}\uFE0F?)?$/u.exec((text ?? '').trim());
-  const city = m?.[1]?.trim();
-  return city ? city : null;
-}
+export const wholeCityQuestion = (cityAr: string) => wholeCityQuestionText(cityAr);
+export const wholeCityQuestionSubject = (text: string | null | undefined): string | null => wholeCitySubject(text);
 
 // The region-AND-city TWIN NAME behind the «مدينة X ولا منطقة X كاملة؟» question (and behind the
 // whole-region question for the same names), so send() knows which name the user is answering about on
@@ -303,8 +307,8 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
     const prox = (q.proximity ?? [])
       .map((p) => (p.text || `${p.phrase} ${p.name || p.categoryAr}`).trim())
       .filter(Boolean);
-    if (prox.length) return `في أي مدينة تبحث عن عقار ${prox.join(' و')}؟ ${cityExampleAr()} ${PIN}`;
-    return `في أي مدينة تبحث؟ ${cityExampleAr()} ${PIN}`;
+    if (prox.length) return nearQuestionAr(prox.join(' و'), userText);
+    return cityQuestionAr(userText, '', q.type);
   }
   // The user asked for the whole CITY or REGION — honour it, don't ask to narrow. Kingdom-wide is
   // deliberately NOT in this test any more: «الرياض كاملة» is a supported scope, «كل المملكة» is not.
@@ -323,24 +327,24 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
     // audit #2 fix: show the REGIONS, not the city display labels (which are identical for twins and
     // dedupe to one blank option). «الهفوف موجودة في أكثر من منطقة (المنطقة الشرقية، منطقة الرياض)…»
     const regions = Array.from(new Set(lm.twinRegions));
-    return `«${arLabel(lm.label)}» موجودة في أكثر من منطقة (${regions.join('، ')}). أي منطقة تقصد؟ ${PIN}`;
+    return twinRegionQuestion(arLabel(lm.label), regions.join('، '), userText);
   }
   // Region-vs-city SAME NAME (الرياض/جازان/تبوك/حائل/نجران/الباحة/الجوف) → ask مدينة ولا منطقة, never
   // default to the city. Must precede the generic city branch below. (audit #4 / Q38.)
   if (lm.regionOrCity) {
     if (scopeChoice) return null; // they picked one of the two options — search it, don't re-ask it
     const label = arLabel(lm.label);
-    return `«${label}» اسم مدينة واسم منطقة في نفس الوقت. تقصد مدينة ${label} ولا منطقة ${label} كاملة؟ ${PIN}`;
+    return regionOrCityQuestion(label, userText);
   }
   // Geography cue (sea/mountain/desert) with NO city → ask the city; never auto-pick a default.
   // (audit #12 / Q39 case A.)
   if (lm.kind === 'geography' && lm.needsCity) {
-    return `تقصد في أي مدينة أو منطقة؟ ${cityExampleAr()} ${PIN}`;
+    return geoQuestionAr(userText);
   }
   // 1) A bare district shared by several cities → ask WHICH CITY (cities with listings first).
   if (lm.kind === 'district' && lm.ambiguous && lm.cities && lm.cities.length > 1) {
     const names = Array.from(new Set(lm.cities.slice(0, 8).map((c) => cityDisplay(c, 'ar')))).slice(0, 6);
-    return `«${arLabel(lm.label)}» موجود في أكثر من مدينة (${names.join('، ')}). أي مدينة تقصدها؟ ${PIN}`;
+    return twinDistrictQuestion(arLabel(lm.label).replace(/^حي\s+/, ''), names.join('، '), userText);
   }
   // 2) A REGION → ask the WHOLE region or a specific city (name a couple of its real, in-inventory cities).
   if (lm.kind === 'region') {
@@ -355,7 +359,7 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
     if (scopeNamedForTwin(userText, regionOrCityTwin(loc)) === 'region') return null;
     const cities = topCitiesInRegion(lm.region ?? lm.city ?? loc, 2).map((c) => cityDisplay(c, 'ar'));
     const hint = cities.length ? ` مثل ${cities.join(' أو ')}` : '';
-    return `تقصد ${arLabel(lm.label)} كاملة، أو مدينة معيّنة${hint}؟ ${PIN}`;
+    return regionQuestionWithHint(arLabel(lm.label), hint, userText);
   }
   // 3) A whole CITY with no neighbourhood → ask the WHOLE city or a specific district.
   if (lm.kind === 'city') {
@@ -2125,13 +2129,13 @@ export default function Agent() {
         // city choice on the AI-agent path (the system prompt explicitly prefers English for known
         // cities) — arLabel() (already used elsewhere in this file for the same reason) falls back
         // to the unresolved placeholder instead of interpolating raw English into this Arabic chip.
-        ask = ar ? `أي حي تفضّل في ${arLabel(q.location)}؟` : `Which district in ${q.location}?`;
+        ask = ar ? nextVariant(REFINE_DISTRICT_AR, { c: arLabel(q.location) }) : nextVariant(REFINE_DISTRICT_EN, { c: q.location });
         options = ds.map((d) => ({ label: d, value: d }));
       }
     }
     if (!dim && !q.priceInput && !q.priceBand) {
       dim = 'budget';
-      ask = ar ? 'كم ميزانيتك تقريباً؟' : 'What is your approximate budget?';
+      ask = ar ? nextVariant(REFINE_BUDGET_AR) : nextVariant(REFINE_BUDGET_EN);
       const ceil = q.deal === 'Buy' ? [500_000, 1_000_000, 2_000_000, 5_000_000] : [30_000, 50_000, 80_000, 150_000];
       options = ceil.map((c) => ({ label: budgetLabel(c, ar), value: String(c) }));
     }
@@ -2144,7 +2148,7 @@ export default function Agent() {
       : (detailForContext(q.category ?? 'Residential', effectiveGroups(q))?.showBeds ?? true);
     if (!dim && !q.detail && bedsApplicable) {
       dim = 'beds';
-      ask = ar ? 'كم غرفة نوم تبغى؟' : 'How many bedrooms?';
+      ask = ar ? nextVariant(REFINE_BEDS_AR) : nextVariant(REFINE_BEDS_EN);
       options = ['1', '2', '3', '4', '5'].map((n) => ({ label: bedsLabel(n, ar), value: n }));
     }
     // THE LEGACY TYPE QUESTION IS DELETED (owner 2026-08-23). It hardcoded four labels
@@ -2158,8 +2162,7 @@ export default function Agent() {
     // free-text path, can still deliver a typed type answer.
     if (!dim) { // everything already specified → open free-form question (typed answer)
       dim = 'free';
-      ask = ar ? 'وش تحب نضيّق فيه أكثر؟ (الميزانية، الحي، عدد الغرف، نوع العقار…)'
-               : 'What would you like to narrow further? (budget, district, bedrooms, type…)';
+      ask = ar ? nextVariant(REFINE_FREE_AR) : nextVariant(REFINE_FREE_EN);
     }
     pendingRefineRef.current = { q, dim }; // typed-answer fallback; chips are the primary path
     const refine = options.length ? { dim, baseQ: q, options } : undefined;
@@ -3443,7 +3446,7 @@ export default function Agent() {
         void promptSignupSoon(run); // guest used their free search (filter) → prompt sign-up
       } catch {
         if (!run.cancelled) {
-          setMsgs((m) => m.filter((x) => x.id !== statusId).concat({ id: uid(), role: 'agent', text: 'تعذّر البحث، حاول مرة أخرى' } as ChatMsg));
+          setMsgs((m) => m.filter((x) => x.id !== statusId).concat({ id: uid(), role: 'agent', text: locale === 'en' ? nextVariant(SEARCH_FAILED_EN) : nextVariant(SEARCH_FAILED_AR) } as ChatMsg));
         }
       } finally {
         if (!run.cancelled) { setBusy(false); runRef.current = null; }
@@ -4325,7 +4328,8 @@ export default function Agent() {
                   );
                 }
                 // Per-message direction: each reply follows its own language: Arabic on the right with the sparkle on the right; English on the left.
-                const txt = m.text;
+                // The last gate (owner 2026-10-11): no dash mark in any message, and every message ends with an emoji.
+                const txt = botMessage(m.text);
                 const rtl = msgRTL(txt);
                 // Stop's quiet line: muted, no sparkle, the reply's own side (ChatGPT «Stopped searching»).
                 if (m.stopNote) {
@@ -4395,7 +4399,7 @@ export default function Agent() {
               // rotation across the owner's 80 messages, same (lang, hasName) shape as
               // pickResultsFoundSentence above.
               const isGenericNoResults = introZeroResult && m.result.suggestion === t(NO_RESULTS_GENERIC_FALLBACK_EN);
-              const introText = introZeroResult
+              const introTextRaw = introZeroResult
                 ? (isGenericNoResults
                     ? pickNoResultsSentence({ lang: rfLang, name: rfName ?? null, stableKey: m.id })
                     : (m.result.suggestion ?? t('No exact matches — try broadening your search.')))
@@ -4410,6 +4414,7 @@ export default function Agent() {
                       stableKey: m.id,
                     })
                   : m.text;
+              const introText = botMessage(introTextRaw); // same last gate as every agent bubble
               return (
                 // Assistant text follows each message language; cards remain full width.
                 <View

@@ -12,6 +12,9 @@ import { supports } from './platforms';
 import { normalizeArabic } from '../lib/chatSearch';
 import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, translate, type Locale, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
 import { arabicOrPlaceholder } from '@/lib/arabicText';
+import { currencyCalcLine } from '@/lib/currencyCalc';
+import { bigAreaMin } from './bigSize';
+import { AMENITY_LABEL } from '@/lib/afEvidence';
 import { combinedBudgetParts } from '@/lib/combinedBudget';
 import { withAdvancedLines, type AfFacet } from '@/lib/afSummary';
 import { bedroomTokensPure } from '@/lib/roomBedrooms';
@@ -147,6 +150,9 @@ export type SearchQuery = {
   // strings. Mutually exclusive with bedrooms in the UI. Supersede contextSize when set. HARD filter.
   areaMin?: string | null;
   areaMax?: string | null;
+  // Display-only: 'big' when areaMin came from the user's word «كبير»/"big" (src/data/bigSize.ts), so the summary can say
+  // what we did with it. Never a filter by itself — areaMin is the filter.
+  areaNote?: 'big' | null;
   // Price range (filter UI, SAR — same unit as the displayed price for the chosen deal/period): min →
   // price ≥ min, max → price ≤ max, both → between. Raw digit strings. HARD filter (no closest-above).
   priceMin?: string | null;
@@ -303,7 +309,10 @@ export function priceCalcNote(q: SearchQuery): string {
 // "villa with 5+ bedrooms at SAR 1,000/m²" from misreading 5 bedrooms as 5 m². (PRD §6.2)
 function fixedSize(q: SearchQuery): number {
   if (!q.detail) return 0;
-  if (q.type && detailFor(q.type).isBedrooms) return 0; // detail is bedrooms, not an area
+  // detail is a BEDROOM count (1–4, 5+) for a dwelling type — not an area. A dwelling's detail that is NOT bedroom-shaped
+  // («300») is a size the user typed, and a per-m² price × that size is the total (owner 2026-10-11: «price per meter
+  // multiplied by this»); before, a villa with a typed size never got the calculated total.
+  if (q.type && detailFor(q.type).isBedrooms && /^([1-4]|5\+?)$/.test(q.detail.trim())) return 0;
   const clean = q.detail.replace(/,/g, '');
   return /^\d+$/.test(clean) ? parseInt(clean, 10) || 0 : 0;
 }
@@ -457,7 +466,15 @@ function budgetLines(q: SearchQuery, loc: Locale = getLocale()): string[] {
   const sar = t('SAR');
   // If the user gave a foreign currency, lead with their original figure so both are visible:
   // "Your budget: USD 100,000" then the SAR line(s) used for the actual search. (user request.)
-  const orig = q.priceOriginal ? [`${t('Your budget')}: ${q.priceOriginal}`] : [];
+  // The user's figure is shown as the CALCULATION that produced the SAR number («5,000,000 دينار كويتي × 12.2 =
+  // ر.س 61,000,000», owner 2026-10-11), falling back to their raw figure for a currency we do not convert.
+  const onePrice = !q.priceOriginal ? null : (() => { const lo = numOrNull(q.priceMin), hi = numOrNull(q.priceMax);
+    if (lo != null && hi == null) return lo; if (hi != null && lo == null) return hi;
+    const amt = lo == null ? (parseInt(((q.priceInput ?? '').match(/\d/g) ?? []).join(''), 10) || null) : null;
+    // a MONTHLY figure the agent already multiplied by 12: the conversion's result is the monthly one
+    return amt != null && q.priceIsAnnual && q.rentPeriod === 'monthly' && amt % 12 === 0 ? amt / 12 : amt; })();
+  const orig = q.priceOriginal
+    ? [`${t('Your budget')}: ${currencyCalcLine(q.priceOriginal, onePrice, loc === 'en' ? 'en' : 'ar', sar) ?? q.priceOriginal}`] : [];
   // COMBINED شراء+إيجار → one labelled bullet per budget half the user filled, never a single
   // unlabelled `Budget` read off the Buy boxes alone. See @/lib/combinedBudget.
   if (q.dealCombined) return [...orig, ...combinedBudgetParts(q, ': ', budgetWords())];
@@ -486,6 +503,14 @@ function budgetLines(q: SearchQuery, loc: Locale = getLocale()): string[] {
     if (amount < 200 && !q.priceIsAnnual) return orig; // unrealistic — engine broadens, nothing to show
     const yearly = `${t('Budget')}: ${t('{a}/year', { a: `${sar} ${grouped(amount)}` })}`;
     // Agent already annualized, or the figure is too large to be a monthly rent → show it as annual.
+    // The agent turned the user's MONTHLY figure into a yearly one (×12): show their own figure and the maths, not only the result.
+    if (q.priceIsAnnual && q.rentPeriod === 'monthly' && amount % 12 === 0) {
+      return [
+        ...orig,
+        `${t('Monthly Rent')}: ${t('{a}/month', { a: `${sar} ${grouped(amount / 12)}` })}`,
+        `${t('Annual Equivalent')}: ${t('{a}/year', { a: `${sar} ${grouped(amount)}` })}`,
+      ];
+    }
     if (q.priceIsAnnual || amount > 25_000) return [...orig, yearly];
     // Otherwise read it as a monthly rent and show the ×12 annual equivalent (most platforms store annual).
     return [
@@ -656,7 +681,11 @@ export function searchSummary(q: SearchQuery, loc: Locale = getLocale()): string
   if (aLo != null || aHi != null) {
     const r = aLo != null && aHi != null ? `${t('From')} ${grouped(aLo)} ${t('To')} ${grouped(aHi)}`
       : aLo != null ? `${t('From')} ${grouped(aLo)}` : `${t('To')} ${grouped(aHi!)}`;
-    lines.push(`• ${t('Size')}: ${r} ${t('m²')}`);
+    // «big» is shown as what we turned it into, only while the figure still IS that threshold — a later explicit
+    // size or a type change must never keep a stale «big» label.
+    const bigLabel = q.areaNote === 'big' && aHi == null && aLo != null && aLo === bigAreaMin(q.type)
+      ? ` (${t('big by Saudi market standards')})` : '';
+    lines.push(`• ${t('Size')}: ${r} ${t('m²')}${bigLabel}`);
   } else if (q.contextSize) lines.push(`• ${t('Size')}: ${q.contextSize} ${t('m²')}`);
   if (q.detail) {
     // Type/agent path shares ONE detail field for BEDROOM count OR SIZE. Label by VALUE: a bedroom-
@@ -665,6 +694,10 @@ export function searchSummary(q: SearchQuery, loc: Locale = getLocale()): string
     else if (/^([1-4]|5\+?)$/.test(q.detail)) lines.push(`• ${t('Bedrooms')}: ${q.detail}`);
     else lines.push(`• ${t('Size')}: ${q.detail} ${t('m²')}`);
   }
+  // The features the search REALLY requires (certified tokens only — an uncertified one never reaches q.amenities), so the
+  // user sees «غرفة خادمة» in the restatement of «بيت مع غرفة للخادمة», not only as a tag on each card (owner 2026-10-11).
+  const wantedAmenities = (q.amenities ?? []).filter((a) => a in AMENITY_LABEL);
+  if (wantedAmenities.length) lines.push(`• ${t('Amenities')}: ${wantedAmenities.map((a) => t(AMENITY_LABEL[a])).join('، ')}`);
   return `${t('Search Summary')}\n${lines.join('\n')}`;
 }
 

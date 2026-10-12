@@ -1,4 +1,4 @@
-import { cityExampleAr, PIN } from "./questionExamples.ts";
+import { nearQuestionAr, geoQuestionAr, regionQuestionText } from "./questionExamples.ts";
 // ─────────────────────────────────────────────────────────────────────────────
 // locationAmbiguity — the three LOST cases restored (round-2 fix, "LOST LOCATION-AMBIGUITY CASES").
 //
@@ -33,9 +33,9 @@ const WANTS_WHOLE_RE = /كامل|كاملة|بالكامل|كلها|كل\s*(?:ا
  * @param nm the region's canonical Arabic name (loc_classify's `name`, kind === 'region')
  * @param text this turn's raw user message
  */
-export function plainRegionQuestion(nm: string, text: string): string | null {
+export function plainRegionQuestion(nm: string, text: string, avoid = ""): string | null {
   if (WANTS_WHOLE_RE.test(text)) return null;
-  return `تقصد ${nm} كاملة، أو مدينة معيّنة؟ ${PIN}`;
+  return regionQuestionText(nm, text, avoid);
 }
 
 // A generic "near <phrase>" construct — Arabic + English. Deliberately NOT the deleted client's full
@@ -62,9 +62,9 @@ const GEOGRAPHY_CUE_RE = /بحر|شاطئ|ساحل|كورنيش|واجهة\s*ب�
  *
  * @param text this turn's raw user message (location has already been resolved to "" by the caller)
  */
-export function emptyLocationQuestion(text: string): string | null {
+export function emptyLocationQuestion(text: string, avoid = ""): string | null {
   const near = text.match(NEAR_PHRASE_RE);
-  if (near) return `في أي مدينة تبحث عن عقار ${near[1].trim()}؟ ${cityExampleAr()} ${PIN}`;
-  if (GEOGRAPHY_CUE_RE.test(text)) return `تقصد في أي مدينة أو منطقة؟ ${cityExampleAr()} ${PIN}`;
+  if (near) return nearQuestionAr(near[1].trim(), text, avoid);
+  if (GEOGRAPHY_CUE_RE.test(text)) return geoQuestionAr(text, avoid);
   return null;
 }

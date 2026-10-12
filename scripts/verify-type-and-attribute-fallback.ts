@@ -236,7 +236,7 @@ const AGENT_TSX = readFileSync(new URL('../src/app/agent.tsx', import.meta.url),
 const AGENT_NOWS = stripWs(AGENT_TSX);
 check(
   'agent.tsx\'s district refine-chip question wraps q.location in arLabel() on the Arabic branch (was raw — could render "أي حي تفضّل في Riyadh؟")',
-  AGENT_NOWS.includes('ask=ar?`أيحيتفضّلفي${arLabel(q.location)}؟`:`Whichdistrictin${q.location}?`;'),
+  AGENT_NOWS.includes('ask=ar?nextVariant(REFINE_DISTRICT_AR,{c:arLabel(q.location)}):nextVariant(REFINE_DISTRICT_EN,{c:q.location});'),
 );
 
 console.log('');

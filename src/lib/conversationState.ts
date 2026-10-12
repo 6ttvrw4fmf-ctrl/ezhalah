@@ -41,7 +41,7 @@ export const STICKY_FIELDS = [
   // fields — priceInput/priceMin/priceMax/priceBand — are already listed below and unaffected.
   'deal', 'bothDeals', 'rentPeriod', 'type', 'category', 'location', 'regionPin', 'districtPin',
   'districts', 'detail', 'contextSize', 'priceInput', 'priceIsAnnual', 'priceOriginal',
-  'priceMin', 'priceMax', 'priceBand', 'areaMin', 'areaMax', 'sources',
+  'priceMin', 'priceMax', 'priceBand', 'areaMin', 'areaMax', 'areaNote', 'sources',
   // advanced filter (the canonical AF question outputs)
   'amenities', 'furnishedPref', 'ratingMin', 'reviewsMin', 'bathMin', 'ageMin', 'ageMax',
   'isNewConstruction', 'streetWidthMin', 'directions', 'unitSubtypes',
