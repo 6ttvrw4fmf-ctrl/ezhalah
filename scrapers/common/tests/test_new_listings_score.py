@@ -377,3 +377,14 @@ def test_unit_inside_a_project_span_is_silence_not_a_mismatch(area, want):
     # wahadat 17399567: project page «101 - 259 م²» / «131 - 168 م²»; stored unit 163 m² (unit 9 in the payload).
     r = compare_listing({"area_m2": area}, page("101 - 259 م²", "131 - 168 م²"))
     assert r["area"] == want
+
+
+def test_area_spec_row_is_kept_over_description_prose():
+    # reinvest 17384293: table «مساحة العقار» / «77» (= 625,000 ÷ «سعر المتر» 8116.883); prose «147 متر مربع مع الاسطح».
+    from scrapers.common.source_reread import page_evidence
+    body = ('<html><body><div><span>مساحة العقار</span><span>77</span></div>'
+            '<div><span>سعر المتر</span><span>8116.883</span></div>'
+            '<p>- اجمالي المساحة: 147 متر مربع مع الاسطح</p></body></html>')
+    pe = page_evidence(body)
+    assert "مساحة العقار 77" in pe["evidence_lines"]
+    assert compare_listing({"area_m2": 77}, pe)["area"] == MATCH
