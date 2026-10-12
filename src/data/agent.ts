@@ -559,7 +559,9 @@ function _n(x: string): number { return parseInt(x.replace(/[,،\s]/g, ''), 10) 
 export function parseAreaConstraint(text: string): { areaMin?: number; areaMax?: number } {
   if (!text) return {};
   const s = text.replace(/[٠-٩]/g, (d) => String(_AR_DIGITS.indexOf(d)));
-  const U = '(?:م²|م2|م\\.?|متر\\s?مربع|متر|mts?|m²|m2|sq\\.?\\s?m|sqm|square\\s?met(?:er|re)s?|met(?:er|re)s?)';
+  // «م» alone is the unit «m», but it is also the FIRST LETTER of «مليون» / «ملايين» / «مئة»: without the lookahead «تحت ٣ مليون» read as
+  // «under 3 m» (max area 3 m², zero results) — found live 2026-10-11 on «فيلا للبيع في جدة تحت ٣ مليون».
+  const U = '(?:م²|م2|م(?![ء-ي])\\.?|متر\\s?مربع|متر|mts?|m²|m2|sq\\.?\\s?m|sqm|square\\s?met(?:er|re)s?|met(?:er|re)s?)';
   const N = '(\\d[\\d,،\\s]*\\d|\\d)';
   // RANGE first: «من X إلى Y (متر)» | «بين X و Y (متر)» | «X - Y متر»
   let m = s.match(new RegExp(`(?:من|from)\\s*${N}\\s*(?:إلى|الى|to|-|–|—|حتى)\\s*${N}\\s*${U}`, 'i'))
