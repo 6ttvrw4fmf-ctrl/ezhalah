@@ -55,6 +55,10 @@ _OTHER = re.compile(
     # A broker's services post and a transport / licensing office (shadow 2026-10-12: 11190372375 «لديك
     # الرغبة في شراء ارض او … بيع ارض … نوفر لك السعر», 11190376087 «نقل ثقيل وخفيف … نستخلص كافة اجراءات»).
     r"نوفر لك|لديك الرغبه|حاب تستفسر|نقل ثقيل|نقل خفيف|نستخلص|"
+    # A broker's «we buy and sell in these plans» and a stock list across neighbourhoods name no unit
+    # (shadow 2026-10-12 window 2: 11190324509 «للبيع والشراء في مخططات طيبه الفرعيه», 11190324807
+    # «يوجد لدينا شقق مفروشة … بعدة احياء»).
+    r"للبيع والشراء|البيع والشراء|يوجد لدينا|بعده احياء|بعده مواقع|"
     # An agency's catalogue ad («يتوفر لدينا شقق وأراضي ومزارع») names no unit: not a listing
     # (shadow 2026-10-11, 11190296071).
     r"يتوفر لدينا|تتوفر لدينا|متوفر لدينا|متوفره لدينا"

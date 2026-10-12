@@ -143,3 +143,15 @@ def test_shadow_2026_10_12_misses_are_not_offers(t, b):
 ])
 def test_shadow_2026_10_12_real_offers_survive(t, b):
     assert classify(t, b)[0] == "offer"
+
+
+# Shadow 2026-10-12 window 2 (run 38209047358, files 10-11-08 → 13 KSA): 110 offers hand-checked, 2 were
+# broker posts with no unit.
+@pytest.mark.parametrize("t,b", [
+    ("مكتب ابو طريخم البقمي للعقار في مخطط طيبه الفرعيه شمال جده",
+     "للبيع والشراء في مخططات طيبه الفرعيه احي الوداد مخطط 598-597 احي الندى"),
+    ("شقق مفروشة ايجار شهري بعدة مواقع",
+     "بسم الله ماشاءالله يوجد لدينا شقق مفروشة جاهزة للإيجار الشهري في جدة بعدة احياء مختلفة"),
+])
+def test_shadow_2026_10_12_window2_brokers_are_not_offers(t, b):
+    assert classify(t, b)[0] != "offer"
