@@ -63,7 +63,7 @@ import { buildTurnDecision } from "./turnWiring.ts";
 // The three location-ambiguity cases restored from the deleted client-side locationClarification()
 // (round 2 fix, "lost location-ambiguity cases") — see its own header.
 import { plainRegionQuestion, emptyLocationQuestion } from "./locationAmbiguity.ts";
-import { cityQuestionAr, cityQuestionEn, noIntentReplyText, searchLineText, listCities, anyCityText, ANY_CITY_RE, socialKind, socialReplyText, unsearchableText, searchingNowText, twinRegionQuestion, twinDistrictQuestion } from "./questionExamples.ts";
+import { cityQuestionAr, cityQuestionEn, noIntentReplyText, searchLineText, districtNotInCityQuestion, listCities, anyCityText, ANY_CITY_RE, socialKind, socialReplyText, unsearchableText, searchingNowText, twinRegionQuestion, twinDistrictQuestion } from "./questionExamples.ts";
 import { botMessage } from "./botMessage.ts";
 import { situationKind, situationReplyText } from "./situations.ts";
 
@@ -1376,7 +1376,29 @@ Deno.serve(async (req: Request) => {
       // markers of a clarification WE generated on the previous turn → this turn answers it. Extended
       // (round 2) with the three restored questions' own distinctive fragments — see the deleted
       // src/app/agent.tsx locationClarification() this ports, git-shown at dd303cb~1.
-      const alreadyAsked = /أكثر من منطقة|أكثر من مدينة|اسم مدينة واسم منطقة|ولا منطقة|كاملة، أو مدينة معيّنة|أي مدينة تبحث عن عقار|أي مدينة أو منطقة/.test(String(lastModel));
+      const alreadyAsked = /أكثر من منطقة|أكثر من مدينة|اسم مدينة واسم منطقة|ولا منطقة|كاملة، أو مدينة معيّنة|أي مدينة تبحث عن عقار|أي مدينة أو منطقة/.test(String(lastModel))
+        || /📍\s*$/.test(String(lastModel).trim());   // every place question the code writes ends with 📍, however it is worded (owner 2026-10-11: they now rotate)
+      // «مو مهم / أي مدينة» answers the question we just asked and carries no place of its own: classify the place we asked about
+      // (the previous turn's), so the «any city» branch below can start with the biggest city (owner 2026-10-11).
+      if (!location && alreadyAsked && ANY_CITY_RE.test(text) && typeof prevQuery?.location === "string" && prevQuery.location.trim()) {
+        location = prevQuery.location.trim();
+      }
+      // «حي النرجس، جدة»: a district + a city. The classifier only knows a bare district, so check the pair ourselves — a district that
+      // does not exist in the city the user named is asked about again (with the cities that DO have it), never searched.
+      const dc = /^(?:حي\s+)?([^،,]{2,30})\s*[،,]\s*([^،,]{2,30})$/.exec(location.trim());
+      if (dc) {
+        const dcls = await locClassify(dc[1].trim());
+        if (dcls !== LOC_CLASSIFY_FAILED && String(dcls?.kind ?? "") === "twin_district") {
+          const dcities = (Array.isArray(dcls?.cities) ? dcls!.cities : []) as Array<Record<string, unknown>>;
+          const stated = arNorm(dc[2]);
+          const hit = dcities.find((c) => { const n = arNorm(String(c.city_ar)); return n === stated || n.includes(stated) || stated.includes(n); });
+          if (hit) { location = String(hit.city_ar); districtPin = `حي ${String(dcls?.name ?? dc[1]).trim()}`; }
+          else if (dcities.length > 0) {
+            const top = dcities.slice(0, 8).map((c) => String(c.city_ar));
+            ambiguityReply = districtNotInCityQuestion(String(dcls?.name ?? dc[1]).trim(), dc[2].trim(), listCities(top, locale === "en", dcities.length > top.length), text, lastBotReply, locale === "en");
+          }
+        }
+      }
       if (location) {
         const cls = await locClassify(location);
         if (cls === LOC_CLASSIFY_FAILED) {

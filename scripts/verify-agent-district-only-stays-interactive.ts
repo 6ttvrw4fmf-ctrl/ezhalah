@@ -58,7 +58,25 @@ check('an English message gets an ENGLISH place question: no Arabic words around
 check('the city list is localized: «A، B، وC» / «A, B and C», and «or another city» when there are more', q.listCities(['الرياض', 'جدة', 'الدمام'], false) === 'الرياض، جدة، والدمام' && q.listCities(['الرياض', 'جدة', 'الدمام'], true) === 'Riyadh, Jeddah and Dammam' && /another city/.test(q.listCities(['الرياض', 'جدة'], true, true)));
 const enWired = (src: string) => /twinDistrictQuestion\(nm, listCities\(top, locale === "en", cities\.length > top\.length\), text, lastBotReply, locale === "en"\)/.test(src) && /plainRegionQuestion\(nm, text, lastBotReply, locale === "en"\)/.test(src) && /emptyLocationQuestion\(text, lastBotReply, locale === "en"\)/.test(src);
 check('the edge asks in the language of the reply', enWired(edge));
-mustCatch('the district question forgetting English', !enWired(edge.replace('cities.length > top.length), text, lastBotReply, locale === "en")', 'cities.length > top.length), text, lastBotReply)')));
+mustCatch('the district question forgetting English', !enWired(edge.replace('twinDistrictQuestion(nm, listCities(top, locale === "en", cities.length > top.length), text, lastBotReply, locale === "en")', 'twinDistrictQuestion(nm, listCities(top, locale === "en", cities.length > top.length), text, lastBotReply)')));
+
+// every place question ends with 📍, so «we already asked» no longer depends on its wording (the questions rotate now)
+const asked = windowBetween(edge, 'const alreadyAsked = /', 'if (!location && alreadyAsked', 'index.ts');
+const askedByPin = (src: string) => /\|\| \/📍\\s\*\$\/\.test\(String\(lastModel\)\.trim\(\)\)/.test(src);
+check('«did we just ask a place question?» is recognised by its closing 📍, whatever the wording', askedByPin(asked));
+mustCatch('the check going back to matching one fixed wording', !askedByPin(asked.replace('|| /📍\\s*$/.test(String(lastModel).trim())', '')));
+check('every place question the code writes ends with 📍',
+  [q.cityQuestionAr('a'), q.cityQuestionEn('a'), q.twinDistrictQuestion('ن', 'ل', 'a'), q.twinRegionQuestion('ن', 'ل', 'a'), q.regionQuestionText('ن', 'a'), q.districtNotInCityQuestion('النرجس', 'جدة', 'الرياض', 'a'), q.geoQuestionAr('a'), q.nearQuestionAr('قريب من X', 'a')].every((r) => r.endsWith('📍')));
+// «any city» when the answer carries no place of its own
+const anyPrev = (src: string) => /!location && alreadyAsked && ANY_CITY_RE\.test\(text\) && typeof prevQuery\?\.location === "string"/.test(src) && /location = prevQuery\.location\.trim\(\);/.test(src);
+check('«مو مهم» on its own re-uses the place we asked about, so the biggest city is searched (not «give me the city»)', anyPrev(edge));
+mustCatch('«مو مهم» losing the place we asked about', !anyPrev(edge.replace('location = prevQuery.location.trim();', '')));
+// a district paired with a city that does not have it
+const NOT = [q.districtNotInCityQuestion('النرجس', 'جدة', 'الرياض، تاروت، القطيف', 'x'), q.districtNotInCityQuestion('Narjis', 'جدة', 'Riyadh, Tarut', 'x', '', true)];
+check('«حي النرجس، جدة» (Jeddah has no such district) is answered with where it IS, a question, its 📍, no dash', NOT.every((r) => /\?|؟/.test(r) && r.endsWith('📍') && !/[-‐-―−]/.test(r) && !/\{\w+\}/.test(r)) && /جدة/.test(NOT[0]) && /الرياض/.test(NOT[0]) && /Jeddah/.test(NOT[1]), NOT.join(' | '));
+const dcWired = (src: string) => /const dc = \/\^\(\?:حي\\s\+\)\?/.test(src) && /else if \(dcities\.length > 0\) \{/.test(src) && /ambiguityReply = districtNotInCityQuestion\(/.test(src);
+check('a «district، city» pair is checked against the cities that really have the district', dcWired(edge));
+mustCatch('the pair check being removed (the search for a district that does not exist there comes back)', !dcWired(edge.replace('else if (dcities.length > 0) {', 'else if (false) {')));
 
 if (failed) { console.error(`\n❌ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✓ a district-only message stays interactive');

@@ -246,6 +246,15 @@ export const listCities = (names: readonly string[], en: boolean, more = false):
   const body = cities.length > 1 ? (en ? `${cities.slice(0, -1).join(', ')} and ${cities[cities.length - 1]}` : `${cities.slice(0, -1).join('، ')}، و${cities[cities.length - 1]}`) : (cities[0] ?? '');
   return more ? (en ? `${body}, or another city` : `${body}، أو مدينة أخرى`) : body;
 };
+// A district the user paired with a city that does not have it («حي النرجس، جدة»): say where it IS, and ask again.
+export const DISTRICT_NOT_IN_CITY_AR: readonly string[] = [
+  'حي {n} ما لقيناه في {c}، موجود في {l}. أي مدينة منها تقصد؟', 'ما عندنا حي {n} في {c}، لكنه في {l}. أي مدينة تبي؟', '{c} ما فيها حي {n} عندنا. هو في {l}، أي وحدة تقصد؟',
+];
+export const DISTRICT_NOT_IN_CITY_EN: readonly string[] = [
+  'We could not find {n} district in {c}; it is in {l}. Which of those do you mean?', 'There is no {n} district in {c} on our side, but it is in {l}. Which city?', '{c} does not have {n} district here. It is in {l}, which one do you mean?',
+];
+export const districtNotInCityQuestion = (n: string, c: string, l: string, seed: string, avoid = '', en = false): string =>
+  `${variantText(en ? DISTRICT_NOT_IN_CITY_EN : DISTRICT_NOT_IN_CITY_AR, seed, avoid, { n, c: en ? (CITY_EN[c] ?? c) : c, l })} ${PIN}`;
 export const searchLineText = (en: boolean, type: string | null | undefined, city: string | null | undefined, seed: string, avoid = ''): string => {
   const t = typeWord(type, en) || (en ? 'a property' : 'عقار');
   const raw = String(city ?? '').trim();
