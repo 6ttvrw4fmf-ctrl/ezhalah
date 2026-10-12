@@ -1,4 +1,4 @@
-import { nearQuestionAr, geoQuestionAr, PIN } from "./questionExamples.ts";
+import { nearQuestionAr, geoQuestionAr, regionQuestionText } from "./questionExamples.ts";
 // ─────────────────────────────────────────────────────────────────────────────
 // locationAmbiguity — the three LOST cases restored (round-2 fix, "LOST LOCATION-AMBIGUITY CASES").
 //
@@ -33,9 +33,9 @@ const WANTS_WHOLE_RE = /كامل|كاملة|بالكامل|كلها|كل\s*(?:ا
  * @param nm the region's canonical Arabic name (loc_classify's `name`, kind === 'region')
  * @param text this turn's raw user message
  */
-export function plainRegionQuestion(nm: string, text: string): string | null {
+export function plainRegionQuestion(nm: string, text: string, avoid = ""): string | null {
   if (WANTS_WHOLE_RE.test(text)) return null;
-  return `تقصد ${nm} كاملة، أو مدينة معيّنة؟ ${PIN}`;
+  return regionQuestionText(nm, text, avoid);
 }
 
 // A generic "near <phrase>" construct — Arabic + English. Deliberately NOT the deleted client's full

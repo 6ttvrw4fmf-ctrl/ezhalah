@@ -62,14 +62,16 @@ const agent = read('src/app/agent.tsx'), index = read('supabase/functions/agent/
 const wired = (a: string, i: string) =>
   /return nearQuestionAr\(prox\.join\(' و'\), userText\);\s*return cityQuestionAr\(userText\);/.test(a)
   && /return geoQuestionAr\(userText\);/.test(a)
-  && /أي مدينة تقصدها؟ \$\{PIN\}`/.test(a)
+  && /return twinDistrictQuestion\(arLabel\(lm\.label\)/.test(a)
   && /cityQuestionEn\(text, lastBotReply\)/.test(i) && /cityQuestionAr\(text, lastBotReply\)/.test(i)
-  && /مثلاً: \$\{EXAMPLE_SEARCH_AR\} \$\{HOUSE\}/.test(i) && /for example: \$\{EXAMPLE_SEARCH_EN\} \$\{HOUSE\}/.test(i);
+  && /noIntentReplyText\(locale === "en", text, lastBotReply\)/.test(i)
+  && [...Array(12)].every((_, k) => app.noIntentReplyText(false, `s${k}`).includes(app.EXAMPLE_SEARCH_AR) && app.noIntentReplyText(true, `s${k}`).includes(app.EXAMPLE_SEARCH_EN)
+    && app.noIntentReplyText(false, `s${k}`).endsWith(app.HOUSE));
 check('the app and the edge function build their questions from the shared, rotating pools', wired(agent, index));
 mustCatch('the app\'s plain city question going back to one fixed sentence', !wired(agent.replace('return cityQuestionAr(userText);', 'return `في أي مدينة تبحث؟ ${PIN}`;'), index));
 mustCatch('the edge function\'s English city floor going back to one fixed sentence', !wired(agent, index.replace('cityQuestionEn(text, lastBotReply)', '`Which city are you searching in? ${PIN}`')));
 mustCatch('the edge function\'s city floor forgetting the previous bot message', !wired(agent, index.replace('cityQuestionAr(text, lastBotReply)', 'cityQuestionAr(text)')));
-mustCatch('the edge function\'s no-intent reply losing its example search', !wired(agent, index.replace('مثلاً: ${EXAMPLE_SEARCH_AR} ${HOUSE}', '')));
+mustCatch('the edge function\'s no-intent reply going back to one fixed sentence', !wired(agent, index.replace('noIntentReplyText(locale === "en", text, lastBotReply)', '`أنا إزهله`')));
 check('no example sentence recommends anything («best», «أفضل», «ننصح»)', ![app.EXAMPLE_SEARCH_AR, app.EXAMPLE_SEARCH_EN, app.cityExampleAr(), app.cityExampleEn(), ...arQs, ...enQs].some((t) => /(best|أفضل|ننصح|انصح|recommend)/i.test(t)));
 
 if (failed) { console.error(`\n❌ ${failed} check(s) failed`); process.exit(1); }

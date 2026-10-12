@@ -4,7 +4,7 @@
 //
 //   node --experimental-strip-types scripts/verify-agent-location-ambiguity.ts   (auto-discovered by npm test)
 
-import { GEO_ASK_AR } from '../supabase/functions/agent/questionExamples.ts';
+import { GEO_ASK_AR, REGION_ASK_AR } from '../supabase/functions/agent/questionExamples.ts';
 import { plainRegionQuestion, emptyLocationQuestion } from '../supabase/functions/agent/locationAmbiguity.ts';
 
 let failures = 0;
@@ -17,7 +17,7 @@ const check = (label: string, ok: boolean, detail = '') => {
 console.log('\nCASE 1 — a plain (non-twin) region: whole-region-vs-a-named-city\n');
 {
   const r = plainRegionQuestion('عسير', 'أبغى شقة في عسير');
-  check('a plain region with no "whole" wording -> asks whole-region-vs-city', r === 'تقصد عسير كاملة، أو مدينة معيّنة؟ 📍', String(r));
+  check('a plain region with no "whole" wording -> asks whole-region-vs-city (one of the rotating phrasings, with the 📍)', !!r && r.endsWith('📍') && REGION_ASK_AR.some((p) => r === p.replace('{n}', 'عسير') + ' 📍'), String(r));
 
   const whole = plainRegionQuestion('عسير', 'أبغى شقة في عسير كاملة');
   check('the user already said "كاملة" this turn -> no ambiguity (null)', whole === null, String(whole));
