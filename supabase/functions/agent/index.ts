@@ -65,6 +65,7 @@ import { buildTurnDecision } from "./turnWiring.ts";
 import { plainRegionQuestion, emptyLocationQuestion } from "./locationAmbiguity.ts";
 import { cityQuestionAr, cityQuestionEn, noIntentReplyText, socialKind, socialReplyText, unsearchableText, searchingNowText, twinRegionQuestion, twinDistrictQuestion } from "./questionExamples.ts";
 import { botMessage } from "./botMessage.ts";
+import { situationKind, situationReplyText } from "./situations.ts";
 
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
 // AI behavior notes live in the `agent_notes` table so they can be edited WITHOUT redeploying this
@@ -1557,6 +1558,12 @@ Deno.serve(async (req: Request) => {
         return json({ kind: "interview", askCount: decision.askCount });
       }
 
+      // A person who writes that they want to die gets a human answer and NO search, whatever else the message holds
+      // (./situations.ts, owner 2026-10-11: found live — «اتمنى اموت» was answered with the product introduction).
+      if (situationKind(text) === "danger") {
+        return json({ kind: "message", reply: situationReplyText("danger", locale === "en", text, lastBotReply), locationQuestion: false, query: understoodState(), askCount: decision.askCount });
+      }
+
       if (decision.kind === "message") {
         // UNSEARCHABLE — THE ONE QUESTION WAS ALREADY ASKED (owner, 2026-09-11). Checked FIRST: an
         // unresolved ambiguity or a still-missing place produces EXACTLY the same establishedState
@@ -1592,10 +1599,15 @@ Deno.serve(async (req: Request) => {
         // all (no type, no place, no budget, no beds, no AF) means the user has not started a
         // search. The moment ANY of those is present — «ابغى شقة» — this yields to the city
         // question below, which is the right answer for a real search that is only missing a place.
-        const noIntentReply = !unsearchableReply && !ambiguityReply && !hasEnoughToSearch(wired.establishedState)
+        // A message that is not a search but IS something (a complaint, a request for advice, a nationality filter, a wish to sell,
+        // a place outside Saudi Arabia) is answered for what it is, never with the product introduction (./situations.ts).
+        const situation = situationKind(text);
+        const situationReply = !unsearchableReply && !ambiguityReply && situation
+          ? situationReplyText(situation, locale === "en", text, lastBotReply) : null;
+        const noIntentReply = !unsearchableReply && !ambiguityReply && !situationReply && !hasEnoughToSearch(wired.establishedState)
           ? (socialKind(text) ? socialReplyText(socialKind(text)!, locale === "en", text, lastBotReply) : noIntentReplyText(locale === "en", text, lastBotReply))
           : null;
-        const noPlaceReply = !unsearchableReply && !ambiguityReply && !noIntentReply && !hasUsableLocation(wired.establishedState)
+        const noPlaceReply = !unsearchableReply && !ambiguityReply && !situationReply && !noIntentReply && !hasUsableLocation(wired.establishedState)
           ? (locale === "en" ? cityQuestionEn(text, lastBotReply, wired.establishedState.type) : cityQuestionAr(text, lastBotReply, wired.establishedState.type))
           : null;
         // ASKING ABOUT PROPERTY TYPE IS GONE (owner, 2026-09-11 — supersedes the 2026-09-06
@@ -1605,7 +1617,7 @@ Deno.serve(async (req: Request) => {
         // A genuine loc_classify ambiguity has a specific, pre-built question; otherwise fall back
         // to the model's own reply text/phrasing (owner-confirmed: the platform enforces THAT this
         // turn is a clarification, never WHAT it asks about).
-        const reply = unsearchableReply ?? ambiguityReply ?? noIntentReply ?? noPlaceReply ?? oneQuestionOnly(groundReply(lead(out.reply), locale, outAmenities, text, lastBotReply));
+        const reply = unsearchableReply ?? ambiguityReply ?? situationReply ?? noIntentReply ?? noPlaceReply ?? oneQuestionOnly(groundReply(lead(out.reply), locale, outAmenities, text, lastBotReply));
         // THIS QUESTION IS NOT OPTIONAL (owner, 2026-09-05; the client-side override this protected
         // against was DELETED 2026-09-11, not just disarmed — src/app/agent.tsx no longer keeps a
         // parallel ask-ceiling at all, it trusts this server verdict unconditionally, same as it
