@@ -73,7 +73,7 @@ import { listingOpenUrl, openListing } from '@/lib/openListing';
 import {
   EMPTY_AD_PANE, closeAdTab, hideAdPane, inAppPreviewHost, inAppViewerHost, openAdTab, showAdPane, type AdPane, type AdTab,
 } from '@/lib/inAppViewer';
-import { PICKER_SHEET_BREAKPOINT, VIEWER_SPLIT_BREAKPOINT, CARDS_THREE_ACROSS_BREAKPOINT } from '@/lib/responsive';
+import { PICKER_SHEET_BREAKPOINT, VIEWER_SPLIT_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import AdViewer from '@/components/AdViewer';
 import { buildAfSummaryItems, buildAfBeatSteps } from '@/lib/afSummary';
@@ -1083,8 +1083,6 @@ export default function Agent() {
   const adPaneRef = useRef<AdPane<AdTab<Listing>>>(EMPTY_AD_PANE);
   const commitAdPane = (p: AdPane<AdTab<Listing>>) => { adPaneRef.current = p; setAdPane(p); };
   const viewerSplit = useAtLeast(VIEWER_SPLIT_BREAKPOINT);
-  // Laptop photo-first cards: 3 across on a wide screen with nothing open beside them, else 2 across.
-  const cardsThreeAcross = useAtLeast(CARDS_THREE_ACROSS_BREAKPOINT);
   // Phone: the site picker is a bottom sheet; wider: a floating card (owner 2026-10-09).
   const pickerSheet = !useAtLeast(PICKER_SHEET_BREAKPOINT);
   const pushAdTab = (tab: AdTab<Listing>) => {
@@ -1112,9 +1110,6 @@ export default function Agent() {
   // never paints one frame of the tall phone layout first. Phone and tablet pass nothing.
   const adPaneBeside = viewerSplit && adPane.tabs.length > 0 && !adPane.hidden;
   const cardRow = viewerSplit ? (adPaneBeside ? 'tight' as const : 'roomy' as const) : undefined;
-  // The photo-first grid shows only while nothing is open beside the results; with the ad pane open the cards
-  // go back to the compact rows (cardRow 'tight'), like before.
-  const cardCols = viewerSplit && !adPaneBeside ? (cardsThreeAcross ? 3 as const : 2 as const) : undefined;
   // Which result messages have finished typing their reply. The property cards stay hidden until the
   // words above them are fully written out, so listings never appear before Ezhalah has spoken (user
   // request). Keyed by message id.
@@ -4487,7 +4482,7 @@ export default function Agent() {
                           per user request ("remove that, not nice"). The cards just appear, no fade,
                           no scale, no stagger. The responsive grid fills the available result width
                           while keeping the original card order in either language. */}
-                      <ResultCardGrid wide={viewerSplit} cols={cardCols}>
+                      <ResultCardGrid wide={viewerSplit}>
                         {/* Live typed turn: default to 0 visible until startReveal begins the one-by-one
                             drip (prevents a full-grid flash if setDoneTyping flushes a render before
                             setRevealCount(0)). History/replay turns (not typing) show all immediately. */}
