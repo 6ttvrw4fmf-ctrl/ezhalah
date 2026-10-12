@@ -206,11 +206,13 @@ export function ResultCard({
 
   // ─── LAPTOP PHOTO-FIRST CARD (owner 2026-10-11) ───────────────────────────────────────────────
   // `row` is only ever set on the laptop (web, ≥1024px), so the phone/tablet card below is untouched.
+  // 'roomy' (nothing open beside the results) = this photo-first card. 'tight' (the ad pane is open beside) =
+  // the OLD compact row below, as it always was — «the layout changes» when a card is pressed (owner 2026-10-11).
   // A big photo on top, then the price with the gold «اضغط هنا» button right across from it, the
   // location, the type icon + rooms + size, the chips (the Advanced-Filter picks first, with a ✓),
   // the source's own small facts, and the source's logo. Every value is still the listing's own:
   // nothing is derived, and a value the source did not give renders nothing.
-  if (row) {
+  if (row === 'roomy') {
     const photos = listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []);
     const stay = isStayLengthPriced(listing.source);
     // PRESS = OPEN. The ad opens first, synchronously inside the click (a delayed window.open would be
@@ -245,7 +247,7 @@ export function ResultCard({
             </View>
             {listing.source_url ? (
               <View style={card.lpCta}>
-                <GoldShineButton idle={false} onPress={fire} style={card.lpGold} testID="card-open-gold">
+                <GoldShineButton shine="css" onPress={fire} style={card.lpGold} testID="card-open-gold">
                   <Text style={card.lpGoldTx}>{t('Click here 👆')}</Text>
                 </GoldShineButton>
                 <Text style={card.lpCtaNote}>{t('To confirm availability and details')}</Text>
@@ -550,6 +552,8 @@ export function ResultCard({
       </View>
       )}
       </View>
+      {/* keeps the golden-buzzer party playing while this card re-flows into the compact row */}
+      {row ? <BuzzLayer burst={burst} /> : null}
     </View>
   );
 }

@@ -13,7 +13,7 @@
 //   2. pressing opens the ad FIRST, synchronously — never behind a timer or an animation (a delayed
 //      window.open is popup-blocked; and the nav barrier forbids animation-gated hand-offs);
 //   3. the photo AND the gold button both call that one handler;
-//   4. no per-card forever-animation (a grid of hundreds of cards): the button is `idle={false}`;
+//   4. the gold button SHINES on every card, by a pure CSS keyframe (no worklet per card);
 //   5. the buzzer is decoration: reduced motion draws nothing, the layer is removed by a timer, no
 //      `.start(callback)`, no Math.random;
 //   6. the type comes BEFORE the rooms, with its own icon from the Filter's icon map;
@@ -38,7 +38,7 @@ let failed = 0;
 const check = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`); };
 
 const laptopBlock = (src: string): string => {
-  const a = src.indexOf('  if (row) {');
+  const a = src.indexOf("  if (row === 'roomy') {");
   const b = src.indexOf('Keep the linked photo above a content-sized body on every screen.');
   return a >= 0 && b > a ? src.slice(a, b) : '';
 };
@@ -52,19 +52,19 @@ const rules = (card: string, buzz: string, grid: string, agent: string, i18n: st
   const lp = laptopBlock(card);
   const styles = lpStyles(card);
   return {
-    'the laptop layout is ONLY behind `if (row)`; the phone card (photoColMobile) is still below it':
-      lp.length > 500 && card.indexOf('  if (row) {') < card.indexOf('photoColMobile') && /row \? \[card\.photoColRow/.test(card),
+    'the photo-first layout is ONLY behind `if (row === \'roomy\')`; the old compact row and the phone card are still below it':
+      lp.length > 500 && card.indexOf("  if (row === 'roomy') {") < card.indexOf('photoColMobile') && /row \? \[card\.photoColRow/.test(card),
     'press = open FIRST, synchronously: const fire = () => { onOpen(); setBurst(…) } — no timer, no animation':
       /const fire = \(\) => \{ onOpen\(\); setBurst\(\(b\) => b \+ 1\); \};/.test(lp),
     'the photo AND the gold button both press the same handler':
-      /<Pressable onPress=\{fire\} accessibilityRole="link"/.test(lp) && /<GoldShineButton idle=\{false\} onPress=\{fire\}/.test(lp),
-    'no per-card forever-animation: the gold button is idle={false}, and GoldShineButton honours it':
-      /idle=\{false\}/.test(lp) && /\{idle \? <ShineSweep \/> : null\}/.test(read('src/components/CardReveal.tsx')),
+      /<Pressable onPress=\{fire\} accessibilityRole="link"/.test(lp) && /<GoldShineButton shine="css" onPress=\{fire\}/.test(lp),
+    'the gold button SHINES on every card, by a CSS keyframe (no worklet per card)':
+      /shine="css"/.test(lp) && /shine === 'css' \? <CssShine \/>/.test(read('src/components/CardReveal.tsx')) && /animationIterationCount: 'infinite'/.test(read('src/components/CardReveal.tsx')),
     'the buzzer is decoration: reduced motion draws nothing; removed by a timer; no .start(callback); no Math.random':
       /if \(!live \|\| reduced\) return null;/.test(buzz) && /setTimeout\(\(\) => setLive\(false\)/.test(buzz)
       && !/\.start\(\s*\(/.test(buzz) && !/Math\.random/.test(buzz),
-    'the buzzer layer mounts inside the laptop card and the card bumps `burst`':
-      /<BuzzLayer burst=\{burst\} \/>/.test(lp),
+    'the buzzer layer mounts in the photo-first card AND stays while it re-flows into the compact row':
+      /<BuzzLayer burst=\{burst\} \/>/.test(lp) && /\{row \? <BuzzLayer burst=\{burst\} \/> : null\}/.test(card),
     'the TYPE (with its Filter icon) comes before the rooms in the main line':
       lp.indexOf('style={card.lpType}') > 0 && lp.indexOf('style={card.lpType}') < lp.indexOf('listing.beds > 0 ? <Stat') && /typeImg\(listing\.cleanType/.test(lp),
     'the Advanced-Filter picks are the lit chips (✓), driven by pickedFeatures':
@@ -81,8 +81,8 @@ const rules = (card: string, buzz: string, grid: string, agent: string, i18n: st
       styles.length > 200 && !/#[0-9a-fA-F]{3,8}\b/.test(styles) && !/#[0-9a-fA-F]{3,8}\b/.test(buzz),
     'ResultCardGrid: a web-only CSS grid; 3 across may run past 940 but never past the screen':
       /Platform\.OS === 'web' && !!cols/.test(grid) && /repeat\(3, minmax\(0, 1fr\)\)/.test(grid) && /repeat\(2, minmax\(0, 1fr\)\)/.test(grid) && /calc\(100vw - 340px\)/.test(grid),
-    'agent.tsx: 3 across only when nothing is open beside the results and the screen is wide':
-      /const cardCols = viewerSplit \? \(\(adPaneBeside \|\| !cardsThreeAcross\) \? 2 as const : 3 as const\) : undefined;/.test(agent)
+    'agent.tsx: the photo-first grid only while nothing is open beside the results (the ad pane open = the old compact rows)':
+      /const cardCols = viewerSplit && !adPaneBeside \? \(cardsThreeAcross \? 3 as const : 2 as const\) : undefined;/.test(agent)
       && /<ResultCardGrid wide=\{viewerSplit\} cols=\{cardCols\}>/.test(agent) && /CARDS_THREE_ACROSS_BREAKPOINT = 1360/.test(resp),
     'the new copy exists in Arabic':
       /'To confirm availability and details':\s*'للتأكد من التوفر والتفاصيل'/.test(i18n) && /'See \{n\} more':\s*'عرض \{n\} أخرى'/.test(i18n),
@@ -103,8 +103,8 @@ mustCatch('opening the ad behind a timer (popup-blocked window.open)', R_OPEN,
   rules(CARD.replace('const fire = () => { onOpen(); setBurst((b) => b + 1); };', 'const fire = () => { setBurst((b) => b + 1); setTimeout(onOpen, 400); };'), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('the photo no longer pressing the shared handler', 'the photo AND the gold button both press the same handler',
   rules(CARD.replace('<Pressable onPress={fire} accessibilityRole="link"', '<Pressable onPress={onOpen} accessibilityRole="link"'), BUZZ, GRID, AGENT, I18N, RESP));
-mustCatch('a looping glint on every card', 'no per-card forever-animation: the gold button is idle={false}, and GoldShineButton honours it',
-  rules(CARD.replace('<GoldShineButton idle={false} onPress={fire}', '<GoldShineButton onPress={fire}'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('a still (non-shining) gold button', 'the gold button SHINES on every card, by a CSS keyframe (no worklet per card)',
+  rules(CARD.replace('<GoldShineButton shine="css" onPress={fire}', '<GoldShineButton shine="none" onPress={fire}'), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('the buzzer ignoring reduced motion', 'the buzzer is decoration: reduced motion draws nothing; removed by a timer; no .start(callback); no Math.random',
   rules(CARD, BUZZ.replace('if (!live || reduced) return null;', 'if (!live) return null;'), GRID, AGENT, I18N, RESP));
 mustCatch('a Math.random confetti', 'the buzzer is decoration: reduced motion draws nothing; removed by a timer; no .start(callback); no Math.random',
@@ -119,12 +119,12 @@ mustCatch('chips wrapping onto a second row', 'PLAIN + SAME SIZE: no additional-
   rules(CARD.replace("lpChips: { flexDirection: 'row', flexWrap: 'nowrap'", "lpChips: { flexDirection: 'row', flexWrap: 'wrap'"), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('a raw hex colour in the buzzer', 'new styles and the buzzer use theme colours only (no raw hex)',
   rules(CARD, BUZZ.replace('colors.goldLight, colors.goldDeep', "'#ffd966', colors.goldDeep"), GRID, AGENT, I18N, RESP));
-mustCatch('a 3-across grid that ignores the open ad pane', 'agent.tsx: 3 across only when nothing is open beside the results and the screen is wide',
-  rules(CARD, BUZZ, GRID, AGENT.replace('(adPaneBeside || !cardsThreeAcross) ? 2 as const : 3 as const', '!cardsThreeAcross ? 2 as const : 3 as const'), I18N, RESP));
+mustCatch('a 3-across grid that ignores the open ad pane', 'agent.tsx: the photo-first grid only while nothing is open beside the results (the ad pane open = the old compact rows)',
+  rules(CARD, BUZZ, GRID, AGENT.replace('viewerSplit && !adPaneBeside ?', 'viewerSplit ?'), I18N, RESP));
 mustCatch('the grid forced onto native', 'ResultCardGrid: a web-only CSS grid; 3 across may run past 940 but never past the screen',
   rules(CARD, BUZZ, GRID.replace("Platform.OS === 'web' && !!cols", '!!cols'), AGENT, I18N, RESP));
-mustCatch('the laptop layout leaking onto the phone card', 'the laptop layout is ONLY behind `if (row)`; the phone card (photoColMobile) is still below it',
-  rules(CARD.replace('  if (row) {', '  if (true) {'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('the laptop layout leaking onto the phone card', 'the photo-first layout is ONLY behind `if (row === \'roomy\')`; the old compact row and the phone card are still below it',
+  rules(CARD.replace("  if (row === 'roomy') {", '  if (true) {'), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('the new copy missing in Arabic', 'the new copy exists in Arabic',
   rules(CARD, BUZZ, GRID, AGENT, I18N.replace("'To confirm availability and details': 'للتأكد من التوفر والتفاصيل',", ''), RESP));
 
