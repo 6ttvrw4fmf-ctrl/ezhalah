@@ -69,6 +69,8 @@ export const cityExampleEn = (seed = ''): string => `For example ${(seed ? EXAMP
 export const cityQuestionAr = (seed: string, avoid = '', type?: string | null): string => `${withOpener(false, seed, avoid, type)}${pickVariant(CITY_ASK_AR, seed, avoid)} ${cityExampleAr(seed)} ${PIN}`;
 export const cityQuestionEn = (seed: string, avoid = '', type?: string | null): string => `${withOpener(true, seed, avoid, type)}${pickVariant(CITY_ASK_EN, seed, avoid)} ${cityExampleEn(seed)} ${PIN}`;
 export const nearQuestionAr = (phrase: string, seed: string, avoid = ''): string => `${pickVariant(NEAR_ASK_AR, seed, avoid).replace('{p}', phrase)} ${cityExampleAr(seed)} ${PIN}`;
+export const nearQuestionEn = (phrase: string, seed: string, avoid = ''): string => `${pickVariant(NEAR_ASK_EN, seed, avoid).replace('{p}', phrase)} ${cityExampleEn(seed)} ${PIN}`;
+export const geoQuestionEn = (seed: string, avoid = '', type?: string | null): string => `${withOpener(true, seed, avoid, type)}${pickVariant(GEO_ASK_EN, seed, avoid)} ${cityExampleEn(seed)} ${PIN}`;
 export const geoQuestionAr = (seed: string, avoid = '', type?: string | null): string => `${withOpener(false, seed, avoid, type)}${pickVariant(GEO_ASK_AR, seed, avoid)} ${cityExampleAr(seed)} ${PIN}`;
 export const wholeCityQuestionText = (cityAr: string, seed = cityAr, avoid = ''): string => `${pickVariant(WHOLE_CITY_ASK_AR, seed, avoid).replace('{c}', cityAr)} ${PIN}`;
 
@@ -99,13 +101,12 @@ export const NO_INTENT_EN: readonly string[] = [
   'I am Ezhalah, I bring you listings from all the platforms. What are you after? For example: {ex}',
 ];
 export const UNSEARCHABLE_AR: readonly string[] = [
-  'عذراً، ما قدرت أحدد مدينة أو حي لبحثك. جرب الفلتر للبحث بشكل أوسع 🤍', 'ما قدرت أعرف المدينة أو الحي اللي تقصده. تقدر تجرب الفلتر وتحدد بنفسك 🤍',
-  'للأسف ما قدرت أحدد المكان في بحثك. جرب الفلتر وحدد منه 🤍',
+  'للحين ما عرفت وين تبي. اكتب المدينة جنب الحي، مثلاً: حي النرجس الرياض 📍', 'عشان أبحث لك أحتاج المدينة. اكتبها مع الحي، مثلاً: العليا الرياض، أو افتح الفلتر وحدد منه 📍',
+  'خلنا نحدد المكان سوا: اكتب اسم المدينة والحي، مثلاً: الشاطئ جدة 📍',
 ];
 export const UNSEARCHABLE_EN: readonly string[] = [
-  "Sorry, I couldn't pin down a city or district for this search. Try the Filter to search more broadly 🤍",
-  "I couldn't work out which city or district you mean. You can try the Filter and pick it yourself 🤍",
-  "Unfortunately I couldn't pin down the place for your search. Try the Filter and choose it there 🤍",
+  'I still need to know where. Type the city next to the district, for example: Al Narjis Riyadh 📍', 'To search I need the city. Type it with the district, for example: Olaya Riyadh, or open the Filter and pick it there 📍',
+  "Let's pin the place down together: type the city and the district, for example: Ash Shati Jeddah 📍",
 ];
 export const REGION_OR_CITY_ASK_AR: readonly string[] = [
   '«{n}» اسم مدينة واسم منطقة في نفس الوقت. تقصد مدينة {n} ولا منطقة {n} كاملة؟', '«{n}» عندنا مدينة ومنطقة بنفس الاسم. أي وحدة تبي، المدينة ولا المنطقة كاملة؟',
@@ -117,10 +118,10 @@ export const SEARCHING_NOW_EN: readonly string[] = ['Got it, searching now 🏡'
 const fillVars = (t: string, v: Record<string, string>): string => t.replace(/\{(\w+)\}/g, (m, k) => v[k] ?? m);
 /** One phrasing of `pool`, chosen by `seed`, never the one the previous bot message used, with its {placeholders} filled. */
 export const variantText = (pool: readonly string[], seed: string, avoid = '', vars: Record<string, string> = {}): string => fillVars(pickVariant(pool, seed, avoid), vars);
-export const twinRegionQuestion = (n: string, l: string, seed: string, avoid = ''): string => `${variantText(TWIN_REGION_ASK_AR, seed, avoid, { n, l })} ${PIN}`;
-export const twinDistrictQuestion = (n: string, l: string, seed: string, avoid = ''): string => `${variantText(TWIN_DISTRICT_ASK_AR, seed, avoid, { n, l })} ${PIN}`;
-export const regionQuestionText = (n: string, seed: string, avoid = ''): string => `${variantText(REGION_ASK_AR, seed, avoid, { n })} ${PIN}`;
-export const regionOrCityQuestion = (n: string, seed: string, avoid = ''): string => `${variantText(REGION_OR_CITY_ASK_AR, seed, avoid, { n })} ${PIN}`;
+export const twinRegionQuestion = (n: string, l: string, seed: string, avoid = '', en = false): string => `${variantText(en ? TWIN_REGION_ASK_EN : TWIN_REGION_ASK_AR, seed, avoid, { n, l })} ${PIN}`;
+export const twinDistrictQuestion = (n: string, l: string, seed: string, avoid = '', en = false): string => `${variantText(en ? TWIN_DISTRICT_ASK_EN : TWIN_DISTRICT_ASK_AR, seed, avoid, { n, l })} ${PIN}`;
+export const regionQuestionText = (n: string, seed: string, avoid = '', en = false): string => `${variantText(en ? REGION_ASK_EN : REGION_ASK_AR, seed, avoid, { n })} ${PIN}`;
+export const regionOrCityQuestion = (n: string, seed: string, avoid = '', en = false): string => `${variantText(en ? REGION_OR_CITY_ASK_EN : REGION_OR_CITY_ASK_AR, seed, avoid, { n })} ${PIN}`;
 /** «{n} كاملة، أو مدينة معيّنة؟» with an optional «مثل جدة أو أبها» hint before the question mark. */
 export const regionQuestionWithHint = (n: string, hint: string, seed: string, avoid = ''): string =>
   `${variantText(REGION_ASK_AR, seed, avoid, { n }).replace(/؟$/, `${hint}؟`)} ${PIN}`;
@@ -212,6 +213,66 @@ export const socialReplyText = (kind: 'thanks' | 'bye' | 'hello', en: boolean, s
   const t = variantText(pool, seed, avoid, { ex: en ? EXAMPLE_SEARCH_EN : EXAMPLE_SEARCH_AR });
   return kind === 'hello' ? `${t} ${HOUSE}` : t;
 };
+// The line the code writes when the model's search reply broke a rule (see replyBreaksSearchRules): built from the parsed search.
+export const SEARCH_LINE_AR: readonly string[] = ['أدور لك {t} في {c}', 'أبحث لك عن {t} في {c}', 'جاري البحث عن {t} في {c}', 'تمام، أدوّر لك {t} في {c}', 'حاضر، أدور لك {t} في {c}'];
+export const SEARCH_LINE_EN: readonly string[] = ['Searching {t} in {c} for you', 'Looking for {t} in {c}', 'On it, searching {t} in {c}', 'Let me look for {t} in {c}'];
+const CITY_EN: Readonly<Record<string, string>> = {
+  'الرياض': 'Riyadh', 'جدة': 'Jeddah', 'الدمام': 'Dammam', 'الخبر': 'Khobar', 'مكة': 'Makkah', 'مكة المكرمة': 'Makkah', 'المدينة': 'Madinah', 'المدينة المنورة': 'Madinah',
+  'الطائف': 'Taif', 'أبها': 'Abha', 'ابها': 'Abha', 'بريدة': 'Buraidah', 'تبوك': 'Tabuk', 'الهفوف': 'Hofuf', 'الخرج': 'Al Kharj', 'الظهران': 'Dhahran', 'حائل': 'Hail',
+  'نجران': 'Najran', 'جازان': 'Jazan', 'ينبع': 'Yanbu', 'الجبيل': 'Jubail', 'القطيف': 'Qatif', 'خميس مشيط': 'Khamis Mushait', 'عنيزة': 'Unaizah',
+};
+// English mirrors of the place questions (an English message must never get an Arabic question — found by the live battery).
+export const TWIN_REGION_ASK_EN: readonly string[] = [
+  '"{n}" exists in more than one region: {l}. Which one do you mean?', 'We have "{n}" in several regions: {l}. Which region?', 'Which "{n}" do you mean? It is in {l}.', 'There is more than one "{n}": {l}. Which one?',
+];
+export const TWIN_DISTRICT_ASK_EN: readonly string[] = [
+  'By the way, {n} district is in more than one city: {l}. Which one do you mean?', '{n} district is found in several cities: {l}. Which city do you want?',
+  'We have {n} district in more than one city: {l}. Which city?', '{n} district is in {l}. Which city do you have in mind?',
+];
+export const REGION_ASK_EN: readonly string[] = [
+  'Do you mean all of {n}, or a specific city?', 'All of {n}, or one city in it?', 'Should I search the whole of {n}, or a particular city?', 'The whole {n} region, or a certain city?',
+];
+export const REGION_OR_CITY_ASK_EN: readonly string[] = [
+  '"{n}" is both a city and a region. Do you mean the city of {n} or the whole {n} region?', 'We have {n} as a city and as a region. Which one do you want?',
+  'Do you want only the city of {n}, or the whole {n} region?', 'There is a city {n} and a region {n}. Which do you mean?',
+];
+export const NEAR_ASK_EN: readonly string[] = [
+  'Which city should I look in for a place {p}?', 'Where do you want a place {p}? Which city?', 'In which city should I search for something {p}?', 'Which city is the place {p} in?',
+];
+export const GEO_ASK_EN: readonly string[] = ['Which city or region do you mean?', 'Which city or region should I search?', 'Where exactly, a city or a region?', 'In which city or region?'];
+/** A localized list of places: «A، B، وC» / «A, B and C», with «، أو مدينة أخرى» / «, or another city» when more exist. */
+export const listCities = (names: readonly string[], en: boolean, more = false): string => {
+  const cities = en ? names.map((c) => CITY_EN[c] ?? c) : [...names];
+  const body = cities.length > 1 ? (en ? `${cities.slice(0, -1).join(', ')} and ${cities[cities.length - 1]}` : `${cities.slice(0, -1).join('، ')}، و${cities[cities.length - 1]}`) : (cities[0] ?? '');
+  return more ? (en ? `${body}, or another city` : `${body}، أو مدينة أخرى`) : body;
+};
+// A district the user paired with a city that does not have it («حي النرجس، جدة»): say where it IS, and ask again.
+export const DISTRICT_NOT_IN_CITY_AR: readonly string[] = [
+  'حي {n} ما لقيناه في {c}، موجود في {l}. أي مدينة منها تقصد؟', 'ما عندنا حي {n} في {c}، لكنه في {l}. أي مدينة تبي؟', '{c} ما فيها حي {n} عندنا. هو في {l}، أي وحدة تقصد؟',
+];
+export const DISTRICT_NOT_IN_CITY_EN: readonly string[] = [
+  'We could not find {n} district in {c}; it is in {l}. Which of those do you mean?', 'There is no {n} district in {c} on our side, but it is in {l}. Which city?', '{c} does not have {n} district here. It is in {l}, which one do you mean?',
+];
+export const districtNotInCityQuestion = (n: string, c: string, l: string, seed: string, avoid = '', en = false): string =>
+  `${variantText(en ? DISTRICT_NOT_IN_CITY_EN : DISTRICT_NOT_IN_CITY_AR, seed, avoid, { n, c: en ? (CITY_EN[c] ?? c) : c, l })} ${PIN}`;
+export const searchLineText = (en: boolean, type: string | null | undefined, city: string | null | undefined, seed: string, avoid = ''): string => {
+  const t = typeWord(type, en) || (en ? 'a property' : 'عقار');
+  const raw = String(city ?? '').trim();
+  const c = en ? (CITY_EN[raw] ?? (/[؀-ۿ]/.test(raw) ? '' : raw)) : raw;
+  if (!c) return searchingNowText(en, seed, avoid);
+  return `${variantText(en ? SEARCH_LINE_EN : SEARCH_LINE_AR, seed, avoid, { t, c })} ${HOUSE}`;
+};
+// «Which city?» is asked again (a different wording) when the answer did not settle it; once the budget is spent the reply is still an
+// invitation, never an apology (owner 2026-10-11: «why didn't he keep it interactive going?»).
+export const ANY_CITY_RE = /(?:اي|أي|كل)\s*مدين[ةه]|مو\s*مهم|مب\s*مهم|ما\s*يفرق|اي\s*وحد[ةه]|كلها|\bany(?:\s*(?:city|one))?\b|doesn'?t\s*matter|all\s*of\s*them|whichever/i;
+export const ANY_CITY_AR: readonly string[] = [
+  'تمام، أبدأ بـ{c} لأن فيها أكثر إعلانات حي {d}، وتقدر تطلب مدينة ثانية', 'ماشي، أبحث لك في {c} أول شي لأن فيها أكثر إعلانات حي {d}', 'حاضر، أبدأ بحي {d} في {c} وهي الأكثر إعلانات، وإذا تبي غيرها قلّي',
+];
+export const ANY_CITY_EN: readonly string[] = [
+  'Okay, starting with {c} since it has the most listings in {d}, and you can ask for another city', 'Sure, I will search {c} first because it has the most listings in {d}', 'Alright, starting with {d} in {c}, the one with the most listings, tell me if you want another',
+];
+export const anyCityText = (en: boolean, seed: string, avoid: string, city: string, district: string): string =>
+  `${variantText(en ? ANY_CITY_EN : ANY_CITY_AR, seed, avoid, { c: en ? (CITY_EN[city] ?? city) : city, d: district })} ${HOUSE}`;
 export const noIntentReplyText = (en: boolean, seed: string, avoid = ''): string =>
   `${variantText(en ? NO_INTENT_EN : NO_INTENT_AR, seed, avoid, { ex: en ? EXAMPLE_SEARCH_EN : EXAMPLE_SEARCH_AR })} ${HOUSE}`;
 export const unsearchableText = (en: boolean, seed: string, avoid = ''): string => pickVariant(en ? UNSEARCHABLE_EN : UNSEARCHABLE_AR, seed, avoid);
