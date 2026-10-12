@@ -29,6 +29,66 @@ safety rules (deploy lock, `safe-pr-merge.ts`, source truth, migration rules) st
 > that each open error has an owner). A Sentry error a customer hit is never «noise»: it is either fixed, or written in
 > your report with the reason and the plan. Your report gets one line: «🛰️ Sentry: N open in my area · fixed N · resolved N».
 
+## 🎯 NEXT RUN ORDERS — written by ⚡ for itself (owner, 2026-10-12: «give yourself instructions so you do a good job on the next run»)
+These win over THE PLAN's timeline below; THE PLAN's rules still hold. Owner order of 10-11 (followup row 832) and 🔧's coach
+note (row 863) are folded in. Replace this block with the next night's orders at the end of every run.
+
+**The clock is the DATABASE's, not the container's.** 10-11 the container ran ~5 min ahead: I wrote «~110 of 120» and 🔧
+measured 90. Start: `select now()` → that is minute 0; never stop before minute 110 by the same clock unless 10/10.
+
+**Minute 0–5, before reading anything else (things that take 25 min must start first):**
+1. Dispatch `haraj-shadow.yml` on `main` with `skip_hours=0 files=8` (the newest 8 hourly files; at 05:00 UTC on 10-12 that is
+   10-11 21:00→10-12 04:00, untouched — USED windows: 10-10 01–03, 10-10 ~07–12, 10-10 13:00→10-11 05:00). It prints ≤110
+   «offer» verdicts in ~25 min. On later nights pick the window the same way and write it in the proof row.
+2. `select now()`; read `ops_engineer_alert_queue where engineer='scraping-engineer'` (34 open on 10-11), Sentry, followup rows.
+3. Take the locks you will need (`scraper:haraj`, `scraper:wasalt`).
+
+**Minute 5–30, prove what is already waiting (each one a proof row — this is what moves the fix rate):**
+- muhaysini pins: its 10-11 crawl (started 04:32 UTC) wrote at its end. `count(*) filter (where latitude is not null)` for
+  muhaysini in `search_listings_ar` must be ~11k → open one muhaysini card like a customer → proof row. Fleet pin % in the report.
+- Wasalt: pending must be < 13,030 and the 05:00 UTC `wasalt-enrich.yml` run green (it no longer refuses — PR #6747). If
+  pending > 15,000 again, the drain still works; read why it grew (a burst of NEW ids = 🔧's 10-09 burst item, not yours).
+- shmoualshmal: if it 403'd tonight, its job log must show the proxy fallback answering. If not, that is a bug.
+
+**Minute 30–60, Haraj gate (owner 832: strict by design — a missed ad is fine, a wrong ad is not):**
+- Hand-check EVERY «offer» line of the shadow log. Shown only if: real-estate tag, an OFFER, a known unit type, and a city.
+  Count requests / non-property / catalogue-or-broker-without-a-unit / business-for-sale / key-money (تقبيل) / car.
+- 100+ checked and all five counts 0 → **gate PASSED**: proof row with the confusion table → go to the live build.
+- Any miss → fix the classifier ROOT (`scrapers/haraj/classify.py`, verbatim titles into `test_haraj_classify.py`,
+  re-classify the old samples to show no real offer was lost), push, and the push itself re-runs the shadow; gate it on
+  ANOTHER untouched window. **Never count the sample you tuned on** (10-11 lesson).
+- The city rule is not yet in `classify()`: the live build must drop any post with no city (JSON-LD addressLocality / REGA
+  «المدينة»). `scrapers/haraj/parse.py` already reads deal, price, type, area, city, district and the source pin.
+
+**Minute 60–110, Haraj live build — only if the gate passed. Template = arsh, 2026-09-27 (copy its shape, read bodies LIVE):**
+1. Migrations, applied one at a time when `pg_stat_activity` shows ≤ 8 active authenticator queries (robot_gate waits don't count),
+   each mirrored byte-for-byte in the same PR and checked first with `scripts/check-migration-before-apply.ts`:
+   `…_listing_tables` (2 tables), `…_join_listing_extra_attrs`, `…_platform_registry`, `…_join_listing_rich_attrs`,
+   `…_wiring_into_search`, `…_join_listing_location_index` (see `supabase/migrations/20260927034*_batch6_arsh_*.sql`).
+2. Registry in THREE places, same PR: the migration, `sql/mirrors/liveness_registry.json`, `scrapers/common/liveness_policies.py`
+   (own-page 404/deleted, grace 3).
+3. `scrapers/haraj/run.py` (tag page + hourly sitemap + slug filter → classify → parse → `redact_pii` → upsert; begin_run
+   first), `scrapers/common/db.py` table map, one line in `small-sources-sync.yml`.
+4. `src/data/loaderPlatforms.ts` PLATFORM_META (placeholder logo) + SOURCE_TOKENS, and whatever else `grep -rln arsh src` lists.
+   A `src/` change ships only through `deploy-frontend.yml` (`confirm: DEPLOY`) after merge.
+5. Dispatch the crawl, wait for the :22 sync, open 5 Haraj cards like a customer (`customer-journey.mjs --phone`), 5 proof rows.
+   🔧 checks the first 100 live ads next morning; any wrong ad → hide Haraj, fix, re-check.
+If the build cannot finish by minute 110: stop at a clean, merged, HIDDEN state (no registry row = nothing a customer can see),
+write exactly which of steps 1–5 are done, and do the rest first tomorrow. «PROPAGATION PENDING» is honest; «live» is not.
+
+**If the gate failed and the fix is pushed:** use the 25 min the re-run takes on 🔧's list: the 4 dormant sites (aqaralsaudia,
+sadin, dwelleo, nafithh — a dated fetch result each via their crawl), then the 79 `located_row_unreachable` wasalt lands
+(PRICE = SOURCE: adjudicate against the ad page, never edit a price).
+
+**While anything runs, never sit idle.** On 10-11 three serial 25-min shadows and a 30-min wait for a quiet database ate
+~70 min. Always have the next item open while a crawl, CI or shadow runs. Browser checks: one at a time, after
+`robot_gate` waiters drop (CI's `node` runners filled it on 10-11).
+
+**Proof timing facts (so nothing lands after the slot):** search index sync :22 (commits ~:24–:26); Wasalt rich attrs
+(meters) `sync-rich-attrs-wasalt` 06:46 UTC daily; muhaysini nightly ends ~07:00 UTC → its proofs are always the next night.
+
+**Report:** «N fixed and proven of M found» first; «🚨 Alerts: 34 → N»; Haraj gate result with its confusion table.
+
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «wire them so the next run turns out perfect … at the point where I don't need to check and agree on
 something, it does it automatically, during its time it fixes everything, and that's it.» You decide; you do not ask the
@@ -236,6 +296,15 @@ These cost your first runs a lot of time. Use them instead of working them out a
   dispatch `source-reread.yml` with `ids: table:id,…` and read its job log with `get_job_logs` (the
   artifact's download host is blocked from the cloud; the log prints the same comparison). It shows
   what the page itself says next to what we store.
+
+## Lessons from 2026-10-11
+- **Never gate on the sample you tuned on.** The Haraj classifier passed its own tuning sample twice and failed a fresh window
+  twice (businesses/cars/key-money, then broker catalogues). Tune on one window, gate on an untouched one.
+- **A 1-in-16 sample is not a sample.** Haraj's hourly sitemap is every category: 1,100 fetches → 18 offers. The URL slug is
+  the post's title, so `--slug-filter` picks property-titled posts (94–109 offers per 1,500 fetches).
+- **A breaker that refuses forever is an outage.** Wasalt's 15,000-pending cap refused every run from 10-08, so the backlog
+  only grew. Over a spend cap, process a bounded batch (newest first); never refuse forever.
+- **Use the database clock.** The container clock ran ahead; the report said 110 min, 🔧 measured 90.
 
 ## Lessons from 2026-10-07 (facts that cost time tonight)
 
