@@ -183,11 +183,11 @@ function ShareMeta() {
       <meta property="og:description" content={SHARE_BLURB_AR} />
       <meta property="og:url" content={SHARE_LINK} />
       <meta property="og:image" content={OG_IMAGE} />
-      <meta property="og:image:width" content="1200" />
-      <meta property="og:image:height" content="630" />
+      <meta property="og:image:width" content="512" />
+      <meta property="og:image:height" content="512" />
       <meta property="og:image:alt" content={SHARE_TITLE_AR} />
-      {/* summary_large_image, not summary: the small variant crops the eagle to a square thumbnail. */}
-      <meta name="twitter:card" content="summary_large_image" />
+      {/* The owner selected the square eagle icon; preserve it without a landscape crop. */}
+      <meta name="twitter:card" content="summary" />
       <meta name="twitter:title" content={SHARE_TITLE_AR} />
       <meta name="twitter:description" content={SHARE_BLURB_AR} />
       <meta name="twitter:image" content={OG_IMAGE} />
