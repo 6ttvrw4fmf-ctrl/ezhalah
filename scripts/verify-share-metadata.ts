@@ -41,7 +41,8 @@ const check = (label: string, ok: boolean, detail = '') => {
 const LAYOUT = 'src/app/_layout.tsx';
 const SHARE = 'src/lib/share.ts';
 const OG_FILE = 'public/og-image-v5.png';
-const REQUIRED_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهلها، ابحث بالذكاء الاصطناعي ولقَ اللي يناسبك — الطريقة الأذكى للبحث عن العقار في المملكة 🦅😉';
+const REQUIRED_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، الطريقة الأذكى للبحث على العقار في المملكة 🦅😉';
+const REQUIRED_EN = 'Looking for a property and want to see everything on offer in one place? Ezhalah, the smarter way to find properties in the Kingdom 🦅😉';
 // Either word, anywhere in the line, names the country — «في» is not required: the 2026-09-25
 // wording says «عقارات السعودية», not «في السعودية».
 const NAMES_COUNTRY = /المملكة|السعودية/;
@@ -73,6 +74,8 @@ export function auditShareMeta(layout: string, share: string, exists: (p: string
     bad.push('OG_IMAGE is not an absolute, VERSION-NAMED url — crawlers cache previews by URL, so the file must be renamed when the art changes, never overwritten');
   const blurb = s.match(/export const SHARE_BLURB_AR = '([^']+)'/)?.[1];
   if (blurb !== REQUIRED_AR) bad.push(`the Arabic description is not the owner's wording: ${blurb ?? '(missing)'}`);
+  const english = s.match(/export const SHARE_BLURB_EN = '([^']+)'/)?.[1];
+  if (english !== REQUIRED_EN) bad.push('the English description is not the owner-approved translation');
   if (!NAMES_COUNTRY.test(blurb ?? '')) bad.push('the description no longer names the country — it must say «في السعودية» (or «في المملكة»)');
   // The OS share text and the in-app sheet must read from the same constant, not their own copy.
   if (!/blurb: SHARE_BLURB_AR/.test(s)) bad.push('the Arabic share text no longer reuses SHARE_BLURB_AR');
