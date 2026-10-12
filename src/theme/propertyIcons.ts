@@ -43,7 +43,7 @@ export const TYPE_IMG: Record<string, any> = {
   'Service Facilities':   require('../../assets/icons/service-facilities.png'), // مرافق خدمية — owner-provided icon (sliced from assets/images/المرافق الخدمية.jpg → 256² monochrome alpha, 2026-07-07)
   'Commercial Land':      require('../../assets/icons/commercial-land.png'),
   'Industrial Land':      require('../../assets/icons/industrial-land.png'),
-  'Raw Land':             require('../../assets/icons/commercial-land.png'), // PLACEHOLDER (owner 2026-10-09: «I'm going to add the photo for أرض خام later»)
+  'Raw Land':             require('../../assets/icons/raw-land.png'), // Owner-approved cactus and stones; shared OptionBox size/tint.
   'Other Land':           require('../../assets/icons/commercial-land.png'), // PLACEHOLDER until the owner picks an «أرض أخرى» photo (2026-10-10)
   // sliced from the user's «staff housing bank telecom» sheet → monochrome alpha (2026-07-01)
   'Bank':                 require('../../assets/icons/bank.png'),
