@@ -141,6 +141,24 @@ function ShineSweep() {
   );
 }
 
+// The same glint as ShineSweep, driven entirely by a CSS keyframe: it runs on the compositor, so a grid of
+// hundreds of cards can each carry a shining button without a worklet per card. Web only; reduced motion
+// draws nothing (a still gradient still reads as gold).
+function CssShine() {
+  const reduced = useReducedMotion();
+  if (reduced || Platform.OS !== 'web') return null;
+  return (
+    <View pointerEvents="none" style={[s.shineBand, s.shineCss]}>
+      <LinearGradient
+        colors={['rgba(255,255,255,0)', 'rgba(255,255,255,0.7)', 'rgba(255,255,255,0)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0.4 }}
+        style={StyleSheet.absoluteFill}
+      />
+    </View>
+  );
+}
+
 // The encouraged-action gold CTA's own paint (owner 2026-09-20): a diagonal metallic gradient
 // (light highlight → deep base, literal hex via useThemePalette — CSS var() strings can't feed
 // LinearGradient, same rule HeroBackground.tsx already follows) with ShineSweep's glint on top.
@@ -148,15 +166,16 @@ function ShineSweep() {
 // so the call site's behavior is unchanged — only the paint is now three layers instead of one flat
 // color. `style` still owns layout (padding/radius/minWidth); this component adds `overflow:hidden`
 // so the gradient and the sweep both respect the pill's rounded corners.
-export function GoldShineButton({ children, style, onPress, disabled, testID, idle = true }: {
+export function GoldShineButton({ children, style, onPress, disabled, testID, shine = 'sweep' }: {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   onPress?: (e: GestureResponderEvent) => void;
   disabled?: boolean;
   testID?: string;
-  // false = still gradient, no looping glint. A results grid of hundreds of cards must not each run its
-  // own forever-animation; the laptop card plays its own one-shot buzzer on press instead.
-  idle?: boolean;
+  // 'sweep' (default) = the reanimated glint; 'css' = the same glint as a pure CSS keyframe (web only, no JS
+  // per frame — what a results grid of hundreds of cards uses, owner 2026-10-11: «the gold button must be
+  // shining on all of them»); 'none' = a still gradient.
+  shine?: 'sweep' | 'css' | 'none';
 }) {
   const pal = useThemePalette();
   return (
@@ -169,7 +188,7 @@ export function GoldShineButton({ children, style, onPress, disabled, testID, id
             end={{ x: 1, y: 1 }}
             style={StyleSheet.absoluteFill}
           />
-          {idle ? <ShineSweep /> : null}
+          {shine === 'sweep' ? <ShineSweep /> : shine === 'css' ? <CssShine /> : null}
           {children}
         </>
       )}
@@ -190,6 +209,15 @@ const s = StyleSheet.create({
   // animated translateX travel distance is itself a fixed px figure — the two must agree in the same
   // unit for the parked/off-screen positions to land where the comment above claims they do.
   shineBand: { position: 'absolute', top: -20, bottom: -20, left: -70, width: 34 },
+  // One pass (~1s) across the button, then a long rest before the next — a glint, not a marquee.
+  shineCss: {
+    animationKeyframes: [{
+      '0%': { transform: 'translateX(0px) rotate(20deg)' },
+      '28%': { transform: 'translateX(300px) rotate(20deg)' },
+      '100%': { transform: 'translateX(300px) rotate(20deg)' },
+    }],
+    animationDuration: '3.6s', animationIterationCount: 'infinite', animationTimingFunction: 'ease-in-out',
+  } as object,
   // CardInWeb's keyframes — the same 260ms fade + 10px rise (150ms fade only on reduced motion).
   // Fill BACKWARDS, not both: the `from` state holds through a stagger delay, and once the rise ends
   // nothing stays pinned on the card — hundreds of finished cards no longer each hold an animated
