@@ -155,3 +155,13 @@ def test_shadow_2026_10_12_real_offers_survive(t, b):
 ])
 def test_shadow_2026_10_12_window2_brokers_are_not_offers(t, b):
     assert classify(t, b)[0] != "offer"
+
+
+# Shadow 2026-10-12 gate #3 (run 38211044586): businesses and goods, verbatim titles.
+@pytest.mark.parametrize("t,b", [
+    ("محل للبيع. بوفيه شغاله لها اكثر من 13 سنه. فرصه الي يبغي محل", "عندي بوفيه للبيع شغاله لها اكثر من 13 سنه"),
+    ("محل شاهي للبيع", "محل شاهي ومشروبات للبيع مجهز بجميع اغراض"),
+    ("غرفة شينكو للبيع كبيرة", ""),
+])
+def test_shadow_2026_10_12_gate3_business_and_goods_are_not_offers(t, b):
+    assert classify(t, b)[0] != "offer"

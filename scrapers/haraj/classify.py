@@ -74,6 +74,9 @@ _OTHER = re.compile(
 _OTHER_TITLE = re.compile(
     _B + r"(?:غرفه نوم|غرف نوم|كنب|كنبه|طقم|دولاب|مطبخ مستعمل|"
     r"كماليات|ملابس|خياط|خياطه|بضاعه|معدات|مطعم|كوفي|كافيه|بقاله|صالون|حلاق|مشغل|"
+    # Shadow 2026-10-12 gate #3: a buffet and a tea shop sold as going businesses, and a portable
+    # sheet-metal room sold as goods (11190352246, 11190346681, 11190351832).
+    r"بوفيه|شاهي|مشروبات|شينكو|"
     r"كامري|كورولا|هايلكس|لاندكروزر|يوكن|تاهو|سوناتا|النترا|اكسنت|جمس|ددسن|لكزس|مرسيدس|افالون|اكورد|"
     r"كابرس|شاص|فورد|نيسان|هونداي|تويوتا|"
     # A broker's catalogue or intake post names no unit (fresh shadow 2026-10-11: «يوجد لدينا أراضي وعمائر
