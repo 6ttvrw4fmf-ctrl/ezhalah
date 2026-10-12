@@ -67,7 +67,7 @@ measured 90. Start: `select now()` → that is minute 0; never stop before minut
    `…_wiring_into_search`, `…_join_listing_location_index` (see `supabase/migrations/20260927034*_batch6_arsh_*.sql`).
 2. Registry in THREE places, same PR: the migration, `sql/mirrors/liveness_registry.json`, `scrapers/common/liveness_policies.py`
    (own-page 404/deleted, grace 3).
-3. `scrapers/haraj/run.py` (tag page + hourly sitemap + slug filter → classify → parse → `redact_pii` → upsert; begin_run
+3. A NEW crawler module, run.py inside the scrapers haraj folder (tag page + hourly sitemap + slug filter → classify → parse → `redact_pii` → upsert; begin_run
    first), `scrapers/common/db.py` table map, one line in `small-sources-sync.yml`.
 4. `src/data/loaderPlatforms.ts` PLATFORM_META (placeholder logo) + SOURCE_TOKENS, and whatever else `grep -rln arsh src` lists.
    A `src/` change ships only through `deploy-frontend.yml` (`confirm: DEPLOY`) after merge.
