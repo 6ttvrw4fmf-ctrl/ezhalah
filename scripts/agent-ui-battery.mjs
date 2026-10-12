@@ -50,8 +50,8 @@ async function one(c) {
       body = await page.evaluate(() => document.body.innerText);
       if (/#1\n/.test(body) || /ما لقينا نتائج|لا توجد نتائج|عذراً، ما لقينا/.test(body)) break;
     }
-    const summary = (body.match(/ملخص البحث\n([\s\S]*?)\n\n/) || [])[1] ?? '';
-    const lines = summary.split('\n').map((l) => l.replace(/^•\s*/, '').trim()).filter(Boolean);
+    const head = body.split(/#1\n/)[0];                              // everything the bot says BEFORE the first card (cards carry source text)
+    const lines = head.split('\n').filter((l) => /^•/.test(l.trim())).map((l) => l.replace(/^•\s*/, '').trim());
     const count = (body.match(/(\d[\d,]*)\s*(?:نتيجة|إعلان)/) || [])[1];
     const cards = (body.match(/#\d+\n/g) || []).length;
     const none = /ما لقينا نتائج|لا توجد نتائج|عذراً، ما لقينا/.test(body);
@@ -59,7 +59,7 @@ async function one(c) {
     if (none || cards === 0) flags.push('NO-RESULTS');
     const size = lines.find((l) => /^(?:المساحة|Size)/.test(l));
     if (size && /م²/.test(size) && /(?:إلى|To)\s*[1-9]\s*م²/.test(size)) flags.push('ABSURD-SIZE');
-    if (/[—–]/.test(body.slice(0, 4000))) flags.push('DASH-IN-CHAT');
+    if (/[-‐-―−]/.test(head.replace(/\d{1,2}\/\d{1,2}\/\d{2,4}/g, ''))) flags.push('DASH-IN-CHAT');
     return { c, count, cards, lines, flags };
   } catch (e) { return { c, flags: ['ERROR ' + String(e.message).slice(0, 60)], lines: [] }; } finally { await ctx.close(); }
 }
