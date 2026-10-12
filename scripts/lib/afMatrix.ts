@@ -24,7 +24,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { liftSymbols } from './liftSymbols.ts';
 import { COHORT_QUESTIONS } from '../../src/lib/afCohorts.ts';
-import { CLEAN_MACRO, ALL_CLEAN_TYPES, HIERARCHY, groupsOf, groupMembers } from '../../src/data/propertyTypes.ts';
+import { CLEAN_MACRO, ALL_CLEAN_TYPES, HIERARCHY, UNBOXED_TYPES, groupsOf, groupMembers } from '../../src/data/propertyTypes.ts';
 import type { SearchQuery } from '../../src/data/search.ts';
 
 export type Leg = 'Buy' | 'RentAnnual' | 'RentMonthly';
@@ -59,11 +59,13 @@ export function tableAllows(type: string, mode: Mode, id: string): boolean {
 
 export type Scope = { kind: 'type' | 'group'; label: string; types: string[]; category: 'Residential' | 'Commercial'; query: SearchQuery };
 
-/** Every clean type and every group, each as the SearchQuery the Filter screen would hold. */
+/** Every clean type and every group, each as the SearchQuery the Filter screen would hold. A type offered as no box
+ *  (UNBOXED_TYPES — «أرض», owner 2026-10-11: «not searchable by property type») is no scope: the Filter cannot hold it,
+ *  so no user can open an Advanced Filter round on it. */
 export function allScopes(): Scope[] {
   const base = { location: 'الرياض', type: null, detail: null, priceInput: '', priceBand: null } as Partial<SearchQuery>;
   const out: Scope[] = [];
-  for (const type of ALL_CLEAN_TYPES) {
+  for (const type of ALL_CLEAN_TYPES.filter((t) => !UNBOXED_TYPES.includes(t))) {
     const category = CLEAN_MACRO[type];
     out.push({ kind: 'type', label: type, types: [type], category,
       query: { ...base, deal: 'Buy', category, typeGroups: groupsOf([type]), types: [type] } as SearchQuery });

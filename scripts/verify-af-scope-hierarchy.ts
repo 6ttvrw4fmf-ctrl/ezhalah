@@ -249,9 +249,9 @@ check('the RPC category gate is dropped ONLY for a cross-macro scope (group pick
 check('…and for the bare type pick under تجاري', scopeCrossesMacro(BUY({ category: 'Commercial', types: ['Residential Land'] })));
 check('…but kept for a same-macro scope on either side', !scopeCrossesMacro(BUY({ category: 'Commercial', typeGroups: ['Retail & Workspace'] })) && !scopeCrossesMacro(BUY({ category: 'Residential', typeGroups: ['Residential Plots'] })) && !scopeCrossesMacro(BUY({ category: 'Commercial', types: ['Commercial Land'] })));
 check('…and never fires without a category pill (nothing-selected keeps the implied default)', !scopeCrossesMacro(BUY({ category: null as unknown as SearchQuery['category'], types: ['Residential Land'] })));
-// «أرض خام» (Raw Land, owner 2026-10-09) joined the land group as its fourth box; «أرض أخرى» (Other Land,
-// owner 2026-10-10: land whose source states no usage) as its fifth.
-check('TYPE candidates under the commercial land group list all five land boxes, deduped', JSON.stringify(scopeCandidates(SCOPE_TYPE_ID, BUY({ category: 'Commercial', typeGroups: ['Commercial & Industrial Plots'] }))) === JSON.stringify(['Commercial Land', 'Industrial Land', 'Residential Land', 'Raw Land', 'Other Land']));
+// «أرض خام» (Raw Land, owner 2026-10-09) joined the land group as its fourth box. «أرض أخرى» (Other Land, 10-10) was a
+// fifth until the owner removed it on 2026-10-11 («not searchable by property type, but by other filters») — verify-other-land-is-not-a-box.ts.
+check('TYPE candidates under the commercial land group list the four land boxes, deduped (no «أرض أخرى»)', JSON.stringify(scopeCandidates(SCOPE_TYPE_ID, BUY({ category: 'Commercial', typeGroups: ['Commercial & Industrial Plots'] }))) === JSON.stringify(['Commercial Land', 'Industrial Land', 'Residential Land', 'Raw Land']));
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll scope-hierarchy assertions passed');
 process.exit(failed ? 1 : 0);

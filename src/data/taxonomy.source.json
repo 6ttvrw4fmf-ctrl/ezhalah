@@ -635,10 +635,7 @@
     {
       "clean": "Other Land",
       "macro": "Commercial",
-      "hierarchy": {
-        "macro": "Commercial",
-        "group": "Commercial & Industrial Plots"
-      },
+      "hierarchy": null,
       "serviceFacility": false,
       "query": {
         "rawTypes": [
