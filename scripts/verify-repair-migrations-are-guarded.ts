@@ -79,7 +79,7 @@ const WAIVED: Record<string, string> = {
   // roster) re-runs the same function every sweep, so any row that drifts wrong again is raised again.
   '20261012142822_qa_aqar_proven_wrong_city_resolutions_repaired_from_own_fields.sql':
     'self-guarding repair of exactly the aqar_classify_shadow_drift() PROVEN_WRONG cohort (11 rows), each value ' +
-    'the function''s own reading of the listing''s raw_city + neighborhood; mon_detect_aqar_proven_wrong_resolution ' +
+    'the function\'s own reading of the listing\'s raw_city + neighborhood; mon_detect_aqar_proven_wrong_resolution ' +
     'watches the class every sweep and raised these rows (17 open alerts on 2026-10-12)',
   // Owner session 2026-10-09 (owner: «make the call yourself»), for the 🦅 Falcon's repair below. The class it
   // fixes — a searchable listing served at exactly 0 for its own deal — is already watched fleet-wide.
