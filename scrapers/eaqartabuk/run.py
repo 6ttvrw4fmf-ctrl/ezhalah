@@ -628,8 +628,23 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
         "photo_urls": photos,
         "date_added": item.get("date") or None,
         "additional_info": info,
+        **feature_answers(features),
     }
     return row, category
+
+
+# eaqartabuk publishes a STRUCTURED feature checklist (candles-map «features»: «مصعد», «مطبخ», «مداخل خاصة»,
+# «كراج», «غرفة غسيل» …). It was filed in additional_info only, so the 90 lifts, 36 kitchens, 176 private
+# entrances, 12 garages and 154 laundry rooms it listed on active ads were NULL to the Advanced Filter
+# (🔬 2026-10-12, backlog 461). A LISTED feature is a yes; an unlisted one stays UNKNOWN — an unticked box on
+# the advertiser's form is not a stated «no». Labels that are not the unit («بجانب الطريق المزدحم») map nothing.
+FEATURE_COLUMNS = {"مصعد": "elevator", "مطبخ": "kitchen", "مداخل خاصة": "private_entrance",
+                   "مدخل خاص": "private_entrance", "كراج": "parking", "غرفة غسيل": "laundry_room"}
+
+
+def feature_answers(features) -> dict[str, bool]:
+    return {FEATURE_COLUMNS[f.strip()]: True for f in (features or [])
+            if isinstance(f, str) and f.strip() in FEATURE_COLUMNS}
 
 
 def main() -> int:

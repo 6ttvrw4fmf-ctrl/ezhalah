@@ -56,6 +56,10 @@ const WAIVED: Record<string, string> = {
     'normalize.amenities_from_lines, zero disagreements over 22,594 rows); scrapers/dealapp/run.py af_answers() ' +
     'now writes it on every crawl, pinned with mutations by scrapers/common/tests/test_dealapp_af_answers.py, and ' +
     'the migration ends in a check block that executes the view against the raw table',
+  '20261012094158_eaqartabuk_feature_checklist_to_amenities.sql':
+    'NULL-only, true-only back-fill of eaqartabuk amenities from each row\'s own STRUCTURED features list ' +
+    '(additional_info.features); scrapers/eaqartabuk/run.py feature_answers() now writes the same on every crawl, ' +
+    'pinned with a mutation by scrapers/common/tests/test_eaqartabuk_feature_checklist.py',
   '20261012093639_alkhaas_rawasidark_amenities_from_own_words.sql':
     'NULL-only, true-only back-fill of alkhaas / rawasidark amenities from their stored description via ' +
     'normalize.prose_amenities_yes; both parsers now write the same on every crawl, pinned with mutations by ' +
