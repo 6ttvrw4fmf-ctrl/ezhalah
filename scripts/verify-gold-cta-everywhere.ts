@@ -1,4 +1,5 @@
-// THE GOLD «اضغط هنا» BUTTON SHINES ON EVERY CARD, AND EVERY PRESS THROWS A PARTY (owner 2026-10-12).
+// THE GOLD «اضغط هنا» BUTTON SHINES ON EVERY LAPTOP CARD, AND EVERY LAPTOP PRESS THROWS A PARTY (owner 2026-10-12).
+// THE PHONE CARD IS UNTOUCHED (owner, later the same day: «undo what you did for the phone»).
 //
 // «What determines our success is traffic to those websites.» So the card's call-to-action is a gold button
 // that shines, with the note «للتأكد من التوفر والتفاصيل» under it — on the phone card and the laptop rows alike
@@ -37,14 +38,14 @@ const ctaStyles = (card: string) => {
 };
 
 const rules = (card: string, buzz: string, reveal: string, i18n: string): Record<string, boolean> => ({
-  'the photo strip carries the gold shining button + «Click here 👆» + the note, on every layout':
-    /<GoldShineButton shine="css" style=\{\[card\.goldCta, row && card\.goldCtaRow\]\} testID="card-open-gold">\s*<Text[^>]*>\{t\('Click here 👆'\)\}<\/Text>\s*<\/GoldShineButton>\s*<Text style=\{\[card\.ctaNote, row && card\.ctaNoteRow\]\}>\{t\('To confirm availability and details'\)\}<\/Text>/.test(card),
-  'press = open FIRST, synchronously: const fire = () => { onOpen(); setBurst(…) }':
-    /const fire = \(\) => \{ onOpen\(\); setBurst\(\(b\) => b \+ 1\); \};/.test(card),
+  'the laptop strip carries the gold shining button + «Click here 👆» + the note; the phone strip keeps the plain white text':
+    /\{row \? \(\s*<View style=\{card\.ctaCol\}>\s*<GoldShineButton shine="css" style=\{\[card\.goldCta, card\.goldCtaRow\]\} testID="card-open-gold">\s*<Text[^>]*>\{t\('Click here 👆'\)\}<\/Text>\s*<\/GoldShineButton>\s*<Text style=\{\[card\.ctaNote, card\.ctaNoteRow\]\}>\{t\('To confirm availability and details'\)\}<\/Text>\s*<\/View>\s*\) : \(\s*<Text style=\{card\.photoAction\}>\{t\('Click here 👆'\)\}<\/Text>\s*\)\}/.test(card),
+  'press = open FIRST, synchronously; the party only on laptop rows; the phone press is plain onOpen':
+    /const fire = row \? \(\) => \{ onOpen\(\); setBurst\(\(b\) => b \+ 1\); \} : onOpen;/.test(card),
   'the photo press AND the details press both use fire':
     /<Pressable onPress=\{fire\} accessibilityRole="link"/.test(card) && /<Pressable onPress=\{fire\} style=\{\[card\.midCol/.test(card),
-  'the buzzer layer is mounted on EVERY card':
-    /\n      <BuzzLayer burst=\{burst\} \/>\n/.test(card) && !/row \? <BuzzLayer/.test(card),
+  'the buzzer layer is mounted on laptop rows only (the phone card is untouched)':
+    /\{row \? <BuzzLayer burst=\{burst\} \/> : null\}/.test(card),
   'the old layouts are intact (laptop row + phone card) and the photo-first laptop block is gone':
     /row \? \[card\.photoColRow/.test(card) && /photoColMobile/.test(card) && !/row === 'roomy'/.test(card) && !/lpWrap/.test(card),
   'the shine is a CSS keyframe behind shine="css", nothing under reduced motion':
@@ -65,16 +66,20 @@ const mustCatch = (what: string, rule: string, broken: Record<string, boolean>) 
   if (!caught) failed++;
   console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
 };
-mustCatch('a still (non-shining) gold button', 'the photo strip carries the gold shining button + «Click here 👆» + the note, on every layout',
+mustCatch('a still (non-shining) gold button', 'the laptop strip carries the gold shining button + «Click here 👆» + the note; the phone strip keeps the plain white text',
   rules(CARD.replace('<GoldShineButton shine="css"', '<GoldShineButton shine="none"'), BUZZ, REVEAL, I18N));
-mustCatch('the note dropped from the strip', 'the photo strip carries the gold shining button + «Click here 👆» + the note, on every layout',
+mustCatch('the note dropped from the strip', 'the laptop strip carries the gold shining button + «Click here 👆» + the note; the phone strip keeps the plain white text',
   rules(CARD.replace("{t('To confirm availability and details')}", ''), BUZZ, REVEAL, I18N));
-mustCatch('opening the ad behind a timer', 'press = open FIRST, synchronously: const fire = () => { onOpen(); setBurst(…) }',
-  rules(CARD.replace('const fire = () => { onOpen(); setBurst((b) => b + 1); };', 'const fire = () => { setBurst((b) => b + 1); setTimeout(onOpen, 300); };'), BUZZ, REVEAL, I18N));
+mustCatch('opening the ad behind a timer', 'press = open FIRST, synchronously; the party only on laptop rows; the phone press is plain onOpen',
+  rules(CARD.replace('const fire = row ? () => { onOpen(); setBurst((b) => b + 1); } : onOpen;', 'const fire = row ? () => { setBurst((b) => b + 1); setTimeout(onOpen, 300); } : onOpen;'), BUZZ, REVEAL, I18N));
+mustCatch('the party leaking onto the phone press', 'press = open FIRST, synchronously; the party only on laptop rows; the phone press is plain onOpen',
+  rules(CARD.replace('const fire = row ? () => { onOpen(); setBurst((b) => b + 1); } : onOpen;', 'const fire = () => { onOpen(); setBurst((b) => b + 1); };'), BUZZ, REVEAL, I18N));
+mustCatch('the gold button leaking onto the phone strip', 'the laptop strip carries the gold shining button + «Click here 👆» + the note; the phone strip keeps the plain white text',
+  rules(CARD.replace("            ) : (\n              <Text style={card.photoAction}>{t('Click here 👆')}</Text>\n            )}", '            ) : null}'), BUZZ, REVEAL, I18N));
 mustCatch('the details press no longer throwing the party', 'the photo press AND the details press both use fire',
   rules(CARD.replace('<Pressable onPress={fire} style={[card.midCol', '<Pressable onPress={onOpen} style={[card.midCol'), BUZZ, REVEAL, I18N));
-mustCatch('the buzzer gated to laptop rows only', 'the buzzer layer is mounted on EVERY card',
-  rules(CARD.replace('\n      <BuzzLayer burst={burst} />\n', '\n      {row ? <BuzzLayer burst={burst} /> : null}\n'), BUZZ, REVEAL, I18N));
+mustCatch('the buzzer layer leaking onto the phone card', 'the buzzer layer is mounted on laptop rows only (the phone card is untouched)',
+  rules(CARD.replace('{row ? <BuzzLayer burst={burst} /> : null}', '<BuzzLayer burst={burst} />'), BUZZ, REVEAL, I18N));
 mustCatch('the photo-first laptop block creeping back', 'the old layouts are intact (laptop row + phone card) and the photo-first laptop block is gone',
   rules(CARD.replace('  return (\n    // Keep the linked photo', "  if (row === 'roomy') { return null; }\n  return (\n    // Keep the linked photo"), BUZZ, REVEAL, I18N));
 mustCatch('a shine that ignores reduced motion', 'the shine is a CSS keyframe behind shine="css", nothing under reduced motion',
@@ -86,5 +91,5 @@ mustCatch('a raw hex colour in the CTA styles', 'the new styles use theme colour
 mustCatch('the Arabic note missing', 'the new styles use theme colours only, and the note exists in Arabic',
   rules(CARD, BUZZ, REVEAL, I18N.replace("'To confirm availability and details': 'للتأكد من التوفر والتفاصيل',", '')));
 
-console.log(failed === 0 ? '\n✅ the gold button shines on every card, every press opens the ad first and then throws the party.\n' : `\n❌ ${failed} check(s) failed.\n`);
+console.log(failed === 0 ? '\n✅ laptop rows: the gold button shines and every press opens the ad first, then the party; the phone card is untouched.\n' : `\n❌ ${failed} check(s) failed.\n`);
 process.exit(failed === 0 ? 0 : 1);

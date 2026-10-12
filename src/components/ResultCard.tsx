@@ -107,8 +107,9 @@ export function ResultCard({
   // websites»). ANY press on the card — photo, gold button, details — opens the ad FIRST (synchronously, inside
   // the click: a delayed window.open is popup-blocked) and THEN bumps `burst`, which plays the gold flash +
   // confetti (CardBuzzer). Phone and laptop alike; the party is decoration and never gates the open.
+  // LAPTOP ONLY (owner 2026-10-12: «undo what you did for the phone»): the phone card presses exactly as before.
   const [burst, setBurst] = useState(0);
-  const fire = () => { onOpen(); setBurst((b) => b + 1); };
+  const fire = row ? () => { onOpen(); setBurst((b) => b + 1); } : onOpen;
   // Evidence for the «مطابق لطلبك» strip: NEVER read from listing.features / listing.bathrooms (raw,
   // NULL-coerced) — only from listing.canon, the canonical row the predicate actually passed on.
   const evidence = useMemo(() => afEvidence(activeAf ?? [], listing.canon, t), [activeAf, listing.canon, t]);
@@ -227,16 +228,21 @@ export function ResultCard({
         ) : null}
         {/* user request: removed the white "AQAR" pill that floated over the photo's top-right.
             Source attribution appears in the photo strip and the compact source row. */}
-        {/* The gold «اضغط هنا» that SHINES (owner 2026-10-12) + the note under it, on every card. The strip is
-            pointerEvents none: the whole photo is the press target (fire), so there is no second handler. */}
+        {/* LAPTOP rows: the gold «اضغط هنا» that SHINES (owner 2026-10-12) + the note under it. PHONE: the plain
+            white «اضغط هنا 👆» exactly as before («undo what you did for the phone»). The strip is pointerEvents none:
+            the whole photo is the press target, so there is no second handler. */}
         {listing.source_url ? (
           <View style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none">
-            <View style={card.ctaCol}>
-              <GoldShineButton shine="css" style={[card.goldCta, row && card.goldCtaRow]} testID="card-open-gold">
-                <Text style={[card.goldCtaTx, row && card.goldCtaTxRow]}>{t('Click here 👆')}</Text>
-              </GoldShineButton>
-              <Text style={[card.ctaNote, row && card.ctaNoteRow]}>{t('To confirm availability and details')}</Text>
-            </View>
+            {row ? (
+              <View style={card.ctaCol}>
+                <GoldShineButton shine="css" style={[card.goldCta, card.goldCtaRow]} testID="card-open-gold">
+                  <Text style={[card.goldCtaTx, card.goldCtaTxRow]}>{t('Click here 👆')}</Text>
+                </GoldShineButton>
+                <Text style={[card.ctaNote, card.ctaNoteRow]}>{t('To confirm availability and details')}</Text>
+              </View>
+            ) : (
+              <Text style={card.photoAction}>{t('Click here 👆')}</Text>
+            )}
             <Text style={[card.sourceText, row && card.sourceTextRow]} numberOfLines={row ? 1 : undefined}>{sourceHost(listing.source)}</Text>
           </View>
         ) : null}
@@ -430,7 +436,7 @@ export function ResultCard({
       </View>
       )}
       </View>
-      <BuzzLayer burst={burst} />
+      {row ? <BuzzLayer burst={burst} /> : null}
     </View>
   );
 }
