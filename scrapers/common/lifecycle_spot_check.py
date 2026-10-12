@@ -184,6 +184,23 @@ def _reader_for(platform: str):
         # hollow). Read it the way its crawl and oracle do.
         from scrapers.muktamel import run as mk
         return mk.page_verdict
+    if platform == "abralosol":
+        # 2026-10-12: the shared status reader got no live answer from any of 5 known-live abralosol
+        # pages (dead-visible void at 09:05 and on a re-run, spot-check 38245017303) while its crawl
+        # read all 2,811 ads that morning through its own session. Read it as its crawl and oracle do:
+        # its own session, 404/410 = DEAD, 200 whose <article> carries THIS node id = ALIVE.
+        import re as _re
+        from scrapers.abralosol import run as ab
+        session = ab._session()
+
+        def read_abralosol(url: str) -> str:
+            m = _re.search(r"/(\d+)/?$", url or "")
+            status, page = ab._fetch(session, url)
+            if status in ab.GONE_STATUSES:
+                return DEAD
+            art = ab._ARTICLE.search(page or "") if status == 200 else None
+            return ALIVE if (art and m and art.group(1) == m.group(1)) else UNKNOWN
+        return read_abralosol
     return None
 
 
