@@ -51,7 +51,7 @@ const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
 // Deterministic post-model rules (owner ruling 2026-08-29). Pure functions, unit-tested and
 // mutation-proven by scripts/verify-agent-postmodel-rules.ts. The model proposes; these decide.
-import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWesternDigits, arabicWordAmounts, fillBathroomsIfAbsent, dropAbshirOpener, insertBeforeTrailingEmoji } from "./postModel.ts";
+import { effectiveBasis, enforceSortMatchesReply, arabicCanonicalLocation, toWesternDigits, arabicWordAmounts, fillBathroomsIfAbsent, statedRentPeriod, alignBasisWithStatedPeriod, dropAbshirOpener, insertBeforeTrailingEmoji } from "./postModel.ts";
 // THE SINGLE DECISION AUTHORITY for kind (owner-approved architecture consolidation, 2026-08-30).
 // See decide.ts's header for the full rationale. The model's own `kind` field is read ONLY to
 // decide whether to retry for wrong language; it is never trusted as the final answer again after
@@ -1230,7 +1230,9 @@ Deno.serve(async (req: Request) => {
       // basis is always Rent; a sale/per-meter basis is always Buy. Trust it over the model's
       // own "deal" only when it's an unambiguous signal (the model occasionally sets deal wrong
       // when the user gives a monthly figure without saying "rent").
-      const basis = String(out.pricing_basis ?? "");
+      // …and the rent period the user wrote in THIS message beats the model's reading of it (see statedRentPeriod).
+      const statedPeriod = statedRentPeriod(text);
+      const basis = alignBasisWithStatedPeriod(String(out.pricing_basis ?? ""), statedPeriod);
       // "Both" = the agent searched without knowing rent vs buy → show both. A price BASIS still
       // disambiguates (any rent period is Rent, a sale figure is Buy), so it cancels "Both".
       let bothDeals = out.deal === "Both";
@@ -1245,7 +1247,7 @@ Deno.serve(async (req: Request) => {
       // annual. Unstated stays undefined → the client keeps its Filter-parity default. Daily/weekly/
       // quarterly budgets annualize the NUMBER but don't remap the pool (conservative).
       let rentPeriod: "monthly" | "annual" | undefined;
-      const rp = String(out.rent_period ?? "");
+      const rp = statedPeriod ?? String(out.rent_period ?? "");
       if (rp === "monthly" || rp === "annual") rentPeriod = rp;
       else if (basis === "monthly_rent") rentPeriod = "monthly";
       else if (basis === "annual_rent") rentPeriod = "annual";
