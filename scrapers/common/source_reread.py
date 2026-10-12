@@ -222,7 +222,28 @@ def wasalt_fact_paths(data, limit: int = 60) -> list[str]:
             out.append(f"{path} = {str(node)[:160]}")
 
     walk(pd, "propertyDetailsV3")
+
+    # Every price the page carries, whatever the fact filter kept: settling a «hundreds of billions» land
+    # (backlog 371/392, PRICE = SOURCE) needs salePrice / conversionPrice / per-metre as Wasalt serves them.
+    def prices(node, path: str) -> None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if isinstance(v, (int, float, str)) and not isinstance(v, bool) and _PRICE_KEY.search(str(k)) \
+                        and v not in ("", None):
+                    line = f"{path}.{k} = {str(v)[:40]}"
+                    if line not in out:
+                        out.append(line)
+                else:
+                    prices(v, f"{path}.{k}")
+        elif isinstance(node, list):
+            for i, x in enumerate(node[:30]):
+                prices(x, f"{path}[{i}]")
+
+    prices(pd, "propertyDetailsV3")
     return out
+
+
+_PRICE_KEY = re.compile(r"price", re.I)
 
 
 def main() -> int:
