@@ -103,7 +103,7 @@ const CURRENCY_RATES: Record<string, number> = {
 const TYPE_SYNONYMS: Record<string, string> = {
   flat: 'Apartment', apt: 'Apartment', studio: 'Studio', penthouse: 'Apartment', duplex: 'Duplex',
   mansion: 'Villa', palace: 'Villa', townhouse: 'Villa', home: 'Villa', dwelling: 'Villa',
-  plot: 'Residential Land', cabin: 'Chalet', 'raw land': 'Raw Land', 'undeveloped land': 'Raw Land', 'other land': 'Other Land',
+  plot: 'Residential Land', cabin: 'Chalet', 'raw land': 'Raw Land', 'undeveloped land': 'Raw Land',
   workspace: 'Office', clinic: 'Office', storage: 'Warehouse', depot: 'Warehouse',
   store: 'Shop', retail: 'Shop', boutique: 'Shop', gallery: 'Showroom', garage: 'Workshop',
   plant: 'Factory', ranch: 'Farm', orchard: 'Agriculture Plot', campsite: 'Camp',
@@ -209,8 +209,6 @@ const AR_TYPE: Record<string, string> = {
   // أرض خام (owner 2026-10-09) — before the bare أرض/ارض for the same prefix reason.
   'أرض خام': 'Raw Land', 'ارض خام': 'Raw Land', 'أراضي خام': 'Raw Land', 'اراضي خام': 'Raw Land',
   'أرض غير مخدومة': 'Raw Land', 'ارض غير مخدومة': 'Raw Land',
-  // أرض أخرى (owner 2026-10-10: land whose source states no usage) — before the bare أرض/ارض, same reason.
-  'أرض أخرى': 'Other Land', 'ارض اخرى': 'Other Land', 'ارض أخرى': 'Other Land', 'أراضي أخرى': 'Other Land', 'اراضي اخرى': 'Other Land',
   'أرض': 'Residential Land', 'ارض': 'Residential Land',
 };
 const RES_TYPES = new Set(Object.entries(CLEAN_MACRO).filter(([, c]) => c === 'Residential').map(([t]) => t));
@@ -586,9 +584,8 @@ const RAW_LAND_LIFTABLE = new Set(['Residential Land', 'Commercial Land', 'Indus
 // findable). The bare word opens the whole land group «الأراضي» — the same scope the Filter's group gives
 // — instead of the edge's guess of one usage. Any usage/raw qualifier the user typed keeps its own type.
 const BARE_LAND_WORD = /(^|[^\u0621-\u064A])(ال)?(أرض|ارض|أراضي|اراضي|اراضى|أراضى)(?![\u0621-\u064A])/;
-const LAND_QUALIFIER = /سكن|تجار|صناع|زراع|مزرع|خام|غير\s+مخدوم|غير\s+مطور|أخرى|اخرى|\b(residential|commercial|industrial|agricultur|farm|raw)/i;
+const LAND_QUALIFIER = /سكن|تجار|صناع|زراع|مزرع|خام|غير\s+مخدوم|غير\s+مطور|\b(residential|commercial|industrial|agricultur|farm|raw)/i;
 const LAND_GROUP = 'Commercial & Industrial Plots';
-const OTHER_LAND_PHRASE = /(أرض|ارض|أراضي|اراضي|اراضى|أراضى)\s+(أخرى|اخرى|أخرى)|\bother\s+lands?\b/i;
 
 export function queryFromBackend(b: BackendQuery, userText: string = '', proximityTexts?: string[]): SearchQuery {
   let q = emptyQuery();
@@ -635,9 +632,6 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   if (RAW_LAND_PHRASE.test(userText) && (q.type == null || RAW_LAND_LIFTABLE.has(q.type))) {
     q.type = 'Raw Land';
     q.category = CLEAN_MACRO['Raw Land'];
-  } else if (OTHER_LAND_PHRASE.test(userText) && (q.type == null || RAW_LAND_LIFTABLE.has(q.type))) {
-    q.type = 'Other Land';                 // the edge's vocabulary predates the box, same as Raw Land
-    q.category = CLEAN_MACRO['Other Land'];
   } else if (BARE_LAND_WORD.test(userText) && !LAND_QUALIFIER.test(userText)
              && (q.type == null || RAW_LAND_LIFTABLE.has(q.type))) {
     q.type = null;

@@ -49,11 +49,11 @@ export const HIERARCHY: Record<Macro, SubGroup[]> = {
     // (unit_subtype_ar = 'أرض خام', sync_raw_land_subtype, only on the source's own word). Its p_types
     // token 'أرض خام' matches that tag in af_eligibility_clause (migration 20261009235607), so every
     // count/result surface reads one definition and a raw residential plot is found under تجاري too.
-    // 'Other Land' («أرض أخرى», owner 2026-10-10: «don't show it in a specific property type, just other
-    // things»): a plot whose source states NO usage — Aqar's «نوع العقار» absent AND the seller's own
-    // description silent. Stored as the source's own category word «أرض» (card shows «أرض»), findable
-    // here and never under أرض سكنية / تجارية / صناعية / زراعية.
-    { group: 'Commercial & Industrial Plots',     types: ['Commercial Land', 'Industrial Land', 'Residential Land', 'Raw Land', 'Other Land'] },
+    // 'Other Land' (a plot whose source states NO usage — stored as the source's own word «أرض») is deliberately
+    // NOT a box here (owner 2026-10-11: «those lands are not searchable by property type, but searchable by
+    // other filters»). It stays a valid clean type — see UNBOXED_TYPES below — so the card, the type mapping and
+    // the category/city/price searches that name no property type all still find it.
+    { group: 'Commercial & Industrial Plots',     types: ['Commercial Land', 'Industrial Land', 'Residential Land', 'Raw Land'] },
   ],
 };
 
@@ -82,6 +82,13 @@ export const FACILITY_TYPE_AR: Record<string, string> = {
   'Event Hall': 'قاعة', 'Meeting Room': 'غرفة اجتماعات', 'Storage Yard': 'ساحة تخزين', 'Self Storage': 'تخزين ذاتي',
 };
 
+// Clean types that are REAL (a stored value maps to them, the card shows them, they have a home macro) but are
+// deliberately offered as NO filter box and live in NO HIERARCHY group: a plot whose source states no usage
+// («أرض», 'Other Land'). Found by every search that names no property type — category, city, district, price,
+// area — never by choosing a box or a group, and never producible by the AI chat as a type (a type with no group
+// would be an active filter with no visible control to remove it — see groupOf).
+export const UNBOXED_TYPES = ['Other Land'];
+
 // Flat clean-type → macro lookup (derived from HIERARCHY, the single source).
 export const CLEAN_MACRO: Record<string, Macro> = (() => {
   const m: Record<string, Macro> = {};
@@ -90,6 +97,7 @@ export const CLEAN_MACRO: Record<string, Macro> = (() => {
   // Facility sub-types are gathered under the 'Service Facilities' box (not HIERARCHY boxes) but remain valid
   // COMMERCIAL clean types for normalizeType + strict query + the AI agent. (owner 2026-07-07)
   for (const t of SERVICE_FACILITY_TYPES) m[t] = 'Commercial';
+  for (const t of UNBOXED_TYPES) m[t] = 'Commercial';   // «أرض»: home macro Commercial (DB migration 20261011020759)
   return m;
 })();
 
@@ -330,7 +338,7 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   // Commercial — Plots (physically in RES tables on Aqar → both)
   'Commercial Land':     { rawTypes: ['Commercial Land', 'أرض تجاري', 'أرض تجارية', 'أرض سكني تجاري'], kinds: BOTH },
   'Industrial Land':     { rawTypes: ['Industrial Land', 'أرض صناعي', 'أرض صناعية'], kinds: BOTH },
-  // أرض أخرى (owner 2026-10-10): land whose source states no usage — see HIERARCHY 'Other Land'.
+  // «أرض» (owner 2026-10-10): land whose source states no usage — a valid type but no box (UNBOXED_TYPES).
   'Other Land':          { rawTypes: ['Land', 'أرض'], kinds: BOTH },
   // أرض خام (owner 2026-10-09): the TAG token, not a stored type — matched against
   // search_listings_ar.unit_subtype_ar by af_eligibility_clause. BOTH: raw lands sit in either kind.
