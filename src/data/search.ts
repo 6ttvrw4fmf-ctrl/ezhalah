@@ -595,7 +595,8 @@ function locationLines(q: SearchQuery, loc: Locale = getLocale()): string[] {
   }
   switch (lm.kind) {
     case 'city':
-      out.push(`${t('City')}: ${arabicOrUnresolved(tPlace(lm.label))}`);
+      // English summary: the canonical English city («Riyadh»), never the Arabic label the agent typed («الرياض») — found by the live UI battery
+      out.push(`${t('City')}: ${getLocale() === 'en' && lm.city ? lm.city : arabicOrUnresolved(tPlace(lm.label))}`);
       // Region disambiguates same-named cities/districts across the Kingdom. (user: include the region.)
       if (regionLabel) out.push(`${t('Region')}: ${regionLabel}`);
       break;

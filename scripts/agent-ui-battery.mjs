@@ -55,12 +55,16 @@ async function one(c) {
     const count = (body.match(/(\d[\d,]*)\s*(?:نتيجة|إعلان)/) || [])[1];
     const cards = (body.match(/#\d+\n/g) || []).length;
     const none = /ما لقينا نتائج|لا توجد نتائج|عذراً، ما لقينا/.test(body);
+    // MATCH FIRST, THEN DIVERSIFY THE PLATFORMS (permanent rule): the sites of the cards, in order
+    const sites = [...body.split(/#1\n/).slice(1).join('#1\n').matchAll(/(?:^|\n)((?:[a-z0-9-]+\.)+(?:sa|com|fm|app|net|co|org|io|me))\n/g)].map((m) => m[1]).slice(0, 12);
     const flags = [];
     if (none || cards === 0) flags.push('NO-RESULTS');
     const size = lines.find((l) => /^(?:المساحة|Size)/.test(l));
     if (size && /م²/.test(size) && /(?:إلى|To)\s*[1-9]\s*م²/.test(size)) flags.push('ABSURD-SIZE');
     if (/[-‐-―−]/.test(head.replace(/\d{1,2}\/\d{1,2}\/\d{2,4}/g, ''))) flags.push('DASH-IN-CHAT');
-    return { c, count, cards, lines, flags };
+    const top = sites.slice(0, 10), share = top.length ? Math.max(...Object.values(top.reduce((a, x) => (a[x] = (a[x] || 0) + 1, a), {}))) / top.length : 0;
+    if (top.length >= 8 && share > 0.7 && Number((count || '0').replace(/,/g, '')) > 300) flags.push(`ONE-SITE(${Math.round(share * 100)}%)`);
+    return { c, count, cards, lines, flags, sites };
   } catch (e) { return { c, flags: ['ERROR ' + String(e.message).slice(0, 60)], lines: [] }; } finally { await ctx.close(); }
 }
 const out = []; let i = 0;
@@ -69,5 +73,5 @@ await browser.close();
 
 const bad = out.filter((r) => r.flags.length);
 console.log(`\n${out.length} searches typed into ${BASE} · ${out.length - bad.length} showed results and looked right · ${bad.length} need a look`);
-for (const r of out.sort((a, b) => a.c.g.localeCompare(b.c.g))) console.log(`${r.flags.length ? '⚠' : '✓'} [${r.c.g}] «${r.c.text}» → ${r.count ?? '-'} results, ${r.cards ?? 0} cards on screen${r.flags.length ? '  ' + r.flags.join(',') : ''}\n      ${r.lines.join(' · ')}`);
+for (const r of out.sort((a, b) => a.c.g.localeCompare(b.c.g))) console.log(`${r.flags.length ? '⚠' : '✓'} [${r.c.g}] «${r.c.text}» → ${r.count ?? '-'} results, ${r.cards ?? 0} cards on screen${r.flags.length ? '  ' + r.flags.join(',') : ''}\n      ${r.lines.join(' · ')}\n      sites: ${(r.sites ?? []).join(' ')}`);
 process.exit(bad.length ? 1 : 0);

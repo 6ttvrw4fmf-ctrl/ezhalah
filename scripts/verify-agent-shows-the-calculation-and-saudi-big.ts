@@ -89,6 +89,7 @@ const arabicOrPlaceholder = (key: string) => key; const LOCATION_UNRESOLVED_AR =
 const effectiveTypes = (q: any) => q.types ?? []; const effectiveGroups = () => []; const effectiveBeds = () => [];
 const numOrNull = (n: any) => n == null || n === '' ? null : Number(n); const grouped = (n: number) => Math.round(n).toLocaleString('en-US');
   const combinedBudgetParts = () => []; const withAdvancedLines = (s: string) => s;
+const cityDisplay = (c: string, l: string) => l === 'ar' ? ({ Riyadh: 'الرياض' } as any)[c] ?? c : c; const translitPlace = (s: string) => s;
 const t = (k: string, v?: any) => v ? k.replace(/\\{(\\w+)\\}/g, (_: string, n: string) => String(v[n])) : k;
 `);
 const summary = summaries.searchSummary as (q: any, l: string) => string;
@@ -101,6 +102,9 @@ check('English summary shows «KWD 5,000,000 × 12.2 = SAR 61,000,000»', summar
 const withMaid = summary({ ...base, amenities: ['maid_room', 'elevator'] }, 'ar');
 check('the summary names the features the search requires: «Amenities: Maid room، Elevator»', withMaid.includes('Amenities: Maid room، Elevator'), withMaid);
 check('…and names nothing when there are none or when a token is unknown', !summary(base, 'ar').includes('Amenities') && !summary({ ...base, amenities: ['bogus'] }, 'ar').includes('Amenities'));
+const cityQ = { location: 'الرياض', deal: 'Rent', type: 'Apartment', priceInput: '', locationMatch: { kind: 'city', label: 'الرياض', raw: 'الرياض', city: 'Riyadh', region: 'Riyadh', districts: [], cities: [], ambiguous: false } };
+check('the ENGLISH summary says «City: Riyadh», not the Arabic label the agent typed; the Arabic summary keeps «الرياض»',
+  summary(cityQ, 'en').includes('City: Riyadh') && !/City: [؀-ۿ]/.test(summary(cityQ, 'en')) && summary(cityQ, 'ar').includes('City: الرياض'), summary(cityQ, 'en'));
 const monthly = { location: 'الخبر', deal: 'Rent', type: 'Apartment', priceInput: '60000', priceIsAnnual: true, rentPeriod: 'monthly' };
 const sm = summary(monthly, 'ar');
 check('a MONTHLY rent the agent multiplied by 12 shows both: «Monthly Rent: SAR 5,000/month» and «Annual Equivalent: SAR 60,000/year»',
