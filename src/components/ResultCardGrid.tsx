@@ -30,7 +30,9 @@ const styles = StyleSheet.create({
   // The chat column itself stops at 940 (MAX_W in agent.tsx); stay inside it.
   gridWide: { maxWidth: 920 },
   // Web-only CSS grid (the laptop is web). A flex column would stack the cards one under another.
-  gridCols: { display: 'grid', gap: 18, alignItems: 'start' } as object,
+  // Each card is content-sized: no blank reserved rows inside a card (owner 2026-10-11 «a lot of blank white
+  // space»); a row is as tall as its tallest card and the shorter ones simply end earlier.
+  gridCols: { display: 'grid', gap: 16, alignItems: 'start' } as object,
   // 3 across: allowed to run 120px past the 940 column, never past the screen minus the sidebar.
   gridThree: { gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', width: 'calc(100% + 120px)', maxWidth: 'min(1100px, calc(100vw - 340px))' } as object,
   // 2 across (ad pane open): stays inside whatever the narrowed column gives it.

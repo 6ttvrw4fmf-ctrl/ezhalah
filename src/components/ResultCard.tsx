@@ -320,33 +320,37 @@ export function ResultCard({
             </View>
           ) : null}
 
-          <View style={card.lpChips}>
-            {shownFeats.map((f) => {
-              const picked = pickedFeatures.has(f.key);
-              return (
-                <View key={f.key} style={[card.lpChip, picked && card.lpChipPicked]} testID={picked ? `card-feature-picked-${f.key}` : undefined}>
-                  {picked ? <Ionicons name="checkmark" size={12} color={colors.onFill} /> : null}
-                  <Text style={[card.lpChipTx, picked && card.lpChipTxPicked]} numberOfLines={1}>{t(f.label)}</Text>
-                </View>
-              );
-            })}
-            {moreFeats > 0 ? (
-              <View style={[card.lpChip, card.lpChipMore]}><Text style={card.lpChipTx}>{`+${moreFeats}`}</Text></View>
-            ) : null}
-          </View>
+          {shownFeats.length > 0 ? (
+            <View style={card.lpChips}>
+              {shownFeats.map((f) => {
+                const picked = pickedFeatures.has(f.key);
+                return (
+                  <View key={f.key} style={[card.lpChip, picked && card.lpChipPicked]} testID={picked ? `card-feature-picked-${f.key}` : undefined}>
+                    {picked ? <Ionicons name="checkmark" size={12} color={colors.onFill} /> : null}
+                    <Text style={[card.lpChipTx, picked && card.lpChipTxPicked]} numberOfLines={1}>{t(f.label)}</Text>
+                  </View>
+                );
+              })}
+              {moreFeats > 0 ? (
+                <View style={[card.lpChip, card.lpChipMore]}><Text style={card.lpChipTx}>{`+${moreFeats}`}</Text></View>
+              ) : null}
+            </View>
+          ) : null}
 
-          <View style={card.lpFacts} testID="card-lp-facts">
-            {lpFacts.map((f) => (
-              <Text key={f.k} style={card.lpFact} numberOfLines={1}>
-                <Text style={card.addlLabel}>{f.label} </Text>
-                <Text style={card.addlValue}>{f.value}</Text>
-              </Text>
-            ))}
-          </View>
+          {lpFacts.length > 0 ? (
+            <View style={card.lpFacts} testID="card-lp-facts">
+              {lpFacts.map((f) => (
+                <Text key={f.k} style={card.lpFact} numberOfLines={1}>
+                  <Text style={card.addlLabel}>{f.label} </Text>
+                  <Text style={card.addlValue}>{f.value}</Text>
+                </Text>
+              ))}
+            </View>
+          ) : null}
 
           <View style={card.lpFoot}>
             <View style={card.hostHead}>
-              <View style={card.hostBadge}><SourceBadge source={listing.source} /></View>
+              <View style={[card.hostBadge, card.lpBadge]}><SourceBadge source={listing.source} /></View>
               <Text style={card.hostedOn}>{t('Hosted on {name}', { name: t(sourceName(listing.source)) })}</Text>
             </View>
           </View>
@@ -1442,7 +1446,7 @@ const card = StyleSheet.create({
 
   // ─── LAPTOP PHOTO-FIRST CARD (owner 2026-10-11) ───
   lpWrap: { borderRadius: radius.card, position: 'relative' },
-  lpPhoto: { width: '100%', aspectRatio: 1.6, position: 'relative', backgroundColor: colors.tint, overflow: 'hidden' } as object,
+  lpPhoto: { width: '100%', aspectRatio: 1.78, position: 'relative', backgroundColor: colors.tint, overflow: 'hidden' } as object,
   // a soft dark fade behind the rank badge so it always reads, whatever the photo is
   lpFade: { position: 'absolute', top: 0, left: 0, right: 0, height: 64, backgroundColor: 'rgba(14,32,22,0.28)' },
   lpPhotoFoot: {
@@ -1451,19 +1455,19 @@ const card = StyleSheet.create({
   },
   lpPhotoFootTx: { color: colors.onFill, fontSize: 12, fontWeight: '500' },
   lpHost: { writingDirection: 'ltr', flexShrink: 1 },
-  lpBody: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14, gap: 8, minWidth: 0 },
+  lpBody: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10, gap: 5, minWidth: 0 },
   lpPriceRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
   lpPriceCol: { flexShrink: 1, minWidth: 0 },
-  lpPrice: { fontSize: 24, lineHeight: 28 },
+  lpPrice: { fontSize: 22, lineHeight: 26 },
   lpCta: { alignItems: 'center', gap: 4, flexShrink: 0 },
-  lpGold: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  lpGold: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   lpGoldTx: { color: colors.goldOnFill, fontSize: 12.5, fontWeight: '800' },
   lpCtaNote: { fontSize: 11, color: colors.muted },
-  lpTitle: { fontSize: 16, lineHeight: 22 },
+  lpTitle: { fontSize: 15, lineHeight: 20 },
   lpType: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   lpTypeIcon: { width: 22, height: 22 },
   lpTypeTx: { fontSize: 13, fontWeight: '700', color: colors.ink },
-  lpChips: { flexDirection: 'row', flexWrap: 'nowrap', gap: 6, minHeight: 28, overflow: 'hidden' },
+  lpChips: { flexDirection: 'row', flexWrap: 'nowrap', gap: 6, overflow: 'hidden' },
   lpChip: {
     flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.tint, borderRadius: 999,
     borderWidth: 1, borderColor: colors.tintLine, paddingHorizontal: 10, paddingVertical: 4, flexShrink: 1,
@@ -1472,9 +1476,10 @@ const card = StyleSheet.create({
   lpChipTx: { fontSize: 12, color: colors.primary, fontWeight: '500', flexShrink: 1 },
   lpChipTxPicked: { color: colors.onFill, fontWeight: '700' },
   lpChipMore: { backgroundColor: colors.surface, borderStyle: 'dashed' },
-  lpFacts: { flexDirection: 'row', flexWrap: 'nowrap', columnGap: 14, minHeight: 20, overflow: 'hidden', alignItems: 'center' },
+  lpFacts: { flexDirection: 'row', flexWrap: 'nowrap', columnGap: 14, overflow: 'hidden', alignItems: 'center' },
   lpFact: { flexShrink: 1 },
-  lpFoot: { marginTop: 'auto', borderTopWidth: 1, borderTopColor: colors.fieldLine, borderStyle: 'dashed', paddingTop: 8 },
+  lpFoot: { marginTop: 'auto', borderTopWidth: 1, borderTopColor: colors.fieldLine, borderStyle: 'dashed', paddingTop: 6 },
+  lpBadge: { width: 72, height: 34 },
 
   // MIDDLE: property info
   midCol: { minWidth: 0, paddingHorizontal: 10, paddingTop: 5, paddingBottom: 2, gap: 3 },
