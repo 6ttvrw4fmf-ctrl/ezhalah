@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Modal, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { Image } from 'expo-image';
 import { useI18n } from '@/i18n';
 import { cardShadow, colors, radius } from '@/theme/tokens';
 import { TAP44 } from '@/theme/palette';
 
 const MODELS = [
   { id: 'shaheen', ar: 'شاهين', en: 'Shaheen', version: '2.2',
+    mark: require('../../assets/models/shaheen.png'),
     descriptionAr: 'سرعة خاطفة ودقة متناهية للإجابات السريعة',
     descriptionEn: 'Lightning-fast precision for instant answers',
     // Why the name, and what it does (owner 2026-10-10, approved wording). Describes the model only —
@@ -14,11 +16,19 @@ const MODELS = [
     storyAr: 'الشاهين أسرع الطيور انقضاضاً، ومن هنا جاء اسمه. نموذجٌ يفهم طلبك من أول جملة، ويعرض لك الإعلانات المطابقة بسرعة ودقة.',
     storyEn: 'The Shaheen (peregrine falcon) is the fastest bird when it dives — that is where the name comes from. A model that understands your request from the first sentence and shows you the matching listings quickly and accurately.' },
   { id: 'hurr', ar: 'حُر', en: 'Hurr', version: '4.4',
+    mark: require('../../assets/models/hurr.png'),
     descriptionAr: 'قوة وتحمل فائق لأصعب المهام والمعالجات',
     descriptionEn: 'Unmatched endurance for your toughest challenges',
     storyAr: 'الحُرّ أقوى صقور الجزيرة العربية وأكثرها صبراً في الصيد، ومن هنا جاء اسمه. نموذجٌ يبحث بعمق في جميع المواقع، ويتعامل مع الطلبات المعقّدة متعددة الشروط.',
     storyEn: 'The Hurr (saker falcon) is the strongest falcon in the Arabian Peninsula and the most patient hunter — that is where the name comes from. A model that searches deeply across all websites and handles complex requests with many conditions.' },
 ] as const;
+
+// Decorative: the adjacent model name already labels each control for assistive technology.
+function ModelMark({ model, size }: { model: typeof MODELS[number]; size: number }) {
+  return <Image source={model.mark} contentFit="contain" accessible={false}
+    testID={`agent-model-mark-${model.id}`} tintColor={model.id === 'hurr' ? colors.muted : colors.primary}
+    style={{ width: size, height: size, flexShrink: 0 }} />;
+}
 
 // Display selection only until provider model IDs are approved. Never send marketing versions
 // as provider API IDs or imply a backend cutover from a UI label.
@@ -54,8 +64,9 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
         // Visually a 24px line; the 44px floor comes from TAP_TARGET_CSS via this marker.
         // @ts-expect-error web-only DOM props on the RNW host node
         dataSet={{ ...TAP44 }}
-        style={({ pressed }) => [styles.trigger, { opacity: disabled ? 0.45 : 1 }, pressed && styles.pressed]}>
-        {/* No ⌄ arrow (owner 2026-10-10: «for shaheen 2.2 don't include this drop menu thing») — the name alone. */}
+        style={({ pressed }) => [styles.trigger, { direction: 'ltr', flexDirection: arabic ? 'row-reverse' : 'row', opacity: disabled ? 0.45 : 1 }, pressed && styles.pressed]}>
+        {/* No ⌄ arrow (owner 2026-10-10: «for shaheen 2.2 don't include this drop menu thing») — keep the name and decorative mark compact. */}
+        <ModelMark model={model} size={16} />
         <Text style={styles.label} numberOfLines={1}>{arabic ? model.ar : model.en} {model.version}</Text>
       </Pressable>
       <Modal visible={!!anchor} transparent animationType="fade" onRequestClose={close}>
@@ -76,7 +87,10 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
                 {/* Name + its one-line sentence (owner 2026-10-10: «for the models include the sentence»); an
                     unavailable model says «قريباً» in words instead of an ⓘ glyph. */}
                 <View style={styles.copy}>
-                  <Text style={[styles.name, { textAlign: arabic ? 'right' : 'left' }, item.id === 'hurr' && styles.unavailableName]}>{arabic ? item.ar : item.en} {item.version}</Text>
+                  <View style={[styles.modelIdentity, { direction: 'ltr', flexDirection: arabic ? 'row-reverse' : 'row' }]}>
+                    <ModelMark model={item} size={22} />
+                    <Text style={[styles.name, { textAlign: arabic ? 'right' : 'left' }, item.id === 'hurr' && styles.unavailableName]}>{arabic ? item.ar : item.en} {item.version}</Text>
+                  </View>
                   <Text style={[styles.optionLine, { textAlign: arabic ? 'right' : 'left' }]}>{arabic ? item.descriptionAr : item.descriptionEn}</Text>
                 </View>
                 <View style={styles.check}>
@@ -114,7 +128,8 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
             </View>
             {MODELS.map((item) => (
               <View key={item.id} style={[styles.storyItem, item.id === 'hurr' && styles.unavailable]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={[styles.modelIdentity, { direction: 'ltr', flexDirection: arabic ? 'row-reverse' : 'row' }]}>
+                  <ModelMark model={item} size={30} />
                   <Text style={[styles.name, styles.storyName]}>{arabic ? item.ar : item.en} {item.version}</Text>
                   {item.id === 'hurr' ? <Text style={styles.soon}>{arabic ? 'قريباً' : 'Coming soon'}</Text> : null}
                 </View>
@@ -133,7 +148,7 @@ const styles = StyleSheet.create({
   // Centred under the chat box in both locales (owner 2026-10-09 round 3: «keep it below» — not under
   // the mic). Negative margins eat most of the column's 8px gaps: ~6px to the box, ~10px to the disclaimer.
   wrap: { alignSelf: 'center' },
-  trigger: { flexDirection: 'row', alignItems: 'center', flexShrink: 0, gap: 4, height: 24, paddingHorizontal: 6, borderRadius: radius.pill },
+  trigger: { flexDirection: 'row', alignItems: 'center', flexShrink: 0, gap: 5, height: 24, paddingHorizontal: 6, borderRadius: radius.pill },
   label: { color: colors.muted, fontSize: 12, lineHeight: 16, fontWeight: '500' },
   pressed: { backgroundColor: colors.tint },
   unavailable: { opacity: 0.55 },
@@ -146,6 +161,7 @@ const styles = StyleSheet.create({
   aboutCopy: { paddingHorizontal: 10, paddingVertical: 10 },
   rule: { height: 1, backgroundColor: colors.fieldLine, marginVertical: 4, marginHorizontal: 7 },
   copy: { flex: 1, minWidth: 0 },
+  modelIdentity: { alignItems: 'center', gap: 8 },
   name: { color: colors.ink, fontSize: 14, lineHeight: 21, fontWeight: '500' },
   description: { color: colors.muted, fontSize: 13, lineHeight: 21, marginTop: 3 },
   optionLine: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 1 },
