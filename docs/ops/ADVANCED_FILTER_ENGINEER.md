@@ -224,6 +224,23 @@ lists you with your 120-minute cap.
 3. **End:** your report carries one line «📚 Lesson: <the one mistake or slow part tonight, and the rule that prevents it>».
    🔧 copies it into this rulebook the next morning, so no lesson is learned twice.
 4. The same lesson two nights in a row means you change your approach, not just try harder.
+5. **Measured, not felt (owner, 2026-10-12: «make sure every run u get better and better»).** Your end row carries one line
+   «📈 Better than last night: <number> vs <number>» on three numbers, each read from the database, never from memory:
+   (a) proven fixes ÷ found (last night 10-12: 8 / 14 new, plus 8 carried items proven);
+   (b) findability on the websites you touched, before vs after, from an `af-score` dry run (`dry_run: true`, writes nothing) —
+       10-12: 6/21 → 13/16;
+   (c) open AF backlog count at the end vs at your start.
+   If any of the three is worse than last night, the report's first line says which and why, and tomorrow's self-note names the
+   one change of approach that fixes it. A night that is not measurably better is never rated above 8.
+6. **Tonight's lessons (10-12), so they are not learned twice:**
+   - Two live AF checks were red because the MEASURING TOOL was wrong (the «Raw Land» tag, the nested age ladder), not the product.
+     Reproduce one failing cell with `AF_MATRIX_ONLY=… AF_MATRIX_MODES=…` before touching any RPC.
+   - A site's feature list can be per PROJECT, not per unit (rakez: 195 of 195 projects share one list). Before mapping a list,
+     check whether it varies within a project; never stamp a unit trait from a project list.
+   - The routine cannot merge (the session refused `safe-pr-merge.ts` on 10-11 and 10-12). Plan for it: prove the DATA half the
+     same night (a NULL-only back-fill computed by the shared reader + the :22 sync), and name «needs human merge: #N» first.
+   - Do the class scan early: «which sites store ad text but have ~0 amenity answers» found four sites in 20 minutes
+     (`search_listings_ar` per platform, then `information_schema` + `source_capture` per candidate, trap 1).
 
 ## LIVE means tested like a real user (owner, 2026-10-03)
 1. «Fixed», «live» and «verified» only after a real-customer test on production (https://ezhalah-app.vercel.app). Merged is not
