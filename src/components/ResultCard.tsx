@@ -217,8 +217,10 @@ export function ResultCard({
     // popup-blocked); the buzzer is bumped second and is pure decoration.
     const fire = () => { onOpen(); setBurst((b) => b + 1); };
     const typeIcon = typeImg(listing.cleanType ?? '');
-    const CHIP_CAP = 5;
-    const shownFeats = unfolded ? visible : visible.slice(0, CHIP_CAP);
+    // PLAIN + SAME SIZE (owner 2026-10-11): every laptop card has the same fixed rows — one title line, one
+    // main line, ONE row of at most 3 chips (the Advanced-Filter picks come first) with a plain «+N».
+    const CHIP_CAP = 3;
+    const shownFeats = visible.slice(0, CHIP_CAP);
     const moreFeats = visible.length - shownFeats.length;
     return (
       <View testID={`card-listing-${listing.id}`} style={[card.wrap, card.lpWrap, { direction: wDir }]}>
@@ -267,7 +269,7 @@ export function ResultCard({
             <Text style={card.derivedTotalNote} numberOfLines={1}>{t('Calculated from price per m² × area — not published by the source')}</Text>
           ) : null}
 
-          <Text style={[card.title, card.lpTitle, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={2}>
+          <Text style={[card.title, card.lpTitle, { textAlign: txtAlign, writingDirection: wDir }]} numberOfLines={1}>
             {(place(arabicOrPlaceholder(t(listing.district), locale, LOCATION_UNRESOLVED_AR)) || place(cityAr) || LOCATION_UNRESOLVED_AR)}{listing.district ? `, ${place(cityAr) || LOCATION_UNRESOLVED_AR}` : ''}
           </Text>
 
@@ -291,7 +293,6 @@ export function ResultCard({
             {listing.beds > 0 ? <Stat icon="bed-outline" big={String(listing.beds)} small={t(listing.beds === 1 ? 'Bed' : 'Beds')} /> : null}
             {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} picked={bathPicked} /> : null}
             {listing.area > 0 ? <Stat icon="resize-outline" big={`${listing.area} ${tr('m²')}`} small={t('Area')} /> : null}
-            {listedClean ? <Stat icon="calendar-outline" big={t('Added')} small={listedClean} /> : null}
           </View>
 
           {evidence.length > 0 ? (
@@ -306,30 +307,20 @@ export function ResultCard({
             </View>
           ) : null}
 
-          {visible.length > 0 ? (
-            <View style={card.lpChips}>
-              {shownFeats.map((f) => {
-                const picked = pickedFeatures.has(f.key);
-                return (
-                  <View key={f.key} style={[card.lpChip, picked && card.lpChipPicked]} testID={picked ? `card-feature-picked-${f.key}` : undefined}>
-                    {picked ? <Ionicons name="checkmark" size={12} color={colors.onFill} /> : null}
-                    <Text style={[card.lpChipTx, picked && card.lpChipTxPicked]}>{t(f.label)}</Text>
-                  </View>
-                );
-              })}
-              {moreFeats > 0 ? (
-                <Pressable onPress={() => setUnfolded(true)} accessibilityRole="button" style={[card.lpChip, card.lpChipMore]}>
-                  <Text style={card.lpChipTx}>{t('See {n} more', { n: moreFeats })}</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          ) : hasAddlInfo ? null : (
-            <Text style={card.noFeat}>{t('No additional features listed')}</Text>
-          )}
-
-          {/* The source's own small facts (age, facade, street width, boundaries, plan/land number …) —
-              exactly the rows the source gave, nothing invented; absent when the source was silent. */}
-          <AdditionalInformationPanel listing={listing} t={t} locale={locale} />
+          <View style={card.lpChips}>
+            {shownFeats.map((f) => {
+              const picked = pickedFeatures.has(f.key);
+              return (
+                <View key={f.key} style={[card.lpChip, picked && card.lpChipPicked]} testID={picked ? `card-feature-picked-${f.key}` : undefined}>
+                  {picked ? <Ionicons name="checkmark" size={12} color={colors.onFill} /> : null}
+                  <Text style={[card.lpChipTx, picked && card.lpChipTxPicked]} numberOfLines={1}>{t(f.label)}</Text>
+                </View>
+              );
+            })}
+            {moreFeats > 0 ? (
+              <View style={[card.lpChip, card.lpChipMore]}><Text style={card.lpChipTx}>{`+${moreFeats}`}</Text></View>
+            ) : null}
+          </View>
 
           <View style={card.lpFoot}>
             <View style={card.hostHead}>
@@ -1448,16 +1439,16 @@ const card = StyleSheet.create({
   lpType: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   lpTypeIcon: { width: 22, height: 22 },
   lpTypeTx: { fontSize: 13, fontWeight: '700', color: colors.ink },
-  lpChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  lpChips: { flexDirection: 'row', flexWrap: 'nowrap', gap: 6, minHeight: 28, overflow: 'hidden' },
   lpChip: {
     flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.tint, borderRadius: 999,
-    borderWidth: 1, borderColor: colors.tintLine, paddingHorizontal: 10, paddingVertical: 4,
+    borderWidth: 1, borderColor: colors.tintLine, paddingHorizontal: 10, paddingVertical: 4, flexShrink: 1,
   },
   lpChipPicked: { backgroundColor: colors.selFill, borderColor: colors.selFill },
-  lpChipTx: { fontSize: 12, color: colors.primary, fontWeight: '500' },
+  lpChipTx: { fontSize: 12, color: colors.primary, fontWeight: '500', flexShrink: 1 },
   lpChipTxPicked: { color: colors.onFill, fontWeight: '700' },
   lpChipMore: { backgroundColor: colors.surface, borderStyle: 'dashed' },
-  lpFoot: { borderTopWidth: 1, borderTopColor: colors.fieldLine, borderStyle: 'dashed', paddingTop: 8, marginTop: 2 },
+  lpFoot: { marginTop: 'auto', borderTopWidth: 1, borderTopColor: colors.fieldLine, borderStyle: 'dashed', paddingTop: 8 },
 
   // MIDDLE: property info
   midCol: { minWidth: 0, paddingHorizontal: 10, paddingTop: 5, paddingBottom: 2, gap: 3 },

@@ -2,8 +2,9 @@
 //
 // What was decided: on the laptop (web, ≥1024px) a result card is a big photo on top, then the price with
 // a GOLD «اضغط هنا» button across from it and a short note under it («للتأكد من التوفر والتفاصيل»), the
-// location, the property TYPE (its own Filter icon) before the rooms/baths/size, the chips (the Advanced-
-// Filter picks lit first), the source's own small facts, and the source's logo. Cards sit 3 across (2
+// location, the property TYPE (its own Filter icon) before the rooms/baths/size, one row of chips (the
+// Advanced-Filter picks lit first), and the source's logo — PLAIN and the SAME SIZE on every card
+// (owner 2026-10-11, second pass: no long facts, no date, nothing wrapping). Cards sit 3 across (2
 // across when the ad pane is open). Pressing the photo OR the gold button opens the ad AND plays a
 // golden-buzzer flash + confetti. «Only the property card — nothing else, laptop only.»
 //
@@ -70,8 +71,10 @@ const rules = (card: string, buzz: string, grid: string, agent: string, i18n: st
       /pickedFeatures\.has\(f\.key\)/.test(lp) && /name="checkmark"/.test(lp) && /card-feature-picked-/.test(lp),
     'the «مطابق لطلبك» evidence strip is kept, never truncated':
       /card-af-evidence/.test(lp) && /evidence\.map/.test(lp),
-    'the source facts (additional info) and the source logo are kept':
-      /<AdditionalInformationPanel listing=\{listing\}/.test(lp) && /<SourceBadge source=\{listing\.source\} \/>/.test(lp),
+    'PLAIN + SAME SIZE: no additional-info panel, no date, one title line, one row of at most 3 chips; the logo is kept':
+      !/AdditionalInformationPanel/.test(lp) && !/listedClean/.test(lp) && /const CHIP_CAP = 3;/.test(lp)
+      && /\[card\.title, card\.lpTitle[^\n]*\n?[^\n]*numberOfLines=\{1\}/.test(lp)
+      && /lpChips: \{ flexDirection: 'row', flexWrap: 'nowrap'/.test(styles) && /<SourceBadge source=\{listing\.source\} \/>/.test(lp),
     'price truth is kept: derived-total equation, per-metre line, stay-length note, rating, RNPL':
       /derivedTotalEquation/.test(lp) && /pricePerMeter/.test(lp) && /isStayLengthPriced|stay \?/.test(lp) && /ratingVal/.test(lp) && /RnplBanner/.test(lp),
     'new styles and the buzzer use theme colours only (no raw hex)':
@@ -109,7 +112,11 @@ mustCatch('a Math.random confetti', 'the buzzer is decoration: reduced motion dr
 mustCatch('the type icon row gone from the main line', 'the TYPE (with its Filter icon) comes before the rooms in the main line',
   rules(CARD.replace('<View style={card.lpType}>', '<View style={card.lpTypeGone}>'), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('the AF picks no longer lit', 'the Advanced-Filter picks are the lit chips (✓), driven by pickedFeatures',
-  rules(CARD.replace('const picked = pickedFeatures.has(f.key);\n                return (\n                  <View key={f.key} style={[card.lpChip', 'const picked = false;\n                return (\n                  <View key={f.key} style={[card.lpChip'), BUZZ, GRID, AGENT, I18N, RESP));
+  rules(CARD.replace('const picked = pickedFeatures.has(f.key);\n              return (\n                <View key={f.key} style={[card.lpChip', 'const picked = false;\n              return (\n                <View key={f.key} style={[card.lpChip'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('the long facts panel creeping back (cards would differ in height)', 'PLAIN + SAME SIZE: no additional-info panel, no date, one title line, one row of at most 3 chips; the logo is kept',
+  rules(CARD.replace('          <View style={card.lpFoot}>', '          <AdditionalInformationPanel listing={listing} t={t} locale={locale} />\n          <View style={card.lpFoot}>'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('chips wrapping onto a second row', 'PLAIN + SAME SIZE: no additional-info panel, no date, one title line, one row of at most 3 chips; the logo is kept',
+  rules(CARD.replace("lpChips: { flexDirection: 'row', flexWrap: 'nowrap'", "lpChips: { flexDirection: 'row', flexWrap: 'wrap'"), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('a raw hex colour in the buzzer', 'new styles and the buzzer use theme colours only (no raw hex)',
   rules(CARD, BUZZ.replace('colors.goldLight, colors.goldDeep', "'#ffd966', colors.goldDeep"), GRID, AGENT, I18N, RESP));
 mustCatch('a 3-across grid that ignores the open ad pane', 'agent.tsx: 3 across only when nothing is open beside the results and the screen is wide',
