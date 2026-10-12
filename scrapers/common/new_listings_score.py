@@ -259,7 +259,33 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         page_states = page_states or any(
             0 <= j < len(lines) and re.match(r"^\s*[\d,.٬]+" + _UNIT_TAIL + r"$", lines[j])
             for i in kw_hits for j in (i - 1, i + 1))
+    if page_states and _inside_a_printed_range(stored, [lines[i] for i in kw_hits] if float(stored) < 1000 else lines):
+        return PAGE_SILENT
     return MISMATCH if page_states else PAGE_SILENT
+
+
+# A project page prints its units as a SPAN («101 - 259 م²»): a unit inside the span is not a statement about that
+# unit, so it is silence, never a mismatch; outside every span it still contradicts the page. wahadat 17399567
+# (2026-10-12): stored unit 9 (163 m², 690,000) — exactly unit 9 of the page's own payload — scored MISMATCH
+# against «101 - 259 م²» / «131 - 168 م²».
+RANGE = re.compile(r"([\d٠-٩][\d٠-٩,.٬]*)\s*[-–—]\s*([\d٠-٩][\d٠-٩,.٬]*)")
+
+
+def _num(x: str) -> float | None:
+    try:
+        return float(x.translate(_DIGITS).replace(",", "").replace("٬", ""))
+    except ValueError:
+        return None
+
+
+def _inside_a_printed_range(stored, lines: list[str]) -> bool:
+    v = float(stored)
+    for x in lines:
+        for m in RANGE.finditer(x):
+            lo, hi = _num(m.group(1)), _num(m.group(2))
+            if lo is not None and hi is not None and lo < hi and lo <= v <= hi:
+                return True
+    return False
 
 
 # «تأسيس مصعد» is a lift SHAFT, prepared for a lift that is not there: it states nothing about having one

@@ -38,7 +38,7 @@ STORED = ("platform,source_table,listing_id,region_ar,city_ar,district_ar,deal_a
 
 # Lines of visible text worth a human's eye: money, size, rooms, and the Advanced Filter words.
 EVIDENCE = re.compile(
-    r"(ريال|ر\.س|SAR|م²|م2|متر|غرف|غرفة|حمام|دورات? مياه|مفروش|مؤثث|مصعد|موقف|مطبخ|مكيف|تكييف|"
+    r"(ريال|ر\.س|SAR|م²|م2|متر|مساحة|غرف|غرفة|حمام|دورات? مياه|مفروش|مؤثث|مصعد|موقف|مطبخ|مكيف|تكييف|"
     r"غرفة (?:خادمة|سائق)|مدخل خاص|عمر العقار|سنوي|شهري|للبيع|للإيجار|حي\s)")
 TAG = re.compile(r"<[^>]+>")
 DROP = re.compile(r"<(script|style|noscript|svg)[^>]*>.*?</\1>", re.S | re.I)
