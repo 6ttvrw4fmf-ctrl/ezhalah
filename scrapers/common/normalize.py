@@ -987,7 +987,10 @@ _CLAUSE_BREAK_RE = re.compile(r"[\n\r،,.;؛|•▫▪+]+|\s-\s")
 # A negator counts only as its own word: `_norm_ar` folds «صغيرة» to «صغيره», whose letters ARE «غير»,
 # so «بركة صغيرة موقف خاص» read parking=False (moftah ids 30274/30247, 2026-09-20). It may abut the
 # token («unfurnished», «غيرمؤثث»), so the right edge is a non-word char OR the end of the window.
-_NEGATOR_RES = tuple(re.compile(rf"(?<!\w){re.escape(n.strip())}(?=\W|$)") for n in _NEGATORS)
+# An Arabic negator also stands as its own word with the conjunction «و» attached: «فيلا … ، وغير مؤثثة» is
+# «and NOT furnished», and without the optional «و» it read furnished = YES (dealapp 16155289, 🔬 2026-10-12).
+_NEGATOR_RES = tuple(re.compile(rf"(?<!\w){'و?' if re.match(r'[ء-ي]', n) else ''}{re.escape(n.strip())}(?=\W|$)")
+                     for n in _NEGATORS)
 
 
 def _amenities_in_clause(raw: str) -> dict[str, bool]:
