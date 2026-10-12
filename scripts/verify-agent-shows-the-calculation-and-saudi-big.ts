@@ -55,6 +55,12 @@ mustCatch('the explicit-size guard being dropped (it would overwrite «فوق ٧
 mustCatch('the threshold being applied when the type has none', !wired(wire.replace('if (bigMin) {', 'if (true) {')));
 mustCatch('the word being read from anything but the user text', !wired(wire.replace('_areaTexts.some(bigWanted)', 'true')));
 
+const orderWire = windowBetween(agentSrc, 'const ordering = vagueOrdering(userText);', 'return q;', 'agent.ts');
+const keepsDiversity = (src: string) => /!\(ordering === 'area_desc' && q\.areaNote === 'big'\)/.test(src) && /if \(ordering && !q\.sort/.test(src);
+check('a «big» that became a Saudi threshold is NOT also sorted largest-first (no outlier at #1, match-first + diversify stay in charge)', keepsDiversity(orderWire));
+mustCatch('the largest-first sort coming back on top of the threshold', !keepsDiversity(orderWire.replace("&& !(ordering === 'area_desc' && q.areaNote === 'big')", '')));
+check('«big» for a type with NO threshold (chalet) still only orders largest-first', bigAreaMin('Chalet') === null);
+
 // ── 4. the calculation line ──────────────────────────────────────────────────────────────────────────────────
 check('«KWD 5,000,000» → «5,000,000 دينار كويتي × 12.2 = ر.س 61,000,000»',
   currencyCalcLine('KWD 5,000,000', 61_000_000, 'ar', 'ر.س') === '5,000,000 دينار كويتي × 12.2 = ر.س 61,000,000');
@@ -74,6 +80,7 @@ const summaries = await liftSymbols(join(ROOT, 'src/data/search.ts'), [
 import { currencyCalcLine } from ${JSON.stringify(join(ROOT, 'src/lib/currencyCalc.ts'))};
 import { bigAreaMin } from ${JSON.stringify(join(ROOT, 'src/data/bigSize.ts'))};
 import { detailFor } from ${JSON.stringify(join(ROOT, 'src/data/taxonomy.ts'))};
+import { AMENITY_LABEL } from ${JSON.stringify(join(ROOT, 'src/lib/afEvidence.ts'))};
 type Locale = 'ar' | 'en'; type SearchQuery = any;
 const getLocale = () => 'ar'; const translate = (loc: string, key: string, v?: any) => v ? key.replace(/\\{(\\w+)\\}/g, (_: string, n: string) => String(v[n])) : key;
 const tWord = (k: string) => k; const tPlace = (k: string) => k; const tPriceTab = (k: string) => k; const tDetailOption = (k: string) => k;
@@ -90,6 +97,9 @@ check('the summary shows «ميزانيتك: 5,000,000 دينار كويتي × 
   s1.includes('Your budget: 5,000,000 دينار كويتي × 12.2 = SAR 61,000,000'), s1);
 check('…and still shows the Budget line the search uses', /Budget: SAR 61,000,000/.test(s1), s1);
 check('English summary shows «KWD 5,000,000 × 12.2 = SAR 61,000,000»', summary(base, 'en').includes('Your budget: KWD 5,000,000 × 12.2 = SAR 61,000,000'));
+const withMaid = summary({ ...base, amenities: ['maid_room', 'elevator'] }, 'ar');
+check('the summary names the features the search requires: «Amenities: Maid room، Elevator»', withMaid.includes('Amenities: Maid room، Elevator'), withMaid);
+check('…and names nothing when there are none or when a token is unknown', !summary(base, 'ar').includes('Amenities') && !summary({ ...base, amenities: ['bogus'] }, 'ar').includes('Amenities'));
 const monthly = { location: 'الخبر', deal: 'Rent', type: 'Apartment', priceInput: '60000', priceIsAnnual: true, rentPeriod: 'monthly' };
 const sm = summary(monthly, 'ar');
 check('a MONTHLY rent the agent multiplied by 12 shows both: «Monthly Rent: SAR 5,000/month» and «Annual Equivalent: SAR 60,000/year»',
@@ -135,6 +145,10 @@ const edgeRate = (code: string) => Number(new RegExp(`\\b${code.toLowerCase()}: 
 const jodRate = Number(/\[\/دينار\\s\*أردني\|دينار\\s\*اردني\/, ([\d.]+)\]/.exec(edge)?.[1]);
 const bad = Object.entries(CURRENCY_RATE_BY_CODE).filter(([c, r]) => (c === 'JOD' ? jodRate : edgeRate(c)) !== r).map(([c, r]) => `${c} ${r}≠${c === 'JOD' ? jodRate : edgeRate(c)}`);
 check('the summary\'s rates equal the rates the search converts with (edge CURRENCY_RATES / AR_CURRENCY)', bad.length === 0, bad.join(', '));
+const sizeNote = windowBetween(edge, 'const isSizeDetail =', 'insertBeforeTrailingEmoji(replyOut', 'index.ts');
+const digitsAware = (src: string) => /!toWesternDigits\(replyOut\)\.replace\(\/,\/g, ""\)\.includes\(detailStr\)/.test(src);
+check('the size note is not repeated when the reply already says the size in Arabic digits («١٠٠٠ متر»)', digitsAware(sizeNote));
+mustCatch('the size note comparing raw text (it repeats «(1000 م²)» after «١٠٠٠ متر»)', !digitsAware(sizeNote.replace('toWesternDigits(replyOut).replace(/,/g, "")', 'replyOut')));
 const hint = windowBetween(edge, 'const JSON_SHAPE_HINT = `', '`;', 'index.ts');
 const noMoney = (src: string) => /Never write a price, a budget or a currency conversion in the reply/.test(src);
 check('the reply format forbids a price, a budget or a conversion in the reply (the model once converted at another rate)', noMoney(hint));

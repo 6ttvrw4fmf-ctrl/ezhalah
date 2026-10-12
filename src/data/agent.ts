@@ -775,7 +775,10 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   //
   // Only when the user has not chosen a sort themselves — an explicit control always outranks a word.
   const ordering = vagueOrdering(userText);
-  if (ordering && !q.sort) q.sort = ordering;
+  // …EXCEPT «big» that already became a Saudi size threshold (src/data/bigSize.ts): the threshold IS what the word means now.
+  // Largest-first on top of it only surfaced source outliers (a «villa» of 337,650 m² as #1, twice) and pushed the permanent
+  // rule — match first, then diversify the platforms — aside (owner 2026-10-11).
+  if (ordering && !q.sort && !(ordering === 'area_desc' && q.areaNote === 'big')) q.sort = ordering;
 
   return q;
 }

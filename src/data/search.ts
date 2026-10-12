@@ -14,6 +14,7 @@ import { t, tWord, tPlace, tPriceTab, tDetailOption, getLocale, translate, type 
 import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { currencyCalcLine } from '@/lib/currencyCalc';
 import { bigAreaMin } from './bigSize';
+import { AMENITY_LABEL } from '@/lib/afEvidence';
 import { combinedBudgetParts } from '@/lib/combinedBudget';
 import { withAdvancedLines, type AfFacet } from '@/lib/afSummary';
 import { bedroomTokensPure } from '@/lib/roomBedrooms';
@@ -693,6 +694,10 @@ export function searchSummary(q: SearchQuery, loc: Locale = getLocale()): string
     else if (/^([1-4]|5\+?)$/.test(q.detail)) lines.push(`• ${t('Bedrooms')}: ${q.detail}`);
     else lines.push(`• ${t('Size')}: ${q.detail} ${t('m²')}`);
   }
+  // The features the search REALLY requires (certified tokens only — an uncertified one never reaches q.amenities), so the
+  // user sees «غرفة خادمة» in the restatement of «بيت مع غرفة للخادمة», not only as a tag on each card (owner 2026-10-11).
+  const wantedAmenities = (q.amenities ?? []).filter((a) => a in AMENITY_LABEL);
+  if (wantedAmenities.length) lines.push(`• ${t('Amenities')}: ${wantedAmenities.map((a) => t(AMENITY_LABEL[a])).join('، ')}`);
   return `${t('Search Summary')}\n${lines.join('\n')}`;
 }
 

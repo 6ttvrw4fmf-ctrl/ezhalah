@@ -1509,7 +1509,9 @@ Deno.serve(async (req: Request) => {
       const detailStr = typeof out.detail === "string" ? out.detail.trim() : "";
       const isSizeDetail = detailStr !== "" && !/^([1-4]|5\+?)$/.test(detailStr);
       let replyOut = lead(out.reply);
-      if (isSizeDetail && !replyOut.includes(detailStr)) {
+      // «١٠٠٠ متر» in the reply IS the 1000 in `detail` — compare digits the same way, or the note repeats the size
+      // («… أرض ١٠٠٠ متر … 🏡 (1000 م²)», found live 2026-10-11).
+      if (isSizeDetail && !toWesternDigits(replyOut).replace(/,/g, "").includes(detailStr)) {
         replyOut = insertBeforeTrailingEmoji(replyOut, locale === "en" ? `(${detailStr} m²)` : `(${detailStr} م²)`);
       }
 
