@@ -146,14 +146,34 @@ def _collect_candidates(client, limit: int) -> list[dict]:
     sampled render the same listing-less page as bogus id 999999999. The run re-read the same
     unresolvable rows daily and reported "560 of 600 UNKNOWN". last_liveness_probe_at moves on
     every verdict, so a probed row goes to the back for a full cycle."""
-    rows = (_execute(client.table(TABLE)
-                     .select("id, ad_number, listing_url, missing_count, last_verified_alive_at, "
-                             "last_liveness_probe_at")
+    cols = ("id, ad_number, listing_url, missing_count, last_verified_alive_at, "
+            "last_liveness_probe_at")
+    rows = (_execute(client.table(TABLE).select(cols)
                      .eq("active", True)
                      .order("last_liveness_probe_at", desc=False, nullsfirst=True)
                      .limit(max(limit * 4, limit) if limit else 20000),
                      what="dealapp candidates").data or [])
+    # STRUCK ROWS ARE NEVER STARVED (2026-10-12). The crawl's prune re-reads every at-grace row
+    # each night, holds it UNKNOWN and stamps last_liveness_probe_at, so a struck row is always
+    # "just looked at" and never falls into this oldest-first window of a ~21k rotation: 9 shown
+    # rows at 3-5 strikes (served_after_source_gone:dealapp) had no sweep reading for days, and
+    # this sweep is the only reader whose fresh render can decide a dealapp page. Struck rows head
+    # the list; the kill rule (decide(), 3 strikes, trust gate, held-alive) is unchanged.
+    struck = (_execute(client.table(TABLE).select(cols)
+                       .eq("active", True).gt("missing_count", 0)
+                       .order("last_liveness_probe_at", desc=False, nullsfirst=True)
+                       .limit(limit or 20000),
+                       what="dealapp struck candidates").data or [])
+    ids = {r["id"] for r in struck}
+    rows = struck + [r for r in rows if r["id"] not in ids]
     return [r for r in rows if (r.get("listing_url") or "").strip()]
+
+
+def _probe_order(r: dict, sitemap) -> tuple:
+    """Struck rows first (see _collect_candidates), then never-probed, then sitemap-present."""
+    return (not (r.get("missing_count") or 0),
+            r.get("last_liveness_probe_at") is not None,
+            -sitemap_candidate_rank(_adid(r["listing_url"]), sitemap) if sitemap else 0)
 
 
 BOGUS_ADID = "999999999"
@@ -301,9 +321,7 @@ def main() -> int:
         # cut the same never-probed rows off the end of every window: they keep a NULL
         # last_liveness_probe_at, so they head every window and are dropped again — 567 active rows
         # had never been opened once (backlog #84, unchanged 10-05 → 10-06).
-        cands.sort(key=lambda r: (r.get("last_liveness_probe_at") is not None,
-                                  -sitemap_candidate_rank(_adid(r["listing_url"]), sitemap)
-                                  if sitemap else 0))
+        cands.sort(key=lambda r: _probe_order(r, sitemap))
         cands = cands[:args.limit] if args.limit else cands
 
         # Every write goes through db._execute: a dropped HTTP/2 connection (ConnectionTerminated)
