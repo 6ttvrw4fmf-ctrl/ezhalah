@@ -31,7 +31,11 @@ async function call(body) {
   for (let i = 0; i < 4; i++) {
     try {
       const r = await fetch(URL_, { method: 'POST', signal: AbortSignal.timeout(50000), headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ locale: 'ar', loggedIn: false, order: false, history: [], ...body }) });
-      return await r.json();
+      const d = await r.json();
+      // THE AI SPEND BREAKER (public.ai_spend_gate, $0.50/hour): once it opens EVERY reply is empty and the real users are on the
+      // plain-search fallback until the owner resets it. Stop at once and say so, instead of reporting hundreds of «mistakes».
+      if (r.status === 503 && d?.error === 'ai spend guard') { console.error(`\nSTOP: the AI spend breaker is open (${d.reason}). Not a bug in the agent. Wait for the hour to pass, tell the owner, run fewer messages per hour (every test run shares the same $0.50/hour).`); process.exit(3); }
+      return d;
     } catch { await new Promise((s) => setTimeout(s, 1500 * (i + 1))); }
   }
   return { kind: 'error', reply: '', query: {} };
