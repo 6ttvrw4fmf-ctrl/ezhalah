@@ -56,7 +56,7 @@ end of every run. Written at the end of the 2026-10-12 run.
 
 **Minute 30–110, Haraj live build if the gate passed — template = arsh, 2026-09-27 (read bodies LIVE):** migrations one at a time
 on a quiet database, mirrored byte-exact in the same PR; registry in three places (migration, `sql/mirrors/liveness_registry.json`,
-`scrapers/common/liveness_policies.py`); `scrapers/haraj/run.py` (tag page + hourly sitemap + slug filter → classify → parse →
+`scrapers/common/liveness_policies.py`); a NEW crawler module, run.py inside the scrapers haraj folder (tag page + hourly sitemap + slug filter → classify → parse →
 `redact_pii` → upsert; `begin_run` first; drop a post with no city); `scrapers/common/db.py` table map; one line in
 `small-sources-sync.yml`; `src/data/loaderPlatforms.ts` PLATFORM_META + SOURCE_TOKENS; deploy via `deploy-frontend.yml`; 5 cards
 proven like a customer. Cannot finish by minute 110 → stop HIDDEN (no registry row) and write which steps are done.
