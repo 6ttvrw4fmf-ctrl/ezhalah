@@ -438,6 +438,20 @@ const enc1 = (t: string) => encodeURIComponent(`"${t}"`);
     qs.includes(`and(type_ar.in.(${enc1('عمارة')}),source_table.like.*${RES_SUFFIX})`), qs);
 }
 
+{
+  // RAW LAND IS A TAG (🔬 2026-10-12). The «Raw Land» token «أرض خام» is stored by no row as type_ar; production
+  // matches it on unit_subtype_ar. Run 38215288912 went red on every Raw Land cell (rpc=11 oracle=0 in جدة)
+  // because this translator emitted only `type_ar=in.(أرض خام)`. Both the single-scope and the two-arm path.
+  const raw = { p_deal: 'بيع', p_category: 'Commercial', p_cities: ['جدة'], p_types: ['أرض خام'] };
+  const single = buildOracleQS(raw, { typeMacros: MACROS }).qs;
+  const twoArm = buildOracleQS({ ...raw, p_tables: ['aldarim_commercial_listings'],
+    p_tables2: ['aqar_residential_listings'], p_types2: ['أرض خام'] }, { typeMacros: MACROS }).qs;
+  const tag = `unit_subtype_ar.eq.${enc1('أرض خام')}`;
+  check('the Raw Land token reaches the unit_subtype_ar TAG on the single-scope path', single.includes(tag), single);
+  check('…and on BOTH arms of a two-arm scope', twoArm.split(tag).length - 1 === 2, twoArm);
+  mustCatch('the pre-fix translation: «أرض خام» read as a stored type only', !`type_ar=in.(${enc1('أرض خام')})`.includes(tag));
+}
+
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }
 if (failures) { console.error(`\n✗ ${failures} check(s) FAILED\n`); process.exit(1); }
 console.log('\n✓ the independent-oracle translator is logically sound\n');

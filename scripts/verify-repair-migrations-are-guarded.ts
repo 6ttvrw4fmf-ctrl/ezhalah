@@ -48,6 +48,26 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 🔬 AF engineer, 2026-10-12. Two NULL-only back-fills of Advanced Filter answers from each ad's OWN stored
+  // text, computed by the same shared reader the scrapers now call on every crawl (yes-or-nothing prose for
+  // sites with no structured field), so a re-crawl writes the same value and a new row cannot re-open the gap.
+  '20261012093213_dealapp_residential_furnished_from_own_words.sql':
+    'NULL-only back-fill of dealapp residential furnished from its stored description (a strict subset of ' +
+    'normalize.amenities_from_lines, zero disagreements over 22,594 rows); scrapers/dealapp/run.py af_answers() ' +
+    'now writes it on every crawl, pinned with mutations by scrapers/common/tests/test_dealapp_af_answers.py, and ' +
+    'the migration ends in a check block that executes the view against the raw table',
+  '20261012100330_sirdab_remal_amenities_from_own_words.sql':
+    'NULL-only, true-only back-fill of sirdab / remal amenities from their stored description via ' +
+    'normalize.prose_amenities_yes; both parsers now write the same on every crawl, pinned with mutations by ' +
+    'scrapers/common/tests/test_prose_only_sites_read_amenities.py',
+  '20261012094158_eaqartabuk_feature_checklist_to_amenities.sql':
+    'NULL-only, true-only back-fill of eaqartabuk amenities from each row\'s own STRUCTURED features list ' +
+    '(additional_info.features); scrapers/eaqartabuk/run.py feature_answers() now writes the same on every crawl, ' +
+    'pinned with a mutation by scrapers/common/tests/test_eaqartabuk_feature_checklist.py',
+  '20261012093639_alkhaas_rawasidark_amenities_from_own_words.sql':
+    'NULL-only, true-only back-fill of alkhaas / rawasidark amenities from their stored description via ' +
+    'normalize.prose_amenities_yes; both parsers now write the same on every crawl, pinned with mutations by ' +
+    'scrapers/common/tests/test_prose_only_sites_read_amenities.py',
   // ⚡ Scraping engineer, 2026-10-10. Three NULL-only back-fills (each writes only where the column is NULL,
   // never a rewrite of a known value) from the row's OWN stored source field, which the scraper now
   // writes on every crawl — so a new row cannot re-open the gap, and each migration ends in a check block.

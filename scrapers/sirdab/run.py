@@ -192,6 +192,12 @@ def map_ad(a: dict) -> tuple[Optional[tuple[dict, str]], str]:
     for flag, col in _UTILITIES.items():
         if p.get(flag) is True:
             row[col] = True
+    # The API has no kitchen / parking / AC / entrance field (its property object: ramps, licences, has_water,
+    # has_sewage, has_electricity, security_cameras …), so the ad's own words are the only statement of them:
+    # YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2). 115 of 566 active ads named one and all stored NULL,
+    # so the Advanced Filter never found them (🔬 2026-10-12). A structured utility above always wins.
+    for col, val in normalize.prose_amenities_yes(desc).items():
+        row.setdefault(col, val)
     stored = row.get("price_total") if deal == "Buy" else row.get("price_annual")
     stored = None if stored is db.AUTHORITATIVE_NULL else stored
     row["price_evidence"] = normalize.price_evidence(

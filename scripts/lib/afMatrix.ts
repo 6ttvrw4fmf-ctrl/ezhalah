@@ -194,6 +194,9 @@ export type FieldMeaning = {
   paramsBoth: (a: Record<string, unknown>, b: Record<string, unknown>) => Record<string, unknown>;
   /** fields whose options + unknown PARTITION the scope (options are disjoint and exhaustive over known) */
   partition: boolean;
+  /** a NESTED «up to» ladder (each option contains the one before it): the options are not disjoint, so the
+   *  scope is the WIDEST rung + the rows past the top rung (`beyond`, a PostgREST filter) + unknown */
+  nested?: { beyond: string };
   /** the count columns the card's "did not mention" caption must derive from (null = no caption) */
   unknownCols: string[] | null;
   totalCol: string;
@@ -338,7 +341,12 @@ export function fieldMeaning(field: string): FieldMeaning | null {
     case 'furnished': return { ...single('cnt_total_base', ['cnt_total_base', 'cnt_furnished', 'cnt_unfurnished'], true), combine: 'or',
       restBoth: () => 'furnished=not.is.null',
       paramsBoth: (a, b) => ({ p_furnished_in: [a.p_furnished, b.p_furnished].sort((x, y) => Number(y) - Number(x)) }) };
+    // A NESTED LADDER since the owner's 2026-10-05 rule (src/data/advancedFilters.ts AGE_LADDER: جديد ⊂ حتى سنتين ⊂
+    // حتى ٥ ⊂ حتى ٩). Summing its options counted one flat up to four times: af-live-truth-check run 38215288912
+    // read «70441 + 3318 vs 23048» on Riyadh apartments/Buy while the RPC's own disjoint buckets summed exactly
+    // (16043 + 1072 + 1256 + 541 + 818 + 3317 = 23047 = search total). A check bug, not a product bug.
     case 'property_age': return { ...single('cnt_total', ['cnt_unknown'], true), combine: 'or', restBoth: orBoth,
+      nested: { beyond: 'property_age=gte.10' },
       paramsBoth: (a, b) => ({ p_age_buckets: Object.keys(AGE).filter((k) => sameParams(AGE[k].params, a) || sameParams(AGE[k].params, b)) }) };
     // «😔 on every question» (owner 2026-10-03): these read a DB IS NULL column (migration 20261003184909),
     // so «did not mention» means exactly that column — never a subtraction over the rungs.
