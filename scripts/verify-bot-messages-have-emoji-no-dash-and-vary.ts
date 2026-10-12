@@ -22,7 +22,7 @@ const check = (name: string, ok: boolean, detail = '') => { console.log(`  ${ok 
 const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
 console.log('\nEvery message: an emoji at the end, no dash, never the same one twice\n');
 
-const DASH = /[—–]/, EMOJI_END = /\p{Extended_Pictographic}️?$/u;
+const DASH = /[-‐-―−]/, EMOJI_END = /\p{Extended_Pictographic}️?$/u;
 const done = (t: string) => EMOJI_END.test(t) && !DASH.test(t);
 
 // ── 1. the last gate, EXECUTED ────────────────────────────────────────────────────────────────────────────────
@@ -31,7 +31,9 @@ const CASES: Array<[string, string]> = [
   ['Got it — searching now.', 'Got it, searching now 🏡'],
   ['أنا إزهله — أدور لك عقارات. قلّي وش تدور عليه؟', 'أنا إزهله، أدور لك عقارات. قلّي وش تدور عليه؟ 📍'],
   ['شقة 100–300 م² في الخبر', 'شقة 100 إلى 300 م² في الخبر 🏡'],
-  ['villa 100-300 m2 near Al-Malqa 🏡', 'villa 100 to 300 m2 near Al-Malqa 🏡'],
+  ['villa 100-300 m2 near Al-Malqa 🏡', 'villa 100 to 300 m2 near Al Malqa 🏡'],
+  ['4-bedroom villas for sale 🏡', '4 bedroom villas for sale 🏡'],
+  ['أبحث لك عن فيلا بمساحة 🏡 (300-400 م²)', 'أبحث لك عن فيلا بمساحة (300 إلى 400 م²) 🏡'],
   ['On it - searching 🏡', 'On it, searching 🏡'],
   ['حاضر — 🏡', 'حاضر 🏡'],
   ['أبحث لك عن شقة –', 'أبحث لك عن شقة 🏡'],
@@ -39,11 +41,11 @@ const CASES: Array<[string, string]> = [
   ['Which city? 📍', 'Which city? 📍'],
 ];
 const wrong = CASES.filter(([i, o]) => bm.botMessage(i) !== o);
-check('a dash is removed (a range becomes words, a spaced dash a comma), an emoji is added, a hyphen inside a word stays',
+check('a dash is removed (a range becomes words, a spaced dash a comma), an emoji is added, even a hyphen inside a word becomes a space',
   wrong.length === 0, wrong.map(([i]) => `${i} → ${bm.botMessage(i)}`).join(' | '));
 check('it is idempotent (a second pass changes nothing)', CASES.every(([i]) => bm.botMessage(bm.botMessage(i)) === bm.botMessage(i)));
 check('whatever goes in, the result has no dash and ends with an emoji',
-  ['—', '- -', 'a — b — c', '— — —', 'x–y', '', 'نص عادي بدون شيء', 'A. B. C.'].every((t) => { const r = bm.botMessage(t); return t === '' ? r === '' : done(r); }));
+  ['—', '- -', 'a — b — c', '— — —', 'x–y', 'a-b', 'a‑b', 'x − y', '', 'نص عادي بدون شيء', 'A. B. C.'].every((t) => { const r = bm.botMessage(t); return t === '' ? r === '' : done(r); }));
 check('the edge copy of the gate is byte-identical to the app copy', read('src/lib/botMessage.ts') === read('supabase/functions/agent/botMessage.ts'));
 const gate = read('src/lib/botMessage.ts');
 const stripsEmDash = (src: string) => /\[–—\]/.test(src) && /ensureEmoji\(noDashes\(text\)\)/.test(src);
@@ -57,9 +59,9 @@ const jsonWired = (src: string) => /reply: botMessage\(\(body as \{ reply: strin
 check('every edge reply leaves through json(), which runs the last gate on `reply`', jsonWired(jsonFn));
 mustCatch('json() no longer running the gate', !jsonWired(jsonFn.replace('botMessage(', '(')));
 const hint = windowBetween(edge, 'const JSON_SHAPE_HINT = `', '`;', 'index.ts');
-const ruleTold = (src: string) => /Never use a dash in the reply: no «—», no «–» and no « - »/.test(src);
+const ruleTold = (src: string) => /Never use a dash or a hyphen in the reply: no «—», no «–», no « - » and no «-» inside words/.test(src);
 check('the model is also TOLD: no dash in the reply', ruleTold(hint));
-mustCatch('the no-dash line being deleted from the prompt', !ruleTold(hint.replace('Never use a dash in the reply', '')));
+mustCatch('the no-dash line being deleted from the prompt', !ruleTold(hint.replace('Never use a dash or a hyphen in the reply', '')));
 const agent = read('src/app/agent.tsx');
 const bubbleWired = (src: string) => /const txt = botMessage\(m\.text\);/.test(src) && /const introText = botMessage\(introTextRaw\);/.test(src);
 check('every agent bubble and the results line pass the gate in the chat', bubbleWired(agent));
@@ -78,7 +80,7 @@ const POOLS: Record<string, readonly string[]> = {
 };
 const small = Object.entries(POOLS).filter(([, p]) => p.length < 3 || new Set(p).size !== p.length);
 check(`all ${Object.keys(POOLS).length} message pools have at least 3 DIFFERENT phrasings`, small.length === 0, small.map(([n]) => n).join(', '));
-check('no phrasing contains a dash', Object.values(POOLS).every((p) => p.every((t) => !DASH.test(t) && !/ - /.test(t))));
+check('no phrasing contains a dash or a hyphen', Object.values(POOLS).every((p) => p.every((t) => !DASH.test(t))));
 check('every phrasing, once its emoji is added, ends with one and keeps no dash',
   Object.values(POOLS).every((p) => p.every((t) => done(bm.botMessage(t.replace(/\{\w+\}/g, 'الرياض'))))));
 check('the two copies of the pools (app and edge function) are the same', JSON.stringify(Object.keys(q)) === JSON.stringify(Object.keys(edgeQ))
