@@ -124,9 +124,11 @@ const drift = Object.entries(T.desc).filter(([raw, clean]) => normalizeType(raw,
   || !(CLEAN_TO_TYPE_AR[clean] ?? []).includes(raw));
 check('every seller-word type the scraper stores maps to the SAME clean type in the app and is searched under it',
   drift.length === 0, JSON.stringify(drift));
-check('«أرض» (Other Land) is its own clean type, offered in the land group «الأراضي»',
+// A real clean type but NO filter box (owner 2026-10-11: «not searchable by property type, but by other filters») —
+// the box half of this is verify-other-land-is-not-a-box.ts.
+check('«أرض» (Other Land) is its own clean type, offered in no land box',
   normalizeType(T.other, 'res').clean === 'Other Land' && (CLEAN_TO_TYPE_AR['Other Land'] ?? []).includes(T.other)
-  && HIERARCHY.Commercial.some((g) => g.types.includes('Other Land')));
+  && !HIERARCHY.Commercial.some((g) => g.types.includes('Other Land')));
 const usageBoxes = ['Residential Land', 'Commercial Land', 'Industrial Land', 'Agriculture Plot'];
 check('…and never under أرض سكنية / تجارية / صناعية / زراعية',
   usageBoxes.every((c) => !(CLEAN_TO_TYPE_AR[c] ?? []).includes(T.other) && !(CLEAN_TO_TYPE_AR[c] ?? []).includes('Land')),
