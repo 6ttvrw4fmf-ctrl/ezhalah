@@ -19,6 +19,7 @@ import { partitionRequestedAmenities, cohortAllows } from '@/lib/afCohorts';
 import { certifyAfOnMergedState as certifyAf, type CertifiableBackendQuery } from '@/lib/afCertify';
 import { mergeConversationState, rescuedFields, describeKnownState } from '@/lib/conversationState';
 import { landmarkHint, ensureLandmarks } from './landmarks';
+import { bigWanted, bigAreaMin } from './bigSize';
 import { normalizeType, isCleanType, CLEAN_MACRO } from './propertyTypes';
 
 // askCount (owner-approved consolidation, 2026-08-30): the SERVER's own running clarifying-question
@@ -657,6 +658,14 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   if ((_area.areaMin != null || _area.areaMax != null) && q.detail
       && !/^([1-4]|5\+?)$/.test(q.detail) && /\d/.test(q.detail)) {
     q.detail = null;
+  }
+
+  // «كبير» / "big" (owner 2026-10-11): read on the SAUDI scale (src/data/bigSize.ts) — an area minimum for the chosen
+  // type, never a bedroom count. Only from the user's OWN words, only when no explicit size was given, and only for a
+  // type that has a measured threshold; otherwise the word stays what it was: a largest-first ordering (vagueOrdering).
+  if (q.areaMin == null && q.areaMax == null && _areaTexts.some(bigWanted)) {
+    const bigMin = bigAreaMin(q.type);
+    if (bigMin) { q.areaMin = String(bigMin); q.areaNote = 'big'; }
   }
 
   q.priceInput = String(b.price ?? '').replace(/[^\d]/g, '');

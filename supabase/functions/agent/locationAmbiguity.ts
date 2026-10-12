@@ -1,4 +1,4 @@
-import { cityExampleAr, PIN } from "./questionExamples.ts";
+import { nearQuestionAr, geoQuestionAr, PIN } from "./questionExamples.ts";
 // ─────────────────────────────────────────────────────────────────────────────
 // locationAmbiguity — the three LOST cases restored (round-2 fix, "LOST LOCATION-AMBIGUITY CASES").
 //
@@ -62,9 +62,9 @@ const GEOGRAPHY_CUE_RE = /بحر|شاطئ|ساحل|كورنيش|واجهة\s*ب�
  *
  * @param text this turn's raw user message (location has already been resolved to "" by the caller)
  */
-export function emptyLocationQuestion(text: string): string | null {
+export function emptyLocationQuestion(text: string, avoid = ""): string | null {
   const near = text.match(NEAR_PHRASE_RE);
-  if (near) return `في أي مدينة تبحث عن عقار ${near[1].trim()}؟ ${cityExampleAr()} ${PIN}`;
-  if (GEOGRAPHY_CUE_RE.test(text)) return `تقصد في أي مدينة أو منطقة؟ ${cityExampleAr()} ${PIN}`;
+  if (near) return nearQuestionAr(near[1].trim(), text, avoid);
+  if (GEOGRAPHY_CUE_RE.test(text)) return geoQuestionAr(text, avoid);
   return null;
 }

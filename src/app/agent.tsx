@@ -99,7 +99,7 @@ import { useI18n, detectLocale, getLocale, translate, t as tr, type Locale, LOCA
 import { listingLocationAr, listingPrice } from '@/lib/listingDisplay';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
-import { cityExampleAr, PIN } from '@/data/questionExamples';
+import { cityQuestionAr, nearQuestionAr, geoQuestionAr, wholeCityQuestionText, wholeCityQuestionSubject as wholeCitySubject, PIN } from '@/data/questionExamples';
 import AdvancedQuestionCard, { AdvancedQuestionLoading, AdvancedIntroCard, type ShellPills } from '@/components/AdvancedQuestionCard';
 import { probeVerdict, mayOpenInterview, mayAssertNothingToNarrow, shouldRetryProbes, offersNarrowing } from '@/lib/afProbe';
 import { ADVANCED_QUESTIONS, SCOPE_QUESTIONS, scopeQuestionFor, resolveScopeOptionsInBackground, INTERVIEW_STOP_AT, MIN_USEFUL_QUESTIONS_TO_SHOW, AF_ROUND_MAX_QUESTIONS, offersMeaningfulNarrowing, eligibleQuestions, minOptionsFor, liveResultCount, liveResultCountOrUnknown, primeLiveResultCount, rankQuestions, type AdvancedOption, type AdvancedQuestion, type AdvancedQuestionResult, type RankedQuestion } from '@/data/advancedFilters';
@@ -265,12 +265,8 @@ const arLabel = (s: string) => arabicOrPlaceholder(s, 'ar', LOCATION_UNRESOLVED_
 // re-parsed that generic noun as المدينة المنورة and searched the wrong region entirely.
 // scripts/verify-agent-whole-city-answer.ts round-trips these two so the template cannot drift out
 // from under the parser.
-export const wholeCityQuestion = (cityAr: string) => `تقصد مدينة ${cityAr} كاملة، أو حي معيّن؟ ${PIN}`;
-export function wholeCityQuestionSubject(text: string | null | undefined): string | null {
-  const m = /^تقصد مدينة (.+) كاملة، أو حي معيّن؟(?:\s*\p{Extended_Pictographic}\uFE0F?)?$/u.exec((text ?? '').trim());
-  const city = m?.[1]?.trim();
-  return city ? city : null;
-}
+export const wholeCityQuestion = (cityAr: string) => wholeCityQuestionText(cityAr);
+export const wholeCityQuestionSubject = (text: string | null | undefined): string | null => wholeCitySubject(text);
 
 // The region-AND-city TWIN NAME behind the «مدينة X ولا منطقة X كاملة؟» question (and behind the
 // whole-region question for the same names), so send() knows which name the user is answering about on
@@ -303,8 +299,8 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
     const prox = (q.proximity ?? [])
       .map((p) => (p.text || `${p.phrase} ${p.name || p.categoryAr}`).trim())
       .filter(Boolean);
-    if (prox.length) return `في أي مدينة تبحث عن عقار ${prox.join(' و')}؟ ${cityExampleAr()} ${PIN}`;
-    return `في أي مدينة تبحث؟ ${cityExampleAr()} ${PIN}`;
+    if (prox.length) return nearQuestionAr(prox.join(' و'), userText);
+    return cityQuestionAr(userText);
   }
   // The user asked for the whole CITY or REGION — honour it, don't ask to narrow. Kingdom-wide is
   // deliberately NOT in this test any more: «الرياض كاملة» is a supported scope, «كل المملكة» is not.
@@ -335,7 +331,7 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
   // Geography cue (sea/mountain/desert) with NO city → ask the city; never auto-pick a default.
   // (audit #12 / Q39 case A.)
   if (lm.kind === 'geography' && lm.needsCity) {
-    return `تقصد في أي مدينة أو منطقة؟ ${cityExampleAr()} ${PIN}`;
+    return geoQuestionAr(userText);
   }
   // 1) A bare district shared by several cities → ask WHICH CITY (cities with listings first).
   if (lm.kind === 'district' && lm.ambiguous && lm.cities && lm.cities.length > 1) {
