@@ -63,6 +63,11 @@ const CASES: Array<[string, { areaMin?: number; areaMax?: number }]> = [
   ['ارض فوق ٢ مليون', {}],
   ['فيلا تحت ٣ ملايين', {}],
   ['فيلا اقل من 400 م', { areaMax: 400 }],
+  // the user's own ways of saying «at most» / «at least» (found by the live UI battery: «ما تزيد عن ١٢٠ متر» showed «المساحة: 120 م²», an exact size)
+  ['شقة في الرياض ما تزيد عن ١٢٠ متر', { areaMax: 120 }], ['شقة ما يزيد عن 150 م', { areaMax: 150 }], ['فيلا لا تتجاوز ٤٠٠ متر', { areaMax: 400 }], ['ارض بحد اقصى ٨٠٠ متر', { areaMax: 800 }],
+  ['شقة لا تزيد عن ١٠٠ متر', { areaMax: 100 }], ['house not more than 300 sqm', { areaMax: 300 }], ['ما تتعدى ٢٠٠ متر', { areaMax: 200 }],
+  ['فيلا لا تقل عن ٣٠٠ متر', { areaMin: 300 }], ['ارض ما تقل عن ٦٠٠ متر', { areaMin: 600 }], ['شقة على الاقل ١٥٠ متر', { areaMin: 150 }], ['villa at least 400 sqm', { areaMin: 400 }],
+  ['فيلا ما تزيد عن ٣ مليون', {}], ['فيلا لا تتجاوز ٥ مليون', {}], ['ارض لا تقل عن ٢ مليون', {}],
   ['ارض ٦٠٠ م وفوق', { areaMin: 600 }],
   ['شقة من ١٠٠ الى ٢٠٠ م', { areaMin: 100, areaMax: 200 }],
   ['شقة 3 غرف في الرياض', {}],

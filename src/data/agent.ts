@@ -567,13 +567,13 @@ export function parseAreaConstraint(text: string): { areaMin?: number; areaMax?:
        || s.match(new RegExp(`${N}\\s*(?:-|–|—)\\s*${N}\\s*${U}`, 'i'));
   if (m) { const a = _n(m[1]), b = _n(m[2]); if (a > 0 && b > 0) return { areaMin: Math.min(a, b), areaMax: Math.max(a, b) }; }
   // MIN: «فوق/أكثر من/أكبر من/… N متر»  OR  «N متر فأكثر/وفوق/فما فوق/أو أكثر/+»
-  const MIN = '(?:فوق|اكثر\\s?من|أكثر\\s?من|اكبر\\s?من|أكبر\\s?من|ما\\s?فوق|not\\s?less\\s?than|at\\s?least|over|above|more\\s?than|min(?:imum)?|starting\\s?(?:from|at))';
+  const MIN = '(?:فوق|اكثر\\s?من|أكثر\\s?من|اكبر\\s?من|أكبر\\s?من|ما\\s?فوق|لا\\s?(?:يقل|تقل)\\s?عن|ما\\s?(?:ت|ي)قل\\s?عن|على\\s?(?:الاقل|الأقل)|بحد\\s?(?:ادنى|أدنى)|الحد\\s?(?:الادنى|الأدنى)|no\\s?(?:smaller|less)\\s?than|not\\s?less\\s?than|at\\s?least|over|above|(?<!not\\s)(?<!no\\s)more\\s?than|min(?:imum)?|starting\\s?(?:from|at))';
   m = s.match(new RegExp(`${MIN}\\s*${N}\\s*${U}`, 'i'))
    || s.match(new RegExp(`${N}\\s*${U}\\s*(?:فأكثر|فاكثر|و\\s?فوق|وفوق|فما\\s?فوق|أو\\s?أكثر|او\\s?اكثر|\\+|and\\s?(?:up|above|over)|or\\s?more|and\\s?more)`, 'i'))
    || s.match(new RegExp(`${N}\\s*${U}\\s*\\+`, 'i'));
   if (m) { const a = _n(m[1]); if (a > 0) return { areaMin: a }; }
   // MAX: «تحت/أقل من/أصغر من/لا يتجاوز/… N متر»
-  const MAX = '(?:تحت|اقل\\s?من|أقل\\s?من|اصغر\\s?من|أصغر\\s?من|حد\\s?اقصى|حد\\s?أقصى|لا\\s?يتجاوز|up\\s?to|under|below|less\\s?than|no\\s?more\\s?than|max(?:imum)?|at\\s?most)';
+  const MAX = '(?:تحت|اقل\\s?من|أقل\\s?من|اصغر\\s?من|أصغر\\s?من|حد\\s?اقصى|حد\\s?أقصى|بحد\\s?(?:اقصى|أقصى)|الحد\\s?(?:الاقصى|الأقصى)|لا\\s?(?:يتجاوز|تتجاوز|يزيد|تزيد|يتعدى|تتعدى)(?:\\s?عن)?|ما\\s?(?:ت|ي)(?:زيد|تجاوز|تعدى|تعدي)(?:\\s?عن)?|up\\s?to|under|below|less\\s?than|no\\s?more\\s?than|not\\s?more\\s?than|no\\s?(?:bigger|larger)\\s?than|max(?:imum)?|at\\s?most)';
   m = s.match(new RegExp(`${MAX}\\s*${N}\\s*${U}`, 'i'));
   if (m) { const a = _n(m[1]); if (a > 0) return { areaMax: a }; }
   return {};
