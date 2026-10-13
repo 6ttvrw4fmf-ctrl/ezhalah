@@ -307,12 +307,28 @@ def _cmp_bool(stored, lines: list[str], kw: str) -> str:
     return MATCH if bool(stored) == page_yes else MISMATCH
 
 
+# Hofuf's ضاحية هجر sub-districts are written three ways for ONE place: the catalog's «الضاحية الرابع», and
+# the sites' «حي الرابع بضاحية هجر» / «ضاحية هجر(الحي الرابع)» (backlog #153; the owner's naming decision
+# #319). arkaan 17543658 / 17543664 / 17543667 / 17544564 (2026-10-13 re-score) were served «الضاحية الرابع
+# / الخامس / الحادي عشر» for exactly those pages and scored 4 district mismatches. Only the SAME ordinal is
+# the same place: «الرابع بضاحية هجر» never matches «الضاحية الخامس».
+_HAJER_ORDINAL = r"(الاول|الثاني عشر|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|الحادي عشر)"
+_HAJER_FORMS = (re.compile(r"(?:الحي\s+)?" + _HAJER_ORDINAL + r"\s+بضاحيه\s+هجر"),
+                re.compile(r"ضاحيه\s+هجر\s*\(?\s*الحي\s+" + _HAJER_ORDINAL))
+
+
+def _hajer_aliases(whole: str) -> str:
+    return " ".join("الضاحيه " + m.group(1) for rx in _HAJER_FORMS for m in rx.finditer(whole))
+
+
 def _cmp_district(stored, whole: str) -> str:
     page_names_one = bool(DISTRICT_ON_PAGE.search(whole))
     if not stored:
         return WE_MISS if page_names_one else PAGE_SILENT
     d = norm_district(stored)
     if d and d in whole:            # covers «حي X», bare «X», and a glued «X <city>» suffix
+        return MATCH
+    if d and re.search(r"(?<!\S)" + re.escape(d) + r"(?!\S)", _hajer_aliases(whole)):
         return MATCH
     return MISMATCH if page_names_one else PAGE_SILENT
 

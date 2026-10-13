@@ -449,3 +449,14 @@ def test_area_the_page_labels_in_its_own_payload_is_the_page_value():
     assert compare_listing({"area_m2": 300}, pe)["area"] == MISMATCH
     # without the page's own label, the prose alone is what the page says
     assert compare_listing({"area_m2": 760}, page_evidence(body.replace("area_m2", "x")))["area"] == MISMATCH
+
+
+@pytest.mark.parametrize("stored,text,want", [
+    ("الضاحية الرابع", "أرض سكنية للبيع في حي الرابع بضاحية هجر | 437.5 م²", MATCH),
+    ("الضاحية الحادي عشر", "أرض سكنية للبيع في حي الحادي عشر بضاحية هجر", MATCH),
+    ("الضاحية الخامس", "ضاحية هجر(الحي الخامس)", MATCH),
+    ("الضاحية الخامس", "أرض سكنية للبيع في حي الرابع بضاحية هجر", MISMATCH),
+])
+def test_hajer_suburb_spellings_are_one_place(stored, text, want):
+    # arkaan 17543658 … 17544564 (2026-10-13): served the catalog's «الضاحية X» for «حي X بضاحية هجر».
+    assert compare_listing({"district_ar": stored}, page(text, title=text))["district"] == want
