@@ -100,14 +100,35 @@ def clean(fragment: Optional[str]) -> str:
     return re.sub(r"\s+", " ", ihtml.unescape(re.sub(r"<[^>]+>", " ", fragment or ""))).strip()
 
 
+def fetch_json_page(s: cc.Session, url: str, tries: int = 3) -> tuple[Any, list]:
+    """(response, its JSON list). 2026-10-13: REST page 1 answered 200 with a body that was not JSON
+    (the probe one second earlier was served), and r.json() crashed the job before begin_run, so the
+    night left no scrape_runs row. A 200 that is not a JSON list is retried, then raised with what
+    it was: a failed fetch, never an empty catalogue."""
+    for attempt in range(tries):
+        r = fetch(s, url)
+        if r.status_code != 200:
+            return r, []
+        try:
+            got = r.json()
+        except ValueError:
+            got = None
+        if isinstance(got, list):
+            return r, got
+        if attempt < tries - 1:
+            time.sleep(3 + attempt * 5)
+    head = (r.text or "")[:80].replace("\n", " ")
+    raise RuntimeError(f"REST answered 200 but not a JSON list {tries}x for {url} "
+                       f"({len(r.content or b'')} bytes, starts {head!r})")
+
+
 def walk_posts(s: cc.Session) -> tuple[list[dict], bool]:
     """Every Arabic property post, and whether the REST walk reached its end."""
     posts: list[dict] = []
     for page in range(1, 50):
-        r = fetch(s, f"{API}?per_page=100&page={page}")
+        r, got = fetch_json_page(s, f"{API}?per_page=100&page={page}")
         if r.status_code != 200:
             return posts, r.status_code == 400 and page > 1        # 400 = past the last page
-        got = r.json()
         posts += [p for p in got if "/en/" not in p.get("link", "")]
         if len(got) < 100:
             return posts, True
@@ -278,17 +299,19 @@ def main() -> int:
     # residential proxy (`proxy: true` → WASALT_PROXY_URL), and keep the session that is served.
     s, tried = retry_smarter_session(f"{API}?per_page=1")
     print(f"{SOURCE}: probe {' '.join(tried)}", flush=True)
-    posts, walked_all = walk_posts(s)
-    terms = type_terms(s)
-    print(f"{SOURCE}: {len(posts)} Arabic property post(s) (REST walk complete={walked_all}); "
-          f"{len(terms)} carry a type term", flush=True)
-
+    # begin_run BEFORE the walk: a crawl that dies while listing posts must still leave a failed
+    # scrape_runs row with its reason (10-13 crashed here and left none; backlog 172/489).
     run_id = None if dry else db.begin_run(SLUG)
+    posts: list[dict] = []
     res: list[dict] = []
     com: list[dict] = []
     skipped: dict[str, int] = {}
     unreadable = 0
     try:
+        posts, walked_all = walk_posts(s)
+        terms = type_terms(s)
+        print(f"{SOURCE}: {len(posts)} Arabic property post(s) (REST walk complete={walked_all}); "
+              f"{len(terms)} carry a type term", flush=True)
         for post in posts:
             r = fetch(s, post["link"])
             if r.status_code != 200:

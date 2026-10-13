@@ -32,51 +32,40 @@ safety rules (deploy lock, `safe-pr-merge.ts`, source truth, migration rules) st
 ## 🎯 NEXT RUN ORDERS — written by ⚡ for itself (owner, 2026-10-12: «give yourself instructions so you do a good job on the next run»)
 These win over THE PLAN's timeline below; THE PLAN's rules still hold. Replace this block at the end of every run.
 
-> **Owner, 2026-10-12, after a run rated 8/10 (3 of 8 bugs fixed and proven):** «tomorrow I need you to do a better run. Your
-> job is to get better on a daily basis, and I want everything fixed and good. This is your job.»
-> So the bar for 2026-10-13 is: **fix rate ≥ 6 of every 10 found, every number proven like a customer, rating ≥ 9, no
-> over-claim.** A night that ends with a fixable bug unfixed is not finished.
+> **Owner, 2026-10-12:** «Your job is to get better on a daily basis, and I want everything fixed and good.» Bar for every
+> night: fix rate ≥ 6 of 10 found, every number proven like a customer, rating ≥ 9, no over-claim.
 
-**What cost 10-12 its rating (do not repeat):**
-- ~25 min lost waiting: two blocking 10-min polls with nothing else running, and a stale shadow run blocking the real one in
-  the same concurrency group. Rule: never block on a wait longer than 3 min; start the next item first. If a run in the same
-  concurrency group is stale, cancel it at once.
-- Branch push + manual dispatch of `haraj-shadow.yml` at the same moment: the push already starts a shadow (defaults
-  `skip_hours=18 files=6`), so one of the two gets cancelled or runs on the wrong window. Push OR dispatch, never both.
-- Window 3 overlapped window 2 by one file: compute the skip from the NEWEST file name the last run printed, not from the clock.
-- The `:end` row over-claimed (5 of 8) and could not be edited (the Supabase tool times out on UPDATE). Rule: write the
-  `:end` row ONCE, last, with `issues_fixed` = the count of tonight's `:proof` rows with `push_ok = true` (query it).
+**What 10-13 learned (do not repeat):**
+- **One push per PR cycle.** Each push cancelled `npm test` mid-run (3 cycles lost, ~25 min). Batch commits locally, run
+  `PATH=<dir with python3 -> /usr/bin/python3>:$PATH npm run test:all` (646 checks, ~11 min; /usr/local/bin/python3 lacks
+  curl_cffi), push once.
+- **A new `scripts/verify-*.ts` needs an executable `mutation(...)` proof** (verify-new-barriers-are-mutation-proven).
+- **Pick rotation listings a customer CAN find:** a rental with `rent_period_ar` NULL is never in a rent search (owner rule),
+  so filter `deal_ar='بيع' or rent_period_ar is not null`. That «false FAIL» found the akariyoun bug, though: when a site has
+  100% NULL periods, re-read one page around «سنو» before calling it source silence.
+- **The Haraj shadow is in concurrency group `haraj-shadow`:** a cancelled run blocks the dispatch until it clears.
 
-**Minute 0–10 (DB clock `select now()`):**
-1. PR #6870 (gate-3 business/goods titles) should be merged; if not, merge it on green with `safe-pr-merge.ts`.
-2. Haraj: write the careful rule for the 2 open gate-3 shapes, verbatim tests, re-classify all three 10-12 windows (only those
-   verdicts may move), push ONCE (that push runs the shadow). Gate window: files from **10-12-07 KSA** onwards, never used.
-   Shadow verdict ids: request 11190353094 («محلات ايجار … في حي الملقا او حطين او العارض», body «يكون في …»),
-   two-district catalogue 11190351267 («شقق للبيع بضاحية الجبيل الحي الاول والحي الثاني»).
-3. `ops_engineer_alert_queue`, Sentry, followup rows, `ops_engineer_backlog` (open).
+**Minute 0–15 (DB clock):** merge state of PR #6933 (merge on green with `safe-pr-merge.ts` if still open), then the proofs below.
 
-**Minute 10–35, prove what 10-12 left pending (each a `:proof` row):**
-- Early-warning moved to 07:45 UTC: backlog items opened 10-13 by `scraper_early_warning` must name only sites whose nightly
-  job really failed or never ran (check each against `scrape_runs`). Zero false items → close 447.
-- 54 Wasalt lands registered 10-12 in `ops_price_source_verified`: production_ready after the :22 sync, one found by the anon
-  replay of `location_search_candidates_ar` (city + district + type, no price range). The 3 left: re-read 12915861 and
-  13746442; route 16532216 (dead at source) to ♻️.
-- shmoualshmal, muhaysini, wasalt-enrich: one line each from tonight's runs.
+**Proofs owed from 10-13 (each a `:proof` row, all need #6933 merged + the 04:22 nightly + the :22 sync):**
+- akariyoun: `select rent_period_ar, count(*) from search_listings_ar where platform='akariyoun' and deal_ar='إيجار' and
+  production_ready group by 1` → سنوي ≈ 190; customer journey on 17376257 (Riyadh إشبيلية شقة, rent سنوي, 87,000) PASS.
+- abralosol: tonight's run ok with ~2,800 rows (route line in the log); ryadah: a scrape_runs row exists (ok, 18 rows).
+- gomenassat 15709861 (offer 818): area_m2 = 1652; card shows 1,652 م².
+- wasalt enrich_ar: pending count (rows_seen of `wasalt_enrich_ar_residential`) below 25,750 and falling.
+- silent_partial_success: my queue's 17-18 standing P1s resolved by the 06:59 10-13 sweep or later; only real ones left.
+- dealapp: the 10-13 catch-up crawl (run dispatched 05:41 UTC) saw ~19k; if the 10-14 02:33 nightly again hits the
+  100-min budget on all 12 shards, raise shards (verify-dealapp-crawl-budget) the same night.
 
-**Minute 35–100, fix (in this order, while the Haraj shadow runs):**
-1. Haraj gate result → PASS: start the live build (arsh template, migrations one at a time on a quiet DB, registry in three
-   places, crawler module, `small-sources-sync.yml`, PLATFORM_META + SOURCE_TOKENS, deploy, 5 customer cards). FAIL: fix the
-   shape, push once, gate the next untouched window.
-2. `mon_detect_silent_partial_success` sliced-crawler class (backlog, 26 standing P1s): baseline per slice signature (wasalt
-   page slice, aqar slice, gathern city shard) or per crawl session total. Must still catch the wasalt-enum collapse (96 vs
-   105k): prove both directions in the migration's check block. Mirror byte-exact, barrier, PR.
-3. Anything the nightly crawl broke (read the failed jobs of the 04:22 run, not only `scrape_runs`).
+**Then, in order:** Haraj gate #4 result (run 38354212930, files 10-12 ≈13–18 KSA, untouched): hand-check every «offer»;
+100 clean → live build (THE PLAN item); any miss → fix the shape, re-classify every window, gate on 10-12 19+ KSA.
+Then backlog 494/496/478 leftovers (aqar farms area, aqarmonthly 13905878, wasalt 13746442 list-vs-detail price).
 
-**Minute 100–110:** proof rows, `:end` row (counts by query), report, rulebook orders for 10-14. Never stop before minute 110.
-
-**Proof timing facts:** search sync :22 (commits ~:24–:26); Wasalt rich attrs 06:46 UTC; muhaysini nightly ends ~07:10 UTC;
-`scraper-early-warning` 07:45 UTC. Haraj sitemap file names are KSA hours (UTC+3). USED Haraj windows (never gate on them):
-10-10 01–03, 10-10 ~07–12, 10-10 13 → 10-11 05, 10-11 08 → 20, 10-11 23 → 10-12 06.
+**Proof timing facts:** search sync :22 (commits ~:24–:26); detector sweep :59 (~3.5 min); Wasalt rich attrs 06:46 UTC;
+muhaysini nightly ends ~07:10 UTC; `scraper-early-warning` 07:45 UTC. USED Haraj windows (never gate on them):
+10-10 01–03, 10-10 ~07–12, 10-10 13 → 10-11 05, 10-11 08 → 20, 10-11 20 → 10-12 11, plus whatever gate #4 reads.
+- **A cancelled check run on a PR head blocks `safe-pr-merge` forever** (the API returns it next to the newer run). If you
+  must cancel a push-triggered shadow, land one more commit that does not touch `scrapers/haraj/**` so the head is clean.
 
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «wire them so the next run turns out perfect … at the point where I don't need to check and agree on

@@ -390,7 +390,8 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
                   f"to override.", flush=True)
             return {"ok": 0, "empty": 0, "fail": 0, "aborted": pending, "pending_before": pending}
         print(f"⚠ {pending} un-fetched rows (> {max_pending}): arrivals mode — no-city rows first, then "
-              f"the {fresh.count} scraped in the last {ARRIVALS_WINDOW_H}h; the old backlog waits.",
+              f"the {fresh.count} scraped in the last {ARRIVALS_WINDOW_H}h, then the old backlog drains "
+              f"newest first in the run's remaining budget.",
               flush=True)
 
     def _base():
@@ -416,6 +417,15 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
             more = (_base().gte("scraped_at", arrivals_since).order("id", desc=True)
                     .limit(limit).execute().data or [])
             rows += [r for r in more if r["id"] not in seen][: limit - len(rows)]
+            seen = {r["id"] for r in rows}
+        # DRAIN, never wait forever (owner 2026-10-10 «drain in batches under the cap»; 2026-10-13
+        # Scraping Engineer). With only no-city rows and the 48 h window, the old backlog never moved:
+        # 25,750 rows pending on 10-12 and 10-13 while each run fetched 0-1 rows. The run's unused
+        # budget now takes the old backlog, newest first, still bounded by `limit` — the same spend
+        # bound a run under the cap already has, so a flag reset still costs at most `limit` a run.
+        if len(rows) < limit:
+            older = (_base().order("id", desc=True).limit(limit).execute().data or [])
+            rows += [r for r in older if r["id"] not in seen][: limit - len(rows)]
     print(f"── {table} shard {shard}/{shards}: {len(rows)} un-fetched rows (cap {limit})", flush=True)
     stats = {"ok": 0, "empty": 0, "fail": 0, "skipped": 0}
     lock = threading.Lock()

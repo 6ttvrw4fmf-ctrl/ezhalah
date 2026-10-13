@@ -275,6 +275,18 @@ PPM_RE = re.compile(
     r"سعر\s*المتر\s*للأرض\s*</span>\s*:\s*([\d٠-٩][\d٠-٩.,]*)\s*(مليار|مليون|ألف|الف)?")
 
 
+# «<h6 class="prt-price-fix text-warning"><span class="badge badge-warning">طريقة الدفع</span> : سنوي</h6>»
+PAYMENT_RE = re.compile(r"طريقة\s*الدفع\s*</span>\s*:\s*([^<]{1,30})</h6>")
+_PAYMENT_PERIOD = {"سنوي": "annual", "شهري": "monthly"}
+
+
+def parse_payment_period(page_html: str) -> Optional[str]:
+    """'annual' / 'monthly' from the listing's «طريقة الدفع» field, exactly one of those two words.
+    «نصف سنوي», «ربع سنوي», «دفعات» or any other value has no bucket here → None (unknown)."""
+    m = PAYMENT_RE.search(page_html or "")
+    return _PAYMENT_PERIOD.get(re.sub(r"\s+", " ", html.unescape(m.group(1))).strip()) if m else None
+
+
 def parse_price_exact(page_html: str) -> Optional[int]:
     """The EXACT price, when the page publishes one.
 
@@ -535,7 +547,19 @@ def map_listing(slug: str, page_html: str) -> tuple[Optional[dict[str, Any]], st
         **parse_services(page_html),
     }
     if is_rent:
-        row["price_annual"] = price
+        # The listing's own «طريقة الدفع : سنوي» field (2026-10-13, backlog 493): every akariyoun rental
+        # prints it, and none of the 191 stored a period, so no rent search ever found one. The fleet
+        # rule decides: the ad's own text tying a period to THIS price wins, a figure <= 10,000 is
+        # monthly, then a title naming one period, and only then the site's field.
+        pay = parse_payment_period(page_html)
+        if price is not None:
+            desc = _DESC_PANEL.search(page_html or "")
+            ad_text = normalize.html_block_lines(desc.group(1)) if desc else ""
+            period, row["price_annual"] = normalize.rent_period_from_ad(price, ad_text, pay, title)
+        else:
+            period, row["price_annual"] = pay, None
+        if period:
+            row["rent_period"] = period
     else:
         row["price_total"] = price
     if ppm is not None:

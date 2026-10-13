@@ -165,3 +165,24 @@ def test_shadow_2026_10_12_window2_brokers_are_not_offers(t, b):
 ])
 def test_shadow_2026_10_12_gate3_business_and_goods_are_not_offers(t, b):
     assert classify(t, b)[0] != "offer"
+
+
+# Gate #3 (run 38211044586), the two shapes left open on 10-12, verbatim: a seeker naming the
+# neighbourhoods they would accept, and a stock list across two neighbourhoods.
+@pytest.mark.parametrize("t,b,want", [
+    ("محلات ايجار على شارع تجاري في حي الملقا او حطين او العارض", "يكون في الربع ‏ الأحياء هاذي", "request"),
+    ("محلات ايجار على شارع تجاري في حي الملقا او حطين او العارض", "", "request"),
+    ("شقق للبيع بضاحية الجبيل الحي الاول والحي الثاني", "", "other"),
+    ("شقق للبيع في حي النرجس وحي الياسمين", "", "other"),
+])
+def test_gate3_open_shapes(t, b, want):
+    assert classify(t, b)[0] == want
+
+
+@pytest.mark.parametrize("t,b", [
+    ("شقة للبيع في حي الياسمين", "شقة 3 غرف"),
+    ("فيلا للبيع حي الملقا", "الواجهة شمالية او شرقية حسب الاختيار"),     # «او» in the body, not a choice of districts
+    ("ارض للبيع في الحي الاول بضاحية الجبيل", "المساحة 600"),             # one neighbourhood
+])
+def test_gate3_one_unit_one_neighbourhood_stays_an_offer(t, b):
+    assert classify(t, b)[0] == "offer"
