@@ -24,6 +24,7 @@ const T: Array<[string, Situation | null]> = [
   ['تنصحني أشتري ولا أأجر؟', 'advice'], ['is this a good time to buy?', 'advice'], ['which is better Aqar or Wasalt', 'advice'], ['هل هذي صفقة حلوة؟', 'advice'], ['قارن لي بين الملقا والياسمين', 'advice'], ['وش أفضل حي', 'advice'],
   ['أبي أبيع شقتي', 'sell'], ['I want to sell my apartment', 'sell'], ['ابغى انشر اعلان', 'sell'],
   ['https://sa.aqar.fm/ar/123456', 'link'], ['رقم الاعلان 7200909248', 'link'], ['www.aqar.fm/xyz', 'link'], ['ad number 7200909248', 'link'], ['0555123456', 'phone'], ['+966555123456', 'phone'], ['966 55 512 3456', 'phone'],
+  ['أنا تعبان ومضايق', 'sad'], ['حزين', 'sad'], ['مالي خلق شي', 'sad'], ["I'm feeling really sad", 'sad'], ['I feel lonely', 'sad'], ['depressed', 'sad'],
   ['ابي شقة في دبي', 'outside'], ['apartment in Cairo', 'outside'], ['villa in London', 'outside'],
   ['شقة ٣ غرف في الرياض ٦٠ ألف', null], ['ابي شقة في الرياض', null], ['شقة للإيجار في جدة', null], ['villa for sale in Jeddah', null], ['مرحبا', null], ['شكراً', null], ['وش تقدر تسوي', null],
   ['ابي شقة قريبة من جامعة الملك سعود', null], ['ابغى فيلا بحي النرجس', null], ['شقة عائلية', null], ['', null],
@@ -41,6 +42,11 @@ check('60 different messages get ≥ 3 different versions of every reply, and ne
   kinds.every((k) => new Set(seeds.map((s) => situationReplyText(k, false, s))).size >= 3 && seeds.every((s) => { const a = situationReplyText(k, false, s); return situationReplyText(k, false, s, a) !== a; })));
 check('the crisis reply names real help (emergency 911 and the Ministry of Health line 937) in both languages and never offers a search',
   [...SITUATION_POOLS.danger.ar, ...SITUATION_POOLS.danger.en].every((r) => /911/.test(r) && /937/.test(r) && !/(?:ابحث|أبحث|أدور|search|listing|إعلان|عقار)/i.test(r)));
+const SEARCHY = /(?:ابحث|أبحث|أدور|ادور|search|listing|إعلان|عقار|مثلاً|for example)/i;
+const sadCalm = (pool: readonly string[]) => pool.every((r) => /🤍$/.test(r) && !SEARCHY.test(r));
+check('a sad message gets a calm word ending in 🤍, never a search pitch or an example search (live 2026-10-13: «أنا تعبان ومضايق» got the introduction)',
+  sadCalm([...SITUATION_POOLS.sad.ar, ...SITUATION_POOLS.sad.en]));
+mustCatch('a sad reply that pitches a search', !sadCalm([...SITUATION_POOLS.sad.ar, 'سلامتك، وش تبي أدور لك؟ 🏡']));
 check('no reply recommends, ranks or says «best» (only the refusal «ما أقدر أنصح» may name the verb)', replies.every((r) => !/(?:أفضل|احسن|أنصح|ننصح|\bbest\b|\bI recommend\b|good deal)/i.test(r.replace('ما أقدر أنصح', ''))));
 check('the nationality / religion reply refuses the filter and offers the supported ones (city, price, rooms)', [...SITUATION_POOLS.protected.ar, ...SITUATION_POOLS.protected.en].every((r) => /(?:المدينة|city)/i.test(r)));
 

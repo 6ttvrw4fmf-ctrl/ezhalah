@@ -62,7 +62,7 @@ import { wantsGuidedInterview, hasUsableLocation, hasEnoughToSearch, established
 import { buildTurnDecision } from "./turnWiring.ts";
 // The three location-ambiguity cases restored from the deleted client-side locationClarification()
 // (round 2 fix, "lost location-ambiguity cases") — see its own header.
-import { plainRegionQuestion, emptyLocationQuestion } from "./locationAmbiguity.ts";
+import { plainRegionQuestion, emptyLocationQuestion, severalCitiesQuestion, residentialCommercialQuestion, proximityNotMeasuredText } from "./locationAmbiguity.ts";
 import { cityQuestionAr, cityQuestionEn, noIntentReplyText, searchLineText, districtNotInCityQuestion, listCities, anyCityText, ANY_CITY_RE, socialKind, socialReplyText, unsearchableText, searchingNowText, twinRegionQuestion, twinDistrictQuestion } from "./questionExamples.ts";
 import { botMessage } from "./botMessage.ts";
 import { situationKind, situationReplyText } from "./situations.ts";
@@ -659,7 +659,9 @@ const AR_CURRENCY: Array<[RegExp, number]> = [
 // (the same defect as the region_or_city Arabic-boundary bug elsewhere in this file) — a plain
 // /\bمن\b/ would silently never match any real Arabic text. Unicode-aware lookarounds instead; \b is
 // still correct for the English connectors (ASCII words only).
-const RANGE_RE = /(?<![\p{L}\p{N}])من(?![\p{L}\p{N}])[\s\S]{0,40}?(?<![\p{L}\p{N}])(?:الى|إلى)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])بين(?![\p{L}\p{N}])[\s\S]{0,60}?(?<![\p{L}\p{N}])و(?![\p{L}\p{N}])|\bfrom\b[\s\S]{0,40}?\bto\b|\bbetween\b[\s\S]{0,60}?\band\b|\d\s*-\s*\d/imu;
+// «و» / «الى» are often WRITTEN ON the next number («بين ٥٠٠ و٧٠٠ ألف», «الى٧٠٠»): a digit right after the connector still
+// counts (live 2026-10-13: that budget searched «≤ 500 ريال», the first figure, because the range was not seen).
+const RANGE_RE = /(?<![\p{L}\p{N}])من(?![\p{L}\p{N}])[\s\S]{0,40}?(?<![\p{L}\p{N}])(?:الى|إلى)(?!\p{L})|(?<![\p{L}\p{N}])بين(?![\p{L}\p{N}])[\s\S]{0,60}?(?<![\p{L}\p{N}])و(?!\p{L})|\bfrom\b[\s\S]{0,40}?\bto\b|\bbetween\b[\s\S]{0,60}?\band\b|\d\s*-\s*\d/imu;
 
 function extractPrice(input: string): string {
   // Arabic numerals FIRST — JS \d is ASCII-only, so «٧٠ الف» was invisible here until 2026-08-29.
@@ -1385,6 +1387,29 @@ Deno.serve(async (req: Request) => {
       }
       // «حي النرجس، جدة»: a district + a city. The classifier only knows a bare district, so check the pair ourselves — a district that
       // does not exist in the city the user named is asked about again (with the cities that DO have it), never searched.
+      // ONE CITY PER SEARCH (rulebook Draft 2, live 2026-10-13: «شقة في الرياض وجدة» searched «الرياض، جدة»). Two or more CITIES → ask
+      // which first; asked already → start with the one with the most listings. A region named next to a city inside it («الخرج، الرياض»)
+      // is that city's anchor, not a second city.
+      const locParts = location.split(/\s*[،,]\s*|\s+و\s+/).map((p) => p.trim()).filter(Boolean);
+      if (locParts.length >= 2 && locParts.length <= 5) {
+        const named = (await Promise.all(locParts.map((p) => locClassify(p)))).map((c) => {
+          if (!c || c === LOC_CLASSIFY_FAILED) return null;
+          const k = String(c.kind ?? ""), rows = k === "city" ? c.regions : c.cities;
+          const row = (Array.isArray(rows) ? rows[0] : null) as Record<string, unknown> | null;
+          return (k === "city" || k === "region_or_city") && row ? { k, city: String(row.city_ar), region: String(row.region_ar), inv: Number(row.inv) || 0 } : null;
+        });
+        if (named.every(Boolean)) {
+          const all = named as Array<{ k: string; city: string; region: string; inv: number }>;
+          const cities = all.filter((a) => !(a.k === "region_or_city" && all.some((b) => b !== a && b.k === "city" && b.region === a.region)));
+          const distinct = [...new Map(cities.map((a) => [a.city, a])).values()].sort((a, b) => b.inv - a.inv);
+          if (distinct.length >= 2) {
+            if (alreadyAsked) {
+              location = distinct[0].city;
+              anyCityReply = searchLineText(locale === "en", typeof out.type === "string" ? out.type : null, location, text, lastBotReply);
+            } else ambiguityReply = severalCitiesQuestion(distinct.map((a) => a.city), text, lastBotReply, locale === "en");
+          }
+        }
+      }
       const dc = /^(?:حي\s+)?([^،,]{2,30})\s*[،,]\s*([^،,]{2,30})$/.exec(location.trim());
       if (dc) {
         const dcls = await locClassify(dc[1].trim());
@@ -1554,7 +1579,10 @@ Deno.serve(async (req: Request) => {
       let replyOut = lead(out.reply);
       // A reply that states a price, asks about the property type, or asks for bedrooms already given is replaced by a line the code
       // writes from the parsed search (owner 2026-10-11; found by the live battery: scripts/agent-live-battery.mjs).
+      // A distance / «near a landmark» wish is not measured yet: the reply says the whole city is searched (rulebook Draft 2).
+      const notMeasured = !districtPin && !regionPin ? proximityNotMeasuredText(text, location, locale === "en", lastBotReply) : null;
       if (anyCityReply) replyOut = anyCityReply;
+      else if (notMeasured) replyOut = notMeasured;
       else if (replyBreaksSearchRules(replyOut, text)) {
         replyOut = searchLineText(locale === "en", typeof out.type === "string" ? out.type : null, location, text, lastBotReply);
       }
@@ -1569,6 +1597,10 @@ Deno.serve(async (req: Request) => {
       const askAboutList = Array.isArray(out.ask_about)
         ? out.ask_about.filter((a: unknown) => typeof a === "string" && a.trim()).map((a: string) => a.trim().toLowerCase())
         : [];
+
+      // RESIDENTIAL + COMMERCIAL in one message («شقة أو محل») → one question, which first (rulebook Draft 2; it used to search every type).
+      // A place question already pending wins; this one pauses the turn the same way (state kept, nothing erased).
+      if (!ambiguityReply) ambiguityReply = residentialCommercialQuestion(text, lastBotReply, locale === "en");
 
       // ── THE SINGLE DECISION AUTHORITY (owner-approved consolidation, 2026-08-30) ─────────────────
       // Everything above resolved THIS turn's fields regardless of what the model itself classified
