@@ -416,3 +416,20 @@ def test_a_unit_past_the_first_sixty_lines_is_still_read():
     r = compare_listing({"price_total": 890000, "area_m2": 161}, pe)
     assert r["price"] == MATCH and r["area"] == MATCH
     assert compare_listing({"price_total": 777000}, pe)["price"] == MISMATCH
+
+
+def test_shell_page_platform_is_unreadable_not_wrong():
+    # ebriza 17513425 (2026-10-13): the HTML is the site shell plus a featured ad «جدة - حي الزهراء» /
+    # «الغرف 1»; our row is a الخرج / العيون villa with 6 rooms, read from ebriza's API.
+    body = ("<html><head><title>منصة إبريزة العقارية</title></head><body><p>للبيع</p><p>الغرف 1</p>"
+            "<p>حمامات 1</p><p>جدة - حي الزهراء- ستارز افينيو</p></body></html>")
+    client = FakeClient({
+        "search_listings_ar": [{"source_table": "t", "listing_id": 1, "district_ar": "العيون",
+                                "bedrooms": 6, "bathrooms": 4}],
+        "t": [{"id": 1, "listing_url": "https://ebriza.com.sa/for_sell/780/x/y/z"}],
+    })
+    row = score_site(client, "ebriza", [("t", 1)], night="2026-10-13", pace=0, probe=lambda url: (200, body))
+    assert row["unreadable_pages"] == 1 and row["normal_mismatch"] == 0 and row["mismatch_ids"] == []
+    # the same page on any other website is still judged
+    other = score_site(client, "fakesite", [("t", 1)], night="2026-10-13", pace=0, probe=lambda url: (200, body))
+    assert other["normal_mismatch"] > 0

@@ -318,6 +318,14 @@ def _cmp_district(stored, whole: str) -> str:
     return MISMATCH if page_names_one else PAGE_SILENT
 
 
+# Websites whose listing URL serves a SHELL: the HTML carries no ad, the ad is drawn by JS from an API.
+# ebriza (scrapers/ebriza/run.py, «THE HTML PAGE IS NOT THE ORACLE — the API is»): /for_sell/<id>/… renders
+# the same 200 shell for any id; 17513425 (2026-10-13, re-read run 38360961845) showed the site title, the
+# login banner and a featured ad «جدة - حي الزهراء» / «الغرف 1», and scored our الخرج / العيون villa (6 rooms)
+# as 3 mismatches. Such a page has said nothing about the ad: unreadable, never wrong.
+SHELL_PAGE_PLATFORMS = frozenset({"ebriza"})
+
+
 def is_other_ads_page(stored: dict, page: dict) -> bool:
     """The page lists OTHER ads, not this one: three or more different districts on its lines, none of
     them ours, and a title naming none. nufouth's share link (/latest-offers?ads-N945=1) opens the ad in
@@ -536,7 +544,7 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             row["unreadable_pages"] += 1
             continue
         page = page_evidence(body)
-        if is_other_ads_page(stored, page):
+        if platform in SHELL_PAGE_PLATFORMS or is_other_ads_page(stored, page):
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
