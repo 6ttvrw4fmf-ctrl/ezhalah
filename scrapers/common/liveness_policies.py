@@ -1424,6 +1424,12 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     # 1,119-card list. A second read (lifecycle-spot-check 37943565545, controls 5/5) read 22 of 22
     # sampled ones gone. Its oracle became callable by the daily check on 10-08 (#6438).
     "aqalemhajer",
+    # 2026-10-11: its crawl's prune never hid anything (the guard trips on a ~100-row catalogue:
+    # re-saw 54 of 72), so 19 ads its SERP dropped since 09-28 stayed shown. Shadow run 38135030865
+    # (11:19 UTC): 97 active, 70 proven by tonight's list, the other 27 — exactly the ads the site's
+    # complete 77-ad list no longer serves — read «هذا الإعلان غير متوفر» on their own pages, with
+    # known-live controls reading live. Leaves SOURCE_LIST_DAILY for this tier.
+    "opensooq",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
@@ -1491,7 +1497,7 @@ SOURCE_LIST_DAILY: tuple[str, ...] = (
     "remal", "ryadah", "sirdab", "superoffice", "tawia", "wajaf", "wslnaa",
     # 2026-10-03
     "abralosol", "albukaeri", "aqaratikom", "aqarnajran", "arkaan", "awal", "dallali",
-    "fahadalshahri", "fursaghyr", "maqrat", "muajarh", "nafithh", "october", "opensooq",
+    "fahadalshahri", "fursaghyr", "maqrat", "muajarh", "nafithh", "october",
     "ramzalqasim", "safera", "satel", "shmoualshmal", "shomou", "squares", "vmksa", "wahadat",
 )
 for _p in SOURCE_LIST_DAILY:
