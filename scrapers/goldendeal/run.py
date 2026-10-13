@@ -185,7 +185,7 @@ TYPE_AR = {
 }
 # Exact overrides for the tokens normalize.TYPE_MAP_EN lacks (map_type_en is exact-match, no
 # substring pass). Every value is an existing canonical type. The shared map already folds the
-# site's other tokens (mansion → Villa, resort → Hotel, townhouse → Villa); a token neither map
+# site's other tokens (mansion → Villa, resort → Hotel, townhouse → «تاون هاوس»); a token neither map
 # knows («palace») is skipped as type_unmapped, never forced.
 TYPE_OVERRIDES_EN = {"building_studio": "Studio", "kiosk": "Kiosk", "workshop": "Workshop",
                      "istraha": "Rest House", "villa_floor": "Floor"}

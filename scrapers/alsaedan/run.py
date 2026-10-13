@@ -207,10 +207,10 @@ _DEAL = {"sale": "Buy", "rent": "Rent"}
 
 # The source's own type words, all 11 measured across the whole catalogue. Only the ones the shared
 # TYPE_MAP_AR does not carry EXACTLY are listed (contract: map_type_exact, exact match only).
-# «تاون هاوس» → Villa is the fleet's existing decision (dwelleo, goldendeal, rakez …).
+# «تاون هاوس» keeps its own name (owner 2026-10-12); the app's search files it under Duplex.
 _TYPE_OVERRIDES = {
     "أرض سكنية": "Residential Land",      # the shared map's own value for «أرض»
-    "تاون هاوس": "Villa",
+    "تاون هاوس": "تاون هاوس",
     "عمارة سكنية": "Building",            # shared «عمارة» → Building
     "عمارة تجارية": "Commercial Building",
 }

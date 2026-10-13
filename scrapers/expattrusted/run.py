@@ -158,7 +158,7 @@ def location(address: Optional[str], description: Optional[str]) -> dict[str, An
 
 
 # ── residence (unit type) ────────────────────────────────────────────────────────────────────────
-_TYPE_WORD_AR = [("studio", "استوديو"), ("apartment", "شقة"), ("townhouse", "فيلا"), ("villa", "فيلا")]
+_TYPE_WORD_AR = [("studio", "استوديو"), ("apartment", "شقة"), ("townhouse", "تاون هاوس"), ("villa", "فيلا")]
 _WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
              "eight": 8, "nine": 9, "ten": 10}
 

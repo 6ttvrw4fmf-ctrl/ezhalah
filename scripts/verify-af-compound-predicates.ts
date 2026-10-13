@@ -54,7 +54,7 @@ type Case = {
 };
 
 const CASES: Case[] = [
-  { label: 'Villa/Buy · street width ≥25 AND bathrooms ≥4', types: ['فيلا', 'تاون هاوس', 'بيت'], deal: 'بيع',
+  { label: 'Villa/Buy · street width ≥25 AND bathrooms ≥4', types: ['فيلا', 'بيت'], deal: 'بيع',
     category: 'Residential', rpc: { p_street_width_min: 25, p_bath_min: 4 },
     restExtra: 'street_width_m=gte.25&bathrooms=gte.4',
     slices: [{ p_street_width_min: 25 }, { p_bath_min: 4 }] },

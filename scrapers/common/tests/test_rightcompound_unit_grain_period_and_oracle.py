@@ -98,7 +98,7 @@ def test_every_unit_is_its_own_row_keyed_by_the_villa_id():
     assert why == "" and skips == {}
     assert [r["ad_number"] for r in rows] == ["RCP629", "RCP632", "RCP633", "RCP638"]
     assert {r["listing_url"] for r in rows} == {URL}
-    assert [r["property_type"] for r in rows] == ["Villa", "Villa", "Apartment", "Studio"]
+    assert [r["property_type"] for r in rows] == ["Villa", "تاون هاوس", "Apartment", "Studio"]
     assert rows[0]["title"] == "Azure Alreem Compound Riyadh – Executive Four Bedroom fully furnished Superior Villa"
     assert rows[0]["source"] == "RightCompound" and rows[0]["transaction_type"] == "Rent"
 
@@ -148,7 +148,7 @@ def test_a_unit_with_no_type_word_is_refused_and_counted():
 
 
 def test_type_words_fold_the_way_the_fleet_does():
-    assert R.unit_type_ar("Town House \" A \" Three Bedroom fully furnished") == "فيلا"
+    assert R.unit_type_ar("Town House \" A \" Three Bedroom fully furnished") == "تاون هاوس"
     assert R.unit_type_ar("Duplex Two Bedroom fully furnished Apartment") == "شقة"
     assert R.unit_type_ar("Two-Bedroom Apartments with balcony") == "شقة"
     assert R.unit_type_ar("Studio fully furnished Apartment") == "استوديو"

@@ -179,7 +179,7 @@ TYPE_OVERRIDES = {
     "ارضين متجاورتين": "Residential Land", "أرضين متجاورات": "Residential Land",
     "متجاورات": "Residential Land",                                            # 5 + 2 + 2
     "ارض تجارية": "Commercial Land",                                           # 7
-    "تاون هاوس": "Villa",                                                      # 6 (normalize: Townhouse→Villa)
+    "تاون هاوس": "تاون هاوس",                                                  # 6 (kept under its own name; search files it under Duplex)
     "شقق دبلكسية": "Apartment", "شقة دبلكسية": "Apartment", "شقة علوية": "Apartment",  # bossbih precedent
     "بيت عربي": "Villa", "بيت شعبي": "Villa",                                  # 2
     # A house sold WITH its flats is one lot; the head noun decides (بيت → Villa, the shared map).

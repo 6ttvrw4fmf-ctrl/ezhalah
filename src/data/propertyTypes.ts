@@ -229,7 +229,7 @@ const RAW_TO_CLEAN: Record<string, string> = {
   'Self Storage': 'Self Storage', 'تخزين ذاتي': 'Self Storage',
   // Long-tail dealapp raw types → existing clean types (owner-approved 2026-07-06; each verified against
   // the live listing — the card still shows the ORIGINAL scraped value). [[property-card-and-type-mapping-rule]]
-  'تاون هاوس': 'Villa',               // titled فيلا, 4br + garage + majlis
+  'تاون هاوس': 'Duplex',              // owner 2026-10-12: «town house is under duplex» (was Villa, 2026-07-06)
   'ملحق علوي': 'Apartment',           // روف / rooftop apartment, titled شقة
   'مجمع سكني': 'Residential Building', // residential compound
   'مكاتب مشتركة': 'Office',            // shared / co-working offices, titled مكتب
@@ -293,8 +293,8 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   // same reasoning as مجمع سكني above, kinds stays ['res'].
   'Residential Building':{ rawTypes: ['Building', 'مجمع سكني', 'مجمع', 'برج'], kinds: ['res'] },
   // Residential — Villas & Houses
-  'Villa':               { rawTypes: ['Villa', 'Palace', 'تاون هاوس', 'House'], kinds: ['res'] }, // فيلا search includes raw قصر + تاون هاوس + بيت (House folded in — few raw listings, owner request 2026-07-20)
-  'Duplex':              { rawTypes: ['Duplex'], kinds: BOTH }, // BOTH: see Studio note — october maps "duplex"→'Duplex' then routes it commercial via category_for_type
+  'Villa':               { rawTypes: ['Villa', 'Palace', 'House'], kinds: ['res'] }, // فيلا search includes raw قصر + بيت (House folded in — few raw listings, owner request 2026-07-20); تاون هاوس moved to Duplex (owner 2026-10-12)
+  'Duplex':              { rawTypes: ['Duplex', 'تاون هاوس'], kinds: BOTH }, // تاون هاوس = town house, filed under Duplex (owner 2026-10-12); // BOTH: see Studio note — october maps "duplex"→'Duplex' then routes it commercial via category_for_type
   // Residential — Vacation & Rural (Rest House/Farm appear in com tables too → both)
   'Rest House':          { rawTypes: ['Rest House', 'إستراحة'], kinds: BOTH }, // إستراحة = aqarcity hamza spelling variant of استراحة (11 rows, res table, verified live 2026-07-27)
   'Chalet':              { rawTypes: ['Chalet'], kinds: ['res'] },

@@ -184,7 +184,6 @@
         "rawTypes": [
           "Villa",
           "Palace",
-          "تاون هاوس",
           "House"
         ],
         "kinds": [
@@ -203,7 +202,8 @@
       "serviceFacility": false,
       "query": {
         "rawTypes": [
-          "Duplex"
+          "Duplex",
+          "تاون هاوس"
         ],
         "kinds": [
           "res",
@@ -1040,6 +1040,10 @@
       [
         "ستوديو",
         "Studio"
+      ],
+      [
+        "تاون هاوس",
+        "تاون هاوس"
       ]
     ],
     "slugToType": [
@@ -1157,7 +1161,8 @@
       "Residential Land",
       "Rest House",
       "Room",
-      "Villa"
+      "Villa",
+      "تاون هاوس"
     ],
     "categoryDefault": "Commercial"
   }

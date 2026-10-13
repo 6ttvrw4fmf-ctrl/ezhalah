@@ -30,7 +30,7 @@ Everything needed is structured on the unit, so nothing is parsed out of prose:
 
 TYPE: the enum is UPPERCASE and `normalize.map_type_en` only matches Title Case (measured:
 'APARTMENT'→None, 'Apartment'→Apartment), so it is title-cased before mapping. TOWNHOUSE resolves
-to Villa, which is the app's own mapping for تاون هاوس (src/data/propertyTypes.ts:180).
+to «تاون هاوس», its own name (owner 2026-10-12); the app's search files it under Duplex (src/data/propertyTypes.ts).
 
 BEDROOMS ARE REAL HERE. Unlike wahadat/iBaax/tuba, the field is literally named `bedroom` (with a
 separate `bathroom`, `majlis`, `diningRoom`, `salah`), so it is a bedroom count and is stored as

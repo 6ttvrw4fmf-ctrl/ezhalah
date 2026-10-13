@@ -83,9 +83,9 @@ _DISTRICT_EN_AR = {
     ("جدة", "fyha"): "حي الفيحاء", ("جدة", "fayha"): "حي الفيحاء", ("جدة", "ruwais"): "حي الرويس",
     ("جدة", "rabwah"): "حي الربوة", ("جدة", "khalidiyyah"): "حي الخالدية",
 }
-# The site's own taxonomy words → Arabic canon (townhouse→Villa is the fleet override).
-_TYPE_EN_AR = {"villa": "فيلا", "apartment": "شقة", "town houses": "فيلا", "town house": "فيلا",
-               "townhouse": "فيلا", "compound villa": "فيلا", "office": "مكتب", "store": "محل",
+# The site's own taxonomy words → Arabic canon (a town house keeps its own name, owner 2026-10-12).
+_TYPE_EN_AR = {"villa": "فيلا", "apartment": "شقة", "town houses": "تاون هاوس", "town house": "تاون هاوس",
+               "townhouse": "تاون هاوس", "compound villa": "فيلا", "office": "مكتب", "store": "محل",
                "duplex": "دوبلكس", "studio": "استوديو", "penthouse": "شقة"}
 
 

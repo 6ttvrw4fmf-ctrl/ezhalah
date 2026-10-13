@@ -29,7 +29,7 @@ SOURCE SHAPE (measured live 2026-09-24 on all 16 compound pages):
     region) and «Riyadh» (wrong; its map pin is in Buraydah) — two candidate cities is ambiguous,
     so it is skipped city_ambiguous, never guessed. A district is written only when the title's own
     district name maps with certainty to a catalogued Arabic district of that city.
-  · TYPE: from the unit's own name — Apartment, Villa, Studio, Townhouse→Villa (fleet override),
+  · TYPE: from the unit's own name — Apartment, Villa, Studio, Townhouse→«تاون هاوس» (keeps its own name; owner 2026-10-12),
     Penthouse→Apartment, a bare «2 Bedroom Duplex» → Duplex. Measured type_unmapped x8 on the full
     walk: KAFD's bare «1/2/3 Bedroom» and «4 Bedroom Triplex» (4), Salamah's «3/4 Bedroom Rooftop
     with terrace» (2), and galleria's «Retail from 200 sqm» / «Offices from 500 sqm» (2 — areas, not
@@ -99,7 +99,7 @@ _DISTRICT_EN_AR = {
     ("الرياض", "yasmin"): "حي الياسمين", ("الرياض", "sahafah"): "حي الصحافة",
     ("جدة", "salamah"): "حي السلامة", ("جدة", "shati"): "حي الشاطئ",
 }
-_TYPE_WORDS = (("studio", "استوديو"), ("townhouse", "فيلا"), ("town house", "فيلا"),
+_TYPE_WORDS = (("studio", "استوديو"), ("townhouse", "تاون هاوس"), ("town house", "تاون هاوس"),
                ("villa", "فيلا"), ("penthouse", "شقة"), ("apartment", "شقة"))
 
 

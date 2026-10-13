@@ -152,7 +152,7 @@ _BATH_RE = re.compile(r"(\d+)\s*Bathroom", re.I)
 _SQM_RE = re.compile(r"([\d,\.]+)\s*sqm", re.I)
 
 _TYPE_EN_AR = {
-    "apartment": "شقة", "studio": "استوديو", "villa": "فيلا", "townhouse": "فيلا",
+    "apartment": "شقة", "studio": "استوديو", "villa": "فيلا", "townhouse": "تاون هاوس",
     "duplex": "دوبلكس", "penthouse": "شقة", "chalet": "شاليه", "room": "غرفة",
 }
 

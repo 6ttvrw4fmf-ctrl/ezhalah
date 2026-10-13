@@ -2130,7 +2130,7 @@ def test_type_mapping_covers_every_word_the_platform_publishes():
         "عمارة سكنية": "Building", "استراحة": "Rest House", "معرض": "Showroom", "مكتب": "Office",
         "مزرعة": "Farm", "مستودع": "Warehouse", "مجمع تجاري ": "Commercial Building",
         "ارض تجاري": "Commercial Land", "محطة وقود": "Gas Station", "غرف عزاب": "Room",
-        "ورشة ": "Workshop", "ستوديو": "Studio", "فندق": "Hotel", "تاون هاوس": "Villa",
+        "ورشة ": "Workshop", "ستوديو": "Studio", "فندق": "Hotel", "تاون هاوس": "تاون هاوس",
         "مصنع": "Factory", "محل تجاري": "Shop", "دوبلكس": "Duplex",
         "مستشفى - مركز صحي": "Health Center",
     }

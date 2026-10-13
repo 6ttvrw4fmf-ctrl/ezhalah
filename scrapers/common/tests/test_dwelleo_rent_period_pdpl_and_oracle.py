@@ -107,7 +107,7 @@ def test_a_silent_rent_keeps_the_figure_and_states_no_period():
 def test_a_stated_annual_rent_is_annual_and_the_figure_is_verbatim():
     row, _, _ = _map(R1378)
     assert row["rent_period"] == "annual" and row["price_annual"] == 150000
-    assert row["property_type"] == "Villa"      # «تاون هاوس», the fleet's existing override
+    assert row["property_type"] == "تاون هاوس"      # «تاون هاوس» keeps its own name (owner 2026-10-12)
 
 
 def test_a_stated_monthly_rent_is_monthly_and_annualised_by_the_shared_helper():
