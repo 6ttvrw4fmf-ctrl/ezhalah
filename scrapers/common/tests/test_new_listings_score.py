@@ -402,3 +402,17 @@ def test_latin_m2_spec_value_is_kept_over_description_prose():
     assert compare_listing({"area_m2": 578}, pe)["area"] == MATCH
     # Both directions: a stored figure the page never states is still a mismatch.
     assert compare_listing({"area_m2": 640}, pe)["area"] == MISMATCH
+
+
+def test_a_unit_past_the_first_sixty_lines_is_still_read():
+    # rakez 17539724 (2026-10-13, re-read run 38361960175): project 34830 lists its units as
+    # «#Cnn» / «متاحة» / «<price> ريال» / «<rooms>» / «<area> م²»; ours, #C22 at 890,000 / 161 m², comes
+    # after 60 evidence lines, and the score called the price and area wrong (backlog #124).
+    from scrapers.common.source_reread import page_evidence
+    rows = "".join(f'<div>#A{i}</div><div>متاحة</div><div>{1_000_000 + i * 1000:,} ريال</div><div>3</div>'
+                   f'<div>{200 + i}.5 م²</div>' for i in range(40))
+    ours = '<div>#C22</div><div>متاحة</div><div>890,000 ريال</div><div>3</div><div>161 م²</div>'
+    pe = page_evidence(f"<html><body>{rows}{ours}</body></html>")
+    r = compare_listing({"price_total": 890000, "area_m2": 161}, pe)
+    assert r["price"] == MATCH and r["area"] == MATCH
+    assert compare_listing({"price_total": 777000}, pe)["price"] == MISMATCH

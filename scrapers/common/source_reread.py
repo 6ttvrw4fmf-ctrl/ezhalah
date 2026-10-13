@@ -86,7 +86,11 @@ def page_evidence(body: str) -> dict:
         "title": html.unescape(title.group(1).strip()) if title else None,
         "meta": meta,
         "jsonld": jsonld[:5],
-        "evidence_lines": _with_values(lines)[:60],
+        # 400, not 60: a rakez project page lists every unit (price · rooms · area), and unit #C22 of
+        # project 34830 (17539724, 890,000 / 161 m², re-read run 38361960175) sits past line 60, so the
+        # score only saw the OTHER units and called our exact values wrong (backlog #124). The job log
+        # still prints only the first n_evidence lines.
+        "evidence_lines": _with_values(lines)[:400],
         "text_head": " | ".join(lines)[:1500],
     }
 
