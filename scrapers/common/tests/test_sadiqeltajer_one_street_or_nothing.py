@@ -39,3 +39,30 @@ def test_two_bearings_without_a_street_are_a_corner():
 def test_silence_stays_null():
     t = "المساحة : 600م المكونات : غرفة"
     assert R.parse_street_width(t) is None and R.parse_direction(t) is None
+
+
+# The 117 frontage rows re-read 2026-10-13 (CI 38379060128): the old reader took the FIRST bearing in a
+# word list anywhere in the row, so an alley or the plot's side lengths decided the facade.
+def test_an_alley_is_not_the_facade():
+    t = "الواجهة : شارع غربي 15م وممر شمالي 8م المكونات : غرفة"      # 12219206, stored north
+    assert R.parse_direction(t) == "غربي" and R.parse_street_width(t) == 15
+
+
+def test_the_plot_side_lengths_are_not_the_facade():
+    t = "الواجهة : شارع شرقي 30م الاطــوال : شمالي 41م جنوبي 51.50م شرقي 20م غربي 22.65م"   # 14108262
+    assert R.parse_direction(t) == "شرقي" and R.parse_street_width(t) == 30
+
+
+def test_a_width_after_a_colon_is_read():
+    t = "الواجهة : شارع شرقي : 15م / ممر شمالي : 5م قريبة من اسواق الرمال"   # 12219014, stored north, no width
+    assert R.parse_direction(t) == "شرقي" and R.parse_street_width(t) == 15
+
+
+def test_a_bearing_glued_to_its_number_is_read():
+    t = "الواجهة : شارع شرقي12م المكونات : غرفة"
+    assert R.parse_direction(t) == "شرقي" and R.parse_street_width(t) == 12
+
+
+def test_two_streets_said_in_one_word_are_a_corner():
+    t = "الواجهة : شارعين شرقي12 وجنوبي12 المكونات : غرفة"
+    assert R.parse_direction(t) is None and R.parse_street_width(t) is None

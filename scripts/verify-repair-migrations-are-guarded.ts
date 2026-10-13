@@ -60,6 +60,11 @@ const WAIVED: Record<string, string> = {
     'NULL-only, true-only back-fill of sirdab / remal amenities from their stored description via ' +
     'normalize.prose_amenities_yes; both parsers now write the same on every crawl, pinned with mutations by ' +
     'scrapers/common/tests/test_prose_only_sites_read_amenities.py',
+  '20261013095626_sadiqeltajer_frontage_one_street_or_nothing.sql':
+    'Fifteen sadiqeltajer rows repaired from each ad\'s own frontage row (CI source-reread 38379060128), every ' +
+    'update guarded on the exact value it replaces; scrapers/sadiqeltajer/run.py now reads one street or nothing on ' +
+    'every crawl, so a re-crawl writes the same facade and never re-creates a cross-street pair, pinned with ' +
+    'mutations by scrapers/common/tests/test_sadiqeltajer_one_street_or_nothing.py',
   '20261013094218_squares_shmoualshmal_kitchen_ac_from_feature_chips.sql':
     'NULL-only, true-only back-fill of squares / shmoualshmal kitchen and AC from each row\'s own STRUCTURED chip ' +
     'list (additional_info.features_ar); both parsers\' chip maps now write the same on every crawl, pinned with a ' +
