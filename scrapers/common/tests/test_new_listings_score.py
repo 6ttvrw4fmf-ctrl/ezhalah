@@ -388,3 +388,64 @@ def test_area_spec_row_is_kept_over_description_prose():
     pe = page_evidence(body)
     assert "مساحة العقار 77" in pe["evidence_lines"]
     assert compare_listing({"area_m2": 77}, pe)["area"] == MATCH
+
+
+def test_latin_m2_spec_value_is_kept_over_description_prose():
+    # akariyoun 17512660 (2026-10-13, re-read run 38361896741): spec «<strong> مساحة العقار: </strong> 578 m²»
+    # and card «المساحة: 578 m²»; the description says «المساحة : 900م (30*30)». We store the structured 578.
+    from scrapers.common.source_reread import page_evidence
+    body = ('<html><body><ul class="detail_features"><li><strong> مساحة العقار: </strong> 578 m²</li></ul>'
+            '<div class="listing-card-info-icon">المساحة:</div><div>578 m²</div>'
+            '<p>الموقع : الرياض حي العقيق</p><p>المساحة : 900م (30*30)</p></body></html>')
+    pe = page_evidence(body)
+    assert any("578 m²" in x for x in pe["evidence_lines"])
+    assert compare_listing({"area_m2": 578}, pe)["area"] == MATCH
+    # Both directions: a stored figure the page never states is still a mismatch.
+    assert compare_listing({"area_m2": 640}, pe)["area"] == MISMATCH
+
+
+def test_a_unit_past_the_first_sixty_lines_is_still_read():
+    # rakez 17539724 (2026-10-13, re-read run 38361960175): project 34830 lists its units as
+    # «#Cnn» / «متاحة» / «<price> ريال» / «<rooms>» / «<area> م²»; ours, #C22 at 890,000 / 161 m², comes
+    # after 60 evidence lines, and the score called the price and area wrong (backlog #124).
+    from scrapers.common.source_reread import page_evidence
+    rows = "".join(f'<div>#A{i}</div><div>متاحة</div><div>{1_000_000 + i * 1000:,} ريال</div><div>3</div>'
+                   f'<div>{200 + i}.5 م²</div>' for i in range(40))
+    ours = '<div>#C22</div><div>متاحة</div><div>890,000 ريال</div><div>3</div><div>161 م²</div>'
+    pe = page_evidence(f"<html><body>{rows}{ours}</body></html>")
+    r = compare_listing({"price_total": 890000, "area_m2": 161}, pe)
+    assert r["price"] == MATCH and r["area"] == MATCH
+    assert compare_listing({"price_total": 777000}, pe)["price"] == MISMATCH
+
+
+def test_shell_page_platform_is_unreadable_not_wrong():
+    # ebriza 17513425 (2026-10-13): the HTML is the site shell plus a featured ad «جدة - حي الزهراء» /
+    # «الغرف 1»; our row is a الخرج / العيون villa with 6 rooms, read from ebriza's API.
+    body = ("<html><head><title>منصة إبريزة العقارية</title></head><body><p>للبيع</p><p>الغرف 1</p>"
+            "<p>حمامات 1</p><p>جدة - حي الزهراء- ستارز افينيو</p></body></html>")
+    client = FakeClient({
+        "search_listings_ar": [{"source_table": "t", "listing_id": 1, "district_ar": "العيون",
+                                "bedrooms": 6, "bathrooms": 4}],
+        "t": [{"id": 1, "listing_url": "https://ebriza.com.sa/for_sell/780/x/y/z"}],
+    })
+    row = score_site(client, "ebriza", [("t", 1)], night="2026-10-13", pace=0, probe=lambda url: (200, body))
+    assert row["unreadable_pages"] == 1 and row["normal_mismatch"] == 0 and row["mismatch_ids"] == []
+    # the same page on any other website is still judged
+    other = score_site(client, "fakesite", [("t", 1)], night="2026-10-13", pace=0, probe=lambda url: (200, body))
+    assert other["normal_mismatch"] > 0
+
+
+def test_area_the_page_labels_in_its_own_payload_is_the_page_value():
+    # sanadak 17502436 (2026-10-13, re-read run 38361883389): the flight payload maps its area label to
+    # lotSize and carries "lotSize":760 (= what we store); the visible text has only «المساحة : 150م تقريباً».
+    from scrapers.common.source_reread import page_evidence
+    body = ('<html><head><meta name="description" content="المساحة : 150م تقريباً"></head><body>'
+            '<p>المساحة : 150م تقريباً</p>'
+            '<script>self.__next_f.push([1,"{\\"label\\":\\"area_m2\\",\\"key\\":\\"lotSize\\"},'
+            '{\\"landNumber\\":\\"3/67/2\\",\\"lotSize\\":760,\\"numberBedrooms\\":3}"])</script>'
+            '</body></html>')
+    pe = page_evidence(body)
+    assert compare_listing({"area_m2": 760}, pe)["area"] == MATCH
+    assert compare_listing({"area_m2": 300}, pe)["area"] == MISMATCH
+    # without the page's own label, the prose alone is what the page says
+    assert compare_listing({"area_m2": 760}, page_evidence(body.replace("area_m2", "x")))["area"] == MISMATCH
