@@ -711,7 +711,10 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   if (typeof b.regionPin === 'string' && b.regionPin.trim()) q.regionPin = b.regionPin.trim();
   if (typeof b.districtPin === 'string' && b.districtPin.trim()) {
     const d = b.districtPin.trim();
-    q.districts = Array.from(new Set([...(q.districts ?? []), d]));
+    // One district, one entry: «النرجس» (read from the text) and «حي النرجس» (the edge's pin) are the same place, and the summary
+    // listed both («الأحياء: النرجس، حي النرجس», live 2026-10-13).
+    const bare = (x: string) => x.replace(/^حي\s+/, '').trim();
+    q.districts = [...(q.districts ?? []).filter((x) => bare(x) !== bare(d)), d];
   }
   applySourceFilter(q, userText, b.platforms);
   // Street / "near a mosque|school|park" terms from the raw message (Q3) — matched against the

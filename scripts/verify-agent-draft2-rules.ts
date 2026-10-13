@@ -97,5 +97,9 @@ const districtShown = (src: string) => /const unshown = \(q\.districts \?\? \[\]
 check('the search summary names the district the AI chat searched («حي النرجس»)', districtShown(summary));
 mustCatch('the district line being lost from the summary', !districtShown(summary.replace('if (unshown.length) lines.push(', 'if (false) lines.push(')));
 
+const pinOnce = (src: string) => /q\.districts = \[\.\.\.\(q\.districts \?\? \[\]\)\.filter\(\(x\) => bare\(x\) !== bare\(d\)\), d\];/.test(src);
+check('the edge\'s district pin replaces the same district read from the text («النرجس» + «حي النرجس» is ONE district)', pinOnce(client));
+mustCatch('the district being listed twice again', !pinOnce(client.replace('q.districts = [...(q.districts ?? []).filter((x) => bare(x) !== bare(d)), d];', 'q.districts = [...(q.districts ?? []), d];')));
+
 if (failed) { console.error(`\n❌ ${failed} check(s) failed`); process.exit(1); }
 console.log('\n✓ rulebook Draft 2: one city, residential or commercial, no distance promise, a chat aside never re-runs the search, a new request starts fresh');
