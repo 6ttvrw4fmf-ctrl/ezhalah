@@ -125,3 +125,18 @@ export function proximityNotMeasuredText(text: string, city: string, en = false,
   if (!c || /[،,]/.test(c) || !(NEAR_PHRASE_RE.test(text) || DISTANCE_RE.test(text))) return null;
   return `${variantText(en ? NOT_MEASURED_EN : NOT_MEASURED_AR, text, avoid, { c: en ? listCities([c], true) : c })} ${HOUSE}`;
 }
+
+/** The message names a property kind of its own («شقة», «محل», "villa"). */
+export const namesAProperty = (text: string): boolean => RES_WORD.test(String(text ?? "")) || COM_WORD.test(String(text ?? ""));
+
+// A COMPLETE NEW REQUEST — a property word AND the place, with no «خلها / ضيف / شيل / بدل…» change word — starts a fresh search: nothing
+// from the previous one rides along (live 2026-10-13, the owner watching: «فيلا للبيع في جدة فيها مسبح» kept «٤ غرف» from a Riyadh
+// apartment search and found nothing). A piece («٣ غرف», «بس بالملقا», «خلها شقق») still changes the current search.
+const CHANGE_WORD = new RegExp(`(?<![\\p{L}])(?:خلها|خليها|خله|خلّها|ضيف|زيد|شيل|احذف|نفس|بدل|بدال|غير|غيرها|غيّرها|عدل|عدّل)${E}|\\b(?:make it|change|instead|same)\\b`, "iu");
+const fold = (s: string) => String(s ?? "").replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").toLowerCase();
+export function isFreshRequest(text: string, city: string): boolean {
+  const c = String(city ?? "").trim();
+  if (!c || /[،,]/.test(c) || CHANGE_WORD.test(String(text ?? "")) || !namesAProperty(text)) return false;
+  const t = fold(text);
+  return t.includes(fold(c).replace(/^ال/, "")) || t.includes(fold(listCities([c], true)));
+}
