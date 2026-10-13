@@ -32,40 +32,51 @@ safety rules (deploy lock, `safe-pr-merge.ts`, source truth, migration rules) st
 ## 🎯 NEXT RUN ORDERS — written by ⚡ for itself (owner, 2026-10-12: «give yourself instructions so you do a good job on the next run»)
 These win over THE PLAN's timeline below; THE PLAN's rules still hold. Replace this block at the end of every run.
 
-> **Owner, 2026-10-12:** «Your job is to get better on a daily basis, and I want everything fixed and good.» Bar for every
-> night: fix rate ≥ 6 of 10 found, every number proven like a customer, rating ≥ 9, no over-claim.
+> **Owner, 2026-10-13, after the 10-13 run (8/10, fix rate 3/8 → 2/10, two sites left broken until he said «fix those»):**
+> «I want you to keep doing a better job on every run. Improve your job in the next run.»
+> **Bar for 10-14 (all five, measured in the `:end` row): fix rate ≥ 6/10 proven like a customer · 0 sites broken on our
+> side at the end · rating ≥ 9 · the owner never has to ask for a fix afterwards · no over-claim.**
 
-**What 10-13 learned (do not repeat):**
-- **One push per PR cycle.** Each push cancelled `npm test` mid-run (3 cycles lost, ~25 min). Batch commits locally, run
-  `PATH=<dir with python3 -> /usr/bin/python3>:$PATH npm run test:all` (646 checks, ~11 min; /usr/local/bin/python3 lacks
-  curl_cffi), push once.
-- **A new `scripts/verify-*.ts` needs an executable `mutation(...)` proof** (verify-new-barriers-are-mutation-proven).
-- **Pick rotation listings a customer CAN find:** a rental with `rent_period_ar` NULL is never in a rent search (owner rule),
-  so filter `deal_ar='بيع' or rent_period_ar is not null`. That «false FAIL» found the akariyoun bug, though: when a site has
-  100% NULL periods, re-read one page around «سنو» before calling it source silence.
-- **The Haraj shadow is in concurrency group `haraj-shadow`:** a cancelled run blocks the dispatch until it clears.
+**Why 10-13 failed, and the rule that replaces each cause (these are hard rules, not advice):**
+1. **The fixes merged at 06:58, so not one of them could be proven in the slot.** → **SHIP BY MINUTE 45.** One PR,
+   one push, `npm run test:all` locally first (`PATH=<dir with python3 → /usr/bin/python3>:$PATH`; 646 checks, ~11 min),
+   merged with `safe-pr-merge.ts` by minute 45. Then dispatch ONE single-source re-crawl per fixed site at once, so its
+   rows reach the :22 sync and the customer proof lands by minute ~80. Fixes found after minute 45 go in a second PR,
+   by minute 90.
+2. **abralosol was «fixed» but still broken: I never read the actual error.** The route log said `CertificateVerifyError`
+   and I stopped there; the real reason («certificate has expired», on the site's side) took the owner's complaint
+   and 40 more minutes. → **For every failed site, read the exception TEXT (not the class) in the first 15 minutes**: the
+   crawl log, or a single-source dispatch on main. Classify each failure at once: OURS (fix) vs THEIRS (expired
+   certificate, DNS gone, 5xx everywhere on 2+ profiles and the proxy → `set_platform_status` dormant with dated
+   evidence, the same night). A site still failing at the end of the run is a missed classification, not «pending».
+3. **I starved my own CI.** The dealapp catch-up took 12 runners and my PR checks queued for 20+ minutes. → **No
+   heavy dispatch (dealapp 12 shards, aqar/wasalt sweeps) before my PR is merged.**
+4. **Pushes cancelled `npm test` three times, and a cancelled shadow check blocked the merge.** → One push per cycle.
+   Never cancel a push-triggered check on a PR head; dispatch diagnostics on `main`, not on the PR branch.
+5. **Rotation picks failed on rentals with no stated period** (never in rent search, by owner rule). → Pick with
+   `deal_ar='بيع' or rent_period_ar is not null`.
+6. **Fix rate denominators were fuzzy.** → `issues_found` = bugs logged in `ops_engineer_backlog` tonight;
+   `issues_fixed` = those with a PASS `:proof` row tonight (rotation proofs don't count). Write both from a query.
 
-**Minute 0–15 (DB clock):** merge state of PR #6933 (merge on green with `safe-pr-merge.ts` if still open), then the proofs below.
+**Minute 0–15 (DB clock):** `select now()`; read the `:end`/`:followup` rows; failed and absent sites of the 04:22 run
+WITH their exception text (rule 2); classify each one OURS or THEIRS.
 
-**Proofs owed from 10-13 (each a `:proof` row, all need #6933 merged + the 04:22 nightly + the :22 sync):**
-- akariyoun: `select rent_period_ar, count(*) from search_listings_ar where platform='akariyoun' and deal_ar='إيجار' and
-  production_ready group by 1` → سنوي ≈ 190; customer journey on 17376257 (Riyadh إشبيلية شقة, rent سنوي, 87,000) PASS.
-- abralosol: tonight's run ok with ~2,800 rows (route line in the log); ryadah: a scrape_runs row exists (ok, 18 rows).
-- gomenassat 15709861 (offer 818): area_m2 = 1652; card shows 1,652 م².
-- wasalt enrich_ar: pending count (rows_seen of `wasalt_enrich_ar_residential`) below 25,750 and falling.
-- silent_partial_success: my queue's 17-18 standing P1s resolved by the 06:59 10-13 sweep or later; only real ones left.
-- dealapp: the 10-13 catch-up crawl (run dispatched 05:41 UTC) saw ~19k; if the 10-14 02:33 nightly again hits the
-  100-min budget on all 12 shards, raise shards (verify-dealapp-crawl-budget) the same night.
+**Proofs owed from 10-13 (each a `:proof` row; #6933 and #6957 are merged, and the 04:22 nightly re-crawls them):**
+- akariyoun: `select rent_period_ar, count(*) from search_listings_ar where platform='akariyoun' and deal_ar='إيجار'
+  and production_ready group by 1` → سنوي ≈ 190; customer journey on 17376257 (Riyadh إشبيلية, rent سنوي, 87,000).
+- gomenassat 15709861 (offer 818): area_m2 = 1652; the card shows 1,652 م².
+- wasalt enrich_ar: `rows_seen` of `wasalt_enrich_ar_residential` below 25,750 and falling.
+- dealapp: the 02:33 nightly re-sees ≥ 18k; if every shard hits the 100-min budget again, raise shards the same night.
+- abralosol: dormant since 10-13 (expired certificate). If tonight's crawl reads it, the hourly cron returns it: prove
+  a card. If not, it stays dormant, which is correct; say so in one line.
 
-**Then, in order:** Haraj gate #4 result (run 38354212930, files 10-12 ≈13–18 KSA, untouched): hand-check every «offer»;
-100 clean → live build (THE PLAN item); any miss → fix the shape, re-classify every window, gate on 10-12 19+ KSA.
-Then backlog 494/496/478 leftovers (aqar farms area, aqarmonthly 13905878, wasalt 13746442 list-vs-detail price).
+**Then, by minute 45 in one PR:** the Haraj live build (gate #4 passed 110/110 on 10-12-14→19 KSA; THE PLAN item) only
+if it fits; otherwise backlog leftovers (wasalt 13746442 list-vs-page price, aqar farms area 59,230,300, map pins
+backlog 312: check rakez WP REST and nofodh listing JSON for coordinates).
 
 **Proof timing facts:** search sync :22 (commits ~:24–:26); detector sweep :59 (~3.5 min); Wasalt rich attrs 06:46 UTC;
 muhaysini nightly ends ~07:10 UTC; `scraper-early-warning` 07:45 UTC. USED Haraj windows (never gate on them):
-10-10 01–03, 10-10 ~07–12, 10-10 13 → 10-11 05, 10-11 08 → 20, 10-11 20 → 10-12 11, plus whatever gate #4 reads.
-- **A cancelled check run on a PR head blocks `safe-pr-merge` forever** (the API returns it next to the newer run). If you
-  must cancel a push-triggered shadow, land one more commit that does not touch `scrapers/haraj/**` so the head is clean.
+10-10 01–03, 10-10 ~07–12, 10-10 13 → 10-11 05, 10-11 08 → 20, 10-11 20 → 10-12 11, 10-12 14 → 19.
 
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «wire them so the next run turns out perfect … at the point where I don't need to check and agree on
