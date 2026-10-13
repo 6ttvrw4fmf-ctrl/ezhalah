@@ -80,9 +80,9 @@ const freshOk = (fn: (t: string, c: string) => boolean) => FRESH.every(([t, c, w
 check('a property word + the place (no «خلها / ضيف / بدل») is a fresh request; a piece or a change is not', freshOk(isFreshRequest), FRESH.filter(([t, c, w]) => isFreshRequest(t, c) !== w).map(([t]) => t).join(' | '));
 mustCatch('a change («خلها فيلا في جدة») being read as a fresh request', !freshOk((t, c) => t.includes(c)));
 const asideWired = (src: string) => /const asideNow = aside && aside !== "financial" && !\(aside === "protected" && namesAProperty\(text\)\) \? aside : null;/.test(src)
-  && /if \(asideNow \|\| courtesy\) \{[\s\S]{0,260}return json\(\{ kind: "message", reply, locationQuestion: false, askCount \}\);/.test(src)
+  && /if \(asideNow \|\| courtesy\) \{[\s\S]{0,260}return json\(\{ kind: "message", reply, locationQuestion: false, query: understoodState\(\), askCount \}\);/.test(src)
   && src.indexOf('if (asideNow || courtesy)') > 0 && src.indexOf('if (asideNow || courtesy)') < src.indexOf('if (decision.kind === "message") {');
-check('a thanks / advice / complaint / sadness in the middle of a search is answered and never re-runs the old search (no query sent)', asideWired(edge));
+check('a thanks / advice / complaint / sadness in the middle of a search is answered and never re-runs the old search (a message, the state kept)', asideWired(edge));
 mustCatch('the aside answer being skipped (the old search re-running on «شكراً»)', !asideWired(edge.replace('if (asideNow || courtesy) {', 'if (false) {')));
 const freshEdge = (src: string) => /const freshRequest = isFreshRequest\(text, location\);/.test(src) && /fresh: freshRequest \|\| undefined,/.test(src)
   && /price: freshRequest && !priceCameFromCurrentTurn \? "" : price,/.test(src);
