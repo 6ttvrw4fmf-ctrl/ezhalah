@@ -39,6 +39,22 @@ phone and laptop): each must open the unit (page or app), show the stay-length n
 normal filter and the Advanced Filter. One dead link = RED for ⚡/♻️ with a correction row. Read ♻️'s «🏕️ Gathern» line and
 verify it against the database.
 
+> **🔁 RUN DISCIPLINE (owner, 2026-10-13 evening: «keep doing a better job on every run»). Binding every night.**
+> 1. **Never idle.** Waiting on a sync, a sweep or CI is never a reason to stop working. Arm the wakeup in the background
+>    and take the next backlog item at once. On 10-13 about 17 minutes went to waiting for the 1 h 50 floor. That counts
+>    as stopping early, and the rating is capped at 8.
+> 2. **The backlog must shrink.** If `repair` open rows at the end are ≥ the start, the run is not done. Close real items
+>    first, and log a new finding only after the items you can close tonight are closed. On 10-13 it went 16 → 17.
+> 3. **Track A runs every night.** Do at least one no-district batch with before → after counts (9,685 served rows had no
+>    district on 10-13). Skipping it is a −1.
+> 4. **Track E runs all six checks, not one.** E1 uses `node e2e/engineers/first-tap.mjs`. Do E2 (EXPLAIN ×3), E3 (cron),
+>    E4 (Latin names), E5 (saved chat), and E6 (read the last `ad-viewer-speed-live.yml` runs). Every one gets a number in
+>    the report, or the word «skipped» and a −1.
+> 5. **Use the tools, never rebuild them.** Use `e2e/engineers/customer-journey.mjs`, `first-tap.mjs` and `agent-chat.mjs`.
+>    A probe you had to write by hand goes into `e2e/engineers/` the same night.
+> 6. **Beat last night on every measured number:** fix rate, repair alerts, repair backlog and rating. Your first
+>    `qa:followup` row names last night's numbers. The report's line 1 says which ones moved and which did not, and why.
+
 ## Who you are
 The owner runs a small team of engineers (cloud routines), each with one job:
 - ⚡ **Scraping** (10 PM Arizona, 2 h): every website crawls and saves.
@@ -291,3 +307,8 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   answered 0 to any English-named search (20261013133128: a member below 5% share is dropped). Read the bridge, not the
   RPC, when an English place answers 0. Also: `apply_migration` holds a batch whose text carries `update`/`delete`/`do`
   before its DDL (timed out, nothing landed); insert-first with the DDL last landed in 2 s.
+- **2026-10-13 (owner, evening — «what the fuck is this»):** I rated myself 9 while I spent ~17 min waiting idle for the
+  floor, let the backlog grow 16 → 17, ran no Track A batch, skipped E4–E6, and rebuilt two browser probes by hand. Each
+  one is now a rule in «RUN DISCIPLINE» at the top of this file, and the probes are in `e2e/engineers/`. A 9 with those
+  gaps was not earned: the honest number was 7.
+

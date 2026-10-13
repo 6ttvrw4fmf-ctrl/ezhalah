@@ -15,3 +15,9 @@ public anon key, never write.
   listings spread across platforms; `--listings '<json>'` takes explicit
   `{platform, source_table, listing_id}` rows. Pure helpers live in `journey-lib.mjs`
   (`node e2e/engineers/journey-lib.mjs` runs its hermetic self-check).
+- `first-tap.mjs` — 🔧's track E1 speed check on a cold phone page: ms until the city dropdown shows counts (cold and after
+  إيجار) and the empty-city note; prints one JSON line, exit 0 = PASS. The dropdown has no testids, so it times the
+  body-text delta after the tap.
+- `agent-chat.mjs "<msg>" ["<msg>" …]` — the AI agent as a phone user: per message, the cards shown and the
+  `p_cities` / `p_districts` the app really sent. Use it for every agent fix's customer proof.
+
