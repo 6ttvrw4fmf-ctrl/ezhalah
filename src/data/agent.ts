@@ -213,6 +213,14 @@ const AR_TYPE: Record<string, string> = {
   'أرض غير مخدومة': 'Raw Land', 'ارض غير مخدومة': 'Raw Land',
   'أرض': 'Residential Land', 'ارض': 'Residential Land',
 };
+
+// The AI sometimes names the type with its Arabic word («شقة») instead of the canonical «Apartment». queryFromBackend() did not know it,
+// filed it under the Commercial fallback, and a two-turn chat («شقة في الرياض وجدة» → «الرياض») showed OFFICES (live 2026-10-13).
+// The same words the free-text parser reads; anything else passes through untouched.
+export function typeFromAgent(ty: string | null): string | null {
+  if (!ty) return null;
+  return AR_TYPE[ty] ?? AR_TYPE[ty.replace(/^ال/, '')] ?? ty;
+}
 const RES_TYPES = new Set(Object.entries(CLEAN_MACRO).filter(([, c]) => c === 'Residential').map(([t]) => t));
 const AR_BUY = /(شراء|للبيع|تمليك|اشتري|أشتري|بيع)/;
 const AR_RENT = /(إيجار|ايجار|للإيجار|للايجار|استئجار|تأجير)/;
@@ -605,7 +613,7 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   if (b.rentPeriod === 'monthly' || b.rentPeriod === 'annual' || b.rentPeriod === 'both') q.rentPeriod = b.rentPeriod;
   q.location = typeof b.location === 'string' ? b.location.trim() : '';
 
-  const ty = typeof b.type === 'string' && b.type.trim() ? b.type.trim() : null;
+  const ty = typeFromAgent(typeof b.type === 'string' && b.type.trim() ? b.type.trim() : null);
   if (ty) {
     if (isCleanType(ty)) {
       // The agent already returned a CLEAN type (it knows them from the DB behavior notes, e.g.
