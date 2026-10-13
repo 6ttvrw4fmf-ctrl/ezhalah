@@ -40,6 +40,10 @@ export async function loadRealExtractPrice(): Promise<(s: string) => string> {
     slice(src, "const CURRENCY_RATES", /^\};$|^\] as const;$|^\];$/),
     slice(src, "const AR_CURRENCY", /^\];$/),
     slice(src, "const RANGE_RE", /;\s*$/),
+    slice(src, "const SIZE_UNIT", /;\s*$/),
+    slice(src, "const SIZE_JOIN", /;\s*$/),
+    slice(src, "const SIZE_RANGE_AFTER", /;\s*$/),
+    slice(src, "const SIZE_RANGE_BEFORE", /;\s*$/),
     slice(src, "function extractPrice(", /^\}$/),
     "export { extractPrice };",
   ];

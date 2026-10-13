@@ -57,6 +57,8 @@ export function parsePriceBounds(text: string | null | undefined, edgePrice?: nu
   // RANGE — «من A الى B», «بين A و B», «A - B», "from A to B", "between A and B"
   const range = new RegExp(`(?:من|بين|from|between)\\s*${NUM}\\s*(?:الي|حتي|و|to|and|-|–|—)\\s*${NUM}`, 'iu').exec(s)
     ?? new RegExp(`${NUM}\\s*(?:-|–|—|الي|to)\\s*${NUM}`, 'iu').exec(s);
+  // …but «من 1000 الى 1500 متر» is an AREA range: the unit after it says so (owner 2026-10-13: it became a land «سعر المتر»).
+  if (range && SIZE_AFTER.test(s.slice((range.index ?? 0) + range[0].length))) return {};
   if (range && !foreign) {
     const a = parseFloat(range[1].replace(/,/g, '')), b = parseFloat(range[3].replace(/,/g, ''));
     let ua = unitValue(range[2]), ub = unitValue(range[4]);
