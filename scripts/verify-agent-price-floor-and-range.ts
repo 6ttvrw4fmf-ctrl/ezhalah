@@ -3,7 +3,8 @@
 // The edge's single price slot is applied as a CEILING: «فيلا أكثر من ٣ مليون», «أرض فوق ٢ مليون», «villa over 2 million» and «لا تقل عن
 // مليون» searched villas UNDER that price — the exact opposite — and «من ١ الى ٣ مليون» lost its lower bound. parsePriceBounds reads the
 // user's own words; queryFromBackend turns a floor / range into real priceMin / priceMax. EXECUTED here, then the wiring is pinned.
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parsePriceBounds as p } from '../src/lib/priceBounds.ts';
 import { windowBetween } from './lib/sourceWindow.ts';
@@ -24,9 +25,20 @@ const T: Array<[string, number | null, { min?: number; max?: number }]> = [
   // a size is not money, a per-metre price is not a range, a foreign currency keeps the edge's conversion
   ['فيلا فوق ٥٠٠ متر', null, {}], ['شقة اكثر من ١٥٠ م²', null, {}], ['ارض ١٠٠٠ متر سعر المتر ٢٠٠٠ فوق', null, {}], ['villa 500 sqm over', null, {}],
   ['فيلا فوق ٥ مليون دينار', 61e6, { min: 61e6 }], ['من ١ الى ٣ مليون دولار', 11.25e6, {}],
+  // an AREA range is not a price range (owner 2026-10-13: «من 1000 الى 1500 متر» became a land «سعر المتر»)
+  ['ارض من 1000 الى 1500 متر', null, {}], ['ارض بين ١٠٠٠ و ١٥٠٠ متر في الرياض', null, {}], ['أبي أرض في الرياض مساحتها تكون بين 1000 متر إلى 1500', null, {}],
 ];
 const wrong = T.filter(([t, e, w]) => JSON.stringify(p(t, e)) !== JSON.stringify(w));
 check(`${T.length} real phrasings: floors, ranges, ceilings, sizes, per-metre prices and currencies are all read the right way round`, wrong.length === 0, wrong.map(([t]) => `${t} → ${JSON.stringify(p(t))}`).join(' | '));
+{ // the real priceBounds.ts with the area-range guard removed must read «من 1000 الى 1500 متر» as a price range again
+  const GUARD = "  if (range && SIZE_AFTER.test(s.slice((range.index ?? 0) + range[0].length))) return {};\n";
+  const src = readFileSync(join(ROOT, 'src/lib/priceBounds.ts'), 'utf8');
+  const dir = mkdtempSync(join(tmpdir(), 'ezhalah-pb-'));
+  writeFileSync(join(dir, 'pb.mts'), src.replace(GUARD, ''));
+  const mutant = (await import(join(dir, 'pb.mts'))).parsePriceBounds as typeof p;
+  mustCatch('an area range read as a price range again (the guard removed from the real file)',
+    src.includes(GUARD) && JSON.stringify(mutant('ارض من 1000 الى 1500 متر', null)) !== '{}' && JSON.stringify(p('ارض من 1000 الى 1500 متر', null)) === '{}');
+}
 check('«فوق / أكثر من / over» is NEVER a ceiling and «تحت / أقل من / under» is NEVER a floor',
   !!p('فيلا اكثر من ٣ مليون', 3e6).min && p('فيلا اكثر من ٣ مليون', 3e6).max == null && !!p('فيلا تحت ٣ مليون', 3e6).max && p('فيلا تحت ٣ مليون', 3e6).min == null);
 
