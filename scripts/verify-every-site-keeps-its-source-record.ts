@@ -13,6 +13,7 @@
 //   node --experimental-strip-types scripts/verify-every-site-keeps-its-source-record.ts   (wired into `npm test`)
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { windowBetween } from './lib/sourceWindow.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 let failed = 0;
@@ -55,7 +56,7 @@ check('every site is either enrolled or named in the not-enrolled list with a re
 
 // ── the module keeps its PDPL promises ──────────────────────────────────────────────────────────────────────────────────────
 const cap = readFileSync(join(ROOT, 'scrapers/common/capture.py'), 'utf8');
-const never = cap.slice(cap.indexOf('_NEVER_WORDS = ('), cap.indexOf('_FACT_EXACT'));
+const never = windowBetween(cap, '_NEVER_WORDS = (', '_FACT_EXACT', 'capture.py');
 const classes = ['user', 'broker', 'advertis', 'owner', 'agent', 'seller', 'phone', 'mobile', 'whatsapp', 'email', 'name', 'url', 'photo', 'token', 'signature', 'guarant', 'national', 'اسم', 'مسوق', 'جوال', 'هاتف'];
 const lacks = classes.filter((c) => !never.includes(`"${c}"`));
 check('person / contact / credential / media / text field names are never read', lacks.length === 0, lacks.join(', '));
