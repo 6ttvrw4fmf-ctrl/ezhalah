@@ -91,3 +91,14 @@ def test_under_cap_is_unchanged_newest_first_without_filters(monkeypatch):
     monkeypatch.setattr(EAR.db, "sb", lambda: c)
     EAR.enrich_table("wasalt_residential_listings", limit=10, workers=1, retry_errs=0)
     assert c.fetches[0] == []
+
+
+def test_over_cap_the_unused_budget_drains_the_old_backlog(monkeypatch):
+    """2026-10-13: 25,750 pending on 10-12 and 10-13 while each run fetched 0-1 rows — the old
+    backlog never moved. After no-city rows and the fresh window, the run's remaining budget takes
+    the old backlog (an unfiltered newest-first read), still bounded by `limit`."""
+    c = _C(pending=25750, fresh=40)
+    monkeypatch.setattr(EAR.db, "sb", lambda: c)
+    out = EAR.enrich_table("wasalt_residential_listings", limit=10, workers=1, retry_errs=0)
+    assert not out.get("aborted")
+    assert len(c.fetches) >= 3 and c.fetches[2] == [], c.fetches
