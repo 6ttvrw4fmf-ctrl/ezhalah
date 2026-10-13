@@ -96,6 +96,24 @@ def read_page(url: str) -> tuple[int | None, str]:
     return None, ""
 
 
+# A page that states a field only in its own app payload, with its own label for it. sanadak renders its
+# spec from the Next.js flight data: `{"label":"area_m2","key":"lotSize"}` and `"lotSize":760` (17502436,
+# re-read run 38361883389). The visible text then carries only the description («المساحة : 150م تقريباً»),
+# so the score compared our 760 with prose and called 4 of 5 sanadak areas wrong. The PAGE says which key is
+# its area; that pair becomes one evidence line, read without our parser.
+_PAYLOAD_LABEL = re.compile(r'"label":"area_m2","key":"(\w+)"')
+
+
+def _payload_area_lines(body: str) -> list[str]:
+    flat = (body or "").replace('\\', "")
+    out = []
+    for key in dict.fromkeys(_PAYLOAD_LABEL.findall(flat)):
+        m = re.search(r'"' + re.escape(key) + r'":(\d+(?:\.\d+)?)[,}]', flat)
+        if m:
+            out.append(f"مساحة العقار {m.group(1)} م²")
+    return out
+
+
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
     jsonld = []
@@ -118,7 +136,7 @@ def page_evidence(body: str) -> dict:
         # project 34830 (17539724, 890,000 / 161 m², re-read run 38361960175) sits past line 60, so the
         # score only saw the OTHER units and called our exact values wrong (backlog #124). The job log
         # still prints only the first n_evidence lines.
-        "evidence_lines": _with_values(lines)[:400],
+        "evidence_lines": (_payload_area_lines(body) + _with_values(lines))[:400],
         "text_head": " | ".join(lines)[:1500],
     }
 

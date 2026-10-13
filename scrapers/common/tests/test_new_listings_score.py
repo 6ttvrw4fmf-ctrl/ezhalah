@@ -433,3 +433,19 @@ def test_shell_page_platform_is_unreadable_not_wrong():
     # the same page on any other website is still judged
     other = score_site(client, "fakesite", [("t", 1)], night="2026-10-13", pace=0, probe=lambda url: (200, body))
     assert other["normal_mismatch"] > 0
+
+
+def test_area_the_page_labels_in_its_own_payload_is_the_page_value():
+    # sanadak 17502436 (2026-10-13, re-read run 38361883389): the flight payload maps its area label to
+    # lotSize and carries "lotSize":760 (= what we store); the visible text has only «المساحة : 150م تقريباً».
+    from scrapers.common.source_reread import page_evidence
+    body = ('<html><head><meta name="description" content="المساحة : 150م تقريباً"></head><body>'
+            '<p>المساحة : 150م تقريباً</p>'
+            '<script>self.__next_f.push([1,"{\\"label\\":\\"area_m2\\",\\"key\\":\\"lotSize\\"},'
+            '{\\"landNumber\\":\\"3/67/2\\",\\"lotSize\\":760,\\"numberBedrooms\\":3}"])</script>'
+            '</body></html>')
+    pe = page_evidence(body)
+    assert compare_listing({"area_m2": 760}, pe)["area"] == MATCH
+    assert compare_listing({"area_m2": 300}, pe)["area"] == MISMATCH
+    # without the page's own label, the prose alone is what the page says
+    assert compare_listing({"area_m2": 760}, page_evidence(body.replace("area_m2", "x")))["area"] == MISMATCH
