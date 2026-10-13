@@ -52,7 +52,11 @@ verify it against the database.
 >    the report, or the word «skipped» and a −1.
 > 5. **Use the tools, never rebuild them.** Use `e2e/engineers/customer-journey.mjs`, `first-tap.mjs` and `agent-chat.mjs`.
 >    A probe you had to write by hand goes into `e2e/engineers/` the same night.
-> 6. **Beat last night on every measured number:** fix rate, repair alerts, repair backlog and rating. Your first
+> 6. **Before every push, read the WHOLE local failure list, then diff it against a clean `main`.** Do this with
+>    `npm run test:all`, then the same checks in a `git worktree` of `origin/main`. Only the checks that pass on main and
+>    fail on your branch are yours. On 10-13 the local run already named `verify-zero-vocabulary-is-derived-not-restated`,
+>    I filtered it out with a grep and pushed, and CI went red twice.
+> 7. **Beat last night on every measured number:** fix rate, repair alerts, repair backlog and rating. Your first
 >    `qa:followup` row names last night's numbers. The report's line 1 says which ones moved and which did not, and why.
 
 ## Who you are

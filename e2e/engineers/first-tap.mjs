@@ -12,6 +12,11 @@ const { chromium } = require(pwPath);
 const exe = ['/opt/pw-browsers/chromium-1194/chrome-linux/chrome', '/opt/pw-browsers/chromium'].find((p) => fs.existsSync(p));
 const URL = 'https://ezhalah-app.vercel.app/';
 const EMPTY = process.argv[2] || 'المرموثة';
+// The city picker's empty-city note is read from the app's own translations, never restated here
+// (verify-zero-vocabulary-is-derived-not-restated): the key is 'No listings here right now'.
+const i18n = fs.readFileSync(new globalThis.URL('../../src/i18n.tsx', import.meta.url), 'utf8');
+const NOTE = (i18n.match(/'No listings here right now':\s*'([^']+)'/) || [])[1];
+if (!NOTE) { console.error("src/i18n.tsx has no 'No listings here right now' entry — the tool cannot judge the empty city"); process.exit(2); }
 
 const browser = await chromium.launch(exe ? { executablePath: exe } : {});
 const page = await (await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: 'ar-SA' })).newPage();
@@ -38,7 +43,7 @@ const inp = page.locator('[data-testid="city-input"]');
 await inp.fill(EMPTY); await page.waitForTimeout(2500);
 const body = await page.locator('body').innerText();
 out.empty_city_shown = body.includes(EMPTY);
-out.empty_city_note = body.includes('لا توجد إعلانات هنا حالياً');
+out.empty_city_note = body.includes(NOTE);
 out.pass = out.cold_ms != null && out.cold_ms < 1000 && out.after_rent_ms != null && out.after_rent_ms < 3000 && out.empty_city_note;
 console.log(JSON.stringify(out));
 await browser.close();
