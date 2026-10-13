@@ -75,6 +75,34 @@ found, written down and still there tomorrow counts against you. This block is t
 in `ops_dead_visible_fleet` plus the open P1 lifecycle backlog items. It must fall every night. If it doesn't,
 the first line of the report says why.
 
+## ⚡ NEXT-RUN UPGRADES (owner, 2026-10-13: «keep doing a better job on every run … improve your job in the next run»)
+Measured on 10-13: 2 fixes proven, 3 left pending on tomorrow's crawls, ~25 of 110 minutes spent in
+`sleep`/wait loops, and one merged fix (#6978) built on a theory a second reader then disproved. These
+rules close each of those, and they win over any older timing in this file:
+
+1. **No idle minutes.** While CI, a crawl or a sync runs, work the next queue item. A `sleep` loop is
+   allowed only as the very last thing before the end row. The end row records `idle_min`.
+2. **Second reader before any change to a quarantined checker.** First dispatch `lifecycle-spot-check.yml`
+   with the checker's own control ids. Change code only if that reader agrees the controls are dead
+   or blocked. A gate that is right to stop is not a bug: say so and move on in under 10 minutes.
+3. **Provable before pending, by the clock.** In the first 20 minutes, list every fix whose proof can
+   land inside the slot: a sweep you may dispatch (`fleet-liveness.yml site=…`,
+   `dealapp-liveness-cron.yml`, `gathern-liveness.yml`), then the next :22 sync. Do those first.
+   Crawl-dependent fixes ship after them, and at most 2 a night may stay pending.
+4. **Prove yesterday's pending fixes in the first 30 minutes,** from the follow-up row, before
+   anything new: manzo #6980 and wahadat #6981 on 10-14.
+5. **A blocker seen twice is re-classified, not retried.** The opensooq registry reseed waited three
+   nights on a DELETE the connector holds for a person, while opensooq's crawl already hides its dead
+   ads through `strike_read_gone` (3 on 10-13, 11 due on 10-14). It is now P3 (it speeds hiding up,
+   it does not unblock it), carried on branch `lifecycle/2026-10-13-opensooq-daily-direct` for
+   any session with a person present. Never try that apply again unattended.
+6. **A hidden ad's proof needs no journey tool.** `customer-journey.mjs` cannot load a hidden listing
+   (it reads UNKNOWN). The proof is the before/after anon `search_listings_ar` read across the :22
+   sync, plus the app's `location_search_candidates_ar` replay for the ad's city and deal (proof
+   rows 1045, 1048 are the shape).
+7. **Fix rate counts only tonight's own work, honestly split** as «N fixed and proven tonight (M of
+   them from yesterday's PRs) of K found».
+
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «I trust the lifecycle engineer … I don't want to go back and forth with it … make it
 powerful so it does an amazing job.» So this section is the whole plan, written to be followed without
