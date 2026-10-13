@@ -64,7 +64,10 @@ THE FIVE THINGS THIS SOURCE WILL GET WRONG IF YOU TRUST THE OBVIOUS THING:
    city would move them 400 km to Riyadh. Scanning these tails against the city catalog is worse
    still: «النخيل» (31), «الزهراء» (28), «الصفا» (22), «النزهة» (15), «الحمراء» (13), «الريان»,
    «الفيصلية», «العزيزية» are ALL both real Saudi city names and Al-Ahsa district names here, so a
-   substring city scan mislabels 150+ listings. No city is ever read from the title.
+   substring city scan mislabels 150+ listings. No city is ever SCANNED out of the title. The one
+   exception (2026-10-13, backlog #455) is a title whose WHOLE place text is a measured Al-Ahsa
+   town («… في حرض», «… بالجشه»), listed by name in AHSA_TOWN_CITIES: there the office itself
+   named the town, so it is the source's city (city_basis «listing_title_town»), never a guess.
    The pool the district name is matched against is NOT the stored city_id: the governorate-level
    «الاحساء» (3677) carries ZERO districts in the catalog, so matching against it alone would leave
    district_ar NULL on all 1,485 rows. Each Al-Ahsa town's pool is asked and a name is taken only
@@ -131,7 +134,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize as N  # noqa: E402
-from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.arabic_location import find_district_in_text, norm_ar, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
 
@@ -171,6 +174,20 @@ OUTSIDE_AREA_TOKENS = ("حائل", "حفر الباطن", "الشنان", "بق�
 # never made (docstring §3).
 AHSA_DISTRICT_POOLS = ((12, "الهفوف"), (2748, "المبرز"), (2038, "العيون"), (2764, "الجفر"),
                        (2653, "العمران"), (243, "بقيق"), (3700, "جواثا"), (2643, "يبرين"))
+
+# Al-Ahsa TOWNS the office names as the PLACE itself: «بيت للبيع في حرض», «أرض للبيع في البطالية»,
+# «البريد بالجشه». Each is a catalog CITY of the Eastern region (resolved through to_catalog with the
+# region hint), none is a district in any AHSA_DISTRICT_POOLS town, and every one is measured on live
+# titles (2026-10-13, backlog #455: حرض 30, البطالية 8, الفضول 4, الطرف 3, القرين 2, الشهارين 2, …).
+# These rows were booked under the governorate «الاحساء», so a customer searching حرض (where Deal
+# App's 13 حرض ads already live) never found them. The source DID name the town here, so this is the
+# source's own city, not a derived one. MEASURED NAMES ONLY, matched against the WHOLE tail (or a
+# trailing «ب/بال<town>»), never as a substring scan — the docstring's §3 warning stands: «الجابرية»
+# is deliberately absent (39 abralosol ads use it as an المبرز district), as are «المركز» (a plain
+# word) and every name that is also an Al-Ahsa district («القارة», «المنيزلة», «التويثير», «الشعبة»).
+AHSA_TOWN_CITIES = ("حرض", "البطالية", "الفضول", "الطرف", "القرين", "الشهارين", "الدالوة",
+                    "التهيمية", "الحليلة", "خريص", "الجشة", "العيون")
+_AHSA_TOWN_BY_NORM = {norm_ar(t): t for t in AHSA_TOWN_CITIES}
 
 # An administrative prefix names a SETTLEMENT, never a district, and «مدينة» in particular collides
 # with a real catalog district called «حي المدينة» — leaving it in matched «طابه بمدينة الشنان» to
@@ -553,6 +570,23 @@ def resolve_district(district_raw: Optional[str]) -> Optional[str]:
     return found.pop() if len(found) == 1 else None
 
 
+def town_city(district_raw: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """(town, rest) when the office's place text IS a named Al-Ahsa town («حرض», «قرية الحليلة») or
+    ends in «ب/بال<town>» («البريد بالجشه» → ("الجشة", "البريد")); (None, None) otherwise."""
+    if not district_raw:
+        return None, None
+    text = norm_ar(_ADMIN_PREFIX_RE.sub(" ", district_raw)).strip()
+    if text in _AHSA_TOWN_BY_NORM:
+        return _AHSA_TOWN_BY_NORM[text], None
+    m = re.match(r"^(.+?)\s+ب(?:ال)?(\S+)$", text)
+    if m:
+        tail = m.group(2)
+        for cand in (tail, "ال" + tail):
+            if cand in _AHSA_TOWN_BY_NORM:
+                return _AHSA_TOWN_BY_NORM[cand], m.group(1).strip() or None
+    return None, None
+
+
 def _type_phrase(title: str) -> str:
     """The words BEFORE the deal word — the source's own type phrase («أرض تجارية», «منزل عظم»)."""
     m = _DEAL_RE.search(f" {title} ")
@@ -592,10 +626,17 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
     # names a place OUTSIDE the governorate is the source contradicting that default → skip.
     if district_raw and any(tok in district_raw for tok in OUTSIDE_AREA_TOKENS):
         return None, category, "outside_office_area"
-    city_id, region_id = to_catalog(OFFICE_CITY_AR, region_hint=REGION_HINT)
+    city_ar, city_basis = OFFICE_CITY_AR, "office_published_city_governorate_grain"
+    district_ar = resolve_district(district_raw)
+    town, town_rest = (None, None) if district_ar else town_city(district_raw)
+    if town:
+        t_id, t_reg = to_catalog(town, region_hint=REGION_HINT)
+        if t_id and t_reg == to_catalog(OFFICE_CITY_AR, region_hint=REGION_HINT)[1]:
+            city_ar, city_basis = town, "listing_title_town"
+            district_ar = find_district_in_text(town_rest, t_id) if town_rest else None
+    city_id, region_id = to_catalog(city_ar, region_hint=REGION_HINT)
     if not city_id:
         return None, category, "city_not_in_catalog"
-    district_ar = resolve_district(district_raw)
 
     amount = detail.get("price_amount")
     if amount is None:
@@ -661,8 +702,8 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
         **_amenities(description),
         "property_type": property_type,
         "transaction_type": transaction_type,
-        "city": N.map_city(OFFICE_CITY_AR),
-        "city_ar": OFFICE_CITY_AR,
+        "city": N.map_city(city_ar),
+        "city_ar": city_ar,
         "city_id": city_id,
         "region_id": region_id,
         "district_ar": district_ar,
@@ -699,7 +740,7 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
             "property_age_raw": fields.get("al-mr") or None,
             "fal_license": detail.get("fal_license"),
             "bump_date": ix.get("bump_date"),      # a REFRESH date, not created_at
-            "city_basis": "office_published_city_governorate_grain",
+            "city_basis": city_basis,
             "district_source": "listing_title" if district_raw else None,
         }.items() if v is not None}),
         # Raw-capture standard: every structured fact the page published, so a field we learn to
