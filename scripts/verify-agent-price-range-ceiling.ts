@@ -62,6 +62,9 @@ eq('«500 m2» is a size, not 500 million', extractPrice('Residential land in Je
 eq('…while «1.5m» and «3m SAR» stay millions', extractPrice('villa up to 1.5m') + '|' + extractPrice('budget 3m SAR'), '1500000|3000000');
 eq('range with commas + ريال', extractPrice('من 300,000 إلى 1,500,000 ريال'), '1500000');
 eq('بين X و Y range', extractPrice('بين 300 الف و 1.5 مليون ريال'), '1500000');
+// The connector is often written ON the next number. Live 2026-10-13: «بين ٥٠٠ و٧٠٠ ألف» searched «≤ 500 ريال».
+eq('LIVE REPRO: «بين ٥٠٠ و٧٠٠ ألف» (و attached) -> 700000', extractPrice('شقة للبيع في الرياض بين ٥٠٠ و٧٠٠ ألف'), '700000');
+eq('«من ٥٠٠ الى٧٠٠ ألف» (الى attached) -> 700000', extractPrice('من ٥٠٠ الى٧٠٠ ألف'), '700000');
 eq('English "from X to Y"', extractPrice('from 300k to 1.5m SAR'), '1500000');
 eq('English "between X and Y"', extractPrice('between 300,000 and 1,500,000 SAR'), '1500000');
 eq('bare hyphen range', extractPrice('300000-1500000 ريال'), '1500000');
