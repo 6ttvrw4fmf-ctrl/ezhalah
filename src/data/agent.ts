@@ -887,7 +887,9 @@ async function callAgentBackend(
         // So we tell the merge exactly what this turn stated.
         query: certifyAfOnMergedState(
           mergeConversationState(
-            ctx.prevQuery ?? null,
+            // A complete new request («فيلا للبيع في جدة فيها مسبح») starts fresh: the edge says so, and nothing from the previous search
+            // rides along (live 2026-10-13: it kept «٤ غرف» from a Riyadh apartment search and found nothing).
+            d.query?.fresh === true ? null : (ctx.prevQuery ?? null),
             queryFromBackend(d.query ?? {}, text, ctx.attemptTexts ?? [text]),
             statedKeys(d.query ?? {}),
           ),

@@ -674,6 +674,13 @@ export function searchSummary(q: SearchQuery, loc: Locale = getLocale()): string
   // Filter path: the District field's pick is carried in districtLabel (the location match here is the
   // CITY), so add an explicit District line so the summary reflects the chosen neighborhood. (owner UI request.)
   if (q.districtLabel?.trim()) lines.push(`• ${t('District')}: ${arabicOrUnresolved(tPlace(q.districtLabel.trim()))}`);
+  // The AI chat carries its district in `q.districts`, not districtLabel: «شقة في الرياض حي النرجس» searched حي النرجس and the summary never
+  // said so (live 2026-10-13). Any district the location lines above did not already name gets its line.
+  else {
+    const shown = locLines.join(' ');
+    const unshown = (q.districts ?? []).filter((d) => d.trim() && !shown.includes(d.trim().replace(/^حي\s+/, '')));
+    if (unshown.length) lines.push(`• ${t(unshown.length > 1 ? 'Districts' : 'District')}: ${unshown.map((d) => arabicOrUnresolved(tPlace(d.trim()))).join(getLocale() === 'ar' ? '، ' : ', ')}`);
+  }
   for (const b of budgetLines(q, loc)) lines.push(`• ${b}`);
   // Category/group-level refinements (filter UI). Each has its own field, so the labels are unambiguous.
   const summaryBeds = effectiveBeds(q);

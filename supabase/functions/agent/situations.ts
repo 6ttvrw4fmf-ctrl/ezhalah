@@ -8,7 +8,7 @@
 // Pure and deterministic: a message is classified by words (never by the model), and the reply is one of several phrasings
 // (never the one the previous bot message used), with its emoji, no dash, no recommendation, and an example the user can type.
 // `danger` is checked FIRST and wins over everything: the agent never searches in answer to it.
-import { variantText, EXAMPLE_SEARCH_AR, EXAMPLE_SEARCH_EN } from "./questionExamples.ts";
+import { variantText, EXAMPLE_SEARCH_AR, EXAMPLE_SEARCH_EN, socialKind } from "./questionExamples.ts";
 
 export type Situation = "danger" | "complaint" | "protected" | "financial" | "advice" | "sell" | "outside" | "link" | "phone" | "sad";
 
@@ -177,3 +177,13 @@ export function situationReplyText(kind: Situation, en: boolean, seed: string, a
 }
 
 export const SITUATION_POOLS = POOLS;
+
+// A thanks / goodbye / hello that is ONLY that («شكراً», «مشكور يا إزهله», "thanks a lot"), with nothing else to act on. «مشكور بس غيرها
+// للدمام» is not: something is left once the courtesy words are taken out. In the middle of a search a pure courtesy must be answered,
+// never turned into the old search again (live 2026-10-13: «شكراً» re-ran «فيلا، ٣ مليون، ٤ غرف، مسبح»).
+const COURTESY = /شكرا+ً?|شكر\S*|مشكور\S*|يعطيك|العافي[ةه]|يسلمو\S*|ما\s*قصرت|جزيلا?ً?|كثير|والله|الله|يا|ياخي|اخوي|أخوي|حبيبي|ازهله|إزهله|مع|السلامة|في|أمان|امان|مرحبا\S*|مرحبً?ا|هلا|اهلا\S*|أهلا\S*|السلام|عليكم|سلام|صباح|مساء|الخير|\bthank(?:s| you)?\b|\bthx\b|\bcheers\b|\bbye\b|\bgoodbye\b|\bsee you\b|\bhi\b|\bhello\b|\bhey\b|\bso much\b|\ba lot\b|\bvery much\b|\bgood (?:morning|evening|afternoon)\b/giu;
+export function pureSocialKind(text: string): "thanks" | "bye" | "hello" | null {
+  const kind = socialKind(text);
+  if (!kind) return null;
+  return String(text ?? "").replace(COURTESY, " ").replace(/[^\p{L}]+/gu, "").trim() === "" ? kind : null;
+}

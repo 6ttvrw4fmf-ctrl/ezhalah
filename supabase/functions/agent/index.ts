@@ -62,10 +62,10 @@ import { wantsGuidedInterview, hasUsableLocation, hasEnoughToSearch, established
 import { buildTurnDecision } from "./turnWiring.ts";
 // The three location-ambiguity cases restored from the deleted client-side locationClarification()
 // (round 2 fix, "lost location-ambiguity cases") — see its own header.
-import { plainRegionQuestion, emptyLocationQuestion, severalCitiesQuestion, residentialCommercialQuestion, proximityNotMeasuredText } from "./locationAmbiguity.ts";
+import { plainRegionQuestion, emptyLocationQuestion, severalCitiesQuestion, residentialCommercialQuestion, proximityNotMeasuredText, namesAProperty, isFreshRequest } from "./locationAmbiguity.ts";
 import { cityQuestionAr, cityQuestionEn, noIntentReplyText, searchLineText, districtNotInCityQuestion, listCities, anyCityText, ANY_CITY_RE, socialKind, socialReplyText, unsearchableText, searchingNowText, twinRegionQuestion, twinDistrictQuestion } from "./questionExamples.ts";
 import { botMessage } from "./botMessage.ts";
-import { situationKind, situationReplyText } from "./situations.ts";
+import { situationKind, situationReplyText, pureSocialKind } from "./situations.ts";
 
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
 // AI behavior notes live in the `agent_notes` table so they can be edited WITHOUT redeploying this
@@ -1630,6 +1630,19 @@ Deno.serve(async (req: Request) => {
         return json({ kind: "message", reply: situationReplyText("danger", locale === "en", text, lastBotReply), locationQuestion: false, query: understoodState(), askCount: decision.askCount });
       }
 
+      // NOT A SEARCH, EVEN IN THE MIDDLE OF ONE (live 2026-10-13, the owner watching): with an old search in memory, «شكراً» and «وش أفضل
+      // حي في الرياض؟» each RE-RAN «فيلا، ٣ مليون، ٤ غرف، مسبح», because the carried state alone was "enough to search". A pure thanks /
+      // goodbye / hello, advice, a complaint, a place abroad, a wish to sell, a link, a phone number or sadness is answered for what it is,
+      // and nothing is searched (the state rides along unchanged, «a pause never erases»). A nationality wish next to a real property («شقة للسعوديين بس») still searches,
+      // as it always did; a financial word can be a purpose («شقة للاستثمار»), so it never interrupts.
+      const aside = situationKind(text);
+      const asideNow = aside && aside !== "financial" && !(aside === "protected" && namesAProperty(text)) ? aside : null;
+      const courtesy = pureSocialKind(text);
+      if (asideNow || courtesy) {
+        const reply = asideNow ? situationReplyText(asideNow, locale === "en", text, lastBotReply) : socialReplyText(courtesy!, locale === "en", text, lastBotReply);
+        return json({ kind: "message", reply, locationQuestion: false, query: understoodState(), askCount });
+      }
+
       if (decision.kind === "message") {
         // UNSEARCHABLE — THE ONE QUESTION WAS ALREADY ASKED (owner, 2026-09-11). Checked FIRST: an
         // unresolved ambiguity or a still-missing place produces EXACTLY the same establishedState
@@ -1702,6 +1715,7 @@ Deno.serve(async (req: Request) => {
       }
 
       // decision.kind === "listings"
+      const freshRequest = isFreshRequest(text, location);
       return json({
         kind: "listings",
         reply: groundReply(replyOut, locale, outAmenities, text, lastBotReply),
@@ -1716,8 +1730,11 @@ Deno.serve(async (req: Request) => {
           districtPin,
           type: typeof out.type === "string" && out.type ? out.type : null,
           detail: typeof out.detail === "string" && out.detail ? out.detail : null,
-          price,
-          priceOriginal: priceOriginal || undefined,
+          // A complete new request starts fresh: the app keeps nothing from the previous search, and a budget read from an EARLIER
+          // message is not this one's (see isFreshRequest, live 2026-10-13).
+          fresh: freshRequest || undefined,
+          price: freshRequest && !priceCameFromCurrentTurn ? "" : price,
+          priceOriginal: (freshRequest && !priceCameFromCurrentTurn ? "" : priceOriginal) || undefined,
           // RULE 2 (owner 2026-08-29) — the reply must not promise an ordering the query does not
           // apply. Live N1 replied «أرخص القصور» with sort unset. Fills an ABSENT sort only; an
           // explicit model sort is never overridden. See ./postModel.ts.
