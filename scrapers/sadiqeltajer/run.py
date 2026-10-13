@@ -315,29 +315,60 @@ def parse_bedrooms(text: str) -> Optional[int]:
     return n if 0 < n <= 50 else None
 
 
-_STREET_RE = re.compile(r"شارع\s*[ء-ي]*\s*([\d٠-٩]{1,3})\s*م")
+# ONE street or nothing (the fleet rule, normalize.one_street_width / one_direction). This source
+# writes a corner plot as two streets in one frontage row — «الواجهة : شارع تجارى غربي 40م شارع
+# جنوبي 15م» (12217842, re-read 2026-10-13). The old reader allowed ONE word between «شارع» and the
+# number, so it skipped the 40 m commercial street and stored 15, and took «جنوبي» because it came
+# first in a word list: a confident value the ad never stated. Two streets or two bearings → NULL.
+_STREET_RE = re.compile(r"شارع((?:\s*[ء-ي]+){0,3})\s*:?\s*([\d٠-٩]{1,3})\s*(?:م|متر)(?![ء-ي])")
+# What follows the street(s) in the same row and is NOT a street: an alley («وممر جنوبي 8م», «ومر شرقي»),
+# the plot's side lengths («الاطــوال : شمالي 41م جنوبي 51م …», every bearing in it is a SIDE, not a
+# facade), the plan number, or a «قريبة من …» note. Measured on the 117 re-read rows (2026-10-13).
+_FACADE_TAIL = re.compile(r"(?:\s|^)(?:و\s*)?(?:ممر|مر(?=\s)|الا?[ـ]*ط[ـ]*و[ـ]*ا?[ـ]*ل|الأطوال|رقم المخطط|المخطط|قريب)")
+_MANY_STREETS = re.compile(r"شارعين|شوارع")
+
+
+def facade_row(text: str) -> Optional[str]:
+    """The listing's OWN frontage row, verbatim (kept in additional_info so it can be re-judged)."""
+    return desc(text, "الواجهة")
+
+
+def _street_part(text: str) -> Optional[str]:
+    """The frontage row up to the first thing that is not a street; None when it names two streets."""
+    v = facade_row(text)
+    if not v:
+        return None
+    v = _FACADE_TAIL.split(v, maxsplit=1)[0]
+    if _MANY_STREETS.search(v) or v.count("شارع") > 1:
+        return None
+    return v
 
 
 def parse_street_width(text: str) -> Optional[int]:
     """From «الواجهة : شارع شرقى 25م» — the listing's OWN frontage row, never the page at large."""
-    v = desc(text, "الواجهة")
+    v = _street_part(text)
     if not v:
         return None
-    m = _STREET_RE.search(v.translate(_AR_DIGITS))
-    if not m:
+    m = _STREET_RE.findall(v.translate(_AR_DIGITS))
+    if len(m) != 1:
         return None
-    n = int(m.group(1))
+    n = int(m[0][1])
     return n if 1 <= n <= 200 else None
 
 
 _DIRECTIONS = ("شمالى", "شمالي", "جنوبى", "جنوبي", "شرقى", "شرقي", "غربى", "غربي",
                "شمال", "جنوب", "شرق", "غرب")
+_ALEF_MAQSURA = str.maketrans("ى", "ي")
 
 
 def parse_direction(text: str) -> Optional[str]:
-    v = desc(text, "الواجهة")
+    v = _street_part(text)
     if not v:
         return None
+    # «شارع شرقي12م»: a bearing glued to its number is still that bearing.
+    v = re.sub(r"(?<=[ء-ي])(?=[\d٠-٩])|(?<=[\d٠-٩])(?=[ء-ي])", " ", v)
+    if normalize.one_direction(v.translate(_ALEF_MAQSURA)) is None:
+        return None                     # no bearing, or two (a corner plot) → unknown
     for d in sorted(_DIRECTIONS, key=len, reverse=True):
         if d in v:
             return d
@@ -507,6 +538,7 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
         "type_ar": type_ar,
         "region_ar": region_ar,
         "components": desc(text, "المكونات"),
+        "facade_raw": facade_row(text),
         "annual_income": annual_income(text),
         "price_is_per_metre": price_per_meter is not None,
         "price_published": (price_total is not None) or (price_per_meter is not None),

@@ -60,6 +60,7 @@ FEATURE_COLUMN = {
     "غرفة سائق": "driver_room",
     "غرفة غسيل": "laundry_room",
     "مدخل سيارة": "car_entrance",
+    "مطبخ": "kitchen",               # the site's own feature tag (6 of 6 active ads on 10-13)
 }
 
 # One vetted addition to the house taxonomy: «محل تجاري» is «محل» (Shop) with the redundant
