@@ -2,8 +2,8 @@
 map_listing() skipped AH1041 (تاون هاوس, Riyadh, 630k) and AH1039 (دور كامل, Al-Mudhnib, 650k)
 — 32 of 34 served (coverage audit 2026-09-28).
 
-townhouse → Duplex (owner 2026-10-12: town house is under Duplex; taxonomy.source.json Duplex
-rawTypes carry «تاون هاوس»; normalize maps the slug townhouse → Duplex). whole_floor → Floor is the site's own label
+townhouse → «تاون هاوس», the source's own name (owner 2026-10-12: a town house is filed under Duplex
+by the app's search but keeps its name; taxonomy.source.json Duplex rawTypes carry «تاون هاوس»). whole_floor → Floor is the site's own label
 «دور كامل». AH1039's office title says «فيلا دورين»; the structured slug decides (the page's spec
 grid and SEO title both say «دور كامل»), the title stays verbatim on the card.
 
@@ -40,7 +40,7 @@ AH1039 = {"publicId": 1039, "purpose": "sale", "currentPrice": 650000,
                     "bathrooms": 3, "floors": 2, "direction": "south", "propertyType": "whole_floor"}}
 
 
-@pytest.mark.parametrize("item,ptype", [(AH1041, "Duplex"), (AH1039, "Floor")])
+@pytest.mark.parametrize("item,ptype", [(AH1041, "تاون هاوس"), (AH1039, "Floor")])
 def test_townhouse_and_whole_floor_are_served_under_existing_types(monkeypatch, item, ptype):
     monkeypatch.setattr(R, "to_catalog", lambda city, region_hint=None: (1, 1))
     row, category = R.map_listing(item, [])

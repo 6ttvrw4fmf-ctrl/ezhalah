@@ -114,7 +114,7 @@ THE TRAPS, ALL MEASURED
    «بنتهاوس » 31, «فيلا» 16, «شقة» 16, "penthouse" 14, «أدوار » 9. Only 4 of the 12 resolve through
    the shared TYPE_MAP_AR unaided. Every override below is an EXISTING fleet mapping, not a new
    judgment: «بنتهاوس»→Apartment (dwelleo, rakez, dealapp, justsa, azure, rightcompound),
-   «تاون هاوس»→Villa (dwelleo, eilmalriyada, aqalemhajer; TYPE_MAP_EN already folds "townhouse"),
+   «تاون هاوس» keeps its own name (dwelleo, eilmalriyada, aqalemhajer; TYPE_MAP_EN maps "townhouse" the same way),
    «فلل»→Villa and «أدوار»/«ادوار»→Floor (souq24, alkhaas). The English slugs go through the
    shared TYPE_MAP_EN, with "penthouse" overridden to match its Arabic twin. Values are stripped
    before lookup because the source pads them.
@@ -285,7 +285,7 @@ _TYPE_OVERRIDES = {
     "أدوار": "Floor",
     # Fleet-settled folds.
     "بنتهاوس": "Apartment",     # a penthouse is sold as an apartment (dwelleo, rakez, dealapp, …)
-    "تاون هاوس": "Villa",        # TYPE_MAP_EN already folds "townhouse" → Villa
+    "تاون هاوس": "تاون هاوس",  # a town house keeps its own name (owner 2026-10-12)
     # The English slugs this source mixes in. apartment/villa/duplex/townhouse already resolve via
     # the shared TYPE_MAP_EN; "penthouse" is in neither shared map, so it is folded like its twin.
     "penthouse": "Apartment",

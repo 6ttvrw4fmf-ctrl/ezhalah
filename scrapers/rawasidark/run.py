@@ -66,13 +66,13 @@ RSC_UNDEFINED = "$undefined"
 #   «عمارة تجارية» — the shared map's substring pass reads the «عمارة» inside it and returns
 #       Building (residential). The source says تجارية, so it is the canonical Commercial Building.
 #   «محطة وقود»   — same station the shared map already knows as «محطة بنزين» → Gas Station.
-#   «تاون هاوس»   — the fleet-wide Townhouse fold (TYPE_MAP_EN 'Townhouse': 'Villa').
+#   «تاون هاوس»   — kept under its own name, fleet wide (TYPE_MAP_EN 'Townhouse': «تاون هاوس»; owner 2026-10-12).
 #   «شقق مفروشة»  — resolves to Apartment by substring anyway; pinned so a future map edit can't
 #       silently move it. Furnishing itself is NOT captured as a field (the source has no such flag).
 TYPE_OVERRIDES = {
     "عمارة تجارية": "Commercial Building",
     "محطة وقود": "Gas Station",
-    "تاون هاوس": "Villa",
+    "تاون هاوس": "تاون هاوس",
     "شقق مفروشة": "Apartment",
 }
 

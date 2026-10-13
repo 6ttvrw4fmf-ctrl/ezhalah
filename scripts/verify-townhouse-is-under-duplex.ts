@@ -1,7 +1,7 @@
-// A TOWN HOUSE (تاون هاوس) IS FILED UNDER DUPLEX, NEVER UNDER VILLA (owner 2026-10-12: «town house are under duplex»).
+// A TOWN HOUSE (تاون هاوس) IS FILED UNDER DUPLEX, NEVER UNDER VILLA, AND KEEPS ITS OWN NAME (owner 2026-10-12: «town house are under duplex … dont change its name»).
 // It used to ride the Villa search (2026-07-06 fold). EXECUTED here against the real type functions, then every layer that writes or
 // reads the word is pinned: the search type labels, the clean-type map, the python normalizer, the agent's word list and the edge prompt.
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { typeArForTypes, normalizeType, CLEAN_TO_QUERY } from '../src/data/propertyTypes.ts';
 
@@ -24,12 +24,23 @@ const src = JSON.parse(read('src/data/taxonomy.source.json'));
 const q = (c: string) => src.cleanTypes.find((t: any) => t.clean === c)?.query?.rawTypes ?? [];
 check('taxonomy.source.json: Duplex lists تاون هاوس, Villa does not', q('Duplex').includes(TH) && !q('Villa').includes(TH));
 
-// python (what the scrapers write on the next daily scrape)
+// python (what the scrapers write on the next daily scrape): the town house KEEPS ITS OWN NAME «تاون هاوس» (owner 2026-10-12: «dont change its
+// name»), it is never written as Duplex or Villa — the search files it under Duplex by the map above.
 const py = read('scrapers/common/normalize.py');
-const pyOk = (s: string) => /'Townhouse': 'Duplex'/.test(s) && /'townhouse': 'Duplex'/.test(s) && !/'[Tt]ownhouse': 'Villa'/.test(s);
-check('normalize.py: Townhouse / townhouse → Duplex', pyOk(py));
-mustCatch('Townhouse folding back into Villa in python', !pyOk(py.replace("'Townhouse': 'Duplex'", "'Townhouse': 'Villa'")));
-check('alhoshan: the townhouse slug → Duplex', /"townhouse": "Duplex"/.test(read('scrapers/alhoshan/run.py')));
+const pyOk = (s: string) => /'Townhouse': 'تاون هاوس'/.test(s) && /'townhouse': 'تاون هاوس'/.test(s) && /"تاون هاوس":\s+"تاون هاوس"/.test(s)
+  && /"Residential Land", "تاون هاوس",/.test(s) && !/'[Tt]ownhouse': '(?:Villa|Duplex)'/.test(s);
+check('normalize.py: Townhouse / townhouse → «تاون هاوس», shared Arabic word kept, routed residential', pyOk(py));
+mustCatch('Townhouse folding back into Villa in python', !pyOk(py.replace("'Townhouse': 'تاون هاوس'", "'Townhouse': 'Villa'")));
+mustCatch('Townhouse being renamed Duplex in python', !pyOk(py.replace("'Townhouse': 'تاون هاوس'", "'Townhouse': 'Duplex'")));
+mustCatch('the town house losing its residential routing', !pyOk(py.replace('"Residential Land", "تاون هاوس",', '"Residential Land",')));
+
+// EVERY scraper: no local fold of a town house into Villa / Duplex / فيلا / دوبلكس (the stale-local-map class of 2026-08-19, again).
+const FOLD = /(?<!:\s*)["'](?:تاون ?هاوس|تاونهاوس|تاون هاووس|town ?houses?|townhouse)["']\s*[:,]\s*["'](?:Villa|Duplex|فيلا|دوبلكس)["']/i;   // the KEY (not a value that precedes the next key)
+const scrapers = readdirSync(join(ROOT, 'scrapers'), { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync(join(ROOT, 'scrapers', d.name, 'run.py'))).map((d) => d.name);
+const folding = scrapers.filter((n) => FOLD.test(read(`scrapers/${n}/run.py`).split('\n').filter((l) => !l.trim().startsWith('#')).join('\n')));
+check(`no scraper folds a town house into Villa/Duplex (${scrapers.length} scrapers scanned)`, folding.length === 0, folding.join(', '));
+mustCatch('a scraper that folds «تاون هاوس» into Villa', FOLD.test('"تاون هاوس": "Villa",') && FOLD.test('("townhouse", "فيلا")') && FOLD.test('"TOWNHOUSE": "Duplex"'));
+check('alhoshan: the townhouse slug keeps the name', /"townhouse": "تاون هاوس"/.test(read('scrapers/alhoshan/run.py')));
 
 // the AI agent
 const ag = read('src/data/agent.ts');

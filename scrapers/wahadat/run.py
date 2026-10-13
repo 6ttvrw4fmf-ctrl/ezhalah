@@ -36,7 +36,7 @@ A project whose units are all reserved/sold contributes nothing rather than cont
 *** THE TYPE FIELD IS ARABIC, AND «ڤيلا» IS SPELLED WITH ڤ (U+06A4) ***
 The owner warned the property type would be "in english" with «تاون هاوس» written in Arabic inside
 it. Measured, it is Arabic throughout: «دور» ×90, «تاون هاوس» ×30, «ڤيلا» ×10, «شقة» ×10. Two traps:
-  · «تاون هاوس» IS already in `src/data/propertyTypes.ts` (→ Villa), so it needs no new mapping.
+  · «تاون هاوس» IS already in `src/data/propertyTypes.ts` (→ Duplex in search, own name kept), so it needs no new mapping.
   · «ڤيلا» uses ڤ (FEH WITH THREE DOTS ABOVE), NOT the standard «فيلا» our taxonomy knows. Left
     alone it would resolve to nothing and those units would land type-less. `_norm_type` rewrites
     ڤ→ف so the source's own word reaches the taxonomy unchanged in meaning.
@@ -84,10 +84,10 @@ TIMEOUT = 40
 READY_STATUS = "available"
 
 # «تاون هاوس» is NOT in the scrapers' own map_type_exact table, but the SHIPPED APP already maps it
-# (src/data/propertyTypes.ts:180 — «تاون هاوس»: 'Villa', and Villa's rawTypes list includes it). So
+# (src/data/propertyTypes.ts:180 — «تاون هاوس»: 'Duplex', and Duplex's rawTypes list includes it). So
 # this override does not invent a classification; it closes a backend/frontend gap that would
 # otherwise skip every townhouse on this source (30 of 128 units measured 2026-09-26).
-_TYPE_OVERRIDES = {"تاون هاوس": "Villa"}
+_TYPE_OVERRIDES = {"تاون هاوس": "تاون هاوس"}
 
 _FLIGHT = re.compile(r'self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)', re.S)
 

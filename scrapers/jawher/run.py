@@ -154,7 +154,7 @@ _TYPE_KEY_AR = {
 # محطة, صراف آلي, سينما, موقف سيارات, محطة كهرباء, برج اتصالات.
 _TYPE_OVERRIDES = {
     "دبلكس": "Duplex", "شقة في برج": "Apartment", "شقة في عمارة": "Apartment",
-    "شقة في فيلا": "Apartment", "تاونهاوس": "Villa",          # TYPE_MAP_EN folds Townhouse→Villa
+    "شقة في فيلا": "Apartment", "تاونهاوس": "تاون هاوس",          # TYPE_MAP_EN folds Townhouse→Villa
     "محل تجاري": "Shop", "مخزن": "Warehouse", "استوديو في عمارة": "Studio",
     "استوديو في برج": "Studio", "عمارة تجارية": "Commercial Building",
 }

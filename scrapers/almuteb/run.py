@@ -71,10 +71,10 @@ SOURCE = "آل متعب العقارية"
 PREFIX = "MTB"
 REST = f"{BASE}/wp-json/wp/v2"
 
-# The site's exact spellings that the shared map does not know. «تاون هاووس» folds into Villa the
-# way the fleet's canonical fold does (normalize: Townhouse → Villa); «أدوار» is the plural of دور.
+# The site's exact spellings that the shared map does not know. «تاون هاووس» (the site's misspelling) maps to the
+# canonical name «تاون هاوس» (owner 2026-10-12: kept under its own name, searched under Duplex); «أدوار» is the plural of دور.
 TYPE_OVERRIDES = {"أدوار": "Floor", "دور أرضي": "Floor", "دور أول": "Floor", "دور ثاني": "Floor",
-                  "تاون هاووس": "Villa", "فلل": "Villa"}
+                  "تاون هاووس": "تاون هاوس", "فلل": "Villa"}
 TAXONOMIES = ("property_type", "property_status", "property_city", "property_area",
               "property_feature")
 

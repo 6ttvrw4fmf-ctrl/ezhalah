@@ -159,7 +159,7 @@ _AREA_RE = re.compile(r"([\d,\.]+)\s*(sq\s*m|sqm|m2|m²|sqf|sq\s*ft|sqft)", re.I
 # «Rent - (SR)247,000» — the label, then the figure. Anything else is not a rent price.
 _RENT_PRICE_RE = re.compile(r"^\s*Rent\s*-\s*\(SR\)\s*([\d,]+)\s*$", re.I)
 
-# The unit NAME carries the type word; the fleet folds townhouse→Villa and penthouse→Apartment.
+# The unit NAME carries the type word; a town house keeps its own name (owner 2026-10-12) and penthouse→Apartment.
 # «NBHK» (bedroom-hall-kitchen, «FAMILY TYPE 3BHK», 2026-09-24 first crawl) is the flat
 # configuration by definition → شقة. «condominium» added 2026-09-24 (owner review of the live
 # Rilam Al Raed compound page: "Two bedroom furnished Condominium…" is an ordinary apartment, not a
@@ -171,7 +171,7 @@ _RENT_PRICE_RE = re.compile(r"^\s*Rent\s*-\s*\(SR\)\s*([\d,]+)\s*$", re.I)
 # «Villa1»/«villa3» (a unit number glued to the noun), «Garden Vila» / «Appartment» / «Aprtment»
 # (the source's own misspellings of the noun) and «EXECUTIVE 3.5( BHK)» were real units skipped
 # type_unmapped.
-_TYPE_WORDS = (("studio", "استوديو"), ("townhouse", "فيلا"), ("town house", "فيلا"),
+_TYPE_WORDS = (("studio", "استوديو"), ("townhouse", "تاون هاوس"), ("town house", "تاون هاوس"),
                ("villa", "فيلا"), ("vila", "فيلا"), ("penthouse", "شقة"), ("apartment", "شقة"),
                ("appartment", "شقة"), ("aprtment", "شقة"), ("apt", "شقة"), ("flat", "شقة"),
                ("condominium", "شقة"), ("condo", "شقة"),

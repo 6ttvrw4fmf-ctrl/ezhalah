@@ -66,7 +66,7 @@ TYPE_MAP = {
     # under Duplex; taxonomy Duplex rawTypes; normalize slug townhouse→Duplex). whole_floor «دور كامل» → Floor. AH1039 is filed
     # whole_floor while its office title says «فيلا دورين»: the structured field wins (the page's
     # own spec grid and SEO title say «دور كامل»); the title is kept verbatim on the card.
-    "townhouse": "Duplex", "whole_floor": "Floor",
+    "townhouse": "تاون هاوس", "whole_floor": "Floor",
     # commercial
     "office": "Office", "shop": "Shop", "showroom": "Showroom", "warehouse": "Warehouse",
     "land_commercial": "Commercial Land", "commercial_building": "Commercial Building",
