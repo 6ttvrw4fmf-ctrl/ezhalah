@@ -275,6 +275,15 @@ These cost your first runs a lot of time. Use them instead of working them out a
   artifact's download host is blocked from the cloud; the log prints the same comparison). It shows
   what the page itself says next to what we store.
 
+## Lessons from 2026-10-13
+- **«CertificateVerifyError» on every route is the SITE's certificate, not our network.** abralosol.com served an expired
+  certificate (curl 60 «certificate has expired») to 3 profiles direct AND 3 through the residential proxy; a customer
+  tapping its card hit a browser security warning. That is down on their side: dormant with dated evidence, auto-return
+  on the first crawl that reads it. Never turn TLS verification off to keep such a site in search.
+- **Name the failure in the run notes.** abralosol's notes said only «unreadable» until the crawler printed the exception
+  text; one extra read for the reason saved a night of guessing. A dispatch from a PR branch leaves its job as a check on
+  the PR head: a failing diagnostic job blocks `safe-pr-merge` until a new commit lands.
+
 ## Lessons from 2026-10-12
 - **A robot that judges «the nightly crawl» must run after it.** `scraper-early-warning` fired at 04:55 UTC, 33 min into a 143-job
   nightly run, and flagged 37 healthy sites as «died before begin_run» plus a duplicate 37-site re-crawl. Before trusting any

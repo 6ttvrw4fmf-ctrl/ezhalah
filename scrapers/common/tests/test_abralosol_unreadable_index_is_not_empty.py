@@ -55,3 +55,14 @@ def test_incomplete_crawl_prunes_nothing(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["run"])
     assert run.main() == 0
     assert calls == []
+
+
+def test_the_failure_names_its_reason(monkeypatch):
+    """10-13 07:40: every route raised CertificateVerifyError and the notes said only «unreadable»."""
+    class _S:
+        def get(self, url):
+            raise RuntimeError("curl: (60) SSL certificate problem: certificate has expired")
+    _stub_pages(monkeypatch, {0: None})
+    monkeypatch.setattr(run, "_session", lambda: _S())
+    with pytest.raises(run.IndexUnreadable, match="certificate has expired"):
+        run.crawl(want_detail=False)

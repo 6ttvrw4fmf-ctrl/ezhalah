@@ -211,6 +211,17 @@ def _fetch(s: cc.Session, url: str, tries: int = 3) -> tuple[Optional[int], Opti
 GONE_STATUSES = (404, 410)
 
 
+def _why_unreadable(s: cc.Session, url: str) -> str:
+    """One more read whose only job is to NAME the failure for the run's notes. 2026-10-13: every
+    route failed with CertificateVerifyError and the notes could not tell an expired certificate
+    from a wrong host or a missing intermediate, which need different fixes."""
+    try:
+        r = s.get(url)
+        return f"HTTP {r.status_code}"
+    except Exception as e:  # noqa: BLE001 — the reason is the point
+        return f"{type(e).__name__}: {str(e)[:220]}"
+
+
 class IndexUnreadable(RuntimeError):
     """The catalogue's first index page could not be read: a failed fetch, never «0 listings»."""
 
@@ -632,7 +643,7 @@ def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[di
             # NOT AN EMPTY ANSWER). Page 0 unreadable = the run failed, said so in its notes; a
             # later page = keep what was read and mark the crawl incomplete so nothing is pruned.
             if page == 0:
-                raise IndexUnreadable(f"index page 0 unreadable ({BASE}/node?page=0)")
+                raise IndexUnreadable(f"index page 0 unreadable ({BASE}/node?page=0): {_why_unreadable(s, f'{BASE}/node?page=0')}")
             stats["incomplete"] = f"index page {page} unreadable"
             break
         recs = _index_rows(html)
