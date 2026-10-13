@@ -41,9 +41,16 @@ _REQUEST = re.compile(
     _B + r"(?!نبينا" + _E + r")(?:"
     r"(?:بحث|مطلوب|نبي|ابغي|ابغا|ابي|ابحث|نبحث|يبحث|تبحث|احتاج|نحتاج|تحتاج|يحتاج|محتاج|بحاجه|ودي|"
     r"ارغب|نرغب|يرغب|ترغب|ادور|ندور|يدور|تدور)(?:ه|ها|ين|ون|هم|نا|ي)?|"
-    r"تكفون|تكفي|من عنده|مين عنده|من لديه|احد عنده|ممكن احد|اللي عنده|الي عنده|اللي يعرف|الي يعرف"
+    r"تكفون|تكفي|من عنده|مين عنده|من لديه|احد عنده|ممكن احد|اللي عنده|الي عنده|اللي يعرف|الي يعرف|"
+    # «… يكون في الربع» — where the unit SHOULD be is a seeker's wish (gate #3 2026-10-12, 11190353094
+    # «محلات ايجار على شارع تجاري في حي الملقا او حطين او العارض», body «يكون في الربع الأحياء هاذي»).
+    r"يكون في|يكون ب|تكون في|تكون ب"
     r")" + _E
 )
+
+# A title offering a choice of neighbourhoods («في حي الملقا او حطين او العارض») describes what a
+# seeker will accept, never one unit's address (gate #3 2026-10-12, 11190353094). Title only.
+_ALTERNATIVES_TITLE = re.compile(_B + r"حي\s+[^\s]+(?:\s+[^\s]+)?\s+او\s+(?:حي\s+)?[^\s]+")
 
 # Not property: jobs, workers, services, goods.
 _OTHER = re.compile(
@@ -89,7 +96,11 @@ _OTHER_TITLE = re.compile(
 # singular first and is not caught.
 _CATALOGUE_TITLE = re.compile(
     _B + r"(?:شقق|ادوار|فلل|اراضي|محلات|عمائر|مكاتب|مستودعات)\s+و\s*(?:ملحق\s+|ملاحق\s+)?"
-    r"(?:شقق|ادوار|فلل|اراضي|محلات|عمائر|مكاتب|مستودعات)" + _E)
+    r"(?:شقق|ادوار|فلل|اراضي|محلات|عمائر|مكاتب|مستودعات)" + _E
+    # Two neighbourhoods at once («… الحي الاول والحي الثاني», «حي النرجس وحي الياسمين») is a stock list,
+    # not one unit's address (gate #3 2026-10-12, 11190351267 «شقق للبيع بضاحية الجبيل الحي الاول والحي
+    # الثاني»).
+    + r"|" + _B + r"(?:ال)?حي\s+[^\s]+\s+و\s*(?:ال)?حي" + _E)
 
 _REGA = re.compile(
     r"رقم ترخيص الاعلان|ترخيص الاعلان|رقم الترخيص|رخصه فال|رقم المعلن|سعر الوحده|نوع العقار|"
@@ -111,7 +122,7 @@ def classify(title: Optional[str], body: Optional[str]) -> tuple[str, str]:
     """(verdict, reason). verdict ∈ offer | request | other | doubt. Only 'offer' may be stored."""
     t, b = _norm(title), _norm(body)
     both = f"{t} \n {b}"
-    m = _REQUEST.search(both)
+    m = _REQUEST.search(both) or _ALTERNATIVES_TITLE.search(t)
     if m:
         return "request", f"request word «{m.group(0)}»"
     m = _OTHER.search(both) or _OTHER_TITLE.search(t) or _CATALOGUE_TITLE.search(t)
