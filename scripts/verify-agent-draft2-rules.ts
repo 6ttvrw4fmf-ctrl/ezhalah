@@ -9,7 +9,8 @@
 //   node --experimental-strip-types scripts/verify-agent-draft2-rules.ts   (in `npm test`)
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { severalCitiesQuestion, residentialCommercialQuestion, proximityNotMeasuredText } from '../supabase/functions/agent/locationAmbiguity.ts';
+import { severalCitiesQuestion, residentialCommercialQuestion, proximityNotMeasuredText, isFreshRequest } from '../supabase/functions/agent/locationAmbiguity.ts';
+import { pureSocialKind } from '../supabase/functions/agent/situations.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 let failed = 0;
@@ -66,5 +67,35 @@ const nearWired = (src: string) => /const notMeasured = !districtPin && !regionP
 check('a whole-city search with a distance wish replaces the model\'s «قريبة من …» reply', nearWired(edge));
 mustCatch('the model\'s promise coming back', !nearWired(edge.replace('else if (notMeasured) replyOut = notMeasured;', '')));
 
+// ── in the middle of a chat (the owner watching, 2026-10-13) ─────────────────────────────────────────────────────
+// «شكراً» and «وش أفضل حي في الرياض؟» each RE-RAN the old search; «فيلا للبيع في جدة فيها مسبح» kept «٤ غرف» from a Riyadh search.
+const PURE: Array<[string, string | null]> = [['شكراً', 'thanks'], ['مشكور يا إزهله', 'thanks'], ['Thanks a lot', 'thanks'], ['مع السلامة', 'bye'], ['هلا', 'hello'],
+  ['مشكور بس غيرها للدمام', null], ['شكراً، خلها ٤ غرف', null], ['شكرا بس ابي فيلا', null]];
+const pureOk = (fn: (t: string) => string | null) => PURE.every(([t, k]) => fn(t) === k);
+check('a pure thanks / goodbye / hello is told apart from a courtesy with a change in it', pureOk(pureSocialKind), PURE.filter(([t, k]) => pureSocialKind(t) !== k).map(([t]) => t).join(' | '));
+mustCatch('«مشكور بس غيرها للدمام» being swallowed as a plain thanks', !pureOk((t) => (/شكر|مشكور/.test(t) ? 'thanks' : /سلامة/.test(t) ? 'bye' : /هلا/.test(t) ? 'hello' : /thank/i.test(t) ? 'thanks' : null)));
+const FRESH: Array<[string, string, boolean]> = [['فيلا للبيع في جدة فيها مسبح تحت ٣ مليون', 'جدة', true], ['ابي شقة في جده', 'جدة', true], ['villa in Riyadh', 'الرياض', true],
+  ['خلها فيلا في جدة', 'جدة', false], ['٣ غرف', 'الرياض', false], ['بس بالملقا', 'الرياض', false], ['جدة', 'جدة', false], ['شقة في النرجس', 'الرياض', false]];
+const freshOk = (fn: (t: string, c: string) => boolean) => FRESH.every(([t, c, w]) => fn(t, c) === w);
+check('a property word + the place (no «خلها / ضيف / بدل») is a fresh request; a piece or a change is not', freshOk(isFreshRequest), FRESH.filter(([t, c, w]) => isFreshRequest(t, c) !== w).map(([t]) => t).join(' | '));
+mustCatch('a change («خلها فيلا في جدة») being read as a fresh request', !freshOk((t, c) => t.includes(c)));
+const asideWired = (src: string) => /const asideNow = aside && aside !== "financial" && !\(aside === "protected" && namesAProperty\(text\)\) \? aside : null;/.test(src)
+  && /if \(asideNow \|\| courtesy\) \{[\s\S]{0,260}return json\(\{ kind: "message", reply, locationQuestion: false, keepState: true, askCount \}\);/.test(src)
+  && src.indexOf('if (asideNow || courtesy)') > 0 && src.indexOf('if (asideNow || courtesy)') < src.indexOf('if (decision.kind === "message") {');
+check('a thanks / advice / complaint / sadness in the middle of a search is answered and never re-runs the old search (a message with no query: the state stays exactly as it was)', asideWired(edge));
+mustCatch('the aside answer being skipped (the old search re-running on «شكراً»)', !asideWired(edge.replace('if (asideNow || courtesy) {', 'if (false) {')));
+const freshEdge = (src: string) => /const freshRequest = isFreshRequest\(text, location\);/.test(src) && /fresh: freshRequest \|\| undefined,/.test(src)
+  && /price: freshRequest && !priceCameFromCurrentTurn \? "" : price,/.test(src);
+check('the edge marks a fresh request and drops a budget read from an EARLIER message', freshEdge(edge));
+mustCatch('an earlier budget riding into a fresh request', !freshEdge(edge.replace('price: freshRequest && !priceCameFromCurrentTurn ? "" : price,', 'price,')));
+const client = readFileSync(join(ROOT, 'src/data/agent.ts'), 'utf8');
+const freshClient = (src: string) => /mergeConversationState\(\s*(?:\/\/[^\n]*\n\s*)*d\.query\?\.fresh === true \? null : \(ctx\.prevQuery \?\? null\),/.test(src);
+check('the app keeps nothing from the previous search when the edge says the request is fresh', freshClient(client));
+mustCatch('the old filters (e.g. «٤ غرف») riding into a fresh request', !freshClient(client.replace('d.query?.fresh === true ? null : (ctx.prevQuery ?? null),', 'ctx.prevQuery ?? null,')));
+const summary = readFileSync(join(ROOT, 'src/data/search.ts'), 'utf8');
+const districtShown = (src: string) => /const unshown = \(q\.districts \?\? \[\]\)\.filter\(/.test(src) && /if \(unshown\.length\) lines\.push\(`• \$\{t\(unshown\.length > 1 \? 'Districts' : 'District'\)\}/.test(src);
+check('the search summary names the district the AI chat searched («حي النرجس»)', districtShown(summary));
+mustCatch('the district line being lost from the summary', !districtShown(summary.replace('if (unshown.length) lines.push(', 'if (false) lines.push(')));
+
 if (failed) { console.error(`\n❌ ${failed} check(s) failed`); process.exit(1); }
-console.log('\n✓ rulebook Draft 2: one city, residential or commercial, no distance promise');
+console.log('\n✓ rulebook Draft 2: one city, residential or commercial, no distance promise, a chat aside never re-runs the search, a new request starts fresh');

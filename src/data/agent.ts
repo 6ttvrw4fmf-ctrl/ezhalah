@@ -357,7 +357,10 @@ function resolveDistrictsFromText(userText: string, city: string): string[] {
   // Q33: «حي الملقا أو حي حطين أو حي الياسمين»). Each match is ≤2 Arabic tokens, stopping on
   // scope/conjunction tokens (في/و/أو/منطقة/مدينة) so «حي العزيزية في الرياض» captures «العزيزية», not
   // «العزيزية في الرياض». (audit #6: was a single .match() — only the first حي was kept.)
-  const arHiRe = /حي\s+([؀-ۿ]+(?:\s+(?!في|و|أو|منطقة|مدينة)[؀-ۿ]+)?)/g;
+  // …and never on a budget / deal / feature word or a «بالرياض» place: «حي النرجس بحدود ٦٠ ألف» searched a district «النرجس بحدود»
+  // that no listing has (live 2026-10-13, seen once the summary started naming the chat's districts).
+  // A district NAME never starts with «في / من / على»: «وش أفضل حي في الرياض؟» became a district «في الرياض؟» that the next turn searched.
+  const arHiRe = /حي\s+(?!(?:في|من|على|عند|بال|قريب|قريبة|جنب|يكون|فيه|فيها)(?![؀-ۿ]))([؀-ۿ]+(?:\s+(?!في|و|أو|منطقة|مدينة|بال|لل|(?:بحدود|حدود|تحت|فوق|اقل|أقل|اكثر|أكثر|بسعر|سعر|ايجار|إيجار|شهري|سنوي|مفروش|مفروشة|غرف|غرفة|غرفتين|مع|قريب|قريبة|جنب|ميزانية|ميزانيتي|الحد)(?![؀-ۿ]))[؀-ۿ]+)?)/g;
   for (const m of ar.matchAll(arHiRe)) out.push(m[1].trim());
   // English needs the WORD «district»/«neighborhood»: a bare «in X» names a CITY far more often
   // («apartment for sale in Riyadh»), and treating it as a district turned the city into a district
@@ -887,7 +890,9 @@ async function callAgentBackend(
         // So we tell the merge exactly what this turn stated.
         query: certifyAfOnMergedState(
           mergeConversationState(
-            ctx.prevQuery ?? null,
+            // A complete new request («فيلا للبيع في جدة فيها مسبح») starts fresh: the edge says so, and nothing from the previous search
+            // rides along (live 2026-10-13: it kept «٤ غرف» from a Riyadh apartment search and found nothing).
+            d.query?.fresh === true ? null : (ctx.prevQuery ?? null),
             queryFromBackend(d.query ?? {}, text, ctx.attemptTexts ?? [text]),
             statedKeys(d.query ?? {}),
           ),
