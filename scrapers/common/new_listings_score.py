@@ -37,7 +37,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from scrapers.common.cleanup import _probe
+from scrapers.common.cleanup import _probe  # noqa: F401  (kept for callers that patch it)
 from scrapers.common.db import sb
 from scrapers.common.source_reread import page_evidence
 
@@ -201,7 +201,7 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False) -> di
     return out
 
 
-_UNIT_TAIL = r"\s*(?:م2|م²|متر|ريال|ر\.س)?\s*"
+_UNIT_TAIL = r"\s*(?:م2|م²|متر|m²|m2|ريال|ر\.س)?\s*"
 
 
 # A control prompt («اختر عدد الغرف», rakez's room picker) names a field without stating it; the unit
@@ -212,7 +212,7 @@ CONTROL_PROMPT = re.compile(r"^\s*اختر\s")
 # An area figure is never another field's value: tuba prints an EMPTY «عمر العقار :» label with the
 # next line «214.66 م²», which read as a stated age (af_score 2026-10-07: tuba property_age 10/10
 # «mismatch», source-reread 37600467768). Only the area field may take a neighbour carrying m².
-AREA_UNIT = re.compile(r"م²|م2|متر مربع")
+AREA_UNIT = re.compile(r"م²|م2|متر مربع|m²")
 
 
 ONE_WORD = re.compile(r"(?<!\S)(?:واحد|واحده)(?!\S)")
@@ -307,6 +307,20 @@ def _cmp_bool(stored, lines: list[str], kw: str) -> str:
     return MATCH if bool(stored) == page_yes else MISMATCH
 
 
+# Hofuf's ضاحية هجر sub-districts are written three ways for ONE place: the catalog's «الضاحية الرابع», and
+# the sites' «حي الرابع بضاحية هجر» / «ضاحية هجر(الحي الرابع)» (backlog #153; the owner's naming decision
+# #319). arkaan 17543658 / 17543664 / 17543667 / 17544564 (2026-10-13 re-score) were served «الضاحية الرابع
+# / الخامس / الحادي عشر» for exactly those pages and scored 4 district mismatches. Only the SAME ordinal is
+# the same place: «الرابع بضاحية هجر» never matches «الضاحية الخامس».
+_HAJER_ORDINAL = r"(الاول|الثاني عشر|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|الحادي عشر)"
+_HAJER_FORMS = (re.compile(r"(?:الحي\s+)?" + _HAJER_ORDINAL + r"\s+بضاحيه\s+هجر"),
+                re.compile(r"ضاحيه\s+هجر\s*\(?\s*الحي\s+" + _HAJER_ORDINAL))
+
+
+def _hajer_aliases(whole: str) -> str:
+    return " ".join("الضاحيه " + m.group(1) for rx in _HAJER_FORMS for m in rx.finditer(whole))
+
+
 def _cmp_district(stored, whole: str) -> str:
     page_names_one = bool(DISTRICT_ON_PAGE.search(whole))
     if not stored:
@@ -314,7 +328,17 @@ def _cmp_district(stored, whole: str) -> str:
     d = norm_district(stored)
     if d and d in whole:            # covers «حي X», bare «X», and a glued «X <city>» suffix
         return MATCH
+    if d and re.search(r"(?<!\S)" + re.escape(d) + r"(?!\S)", _hajer_aliases(whole)):
+        return MATCH
     return MISMATCH if page_names_one else PAGE_SILENT
+
+
+# Websites whose listing URL serves a SHELL: the HTML carries no ad, the ad is drawn by JS from an API.
+# ebriza (scrapers/ebriza/run.py, «THE HTML PAGE IS NOT THE ORACLE — the API is»): /for_sell/<id>/… renders
+# the same 200 shell for any id; 17513425 (2026-10-13, re-read run 38360961845) showed the site title, the
+# login banner and a featured ad «جدة - حي الزهراء» / «الغرف 1», and scored our الخرج / العيون villa (6 rooms)
+# as 3 mismatches. Such a page has said nothing about the ad: unreadable, never wrong.
+SHELL_PAGE_PLATFORMS = frozenset({"ebriza"})
 
 
 def is_other_ads_page(stored: dict, page: dict) -> bool:
@@ -511,7 +535,10 @@ def no_district_backlog(client) -> dict:
 
 def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: str,
                pace: float = PACE_S, probe=None) -> dict:
-    probe = probe or _probe
+    if probe is None:
+        # Imported here, not at module level: af_score and its hermetic check load this module with
+        # source_reread stubbed, and they always pass their own probe.
+        from scrapers.common.source_reread import read_page as probe
     row = empty_row(night, platform)
     last = 0.0
     for table, rid in picks:
@@ -535,7 +562,7 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             row["unreadable_pages"] += 1
             continue
         page = page_evidence(body)
-        if is_other_ads_page(stored, page):
+        if platform in SHELL_PAGE_PLATFORMS or is_other_ads_page(stored, page):
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue

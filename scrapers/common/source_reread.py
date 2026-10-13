@@ -24,7 +24,9 @@ import os
 import random
 import re
 import sys
+import time
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 from scrapers.common.cleanup import PLATFORMS, _probe
 from scrapers.common.db import sb
@@ -38,7 +40,7 @@ STORED = ("platform,source_table,listing_id,region_ar,city_ar,district_ar,deal_a
 
 # Lines of visible text worth a human's eye: money, size, rooms, and the Advanced Filter words.
 EVIDENCE = re.compile(
-    r"(ريال|ر\.س|SAR|م²|م2|متر|مساحة|غرف|غرفة|حمام|دورات? مياه|مفروش|مؤثث|مصعد|موقف|مطبخ|مكيف|تكييف|"
+    r"(ريال|ر\.س|SAR|م²|م2|m²|متر|مساحة|غرف|غرفة|حمام|دورات? مياه|مفروش|مؤثث|مصعد|موقف|مطبخ|مكيف|تكييف|"
     r"غرفة (?:خادمة|سائق)|مدخل خاص|عمر العقار|سنوي|شهري|للبيع|للإيجار|حي\s)")
 TAG = re.compile(r"<[^>]+>")
 DROP = re.compile(r"<(script|style|noscript|svg)[^>]*>.*?</\1>", re.S | re.I)
@@ -52,7 +54,10 @@ TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I)
 # figure. reinvest 17384274 (2026-10-12) then showed only the description's «3 غرف نوم» and scored our
 # structured bedrooms = 1 a mismatch although the page's own table says «عدد غرف النوم 1». A short value
 # line straight after an evidence label is kept WITH its label.
-SHORT_VALUE = re.compile(r"^[\d٠-٩][\d٠-٩.,٬]*(?:\s*(?:م²|م2|متر|ريال|ر\.س|سنة|سنوات))?$|^(?:نعم|لا|جديد|يوجد|لا يوجد)$")
+# The unit may be written in Latin letters: akariyoun prints «مساحة العقار: 578 m²» (17512660 / 17512661,
+# 2026-10-13); with only the Arabic units the value line was dropped, the description's «المساحة : 900م» was
+# all that reached the score, and our structured 578 scored a mismatch on both ads.
+SHORT_VALUE = re.compile(r"^[\d٠-٩][\d٠-٩.,٬]*(?:\s*(?:م²|م2|متر|m²|m2|sqm|ريال|ر\.س|سنة|سنوات))?$|^(?:نعم|لا|جديد|يوجد|لا يوجد)$")
 
 
 def _with_values(lines: list[str]) -> list[str]:
@@ -62,6 +67,50 @@ def _with_values(lines: list[str]) -> list[str]:
             continue
         nxt = lines[i + 1] if i + 1 < len(lines) else ""
         out.append(f"{x} {nxt}" if nxt and not EVIDENCE.search(nxt) and SHORT_VALUE.match(nxt) else x)
+    return out
+
+
+# Hosts the shared probe cannot read in time, read the way their own scraper reads them. muktamel answers
+# its listing pages slowly: the probe's 25 s per profile timed out on 5/5 pages (re-read run 38224014958,
+# the 10-12 and 10-13 scores: «unreadable»), while scrapers/muktamel/run.py (chrome124 + Arabic
+# Accept-Language, 45 s, 3 tries) verified 3,504 of them alive the same day (backlog #456). The READER
+# only; cleanup._probe (the liveness path) is untouched.
+SLOW_HOSTS = {"muktamel.com": 45}
+
+
+def read_page(url: str) -> tuple[int | None, str]:
+    host = (urlsplit(url).netloc or "").lower()
+    budget = next((t for h, t in SLOW_HOSTS.items() if host == h or host.endswith("." + h)), None)
+    if budget is None:
+        return _probe(url)
+    from curl_cffi import requests as _cc
+    s = _cc.Session(impersonate="chrome124")
+    s.headers.update({"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                      "Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
+    for attempt in range(3):
+        try:
+            r = s.get(url, timeout=budget, allow_redirects=True)
+            return r.status_code, (r.text or "")
+        except Exception:
+            time.sleep(1.0 * (attempt + 1))
+    return None, ""
+
+
+# A page that states a field only in its own app payload, with its own label for it. sanadak renders its
+# spec from the Next.js flight data: `{"label":"area_m2","key":"lotSize"}` and `"lotSize":760` (17502436,
+# re-read run 38361883389). The visible text then carries only the description («المساحة : 150م تقريباً»),
+# so the score compared our 760 with prose and called 4 of 5 sanadak areas wrong. The PAGE says which key is
+# its area; that pair becomes one evidence line, read without our parser.
+_PAYLOAD_LABEL = re.compile(r'"label":"area_m2","key":"(\w+)"')
+
+
+def _payload_area_lines(body: str) -> list[str]:
+    flat = (body or "").replace('\\', "")
+    out = []
+    for key in dict.fromkeys(_PAYLOAD_LABEL.findall(flat)):
+        m = re.search(r'"' + re.escape(key) + r'":(\d+(?:\.\d+)?)[,}]', flat)
+        if m:
+            out.append(f"مساحة العقار {m.group(1)} م²")
     return out
 
 
@@ -83,7 +132,11 @@ def page_evidence(body: str) -> dict:
         "title": html.unescape(title.group(1).strip()) if title else None,
         "meta": meta,
         "jsonld": jsonld[:5],
-        "evidence_lines": _with_values(lines)[:60],
+        # 400, not 60: a rakez project page lists every unit (price · rooms · area), and unit #C22 of
+        # project 34830 (17539724, 890,000 / 161 m², re-read run 38361960175) sits past line 60, so the
+        # score only saw the OTHER units and called our exact values wrong (backlog #124). The job log
+        # still prints only the first n_evidence lines.
+        "evidence_lines": (_payload_area_lines(body) + _with_values(lines))[:400],
         "text_head": " | ".join(lines)[:1500],
     }
 
@@ -296,7 +349,7 @@ def main() -> int:
         item = {"table": table, "id": rid, "url": url, "stored": stored,
                 "card_district_raw": raw.get("neighborhood")}
         if url:
-            status, body = _probe(url)
+            status, body = read_page(url)
             platform = stored.get("platform") or table.split("_")[0]
             item["status"] = status
             item["verdict"] = classify_response(status, body or "",
