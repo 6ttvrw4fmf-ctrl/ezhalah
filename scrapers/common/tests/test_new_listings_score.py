@@ -303,3 +303,88 @@ def test_room_picker_prompt_is_not_a_room_count():
     # a real stated count on the same page still decides
     assert compare_listing({"bedrooms": 4}, page(*lines, "غرف النوم 3"))["bedrooms"] == MISMATCH
     assert compare_listing({"bedrooms": 3}, page(*lines, "غرف النوم 3"))["bedrooms"] == MATCH
+
+
+# ── Known answers from the 2026-10-12 score (job 114677400387, re-read run 38216091755) ─────────
+
+def test_al_hay_tail_is_not_a_district_on_the_page():
+    # mustqr 17151695: app shell, the only «حي» is «الحي» in «تصفح حسب الحي والسعر» → silent, not MISMATCH.
+    assert _cmp_district("حي السويفلة", norm("تصفح حسب الحي والسعر")) == PAGE_SILENT
+    # aqalemhajer title «الضاحية الحي الاول» names no «حي X» either.
+    assert _cmp_district(None, norm("أرض للبيع في الضاحية الحي الاول 23-1 أ")) == PAGE_SILENT
+    # «حي X» on its own, or glued to «ب», still names one.
+    assert _cmp_district("النرجس", norm("حي العليا")) == MISMATCH
+    assert _cmp_district(None, norm("شقة بحي حطين")) == WE_MISS
+
+
+def test_office_contact_line_is_not_the_ads_district():
+    # aqalemhajer 17387590: footer «الأحساء, الهفوف, حي الملك فهد, هاتف:…» under every ad.
+    r = compare_listing({"district_ar": None},
+                        page("بيت للبيع في المزرع", "الأحساء, الهفوف, حي الملك فهد, هاتف:0500000000 - 0500000001"))
+    assert r["district"] == PAGE_SILENT
+    # the same district on an ad line is still read
+    r = compare_listing({"district_ar": None}, page("فيلا للبيع في حي الملك فهد"))
+    assert r["district"] == WE_MISS
+
+
+@pytest.mark.parametrize("stored,want", [(2, MATCH), (3, MISMATCH)])
+def test_dual_word_states_two(stored, want):
+    # bossbih 17388816: «▫️غرفتين النوم» / «غرفتين», stored bedrooms 2.
+    assert compare_listing({"bedrooms": stored}, page("▫️غرفتين النوم", "12,000 ريال"))["bedrooms"] == want
+
+
+def test_other_ads_table_page_is_unreadable_not_wrong():
+    from scrapers.common.new_listings_score import is_other_ads_page
+    # nufouth 17377059 (stored حي الوزارات): the share link's static HTML is the vacancies table.
+    table = page("ر.س", "6 غرف", "حي المحمدية", "ر.س", "3 غرف", "حي البحيرة", "ر.س", "4 غرف", "حي الياسمين",
+                 title="نفوذ التطوير للعقارات وادارة الأملاك - جدول الشواغر")
+    assert is_other_ads_page({"district_ar": "حي الوزارات"}, table)
+    assert is_other_ads_page({"district_ar": None}, table)
+    # ours among them, or the title naming one, is a real ad page with a «similar ads» strip
+    assert not is_other_ads_page({"district_ar": "حي البحيرة"}, table)
+    titled = dict(table, title="شقة للإيجار في حي الياسمين")
+    assert not is_other_ads_page({"district_ar": "حي الوزارات"}, titled)
+    # two districts is not a table
+    assert not is_other_ads_page({"district_ar": "حي النسيم الشرقي"},
+                                 page("حي النسيم الشرقي", "101 - 259 م²", "حي العارض", title="مشروع الصفوة"))
+
+
+def test_score_site_counts_other_ads_page_as_unreadable():
+    body = ("<html><head><title>جدول الشواغر</title></head><body><p>6 غرف</p><p>حي المحمدية</p>"
+            "<p>3 غرف</p><p>حي البحيرة</p><p>4 غرف</p><p>حي الياسمين</p></body></html>")
+    client = FakeClient({
+        "search_listings_ar": [{"source_table": "t", "listing_id": 1, "district_ar": "حي الوزارات", "bedrooms": 2}],
+        "t": [{"id": 1, "listing_url": "https://example.test/?ads-N1=1"}],
+    })
+    row = score_site(client, "fakesite", [("t", 1)], night="2026-10-12", pace=0, probe=lambda url: (200, body))
+    assert row["unreadable_pages"] == 1 and row["normal_mismatch"] == 0 and row["mismatch_ids"] == []
+
+
+def test_spec_table_value_on_its_own_line_is_kept_with_its_label():
+    # reinvest 17384274: table «عدد غرف النوم» / «1» (structured), description «* 3 غرف نوم» (prose).
+    from scrapers.common.source_reread import page_evidence
+    body = ('<html><body><div><span>عدد غرف النوم</span><span>1</span></div>'
+            '<div><span>عدد دورات المياه</span><span>1</span></div>'
+            '<p>* 3 غرف نوم</p><p>* 3 دورات مياه</p></body></html>')
+    pe = page_evidence(body)
+    assert "عدد غرف النوم 1" in pe["evidence_lines"]
+    r = compare_listing({"bedrooms": 1, "bathrooms": 1}, pe)
+    assert r["bedrooms"] == MATCH and r["bathrooms"] == MATCH
+
+
+@pytest.mark.parametrize("area,want", [(163, PAGE_SILENT), (101, MATCH), (300, MISMATCH)])
+def test_unit_inside_a_project_span_is_silence_not_a_mismatch(area, want):
+    # wahadat 17399567: project page «101 - 259 م²» / «131 - 168 م²»; stored unit 163 m² (unit 9 in the payload).
+    r = compare_listing({"area_m2": area}, page("101 - 259 م²", "131 - 168 م²"))
+    assert r["area"] == want
+
+
+def test_area_spec_row_is_kept_over_description_prose():
+    # reinvest 17384293: table «مساحة العقار» / «77» (= 625,000 ÷ «سعر المتر» 8116.883); prose «147 متر مربع مع الاسطح».
+    from scrapers.common.source_reread import page_evidence
+    body = ('<html><body><div><span>مساحة العقار</span><span>77</span></div>'
+            '<div><span>سعر المتر</span><span>8116.883</span></div>'
+            '<p>- اجمالي المساحة: 147 متر مربع مع الاسطح</p></body></html>')
+    pe = page_evidence(body)
+    assert "مساحة العقار 77" in pe["evidence_lines"]
+    assert compare_listing({"area_m2": 77}, pe)["area"] == MATCH

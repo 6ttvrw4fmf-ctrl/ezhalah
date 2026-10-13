@@ -6,7 +6,7 @@ the keys the code reads. Every test executes the REAL senan map_listing()/main()
 imported from scrapers/jawher/run.py); only to_catalog and find_district_in_text are stubbed.
 What it pins: the listing grain is ONE UNIT with its own price and its own page; the project it
 belongs to is recorded, never made the listing; a unit whose `area` is null prints its built_up_
-area as the م² figure; townhouse folds to Villa; a sold unit still in the catalogue is skipped; a
+area as the م² figure; townhouse keeps its own name «تاون هاوس»; a sold unit still in the catalogue is skipped; a
 unit whose page prints no location is skipped, never given its tag's or its project's city; the
 site's Arabic city spellings («ابها», «احد رفيده») are offered to the catalog as published.
 """
@@ -97,9 +97,9 @@ def test_unit_counters_reach_real_columns_and_silence_stays_null():
     assert row["license_number"] is None and row["additional_info"]["fal_licence_number"] == "1200017563"
 
 
-def test_townhouse_folds_to_villa_and_a_standalone_unit_has_no_project():
+def test_townhouse_keeps_its_name_and_a_standalone_unit_has_no_project():
     row = _row(STANDALONE)
-    assert row["property_type"] == "Villa"
+    assert row["property_type"] == "تاون هاوس"
     assert "project" not in row["additional_info"]
     assert row["street_width_m"] == 15 and row["elevator"] is True and "parking" not in row
     assert row["private_entrance"] is True, "«مدخل خاص» in the unit's own prose"

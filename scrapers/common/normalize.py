@@ -74,6 +74,9 @@ TYPE_MAP_AR = {
     "دوبليكس":  "Duplex",
     "استوديو":  "Studio",
     "ستوديو":   "Studio",
+    # Owner 2026-10-12: «town house is under Duplex, but don't change its name». The stored type stays the
+    # source's own word; the app's search files it under Duplex (src/data/propertyTypes.ts RAW_TO_CLEAN).
+    "تاون هاوس":  "تاون هاوس",
 }
 
 # Aqar URL slug → canonical English property type (matches Ezhalah's taxonomy).
@@ -306,7 +309,7 @@ TYPE_MAP_EN = {
     # 'Studio'/'Small apartment (studio)'→'Studio' (both clean types searchable in res+com
     # post-#98). The historical Villa/Apartment folds pre-dated Duplex/Studio existing as clean
     # types and blocked the type filter from finding these rows under their real type.
-    'Apartment': 'Apartment', 'Villa': 'Villa', 'Townhouse': 'Villa', 'Duplex': 'Duplex',
+    'Apartment': 'Apartment', 'Villa': 'Villa', 'Townhouse': 'تاون هاوس', 'Duplex': 'Duplex',
     'Floor': 'Floor', 'Building': 'Building', 'Residential Building': 'Building',
     'Land': 'Residential Land', 'Residential Land': 'Residential Land', 'Plot': 'Residential Land',
     'Rest House': 'Rest House', 'Resthouse': 'Rest House', 'Chalet': 'Chalet', 'Farm': 'Farm',
@@ -320,7 +323,7 @@ TYPE_MAP_EN = {
     # ── Aldarim API `type` (lowercased) → canonical taxonomy type (moved verbatim from
     # scrapers/aldarim/run.py). Land's residential/commercial split stays decided by the listing's
     # category AT THE CALL SITE in the scraper (not here).
-    'land': 'Residential Land', 'villa': 'Villa', 'townhouse': 'Villa',
+    'land': 'Residential Land', 'villa': 'Villa', 'townhouse': 'تاون هاوس',  # owner 2026-10-12: a town house keeps its own name (search files it under Duplex)
     'duplex': 'Duplex',  # 2026-07-16 mapping standardization: was folded to Villa (see Wasalt note above)
     'mansion': 'Villa', 'apartment': 'Apartment', 'tower_apartment': 'Apartment',
     'building_apartment': 'Apartment', 'villa_apartment': 'Apartment', 'floor': 'Floor',
@@ -406,7 +409,7 @@ def category_for_type(t: str) -> str:
     """Residential vs Commercial — same split the app's filter uses."""
     residential = {
         "Apartment", "Villa", "Floor", "Room", "Building",
-        "Rest House", "Chalet", "Camp", "Residential Land",
+        "Rest House", "Chalet", "Camp", "Residential Land", "تاون هاوس",
     }
     return "Residential" if t in residential else "Commercial"
 
@@ -987,7 +990,10 @@ _CLAUSE_BREAK_RE = re.compile(r"[\n\r،,.;؛|•▫▪+]+|\s-\s")
 # A negator counts only as its own word: `_norm_ar` folds «صغيرة» to «صغيره», whose letters ARE «غير»,
 # so «بركة صغيرة موقف خاص» read parking=False (moftah ids 30274/30247, 2026-09-20). It may abut the
 # token («unfurnished», «غيرمؤثث»), so the right edge is a non-word char OR the end of the window.
-_NEGATOR_RES = tuple(re.compile(rf"(?<!\w){re.escape(n.strip())}(?=\W|$)") for n in _NEGATORS)
+# An Arabic negator also stands as its own word with the conjunction «و» attached: «فيلا … ، وغير مؤثثة» is
+# «and NOT furnished», and without the optional «و» it read furnished = YES (dealapp 16155289, 🔬 2026-10-12).
+_NEGATOR_RES = tuple(re.compile(rf"(?<!\w){'و?' if re.match(r'[ء-ي]', n) else ''}{re.escape(n.strip())}(?=\W|$)")
+                     for n in _NEGATORS)
 
 
 def _amenities_in_clause(raw: str) -> dict[str, bool]:

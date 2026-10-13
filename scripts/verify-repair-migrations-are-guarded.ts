@@ -48,6 +48,26 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 🔬 AF engineer, 2026-10-12. Two NULL-only back-fills of Advanced Filter answers from each ad's OWN stored
+  // text, computed by the same shared reader the scrapers now call on every crawl (yes-or-nothing prose for
+  // sites with no structured field), so a re-crawl writes the same value and a new row cannot re-open the gap.
+  '20261012093213_dealapp_residential_furnished_from_own_words.sql':
+    'NULL-only back-fill of dealapp residential furnished from its stored description (a strict subset of ' +
+    'normalize.amenities_from_lines, zero disagreements over 22,594 rows); scrapers/dealapp/run.py af_answers() ' +
+    'now writes it on every crawl, pinned with mutations by scrapers/common/tests/test_dealapp_af_answers.py, and ' +
+    'the migration ends in a check block that executes the view against the raw table',
+  '20261012100330_sirdab_remal_amenities_from_own_words.sql':
+    'NULL-only, true-only back-fill of sirdab / remal amenities from their stored description via ' +
+    'normalize.prose_amenities_yes; both parsers now write the same on every crawl, pinned with mutations by ' +
+    'scrapers/common/tests/test_prose_only_sites_read_amenities.py',
+  '20261012094158_eaqartabuk_feature_checklist_to_amenities.sql':
+    'NULL-only, true-only back-fill of eaqartabuk amenities from each row\'s own STRUCTURED features list ' +
+    '(additional_info.features); scrapers/eaqartabuk/run.py feature_answers() now writes the same on every crawl, ' +
+    'pinned with a mutation by scrapers/common/tests/test_eaqartabuk_feature_checklist.py',
+  '20261012093639_alkhaas_rawasidark_amenities_from_own_words.sql':
+    'NULL-only, true-only back-fill of alkhaas / rawasidark amenities from their stored description via ' +
+    'normalize.prose_amenities_yes; both parsers now write the same on every crawl, pinned with mutations by ' +
+    'scrapers/common/tests/test_prose_only_sites_read_amenities.py',
   // ⚡ Scraping engineer, 2026-10-10. Three NULL-only back-fills (each writes only where the column is NULL,
   // never a rewrite of a known value) from the row's OWN stored source field, which the scraper now
   // writes on every crawl — so a new row cannot re-open the gap, and each migration ends in a check block.
@@ -63,6 +83,24 @@ const WAIVED: Record<string, string> = {
     'NULL-only back-fill of separate_*_meter from each row\'s own additional_info for 7,403 rows enriched ' +
     'before 2026-09-04; enrich.py meter_fields_from_deep() has written them on every enrichment since, pinned ' +
     'by test_wasalt_enrich_meter_parse_gap.py, and mon_detect_wasalt_meter_parse_gap watches the class',
+  // 🔧 Quality & Repair, 2026-10-12. Fifteen located_row_unreachable rows (price/size gate hid them; the
+  // source's own page prints the same extreme price) registered in ops_price_source_verified and flipped
+  // production_ready. The class is watched by the very detector that raised them: a row that loses its
+  // registration, or that the gate re-hides on the next sync upsert, re-enters the cohort and
+  // mon_detect_located_row_unreachable (in the roster, whole cohort evaluated at ≤ 200 rows) raises it again.
+  '20261012132626_qa_located_row_unreachable_source_verified_dealapp_raghdan.sql':
+    'registration-gated un-hide of 15 rows whose source page prints the stored price (evidence string per ' +
+    'row); enforce_price_size_sanity() re-reads ops_price_source_verified on every upsert, and ' +
+    'mon_detect_located_row_unreachable watches exactly this cohort (it raised these 24; 9 stay hidden and open)',
+  // 🔧 Quality & Repair, 2026-10-12. The eleven aqar rows aqar_classify_shadow_drift() classified PROVEN_WRONG
+  // (own city + neighbourhood resolve under another city) rewritten to the function's fresh_* values, in the
+  // shadow row and the served row, logged to aqar_resolver_log, with a trailing assertion that the cohort is
+  // empty. The class is watched by the detector that raised it: mon_detect_aqar_proven_wrong_resolution (in the
+  // roster) re-runs the same function every sweep, so any row that drifts wrong again is raised again.
+  '20261012142822_qa_aqar_proven_wrong_city_resolutions_repaired_from_own_fields.sql':
+    'self-guarding repair of exactly the aqar_classify_shadow_drift() PROVEN_WRONG cohort (11 rows), each value ' +
+    'the function\'s own reading of the listing\'s raw_city + neighborhood; mon_detect_aqar_proven_wrong_resolution ' +
+    'watches the class every sweep and raised these rows (17 open alerts on 2026-10-12)',
   // Owner session 2026-10-09 (owner: «make the call yourself»), for the 🦅 Falcon's repair below. The class it
   // fixes — a searchable listing served at exactly 0 for its own deal — is already watched fleet-wide.
   '20261009204020_bossbih_per_metre_ads_stale_zero_total_to_null.sql':

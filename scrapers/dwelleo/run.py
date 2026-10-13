@@ -66,7 +66,7 @@ the site's own «قريباً/على الخارطة» flags; sold/rented are its
 property_type.name: شقة 5,581 · فيلا 2,815 · ارض 1,159 · دور 736 · مبني 287 · استوديو 202 ·
 غير محدد 186 · تاون هاوس 182 · سطح 130 · مكتب 63 · بنتهاوس 53 · محل 52 · مزرعة 13 · شاليه 13.
   · «مبني» is the site's spelling of مبنى (titles: «مبنى تجاري», «عمارة 12 شقة») → Building.
-  · «تاون هاوس» → Villa and «بنتهاوس» → Apartment follow the fleet's existing overrides.
+  · «تاون هاوس» keeps its own name (owner 2026-10-12) and «بنتهاوس» → Apartment follows the fleet override.
   · «ارض» is split by the site's own land_type: residential/blank → Residential Land,
     commercial → Commercial Land, agricultural → Farm (the canon's «أرض زراعية»); raw_land,
     industrial, shovel_ready, institutional, touristic (23 rows) have no honest bucket → skipped.
@@ -177,7 +177,7 @@ _PAUSE = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 
 _DEAL = {"for-sale": "Buy", "re-sale": "Buy", "for-rent": "Rent"}
 # The site's exact spellings where they differ from the shared map (contract: map_type_exact).
-_TYPE_OVERRIDES = {"مبني": "Building", "تاون هاوس": "Villa", "بنتهاوس": "Apartment"}
+_TYPE_OVERRIDES = {"مبني": "Building", "تاون هاوس": "تاون هاوس", "بنتهاوس": "Apartment"}
 _LAND_BY_USE = {None: "Residential Land", "": "Residential Land", "residential": "Residential Land",
                 "commercial": "Commercial Land", "agricultural": "Farm"}
 # Types whose bedrooms/bathrooms are the UNIT's; a Building's counts are its whole room stock.

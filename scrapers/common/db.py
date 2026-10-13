@@ -1297,6 +1297,58 @@ def _own_page_session():
         return requests.Session()
 
 
+READ_GONE_MAX_READS = 60   # own-page reads per table per run when a prune is guarded or skipped
+
+
+def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=None, *,
+                     max_prune_frac: float = 0.30, min_active_guard: int = 8,
+                     max_reads: int = READ_GONE_MAX_READS) -> int:
+    """Strike ONLY the unseen active rows whose OWN page reads gone (2026-10-12).
+
+    For a crawl whose absence prune was refused (a guard tripped, or the walk fell short) — the
+    direct readings must not be thrown away with the absence (the dealapp lesson of 10-06, muktamel
+    10-07). opensooq: 27 of 97 ads read «هذا الإعلان غير متوفر» on their own pages four runs running
+    while the guard (re-saw 49 of 72) discarded every prune. manzo: a 2-ad catalogue whose walk never
+    matched the API's count, so its dead ad's strike counter froze at 2 for days, on screen.
+
+    Each unseen row's own page is read through `verify_gone` (default: own_page_status_oracle, which
+    needs a seen page to answer live first). UNKNOWN and live rows are counted as seen (kept, shown);
+    only read-gone rows take a strike, at most the collapse cap's worth (oldest-seen first; the cap
+    is respected, never raised). prune_unseen then runs with its grace and its at-grace re-read."""
+    seen = {str(a) for a in seen_ads if a}
+    if not seen:
+        return 0       # nothing seen this run: the source may be down — no control, no reading
+    c = sb()
+    q = c.table(table).select("ad_number,last_seen_at").eq("active", True)
+    if source:
+        q = q.eq("source", source)
+    rows = [r for r in (_execute(q.range(0, 999), what=table + ".read_gone_slice").data or [])
+            if r.get("ad_number")]
+    if verify_gone is None:
+        verify_gone = own_page_status_oracle(c, table, seen)
+    unseen = sorted((r for r in rows if r["ad_number"] not in seen),
+                    key=lambda r: str(r.get("last_seen_at") or ""))[:max_reads]
+    gone: list[str] = []
+    for r in unseen:
+        try:
+            got = verify_gone(r["ad_number"])
+        except Exception as e:  # noqa: BLE001 — an oracle that throws is UNKNOWN, never gone
+            print(f"{table}: verify_gone({r['ad_number']}) raised {type(e).__name__}: {e} → unknown")
+            continue
+        verdict = (got[0] if isinstance(got, (tuple, list)) else got) or "unknown"
+        if str(verdict).lower() == "gone":
+            gone.append(r["ad_number"])
+    if len(rows) >= min_active_guard:
+        gone = gone[:int(max_prune_frac * len(rows))]
+    if not gone:
+        print(f"{table}: no unseen ad read gone on its own page — nothing struck", flush=True)
+        return 0
+    print(f"{table}: striking only the {len(gone)} ad(s) whose own page read gone", flush=True)
+    return prune_unseen(table, {r["ad_number"] for r in rows} - set(gone), source=source,
+                        verify_gone=verify_gone, min_coverage=0.0, max_prune_frac=max_prune_frac,
+                        min_active_guard=min_active_guard)
+
+
 def own_page_status_oracle(c, table: str, seen, *, session=None):
     """verify_gone for a prune_unseen caller that supplied none (see the call site).
 

@@ -38,13 +38,31 @@ STORED = ("platform,source_table,listing_id,region_ar,city_ar,district_ar,deal_a
 
 # Lines of visible text worth a human's eye: money, size, rooms, and the Advanced Filter words.
 EVIDENCE = re.compile(
-    r"(ريال|ر\.س|SAR|م²|م2|متر|غرف|غرفة|حمام|دورات? مياه|مفروش|مؤثث|مصعد|موقف|مطبخ|مكيف|تكييف|"
+    r"(ريال|ر\.س|SAR|م²|م2|متر|مساحة|غرف|غرفة|حمام|دورات? مياه|مفروش|مؤثث|مصعد|موقف|مطبخ|مكيف|تكييف|"
     r"غرفة (?:خادمة|سائق)|مدخل خاص|عمر العقار|سنوي|شهري|للبيع|للإيجار|حي\s)")
 TAG = re.compile(r"<[^>]+>")
 DROP = re.compile(r"<(script|style|noscript|svg)[^>]*>.*?</\1>", re.S | re.I)
 JSONLD = re.compile(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', re.S | re.I)
 META = re.compile(r'<meta\s+[^>]*(?:property|name)=["\']([^"\']+)["\'][^>]*content=["\']([^"\']*)["\']', re.I)
 TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I)
+
+
+# A spec table renders its label and its value as two elements («عدد غرف النوم» / «1»): split on tags they
+# become two lines, and the bare value never matched EVIDENCE, so the reader kept the label and lost the
+# figure. reinvest 17384274 (2026-10-12) then showed only the description's «3 غرف نوم» and scored our
+# structured bedrooms = 1 a mismatch although the page's own table says «عدد غرف النوم 1». A short value
+# line straight after an evidence label is kept WITH its label.
+SHORT_VALUE = re.compile(r"^[\d٠-٩][\d٠-٩.,٬]*(?:\s*(?:م²|م2|متر|ريال|ر\.س|سنة|سنوات))?$|^(?:نعم|لا|جديد|يوجد|لا يوجد)$")
+
+
+def _with_values(lines: list[str]) -> list[str]:
+    out: list[str] = []
+    for i, x in enumerate(lines):
+        if not EVIDENCE.search(x):
+            continue
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        out.append(f"{x} {nxt}" if nxt and not EVIDENCE.search(nxt) and SHORT_VALUE.match(nxt) else x)
+    return out
 
 
 def page_evidence(body: str) -> dict:
@@ -65,7 +83,7 @@ def page_evidence(body: str) -> dict:
         "title": html.unescape(title.group(1).strip()) if title else None,
         "meta": meta,
         "jsonld": jsonld[:5],
-        "evidence_lines": [x for x in lines if EVIDENCE.search(x)][:60],
+        "evidence_lines": _with_values(lines)[:60],
         "text_head": " | ".join(lines)[:1500],
     }
 
@@ -222,7 +240,28 @@ def wasalt_fact_paths(data, limit: int = 60) -> list[str]:
             out.append(f"{path} = {str(node)[:160]}")
 
     walk(pd, "propertyDetailsV3")
+
+    # Every price the page carries, whatever the fact filter kept: settling a «hundreds of billions» land
+    # (backlog 371/392, PRICE = SOURCE) needs salePrice / conversionPrice / per-metre as Wasalt serves them.
+    def prices(node, path: str) -> None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if isinstance(v, (int, float, str)) and not isinstance(v, bool) and _PRICE_KEY.search(str(k)) \
+                        and v not in ("", None):
+                    line = f"{path}.{k} = {str(v)[:40]}"
+                    if line not in out:
+                        out.append(line)
+                else:
+                    prices(v, f"{path}.{k}")
+        elif isinstance(node, list):
+            for i, x in enumerate(node[:30]):
+                prices(x, f"{path}[{i}]")
+
+    prices(pd, "propertyDetailsV3")
     return out
+
+
+_PRICE_KEY = re.compile(r"price", re.I)
 
 
 def main() -> int:

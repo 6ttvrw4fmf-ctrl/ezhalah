@@ -346,7 +346,7 @@ _TYPE_OVERRIDES = {
                                             # TYPE_MAP_AR's «أرض تجارية» (souq24: «ارض تجارية»)
     "محطة وقود": "Gas Station",             # amaall / dealapp / rawasidark / souq24
     "محل تجاري": "Shop",                    # aalbarrak
-    "تاون هاوس": "Villa",                   # fleet fold Townhouse→Villa (justsa / aqalemhajer)
+    "تاون هاوس": "تاون هاوس",                   # fleet fold Townhouse→Villa (justsa / aqalemhajer)
     "مستشفى - مركز صحي": "Health Center",   # aqargate's «مستشفى، مركز صحي»
     "غرف عزاب": "Room",                     # bachelor ROOMS: «غرف»→Room, «عزاب»→tenant_category
 }

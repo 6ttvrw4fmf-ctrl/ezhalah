@@ -242,7 +242,7 @@ def test_a_direct_read_that_names_the_unit_stamps_the_row():
 # ── 2. PRICE = SOURCE, TYPES, JSON-ONLY ROWS ────────────────────────────────────────────────────
 def test_json_only_rows_still_map_and_a_900_riyal_sale_stays_900():
     row, _ = _row(U373, None)
-    assert row["property_type"] == "Villa" and row["price_total"] == 1792000       # «تاون هاوس» → the fleet fold
+    assert row["property_type"] == "تاون هاوس" and row["price_total"] == 1792000       # «تاون هاوس» keeps its own name
     assert row["direction"] == "جنوب" and row["street_width_m"] == 30 and row["license_number"] == "7201001555"
     assert row["photo_urls"] == ["https://just.sa/das/includes/uploads/images/offer_20260808_195828_5f4cc1.webp"]
     assert "bathrooms" not in row or row["bathrooms"] is None

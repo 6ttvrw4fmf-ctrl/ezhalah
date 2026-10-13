@@ -80,6 +80,14 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # 2026-10-08 «misses» (5 of 8) were all prose («مطبخ راكب», «موقف خاص» in the description) on ads whose
     # own structured fields are blank: our NULL is the source's answer (law §2). Read by sanadak_page().
     "sanadak": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "furnished"),
+    # sodasyat's spec grid («بها مصعد», «موقف», «مطبخ», «مكيف», «غرفة سائق» …, scrapers/sodasyat/run.py SPEC_COLS)
+    # is its structured statement; an unticked item is silence. Its 2026-10-12 «misses» (3 of 5) were prose
+    # («مطبخ أمريكي» in the description) on ads whose grid lists the lift and parking but no kitchen (🔬).
+    "sodasyat": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "furnished",
+                 "private_entrance"),
+    # eaqartabuk's candles-map «features» checklist is structured since 2026-10-12 (feature_answers); prose is
+    # never read for the four fields it can express.
+    "eaqartabuk": ("elevator", "kitchen", "private_entrance", "parking"),
 }
 COL = {n: c for n, _, c, _ in FIELDS}
 _YES = {"true", "1", "نعم", "يوجد", "متوفر"}

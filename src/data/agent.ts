@@ -104,7 +104,7 @@ const CURRENCY_RATES: Record<string, number> = {
 // doesn't set a type, which broadens honestly). (audit items 1/5, 2026-07-27)
 const TYPE_SYNONYMS: Record<string, string> = {
   flat: 'Apartment', apt: 'Apartment', studio: 'Studio', penthouse: 'Apartment', duplex: 'Duplex',
-  mansion: 'Villa', palace: 'Villa', townhouse: 'Villa', home: 'Villa', dwelling: 'Villa',
+  mansion: 'Villa', palace: 'Villa', townhouse: 'Duplex', home: 'Villa', dwelling: 'Villa',
   plot: 'Residential Land', cabin: 'Chalet', 'raw land': 'Raw Land', 'undeveloped land': 'Raw Land',
   workspace: 'Office', clinic: 'Office', storage: 'Warehouse', depot: 'Warehouse',
   store: 'Shop', retail: 'Shop', boutique: 'Shop', gallery: 'Showroom', garage: 'Workshop',

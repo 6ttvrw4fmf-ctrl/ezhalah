@@ -115,6 +115,9 @@ export function directionVariantsFrom(observed: Iterable<string>): Record<string
   return map;
 }
 
+/** The «Raw Land» filter token; matched against the index's unit_subtype_ar TAG, not type_ar. */
+export const RAW_LAND_TAG = 'أرض خام';
+
 export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string; unhandled: string[] } {
   const parts = ['production_ready=is.true'];
   // Mixture params (owner 2026-10-03) are each ONE disjunction; collected and emitted once at the end so
@@ -292,7 +295,18 @@ export function buildOracleQS(reqBody: RpcBody, opts?: OracleOpts): { qs: string
    * one-kind (the two-scope case this module already handled), it is byte-identical to the old
    * `type_ar.in.(…)` — so this changes NOTHING except the mixed-kind case it was written for.
    */
+  // RAW LAND IS A TAG, NOT A TYPE (🔬 AF engineer, 2026-10-12). The «Raw Land» box sends the token «أرض خام»,
+  // which no index row stores as type_ar: a raw plot keeps its source type and is TAGGED
+  // unit_subtype_ar = 'أرض خام'. Production's type arm reads (live location_search_candidates_ar)
+  //     s.type_ar = any(p_types) or (s.unit_subtype_ar = 'أرض خام' and 'أرض خام' = any(p_types))
+  // and this oracle emitted the first half only, so it counted 0 where the RPC counted the tagged plots. It
+  // agreed while no row was tagged; once 281 were, every Raw Land cell of af-live-truth-check went red
+  // (run 38215288912, «base count RPC == oracle» rpc=11 oracle=0 in جدة) — a tool undercount, not a product bug.
   const typeConjunct = (permitted: string[], tables: string[] | null | undefined): string => {
+    const c = typeConjunctNoTag(permitted, tables);
+    return permitted.includes(RAW_LAND_TAG) ? `or(${c},unit_subtype_ar.eq.${enc(`"${RAW_LAND_TAG}"`)})` : c;
+  };
+  const typeConjunctNoTag = (permitted: string[], tables: string[] | null | undefined): string => {
     const plain = `type_ar.in.(${permitted.map((x) => enc(`"${x}"`)).join(',')})`;
     if (!macros || !category || !mixedKind(tables)) return plain;
     const both = permitted.filter((t) => macros[t] === 'both');

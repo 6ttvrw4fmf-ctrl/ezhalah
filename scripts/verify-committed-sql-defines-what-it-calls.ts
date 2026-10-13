@@ -67,7 +67,7 @@ const RECOVERED_MD5 = 'eaf7d972969dc71d23b35d590f267c6b';
 // as a definition. loc_rel_refresh_tick and backfill_aqar_res have been committed procedures all
 // along and sat here as "production-only" only because of that; teaching the reader PROCEDURE
 // resolves both. 30 -> 28.
-const MAX_BASELINE_ENTRIES = 28;
+const MAX_BASELINE_ENTRIES = 17;
 
 let failed = 0;
 const check = (ok: boolean, msg: string, extra = '') => {
@@ -91,7 +91,12 @@ export function unresolvedPublicRefs(files: SqlFile[]): Map<string, string[]> {
   const defined = new Set<string>();
   const referenced = new Map<string, string[]>();
   for (const { file, sql } of files) {
-    const code = stripSqlCommentsAndBlanks(sql);
+    // An INSERT target followed by its column list — `insert into public.t (a, b) values …` — is a
+    // RELATION reference, not a call: the parenthesis belongs to the column list. Without this the
+    // reader flagged public.aqar_resolver_log() on 2026-10-12 for a plain insert into that table.
+    // Only the insert-target shape is exempt; `select public.fn(` still reads as a call.
+    const code = stripSqlCommentsAndBlanks(sql)
+      .replace(/(\binsert\s+into\s+public\.[a-zA-Z0-9_]+)\s*\(/gi, '$1 /*cols*/ (');
     for (const n of namesIn(code, DEFINES_FUNCTION)) defined.add(n);
     for (const n of namesIn(code, DEFINES_RELATION)) defined.add(n);
     for (const n of namesIn(code, REFERENCES)) {
@@ -167,6 +172,16 @@ const COMMENTED_OUT: SqlFile[] = [
 ];
 mustCatch('a CREATE that exists only inside a comment being counted as a definition',
   unresolvedPublicRefs(COMMENTED_OUT).has('ghost'));
+
+// An INSERT target with a column list is a relation, not a call (2026-10-12: a plain
+// `insert into public.aqar_resolver_log (run_at, …)` read as a call to a production-only function).
+// Both directions: the insert target is NOT reported, and a real call in the same file still is.
+const INSERT_TARGET: SqlFile[] = [
+  { file: 'a.sql', sql: 'insert into public.some_log (run_at, id) select now(), public.really_missing(1);' },
+];
+mustCatch('an INSERT target with a column list being read as a call (while a real call still is)',
+  !unresolvedPublicRefs(INSERT_TARGET).has('some_log') &&
+  unresolvedPublicRefs(INSERT_TARGET).has('really_missing'));
 
 // The negative direction: a real definition in the same corpus must silence it, or the check is a
 // constant red that someone will eventually delete.

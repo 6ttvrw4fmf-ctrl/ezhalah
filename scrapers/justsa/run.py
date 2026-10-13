@@ -28,7 +28,7 @@ SOURCE SHAPE (measured live 2026-09-24, before any code)
   the price-card text so a period word the site adds later is honoured on the source's own word.
 · PII: the detail page shows the marketer's personal name and avatar (`rv-agent-mini`); that block
   is never read. The description is passed through pii.redact_pii.
-· TYPES: «دور أرضي»/«دور علوي» → Floor (the bare «دور» is Floor); «تاون هاوس» → Villa and
+· TYPES: «دور أرضي»/«دور علوي» → Floor (the bare «دور» is Floor); «تاون هاوس» keeps its own name (owner 2026-10-12) and
   «بينتهاوس» → Apartment follow the fleet's own folds (rawasidark / rakez / dealapp).
 · PRICE = SOURCE: J1516 is a «دور أرضي» for sale at 900 — stored as 900 (a 1-riyal ad stays 1).
 
@@ -72,7 +72,7 @@ PAUSE = 0.5   # seconds between detail fetches — a small office, be polite
 
 _TYPE_OVERRIDES = {
     "دور أرضي": "Floor", "دور علوي": "Floor",
-    "تاون هاوس": "Villa",        # fleet fold: TYPE_MAP_EN 'Townhouse' → 'Villa' (rawasidark)
+    "تاون هاوس": "تاون هاوس",        # fleet fold: TYPE_MAP_EN 'Townhouse' → 'Villa' (rawasidark)
     "بينتهاوس": "Apartment",     # a penthouse is sold as an apartment (rakez, dealapp)
 }
 _AVAILABLE = "متاح"

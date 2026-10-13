@@ -61,11 +61,11 @@ WORKERS = int(os.environ.get("SANADAK_WORKERS", "4"))
 TYPE_MAP = {
     "Apartment": "Apartment", "Villa": "Villa", "Floor": "Floor", "Building": "Building",
     # Duplex + Studio are their OWN clean types since the 2-macro filter split — no longer folded
-    # into Villa/Apartment. Townhouse/Palace/House stay Villa-folds per the locked canon rule.
+    # into Villa/Apartment. Palace/House stay Villa-folds per the locked canon rule; Townhouse keeps its own name (owner 2026-10-12).
     # (canon unification, audit item 7d, 2026-07-27.)
     "Duplex": "Duplex", "Palace": "Villa", "Room": "Room", "RestHouse": "Rest House",
     "Chalet": "Chalet", "Farm": "Farm", "Land": "Residential Land", "House": "House",
-    "Townhouse": "Villa", "Studio": "Studio", "Penthouse": "Apartment",
+    "Townhouse": "تاون هاوس", "Studio": "Studio", "Penthouse": "Apartment",
     # commercial
     "Office": "Office", "Shop": "Shop", "Showroom": "Showroom", "Warehouse": "Warehouse",
     "CommercialLand": "Commercial Land", "CommercialBuilding": "Commercial Building",
