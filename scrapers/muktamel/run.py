@@ -1114,5 +1114,10 @@ def page_verdict(url: str) -> str:
         return ALIVE
     return UNKNOWN
 
+# Owner 2026-10-13: every site keeps its COMPLETE source record (PDPL-clean) beside the mapped columns.
+from scrapers.common.capture import capture_source_items  # noqa: E402
+capture_source_items(globals())
+
+
 if __name__ == "__main__":
     raise SystemExit(main())

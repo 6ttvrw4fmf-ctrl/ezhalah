@@ -163,6 +163,14 @@ def test_non_riyadh_unavailable_and_fidless_floorplans_are_skipped():
     assert R.map_listing({**no_word, "title": "Studio"}, "riyadh-granada", {})[1] == "commercial"
 
 
+def _values_only(row):
+    """The row as stored, minus the capture's key-NAME audit list (`unkept_keys`: field names we did NOT keep, never
+    values). These tests guard VALUES (people, numbers); a field's name is not personal data."""
+    cap = {k: v for k, v in (row.get("source_capture") or {}).items() if k != "unkept_keys"}
+    cap = {k: ({kk: vv for kk, vv in v.items() if kk != "unkept_keys"} if isinstance(v, dict) else v) for k, v in cap.items()}
+    return {**row, "source_capture": cap}
+
+
 # 5/6 ── url, identity, PII ──────────────────────────────────────────────────────────────────────
 def test_listing_url_is_the_sitemaps_own_fid_page_with_a_slugified_fallback():
     row, _ = _row(FP_2BR)
@@ -171,7 +179,7 @@ def test_listing_url_is_the_sitemaps_own_fid_page_with_a_slugified_fallback():
     assert b2["listing_url"] == ("https://flow.life/en/properties/riyadh-olaya/available-homes/"
                                  "b2-standard-2-bedroom-with-wraparound-balcony/fid/phBbGPeQ0IJVMZJQxsdo")
     assert "None" not in b2["listing_url"]
-    dump = json.dumps(row, ensure_ascii=False)
+    dump = json.dumps(_values_only(row), ensure_ascii=False)     # a field NAME (countryCode) may be listed as unkept; no value may be stored
     assert "115207100" not in dump and "countryCode" not in dump
     assert row["photo_urls"] == ["https://flowhouse.imgix.net/cms/DRS_Hssq0_Jbix_Uik7_O6z_J_c2d9451ef5.png"]
 

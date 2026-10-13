@@ -453,6 +453,14 @@ def test_no_agent_office_or_qr_field_reaches_any_stored_field(rec):
         assert key not in row["source_capture"]
 
 
+def _values_only(row):
+    """The row as stored, minus the capture's key-NAME audit list (`unkept_keys`: field names we did NOT keep, never
+    values). These tests guard VALUES (people, numbers); a field's name is not personal data."""
+    cap = {k: v for k, v in (row.get("source_capture") or {}).items() if k != "unkept_keys"}
+    cap = {k: ({kk: vv for kk, vv in v.items() if kk != "unkept_keys"} if isinstance(v, dict) else v) for k, v in cap.items()}
+    return {**row, "source_capture": cap}
+
+
 def test_a_poisoned_record_leaks_nothing_even_when_the_source_adds_new_pii():
     """The allowlist's real job: keys nobody has seen yet, and real ones the platform DOES publish
     on some rows (RentGuarantorInformation, LegalRequirementText, an agent object), must not arrive
@@ -469,7 +477,7 @@ def test_a_poisoned_record_leaks_nothing_even_when_the_source_adds_new_pii():
         ],
     }
     row, _ = _row(poisoned)
-    blob = json.dumps(row, ensure_ascii=False, default=str)
+    blob = json.dumps(_values_only(row), ensure_ascii=False, default=str)     # field NAMES may be listed as unkept; no value may be stored
     for leak in ("0555111222", "0501234567", "سعد بن محمد", "عبدالله الشهري", "agent@example.com",
                 "px-966501234567", "0555754441", "Agent", "RentGuarantorInformation",
                 "LegalRequirementText", "PixelTrackingCode"):
