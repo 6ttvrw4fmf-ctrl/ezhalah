@@ -90,39 +90,27 @@ check("R11.2 (revised again 2026-09-12/13, silent this time): a MEASURED 'no' af
 check("...and that verdict path still records afCanNarrow first (the «تحديد أكثر» gate is untouched)",
   /setAfCanNarrow\(\(c\) => \(\{ \.\.\.c, \[m\.id\]: offersNarrowing\(verdict\) \}\)\);/.test(agent));
 
-console.log("\n── the composer is the SAME box, made inert — not a separate card ──");
+console.log("\n── a finished search NEVER locks the chat (owner 2026-10-13: «remove the lock») ──");
+// Supersedes the 2026-09-05 inert composer and the 2026-10-05 «hide it completely»: watched live, a 3-result search took the box away
+// and the user could not type. `completed` still ends THAT search (no «عرض المزيد», its closing note); it no longer touches the box.
 const compIdx = agent.indexOf("<View style={[s.composerWrap");
-check("the composer block is unconditional — no ternary swaps in a different card for `completed`",
-  compIdx > -1 && !/\{completed \? \(/.test(agent));
-check("the input goes non-editable when completed", /editable=\{!completed\}/.test(agent));
-check("the input's value is cleared when completed (nothing typed can look sendable)",
-  /value=\{completed \? '' : typed\}/.test(agent));
-check("the placeholder explains the closed state instead of inviting a message",
-  /placeholder=\{completed \? t\('This chat is closed — tap ☰ at the top to start a new search'\)/.test(agent));
-check("the mic disappears when completed (no dead mic control on a locked composer)",
-  /isVoiceInputSupported\(\) && !completed \?/.test(agent));
-check("the send button is disabled once completed, regardless of typed text",
-  /disabled=\{completed \|\| !typed\.trim\(\)\}/.test(agent));
-check("the send icon becomes a lock when completed, an arrow otherwise",
-  /name=\{completed \? 'lock-closed' : 'arrow-up'\}/.test(agent));
+const neverLocks = (src: string) => compIdx > -1
+  && /\{!filterOrigin \? \(\s*\n\s*<View style=\{\[s\.composer, /.test(src)
+  && !/!filterOrigin && !completed/.test(src)
+  && !/editable=\{!completed\}/.test(src)
+  && !/value=\{completed \? '' : typed\}/.test(src)
+  && !/isVoiceInputSupported\(\) && !completed/.test(src)
+  && !/disabled=\{completed \|\|/.test(src)
+  && !/'lock-closed'/.test(src);
+check("the composer, its text, mic and send button stay live after a finished search", neverLocks(agent));
+mustCatch("the box being hidden again on a finished search", !neverLocks(agent.replace("{!filterOrigin ? (", "{!filterOrigin && !completed ? (")));
+mustCatch("the send button locking again", !neverLocks(agent.replace("disabled={!typed.trim()}", "disabled={completed || !typed.trim()}")));
+const sendReopens = (src: string) => /setStopped\(false\);[^\n]*\n\s*setCompleted\(false\);[^\n]*\n\s*setBusy\(true\);/.test(src);
+check("the next message reopens a finished search (send() clears `completed` before the new turn)", sendReopens(agent));
+mustCatch("a new message inheriting the finished state (its «عرض المزيد» row would stay hidden)",
+  !sendReopens(agent.replace(/(setStopped\(false\);[^\n]*\n)\s*setCompleted\(false\);[^\n]*\n/, "$1")));
 check("no separate replacement card, New Chat button, or their styles remain",
   !/completedWrap|completedBar|completedTxWrap|completedSub|newChatBtn|newChatTx/.test(agent));
-
-console.log("\n── mutation proof — the barrier must actually catch a regression ──");
-{
-  // Simulate the OLD replacement-card shape reappearing: a ternary swaps in a different branch.
-  // The real check's own condition, re-run against the mutant, must flip from PASS to FAIL.
-  const isUnconditional = (src: string) => compIdx > -1 && !/\{completed \? \(/.test(src);
-  const regressed = "{completed ? (<View />) : (" + agent;
-  check("MUTATION: reintroducing a completed-ternary around the composer is caught",
-    isUnconditional(agent) === true && isUnconditional(regressed) === false);
-}
-{
-  // Simulate someone forgetting to disable the send button while locking the icon to a lock.
-  const regressed = agent.replace("disabled={completed || !typed.trim()}", "disabled={!typed.trim()}");
-  check("MUTATION: dropping `completed` from the send button's disabled condition is caught",
-    !/disabled=\{completed \|\| !typed\.trim\(\)\}/.test(regressed));
-}
 
 console.log("\n── Back / reopen / New Chat ──");
 check("restore reinstates completed from the transcript", /setCompleted\(restored\.completed === true\);/.test(agent));
@@ -130,9 +118,6 @@ check("New Chat (fresh) clears it", /setCompleted\(false\);/.test(agent));
 check("the capture persists it", /serializeChat\(\{ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow \}\)/.test(agent));
 
 console.log("\n── i18n contract ──");
-check("the closed-composer placeholder has an Arabic entry",
-  /'This chat is closed — tap ☰ at the top to start a new search': 'أُغلقت هذه المحادثة/.test(i18n));
-
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 // §TERMINALITY — `completed` IS A CLAIM ABOUT LISTINGS THE TRANSCRIPT TRUNCATES (routine #8,
 // 2026-09-12). THE SEAM: this file's own subject (the terminal-chat rule, #4/#5) composed with
@@ -212,7 +197,7 @@ for (const n of [1_200, 2_060]) {
 // lock is owner rule 2026-08-30 and must survive untouched, INCLUDING inside a chat whose earlier,
 // larger turn was truncated. Only the LAST results turn may decide terminality.
 const afSmall = reopen(finishedChat(20));
-check("an AF-completed chat (20 rows, ≤ INTERVIEW_STOP_AT) still reopens LOCKED — owner rule 2026-08-30 untouched",
+check("an AF-completed chat (20 rows, ≤ INTERVIEW_STOP_AT) still reopens FINISHED (its search ended; the box stays live since 2026-10-13)",
   afSmall.completed === true && afSmall.pager === false && afSmall.deadEnd === false, JSON.stringify(afSmall));
 // (earlier turn revealed 600 > the 500 cap ⇒ it IS truncated on save — the case this check exists for)
 const afAfterBigTurn = reopen(finishedChat(20, true, 600));
