@@ -143,6 +143,9 @@ OFFER_802_FIG1 = [802, "مكتب للايجار حي حطين", "مكتب", "24.
     ("652l", 652),              # stray latin letter on the live value
     ("1050 م²", 1050),
     ("1600م2", 1600),
+    ("1.652", 1652),            # offer 818 (2026-10-13): a DOT grouping three digits, stored 1 m² before
+    ("107.68م", 107),           # a dot with two digits stays a decimal
+    ("1393.3", 1393),
 ])
 def test_area_is_parsed_from_the_source_string(raw, expected):
     assert R._area_m2(raw) == expected
