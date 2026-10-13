@@ -435,10 +435,13 @@ def main() -> int:
                           ("wahadat_commercial_listings", com)):
             if rows:
                 seen_ads = {r["ad_number"] for r in rows} | held
-                struck = [r for r in (db.sb().table(tbl).select("ad_number,listing_url")
-                                      .eq("source", SOURCE).eq("active", True).gt("missing_count", 0)
-                                      .limit(1000).execute().data or [])
-                          if r.get("ad_number") not in seen_ads]
+                try:
+                    struck = [r for r in (db.sb().table(tbl).select("ad_number,listing_url")
+                                          .eq("source", SOURCE).eq("active", True).gt("missing_count", 0)
+                                          .limit(1000).execute().data or [])
+                              if r.get("ad_number") not in seen_ads]
+                except Exception:                       # noqa: BLE001 — unread stays unknown
+                    struck = []
                 off_market.update(read_unlisted_projects(sess, set(urls), struck))
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rows} | held, source=SOURCE,
                                     verify_gone=off_market_oracle(off_market))
