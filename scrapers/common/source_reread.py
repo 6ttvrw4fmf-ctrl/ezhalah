@@ -24,7 +24,9 @@ import os
 import random
 import re
 import sys
+import time
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 from scrapers.common.cleanup import PLATFORMS, _probe
 from scrapers.common.db import sb
@@ -66,6 +68,32 @@ def _with_values(lines: list[str]) -> list[str]:
         nxt = lines[i + 1] if i + 1 < len(lines) else ""
         out.append(f"{x} {nxt}" if nxt and not EVIDENCE.search(nxt) and SHORT_VALUE.match(nxt) else x)
     return out
+
+
+# Hosts the shared probe cannot read in time, read the way their own scraper reads them. muktamel answers
+# its listing pages slowly: the probe's 25 s per profile timed out on 5/5 pages (re-read run 38224014958,
+# the 10-12 and 10-13 scores: «unreadable»), while scrapers/muktamel/run.py (chrome124 + Arabic
+# Accept-Language, 45 s, 3 tries) verified 3,504 of them alive the same day (backlog #456). The READER
+# only; cleanup._probe (the liveness path) is untouched.
+SLOW_HOSTS = {"muktamel.com": 45}
+
+
+def read_page(url: str) -> tuple[int | None, str]:
+    host = (urlsplit(url).netloc or "").lower()
+    budget = next((t for h, t in SLOW_HOSTS.items() if host == h or host.endswith("." + h)), None)
+    if budget is None:
+        return _probe(url)
+    from curl_cffi import requests as _cc
+    s = _cc.Session(impersonate="chrome124")
+    s.headers.update({"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                      "Accept-Language": "ar,en-US;q=0.7,en;q=0.6"})
+    for attempt in range(3):
+        try:
+            r = s.get(url, timeout=budget, allow_redirects=True)
+            return r.status_code, (r.text or "")
+        except Exception:
+            time.sleep(1.0 * (attempt + 1))
+    return None, ""
 
 
 def page_evidence(body: str) -> dict:
@@ -303,7 +331,7 @@ def main() -> int:
         item = {"table": table, "id": rid, "url": url, "stored": stored,
                 "card_district_raw": raw.get("neighborhood")}
         if url:
-            status, body = _probe(url)
+            status, body = read_page(url)
             platform = stored.get("platform") or table.split("_")[0]
             item["status"] = status
             item["verdict"] = classify_response(status, body or "",

@@ -53,3 +53,29 @@ def test_wasalt_prices_are_printed_whatever_the_fact_filter_keeps():
     assert "propertyDetailsV3.propertyInfo.salePrice = 40500000000" in lines
     assert "propertyDetailsV3.propertyInfo.pricePerMeter = 18000000" in lines
     assert not any("isPriceNegotiable" in l for l in lines)   # a flag is not a price
+
+
+def test_slow_host_is_read_the_way_its_scraper_reads_it(monkeypatch):
+    # muktamel (backlog #456): the shared probe's 25 s timed out on 5/5 pages; the reader uses the
+    # scraper's own route (chrome124 + Arabic, 45 s, retries). Every other host still goes through _probe.
+    import curl_cffi.requests as cc
+    from scrapers.common import source_reread as SR
+    seen = {}
+
+    class FakeResp:
+        status_code, text = 200, "<html>ok</html>"
+
+    class FakeSession:
+        def __init__(self, impersonate=None):
+            seen["impersonate"] = impersonate
+            self.headers = {}
+
+        def get(self, url, timeout=None, allow_redirects=True):
+            seen["timeout"] = timeout
+            return FakeResp()
+
+    monkeypatch.setattr(cc, "Session", FakeSession)
+    monkeypatch.setattr(SR, "_probe", lambda url: (599, "probe"))
+    assert SR.read_page("https://www.muktamel.com/real-estates/34463") == (200, "<html>ok</html>")
+    assert seen == {"impersonate": "chrome124", "timeout": 45}
+    assert SR.read_page("https://sa.aqar.fm/ad/1") == (599, "probe")

@@ -37,7 +37,8 @@ import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from scrapers.common.cleanup import _probe
+from scrapers.common.cleanup import _probe  # noqa: F401  (kept for callers that patch it)
+from scrapers.common.source_reread import read_page
 from scrapers.common.db import sb
 from scrapers.common.source_reread import page_evidence
 
@@ -511,7 +512,7 @@ def no_district_backlog(client) -> dict:
 
 def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: str,
                pace: float = PACE_S, probe=None) -> dict:
-    probe = probe or _probe
+    probe = probe or read_page
     row = empty_row(night, platform)
     last = 0.0
     for table, rid in picks:
