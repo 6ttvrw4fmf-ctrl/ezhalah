@@ -1633,14 +1633,15 @@ Deno.serve(async (req: Request) => {
       // NOT A SEARCH, EVEN IN THE MIDDLE OF ONE (live 2026-10-13, the owner watching): with an old search in memory, «شكراً» and «وش أفضل
       // حي في الرياض؟» each RE-RAN «فيلا، ٣ مليون، ٤ غرف، مسبح», because the carried state alone was "enough to search". A pure thanks /
       // goodbye / hello, advice, a complaint, a place abroad, a wish to sell, a link, a phone number or sadness is answered for what it is,
-      // and nothing is searched (the state rides along unchanged, «a pause never erases»). A nationality wish next to a real property («شقة للسعوديين بس») still searches,
+      // and nothing is searched. It sends NO query on purpose (keepState): the app then keeps the search exactly as it was, where a query
+      // read from «وش أفضل حي في الرياض؟» would have planted a district «في الرياض؟» into it (live 2026-10-13). A nationality wish next to a real property («شقة للسعوديين بس») still searches,
       // as it always did; a financial word can be a purpose («شقة للاستثمار»), so it never interrupts.
       const aside = situationKind(text);
       const asideNow = aside && aside !== "financial" && !(aside === "protected" && namesAProperty(text)) ? aside : null;
       const courtesy = pureSocialKind(text);
       if (asideNow || courtesy) {
         const reply = asideNow ? situationReplyText(asideNow, locale === "en", text, lastBotReply) : socialReplyText(courtesy!, locale === "en", text, lastBotReply);
-        return json({ kind: "message", reply, locationQuestion: false, query: understoodState(), askCount });
+        return json({ kind: "message", reply, locationQuestion: false, keepState: true, askCount });
       }
 
       if (decision.kind === "message") {
