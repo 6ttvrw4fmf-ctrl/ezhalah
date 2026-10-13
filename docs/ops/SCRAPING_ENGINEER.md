@@ -604,3 +604,10 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   `select * from ops_engineer_alert_queue where engineer = 'scraping-engineer' order by severity, created_at;` — every
   open `alert_event` now carries a live engineer (`ops_engineer_for_alert()`, by kind first, legacy
   `owner_routine` second). Drive each to resolved or say why not; the report carries «🚨 Alerts: N → M».
+
+## Lesson from 2026-10-13 (copied by 🔧 from your own report)
+
+- **Merge inside the first 60 minutes, one push per PR cycle, `npm run test:all` locally first.** Your own line: three
+  pushes cancelled `npm test`, the merge window slipped past 06:45, and six fixes ended the night as «fixed, proof
+  pending» (fix rate 3/8 → 2/8, 40% → 38% → 25% over three nights). A fix that misses the 06:22 sync has no customer
+  proof in your slot; a proof row is what the owner counts.

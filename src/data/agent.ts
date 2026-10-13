@@ -360,7 +360,8 @@ function resolveDistrictsFromText(userText: string, city: string): string[] {
   // …and never on a budget / deal / feature word or a «بالرياض» place: «حي النرجس بحدود ٦٠ ألف» searched a district «النرجس بحدود»
   // that no listing has (live 2026-10-13, seen once the summary started naming the chat's districts).
   // A district NAME never starts with «في / من / على»: «وش أفضل حي في الرياض؟» became a district «في الرياض؟» that the next turn searched.
-  const arHiRe = /حي\s+(?!(?:في|من|على|عند|بال|قريب|قريبة|جنب|يكون|فيه|فيها)(?![؀-ۿ]))([؀-ۿ]+(?:\s+(?!في|و|أو|منطقة|مدينة|بال|لل|(?:بحدود|حدود|تحت|فوق|اقل|أقل|اكثر|أكثر|بسعر|سعر|ايجار|إيجار|شهري|سنوي|مفروش|مفروشة|غرف|غرفة|غرفتين|مع|قريب|قريبة|جنب|ميزانية|ميزانيتي|الحد)(?![؀-ۿ]))[؀-ۿ]+)?)/g;
+  // …nor swallows a room / bathroom / feature count: «حي النرجس حمامين» searched a district «النرجس حمامين» (ops_zero_result_log 2026-10-13 07:42).
+  const arHiRe = /حي\s+(?!(?:في|من|على|عند|بال|قريب|قريبة|جنب|يكون|فيه|فيها)(?![؀-ۿ]))([؀-ۿ]+(?:\s+(?!في|و|أو|منطقة|مدينة|بال|لل|(?:بحدود|حدود|تحت|فوق|اقل|أقل|اكثر|أكثر|بسعر|سعر|ايجار|إيجار|شهري|سنوي|مفروش|مفروشة|غرف|غرفة|غرفتين|حمام|حمامين|حمامات|دور|دورين|صالة|صالتين|مجلس|مطبخ|مسبح|مصعد|موقف|مواقف|حوش|مع|قريب|قريبة|جنب|ميزانية|ميزانيتي|الحد)(?![؀-ۿ]))[؀-ۿ]+)?)/g;
   for (const m of ar.matchAll(arHiRe)) out.push(m[1].trim());
   // English needs the WORD «district»/«neighborhood»: a bare «in X» names a CITY far more often
   // («apartment for sale in Riyadh»), and treating it as a district turned the city into a district
