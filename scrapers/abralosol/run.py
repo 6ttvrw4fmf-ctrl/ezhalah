@@ -46,6 +46,7 @@ from typing import Any, Optional
 from curl_cffi import requests as cc
 
 from scrapers.common import db
+from scrapers.common.http import retry_smarter_session
 from scrapers.common.http_liveness import LivenessProbe
 from scrapers.common import normalize as N
 from scrapers.common.pii import redact_capture, redact_pii
@@ -183,7 +184,12 @@ def _clean(text: Optional[str]) -> Optional[str]:
 
 
 def _session() -> cc.Session:
-    return cc.Session(impersonate="chrome124", timeout=30)
+    # 2026-10-13 (Scraping Engineer, backlog 488/63): one pinned profile, no retry route. The 10-13
+    # nightly read /node?page=0 as nothing on chrome124 and logged an empty catalogue (pages=0).
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it.
+    s, tried = retry_smarter_session(f"{BASE}/node?page=0", timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
+    return s
 
 
 def _fetch(s: cc.Session, url: str, tries: int = 3) -> tuple[Optional[int], Optional[str]]:
@@ -203,6 +209,10 @@ def _fetch(s: cc.Session, url: str, tries: int = 3) -> tuple[Optional[int], Opti
 
 
 GONE_STATUSES = (404, 410)
+
+
+class IndexUnreadable(RuntimeError):
+    """The catalogue's first index page could not be read: a failed fetch, never «0 listings»."""
 
 
 def _get(s: cc.Session, url: str, tries: int = 3) -> Optional[str]:
@@ -617,7 +627,15 @@ def crawl(limit: int = 0, want_detail: bool = True) -> tuple[list[dict], list[di
 
     for page in range(MAX_PAGES):
         html = _get(s, f"{BASE}/node?page={page}")
-        recs = _index_rows(html or "")
+        if html is None:
+            # An index page we could not READ is not the end of the catalogue (A FAILED FETCH IS
+            # NOT AN EMPTY ANSWER). Page 0 unreadable = the run failed, said so in its notes; a
+            # later page = keep what was read and mark the crawl incomplete so nothing is pruned.
+            if page == 0:
+                raise IndexUnreadable(f"index page 0 unreadable ({BASE}/node?page=0)")
+            stats["incomplete"] = f"index page {page} unreadable"
+            break
+        recs = _index_rows(html)
         if not recs:
             break
         stats["pages"] += 1
@@ -716,8 +734,9 @@ def main() -> int:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
 
         verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
-        for tbl, rows_seen in (("abralosol_residential_listings", res),
-                               ("abralosol_commercial_listings", com)):
+        for tbl, rows_seen in (() if stats.get("incomplete") else
+                               (("abralosol_residential_listings", res),
+                                ("abralosol_commercial_listings", com))):
             nn = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source=SOURCE,
                                  verify_gone=verify_gone)
             if nn < 0:
