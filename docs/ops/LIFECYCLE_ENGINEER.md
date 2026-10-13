@@ -1075,11 +1075,16 @@ or rewrite another engineer's work, and never start a big change in another engi
   the guarded branch (strike only own-page «gone», cap respected: `opensooq/run.py::_strike_read_gone`)
   before waiting on a person for a tier move.
 
-- **2026-10-13 (♻️):** a sweep stamps every 200 it reads with ONE timestamp, so one run's batch could
-  be every control. A trust-quarantined gathern run (06:40, alive_rate 11%) stamped 11 rows; 7 read 404
-  an hour later and every sweep from 07:37 checked nothing. `choose_canaries` now lets no single
-  observation timestamp supply more than a third of the controls. When a sweep reads `CANARY-QUARANTINED`
-  with the SAME status mix run after run, look at what stamped its controls before blaming the source.
+- **2026-10-13 (♻️):** a quarantine is not a bug until a SECOND reader disagrees with it. Gathern's sweep
+  read 7-8 of 10 controls 404 from 07:37 to 11:32 UTC (CI and the proxy alike); #6978 (no single
+  observation timestamp may be more than a third of the controls) was merged on the theory that one
+  quarantined run's stamps were the controls, and the next run still read 3/10. lifecycle-spot-check
+  38391222675 then read 10 of those 12 "404" controls LIVE at 11:35: gathern was flapping, the gate was
+  right, and #6978 is hardening, not the cure. Dispatch the spot-check on the control ids FIRST.
+- **2026-10-13 (♻️):** a crawl that maps nothing must still hand its walk to the own-page oracle. manzo read
+  29 listed records, mapped 0 (status «available»), so `strike_read_gone` got an empty seen set and a
+  404 ad stayed on screen for three nights (#6980). And a unit whose project leaves the sitemap is never
+  read again: wahadat now reads struck units' unlisted project pages (14 units, 5-8 strikes).
 
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
