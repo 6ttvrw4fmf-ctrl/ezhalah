@@ -356,7 +356,24 @@ def choose_canaries(rows: list[dict], limit: int, now: Optional[datetime] = None
             continue
         fresh.append((seen, row))
     fresh.sort(key=lambda pair: pair[0], reverse=True)
-    return [row for _, row in fresh[:limit]]
+    # ONE RUN'S STAMPS MAY NOT BE EVERY CONTROL (2026-10-13). A sweep stamps every row it reads 200
+    # with the SAME timestamp, so the freshest ten were often one batch. At 06:40 UTC a run the
+    # trust gate quarantined (alive_rate 11%) still stamped 11 rows alive at 06:40:12.904624; they
+    # outranked the crawl's sightings, 7 of them answered 404 an hour later, and every sweep from
+    # 07:37 read its controls 3/10 and checked nothing — the same deadlock as above, one batch wide,
+    # until the next day's crawl. So, still freshest-first, no observation timestamp supplies more
+    # than a third of the controls; leftovers fill the pool only when there is nothing else.
+    per_stamp = max(1, limit // 3)
+    picked: list[dict] = []
+    spare: list[dict] = []
+    taken: dict[datetime, int] = {}
+    for seen, row in fresh:
+        if taken.get(seen, 0) < per_stamp:
+            taken[seen] = taken.get(seen, 0) + 1
+            picked.append(row)
+        else:
+            spare.append(row)
+    return (picked + spare)[:limit]
 
 
 def _collect_canaries(client, limit: int) -> list[dict]:

@@ -227,6 +227,33 @@ def off_market_oracle(off_market: dict[str, str]):
     return verify_gone
 
 
+def read_unlisted_projects(sess, read_urls: set[str], struck: list[dict]) -> dict[str, str]:
+    """Off-market statuses for struck units whose project page the sitemap no longer lists (2026-10-13).
+
+    14 active units of two projects (دام-101, هيو فلورز تنال) sat at 5-8 strikes on screen: their
+    project left the 100-project sitemap, so no crawl read their own record again and the off-market
+    oracle could only say «not read this run» (unknown) every night. Each such project page still
+    answers 200 (lifecycle-spot-check 38392426679), so it is read here, once per page, and a unit its
+    own record marks sold/reserved in a project whose is_active is true is off market exactly as in
+    the main walk. Anything else stays unknown."""
+    out: dict[str, str] = {}
+    for url in sorted({r.get("listing_url") for r in struck if r.get("listing_url")} - read_urls):
+        try:
+            r = sess.get(url, impersonate=IMPERSONATE, timeout=TIMEOUT)
+            if r.status_code != 200:
+                continue
+            proj, units = parse_project(r.text, url)
+        except Exception:                               # noqa: BLE001 — unread is unknown
+            continue
+        if proj is None or proj.get("is_active") is not True:
+            continue
+        for unit in units:
+            st = (unit.get("status") or "").strip().lower()
+            if st in OFF_MARKET_STATUSES and unit_uid(unit):
+                out[f"{PREFIX}{unit_uid(unit)}"] = st
+    return out
+
+
 def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[str, Any], str]:
     """(row, category) for ONE unit already proven `status == available` and type-resolved."""
     category = normalize.category_for_type(ptype).lower()
@@ -407,6 +434,15 @@ def main() -> int:
         for tbl, rows in (("wahadat_residential_listings", res),
                           ("wahadat_commercial_listings", com)):
             if rows:
+                seen_ads = {r["ad_number"] for r in rows} | held
+                try:
+                    struck = [r for r in (db.sb().table(tbl).select("ad_number,listing_url")
+                                          .eq("source", SOURCE).eq("active", True).gt("missing_count", 0)
+                                          .limit(1000).execute().data or [])
+                              if r.get("ad_number") not in seen_ads]
+                except Exception:                       # noqa: BLE001 — unread stays unknown
+                    struck = []
+                off_market.update(read_unlisted_projects(sess, set(urls), struck))
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rows} | held, source=SOURCE,
                                     verify_gone=off_market_oracle(off_market))
                 if n < 0:

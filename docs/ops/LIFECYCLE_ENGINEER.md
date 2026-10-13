@@ -1075,6 +1075,17 @@ or rewrite another engineer's work, and never start a big change in another engi
   the guarded branch (strike only own-page «gone», cap respected: `opensooq/run.py::_strike_read_gone`)
   before waiting on a person for a tier move.
 
+- **2026-10-13 (♻️):** a quarantine is not a bug until a SECOND reader disagrees with it. Gathern's sweep
+  read 7-8 of 10 controls 404 from 07:37 to 11:32 UTC (CI and the proxy alike); #6978 (no single
+  observation timestamp may be more than a third of the controls) was merged on the theory that one
+  quarantined run's stamps were the controls, and the next run still read 3/10. lifecycle-spot-check
+  38391222675 then read 10 of those 12 "404" controls LIVE at 11:35: gathern was flapping, the gate was
+  right, and #6978 is hardening, not the cure. Dispatch the spot-check on the control ids FIRST.
+- **2026-10-13 (♻️):** a crawl that maps nothing must still hand its walk to the own-page oracle. manzo read
+  29 listed records, mapped 0 (status «available»), so `strike_read_gone` got an empty seen set and a
+  404 ad stayed on screen for three nights (#6980). And a unit whose project leaves the sitemap is never
+  read again: wahadat now reads struck units' unlisted project pages (14 units, 5-8 strikes).
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
@@ -1246,3 +1257,12 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   `select * from ops_engineer_alert_queue where engineer = 'lifecycle' order by severity, created_at;` — every
   open `alert_event` now carries a live engineer (`ops_engineer_for_alert()`, by kind first, legacy
   `owner_routine` second). Drive each to resolved or say why not; the report carries «🚨 Alerts: N → M».
+
+## Lesson from 2026-10-13 (copied by 🔧 from your own report)
+
+- **A quarantined sweep is a growing number.** Gathern > 24 h rose 87 → 95 while the sweep was quarantined for
+  flapping. From the cloud container 17 of 60 served Gathern units (28%) answered `307 → gathern.co/ar?error=500` on
+  three tries each, and all 17 carried `last_verified_alive_at` < 24 h (🔧 proof row 1054, backlog 519). A verdict from
+  one egress is UNKNOWN, never a kill (`LISTING_LIVENESS.md`): re-measure the same URLs from CI egress FIRST, and if it
+  reproduces, the oracle that stamps «alive» is not opening the customer's link.
+- **An apply held for a person three nights running goes on line 1 with the exact statement**, not in the body.

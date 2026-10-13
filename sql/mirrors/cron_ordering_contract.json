@@ -19,12 +19,10 @@
     "PART 6) — never weaken a barrier to make it green."
   ],
   "_semantics": "gap = downstream_minute - upstream_minute, PLAIN subtraction, not modulo 60 — copied from the live detector on purpose. A consumer must trail its producer WITHIN the hour; one that runs first reads an input up to a full cycle stale. See scripts/lib/cronOrdering.ts.",
-  "_mirrored_through_migration": "20260911152632",
+  "_mirrored_through_migration": "20261013134139",
   "_mirrored_through_migration_why": "The NEWEST migration version in supabase/migrations/ whose SQL mentions ops_cron_ordering_contract. scripts/verify-cron-ordering-contract.ts recomputes this from the tree and fails if it does not match, so a migration that changes the contract without updating this file goes RED on its own PR. That is AGENTS.md's apply-and-mirror rule enforced from the diff alone — no secret, no network, and no SQL parsing. If you add such a migration, re-read production, update the rows/schedules above, and set this to the new version.",
-
-  "_measured_at": "2026-09-12",
-  "_measured_by": "routine-10-barrier, via Supabase MCP against project aannarbkwcymrotzwdbo: select * from ops_cron_ordering_contract; and select jobid, jobname, schedule, active from cron.job.",
-
+  "_measured_at": "2026-10-13",
+  "_measured_by": "🔧 Quality & Repair, via Supabase MCP against project aannarbkwcymrotzwdbo: select * from ops_cron_ordering_contract; select jobid, jobname, schedule, command from cron.job (jobid 28 has been at :22 since 20260918171507; the 2026-09-12 reading of :36 was stale).",
   "contract": [
     {
       "upstream_job": "sync-search-listings-ar",
@@ -36,7 +34,8 @@
       "upstream_job": "refresh_listing_native_location_v1",
       "downstream_job": "sync-search-listings-ar",
       "min_gap_minutes": 7,
-      "why": "sync_search_listings_ar() selects from listing_native_location_v2, a VIEW referencing the MATVIEW active_listing_ids_v2; jobid 17 refreshes that matview. Floor 7 min: jobid 17 max runtime 360.4s (6.0 min) over 168 runs in 7 days. (ops_incident #143)"
+      "why": "sync_search_listings_ar() selects from listing_native_location_v2, a VIEW referencing the MATVIEW active_listing_ids_v2; jobid 17 refreshes that matview. Floor 7 min: jobid 17 max runtime 360.4s (6.0 min) over 168 runs in 7 days. (ops_incident #143) [2026-10-13, 🔧] satisfied_by_lock = location_pipeline:v1_refresh: migration 20260927224625 kept :20/:22 and made jobid 17 hold a TRANSACTION-scoped advisory lock to COMMIT with jobid 28 blocking on it (measured 2026-10-13: pg_locks granted on pid 754260 from 13:20:00, job 28 blocked 13:22:00 → 13:22:31). The floor stays 7; the detector checks the real commands take the lock before their work (cron_contract_lock_satisfied) and only then skips the gap.",
+      "satisfied_by_lock": "location_pipeline:v1_refresh"
     },
     {
       "upstream_job": "refresh-district-display-canon",
@@ -45,24 +44,29 @@
       "why": "sync_search_listings_ar() reads loc_display_district_canon, the ONE canonical user-visible district rendering per (city_id, normalised district) required by SEARCH_MATCH_QA_ENGINEER.md §42.1; jobid 109 rebuilds it. Floor 2 min: jobid 109 max runtime 6.9s over 125 runs in 7 days."
     }
   ],
-
   "schedules": {
     "refresh-district-display-canon": "8 * * * *",
     "refresh_listing_native_location_v1": "20 * * * *",
-    "sync-search-listings-ar": "36 * * * *",
+    "sync-search-listings-ar": "22 * * * *",
     "resolve-english-city-overlay": "50 * * * *"
   },
-
   "_jobids": {
     "refresh-district-display-canon": 109,
     "refresh_listing_native_location_v1": 17,
     "sync-search-listings-ar": 28,
     "resolve-english-city-overlay": 35
   },
-
   "_gaps_as_measured": [
-    "refresh-district-display-canon :08 -> sync-search-listings-ar :36 = 28 min (floor 2)",
-    "refresh_listing_native_location_v1 :20 -> sync-search-listings-ar :36 = 16 min (floor 7)",
-    "sync-search-listings-ar :36 -> resolve-english-city-overlay :50 = 14 min (floor 9)"
+    "refresh-district-display-canon :08 -> sync-search-listings-ar :22 = 14 min (floor 2)",
+    "refresh_listing_native_location_v1 :20 -> sync-search-listings-ar :22 = 2 min (floor 7) — satisfied by the advisory lock location_pipeline:v1_refresh, not by the clock",
+    "sync-search-listings-ar :22 -> resolve-english-city-overlay :50 = 28 min (floor 9)"
+  ],
+  "lock_dependencies": [
+    {
+      "key": "location_pipeline:v1_refresh",
+      "producer": "refresh_listing_native_location_v1",
+      "consumer": "sync-search-listings-ar",
+      "why": "Both commands take pg_advisory_xact_lock(hashtext('location_pipeline:v1_refresh')) as their first real statement; pg_cron runs each command as ONE transaction, so the consumer blocks until the producer COMMITS the refreshed matviews (20260927224625; proven 2026-10-13, 🔧 proof row 1055)."
+    }
   ]
 }

@@ -39,6 +39,10 @@ function problems(fn: Fn): string[] {
   expect("شقة للبيع حي النرجس في الرياض", "Riyadh", ["النرجس"]);
   // A budget / deal word or «بالرياض» right after the name is not part of it (live 2026-10-13: «النرجس بحدود»).
   expect("ابي شقة ٣ غرف للايجار في الرياض حي النرجس بحدود ٦٠ ألف", "الرياض", ["النرجس"]);
+  // A bathroom / room / feature count after the name is not part of it (ops_zero_result_log 2026-10-13 07:42: «الرجس حمامين»).
+  expect("فيلا للإيجار في الرياض حي النرجس حمامين", "الرياض", ["النرجس"]);
+  expect("شقة حي الملقا مجلس وصالة", "الرياض", ["الملقا"]);
+  expect("بيت حي الياسمين دورين", "الرياض", ["الياسمين"]);
   expect("فيلا حي الملقا بالرياض", "الرياض", ["الملقا"]);
   expect("شقة حي الياسمين للايجار", "الرياض", ["الياسمين"]);
   // Two-word district names still keep both words.
