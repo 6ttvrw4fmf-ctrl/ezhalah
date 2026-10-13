@@ -10,7 +10,7 @@
 // `danger` is checked FIRST and wins over everything: the agent never searches in answer to it.
 import { variantText, EXAMPLE_SEARCH_AR, EXAMPLE_SEARCH_EN } from "./questionExamples.ts";
 
-export type Situation = "danger" | "complaint" | "protected" | "financial" | "advice" | "sell" | "outside" | "link" | "phone";
+export type Situation = "danger" | "complaint" | "protected" | "financial" | "advice" | "sell" | "outside" | "link" | "phone" | "sad";
 
 const L = "(?<![\\p{L}])", R = "(?![\\p{L}])";
 const re = (src: string) => new RegExp(src, "iu");
@@ -21,6 +21,10 @@ const FINANCIAL = re(`${L}(?:قرض|قروض|تمويل|رهن|مرابحة|اس
 const ADVICE = re(`${L}(?:تنصحني|تنصح|انصحني|أنصحني|نصيحة|نصيحتك|توصي|ترشح|ترشّح|اقترح\\s*علي|اقترح|قارن|قارنلي|مقارنة|يستاهل|صفقة|فرصة\\s*حلوة)${R}|(?:اشتري|أشتري)\\s*(?:ولا|أو)\\s*(?:اأجر|أأجر|اجر|أجر)|(?:ايش|وش|إيش)\\s*(?:أفضل|احسن|أحسن)|\\b(?:best|better|which\\s+is\\s+better|should\\s+i|good\\s+(?:time|deal)|worth\\s+it|compare|recommend\\w*|advice|advise)\\b`);
 const SELL = re(`(?:ابي|أبي|ابغى|أبغى|ودي)\\s*(?:ابيع|أبيع|اعلن|أعلن|انشر|أنشر|اأجر|أأجر|اؤجر|أؤجر)|(?:انشر|أنشر|اضيف|أضيف)\\s*(?:اعلان|إعلان|عقاري)|\\b(?:i\\s+want\\s+to\\s+(?:sell|rent\\s+out|list)|sell\\s+my|list\\s+my|post\\s+(?:an?\\s+)?(?:ad|listing)|advertise\\s+my)\\b`);
 const OUTSIDE = re(`${L}(?:دبي|ابوظبي|أبوظبي|الشارقة|عجمان|الكويت|القاهرة|الاسكندرية|الإسكندرية|عمّان|عمان|الدوحة|المنامة|مسقط|بيروت|دمشق|بغداد|اسطنبول|إسطنبول|لندن|باريس|مدريد|تركيا|مصر|الاردن|الأردن|لبنان)${R}|\\b(?:dubai|abu\\s*dhabi|sharjah|kuwait(?:\\s*city)?|cairo|alexandria|amman|doha|manama|muscat|beirut|damascus|baghdad|istanbul|london|paris|madrid|turkey|egypt|jordan|lebanon|qatar|uae|bahrain|oman)\\b`);
+
+// Someone who says they are sad or worn out («أنا تعبان ومضايق») gets a calm word and NO search pitch (rulebook preset 31, live 2026-10-13:
+// it got the product introduction). Only in a turn with no search in it, so «تعبت وأنا أدور شقة في الرياض» still searches.
+const SAD = re(`${L}(?:تعبان|تعبانة|تعبانه|مضايق|مضايقة|متضايق|متضايقة|زعلان|زعلانة|حزين|حزينة|حزنان|مكتئب|مكتئبة|مهموم|مهمومة|مقهور|مقهورة|قلقان|قلقانة|ضايق\\s*صدري|مالي\\s*خلق|نفسيتي\\s*(?:تعبانة|تعبانه|زفت))${R}|\\b(?:i'?m|i\\s+am|feeling|i\\s+feel)\\s+(?:so\\s+|really\\s+|very\\s+)?(?:sad|depressed|down|lonely|stressed|anxious|upset|miserable|unhappy|hopeless)\\b|\\bdepress(?:ed|ion)\\b`);
 
 // A pasted listing link or an ad number is not a search («only a link or ad number», rulebook preset 25); a phone number is something the user
 // should never need to give (PDPL), and we never repeat it.
@@ -39,6 +43,7 @@ export function situationKind(text: string): Situation | null {
   if (SELL.test(s)) return "sell";
   if (ADVICE.test(s)) return "advice";
   if (OUTSIDE.test(s)) return "outside";
+  if (SAD.test(s)) return "sad";
   return null;
 }
 
@@ -137,6 +142,18 @@ const POOLS: Record<Situation, { ar: readonly string[]; en: readonly string[] }>
       "You don't need to type your phone number here, and I don't keep it. Tell me what you're looking for, for example: {ex} 🏡",
       "A phone number isn't needed for a search. Tell me the type and the city, for example: {ex} 🏡",
       "Keep your number to yourself, I only need what you're looking for, for example: {ex} 🏡",
+    ],
+  },
+  sad: {
+    ar: [
+      "سلامتك، الله يفرّج همّك ويريّح بالك. خذ وقتك، وأنا هنا متى ما احتجتني 🤍",
+      "الله يشرح صدرك ويكتب لك الراحة. لا تشيل الهم لحالك، كلّم أحد تثق فيه 🤍",
+      "سلامة قلبك، الله يهوّنها عليك. أنا موجود متى ما بغيت 🤍",
+    ],
+    en: [
+      "I'm sorry you're feeling this way. Take your time, I'm here whenever you need 🤍",
+      "I hope things feel lighter for you soon. Please don't carry it alone, talk to someone you trust 🤍",
+      "That sounds hard, take care of yourself. I'm here whenever you want 🤍",
     ],
   },
   outside: {
