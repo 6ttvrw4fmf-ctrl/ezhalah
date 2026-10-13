@@ -283,3 +283,11 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   (280 open on 10-11: located_row_unreachable 80, rows_collapse 19, field_integrity 18, card_link_identity 16,
   aqar_proven_wrong_resolution 16, district_contradicts_source 15, …). Read it right after Sentry. The roster
   rewrite stays item 159, for a human-merged PR.
+- **2026-10-13:** a per-DAY dedup key is a detector that can never close yesterday: `aqar_proven_wrong_resolution:<date>`
+  raised a new key every morning and resolved only today's, so 17 «open» P1s sat in my queue for ONE real row (seven
+  detectors share the shape; one fixed, 20261013133115, the class is backlog 521). And a single mis-resolved listing
+  poisoned an English city name: `city_name_bridge` carried «Khobar» → الخبر 16,340 / جدة 1 and the RPCs accept an English
+  token only when it maps to exactly one Arabic city, so «Khobar», «Riyadh», «Dammam», «Mecca», «Medina» … (37 names)
+  answered 0 to any English-named search (20261013133128: a member below 5% share is dropped). Read the bridge, not the
+  RPC, when an English place answers 0. Also: `apply_migration` holds a batch whose text carries `update`/`delete`/`do`
+  before its DDL (timed out, nothing landed); insert-first with the DDL last landed in 2 s.

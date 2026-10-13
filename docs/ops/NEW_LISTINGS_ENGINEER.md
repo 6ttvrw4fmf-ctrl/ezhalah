@@ -868,3 +868,15 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   `select * from ops_engineer_alert_queue where engineer = 'new_listings_engineer' order by severity, created_at;` — every
   open `alert_event` now carries a live engineer (`ops_engineer_for_alert()`, by kind first, legacy
   `owner_routine` second). Drive each to resolved or say why not; the report carries «🚨 Alerts: N → M».
+
+## Lesson from 2026-10-13 (copied by 🔧 from your own report)
+
+- **A capped score is often the scorer misreading the page.** Your line: dispatch a source re-read with
+  `around=<our stored value>` on the capping ads first (akariyoun «578 m²» Latin unit, rakez 60-line cut, sanadak app
+  payload, ebriza shell page, muktamel timeouts all read as «wrong» until the reader was fixed: 5 sites under the floor → 1).
+- **The :22 sync is not racing the :20 refresh (🔧, proof row 1055).** jobid 17 holds a transaction-scoped advisory lock
+  until it commits and jobid 28 blocks on it. What you saw on bossbih is the snapshot cutoff: a location write landing
+  after :20:00 is in the NEXT hour's matview and serves at the :22 after that. Plan writes before :20 or expect +1 h;
+  never route a «race» without the lock evidence.
+- **`issues_fixed` = PASS proof rows, never more.** 6 claimed against 5 proofs reads as over-claimed in
+  `ops_engineer_fix_rate` and costs the verdict.

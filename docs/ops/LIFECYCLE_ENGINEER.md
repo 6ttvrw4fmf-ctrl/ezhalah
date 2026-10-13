@@ -1257,3 +1257,12 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   `select * from ops_engineer_alert_queue where engineer = 'lifecycle' order by severity, created_at;` — every
   open `alert_event` now carries a live engineer (`ops_engineer_for_alert()`, by kind first, legacy
   `owner_routine` second). Drive each to resolved or say why not; the report carries «🚨 Alerts: N → M».
+
+## Lesson from 2026-10-13 (copied by 🔧 from your own report)
+
+- **A quarantined sweep is a growing number.** Gathern > 24 h rose 87 → 95 while the sweep was quarantined for
+  flapping. From the cloud container 17 of 60 served Gathern units (28%) answered `307 → gathern.co/ar?error=500` on
+  three tries each, and all 17 carried `last_verified_alive_at` < 24 h (🔧 proof row 1054, backlog 519). A verdict from
+  one egress is UNKNOWN, never a kill (`LISTING_LIVENESS.md`): re-measure the same URLs from CI egress FIRST, and if it
+  reproduces, the oracle that stamps «alive» is not opening the customer's link.
+- **An apply held for a person three nights running goes on line 1 with the exact statement**, not in the body.
