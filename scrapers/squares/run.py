@@ -190,7 +190,9 @@ _FEATURE = re.compile(r'<span>(.*?)</span>', re.S)
 # NULL (unknown) — a list that omits «مصعد» does not say there is no lift.
 _FEATURE_COLS = {"غرفة سائق": "driver_room", "غرفة خادمة": "maid_room", "غرفة عاملة": "maid_room",
                  "مصعد": "elevator", "كراج سيارة": "parking", "موقف سيارة": "parking",
-                 "مواقف": "parking", "مطبخ": "kitchen"}
+                 "مواقف": "parking", "مطبخ": "kitchen",
+                 # The site's own longer chips for the same facts (10-13, 2 + 2 of 14 active ads).
+                 "مطبخ كامل": "kitchen", "مكيف إسبليت": "air_conditioner"}
 
 
 def parse_detail(page: str) -> dict[str, Any]:

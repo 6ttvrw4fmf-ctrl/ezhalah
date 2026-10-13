@@ -60,6 +60,10 @@ const WAIVED: Record<string, string> = {
     'NULL-only, true-only back-fill of sirdab / remal amenities from their stored description via ' +
     'normalize.prose_amenities_yes; both parsers now write the same on every crawl, pinned with mutations by ' +
     'scrapers/common/tests/test_prose_only_sites_read_amenities.py',
+  '20261013094218_squares_shmoualshmal_kitchen_ac_from_feature_chips.sql':
+    'NULL-only, true-only back-fill of squares / shmoualshmal kitchen and AC from each row\'s own STRUCTURED chip ' +
+    'list (additional_info.features_ar); both parsers\' chip maps now write the same on every crawl, pinned with a ' +
+    'mutation by scrapers/common/tests/test_feature_chip_kitchen_ac_squares_shmoualshmal.py',
   '20261012094158_eaqartabuk_feature_checklist_to_amenities.sql':
     'NULL-only, true-only back-fill of eaqartabuk amenities from each row\'s own STRUCTURED features list ' +
     '(additional_info.features); scrapers/eaqartabuk/run.py feature_answers() now writes the same on every crawl, ' +
