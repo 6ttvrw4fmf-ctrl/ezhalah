@@ -1075,6 +1075,12 @@ or rewrite another engineer's work, and never start a big change in another engi
   the guarded branch (strike only own-page «gone», cap respected: `opensooq/run.py::_strike_read_gone`)
   before waiting on a person for a tier move.
 
+- **2026-10-13 (♻️):** a sweep stamps every 200 it reads with ONE timestamp, so one run's batch could
+  be every control. A trust-quarantined gathern run (06:40, alive_rate 11%) stamped 11 rows; 7 read 404
+  an hour later and every sweep from 07:37 checked nothing. `choose_canaries` now lets no single
+  observation timestamp supply more than a third of the controls. When a sweep reads `CANARY-QUARANTINED`
+  with the SAME status mix run after run, look at what stamped its controls before blaming the source.
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
