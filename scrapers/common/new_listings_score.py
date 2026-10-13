@@ -201,7 +201,7 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False) -> di
     return out
 
 
-_UNIT_TAIL = r"\s*(?:م2|م²|متر|ريال|ر\.س)?\s*"
+_UNIT_TAIL = r"\s*(?:م2|م²|متر|m²|m2|ريال|ر\.س)?\s*"
 
 
 # A control prompt («اختر عدد الغرف», rakez's room picker) names a field without stating it; the unit
@@ -212,7 +212,7 @@ CONTROL_PROMPT = re.compile(r"^\s*اختر\s")
 # An area figure is never another field's value: tuba prints an EMPTY «عمر العقار :» label with the
 # next line «214.66 م²», which read as a stated age (af_score 2026-10-07: tuba property_age 10/10
 # «mismatch», source-reread 37600467768). Only the area field may take a neighbour carrying m².
-AREA_UNIT = re.compile(r"م²|م2|متر مربع")
+AREA_UNIT = re.compile(r"م²|م2|متر مربع|m²")
 
 
 ONE_WORD = re.compile(r"(?<!\S)(?:واحد|واحده)(?!\S)")

@@ -388,3 +388,17 @@ def test_area_spec_row_is_kept_over_description_prose():
     pe = page_evidence(body)
     assert "مساحة العقار 77" in pe["evidence_lines"]
     assert compare_listing({"area_m2": 77}, pe)["area"] == MATCH
+
+
+def test_latin_m2_spec_value_is_kept_over_description_prose():
+    # akariyoun 17512660 (2026-10-13, re-read run 38361896741): spec «<strong> مساحة العقار: </strong> 578 m²»
+    # and card «المساحة: 578 m²»; the description says «المساحة : 900م (30*30)». We store the structured 578.
+    from scrapers.common.source_reread import page_evidence
+    body = ('<html><body><ul class="detail_features"><li><strong> مساحة العقار: </strong> 578 m²</li></ul>'
+            '<div class="listing-card-info-icon">المساحة:</div><div>578 m²</div>'
+            '<p>الموقع : الرياض حي العقيق</p><p>المساحة : 900م (30*30)</p></body></html>')
+    pe = page_evidence(body)
+    assert any("578 m²" in x for x in pe["evidence_lines"])
+    assert compare_listing({"area_m2": 578}, pe)["area"] == MATCH
+    # Both directions: a stored figure the page never states is still a mismatch.
+    assert compare_listing({"area_m2": 640}, pe)["area"] == MISMATCH

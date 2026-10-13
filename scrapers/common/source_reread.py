@@ -38,7 +38,7 @@ STORED = ("platform,source_table,listing_id,region_ar,city_ar,district_ar,deal_a
 
 # Lines of visible text worth a human's eye: money, size, rooms, and the Advanced Filter words.
 EVIDENCE = re.compile(
-    r"(ريال|ر\.س|SAR|م²|م2|متر|مساحة|غرف|غرفة|حمام|دورات? مياه|مفروش|مؤثث|مصعد|موقف|مطبخ|مكيف|تكييف|"
+    r"(ريال|ر\.س|SAR|م²|م2|m²|متر|مساحة|غرف|غرفة|حمام|دورات? مياه|مفروش|مؤثث|مصعد|موقف|مطبخ|مكيف|تكييف|"
     r"غرفة (?:خادمة|سائق)|مدخل خاص|عمر العقار|سنوي|شهري|للبيع|للإيجار|حي\s)")
 TAG = re.compile(r"<[^>]+>")
 DROP = re.compile(r"<(script|style|noscript|svg)[^>]*>.*?</\1>", re.S | re.I)
@@ -52,7 +52,10 @@ TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I)
 # figure. reinvest 17384274 (2026-10-12) then showed only the description's «3 غرف نوم» and scored our
 # structured bedrooms = 1 a mismatch although the page's own table says «عدد غرف النوم 1». A short value
 # line straight after an evidence label is kept WITH its label.
-SHORT_VALUE = re.compile(r"^[\d٠-٩][\d٠-٩.,٬]*(?:\s*(?:م²|م2|متر|ريال|ر\.س|سنة|سنوات))?$|^(?:نعم|لا|جديد|يوجد|لا يوجد)$")
+# The unit may be written in Latin letters: akariyoun prints «مساحة العقار: 578 m²» (17512660 / 17512661,
+# 2026-10-13); with only the Arabic units the value line was dropped, the description's «المساحة : 900م» was
+# all that reached the score, and our structured 578 scored a mismatch on both ads.
+SHORT_VALUE = re.compile(r"^[\d٠-٩][\d٠-٩.,٬]*(?:\s*(?:م²|م2|متر|m²|m2|sqm|ريال|ر\.س|سنة|سنوات))?$|^(?:نعم|لا|جديد|يوجد|لا يوجد)$")
 
 
 def _with_values(lines: list[str]) -> list[str]:
