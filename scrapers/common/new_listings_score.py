@@ -38,7 +38,6 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from scrapers.common.cleanup import _probe  # noqa: F401  (kept for callers that patch it)
-from scrapers.common.source_reread import read_page
 from scrapers.common.db import sb
 from scrapers.common.source_reread import page_evidence
 
@@ -520,7 +519,10 @@ def no_district_backlog(client) -> dict:
 
 def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: str,
                pace: float = PACE_S, probe=None) -> dict:
-    probe = probe or read_page
+    if probe is None:
+        # Imported here, not at module level: af_score and its hermetic check load this module with
+        # source_reread stubbed, and they always pass their own probe.
+        from scrapers.common.source_reread import read_page as probe
     row = empty_row(night, platform)
     last = 0.0
     for table, rid in picks:
