@@ -184,7 +184,6 @@
         "rawTypes": [
           "Villa",
           "Palace",
-          "تاون هاوس",
           "House"
         ],
         "kinds": [
@@ -203,7 +202,8 @@
       "serviceFacility": false,
       "query": {
         "rawTypes": [
-          "Duplex"
+          "Duplex",
+          "تاون هاوس"
         ],
         "kinds": [
           "res",

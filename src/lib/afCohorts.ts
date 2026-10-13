@@ -77,7 +77,7 @@ export const COHORT_QUESTIONS: Record<string, { RentAnnual?: string[]; Buy?: str
   // known say yes — the strongest installment market in the DB), AC textbook split, furnished,
   // plus the villa staples. Buy: NO rnpl (yes=0), NO furnished (yes below floor), and AC is
   // deliberately absent from the amenity data on Buy (aqar dropped it from بيع forms — chip
-  // gates itself out). بيت/تاون هاوس ride the same search with no interview (n=3–51).
+  // gates itself out). بيت rides the same search with no interview (n=3–51); تاون هاوس moved to Duplex (owner 2026-10-12).
   Villa: {
     RentAnnual: ['rnpl', 'property_age', 'amenities', 'bathrooms', 'furnished', 'street_width', 'direction'],
     Buy: ['property_age', 'amenities', 'bathrooms', 'street_width', 'direction'],
