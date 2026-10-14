@@ -247,11 +247,12 @@ export const locationPhrase = (q: SearchQuery) => q.location.trim() || 'Saudi Ar
 const placeText = (q: SearchQuery) => {
   const city = q.location.trim();
   if (!city) return t('Saudi Arabia');
-  const cityText = arabicOrUnresolved(tPlace(city));
+  const displayPlace = (name: string) => getLocale() === 'en' ? translitPlace(name) : arabicOrUnresolved(tPlace(name));
+  const cityText = displayPlace(city);
   // When the user picked a district in the filter, show it in front of the city so the summary
   // reflects exactly what was selected: "حي X، جدة". (owner UI request 2026-07-18.)
   const dist = q.districtLabel?.trim();
-  return dist ? t('{district}, {city}', { district: arabicOrUnresolved(tPlace(dist)), city: cityText }) : cityText;
+  return dist ? t('{district}, {city}', { district: displayPlace(dist), city: cityText }) : cityText;
 };
 const verbText = (q: SearchQuery) => {
   if (q.bothDeals || q.dealCombined) return t('to rent or buy');
