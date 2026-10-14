@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { msgRTL } from '../src/lib/textDirection.ts';
+import { buildAfSummaryItems } from '../src/lib/afSummary.ts';
+
+assert.deepEqual(buildAfSummaryItems([{ id: 'property_age', keys: ['2'], labels: ['Up to 2 years'] }], 'en'), ['Age Up to 2 years 🏗️']);
+assert.deepEqual(buildAfSummaryItems([{ id: 'property_age', keys: ['2'], labels: ['سنتين'] }]), ['عمر سنتين 🏗️']);
 
 const source = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
 // Location names do not change the paragraph language. Leading numbers and emoji are neutral.
@@ -12,6 +16,11 @@ assert.equal(msgRTL('ابحث في Riyadh Al Mahdiyah Al Rimal'), true);
 assert.equal(msgRTL('١٢ Search results in الرياض'), false);
 assert.equal(msgRTL('123'), false);
 function verify(text: string) {
+  const resultsCode = text.slice(text.indexOf('// results — STRICT ORDER'));
+  const expression = resultsCode.match(/const rtl = ([^;]+);/)![1];
+  const direction = new Function('m', 'msgRTL', `return ${expression};`);
+  assert.equal(direction({ text: 'لقينا نتائج', summary: 'Search Summary: Villa' }, msgRTL), false);
+  assert.equal(direction({ text: 'Found results', summary: 'ملخص البحث' }, msgRTL), true);
   const ast = ts.createSourceFile('agent.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const styles: string[] = [];
   function visit(node: ts.Node) {
@@ -22,10 +31,11 @@ function verify(text: string) {
   }
   visit(ast);
   const wrapper = styles.find(s => s.includes('gap: 10') && s.includes("'76%'"))!;
+  const user = styles.find(s => s.includes('s.userBubble'))!;
   const row = styles.find(s => s.includes('s.reply,') && s.includes('alignSelf:'))!;
   const results = styles.find(s => s.includes('gap: 6, alignItems: rtl') && s.includes("width: '100%'"))!;
   const slogan = styles.find(s => s.includes('s.reply,') && s.includes("alignItems: 'center'"))!;
-  assert.ok(wrapper && row && results && slogan, 'all reply paths found');
+  assert.ok(user && wrapper && row && results && slogan, 'all message paths found');
   function run(expression: string, message: string) {
     const js = ts.transpileModule(`const value = (${expression});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
     return new Function('rtl', 'msgRTL', 'IS_WEB', 's', 'm', 'searchingVisibleRef', 'latestResult', 'doneTyping', js + '\nreturn value;')(
@@ -36,6 +46,7 @@ function verify(text: string) {
     const arabic = /[\u0600-\u06ff]/.test(message);
     const edge = arabic ? 'flex-end' : 'flex-start';
     const flow = arabic ? 'row-reverse' : 'row';
+    assert.equal(run(user, message)[1].alignSelf, edge);
     assert.equal(run(wrapper, message).alignSelf, edge);
     assert.equal(run(row, message)[1].alignSelf, edge);
     assert.equal(run(row, message)[1].flexDirection, flow);
@@ -51,4 +62,7 @@ function mustCatch(brokenSource: string) {
   assert.throws(() => verify(brokenSource), assert.AssertionError);
 }
 mustCatch(mutant);
+const userMutant = source.replace("[s.userBubble, { alignSelf: rtl ? 'flex-end' : 'flex-start' }]", "[s.userBubble, { alignSelf: 'flex-end' }]");
+assert.notEqual(userMutant, source, 'user bubble mutation target exists');
+mustCatch(userMutant);
 console.log('PASS: Arabic replies/results/sparkles align right, English left; original defect mutation rejected.');

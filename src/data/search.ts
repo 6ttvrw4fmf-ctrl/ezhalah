@@ -22,6 +22,7 @@ import { translitPlace } from '@/lib/translitPlace';
 import { CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { groupMembers, CLEAN_MACRO, SUBGROUPS } from './propertyTypes';
 import { pickFilterGreetingOpening } from './filterGreetingRotation';
+import { pickEnglishFilterGreetingOpening } from './filterGreetingRotation';
 import { primeFilterGreetings } from './loaderFilterGreetings';
 
 // A parsed search. Every field optional — empty fields broaden, never dead-end. (PRD §6.1)
@@ -247,11 +248,12 @@ export const locationPhrase = (q: SearchQuery) => q.location.trim() || 'Saudi Ar
 const placeText = (q: SearchQuery) => {
   const city = q.location.trim();
   if (!city) return t('Saudi Arabia');
-  const cityText = arabicOrUnresolved(tPlace(city));
+  const displayPlace = (name: string) => getLocale() === 'en' ? translitPlace(name) : arabicOrUnresolved(tPlace(name));
+  const cityText = displayPlace(city);
   // When the user picked a district in the filter, show it in front of the city so the summary
   // reflects exactly what was selected: "حي X، جدة". (owner UI request 2026-07-18.)
   const dist = q.districtLabel?.trim();
-  return dist ? t('{district}, {city}', { district: arabicOrUnresolved(tPlace(dist)), city: cityText }) : cityText;
+  return dist ? t('{district}, {city}', { district: displayPlace(dist), city: cityText }) : cityText;
 };
 const verbText = (q: SearchQuery) => {
   if (q.bothDeals || q.dealCombined) return t('to rent or buy');
@@ -435,7 +437,7 @@ export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
     ? t("I couldn't find anything at {amount}, but here are some similar to what you're looking for:", { amount: tooLowAmount })
     : t('{calc}Here are {what} {verb} {place} that match what you’re looking for.', { calc: calcNote, what: subWhat, verb, place: subPlace });
 
-  return { bubble, sub };
+  return { bubble: getLocale() === 'en' ? pickEnglishFilterGreetingOpening() + bubble : bubble, sub };
 }
 
 export const grouped = (n: number) => n.toLocaleString('en-US');

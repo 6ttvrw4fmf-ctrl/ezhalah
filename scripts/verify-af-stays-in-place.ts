@@ -96,7 +96,7 @@ const stayProblems = (agentSrc: string, cardSrc: string): string[] => {
     out.push('a round does not give its answers bubble an id the view can ease to');
   if (!/for \(const d of \[80, 700, 1500\]\) easeToMsgTop\(echoId, d\);/.test(code))
     out.push('a round does not ease down to its own answers bubble when its search starts (the reader would have to scroll to find it)');
-  if (!/<View key=\{m\.id\} ref=\{\(n: any\) => \{ msgNodeRef\.current\[m\.id\] = n; \}\} style=\{[^}]*\}>/.test(code))
+  if (!/<View key=\{m\.id\} ref=\{\(n: any\) => \{ msgNodeRef\.current\[m\.id\] = n; \}\} style=\{[^\n]*\}>/.test(code))
     out.push('the user bubble is not registered in msgNodeRef, so easing to it measures nothing');
   if (!/guidedSearchSummary\(opts\.guided\.baseQ, opts\.guided\.facets\)/.test(code))
     out.push('a guided round\'s turn does not use the whole summary (original + every committed answer)');
@@ -105,7 +105,7 @@ const stayProblems = (agentSrc: string, cardSrc: string): string[] => {
   if (/onRemove|removeGuidedFacet|name="close"/.test(code.slice(code.indexOf('guidedPills.facets.map'), code.indexOf('guidedPills.facets.map') + 600)))
     out.push('a transcript chip has a ✕ or a remove handler');
   // «add the emojis here» (owner 2026-10-03): a chip reads exactly like its summary line — شقة 🏡, مفروش 🛋️.
-  if (!/<Text style=\{s\.guidedPillTx\}>\{buildAfSummaryItems\(\[f\]\)\.join\('، '\)\}<\/Text>/.test(code))
+  if (!code.includes("<Text style={s.guidedPillTx}>{buildAfSummaryItems([f], rfLang).join(rfLang === 'ar' ? '، ' : ', ')}</Text>"))
     out.push('a transcript chip shows the bare label, without the emoji its summary line carries');
   if (!/<Text style=\{s\.pillTx\}>\{buildAfSummaryItems\(\[f\]\)\.join\('، '\)\}<\/Text>/.test(card))
     out.push('a question-card chip shows the bare label, without the emoji its summary line carries');
@@ -137,13 +137,13 @@ mustCatch('the dimming coming back (earlier turns faded while a search loads)',
 mustCatch('the round no longer eases to its own answers bubble',
   stayProblems(swap(AGENT, 'for (const d of [80, 700, 1500]) easeToMsgTop(echoId, d);', ''), CARD).length > 0);
 mustCatch('the user bubble losing its node registration',
-  stayProblems(swap(AGENT, '<View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={s.userBubble}>', '<View key={m.id} style={s.userBubble}>'), CARD).length > 0);
+  stayProblems(swap(AGENT, '<View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={[s.userBubble,', '<View key={m.id} style={[s.userBubble,'), CARD).length > 0);
 mustCatch('the turn summary reverting to the refined query alone (original lines overwritten)',
   stayProblems(swap(AGENT, 'guidedSearchSummary(opts.guided.baseQ, opts.guided.facets)', 'buildScrapeIntro(result.query ?? refined)'), CARD).length > 0);
 mustCatch('a ✕ coming back on the chips',
   stayProblems(swap(AGENT, '<View key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill}>', '<View key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill} onRemove={() => 1}>'), CARD).length > 0);
 mustCatch('a transcript chip losing its emoji (bare label again)',
-  stayProblems(swap(AGENT, "<Text style={s.guidedPillTx}>{buildAfSummaryItems([f]).join('، ')}</Text>", "<Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>"), CARD).length > 0);
+  stayProblems(swap(AGENT, "<Text style={s.guidedPillTx}>{buildAfSummaryItems([f], rfLang).join(rfLang === 'ar' ? '، ' : ', ')}</Text>", "<Text style={s.guidedPillTx}>{f.labels.join('، ')}</Text>"), CARD).length > 0);
 mustCatch('a question-card chip losing its emoji (bare label again)',
   stayProblems(AGENT, swap(CARD, "<Text style={s.pillTx}>{buildAfSummaryItems([f]).join('، ')}</Text>", "<Text style={s.pillTx}>{f.labels.join('، ')}</Text>")).length > 0);
 mustCatch('the sad emoji dropped from the unknown line',

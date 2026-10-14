@@ -95,7 +95,7 @@ console.log("\n── a finished search NEVER locks the chat (owner 2026-10-13: 
 // and the user could not type. `completed` still ends THAT search (no «عرض المزيد», its closing note); it no longer touches the box.
 const compIdx = agent.indexOf("<View style={[s.composerWrap");
 const neverLocks = (src: string) => compIdx > -1
-  && /\{!filterOrigin \? \(\s*\n\s*<View style=\{\[s\.composer, /.test(src)
+  && /\{!filterOrigin \|\| completed \? \(\s*\n\s*<View style=\{\[s\.composer, /.test(src)
   && !/!filterOrigin && !completed/.test(src)
   && !/editable=\{!completed\}/.test(src)
   && !/value=\{completed \? '' : typed\}/.test(src)
@@ -103,7 +103,7 @@ const neverLocks = (src: string) => compIdx > -1
   && !/disabled=\{completed \|\|/.test(src)
   && !/'lock-closed'/.test(src);
 check("the composer, its text, mic and send button stay live after a finished search", neverLocks(agent));
-mustCatch("the box being hidden again on a finished search", !neverLocks(agent.replace("{!filterOrigin ? (", "{!filterOrigin && !completed ? (")));
+mustCatch("the box being hidden again on a finished search", !neverLocks(agent.replace("{!filterOrigin || completed ? (", "{!filterOrigin && !completed ? (")));
 mustCatch("the send button locking again", !neverLocks(agent.replace("disabled={!typed.trim()}", "disabled={completed || !typed.trim()}")));
 const sendReopens = (src: string) => /setStopped\(false\);[^\n]*\n\s*setCompleted\(false\);[^\n]*\n\s*setBusy\(true\);/.test(src);
 check("the next message reopens a finished search (send() clears `completed` before the new turn)", sendReopens(agent));

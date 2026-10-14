@@ -2795,11 +2795,11 @@ export default function Agent() {
     // nothing — same query, same cards — so the turn keeps its buttons and the user can open the
     // interview again from it; replacing them with a receipt would strand them with no way back in.
     const askedThisRound = [...ageFlowAskedRef.current].filter((id) => !(carry?.asked ?? []).includes(id));
-    const roundLog = buildAfRoundLog(askedThisRound, ageFlowFacetsRef.current);
+    const roundLog = buildAfRoundLog(askedThisRound, ageFlowFacetsRef.current, locale);
     const roundCommitted = buildAfSummary(ageFlowFacetsRef.current);
     if (carry && roundCommitted) setAfReceipt((r) => ({ ...r, [carry.msgId]: roundLog }));
     // The user's bubble opens with a rotating Saudi courtesy + request (owner 2026-10-10: «لاهنت 🤍، أبغى …»).
-    const roundLabel = ageFlowLabelsRef.current.join('، ');
+    const roundLabel = ageFlowLabelsRef.current.join(locale === 'ar' ? '، ' : ', ');
     void runRefine(q, '__guided__', '', locale === 'ar' && roundLabel ? pickAfCourtesyOpening() + roundLabel : roundLabel, {
       guided,
       // The picks in the chips' own words, without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات») — clearer than the raw labels.
@@ -3088,6 +3088,7 @@ export default function Agent() {
   const send = async (override?: string) => {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
+    setFilterOrigin(false);
     const selectedSourcesForTurn = pickerSourceSlugs(selectedSources);
     const sourceChoiceForTurn = pickerSourceExplicit;
     // The user SENT something (typed or voice — sendVoice funnels in here): the small sign-in
@@ -4294,13 +4295,10 @@ export default function Agent() {
           <View style={s.col}>
             {(() => { const lastId = msgs[msgs.length - 1]?.id; const latestResult = msgs.filter(x => x.role === 'results').slice(-1)[0]; return msgs.map((m) => {
               if (m.role === 'user') {
-                // User messages ALWAYS sit on the user side (alignSelf: 'flex-end') regardless of the
-                // message language — the page direction (RTL/LTR) decides which screen edge that is.
-                // Only the text follows its own writingDirection. A narrow green edge marks the
-                // speaker without turning every line into the same rounded chatbot tile.
+                // Owner: English bubbles sit on the left; Arabic bubbles sit on the right.
                 const rtl = msgRTL(m.text);
                 return (
-                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={s.userBubble}>
+                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={[s.userBubble, { alignSelf: rtl ? 'flex-end' : 'flex-start' }]}>
                     <Text style={[s.userText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
                       {m.typing ? <Typer text={m.text} onDone={onBubbleDone} /> : m.text}
                     </Text>
@@ -4361,7 +4359,7 @@ export default function Agent() {
               // results — STRICT ORDER (user request, repeated as a bug fix): slogan → summary →
               // result intro → sort line → property cards. Slogan + summary persist from the searching
               // status into the same bubble (no duplicate slogan/summary block, no out-of-order intro).
-              const rtl = msgRTL(m.text);
+              const rtl = msgRTL(m.summary || m.text);
               // Hoisted out of the RESULT INTRO block below (§3) so Read Aloud speaks the EXACT
               // same sentence the reply types on screen — one computation, never a second copy that
               // could drift from what's actually shown.
@@ -4465,7 +4463,7 @@ export default function Agent() {
                             for every answer, scope or not: nothing on this row removes anything. */}
                         {guidedPills.facets.map((f, i) => (
                           <View key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill}>
-                            <Text style={s.guidedPillTx}>{buildAfSummaryItems([f]).join('، ')}</Text>
+                            <Text style={s.guidedPillTx}>{buildAfSummaryItems([f], rfLang).join(rfLang === 'ar' ? '، ' : ', ')}</Text>
                           </View>
                         ))}
                       </View>
@@ -4779,9 +4777,8 @@ export default function Agent() {
                                   {/* The round, in the order it happened — answers and skips in ONE
                                       sentence (see finishGuided). No «اخترت:» label any more: the line now
                                       mixes both, and the head above already says what this card is.
-                                      Untranslated by design, exactly as buildAfSummary's output always
-                                      was — the builder writes finished Arabic. A receipt stored before
-                                      2026-09-20 is a plain committed-only sentence and still renders. */}
+                                      New receipts use the interface language, including skip labels.
+                                      Older stored receipts remain verbatim as conversation history. */}
                                   <Text
                                     testID="af-round-receipt-choices"
                                     style={[s.afReceiptTx, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}
@@ -4835,7 +4832,7 @@ export default function Agent() {
             never locks the composer (owner: «remove the lock»): the user keeps typing, and send() reopens. */}
         <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]} testID="agent-footer" onLayout={e => setLoaderBottomInset(Math.ceil(e.nativeEvent.layout.height))}>
           <View style={[s.col, s.composerCol]}>
-            {/* FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11; tightened 2026-09-12): the free-text
+            {/* FILTER RESULTS: after completion the composer is available below the final note (owner, 2026-10-13; supersedes the prior no-chat rule for completed searches): the free-text
                 composer never shows for a Filter-origin conversation — the disclaimer below stays
                 always-on regardless of origin (it's a listings-source legal notice, not part of
                 "the chat"). See filterOrigin's own comment above.
@@ -4851,7 +4848,7 @@ export default function Agent() {
             {/* THE CHAT NEVER LOCKS (owner 2026-10-13: «remove the lock», superseding 2026-10-05 «hide it completely»): a
                 finished search keeps the box, and the next message simply starts the next search (send() clears
                 `completed`). ☰ still starts a clean chat. */}
-            {!filterOrigin ? (
+            {!filterOrigin || completed ? (
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>
               {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
                   recording row is an absolute overlay on the same surface), so the composer's size
