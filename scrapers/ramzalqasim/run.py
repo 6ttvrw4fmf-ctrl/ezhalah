@@ -439,7 +439,35 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
         "description": description,
         "additional_info": ai,
     }
+    labels = content_labels(rec.get("content"))
+    if labels:
+        ai["features_ar"] = labels
+    row.update(content_answers(labels))
     return row, category, gone
+
+
+# ── the marker's own «المحتويات» chip list (🔬 AF engineer, 2026-10-14, backlog 248) ─────────────────────────
+# Each marker carries `content`, a JSON list of letters, and the ad page renders each letter as one chip under
+# «المحتويات:». Measured on 3 live ads 10-14: /x/264 content M,N,K,L,J,G,H,I,F,E,A,C renders «توفير صرف صحي،
+# صالة، توفير الماء، توفير الكهرباء، غرفة خادمة، حوش، سطح، درج داخلي، مدخل سيارة، ملحق، مجلس رجال، مطبخ», /x/265
+# M,L,K,G and /x/263 A..N agree letter for letter. Kitchen was 0 of 153 stored. A listed chip → True; an unlisted
+# one is silence. «مدخل سيارة» (a car entrance) is not mapped to parking: it is not the same fact.
+CONTENT_LETTERS = {"A": "مجلس رجال", "B": "مجلس نساء", "C": "مطبخ", "D": "مقلط", "E": "ملحق", "F": "مدخل سيارة",
+                   "G": "حوش", "H": "سطح", "I": "درج داخلي", "J": "غرفة خادمة", "K": "توفير الماء",
+                   "L": "توفير الكهرباء", "M": "توفير صرف صحي", "N": "صالة"}
+_CONTENT_COLS = {"مطبخ": "kitchen", "غرفة خادمة": "maid_room"}
+
+
+def content_labels(raw: Any) -> list[str]:
+    try:
+        letters = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except ValueError:
+        return []
+    return [CONTENT_LETTERS[x] for x in letters if isinstance(x, str) and x in CONTENT_LETTERS]
+
+
+def content_answers(labels: list[str]) -> dict[str, bool]:
+    return {_CONTENT_COLS[x]: True for x in labels if x in _CONTENT_COLS}
 
 
 def _pin_sold_inactive(table: str, ad_numbers: list[str],
