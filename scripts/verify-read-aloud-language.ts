@@ -39,6 +39,9 @@ async function speechContract(source: string) {
     assert.equal(missing.spoken.length,0);
   }
 }
+const mustCatch = async (label: string, broken: () => Promise<unknown>) => {
+  await assert.rejects(broken, undefined, label);
+};
 const speech = read('src/lib/readAloud.ts');
 await speechContract(speech);
 for (const [from,to] of [
@@ -46,7 +49,7 @@ for (const [from,to] of [
   ["locale === 'en' ? 'en-US' : AR_LANG",'AR_LANG'],
 ]) {
   assert(speech.includes(from));
-  await assert.rejects(()=>speechContract(speech.replace(from,to)));
+  await mustCatch(`wrong speech language or voice: ${from}`,()=>speechContract(speech.replace(from,to)));
 }
 assert.equal(voiceLogic.pickBestEnglishVoice([voices[0]]),null);
 assert.equal(voiceLogic.pickBestEnglishVoice(voices)?.identifier,'english');
@@ -78,5 +81,5 @@ function scriptContract(source: string) {
   }
 }
 scriptContract(scriptSource);
-assert.throws(()=>scriptContract(scriptSource.replace('cardSpeech(listing, locale)','cardSpeech(listing)')));
+await mustCatch('Arabic card facts returning in English speech',async ()=>scriptContract(scriptSource.replace('cardSpeech(listing, locale)','cardSpeech(listing)')));
 console.log('PASS English/native/web speech language, explicit voice, exact text, translated visible card facts, stay-length note, and wrong-language mutations.');
