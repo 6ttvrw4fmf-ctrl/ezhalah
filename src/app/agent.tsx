@@ -4294,13 +4294,10 @@ export default function Agent() {
           <View style={s.col}>
             {(() => { const lastId = msgs[msgs.length - 1]?.id; const latestResult = msgs.filter(x => x.role === 'results').slice(-1)[0]; return msgs.map((m) => {
               if (m.role === 'user') {
-                // User messages ALWAYS sit on the user side (alignSelf: 'flex-end') regardless of the
-                // message language — the page direction (RTL/LTR) decides which screen edge that is.
-                // Only the text follows its own writingDirection. A narrow green edge marks the
-                // speaker without turning every line into the same rounded chatbot tile.
+                // Owner: English bubbles sit on the left; Arabic bubbles sit on the right.
                 const rtl = msgRTL(m.text);
                 return (
-                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={s.userBubble}>
+                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={[s.userBubble, { alignSelf: rtl ? 'flex-end' : 'flex-start' }]}>
                     <Text style={[s.userText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
                       {m.typing ? <Typer text={m.text} onDone={onBubbleDone} /> : m.text}
                     </Text>

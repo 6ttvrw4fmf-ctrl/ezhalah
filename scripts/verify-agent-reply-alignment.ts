@@ -22,10 +22,11 @@ function verify(text: string) {
   }
   visit(ast);
   const wrapper = styles.find(s => s.includes('gap: 10') && s.includes("'76%'"))!;
+  const user = styles.find(s => s.includes('s.userBubble'))!;
   const row = styles.find(s => s.includes('s.reply,') && s.includes('alignSelf:'))!;
   const results = styles.find(s => s.includes('gap: 6, alignItems: rtl') && s.includes("width: '100%'"))!;
   const slogan = styles.find(s => s.includes('s.reply,') && s.includes("alignItems: 'center'"))!;
-  assert.ok(wrapper && row && results && slogan, 'all reply paths found');
+  assert.ok(user && wrapper && row && results && slogan, 'all message paths found');
   function run(expression: string, message: string) {
     const js = ts.transpileModule(`const value = (${expression});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
     return new Function('rtl', 'msgRTL', 'IS_WEB', 's', 'm', 'searchingVisibleRef', 'latestResult', 'doneTyping', js + '\nreturn value;')(
@@ -36,6 +37,7 @@ function verify(text: string) {
     const arabic = /[\u0600-\u06ff]/.test(message);
     const edge = arabic ? 'flex-end' : 'flex-start';
     const flow = arabic ? 'row-reverse' : 'row';
+    assert.equal(run(user, message)[1].alignSelf, edge);
     assert.equal(run(wrapper, message).alignSelf, edge);
     assert.equal(run(row, message)[1].alignSelf, edge);
     assert.equal(run(row, message)[1].flexDirection, flow);
@@ -51,4 +53,7 @@ function mustCatch(brokenSource: string) {
   assert.throws(() => verify(brokenSource), assert.AssertionError);
 }
 mustCatch(mutant);
+const userMutant = source.replace("[s.userBubble, { alignSelf: rtl ? 'flex-end' : 'flex-start' }]", "[s.userBubble, { alignSelf: 'flex-end' }]");
+assert.notEqual(userMutant, source, 'user bubble mutation target exists');
+mustCatch(userMutant);
 console.log('PASS: Arabic replies/results/sparkles align right, English left; original defect mutation rejected.');
