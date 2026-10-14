@@ -219,5 +219,6 @@ export function buildAfRoundLog(askedIds: string[], facets: AfFacet[], locale: '
     else { const sk = locale === 'en' ? (AF_LINE_LABEL[id] ? `Skipped ${AF_LINE_LABEL[id]} ${SKIP_MARK}` : null) : skipItem(id); if (sk) items.push(sk); }
   }
   for (const f of facets) if (!askedIds.includes(f.id)) items.push(...facetItems(f, locale));
-  return locale === 'en' ? [...new Set(items)].join(', ') : joinAr([...new Set(items)]);
+  if (locale === 'en') return [...new Set(items)].join(', ');
+  return joinAr([...new Set(items)]);
 }
