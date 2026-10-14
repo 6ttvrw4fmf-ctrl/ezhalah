@@ -511,3 +511,10 @@ def test_a_district_the_page_names_only_in_seller_prose_is_silence_on_prose_only
     assert "mobasher" in PROSE_ONLY_DISTRICT
     assert compare_listing(stored, page, prose_only_district=True)["district"] == PAGE_SILENT
     assert compare_listing(stored, page)["district"] == MISMATCH
+
+
+def test_a_per_meter_rate_matches_the_total_the_page_prints_for_it():
+    # muktamel 17584328 (2026-10-14): stored rate 420 × 690 m²; the page prints only «690 م² 289,800».
+    page = {"title": "أرض سكني للبيع في حي الجامعة في ثادق", "evidence_lines": ["690 م² 289,800", "للبيع 289,800"]}
+    assert compare_listing({"price_per_meter": 420, "area_m2": 690}, page)["price"] == MATCH
+    assert compare_listing({"price_per_meter": 400, "area_m2": 690}, page)["price"] != MATCH

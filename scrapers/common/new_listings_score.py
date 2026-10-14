@@ -195,6 +195,15 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
                 if stored_v == int(stored_v):
                     stored_v = int(stored_v)
             out[name] = _cmp_number(stored_v, lines, whole, kw)
+            # Rule 5: a per-m² rate × size is the total the card SHOWS. A page that prints only that total
+            # states our price, not another one. muktamel 17584328 (2026-10-14, re-read run 38530789154):
+            # land rate 420 (the API's offer.price) × 690 m² = «289,800», the only figure on the page.
+            ppm, area = stored.get("price_per_meter"), stored.get("area_m2")
+            if (out[name] != MATCH and not stored.get("price_total") and not stored.get("price_annual")
+                    and ppm and area):
+                total = float(ppm) * float(area)
+                if total == int(total) and _cmp_number(int(total), lines, whole, kw) == MATCH:
+                    out[name] = MATCH
         elif kind == "number":
             out[name] = _cmp_number(stored.get(col), lines, whole, kw)
         elif kind == "bool":
