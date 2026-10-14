@@ -42,6 +42,11 @@ const agent = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'ut
 // (which necessarily names `setFilterOrigin` while explaining the design) can't inflate a count.
 const decomment = (src: string) => src.split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
 const code = decomment(agent);
+// Owner clarification 2026-10-13: completed Filter searches expose the composer below the final note.
+const gateExpression = code.match(/\{([^\n{}]+) \? \(\s*\n\s*<View style=\{\[s\.composer,/)![1];
+const visible = new Function('filterOrigin', 'completed', `return ${gateExpression};`);
+for (const filterOrigin of [true, false]) for (const completed of [true, false])
+  check(`composer visibility filter=${filterOrigin} completed=${completed}`, visible(filterOrigin, completed) === (!filterOrigin || completed));
 
 console.log('── the flag exists, defaults false, and is reset by startFresh like every other per-conversation flag ──');
 check('filterOrigin state exists, default false', /const \[filterOrigin, setFilterOrigin\] = useState\(false\);/.test(code));
@@ -60,7 +65,7 @@ check('the seed-chip path (a chip, NOT the Filter) never sets it true',
 console.log('\n── JSX: two-way branch — real composer OR nothing — disclaimer never gated ──');
 // Branch 1: the REAL composer (TextInput and all) renders ONLY on `!filterOrigin` — and, since
 // 2026-10-05 (owner «Hide it completely»), only while the search was not finished; since 2026-10-13 (owner «remove the lock») a finished search keeps it too.
-const COMPOSER_BRANCH = /\{!filterOrigin \? \(\s*\n\s*<View style=\{\[s\.composer, COMPOSER_EASE/;
+const COMPOSER_BRANCH = /\{!filterOrigin \|\| completed \? \(\s*\n\s*<View style=\{\[s\.composer, COMPOSER_EASE/;
 check('the real composer is gated behind `!filterOrigin` (never a wider condition that could show it for a Filter search)',
   COMPOSER_BRANCH.test(code));
 // Branch 2: filterOrigin → NOTHING. No Stop-alone branch, no composer pill, no TextInput anywhere
@@ -72,13 +77,13 @@ const twoWayEnd = /\)\s*\n\s*\}\s*<\/View>\s*\n\s*<\/View>\s*\n\s*<Pressable/;  
 // The branch's OWN closer sits at the gate's indentation; nested `) : null}` closers inside the box
 // (voice overlay, stop/send) are deeper and must not be mistaken for it. Returns the index just past it.
 const branchClose = (c: string): number => {
-  const open = c.indexOf('{!filterOrigin ? (');
+  const open = c.indexOf('{!filterOrigin || completed ? (');
   if (open < 0) return -1;
   const indent = c.slice(c.lastIndexOf('\n', open) + 1, open).match(/^ */)?.[0] ?? '';
   const at = c.indexOf(`\n${indent}) : null}`, open);
   return at < 0 ? -1 : at + `\n${indent}) : null}`.length;
 };
-const composerBranchStart = code.indexOf('{!filterOrigin ? (');
+const composerBranchStart = code.indexOf('{!filterOrigin || completed ? (');
 // The branch's own closer (indent-aware): the mic's `) : null}` sits before Stop since 2026-10-10 and must
 // not be mistaken for the end of the composer.
 const nullCloseIdx = branchClose(code) >= 0 ? branchClose(code) - ') : null}'.length : -1;
@@ -124,7 +129,7 @@ console.log('\n── mutation proof: this check actually fails on the regressio
 // it sat between the branch and the disclaimer under its own copy of the gate; closeThenDisc above
 // still tolerates that shape, this check forbids any copy OUTSIDE the branch.)
 const selectorOnlyInsideBranch = (c: string) => {
-  const open = c.indexOf('{!filterOrigin ? (');
+  const open = c.indexOf('{!filterOrigin || completed ? (');
   const close = branchClose(c);
   const at = c.indexOf('<AgentModelSelector');
   return open >= 0 && close > open && at > open && at < close && c.indexOf('<AgentModelSelector', close) < 0;
@@ -141,7 +146,7 @@ mustCatch('an ungated model selector appearing on Filter-origin results',
 // Mutation 1: someone "simplifies" the JSX by dropping the whole three-way branch, leaving the
 // composer unconditional again (the ORIGINAL 09-11 bug this barrier prevents).
 const mutatedNoGate = agent.replace(
-  '{!filterOrigin ? (\n            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>',
+  '{!filterOrigin || completed ? (\n            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>',
   '<View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>',
 );
 mustCatch('removing the branch (composer unconditional again)',
@@ -158,7 +163,7 @@ const mutatedStopBackForFilter = agent.replace(
 mustCatch('a Stop-alone branch creeping back into the filterOrigin path (the exact regression this second tightening removes)',
   mutatedStopBackForFilter !== agent && (() => {
     const c = decomment(mutatedStopBackForFilter);
-    return /\{!filterOrigin \? \([\s\S]*?\) : \([\s\S]*?onPress=\{stop\}[\s\S]*?\) : null\}/.test(c);
+    return /\{!filterOrigin \|\| completed \? \([\s\S]*?\) : \([\s\S]*?onPress=\{stop\}[\s\S]*?\) : null\}/.test(c);
   })());
 // Mutation 3: the branch stays, but someone moves the disclaimer's closing marker so it lands
 // INSIDE the branch, hiding the legal notice along with the composer on Filter-origin.
@@ -174,7 +179,7 @@ mustCatch('pulling the disclaimer inside the branch (it would vanish on Filter-o
 // its own slot, in Send's own circle — so nothing moves and «شاهين 2.2» stays under the mic. Measured on a
 // local build at 1100 px: chip, text, mic, model label and the 38×38 button at identical pixels idle vs busy.
 const steadyRow = (c: string) => {
-  const open = c.indexOf('{!filterOrigin ? (');
+  const open = c.indexOf('{!filterOrigin || completed ? (');
   const close = branchClose(c);
   const box = open >= 0 && close > open ? c.slice(open, close) : '';
   const chip = box.indexOf('testID="initial-chat-search"');

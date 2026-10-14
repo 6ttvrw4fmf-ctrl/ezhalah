@@ -246,11 +246,11 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). All registered
   replay predicate gates the animated wrapper synchronously so it cannot flash before effects run.
   On a fresh chat and during live search, existing mode-pill behavior is unchanged. The Ezhalah
   header title is 22px bold on the agent screen.
-- **Filter results have no chat composer (owner, 2026-09-11).** Filter and the AI Agent share this one
+- **Completed Filter searches show the composer below the final message (owner, 2026-10-13),** superseding the no-composer rule for completed searches. Filter and the AI Agent share this one
   screen; a Filter search arrives via the `?filter=` route param. The `filterOrigin` state flag is set
   `true` only in that arrival branch (reset to `false` by `startFresh()`, same lifecycle as every other
-  per-conversation flag here) and gates the composer's `<View>` — `{(!filterOrigin || busy || revealing)
-  && (...)}`. **Only the free-text input row (input box, mic, send arrow) disappears** — refine chips and
+  per-conversation flag here) and gates the composer's `<View>` with `!filterOrigin || completed`.
+  **The free-text input row is hidden only on unfinished Filter searches** — refine chips and
   «تحديد أكثر» (Advanced Filter) stay fully available, and so does the composer's own Stop control while
   `busy`/`revealing` (an in-flight Filter search must stay cancellable —
   `verify-filter-stop-cancels-and-restores.ts` is a separate, older owner rule this must never break;

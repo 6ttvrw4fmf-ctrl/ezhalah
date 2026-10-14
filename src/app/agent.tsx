@@ -4832,7 +4832,7 @@ export default function Agent() {
             never locks the composer (owner: «remove the lock»): the user keeps typing, and send() reopens. */}
         <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]} testID="agent-footer" onLayout={e => setLoaderBottomInset(Math.ceil(e.nativeEvent.layout.height))}>
           <View style={[s.col, s.composerCol]}>
-            {/* FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11; tightened 2026-09-12): the free-text
+            {/* FILTER RESULTS: after completion the composer is available below the final note (owner, 2026-10-13; supersedes the prior no-chat rule for completed searches): the free-text
                 composer never shows for a Filter-origin conversation — the disclaimer below stays
                 always-on regardless of origin (it's a listings-source legal notice, not part of
                 "the chat"). See filterOrigin's own comment above.
@@ -4848,7 +4848,7 @@ export default function Agent() {
             {/* THE CHAT NEVER LOCKS (owner 2026-10-13: «remove the lock», superseding 2026-10-05 «hide it completely»): a
                 finished search keeps the box, and the next message simply starts the next search (send() clears
                 `completed`). ☰ still starts a clean chat. */}
-            {!filterOrigin ? (
+            {!filterOrigin || completed ? (
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>
               {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
                   recording row is an absolute overlay on the same surface), so the composer's size
