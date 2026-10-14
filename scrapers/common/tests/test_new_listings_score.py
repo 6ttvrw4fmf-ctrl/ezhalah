@@ -460,3 +460,42 @@ def test_area_the_page_labels_in_its_own_payload_is_the_page_value():
 def test_hajer_suburb_spellings_are_one_place(stored, text, want):
     # arkaan 17543658 … 17544564 (2026-10-13): served the catalog's «الضاحية X» for «حي X بضاحية هجر».
     assert compare_listing({"district_ar": stored}, page(text, title=text))["district"] == want
+
+
+def test_the_district_the_page_states_in_its_own_payload_beats_the_sellers_prose():
+    # mobasher 17693081 (2026-10-14, re-read run 38527021238): the payload carries
+    # "neighborhoodNameAr":"حي الثقبة" (= what we store); the description says «مدينة الخبر، حي الحمراء».
+    from scrapers.common.source_reread import page_evidence
+    body = ('<html><head><meta name="description" content="الموقع: المنطقة الشرقية، مدينة الخبر، حي الحمراء.">'
+            '</head><body><script>self.__next_f.push([1,"{\\"cityNameAr\\":\\"الخبر\\",'
+            '\\"neighborhoodNameAr\\":\\"حي الثقبة\\",\\"rooms\\":2}"])</script></body></html>')
+    pe = page_evidence(body)
+    assert compare_listing({"district_ar": "حي الثقبة"}, pe)["district"] == MATCH
+    assert compare_listing({"district_ar": "حي العقربية"}, pe)["district"] == MISMATCH
+    # without the payload field, the prose is all the page says
+    no_payload = page_evidence(body.replace("neighborhoodNameAr", "x"))
+    assert compare_listing({"district_ar": "حي الثقبة"}, no_payload)["district"] == MISMATCH
+
+
+def test_a_spec_value_in_a_sibling_element_beats_the_descriptions_dual_word():
+    # hajer 17663701 (2026-10-14): REM spec «عدد غرف النوم» / «6» in sibling spans; the description lists
+    # «غرفتين نوم» / «غرفتين ماستر» / «غرفتين نوم». The spec is the field; the prose dual is not the count.
+    from scrapers.common.source_reread import page_evidence
+
+    def body(n):
+        return ('<html><body><ul><li>•غرفتين نوم +دورة مياه</li><li>•غرفتين ماستر</li></ul>'
+                '<div class="detail rem-field-value"><strong class="rem-single-field-title">عدد غرف النوم</strong>'
+                '<span class="rem-single-field-sep"> : </span>'
+                f'<span class="rem-single-field-value">{n}</span></div></body></html>')
+    assert compare_listing({"bedrooms": 6}, page_evidence(body(6)))["bedrooms"] == MATCH
+    assert compare_listing({"bedrooms": 6}, page_evidence(body(3)))["bedrooms"] == MISMATCH
+
+
+def test_a_share_link_whose_page_never_carries_the_ad_code_is_unreadable():
+    # nufouth 17667724 (2026-10-14): /latest-offers?ads-N5470=1 serves the vacancy table without «5470».
+    from scrapers.common.new_listings_score import page_lacks_its_ad
+    table = "<html><body>جدول الشواغر | 6 غرف | حي المحمدية | 3 غرف | حي العارض</body></html>"
+    assert page_lacks_its_ad("https://nufouth.com/latest-offers?ads-N5470=1", table)
+    assert not page_lacks_its_ad("https://nufouth.com/latest-offers?ads-N5470=1", table + '<div id="N5470">2 غرف</div>')
+    assert not page_lacks_its_ad("https://nufouth.com/latest-offers?ads-N5470=1", table.replace("6 غرف", "إعلان 5470"))
+    assert not page_lacks_its_ad("https://aqar.fm/ad/5470", table)        # no code in the query: not this rule
