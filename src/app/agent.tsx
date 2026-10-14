@@ -2798,9 +2798,9 @@ export default function Agent() {
     const roundLog = buildAfRoundLog(askedThisRound, ageFlowFacetsRef.current, locale);
     const roundCommitted = buildAfSummary(ageFlowFacetsRef.current);
     if (carry && roundCommitted) setAfReceipt((r) => ({ ...r, [carry.msgId]: roundLog }));
-    // The user's bubble opens with a rotating Saudi courtesy + request (owner 2026-10-10: «لاهنت 🤍، أبغى …»).
+    // Each language opens with its rotating courtesy + request (owner 2026-10-14).
     const roundLabel = ageFlowLabelsRef.current.join(locale === 'ar' ? '، ' : ', ');
-    void runRefine(q, '__guided__', '', locale === 'ar' && roundLabel ? pickAfCourtesyOpening() + roundLabel : roundLabel, {
+    void runRefine(q, '__guided__', '', roundLabel ? pickAfCourtesyOpening(Math.random, locale) + roundLabel : roundLabel, {
       guided,
       // The picks in the chips' own words, without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات») — clearer than the raw labels.
       // One beat per answered question, in the chips' own words without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات»),
