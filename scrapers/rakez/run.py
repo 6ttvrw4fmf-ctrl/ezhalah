@@ -78,6 +78,7 @@ HEADERS = {
 }
 
 INGESTIBLE_UNIT_STATUS = "available"
+AREA_PROBE_UNIT_IDS = {68221, 14631}     # backlog #507: RKZ68221 (project 67515), RKZ14631 (26260)
 
 
 def _unit_status(acf: dict) -> str:
@@ -647,6 +648,12 @@ def main() -> int:
             raise RuntimeError("fetched units but ZERO Arabic projects — nothing could be typed or "
                                f"located in Arabic. {LAST_FETCH_NOTE}")
         print(f"Rakez: {len(units)} units, {len(en_projects)} projects, {len(tree)} location terms")
+        # Backlog #507 (2026-10-14): the project page prints a larger area than acf.area for the same
+        # unit (#1 of project 26260: page 176 m², acf.area 144; #7 of 67515: 220.68 vs 169). Print
+        # the whole raw record of those units so the run log shows which field the page renders.
+        for u in units:
+            if u.get("id") in AREA_PROBE_UNIT_IDS:
+                print(f"  #507 probe unit {u['id']} acf={ {k: v for k, v in (u.get('acf') or {}).items() if k != 'description_ar'} }")
 
         if args.limit_test:
             units = units[: args.limit_test]
