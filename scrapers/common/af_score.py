@@ -92,6 +92,10 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # eaqartabuk's candles-map «features» checklist is structured since 2026-10-12 (feature_answers); prose is
     # never read for the four fields it can express.
     "eaqartabuk": ("elevator", "kitchen", "private_entrance", "parking"),
+    # squares' «مميزات العقار» chip list is its structured statement for these six (scrapers/squares/run.py
+    # _FEATURE_COLS). Its 10-13 misses (13602723, 13602726, CI re-read 38384423613) were description prose
+    # («يوجد مصعد في العمارة», «غرفة خادمة مع دورة مياة») on ads whose chip list names neither (🔬, backlog 515).
+    "squares": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room"),
 }
 COL = {n: c for n, _, c, _ in FIELDS}
 _YES = {"true", "1", "نعم", "يوجد", "متوفر"}
