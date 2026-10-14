@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { msgRTL } from '../src/lib/textDirection.ts';
+import { buildAfSummaryItems } from '../src/lib/afSummary.ts';
+
+assert.deepEqual(buildAfSummaryItems([{ id: 'property_age', keys: ['2'], labels: ['Up to 2 years'] }], 'en'), ['Age Up to 2 years 🏗️']);
+assert.deepEqual(buildAfSummaryItems([{ id: 'property_age', keys: ['2'], labels: ['سنتين'] }]), ['عمر سنتين 🏗️']);
 
 const source = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
 // Location names do not change the paragraph language. Leading numbers and emoji are neutral.
@@ -12,6 +16,11 @@ assert.equal(msgRTL('ابحث في Riyadh Al Mahdiyah Al Rimal'), true);
 assert.equal(msgRTL('١٢ Search results in الرياض'), false);
 assert.equal(msgRTL('123'), false);
 function verify(text: string) {
+  const resultsCode = text.slice(text.indexOf('// results — STRICT ORDER'));
+  const expression = resultsCode.match(/const rtl = ([^;]+);/)![1];
+  const direction = new Function('m', 'msgRTL', `return ${expression};`);
+  assert.equal(direction({ text: 'لقينا نتائج', summary: 'Search Summary: Villa' }, msgRTL), false);
+  assert.equal(direction({ text: 'Found results', summary: 'ملخص البحث' }, msgRTL), true);
   const ast = ts.createSourceFile('agent.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const styles: string[] = [];
   function visit(node: ts.Node) {

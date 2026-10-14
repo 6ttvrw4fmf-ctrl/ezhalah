@@ -4358,7 +4358,7 @@ export default function Agent() {
               // results — STRICT ORDER (user request, repeated as a bug fix): slogan → summary →
               // result intro → sort line → property cards. Slogan + summary persist from the searching
               // status into the same bubble (no duplicate slogan/summary block, no out-of-order intro).
-              const rtl = msgRTL(m.text);
+              const rtl = msgRTL(m.summary || m.text);
               // Hoisted out of the RESULT INTRO block below (§3) so Read Aloud speaks the EXACT
               // same sentence the reply types on screen — one computation, never a second copy that
               // could drift from what's actually shown.
@@ -4462,7 +4462,7 @@ export default function Agent() {
                             for every answer, scope or not: nothing on this row removes anything. */}
                         {guidedPills.facets.map((f, i) => (
                           <View key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill}>
-                            <Text style={s.guidedPillTx}>{buildAfSummaryItems([f]).join('، ')}</Text>
+                            <Text style={s.guidedPillTx}>{buildAfSummaryItems([f], rfLang).join(rfLang === 'ar' ? '، ' : ', ')}</Text>
                           </View>
                         ))}
                       </View>
