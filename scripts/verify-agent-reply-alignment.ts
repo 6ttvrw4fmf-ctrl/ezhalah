@@ -5,6 +5,12 @@ import ts from 'typescript';
 import { msgRTL } from '../src/lib/textDirection.ts';
 
 const source = readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
+// Location names do not change the paragraph language. Leading numbers and emoji are neutral.
+assert.equal(msgRTL('Find homes in حي المهدية وحي الرمال شمال مدينة الرياض'), false);
+assert.equal(msgRTL('🔍 12 homes in حي المهدية وحي الرمال شمال مدينة الرياض'), false);
+assert.equal(msgRTL('ابحث في Riyadh Al Mahdiyah Al Rimal'), true);
+assert.equal(msgRTL('١٢ Search results in الرياض'), false);
+assert.equal(msgRTL('123'), false);
 function verify(text: string) {
   const ast = ts.createSourceFile('agent.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const styles: string[] = [];
