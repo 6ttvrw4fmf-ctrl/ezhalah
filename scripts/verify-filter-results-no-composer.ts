@@ -201,7 +201,7 @@ mustCatch('a Stop button of its own size and shape (the row shifts)', !steadyRow
 const sendPrefix = windowBetween(code, 'const send = async (override?: string) => {', 'const selectedSourcesForTurn', 'src/app/agent.tsx');
 async function sendsAsChat(prefix: string, typed: string, busy = false) {
   let origin = true;
-  const send = new Function('typed', 'busy', 'setFilterOrigin', stripTypeScriptTypes(prefix + '\n}; return send;'))(typed, busy, (value: boolean) => { origin = value; });
+  const send = new Function('typed', 'busy', 'setFilterOrigin', stripTypeScriptTypes(prefix + '\n};') + '\nreturn send;')(typed, busy, (value: boolean) => { origin = value; });
   await send();
   return origin;
 }
