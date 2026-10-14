@@ -84,7 +84,10 @@ check('4. no letterSpacing in any About style (Latin tracking mangles Arabic scr
   aBlock.length > 100 && !/letterSpacing/.test(aBlock));
 
 // ── 5 + 6. Every displayed string has an Arabic entry, and none carries a «—» dash ──────────────
-const keys = [...modal.matchAll(/t\('((?:[^'\\]|\\.)+)'/g)].map((m) => m[1].replace(/\\'/g, "'"));
+const translationKeys = (source: string) => [...source.matchAll(/\bt\('((?:[^'\\]|\\.)+)'/g)].map((m) => m[1].replace(/\\'/g, "'"));
+const keys = translationKeys(modal);
+check('translation-key discovery includes t() and excludes split()', JSON.stringify(translationKeys("value.split('not a displayed label'); t('Support');")) === JSON.stringify(['Support']));
+check('a new untranslated label is still discovered', translationKeys("t('A newly untranslated label');").includes('A newly untranslated label'));
 const missing: string[] = [];
 const dashed: string[] = [];
 for (const k of new Set(keys)) {
