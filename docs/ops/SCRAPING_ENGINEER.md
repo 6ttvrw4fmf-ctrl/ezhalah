@@ -30,6 +30,7 @@ safety rules (deploy lock, `safe-pr-merge.ts`, source truth, migration rules) st
 > your report with the reason and the plan. Your report gets one line: «🛰️ Sentry: N open in my area · fixed N · resolved N».
 
 ## 🎯 NEXT RUN ORDERS — written by ⚡ for itself (owner, 2026-10-12: «give yourself instructions so you do a good job on the next run»)
+
 These win over THE PLAN's timeline below; THE PLAN's rules still hold. Replace this block at the end of every run.
 
 > **Owner, 2026-10-13, after the 10-13 run (8/10, fix rate 3/8 → 2/10, two sites left broken until he said «fix those»):**
@@ -37,46 +38,42 @@ These win over THE PLAN's timeline below; THE PLAN's rules still hold. Replace t
 > **Bar for 10-14 (all five, measured in the `:end` row): fix rate ≥ 6/10 proven like a customer · 0 sites broken on our
 > side at the end · rating ≥ 9 · the owner never has to ask for a fix afterwards · no over-claim.**
 
-**Why 10-13 failed, and the rule that replaces each cause (these are hard rules, not advice):**
-1. **The fixes merged at 06:58, so not one of them could be proven in the slot.** → **SHIP BY MINUTE 45.** One PR,
-   one push, `npm run test:all` locally first (`PATH=<dir with python3 → /usr/bin/python3>:$PATH`; 646 checks, ~11 min),
-   merged with `safe-pr-merge.ts` by minute 45. Then dispatch ONE single-source re-crawl per fixed site at once, so its
-   rows reach the :22 sync and the customer proof lands by minute ~80. Fixes found after minute 45 go in a second PR,
-   by minute 90.
-2. **abralosol was «fixed» but still broken: I never read the actual error.** The route log said `CertificateVerifyError`
-   and I stopped there; the real reason («certificate has expired», on the site's side) took the owner's complaint
-   and 40 more minutes. → **For every failed site, read the exception TEXT (not the class) in the first 15 minutes**: the
-   crawl log, or a single-source dispatch on main. Classify each failure at once: OURS (fix) vs THEIRS (expired
-   certificate, DNS gone, 5xx everywhere on 2+ profiles and the proxy → `set_platform_status` dormant with dated
-   evidence, the same night). A site still failing at the end of the run is a missed classification, not «pending».
-3. **I starved my own CI.** The dealapp catch-up took 12 runners and my PR checks queued for 20+ minutes. → **No
-   heavy dispatch (dealapp 12 shards, aqar/wasalt sweeps) before my PR is merged.**
-4. **Pushes cancelled `npm test` three times, and a cancelled shadow check blocked the merge.** → One push per cycle.
-   Never cancel a push-triggered check on a PR head; dispatch diagnostics on `main`, not on the PR branch.
-5. **Rotation picks failed on rentals with no stated period** (never in rent search, by owner rule). → Pick with
-   `deal_ar='بيع' or rent_period_ar is not null`.
-6. **Fix rate denominators were fuzzy.** → `issues_found` = bugs logged in `ops_engineer_backlog` tonight;
-   `issues_fixed` = those with a PASS `:proof` row tonight (rotation proofs don't count). Write both from a query.
+> **Same bar on 10-15.** 10-14: PR #7041 merged at minute 29, its re-crawls proven inside the slot; the numbers are
+> in the 10-14 `:end` row.
 
-**Minute 0–15 (DB clock):** `select now()`; read the `:end`/`:followup` rows; failed and absent sites of the 04:22 run
-WITH their exception text (rule 2); classify each one OURS or THEIRS.
+> **Kept from 10-13 (hard rules; on 10-14 they got the merge in at minute 29 and the re-crawl proven by minute ~50):** ship ONE
+> PR early (`pytest scrapers/common/tests` + `npm run test:all` locally, then push once); read every failed site's
+> exception TEXT in the first 15 min and classify OURS/THEIRS; no heavy dispatch before your PR merges; one push per
+> cycle; pick rotation listings with `deal_ar='بيع' or rent_period_ar is not null`; `issues_fixed` = PASS `:proof` rows
+> for tonight's backlog items, counted by query.
 
-**Proofs owed from 10-13 (each a `:proof` row; #6933 and #6957 are merged, and the 04:22 nightly re-crawls them):**
-- akariyoun: `select rent_period_ar, count(*) from search_listings_ar where platform='akariyoun' and deal_ar='إيجار'
-  and production_ready group by 1` → سنوي ≈ 190; customer journey on 17376257 (Riyadh إشبيلية, rent سنوي, 87,000).
-- gomenassat 15709861 (offer 818): area_m2 = 1652; the card shows 1,652 م².
-- wasalt enrich_ar: `rows_seen` of `wasalt_enrich_ar_residential` below 25,750 and falling.
-- dealapp: the 02:33 nightly re-sees ≥ 18k; if every shard hits the 100-min budget again, raise shards the same night.
-- abralosol: dormant since 10-13 (expired certificate). If tonight's crawl reads it, the hourly cron returns it: prove
-  a card. If not, it stays dormant, which is correct; say so in one line.
+**New rule from 10-14: a fix is not «fixed» until the RAW row changed.** The 10-13 akariyoun fix passed its test and
+merged, and the next night's crawl stored nothing: the test markup was not the live markup (the live page indents
+`</h6>` by 52 spaces). After any parser fix, re-crawl and `select <field>, count(*)` on the RAW table before the :22
+sync; a test fixture must be copied VERBATIM from `source-reread` output, whitespace included.
 
-**Then, by minute 45 in one PR:** the Haraj live build (gate #4 passed 110/110 on 10-12-14→19 KSA; THE PLAN item) only
-if it fits; otherwise backlog leftovers (wasalt 13746442 list-vs-page price, aqar farms area 59,230,300, map pins
-backlog 312: check rakez WP REST and nofodh listing JSON for coordinates).
+**Minute 0–15 (DB clock):** `select now()`; `:end`/`:followup` rows; failed and absent sites of the 04:22 nightly with
+their exception text; ALSO `select date_trunc('day',started_at), sum(rows_seen) from scrape_runs where platform like
+'wasalt_enum%' group by 1` (the enum runs every 2 days at 21:00 UTC; its collapse is invisible in per-site checks).
 
-**Proof timing facts:** search sync :22 (commits ~:24–:26); detector sweep :59 (~3.5 min); Wasalt rich attrs 06:46 UTC;
-muhaysini nightly ends ~07:10 UTC; `scraper-early-warning` 07:45 UTC. USED Haraj windows (never gate on them):
-10-10 01–03, 10-10 ~07–12, 10-10 13 → 10-11 05, 10-11 08 → 20, 10-11 20 → 10-12 11, 10-12 14 → 19.
+**Owed → first thing on 10-15/10-16:**
+- **wasalt enumeration (backlog 532, P1).** The 10-13 21:00 enum summed 5,408 rows vs 177,017 on 10-11: every shard
+  stopped after ~5-6 pages on a VALID empty page (apartment/sale count=33,814, 176 upserted). PR #7041 makes such a
+  slice TRUNCATED and writes «source served an empty page N of M (… empty page reported count=… totalPages=…)» into
+  the shard's notes. The next enum is 10-15 21:00 UTC; on 10-16 read those notes. If every shard stops at the same
+  page (a pagination cap at the source), redesign the enumeration to slice under the cap (city / price-band filters
+  on the search URL) and re-measure bandwidth first (~894 KB per browser page). Do NOT dispatch
+  `wasalt-enum-liveness.yml` yourself (liveness workflows are not yours to run). Nothing is deactivated meanwhile:
+  the roll-up refuses, so the listings are UNKNOWN, not dead.
+- **akariyoun (backlog 493/525):** if the customer proof did not land on 10-14, run it: rent search Riyadh إشبيلية
+  سنوي finds 17376257 (87,000). The raw table already reads 145 annual / 4 monthly / 17 no-field after the 05:37 re-crawl.
+- **backlog 535:** the roll-up refusal label `wasalt_enum_rollup_refused` auto-registered as kind='source' (the
+  auto-register regex in `mon_auto_register_platform` lacks `_enum|_shard|_rollup|_refused`). Before flipping it and
+  `wasalt_enum_shard` to internal, check that `mon_detect_silent_scraper_death` and the wasalt enum watchers still see
+  an internal label. Otherwise the only P0 on an enum collapse goes dark.
+
+**Proof timing facts:** search sync :22 (commits ~:24–:26); detector sweep :59; Wasalt enum 21:00 UTC every 2 days
+(~7 h when healthy); muhaysini nightly ends ~07:10 UTC; `scraper-early-warning` 07:45 UTC.
 
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «wire them so the next run turns out perfect … at the point where I don't need to check and agree on

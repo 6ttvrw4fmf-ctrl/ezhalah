@@ -451,14 +451,20 @@ def city_from_title(title: str) -> tuple[Optional[str], Optional[int], Optional[
     («منطقة القصيم») only becomes a hint for the city scan — never the location itself."""
     toks = [t for t in _TOK_SPLIT.split(title or "") if t]
     hint: Optional[int] = None
-    for i in range(len(toks) - 1, -1, -1):
+    # Windows are anchored on their LAST token and tried longest first (2026-10-14): the old scan
+    # started each window at a token, so the one-word tail «الباطن» of «بمدينة حفر الباطن» was asked
+    # before the two-word «حفر الباطن» and resolved to a Qassim village (15 listings), «رياض
+    # الخبراء» to «الخبراء» (10), and «بمدينة المنورة» fell through to the district before it (3).
+    for end in range(len(toks), 0, -1):
         for size in (2, 1):
-            if i + size > len(toks):
+            if end - size < 0:
                 continue
-            cand = " ".join(toks[i:i + size])
+            cand = " ".join(toks[end - size:end])
             forms = [cand]
             if cand[:1] in "بل" and len(cand) > 2:
                 forms.append(cand[1:])        # «بعنيزة» → «عنيزة», keeping the raw form too
+            if normalize._norm_ar(forms[-1]).startswith("مدينه "):
+                forms.append("ال" + forms[-1])  # «(ب)مدينة المنورة» is «المدينة المنورة»
             for form in forms:
                 if normalize._norm_ar(form) in _CITY_STOP or is_ambiguous_standalone_word(form):
                     continue
