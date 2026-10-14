@@ -20,5 +20,8 @@ function verify(code: string) {
 verify(block);
 const mutant = block.replace('translitPlace(name)', 'name');
 assert.notEqual(mutant, block);
-assert.throws(() => verify(mutant), assert.AssertionError);
+function mustCatch(broken: string) {
+  assert.throws(() => verify(broken), assert.AssertionError);
+}
+mustCatch(mutant);
 console.log('PASS: Filter place display uses English names, retains Arabic, and rejects raw-Arabic mutation.');
