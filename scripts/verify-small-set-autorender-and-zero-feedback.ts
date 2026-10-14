@@ -66,7 +66,7 @@ const zero = agent.slice(agent.indexOf("m.result.listings.length === 0 ? ("), ag
 check("the zero-result branch renders the FeedbackRow (not null)",
   /<FeedbackRow feedbackKey=\{m\.id\} onFeedback=\{showFbToast\}/.test(zero) && !/\n\s*null\n\s*\) : \(/.test(zero));
 check("its read-aloud reads the zero-result intro alone (no phantom listings)",
-  /buildResultsReadAloudSegments\(introText, \[\], undefined\)/.test(zero));
+  /buildResultsReadAloudSegments\(introText, \[\], undefined, locale\)/.test(zero));
 check("the non-zero branch still has its own FeedbackRow (two sites total)",
   (agent.match(/<FeedbackRow feedbackKey=\{m\.id\}/g) ?? []).length === 2);
 
