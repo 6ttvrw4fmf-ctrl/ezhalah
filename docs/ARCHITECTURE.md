@@ -73,6 +73,8 @@ The header and sidebar Ezhalah name uses dark green. Assistant replies and resul
 
 The AI Agent’s empty composer hint aligns left in English and right in Arabic (owner, 2026-10-07). Typed messages keep their own language direction. The entire user bubble sits on the left for English and on the right for Arabic, determined per message (owner clarification, 2026-10-13).
 
+English property cards localize platform attribution, property-type labels and finite attribute values using the existing bilingual catalog (owner, 2026-10-13). Source reference IDs, including Arabic letters in plan numbers, remain verbatim; source images and logos remain original. Arabic card display is preserved.
+
 English Filter submissions localize city/district display and rotate short English greetings with emojis before the request, matching the Arabic treatment. The following searching status keeps its translated rotating lines and sparkle mark (owner, 2026-10-13).
 
 

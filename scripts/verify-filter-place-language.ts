@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
+import { windowBetween } from './lib/sourceWindow.ts';
 // Inject the existing converter to test placeText's locale decision without loading search data.
 const translitPlace = (name: string) => ({ 'جدة': 'Jeddah', 'الرياض': 'Riyadh', 'حي الروضة': 'Al Rawdah' }[name] ?? name);
 
 const source = readFileSync(new URL('../src/data/search.ts', import.meta.url), 'utf8');
-const block = source.slice(source.indexOf('const placeText ='), source.indexOf('const verbText ='));
+const block = windowBetween(source, 'const placeText =', 'const verbText =', 'src/data/search.ts');
 function verify(code: string) {
   const make = (locale: string) => new Function('getLocale', 'translitPlace', 'tPlace', 'arabicOrUnresolved', 't',
     stripTypeScriptTypes(code) + '\nreturn placeText;')(

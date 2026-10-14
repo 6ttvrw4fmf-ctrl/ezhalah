@@ -6,7 +6,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
 import { derivedTotalEquation } from '@/data/listings';
-import { useI18n, t as tr, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
+import { useI18n, englishCatalogText, t as tr, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish, attrDisplayLabel, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
@@ -166,7 +166,7 @@ export function ResultCard({
   // (dealapp "تاون هاوس", "ملحق علوي"…); for English-raw sources (aqar stores "Apartment") show the
   // source-matching Arabic via the clean mapping — never English on the card. Mapping stays filter-only.
   const typeLabel = arabicOrPlaceholder(
-    /[ء-ي]/.test(listing.type || '') ? listing.type : t(listing.cleanType ?? listing.type),
+    locale === 'en' ? englishCatalogText(listing.type || listing.cleanType || '') : /[ء-ي]/.test(listing.type || '') ? listing.type : t(listing.cleanType ?? listing.type),
     locale,
     TYPE_UNRESOLVED_AR,
   );
@@ -229,7 +229,7 @@ export function ResultCard({
     const lpFacts: Array<{ k: string; label: string; value: string }> = [];
     for (const re of FACT_ORDER) {
       const r = factRows.find((x) => re.test(`${x.key} ${x.label}`) && !lpFacts.some((f) => f.k === x.key));
-      if (r && lpFacts.length < 3) lpFacts.push({ k: r.key, label: attrDisplayLabel(t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), value: arAttrValue(r.label, r.value, locale) });
+      if (r && lpFacts.length < 3) lpFacts.push({ k: r.key, label: attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), value: arAttrValue(r.label, r.value, locale) });
     }
     if (listedClean && lpFacts.length < 3) lpFacts.push({ k: 'listed', label: t('Added'), value: listedClean });
     const CHIP_CAP = 3;
@@ -351,7 +351,7 @@ export function ResultCard({
           <View style={card.lpFoot}>
             <View style={card.hostHead}>
               <View style={[card.hostBadge, card.lpBadge]}><SourceBadge source={listing.source} /></View>
-              <Text style={card.hostedOn}>{t('Hosted on {name}', { name: t(sourceName(listing.source)) })}</Text>
+              <Text style={card.hostedOn}>{t('Hosted on {name}', { name: locale === 'en' ? englishCatalogText(sourceName(listing.source)) : t(sourceName(listing.source)) })}</Text>
             </View>
           </View>
         </View>
@@ -394,7 +394,7 @@ export function ResultCard({
         <View style={card.sourceRow}>
           <View style={card.hostHead}>
             <View style={card.hostBadge}><SourceBadge source={listing.source} /></View>
-            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: t(sourceName(listing.source)) })}</Text>
+            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: locale === 'en' ? englishCatalogText(sourceName(listing.source)) : t(sourceName(listing.source)) })}</Text>
           </View>
           <Text style={card.typeLabel}>{typeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
         </View>
@@ -652,6 +652,22 @@ export function arAttrValue(label: string, value: string, locale: string): strin
   if (!v) return value;
   const ll = String(label ?? '').trim().toLowerCase();
   const lv = v.toLowerCase();
+  if (locale === 'en') {
+    // Translate finite source enums in either direction without changing the stored fact.
+    const known = Object.entries(AR_ENUM[ll] ?? {}).find(([, ar]) => ar === v);
+    if (known) return known[0].replace(/-/g, ' ');
+    if (v === 'نعم') return 'Yes';
+    if (v === 'لا') return 'No';
+    if (ll === 'age') {
+      if (v === 'جديد') return 'New';
+      if (v === 'أقل من سنة') return 'Less than 1 year';
+      if (v === 'سنة واحدة') return '1 year';
+      if (v === 'سنتان') return '2 years';
+      const years = /^(أكثر من )?(\d+) (?:سنوات|سنة)$/.exec(v);
+      if (years) return `${years[1] ? 'Over ' : ''}${years[2]} years`;
+    }
+    return englishCatalogText(v);
+  }
   if (AR_YESNO[lv]) return AR_YESNO[lv];                                   // Electricity/Water/booleans
   if (ll === 'age') {
     if (lv === 'new') return 'جديد';
@@ -701,7 +717,7 @@ function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
       <Text numberOfLines={unfolded ? undefined : 1} style={[card.oneLine, locale === 'ar' ? card.oneLineRtl : card.oneLineLtr]}>
         {visible.map((r) => (
           <Text key={r.key}>
-            <Text style={card.addlLabel}>{attrDisplayLabel(t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR)} </Text>
+            <Text style={card.addlLabel}>{attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR)} </Text>
             <Text style={card.addlValue}>{arAttrValue(r.label, r.value, locale)}</Text>
             {'\u2003'}
           </Text>
@@ -715,7 +731,7 @@ function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
         {visible.map((r) => (
           <View key={r.key} style={card.addlCell}>
             {/* The source's own Arabic `key` outranks the placeholder — see attrDisplayLabel. */}
-            <Text style={card.addlLabel}>{attrDisplayLabel(t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR)}</Text>
+            <Text style={card.addlLabel}>{attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR)}</Text>
             <Text style={card.addlValue}>{arAttrValue(r.label, r.value, locale)}</Text>
           </View>
         ))}
