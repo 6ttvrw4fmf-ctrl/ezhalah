@@ -74,7 +74,11 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # gathern's unit page heads its appliance list «مرافق المطبخ» («ثلاجه غلايه», «فريزر مايكرويف …»):
     # the header word is a label, and an appliance list is not the site saying «kitchen» (🔬 decision
     # 2026-10-07, backlog 132, law §6). All 4 gathern «misses» of 2026-10-07 were exactly this.
-    "gathern": ("kitchen",),
+    # elevator / parking: gathern's «المرافق» list (serverData.data.extraDescription, the labels the scraper maps:
+    # «مصعد», «موقف سيارة») is the structured statement. Its 10-14 «misses» (11837661: «بلكونة … مطلة على
+    # المواقف», a balcony overlooking the car park) were prose on units whose list names neither (🔬, CI
+    # source-reread 38543385427). Read by gathern_props().
+    "gathern": ("kitchen", "elevator", "parking"),
     # sanadak's listing object (the RSC payload its page renders) carries kitchenStatusText, acTypeText,
     # numberElevators / numberMaidRooms / numberParkingAreas, isDriverRoomAvailable and isFurnished. Its
     # 2026-10-08 «misses» (5 of 8) were all prose («مطبخ راكب», «موقف خاص» in the description) on ads whose
@@ -349,6 +353,44 @@ def sanadak_page(url: str, fetch=None) -> dict | None:
             "evidence_lines": lines[:200], "text_head": " | ".join(lines)[:1500]}
 
 
+# A website whose every page carries a category MENU of internal links («أجهزة مطبخ», «مكيفات هواء» on opensooq):
+# the menu is not the ad, and the reader's line cut-off truncates it differently per page, so template_lines()
+# cannot see it as shared (CI source-reread 38543714404: every «مطبخ» on 13605230 / 13605245 was a menu link;
+# opensooq scored 0 of 5 with kitchen and AC «missed» 5 of 5 — backlog 76 / 129). On these sites the text of an
+# internal link is dropped before the page is read.
+NAV_LINK_SITES = {"opensooq"}
+_NAV_LINK = re.compile(r'<a\b[^>]*href="/[^"]*"[^>]*>([^<]{1,60})</a>')
+
+
+def strip_nav(page: dict, body: str) -> dict:
+    nav = {norm(t) for t in _NAV_LINK.findall(body or "") if t.strip()}
+    if not nav:
+        return page
+    keep = [x for x in (page.get("evidence_lines") or []) if norm(x) not in nav]
+    head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if norm(x) not in nav)
+    return {**page, "evidence_lines": keep, "text_head": head}
+
+
+# gathern's own amenity list, from the page's __NEXT_DATA__ (serverData.data.extraDescription[*].content): a listed
+# label is a yes, an unlisted one is silence (scrapers/gathern/run.py _amenity_flags, never «no»).
+GATHERN_LABELS = {"elevator": "مصعد", "parking": "موقف سيارة"}
+
+
+def gathern_props(body: str) -> list[dict]:
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', body or "", re.S)
+    try:
+        data = json.loads(m.group(1))["props"]["pageProps"]["serverData"]["data"] if m else {}
+    except (ValueError, KeyError, TypeError):
+        return []
+    labels = {str(c).strip() for blk in (data.get("extraDescription") or []) if isinstance(blk, dict)
+              for c in (blk.get("content") or [])}
+    return [{"name": SANADAK_NAMES[f], "value": "نعم"} for f, lab in GATHERN_LABELS.items() if lab in labels]
+
+
+def is_gathern(url: str) -> bool:
+    return "gathern.co" in url
+
+
 def is_sanadak(url: str) -> bool:
     return "sanadak.sa" in url
 
@@ -457,6 +499,10 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
             except Exception:  # noqa: BLE001
                 status, body = None, ""
             page = page_evidence(body) if status == 200 and body else None
+            if page is not None and platform in NAV_LINK_SITES:
+                page = strip_nav(page, body)
+            if page is not None and is_gathern(url):
+                page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": gathern_props(body)}]}
         if page is None:
             row["sampled"] += 1
             row["unreadable_pages"] += 1
