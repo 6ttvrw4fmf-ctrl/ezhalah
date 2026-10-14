@@ -4478,7 +4478,7 @@ export default function Agent() {
                     // but the RESPONSE-level feedback row still belongs to this turn (owner 2026-08-30: thumbs
                     // must not vanish merely because listing count = 0; the user is rating the answer, and
                     // "nothing matched" IS an answer). Read-aloud reads the zero-result intro alone.
-                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined)} />
+                    <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={buildResultsReadAloudSegments(introText, [], undefined, locale)} />
                   ) : (
                     <>
                       {/* The default "مرتبة حسب الأقرب لطلبك" note was removed per owner request (2026-07-07).
@@ -4696,7 +4696,7 @@ export default function Agent() {
                             ? t('You can tap {a} or {b}.', { a: spokenActionLabels[0], b: spokenActionLabels[1] })
                             : t('You can tap {a}.', { a: spokenActionLabels[0] });
                         const readAloudClosingNote = [moreNoteText, spokenActionsNote].filter(Boolean).join(' ');
-                        const readAloudSegments = buildResultsReadAloudSegments(introText, m.result.listings.slice(0, shown), readAloudClosingNote);
+                        const readAloudSegments = buildResultsReadAloudSegments(introText, m.result.listings.slice(0, shown), readAloudClosingNote, locale);
                         return (
                           <>
                             <View style={{ gap: 8, marginTop: 14, alignSelf: 'stretch' }}>

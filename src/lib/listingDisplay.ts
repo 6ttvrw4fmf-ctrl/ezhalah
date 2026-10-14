@@ -1,11 +1,11 @@
 // Arabic-locked listing display facts — the SAME derivation ResultCard.tsx uses for its own
 // headline (type / location / price), extracted so a second consumer (Read Aloud, owner 2026-08-19)
 // can never say something that disagrees with what the card actually shows. Always resolves to
-// Arabic regardless of the app's current UI locale — Read Aloud is Arabic-only by product decision,
-// independent of whichever locale the visible screen happens to be in.
+// Arabic in the *Ar helpers; the English speech helpers share ResultCard's catalog/transliteration.
 import type { Listing } from '@/data/listings';
-import { translate, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, type Locale } from '@/i18n';
+import { englishCatalogText, translate, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, type Locale } from '@/i18n';
 import { arabicOrPlaceholder } from './arabicText';
+import { translitPlace } from './translitPlace';
 
 // #1 (source-accurate, mirrors ResultCard.tsx): the RAW scraped type when it's already Arabic, else
 // the clean-type mapping translated to Arabic — never leaks a raw English type string.
@@ -244,4 +244,16 @@ export function sourceName(source: string): string {
 // platform name can never drift from what's shown.
 export function listingPlatformAr(listing: Listing): string {
   return translate('ar', 'Hosted on {name}', { name: translate('ar', sourceName(listing.source)) });
+}
+
+// Same English catalog and place renderer as ResultCard; Arabic helpers stay canonical.
+export function listingTypeEn(listing: Listing): string {
+  return englishCatalogText(listing.type || listing.cleanType || '');
+}
+export function listingLocationEn(listing: Listing): string {
+  const city = translitPlace(translate('en', listing.city));
+  return listing.district ? `${translitPlace(translate('en', listing.district))}, ${city}` : city;
+}
+export function listingPlatformEn(listing: Listing): string {
+  return translate('en', 'Hosted on {name}', { name: englishCatalogText(sourceName(listing.source)) });
 }
