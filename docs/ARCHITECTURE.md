@@ -98,6 +98,8 @@ in-memory only).
 | `about` | About Us | modal, slide-up | Neutrality + REGA/PDPL copy. §7. |
 | `support` | Support | modal, slide-up | Contact + response time. §7. |
 
+Support headings, fields, descriptions and response-time bullets follow the selected reading direction. Terms of Use and Privacy Policy provide complete English translations section-for-section alongside the unchanged Arabic originals; dates, contact tokens, retention and cross-border disclosures stay equivalent (owner, 2026-10-14).
+
 Root overlays: `<InfoModal/>` (Support/About popups) and `<IntroVideo/>` (first-run intro, logged-out
 only, shown once).
 

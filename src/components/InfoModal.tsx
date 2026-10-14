@@ -24,7 +24,7 @@ import { useAtLeast } from '@/lib/useAtLeast';
 import { DOCK_BREAKPOINT } from '@/lib/responsive';
 import { canDragAuthPopup } from '@/lib/authPopupBehavior';
 import { attachCardDrag, clampOffsetOnScreen } from '@/lib/cardDrag';
-import { LEGAL_DOCS, hasLegalDocs } from '@/data/legal';
+import { getLegalDocs, hasLegalDocs } from '@/data/legal';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const IN = { duration: 240, easing: Easing.bezier(0.22, 1, 0.36, 1) };
@@ -212,12 +212,13 @@ function Sheet({ kind, legalTab, onClose }: { kind: Kind; legalTab: 'terms' | 'p
 // with room to breathe — title band, the support form, then partnerships and the response promise
 // as quieter secondary sections. VISUAL ONLY — same strings, same fields, same actions, same icons.
 function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => string }) {
+  const { isRTL } = useI18n();
   return (
     <View>
       {/* Style `h` keeps its CLOSE_CLEAR physical-right padding so the title can never slide under
           the floating × (verify-info-modal-header-clearance pins that arithmetic). */}
       <View style={s.head}>
-        <Text style={s.h}>{t('Support')}</Text>
+        <Text style={[s.h, !isRTL && s.textLtr]}>{t('Support')}</Text>
       </View>
 
       <View style={s.bodyPad}>
@@ -234,7 +235,7 @@ function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => stri
         <View style={s.rt}>
           <View style={s.rtHead}>
             <Ionicons name="time-outline" size={15} color={colors.primary} />
-            <Text style={s.rtH}>{t('Response Time')}</Text>
+            <Text style={[s.rtH, !isRTL && s.textLtr]}>{t('Response Time')}</Text>
           </View>
           <RtRow text={t('Typical response time: {h}.', { h: t('72 hours') })} />
           <RtRow text={t('Some inquiries may take up to {d}.', { d: t('1 week') })} />
@@ -249,7 +250,7 @@ function SupportBody({ t }: { t: (s: string, v?: Record<string, string>) => stri
 // on screen so «حاول مرة أخرى» resends exactly what the user wrote. Nothing is cleared on failure —
 // losing someone's typed problem report is the one outcome this form must never produce.
 function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => string }) {
-  const { locale } = useI18n();
+  const { locale, isRTL } = useI18n();
   const { user } = useApp();
   // Closing this dialog UNMOUNTS the form, and its backdrop closes on a tap — so an in-progress
   // draft is restored from the session-scoped cache rather than starting empty. See the long note
@@ -322,8 +323,8 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
       <View style={s.formHead}>
         <View style={s.cardIc}><Ionicons name="headset-outline" size={19} color={colors.primary} /></View>
         <View style={s.supBody}>
-          <Text style={s.mail}>{t('Contact support')}</Text>
-          <Text style={s.desc}>{t('Questions about your account, searches, or technical issues.')}</Text>
+          <Text style={[s.mail, !isRTL && s.textLtr]}>{t('Contact support')}</Text>
+          <Text style={[s.desc, !isRTL && s.textLtr]}>{t('Questions about your account, searches, or technical issues.')}</Text>
         </View>
       </View>
 
@@ -337,7 +338,7 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
           maxLength={SUBJECT_MAX}
           placeholder={t('What is this about?')}
           placeholderTextColor={colors.muted}
-          style={s.input}
+          style={[s.input, !isRTL && s.inputLtr]}
         />
       </Field>
 
@@ -354,7 +355,7 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
           textAlignVertical="top"
           placeholder={t('Tell us what happened.')}
           placeholderTextColor={colors.muted}
-          style={[s.input, s.area]}
+          style={[s.input, s.area, !isRTL && s.inputLtr]}
         />
       </Field>
 
@@ -377,7 +378,7 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
       {state === 'error' ? (
         <View style={s.errRow}>
           <Ionicons name={failure === 'rate_limited' ? 'time-outline' : 'alert-circle-outline'} size={15} color={colors.danger} />
-          <Text style={s.errTx}>
+          <Text style={[s.errTx, !isRTL && s.textLtr]}>
             {failure === 'rate_limited'
               ? t('You have sent several messages already. Please wait about an hour before sending another.')
               : t("Couldn't send your message. Check your connection and try again.")}
@@ -404,9 +405,10 @@ function SupportForm({ t }: { t: (s: string, v?: Record<string, string>) => stri
 }
 
 function Field({ label, invalid, focused, children }: { label: string; invalid: boolean; focused: boolean; children: React.ReactNode }) {
+  const { isRTL } = useI18n();
   return (
     <View style={s.field}>
-      <Text style={s.fieldLabel}>{label}</Text>
+      <Text style={[s.fieldLabel, !isRTL && s.textLtr]}>{label}</Text>
       <View style={[s.fieldBox, WEB_SMOOTH, focused && s.fieldBoxFocus, invalid && s.fieldBoxBad]}>{children}</View>
     </View>
   );
@@ -501,8 +503,9 @@ function AboutBody({ t, reduced, gripRef, drag }: {
 // invented, and the dialog is unreachable until both documents exist (hasLegalDocs gates the
 // account-menu row and the login popup's link).
 function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
+  const { locale, isRTL } = useI18n();
   const [tab, setTab] = useState<'terms' | 'privacy'>(initial);
-  const docs = hasLegalDocs() ? LEGAL_DOCS[tab] : [];
+  const docs = hasLegalDocs() ? getLegalDocs(locale)[tab] : [];
   const tabs: { key: 'terms' | 'privacy'; label: string }[] = [
     { key: 'terms', label: t('Terms of Use') },
     { key: 'privacy', label: t('Privacy Policy') },
@@ -512,7 +515,7 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
       <View style={s.head}>
         <View style={s.legalLockup}>
           <RNImage source={EAGLE} style={s.legalEagle} resizeMode="contain" />
-          <Text style={[s.h, s.legalTitle]}>{t('Terms & Privacy')}</Text>
+          <Text style={[s.h, s.legalTitle, !isRTL && s.textLtr]}>{t('Terms & Privacy')}</Text>
         </View>
       </View>
       <View style={s.bodyPad}>
@@ -536,11 +539,15 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
             both: partners@ (Terms) for business/support-shaped inquiries, admin@ (Privacy, owner
             2026-09-04) for data-rights/PDPL requests — a normal split, not a drift risk, since both
             literals still live only here. */}
-        {docs.map((p, i) => (
-          <Text key={i} style={s.legalP}>
-            {p.replace('{{CONTACT_EMAIL}}', tab === 'privacy' ? 'admin@ezhalah.com' : 'partners@ezhalah.com')}
-          </Text>
-        ))}
+        {docs.map((p, i) => {
+          const [heading, ...paragraphs] = p.replace('{{CONTACT_EMAIL}}', tab === 'privacy' ? 'admin@ezhalah.com' : 'partners@ezhalah.com').split('\n\n');
+          return (
+            <View key={i}>
+              <Text accessibilityRole={i === 0 ? undefined : 'header'} style={[i === 0 ? s.legalDate : s.legalSectionTitle, !isRTL && s.textLtr]}>{heading}</Text>
+              {paragraphs.map((paragraph, j) => <Text key={j} style={[s.legalP, !isRTL && s.textLtr]}>{paragraph}</Text>)}
+            </View>
+          );
+        })}
       </View>
     </View>
   );
@@ -549,22 +556,24 @@ function LegalBody({ t, initial }: { t: Tr; initial: 'terms' | 'privacy' }) {
 // One channel = one RTL row: a distinct glyph names the audience, the address is the hero line
 // (kept LTR internally — it's latin), the purpose sentence sits beneath.
 function SupCard({ icon, email, desc }: { icon: keyof typeof Ionicons.glyphMap; email: string; desc: string }) {
+  const { isRTL } = useI18n();
   return (
     <View style={s.supCard}>
       <View style={s.cardIc}><Ionicons name={icon} size={19} color={colors.primary} /></View>
       <View style={s.supBody}>
-        <Text style={s.mail}>{email}</Text>
-        <Text style={s.desc}>{desc}</Text>
+        <Text style={[s.mail, !isRTL && s.textLtr]}>{email}</Text>
+        <Text style={[s.desc, !isRTL && s.textLtr]}>{desc}</Text>
       </View>
     </View>
   );
 }
 
 function RtRow({ text }: { text: string }) {
+  const { isRTL } = useI18n();
   return (
     <View style={s.rtRow}>
       <View style={s.dot} />
-      <Text style={s.rtText}>{text}</Text>
+      <Text style={[s.rtText, !isRTL && s.textLtr]}>{text}</Text>
     </View>
   );
 }
@@ -636,6 +645,7 @@ const s = StyleSheet.create({
     fontSize: IS_WEB ? 16 : 14, color: colors.ink, textAlign: 'right', paddingVertical: 12, minHeight: 48,
     ...(IS_WEB ? ({ outlineStyle: 'none' } as any) : {}),
   },
+  textLtr: { textAlign: 'left', writingDirection: 'ltr' as any },
   inputLtr: { textAlign: 'left', writingDirection: 'ltr' as any },
   area: { minHeight: 132, paddingTop: 12, lineHeight: 22 },
   errRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 12 },
@@ -672,6 +682,8 @@ const s = StyleSheet.create({
   segBtnHover: { backgroundColor: colors.surface2 },
   segTx: { fontSize: 13.5, fontWeight: '700', color: colors.muted },
   segTxOn: { color: colors.ink },
+  legalDate: { fontSize: 13, lineHeight: 22, color: colors.muted, textAlign: 'right', marginBottom: 20 },
+  legalSectionTitle: { fontSize: 16, lineHeight: 26, fontWeight: '700', color: colors.ink, textAlign: 'right', marginTop: 6, marginBottom: 8 },
   legalP: { fontSize: 14.5, lineHeight: 26, color: colors.body, textAlign: 'right', marginBottom: 14 },
 });
 
