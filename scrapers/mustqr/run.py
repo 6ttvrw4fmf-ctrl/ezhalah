@@ -781,12 +781,30 @@ def map_listing(p: dict, n_to_region: dict[str, str]) -> tuple[Optional[dict], s
         "additional_info": extras,
     }
     row.update(_price_fields(p, is_rent))
+    row.update(feature_answers(p.get("features")))
     # price_per_meter is NEVER derived (listing-fidelity rule): mustqr's API publishes no ppm field,
     # so the field stays NULL. The old round(price_total/area_m2) derivation fabricated 621 live
     # values — removed 2026-07-27 (audit item 4); scripts/verify-no-derived-price.ts guards the
     # whole fleet against this pattern re-appearing.
 
     return row, bucket
+
+
+# mustqr's `features` field is the advertiser's own feature list («مطبخ راكب، 6 مكيفات شباك»,
+# «باب كراج، مجلسين، مطبخ، عداد ماء») and was filed only in additional_info: on 10-14, 104 of the 251 active
+# lists named a kitchen, AC, garage, maid or driver room and the columns were NULL on every one (🔬 AF engineer).
+# A named item → True; an item not named, or no list, is silence (never «no»). «تأسيس مصعد» (a prepared shaft) is
+# suppressed by the shared reader. The description is not read for these: the site has this field (law §2).
+_FEATURE_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance")
+
+
+def feature_answers(features: Any) -> dict[str, bool]:
+    out: dict[str, bool] = {}
+    for item in re.split(r"[،,\n]+", str(features or "")):
+        for col, val in normalize.amenities_from_text(item.strip()).items():
+            if val is True and col in _FEATURE_COLS:
+                out[col] = True
+    return out
 
 
 def fetch_all(s: cc.Session, jwt: str, limit: Optional[int] = None) -> list[dict]:

@@ -65,6 +65,12 @@ const WAIVED: Record<string, string> = {
     'update guarded on the exact value it replaces; scrapers/sadiqeltajer/run.py now reads one street or nothing on ' +
     'every crawl, so a re-crawl writes the same facade and never re-creates a cross-street pair, pinned with ' +
     'mutations by scrapers/common/tests/test_sadiqeltajer_one_street_or_nothing.py',
+  '20261014093140_jurash_amenities_from_own_words_and_garage_silence.sql':
+    'Twelve jurash rows, each update guarded on its id and on the exact value it replaces: NULL-only, true-only ' +
+    'kitchen / maid / driver room from the stored description via normalize.prose_amenities_yes, and five ' +
+    'parking = false rows with no garage field back to NULL; scrapers/jurash/run.py prose_answers() and ' +
+    'parking_answer() now write the same on every crawl, pinned with mutations by ' +
+    'scrapers/common/tests/test_jurash_amenity_answers.py',
   '20261013094218_squares_shmoualshmal_kitchen_ac_from_feature_chips.sql':
     'NULL-only, true-only back-fill of squares / shmoualshmal kitchen and AC from each row\'s own STRUCTURED chip ' +
     'list (additional_info.features_ar); both parsers\' chip maps now write the same on every crawl, pinned with a ' +
