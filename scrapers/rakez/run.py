@@ -319,7 +319,8 @@ def _city_or_region_homonym(name: str) -> tuple[Optional[int], Optional[int]]:
     return cid, rid
 
 
-def resolve_location(term_ids: list[int], tree: dict[int, dict]) -> tuple[Optional[str], Optional[int],
+def resolve_location(term_ids: list[int], tree: dict[int, dict], title: Optional[str] = None
+                     ) -> tuple[Optional[str], Optional[int],
                                                                          Optional[int], Optional[str]]:
     """(city_ar, city_id, region_id, district_ar) from the taxonomy TREE.
 
@@ -335,14 +336,13 @@ def resolve_location(term_ids: list[int], tree: dict[int, dict]) -> tuple[Option
         return d
 
     tagged = [t for t in term_ids if t in tree]
-    if not tagged:
-        return None, None, None, None
-    leaf = max(tagged, key=depth)
-
-    # ancestry, leaf first
-    chain, tid, seen = [], leaf, set()
-    while tid in tree and tid not in seen:
-        seen.add(tid); chain.append(tree[tid]["name"]); tid = tree[tid]["parent"]
+    chain: list[str] = []
+    if tagged:
+        leaf = max(tagged, key=depth)
+        # ancestry, leaf first
+        tid, seen = leaf, set()
+        while tid in tree and tid not in seen:
+            seen.add(tid); chain.append(tree[tid]["name"]); tid = tree[tid]["parent"]
 
     city_ar = city_id = region_id = None
     for name in chain[1:] or chain:            # a city is never the leaf unless the leaf is all we have
@@ -350,11 +350,57 @@ def resolve_location(term_ids: list[int], tree: dict[int, dict]) -> tuple[Option
         if cid:
             city_ar, city_id, region_id = name, cid, rid
             break
+
     if not city_id:
-        return None, None, None, None
+        # The tree skipped the city (البندرية → الشرقية, no الخبر): the project's OWN title states it.
+        # A region the tree did name must agree with the title's city, or nothing is placed.
+        regions = {r for r in (_bare_region_labels().get(norm_ar(n)) for n in chain) if r is not None}
+        city_ar, city_id, region_id, district_ar = location_from_title(title)
+        if not city_id or (regions and region_id not in regions):
+            return None, None, None, None
+        return city_ar, city_id, region_id, district_ar
 
     district_ar = find_district_in_text(chain[0], city_id) if chain else None
+    tree_named_a_district = bool(chain) and chain[0] != city_ar and not _ZONE.match(chain[0])
+    if not district_ar and title and not tree_named_a_district:
+        # The tree stopped at the city (or a zone): the title's own district words, catalog-scoped.
+        # A district the tree DID name but our catalog lacks stays NULL — the title never overrules it.
+        t_city, t_cid, _, t_dist = location_from_title(title)
+        if t_cid in (None, city_id):
+            district_ar = t_dist if t_cid else find_district_in_text(_title_tail(title), city_id)
     return city_ar, city_id, region_id, district_ar
+
+
+_ZONE = re.compile(r"(شمال|جنوب|شرق|غرب|وسط)\s")
+_DASH = re.compile(r"\s*[–—-]\s*")
+
+
+def _title_tail(title: Optional[str]) -> str:
+    """The location part of a rakez project title: everything after its first dash
+    («شقق ألين 152 – البندرية الخبر» → «البندرية الخبر», «شقق تلال فيلج – النسيم – مكة المكرمة» →
+    «النسيم مكة المكرمة»). A title with no dash states no location this way → ''."""
+    parts = _DASH.split(title or "", maxsplit=1)
+    return " ".join(_DASH.split(parts[1])) if len(parts) == 2 else ""
+
+
+def location_from_title(title: Optional[str]) -> tuple[Optional[str], Optional[int], Optional[int],
+                                                        Optional[str]]:
+    """(city_ar, city_id, region_id, district_ar) from the project title's tail «<district> <city>».
+
+    The city is the tail's LAST one or two words (two first, so «مكة المكرمة» is not «المكرمة»),
+    validated against our catalog with the same region-homonym guard as the tree walk («الشبيلي
+    الشرقية» stays NULL: الشرقية is the region, never the village of that name). The district is
+    only ever a catalog-attested district of THAT city named in the remaining words."""
+    words = re.findall(r"[\u0621-\u064A]+", _title_tail(title))
+    for n in (2, 1):
+        if len(words) < n:
+            continue
+        name = " ".join(words[-n:])
+        cid, rid = _city_or_region_homonym(name)
+        if cid:
+            rest = " ".join(words[:-n])
+            return name, cid, rid, (find_district_in_text(rest, cid) if rest else None)
+    return None, None, None, None
 
 
 def _floor_number(raw: Any) -> Optional[int]:
@@ -410,7 +456,8 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
         return None, ""                       # unmapped type → skipped, never assumed
 
     city_term_ids = [t["id"] for t in _terms_of(ar_project, "city") if isinstance(t.get("id"), int)]
-    city_ar, city_id, region_id, district_ar = resolve_location(city_term_ids, tree)
+    ar_title = _clean(((ar_project or {}).get("title") or {}).get("rendered"))
+    city_ar, city_id, region_id, district_ar = resolve_location(city_term_ids, tree, ar_title)
 
     price = _to_int(acf.get("price"))
     area = _to_int(acf.get("area"))
