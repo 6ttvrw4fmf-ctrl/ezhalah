@@ -31,7 +31,7 @@ export default function FeedbackRow({
   // messages), this component only ever plays whatever it's given.
   readAloudSegments?: ReadAloudSegment[];
 }) {
-  const { t, isRTL } = useI18n();
+  const { t, isRTL, locale } = useI18n();
   const [rating, setRating] = useState<FeedbackRating | null>(() => getListingFeedback(feedbackKey));
   const reducedMotion = useReducedMotion();
   const [copied, setCopied] = useState(false);
@@ -66,12 +66,12 @@ export default function FeedbackRow({
   const onReadAloud = () => {
     if (speaking) { stopReadAloud(); return; }
     if (!readAloudSegments?.length) return;
-    const started = speakReadAloud(feedbackKey, readAloudSegments);
+    const started = speakReadAloud(feedbackKey, readAloudSegments, locale);
     if (!started) {
       // Ask WHY it refused rather than assuming the permanent case. 'none' cannot normally appear
       // here (a confirmed voice is exactly what makes speakReadAloud start), but if it ever does —
       // e.g. an empty segment list — saying nothing is more honest than inventing a device verdict.
-      const why = readAloudRefusal();
+      const why = readAloudRefusal(locale);
       if (why !== 'none') {
         setRefusal(why);
         setTimeout(() => setRefusal('none'), 3200);
