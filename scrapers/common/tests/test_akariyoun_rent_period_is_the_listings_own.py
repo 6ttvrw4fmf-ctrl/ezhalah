@@ -9,6 +9,7 @@ monthly, then the title, then the site's field.
 from scrapers.akariyoun import run as AK
 
 AK.find_district_in_text = lambda text, city_id: text
+AK.to_catalog = lambda city: (1, 1)  # hermetic: the catalog lookup is a DB read, not what this file tests
 
 PAY = """<h6 class="prt-price-fix text-warning"><span
         class="badge badge-warning">طريقة الدفع</span>
@@ -34,6 +35,23 @@ def _row(pay_value=None, desc="للإيجار شقة دور أرضي<br>السع
 def test_the_field_is_read():
     assert AK.parse_payment_period(PAY.format(v="سنوي")) == "annual"
     assert AK.parse_payment_period(PAY.format(v="شهري")) == "monthly"
+
+
+# Verbatim live markup (CI source-reread 38515266387, 2026-10-14): the closing tag sits on its own line,
+# indented ~52 spaces. The 10-13 pattern needed «</h6>» within 30 characters of the value and read
+# nothing on every live page.
+LIVE = ('<h6 class="prt-price-fix text-warning"><span\n'
+        + ' ' * 60 + 'class="badge badge-warning">طريقة الدفع</span>\n'
+        + ' ' * 56 + ': {v}\n' + ' ' * 52 + '</h6>')
+
+
+def test_the_live_indented_markup_is_read():
+    assert AK.parse_payment_period(LIVE.format(v="سنوي")) == "annual"
+    assert AK.parse_payment_period(LIVE.format(v="شهري")) == "monthly"
+    assert AK.parse_payment_period(LIVE.format(v="نصف سنوي")) is None
+    page = RENT.format(pay=LIVE.format(v="سنوي"), desc="للإيجار شقة دور أرضي")
+    row, _cat, _raw = AK.map_listing("shk-llaygar-fy-hy-ashbyly-8", page)
+    assert row["rent_period"] == "annual" and row["price_annual"] == 87000
 
 
 def test_a_value_with_no_bucket_is_unknown():

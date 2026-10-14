@@ -55,6 +55,7 @@ from scrapers.bossbih.run import (  # noqa: E402  same theme, same town: one voc
     TYPE_UNMAPPABLE, _BED_RE, _area, _counts, _price_basis, resolve_district,
 )
 from scrapers.common import db, normalize as N  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
 
@@ -85,15 +86,25 @@ def _text(fragment: str) -> str:
     return re.sub(r"\s+", " ", ihtml.unescape(re.sub(r"<[^>]+>", " ", t))).strip()
 
 
+# What the last fetch answered (status + size), so an index page with no ads says WHY in the run's notes.
+_LAST: dict[str, Any] = {}
+
+
+class IndexUnreadable(RuntimeError):
+    """The catalogue's first index page held no ad: a failed or refused fetch, never «0 listings»."""
+
+
 def get(s: cc.Session, url: str) -> Optional[str]:
     for attempt in range(3):
         try:
-            r = s.get(url, impersonate="chrome", timeout=40)
+            r = s.get(url, timeout=40)   # the session's own profile (retry_smarter_session picked it)
+            _LAST.update(url=url, status=r.status_code, bytes=len(r.content or b""))
             if r.status_code == 404:
                 return None
             r.raise_for_status()
             return r.text
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            _LAST.update(url=url, status=f"{type(e).__name__}: {str(e)[:120]}", bytes=0)
             if attempt == 2:
                 raise
             time.sleep(2 + attempt * 3)
@@ -251,13 +262,29 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--limit", type=int, default=0)
     a = ap.parse_args()
-    s = cc.Session()
+    # 2026-10-14 (backlog 533): the nightly read index page 0 in 1.5 s on one pinned profile, found no ad,
+    # and logged only «0 ad(s)» → «RC-B demoted» with no reason. The shared resilient path probes three
+    # profiles DIRECT, then the proxy, and an index page 0 with no ad is a FAILED run that names what
+    # the page answered — never a quiet empty catalogue.
+    s, tried = retry_smarter_session(f"{BASE}/?field_nw_al_qar_value=All&page=0", timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
 
     nids: list[str] = []
     for page in range(MAX_PAGES):
-        html = get(s, f"{BASE}/?field_nw_al_qar_value=All&page={page}") or ""
+        try:
+            html = get(s, f"{BASE}/?field_nw_al_qar_value=All&page={page}") or ""
+        except Exception:  # noqa: BLE001 — page 0 is judged below; a later page ends the walk
+            html = ""
         got = [n for n in parse_index(html) if n not in nids]
         if not got:
+            if page == 0:
+                why = (f"index page 0 held no ad ({BASE}/?field_nw_al_qar_value=All&page=0): "
+                       f"answered {_LAST.get('status')} with {_LAST.get('bytes')} bytes | route: {' · '.join(tried)}")
+                print(f"✗ {SOURCE}: {why}", flush=True)
+                if not a.dry_run:
+                    rid = db.begin_run(SLUG)
+                    db.end_run(rid, ok=False, rows_seen=0, rows_upserted=0, notes=why[:300])
+                return 1
             break
         nids += got
         time.sleep(PAUSE)

@@ -276,7 +276,11 @@ PPM_RE = re.compile(
 
 
 # «<h6 class="prt-price-fix text-warning"><span class="badge badge-warning">طريقة الدفع</span> : سنوي</h6>»
-PAYMENT_RE = re.compile(r"طريقة\s*الدفع\s*</span>\s*:\s*([^<]{1,30})</h6>")
+# The live page indents the closing tag by ~52 spaces after the value («: سنوي\n<52 spaces></h6>», CI
+# source-reread 38515266387, 2026-10-14), so the value is read up to the trailing whitespace, not up to
+# «</h6>»: a 30-character window that had to reach «</h6>» matched no live page, and all 150 rentals
+# stayed with no period after the 10-13 fix.
+PAYMENT_RE = re.compile(r"طريقة\s*الدفع\s*</span>\s*:\s*([^<\s][^<]{0,29}?)\s*</h6>")
 _PAYMENT_PERIOD = {"سنوي": "annual", "شهري": "monthly"}
 
 
