@@ -18,7 +18,21 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { pickFilterGreetingOpening, setFilterGreetingsCache, __testing } from '../src/data/filterGreetingRotation.ts';
-import { pickEnglishFilterGreetingOpening } from '../src/data/filterGreetingRotation.ts';
+import { pickEnglishFilterGreetingOpening, __englishTesting } from '../src/data/filterGreetingRotation.ts';
+
+if (__englishTesting.ENGLISH_OPENINGS.length !== __testing.BAKED.length
+  || !__testing.BAKED.every((row, i) => __englishTesting.ENGLISH_OPENINGS[i].endsWith(`${row.emoji}, `))) {
+  throw new Error('Every Arabic Filter greeting must have an English translation with the same emoji');
+}
+const oldRandom = Math.random;
+const seenEnglish = new Set<string>();
+try {
+  for (let i = 0; i < __testing.BAKED.length; i++) {
+    Math.random = () => (i + 0.1) / __testing.BAKED.length;
+    seenEnglish.add(pickEnglishFilterGreetingOpening());
+  }
+} finally { Math.random = oldRandom; }
+if (seenEnglish.size !== 11) throw new Error('All eleven English Filter greetings must be reachable');
 
 let previousEnglish = '';
 for (let i = 0; i < 30; i++) {
