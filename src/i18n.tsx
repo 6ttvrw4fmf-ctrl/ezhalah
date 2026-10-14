@@ -1653,6 +1653,9 @@ function fill(template: string, vars?: Record<string, string | number>): string 
 // tests use it); only what an English reader sees changes. Owner 2026-10-09: «the English is just the translation»
 // — each entry is the faithful translation of the Arabic value, in plain sentence-case English.
 const EN: Record<string, string> = {
+  'الهيئة العامة للعقار': 'Real Estate General Authority',
+  'لايوجد': 'None',
+  'لا يوجد': 'None',
   'That is every matching listing ({n}). For a new search, open the menu and choose Search.': 'That is every matching listing ({n}). Start a new search below.',
   'آي باكس': 'iBaax',
   'شركة المربعات العقارية': 'Squares',

@@ -120,9 +120,14 @@ for (const [label, value, expected] of [
   ['Facade', 'جنوبية - غربية', 'South West'], ['Street width', '20 متر', '20 m'],
   ['Building age (years)', 'سنه', '1 year'], ['Building age (years)', 'اكثر من عشر سنوات', 'Over 10 years'], ['Age', '2 years', '2 years'],
   ['Street', 'حي الروضة', 'Al Rawdah'],
+  ['Ad source', 'الهيئة العامة للعقار', 'Real Estate General Authority'],
+  ['Other obligations on the property', 'لايوجد', 'None'],
+  ['Other obligations on the property', 'لا يوجد', 'None'],
   ['Amenities', 'موقف', 'Parking'], ['Property services', 'الكهرباء، المياه، الصرف الصحي', 'Electricity, Water Supply, Sanitation'],
   ['Plan number', '7489/ق/ب', '7489/ق/ب'],
 ]) check(`English ${label}: ${value}`, format(label, value, 'en') === expected);
+check('Arabic source authority retained', format('Ad source', 'الهيئة العامة للعقار', 'ar') === 'الهيئة العامة للعقار');
+check('Arabic explicit absence retained', format('Other obligations on the property', 'لايوجد', 'ar') === 'لايوجد');
 check('Arabic enum rendering retained', format('Facade', 'east', 'ar') === 'شرقية');
 for (const [, name] of readFileSync('src/lib/listingDisplay.ts', 'utf8').matchAll(/return '([^']*[ء-ي][^']*)'/g)) {
   check(`English platform name: ${name}`, !/[ء-ي]/.test(englishCatalogText(name)));
@@ -138,6 +143,17 @@ try {
   function mustCatch() { assert.throws(() => assert.equal(broken('Age', '2 years', 'en'), '2 years'), assert.AssertionError); }
   mustCatch();
   check('MUTATION: removing English locale branch is caught', true);
+  const i18nSource = readFileSync('src/i18n.tsx', 'utf8');
+  const missingAuthority = i18nSource.replace("  'الهيئة العامة للعقار': 'Real Estate General Authority',", '');
+  assert.notEqual(missingAuthority, i18nSource);
+  const mutantCatalogFile = join(mutantDir, 'i18n.tsx');
+  writeFileSync(mutantCatalogFile, missingAuthority);
+  const brokenCatalog = (await liftSymbols(mutantCatalogFile, [
+    { header: 'const AR:' }, { header: 'const EN:' }, { header: 'export function englishCatalogText(' },
+  ], ['englishCatalogText'])).englishCatalogText as (text: string) => string;
+  assert.throws(() => assert.equal(brokenCatalog('الهيئة العامة للعقار'), 'Real Estate General Authority'), assert.AssertionError);
+  check('MUTATION: untranslated source authority is caught', true);
+
 } finally { rmSync(mutantDir, {recursive: true, force: true}); }
 
 check('both host-name render paths use English catalog lookup', (CARD.match(/name: locale === 'en' \? englishCatalogText\(sourceName\(listing.source\)\)/g) ?? []).length === 2);
