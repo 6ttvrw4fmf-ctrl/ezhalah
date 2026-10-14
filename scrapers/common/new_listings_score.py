@@ -341,6 +341,23 @@ def _cmp_district(stored, whole: str) -> str:
 SHELL_PAGE_PLATFORMS = frozenset({"ebriza"})
 
 
+# A share link that names its ad by CODE in the query («/latest-offers?ads-N5470=1», nufouth) opens the ad in a JS
+# modal: if the served HTML never contains that code, the page is the table of OTHER units and has said nothing
+# about this ad. nufouth 17667724 (2026-10-14, re-read run 38527525460): «5470» appears nowhere in the body, one
+# of the table's units is also in حي العارض (so is_other_ads_page saw «ours» and stood down), and «6 غرف» /
+# «3 غرف» / «4 غرف» from other units scored our 2 bedrooms a MISMATCH.
+_AD_CODE_IN_URL = re.compile(r"[?&]ads-([A-Za-z]*\d+)=")
+
+
+def page_lacks_its_ad(url: str | None, body: str) -> bool:
+    m = _AD_CODE_IN_URL.search(url or "")
+    if not m:
+        return False
+    code = m.group(1)
+    digits = re.sub(r"\D", "", code)
+    return code not in (body or "") and not re.search(r"(?<!\d)" + digits + r"(?!\d)", body or "")
+
+
 def is_other_ads_page(stored: dict, page: dict) -> bool:
     """The page lists OTHER ads, not this one: three or more different districts on its lines, none of
     them ours, and a title naming none. nufouth's share link (/latest-offers?ads-N945=1) opens the ad in
@@ -562,7 +579,8 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             row["unreadable_pages"] += 1
             continue
         page = page_evidence(body)
-        if platform in SHELL_PAGE_PLATFORMS or is_other_ads_page(stored, page):
+        if (platform in SHELL_PAGE_PLATFORMS or is_other_ads_page(stored, page)
+                or page_lacks_its_ad(url, body)):
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue

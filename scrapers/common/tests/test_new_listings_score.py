@@ -489,3 +489,13 @@ def test_a_spec_value_in_a_sibling_element_beats_the_descriptions_dual_word():
                 f'<span class="rem-single-field-value">{n}</span></div></body></html>')
     assert compare_listing({"bedrooms": 6}, page_evidence(body(6)))["bedrooms"] == MATCH
     assert compare_listing({"bedrooms": 6}, page_evidence(body(3)))["bedrooms"] == MISMATCH
+
+
+def test_a_share_link_whose_page_never_carries_the_ad_code_is_unreadable():
+    # nufouth 17667724 (2026-10-14): /latest-offers?ads-N5470=1 serves the vacancy table without «5470».
+    from scrapers.common.new_listings_score import page_lacks_its_ad
+    table = "<html><body>جدول الشواغر | 6 غرف | حي المحمدية | 3 غرف | حي العارض</body></html>"
+    assert page_lacks_its_ad("https://nufouth.com/latest-offers?ads-N5470=1", table)
+    assert not page_lacks_its_ad("https://nufouth.com/latest-offers?ads-N5470=1", table + '<div id="N5470">2 غرف</div>')
+    assert not page_lacks_its_ad("https://nufouth.com/latest-offers?ads-N5470=1", table.replace("6 غرف", "إعلان 5470"))
+    assert not page_lacks_its_ad("https://aqar.fm/ad/5470", table)        # no code in the query: not this rule
