@@ -658,10 +658,17 @@ export function arAttrValue(label: string, value: string, locale: string): strin
     if (known) return known[0].replace(/-/g, ' ');
     if (v === 'نعم') return 'Yes';
     if (v === 'لا') return 'No';
-    if (ll === 'age') {
+    if (ll === 'facade') {
+      const directions: Record<string, string> = { شرق: 'East', شرقية: 'East', غرب: 'West', غربية: 'West', شمال: 'North', شمالية: 'North', جنوب: 'South', جنوبية: 'South' };
+      const parts = v.split(/[\s-]+/);
+      if (parts.every(part => directions[part])) return parts.map(part => directions[part]).join(' ');
+    }
+    if (/street.*width|عرض الشارع/i.test(ll)) return v.replace(/^(\d+(?:\.\d+)?)\s*(?:متر|م)$/u, '$1 m');
+    if (ll === 'age' || ll === 'building age (years)') {
       if (v === 'جديد') return 'New';
       if (v === 'أقل من سنة') return 'Less than 1 year';
-      if (v === 'سنة واحدة') return '1 year';
+      if (v === 'سنة واحدة' || v === 'سنة' || v === 'سنه') return '1 year';
+      if (/^اكثر من عشر سنوات$/.test(v)) return 'Over 10 years';
       if (v === 'سنتان') return '2 years';
       const years = /^(أكثر من )?(\d+) (?:سنوات|سنة)$/.exec(v);
       if (years) return `${years[1] ? 'Over ' : ''}${years[2]} years`;

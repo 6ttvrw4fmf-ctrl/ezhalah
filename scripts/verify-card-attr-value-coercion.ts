@@ -115,7 +115,9 @@ check('Arabic host name uses the existing English brand name', englishCatalogTex
 for (const [label, value, expected] of [
   ['Furniture', 'غير مفروش', 'un furnished'], ['Facade', 'شرقية', 'east'],
   ['Property Usage', 'سكني', 'residential'], ['Age', 'جديد', 'New'],
-  ['Electricity', 'نعم', 'Yes'], ['Age', '2 years', '2 years'],
+  ['Electricity', 'نعم', 'Yes'], ['Facade', 'شرق', 'East'],
+  ['Facade', 'جنوبية - غربية', 'South West'], ['Street width', '20 متر', '20 m'],
+  ['Building age (years)', 'سنه', '1 year'], ['Building age (years)', 'اكثر من عشر سنوات', 'Over 10 years'], ['Age', '2 years', '2 years'],
   ['Plan number', '7489/ق/ب', '7489/ق/ب'],
 ]) check(`English ${label}: ${value}`, format(label, value, 'en') === expected);
 check('Arabic enum rendering retained', format('Facade', 'east', 'ar') === 'شرقية');
