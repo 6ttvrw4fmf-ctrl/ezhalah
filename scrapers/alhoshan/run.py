@@ -353,7 +353,31 @@ def map_listing(p: dict, photos: Optional[list[str]] = None) -> tuple[Optional[d
         "region_id": rid,
         "source_capture": {k: v for k, v in p.items() if k not in _PII},
     }
+    row.update(af_answers(p, specs))
     return row, category
+
+
+# ── Advanced Filter answers from the record's OWN fields (🔬 AF engineer, 2026-10-14) ─────────────────────
+# specs.direction («north») and specs.parkingSpaces (a count) are structured, and both were filed only in the
+# additional_info panel: on 10-14, 23 of 30 active ads stated a facade and 8 a parking count, and the
+# direction / parking columns were NULL on all of them (alhoshan 0 of 3 findable, direction missed 5 of 5).
+# specs.features is empty on every active record, so kitchen and the rooms have no structured field and the
+# record's own description is the statement (law §2), yes-or-nothing; parking is never read from prose.
+_PROSE_COLS = ("kitchen", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance")
+
+
+def af_answers(p: dict, specs: dict) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    facade = normalize.facade_from_slug(specs.get("direction"))
+    if facade:
+        out["direction"] = facade
+    spaces = _int(specs.get("parkingSpaces"))
+    if spaces and spaces > 0:
+        out["parking"] = True
+    for col, val in normalize.prose_amenities_yes(p.get("description"), skip=("parking",)).items():
+        if col in _PROSE_COLS:
+            out[col] = val
+    return out
 
 
 def main() -> int:
