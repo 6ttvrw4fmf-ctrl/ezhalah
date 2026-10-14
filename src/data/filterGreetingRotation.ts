@@ -81,3 +81,12 @@ export function pickFilterGreetingOpening(): string {
 
 // Test-only export: the baked list itself, so a barrier can assert its exact size and shape.
 export const __testing = { BAKED };
+
+const ENGLISH_OPENINGS = ['Hi Ezhalah 👋, ', 'Hello Ezhalah 🌿, ', 'Hey Ezhalah ✨, ', 'Hi there, Ezhalah 🏡, '] as const;
+let lastEnglishIndex = -1;
+export function pickEnglishFilterGreetingOpening(): string {
+  let index = Math.floor(Math.random() * ENGLISH_OPENINGS.length);
+  if (index === lastEnglishIndex) index = (index + 1) % ENGLISH_OPENINGS.length;
+  lastEnglishIndex = index;
+  return ENGLISH_OPENINGS[index];
+}

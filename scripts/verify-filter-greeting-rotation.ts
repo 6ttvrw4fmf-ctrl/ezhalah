@@ -18,6 +18,16 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { pickFilterGreetingOpening, setFilterGreetingsCache, __testing } from '../src/data/filterGreetingRotation.ts';
+import { pickEnglishFilterGreetingOpening } from '../src/data/filterGreetingRotation.ts';
+
+let previousEnglish = '';
+for (let i = 0; i < 30; i++) {
+  const opening = pickEnglishFilterGreetingOpening();
+  if (opening === previousEnglish || /[\u0600-\u06ff]/.test(opening) || !/\p{Extended_Pictographic}/u.test(opening)) {
+    throw new Error('English Filter openings must rotate without adjacent repeats and include an emoji, without Arabic');
+  }
+  previousEnglish = opening;
+}
 
 const root = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');

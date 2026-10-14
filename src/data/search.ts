@@ -22,6 +22,7 @@ import { translitPlace } from '@/lib/translitPlace';
 import { CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { groupMembers, CLEAN_MACRO, SUBGROUPS } from './propertyTypes';
 import { pickFilterGreetingOpening } from './filterGreetingRotation';
+import { pickEnglishFilterGreetingOpening } from './filterGreetingRotation';
 import { primeFilterGreetings } from './loaderFilterGreetings';
 
 // A parsed search. Every field optional — empty fields broaden, never dead-end. (PRD §6.1)
@@ -436,7 +437,7 @@ export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
     ? t("I couldn't find anything at {amount}, but here are some similar to what you're looking for:", { amount: tooLowAmount })
     : t('{calc}Here are {what} {verb} {place} that match what you’re looking for.', { calc: calcNote, what: subWhat, verb, place: subPlace });
 
-  return { bubble, sub };
+  return { bubble: getLocale() === 'en' ? pickEnglishFilterGreetingOpening() + bubble : bubble, sub };
 }
 
 export const grouped = (n: number) => n.toLocaleString('en-US');

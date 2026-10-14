@@ -73,6 +73,8 @@ The header and sidebar Ezhalah name uses dark green. Assistant replies and resul
 
 The AI Agent’s empty composer hint aligns left in English and right in Arabic (owner, 2026-10-07). Typed messages keep their own language direction. The entire user bubble sits on the left for English and on the right for Arabic, determined per message (owner clarification, 2026-10-13).
 
+English Filter submissions localize city/district display and rotate short English greetings with emojis before the request, matching the Arabic treatment. The following searching status keeps its translated rotating lines and sparkle mark (owner, 2026-10-13).
+
 
 **Shell (`src/app/_layout.tsx`):** a single expo-router `Stack`. Provider tree: `GestureHandlerRootView`
 → `SafeAreaProvider` → `LocaleProvider` → `AppProvider` → `StatusBar` → `Shell`. On web ≥ 900px a
