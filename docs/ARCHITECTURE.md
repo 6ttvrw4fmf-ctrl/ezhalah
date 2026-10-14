@@ -69,13 +69,15 @@ STOP → restore → fix → continue. Checklist: `ezhalah-app/docs/DEPLOY_REGRE
 
 **Chat language (owner, 2026-10-07):** reply in the latest user message’s language without changing the interface language, sidebar, controls, or page layout. Assistant messages stay on the assistant side; text keeps its own reading direction. Save original messages/replies verbatim. Automatic saved titles follow the latest user message and its language, including when search results arrive; manually renamed titles remain unchanged.
 
+The empty English chat subtitle is “Describe it and Ezhalah” without punctuation; English model descriptions use ordinary sentence punctuation rather than long dashes (owner, 2026-10-14).
+
 The header and sidebar Ezhalah name uses dark green. Assistant replies and result slogans keep the same green sparkle stars as the thinking state (owner, 2026-10-07).
 
 The AI Agent’s empty composer hint aligns left in English and right in Arabic (owner, 2026-10-07). Typed messages keep their own language direction. The entire user bubble sits on the left for English and on the right for Arabic, determined per message (owner clarification, 2026-10-13).
 
 English property cards localize platform attribution, property-type labels and finite attribute values using the existing bilingual catalog (owner, 2026-10-13). Source reference IDs, including Arabic letters in plan numbers, remain verbatim; source images and logos remain original. Arabic card display is preserved.
 
-English Filter submissions localize city/district display and rotate short English greetings with emojis before the request, matching the Arabic treatment. Advanced Filter round receipts localize committed items and skip labels in ask order; English selections join with commas. The following searching status keeps its translated rotating lines and sparkle mark (owner, 2026-10-13).
+English Filter submissions localize city/district display and rotate short English greetings with emojis before the request, matching the Arabic treatment. The eleven approved Arabic Filter greetings each have a natural English translation with the same emoji (owner, 2026-10-14); English must not use a smaller substitute pool. Advanced Filter selection messages also open with nine translated English courtesy/request phrases, using the same emojis and independent non-repeating rotation as Arabic (owner, 2026-10-14). Advanced Filter round receipts localize committed items and skip labels in ask order; English selections join with commas. The following searching status keeps its translated rotating lines and sparkle mark (owner, 2026-10-13).
 
 
 **Shell (`src/app/_layout.tsx`):** a single expo-router `Stack`. Provider tree: `GestureHandlerRootView`
