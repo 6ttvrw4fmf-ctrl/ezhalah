@@ -296,7 +296,8 @@ jobs:
           - { source: superoffice, cmd: "python -m scrapers.superoffice.run --type all", tmo: 10, proxy: true }
           # 2026-09-28 (owner-approved): Shomou = 26 index pages + ~1,028 ad pages (only in-date ads kept);
           #   Maktab = one public JSON page of offices.
-          - { source: shomou,      cmd: "python -m scrapers.shomou.run --type all", tmo: 30 }
+          #   shomou: `proxy: true` (2026-10-14, Scraping Engineer) — 10-14 read index page 0 as no ad on one pinned profile.
+          - { source: shomou,      cmd: "python -m scrapers.shomou.run --type all", tmo: 30, proxy: true }
           - { source: maktab,      cmd: "python -m scrapers.maktab.run --type all", tmo: 10 }
           # wave 3, batch 5: holoul is an open JSON API (238 rows → 30); eightfloor is a Nuzul tenant (public API, 2 rows); manzo is an open JSON API (1 row).
           - { source: manzo,        cmd: "python -m scrapers.manzo.run --type all", tmo: 10, proxy: true }

@@ -715,6 +715,12 @@ def upsert(row: dict, main_type: str) -> None:
     db.upsert_wasalt_residential(row)
 
 
+# Where and how each slice stopped early on a VALID but empty page (2026-10-14, backlog 532); main()
+# writes it into the run's notes so a shard's own row says why it is short.
+_STOPS: list[str] = []
+_EMPTY_PAGE_RETRY_PAUSE_S = float(os.environ.get("WASALT_EMPTY_PAGE_RETRY_PAUSE_S", "8"))
+
+
 def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[int, int, bool, bool]:
     """Sweep one type-slug × deal. Returns (upserted, source_count, page1_valid, truncated).
 
@@ -750,7 +756,23 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[
     upserted = 0
     truncated = False
     for page in range(1, pages + 1):
-        _, _, props, valid = fetch_page(s, deal, cat, slug, page)
+        pg_count, pg_total, props, valid = fetch_page(s, deal, cat, slug, page)
+        if not props and valid and page < pages and upserted < count:
+            # A VALID page with no listings BEFORE the last page the source itself announced is not
+            # «the end of results» (2026-10-14, backlog 532): on 10-13 every enum shard stopped this
+            # way after ~5-6 pages (apartment/sale: count=33,814, pages≤1053, 176 upserted) and each
+            # one reported ok=true, so only the roll-up's 40,000 floor noticed 177,017 → 5,408. Ask
+            # once more after a pause; a second empty answer is an INCOMPLETE slice, named with what
+            # the empty page itself reported so the run's notes say where and how the source stopped.
+            time.sleep(_EMPTY_PAGE_RETRY_PAUSE_S)
+            pg_count, pg_total, props, valid = fetch_page(s, deal, cat, slug, page)
+            if not props and valid:
+                _STOPS.append(f"{slug}/{deal}: source served an empty page {page} of {pages} "
+                              f"(page 1 count={count}; empty page reported count={pg_count} "
+                              f"totalPages={pg_total}) after {upserted} rows")
+                print(f"   ✗ {_STOPS[-1]} — slice is INCOMPLETE")
+                truncated = True
+                break
         if not props:
             if not valid:
                 # A failed fetch mid-crawl, not a genuine end of results. Stop taking new pages
@@ -847,6 +869,8 @@ def main() -> int:
             notes = (f"TRUNCATED mid-crawl for {args.slug}/{args.deal}: upserted={total} of "
                      f"source-reported count={src_count} — a page failed to fetch/parse before the "
                      f"catalogue was fully walked (not a legitimate end of results)")
+            if _STOPS:
+                notes += " | " + "; ".join(_STOPS)[:300]
         elif legit_empty:
             notes = f"source reports 0 listings for {args.slug}/{args.deal} (valid page, empty category)"
         elif ok:
