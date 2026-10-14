@@ -114,10 +114,11 @@ def _payload_area_lines(body: str) -> list[str]:
     return out
 
 
-# The same for the ad's PLACE. mobasher draws the page from its API payload, where the district is a structured
-# field (`"neighborhoodNameAr":"حي الثقبة"`), while the visible text is only the seller's description («الموقع:
-# المنطقة الشرقية، مدينة الخبر، حي الحمراء»). 17693081 (2026-10-14, re-read run 38527021238) was scored a district
-# MISMATCH against that prose although we serve exactly the structured value: prose is never the source field.
+# The same for the ad's PLACE: a page whose app payload carries the district as a structured field
+# (`"neighborhoodNameAr":"حي …"`, `"districtNameAr"`, `"district_ar"`) gets it as one evidence line, so the score
+# does not fall back on the seller's description. (Written for mobasher 17693081 on 2026-10-14; a later re-read
+# showed mobasher's served HTML does NOT carry the field at all — that site is handled by PROSE_ONLY_DISTRICT in
+# new_listings_score.py. This reader rule stays for any page that does.)
 _PAYLOAD_PLACE = re.compile(r'"(?:neighborhoodNameAr|districtNameAr|district_ar)":"([^"]{2,60})"')
 
 

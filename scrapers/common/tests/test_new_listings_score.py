@@ -499,3 +499,15 @@ def test_a_share_link_whose_page_never_carries_the_ad_code_is_unreadable():
     assert not page_lacks_its_ad("https://nufouth.com/latest-offers?ads-N5470=1", table + '<div id="N5470">2 غرف</div>')
     assert not page_lacks_its_ad("https://nufouth.com/latest-offers?ads-N5470=1", table.replace("6 غرف", "إعلان 5470"))
     assert not page_lacks_its_ad("https://aqar.fm/ad/5470", table)        # no code in the query: not this rule
+
+
+def test_a_district_the_page_names_only_in_seller_prose_is_silence_on_prose_only_sites():
+    # mobasher 17693081 (2026-10-14): we serve the API's «حي الثقبة»; the page HTML has only the seller's
+    # «مدينة الخبر، حي الحمراء». On a prose-only site that is silence; elsewhere it still contradicts.
+    from scrapers.common.new_listings_score import PROSE_ONLY_DISTRICT
+    page = {"title": "شقة سكني في المنطقة الشرقية الخبر للبيع",
+            "meta": {"description": "الموقع: المنطقة الشرقية، مدينة الخبر، حي الحمراء."}}
+    stored = {"district_ar": "حي الثقبة"}
+    assert "mobasher" in PROSE_ONLY_DISTRICT
+    assert compare_listing(stored, page, prose_only_district=True)["district"] == PAGE_SILENT
+    assert compare_listing(stored, page)["district"] == MISMATCH

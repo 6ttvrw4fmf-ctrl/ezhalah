@@ -57,6 +57,12 @@ FLOOR_CAP = 5                      # …at this
 
 # Owner 2026-10-02: Gathern + Aqar Monthly stays are priced by length; never compare their price.
 SKIP_PRICE = {"gathern", "aqarmonthly"}
+# Websites whose served page names the district ONLY in the seller's free text, while the platform's own
+# structured neighbourhood (which we serve) lives in an API the page HTML does not carry. mobasher 17693081
+# (2026-10-14): API neighborhoodNameAr «حي الثقبة» (stored), page HTML contains «الثقبة» nowhere (re-read run
+# 38527021238, around=الثقبة: 0 hits), description «مدينة الخبر، حي الحمراء». Prose is never the source field
+# (rule 3), so on these pages the district is page-silent, never a mismatch.
+PROSE_ONLY_DISTRICT = {"mobasher"}
 
 MATCH, MISMATCH, WE_MISS, PAGE_SILENT, UNREADABLE = "match", "mismatch", "we_miss", "page_silent", "unreadable"
 
@@ -160,7 +166,8 @@ def _num_pattern(v) -> re.Pattern:
     return re.compile(r"(?<![\d.,])" + body + r"(?![\d])")
 
 
-def compare_listing(stored: dict, page: dict, *, skip_price: bool = False) -> dict[str, str]:
+def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
+                    prose_only_district: bool = False) -> dict[str, str]:
     """Every field we serve vs what the page itself says. Pure; no client, no network."""
     # Line-scoped checks (a small number near its keyword, negation) need real page lines.
     # text_head is page lines joined with " | " (source_reread), so splitting recovers them;
@@ -193,7 +200,7 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False) -> di
         elif kind == "bool":
             out[name] = _cmp_bool(stored.get(col), lines, kw)
         elif kind == "district":
-            out[name] = _cmp_district(stored.get(col), whole_loc)
+            out[name] = PAGE_SILENT if prose_only_district else _cmp_district(stored.get(col), whole_loc)
         elif kind == "deal":
             out[name] = _cmp_valued(stored.get(col), whole, DEAL_KW)
         else:
@@ -584,7 +591,8 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
-        fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE), stored)
+        fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
+                                       prose_only_district=platform in PROSE_ONLY_DISTRICT), stored)
     if row["unreadable_pages"]:
         row["note"] = f"{row['unreadable_pages']} page(s) unreadable (never counted as wrong)"
     return row
