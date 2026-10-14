@@ -47,7 +47,7 @@ check('all 9 appear over many rounds (real rotation)', seen.size === 9, `saw ${s
 
 const wired = (src: string) =>
   /import \{ pickAfCourtesyOpening \} from '@\/data\/afCourtesyOpeners';/.test(src)
-  && /const roundLabel = ageFlowLabelsRef\.current\.join\('، '\);\s*void runRefine\(q, '__guided__', '', locale === 'ar' && roundLabel \? pickAfCourtesyOpening\(\) \+ roundLabel : roundLabel, \{/.test(src);
+  && /const roundLabel = ageFlowLabelsRef\.current\.join\(locale === 'ar' \? '، ' : ', '\);\s*void runRefine\(q, '__guided__', '', locale === 'ar' && roundLabel \? pickAfCourtesyOpening\(\) \+ roundLabel : roundLabel, \{/.test(src);
 check('the AF round\'s bubble = courtesy + summary, Arabic UI only', wired(AGENT));
 
 // ── mutation proofs ──────────────────────────────────────────────────────────────────────────────
