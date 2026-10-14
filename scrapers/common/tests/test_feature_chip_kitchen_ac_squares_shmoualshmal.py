@@ -44,3 +44,17 @@ def test_shmoualshmal_kitchen_tag_answers_kitchen():
 
 def test_shmoualshmal_silence_stays_null():
     assert _sh_row(["سطح"]).get("kitchen") is None
+
+
+def test_squares_street_width_comes_from_the_ad_words(monkeypatch):
+    # No structured width/facade field on squares; 13602726 says «عرض الشارع : 15 متر» (re-read 38384423613).
+    monkeypatch.setattr(SQ, "place", lambda a: ("الرياض", 3, 1, None, None))
+    monkeypatch.setattr(SQ, "find_district_in_text", lambda t, c: None)
+    rec = {"id": 2, "link": "https://squares.com.sa/y/", "title": {"rendered": "فيلا بحي القدس للبيع"},
+           "content": {"rendered": "المساحة : 360 متر مربع\nعرض الشارع : 15 متر\nعمر العقار : سنتين"}}
+    detail = {"address": "حي القدس, الرياض, السعودية", "price_text": "ريال4,500,000", "facts": {}, "features": []}
+    row = SQ.map_listing(rec, "فيلا", "Buy", detail)[0]
+    assert row.get("street_width_m") == 15
+    assert row.get("direction") is None
+    rec["content"]["rendered"] = "المساحة : 360 متر مربع"
+    assert SQ.map_listing(rec, "فيلا", "Buy", detail)[0].get("street_width_m") is None

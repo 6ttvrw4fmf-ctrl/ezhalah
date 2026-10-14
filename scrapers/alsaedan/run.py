@@ -182,6 +182,7 @@ import argparse
 import html as html_mod
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -505,6 +506,47 @@ def map_listing(card: dict[str, Any], project: Optional[dict[str, Any]],
 
 
 # ── FETCH ────────────────────────────────────────────────────────────────────────────────────────
+# ── the unit page's OWN spec grid (🔬 AF engineer, 2026-10-13, backlog 513) ─────────────────────────
+# The list card carries area, rooms, baths and floor only; the unit page adds a structured cell per fact,
+# `<small>مطبخ</small><b>1</b>` (CI source-reread 38379218579: units 3236, 3161 and 3058 all print it).
+# alsaedan scored 0 of 8 findable that night, kitchen missed on 10 of 10. The cell is THIS unit's own
+# figure, so unlike a project-level list it may be stored: N >= 1 → True, a printed 0 → False, a cell
+# the page does not print or a page that could not be read → unknown (never «no»).
+_CELL_RE = re.compile(r"<small>\s*([^<]{1,40}?)\s*</small>\s*<b>\s*([^<]{1,20}?)\s*</b>", re.S)
+_CELL_COLS = {"مطبخ": "kitchen"}
+UNIT_PAGE_PACE = 0.5
+
+
+def unit_page_answers(page: str) -> dict[str, bool]:
+    """Amenity answers from the unit page's own spec cells; {} when it states none."""
+    out: dict[str, bool] = {}
+    for label, value in _CELL_RE.findall(page or ""):
+        col = _CELL_COLS.get(_txt(label) or "")
+        n = normalize.to_int(value)
+        if col and n is not None and col not in out:
+            out[col] = n >= 1
+    return out
+
+
+def add_unit_page_answers(s: cc.Session, rows: list[dict[str, Any]], fetch=None) -> int:
+    """Read each unit page once (a unit offered both ways is one page) and merge its answers."""
+    fetch = fetch or (lambda url: _get(s, url))
+    seen: dict[str, dict[str, bool]] = {}
+    for r in rows:
+        url = r.get("listing_url")
+        if not url:
+            continue
+        if url not in seen:
+            try:
+                seen[url] = unit_page_answers(fetch(url))
+            except Exception:  # noqa: BLE001 — an unread page is unknown, never a denial
+                seen[url] = {}
+            if UNIT_PAGE_PACE:
+                time.sleep(UNIT_PAGE_PACE)
+        r.update(seen[url])
+    return sum(1 for v in seen.values() if v)
+
+
 def _get(s: cc.Session, url: str) -> str:
     r = None
     for attempt in range(3):
@@ -643,6 +685,8 @@ def main() -> int:
                 if args.type != "all" and cat != args.type:
                     continue
                 (com if cat == "commercial" else res).append(row)
+        answered = add_unit_page_answers(s, res + com)
+        print(f"  unit pages with a spec answer: {answered}", flush=True)
         notes = _tally(skipped)
         if skipped:
             print("  skipped (not guessed): " + notes)

@@ -287,6 +287,14 @@ def map_listing(rec: dict, ptype_ar: str, deal: str, detail: dict[str, Any]) -> 
     for word, col in _FEATURE_COLS.items():
         if word in features:
             row[col] = True
+    # Street width and facade have NO structured field on this site (its fact block is type, build year
+    # and area only), so the ad's own words are the statement (law §2): «عرض الشارع : 15 متر» on
+    # 13602726 (CI re-read 38384423613). The shared reader keeps the fleet rule — one street or nothing.
+    width, facade = normalize.street_from_prose(body)
+    if width is not None:
+        row["street_width_m"] = width
+    if facade is not None:
+        row["direction"] = facade
     if deal == "Buy":
         row["price_total"] = price
     else:
