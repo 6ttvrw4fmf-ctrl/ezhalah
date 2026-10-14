@@ -22,7 +22,11 @@
 // The class this guards is NOT "numbers": it is "a source value reaches a string-only renderer".
 // Both halves are asserted — the boundary coercion (root cause) and the render-site String()
 // (defence in depth) — because either one alone lets the class back in through a new call site.
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { liftSymbols } from './lib/liftSymbols.ts';
 
 const REMOTE = readFileSync(new URL('../src/data/remote.ts', import.meta.url), 'utf8');
 const CARD = readFileSync(new URL('../src/components/ResultCard.tsx', import.meta.url), 'utf8');
@@ -84,6 +88,75 @@ check('arAttrValue coerces its label argument before .trim()',
 const unguarded = [...CARD.matchAll(/(?<!String)\((?:value|label|r\.value|r\.label) \?\? ''\)\.trim\(\)/g)];
 check('no unguarded (value|label ?? \'\').trim() remains in ResultCard', unguarded.length === 0,
   `found ${unguarded.length}: every listing-sourced value must go through String() first`);
+
+// Execute the actual English card formatter, including Arabic source enums and IDs.
+const i18n = await liftSymbols('src/i18n.tsx', [
+  { header: 'const AR:' }, { header: 'const EN:' },
+  { header: 'export function englishCatalogText(' },
+], ['englishCatalogText']);
+const englishCatalogText = i18n.englishCatalogText as (text: string) => string;
+const declarations = [
+  { header: 'const AR_YESNO:', endsWith: /;$/ },
+  { header: 'const FURNISH_VALUES_AR:' }, { header: 'const AR_ENUM:' },
+  { header: 'export function arAttrValue(' },
+];
+const translitSource = readFileSync('src/lib/translitPlace.ts', 'utf8').replace(/export /g, '').replace("import sa from '@/data/sa-locations.json';", 'const sa = ' + readFileSync('src/data/sa-locations.json', 'utf8') + ';');
+const prelude = `${translitSource}\n
+const englishCatalogText = ${englishCatalogText.toString()};
+const AR = ${JSON.stringify((await liftSymbols('src/i18n.tsx', [{header:'const AR:'}], ['AR'])).AR)};
+const EN = ${JSON.stringify((await liftSymbols('src/i18n.tsx', [{header:'const EN:'}], ['EN'])).EN)};
+const FREE_TEXT_PROSE_LABELS = new Set();
+const ATTRIBUTE_UNRESOLVED_AR = 'غير محدد';
+const arabicOrPlaceholderForFreeText = (v: string) => v;
+const translateTrailingPeriodWord = (v: string) => v;
+`;
+const formatters = await liftSymbols('src/components/ResultCard.tsx', declarations, ['arAttrValue'], prelude);
+const format = formatters.arAttrValue as (label: string, value: string, locale: string) => string;
+check('Arabic host name uses the existing English brand name', englishCatalogText('أحمد المحيسني العقارية') === 'Ahmed Almuhaysini');
+for (const [label, value, expected] of [
+  ['Furniture', 'غير مفروش', 'un furnished'], ['Facade', 'شرقية', 'east'],
+  ['Property Usage', 'سكني', 'residential'], ['Age', 'جديد', 'New'],
+  ['Electricity', 'نعم', 'Yes'], ['Facade', 'شرق', 'East'],
+  ['Facade', 'جنوبية - غربية', 'South West'], ['Street width', '20 متر', '20 m'],
+  ['Building age (years)', 'سنه', '1 year'], ['Building age (years)', 'اكثر من عشر سنوات', 'Over 10 years'], ['Age', '2 years', '2 years'],
+  ['Street', 'حي الروضة', 'Al Rawdah'],
+  ['Ad source', 'الهيئة العامة للعقار', 'Real Estate General Authority'],
+  ['Other obligations on the property', 'لايوجد', 'None'],
+  ['Other obligations on the property', 'لا يوجد', 'None'],
+  ['Amenities', 'موقف', 'Parking'], ['Property services', 'الكهرباء، المياه، الصرف الصحي', 'Electricity, Water Supply, Sanitation'],
+  ['Plan number', '7489/ق/ب', '7489/ق/ب'],
+]) check(`English ${label}: ${value}`, format(label, value, 'en') === expected);
+check('Arabic source authority retained', format('Ad source', 'الهيئة العامة للعقار', 'ar') === 'الهيئة العامة للعقار');
+check('Arabic explicit absence retained', format('Other obligations on the property', 'لايوجد', 'ar') === 'لايوجد');
+check('Arabic enum rendering retained', format('Facade', 'east', 'ar') === 'شرقية');
+for (const [, name] of readFileSync('src/lib/listingDisplay.ts', 'utf8').matchAll(/return '([^']*[ء-ي][^']*)'/g)) {
+  check(`English platform name: ${name}`, !/[ء-ي]/.test(englishCatalogText(name)));
+}
+// Watch the original defect fail: removing the English branch must Arabicize English values again.
+const mutantDir = mkdtempSync(join(tmpdir(), 'card-locale-mutant-'));
+try {
+  const mutantFile = join(mutantDir, 'card.tsx');
+  const mutant = CARD.replace("if (locale === 'en') {", "if (locale === 'disabled') {");
+  assert.notEqual(mutant, CARD);
+  writeFileSync(mutantFile, mutant);
+  const broken = (await liftSymbols(mutantFile, declarations, ['arAttrValue'], prelude)).arAttrValue as typeof format;
+  function mustCatch() { assert.throws(() => assert.equal(broken('Age', '2 years', 'en'), '2 years'), assert.AssertionError); }
+  mustCatch();
+  check('MUTATION: removing English locale branch is caught', true);
+  const i18nSource = readFileSync('src/i18n.tsx', 'utf8');
+  const missingAuthority = i18nSource.replace("  'الهيئة العامة للعقار': 'Real Estate General Authority',", '');
+  assert.notEqual(missingAuthority, i18nSource);
+  const mutantCatalogFile = join(mutantDir, 'i18n.tsx');
+  writeFileSync(mutantCatalogFile, missingAuthority);
+  const brokenCatalog = (await liftSymbols(mutantCatalogFile, [
+    { header: 'const AR:' }, { header: 'const EN:' }, { header: 'export function englishCatalogText(' },
+  ], ['englishCatalogText'])).englishCatalogText as (text: string) => string;
+  assert.throws(() => assert.equal(brokenCatalog('الهيئة العامة للعقار'), 'Real Estate General Authority'), assert.AssertionError);
+  check('MUTATION: untranslated source authority is caught', true);
+
+} finally { rmSync(mutantDir, {recursive: true, force: true}); }
+
+check('both host-name render paths use English catalog lookup', (CARD.match(/name: locale === 'en' \? englishCatalogText\(sourceName\(listing.source\)\)/g) ?? []).length === 2);
 
 if (failed > 0) {
   console.error(`\n❌ card-attr-value-coercion: ${failed} check(s) failed.`);

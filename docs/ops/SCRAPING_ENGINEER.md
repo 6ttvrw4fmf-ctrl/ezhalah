@@ -30,42 +30,50 @@ safety rules (deploy lock, `safe-pr-merge.ts`, source truth, migration rules) st
 > your report with the reason and the plan. Your report gets one line: «🛰️ Sentry: N open in my area · fixed N · resolved N».
 
 ## 🎯 NEXT RUN ORDERS — written by ⚡ for itself (owner, 2026-10-12: «give yourself instructions so you do a good job on the next run»)
+
 These win over THE PLAN's timeline below; THE PLAN's rules still hold. Replace this block at the end of every run.
 
-> **Owner, 2026-10-12:** «Your job is to get better on a daily basis, and I want everything fixed and good.» Bar for every
-> night: fix rate ≥ 6 of 10 found, every number proven like a customer, rating ≥ 9, no over-claim.
+> **Owner, 2026-10-13, after the 10-13 run (8/10, fix rate 3/8 → 2/10, two sites left broken until he said «fix those»):**
+> «I want you to keep doing a better job on every run. Improve your job in the next run.»
+> **Bar for 10-14 (all five, measured in the `:end` row): fix rate ≥ 6/10 proven like a customer · 0 sites broken on our
+> side at the end · rating ≥ 9 · the owner never has to ask for a fix afterwards · no over-claim.**
 
-**What 10-13 learned (do not repeat):**
-- **One push per PR cycle.** Each push cancelled `npm test` mid-run (3 cycles lost, ~25 min). Batch commits locally, run
-  `PATH=<dir with python3 -> /usr/bin/python3>:$PATH npm run test:all` (646 checks, ~11 min; /usr/local/bin/python3 lacks
-  curl_cffi), push once.
-- **A new `scripts/verify-*.ts` needs an executable `mutation(...)` proof** (verify-new-barriers-are-mutation-proven).
-- **Pick rotation listings a customer CAN find:** a rental with `rent_period_ar` NULL is never in a rent search (owner rule),
-  so filter `deal_ar='بيع' or rent_period_ar is not null`. That «false FAIL» found the akariyoun bug, though: when a site has
-  100% NULL periods, re-read one page around «سنو» before calling it source silence.
-- **The Haraj shadow is in concurrency group `haraj-shadow`:** a cancelled run blocks the dispatch until it clears.
+> **Same bar on 10-15.** 10-14: PR #7041 merged at minute 29, its re-crawls proven inside the slot; the numbers are
+> in the 10-14 `:end` row.
 
-**Minute 0–15 (DB clock):** merge state of PR #6933 (merge on green with `safe-pr-merge.ts` if still open), then the proofs below.
+> **Kept from 10-13 (hard rules; on 10-14 they got the merge in at minute 29 and the re-crawl proven by minute ~50):** ship ONE
+> PR early (`pytest scrapers/common/tests` + `npm run test:all` locally, then push once); read every failed site's
+> exception TEXT in the first 15 min and classify OURS/THEIRS; no heavy dispatch before your PR merges; one push per
+> cycle; pick rotation listings with `deal_ar='بيع' or rent_period_ar is not null`; `issues_fixed` = PASS `:proof` rows
+> for tonight's backlog items, counted by query.
 
-**Proofs owed from 10-13 (each a `:proof` row, all need #6933 merged + the 04:22 nightly + the :22 sync):**
-- akariyoun: `select rent_period_ar, count(*) from search_listings_ar where platform='akariyoun' and deal_ar='إيجار' and
-  production_ready group by 1` → سنوي ≈ 190; customer journey on 17376257 (Riyadh إشبيلية شقة, rent سنوي, 87,000) PASS.
-- abralosol: tonight's run ok with ~2,800 rows (route line in the log); ryadah: a scrape_runs row exists (ok, 18 rows).
-- gomenassat 15709861 (offer 818): area_m2 = 1652; card shows 1,652 م².
-- wasalt enrich_ar: pending count (rows_seen of `wasalt_enrich_ar_residential`) below 25,750 and falling.
-- silent_partial_success: my queue's 17-18 standing P1s resolved by the 06:59 10-13 sweep or later; only real ones left.
-- dealapp: the 10-13 catch-up crawl (run dispatched 05:41 UTC) saw ~19k; if the 10-14 02:33 nightly again hits the
-  100-min budget on all 12 shards, raise shards (verify-dealapp-crawl-budget) the same night.
+**New rule from 10-14: a fix is not «fixed» until the RAW row changed.** The 10-13 akariyoun fix passed its test and
+merged, and the next night's crawl stored nothing: the test markup was not the live markup (the live page indents
+`</h6>` by 52 spaces). After any parser fix, re-crawl and `select <field>, count(*)` on the RAW table before the :22
+sync; a test fixture must be copied VERBATIM from `source-reread` output, whitespace included.
 
-**Then, in order:** Haraj gate #4 result (run 38354212930, files 10-12 ≈13–18 KSA, untouched): hand-check every «offer»;
-100 clean → live build (THE PLAN item); any miss → fix the shape, re-classify every window, gate on 10-12 19+ KSA.
-Then backlog 494/496/478 leftovers (aqar farms area, aqarmonthly 13905878, wasalt 13746442 list-vs-detail price).
+**Minute 0–15 (DB clock):** `select now()`; `:end`/`:followup` rows; failed and absent sites of the 04:22 nightly with
+their exception text; ALSO `select date_trunc('day',started_at), sum(rows_seen) from scrape_runs where platform like
+'wasalt_enum%' group by 1` (the enum runs every 2 days at 21:00 UTC; its collapse is invisible in per-site checks).
 
-**Proof timing facts:** search sync :22 (commits ~:24–:26); detector sweep :59 (~3.5 min); Wasalt rich attrs 06:46 UTC;
-muhaysini nightly ends ~07:10 UTC; `scraper-early-warning` 07:45 UTC. USED Haraj windows (never gate on them):
-10-10 01–03, 10-10 ~07–12, 10-10 13 → 10-11 05, 10-11 08 → 20, 10-11 20 → 10-12 11, plus whatever gate #4 reads.
-- **A cancelled check run on a PR head blocks `safe-pr-merge` forever** (the API returns it next to the newer run). If you
-  must cancel a push-triggered shadow, land one more commit that does not touch `scrapers/haraj/**` so the head is clean.
+**Owed → first thing on 10-15/10-16:**
+- **wasalt enumeration (backlog 532, P1).** The 10-13 21:00 enum summed 5,408 rows vs 177,017 on 10-11: every shard
+  stopped after ~5-6 pages on a VALID empty page (apartment/sale count=33,814, 176 upserted). PR #7041 makes such a
+  slice TRUNCATED and writes «source served an empty page N of M (… empty page reported count=… totalPages=…)» into
+  the shard's notes. The next enum is 10-15 21:00 UTC; on 10-16 read those notes. If every shard stops at the same
+  page (a pagination cap at the source), redesign the enumeration to slice under the cap (city / price-band filters
+  on the search URL) and re-measure bandwidth first (~894 KB per browser page). Do NOT dispatch
+  `wasalt-enum-liveness.yml` yourself (liveness workflows are not yours to run). Nothing is deactivated meanwhile:
+  the roll-up refuses, so the listings are UNKNOWN, not dead.
+- **akariyoun (backlog 493/525):** if the customer proof did not land on 10-14, run it: rent search Riyadh إشبيلية
+  سنوي finds 17376257 (87,000). The raw table already reads 145 annual / 4 monthly / 17 no-field after the 05:37 re-crawl.
+- **backlog 535:** the roll-up refusal label `wasalt_enum_rollup_refused` auto-registered as kind='source' (the
+  auto-register regex in `mon_auto_register_platform` lacks `_enum|_shard|_rollup|_refused`). Before flipping it and
+  `wasalt_enum_shard` to internal, check that `mon_detect_silent_scraper_death` and the wasalt enum watchers still see
+  an internal label. Otherwise the only P0 on an enum collapse goes dark.
+
+**Proof timing facts:** search sync :22 (commits ~:24–:26); detector sweep :59; Wasalt enum 21:00 UTC every 2 days
+(~7 h when healthy); muhaysini nightly ends ~07:10 UTC; `scraper-early-warning` 07:45 UTC.
 
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «wire them so the next run turns out perfect … at the point where I don't need to check and agree on
@@ -604,3 +612,10 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   `select * from ops_engineer_alert_queue where engineer = 'scraping-engineer' order by severity, created_at;` — every
   open `alert_event` now carries a live engineer (`ops_engineer_for_alert()`, by kind first, legacy
   `owner_routine` second). Drive each to resolved or say why not; the report carries «🚨 Alerts: N → M».
+
+## Lesson from 2026-10-13 (copied by 🔧 from your own report)
+
+- **Merge inside the first 60 minutes, one push per PR cycle, `npm run test:all` locally first.** Your own line: three
+  pushes cancelled `npm test`, the merge window slipped past 06:45, and six fixes ended the night as «fixed, proof
+  pending» (fix rate 3/8 → 2/8, 40% → 38% → 25% over three nights). A fix that misses the 06:22 sync has no customer
+  proof in your slot; a proof row is what the owner counts.

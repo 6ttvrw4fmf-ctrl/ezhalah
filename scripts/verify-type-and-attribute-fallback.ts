@@ -148,7 +148,7 @@ const RESULTCARD_NOWS = stripWs(RESULTCARD_TS);
 // matched — in scripts/verify-additional-info-labels-are-arabic.ts, which also pins this wiring.
 check(
   "ResultCard.tsx's AdditionalInformationPanel resolves the row label via attrDisplayLabel(..., ATTRIBUTE_UNRESOLVED_AR)",
-  RESULTCARD_NOWS.includes('attrDisplayLabel(t(r.label),r.key,locale,ATTRIBUTE_UNRESOLVED_AR)'),
+  RESULTCARD_NOWS.includes("attrDisplayLabel(locale==='en'?englishCatalogText(r.label):t(r.label),r.key,locale,ATTRIBUTE_UNRESOLVED_AR)"),
 );
 check(
   'the placeholder is still the FINAL fallback for an unresolvable label (no English leak)',

@@ -170,3 +170,21 @@ def test_no_canary_is_not_a_passing_canary():
     assert "not answering this run reliably" in trust_quarantine_reason(False, 0, 0)
     # Even if a caller wrongly passes ok=True with nothing probed, an unprobed pool proves nothing.
     assert "not answering this run reliably" in trust_quarantine_reason(True, 0, 0)
+
+
+def test_one_runs_batch_cannot_be_every_control():
+    """2026-10-13: a trust-quarantined sweep stamped 11 rows alive at ONE timestamp (06:40); they were
+    every control for four runs, 7 read 404, and the sweep checked nothing until the next crawl."""
+    batch = NOW - timedelta(hours=1)
+    cluster = [_row(i, seen=batch, verified=batch) for i in range(1, 12)]
+    older = [_row(100 + i, seen=NOW - timedelta(hours=2, minutes=i)) for i in range(20)]
+    chosen = choose_canaries(cluster + older, 10, now=NOW)
+    assert len(chosen) == 10
+    assert sum(1 for r in chosen if r["id"] < 100) == 3          # a third, freshest-first
+    assert [r["id"] for r in chosen[3:]] == [100 + i for i in range(7)]
+
+
+def test_a_single_batch_still_fills_the_pool_when_nothing_else_is_fresh():
+    batch = NOW - timedelta(hours=1)
+    cluster = [_row(i, seen=batch) for i in range(1, 12)]
+    assert len(choose_canaries(cluster, 10, now=NOW)) == 10

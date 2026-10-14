@@ -663,6 +663,13 @@ const AR_CURRENCY: Array<[RegExp, number]> = [
 // counts (live 2026-10-13: that budget searched «≤ 500 ريال», the first figure, because the range was not seen).
 const RANGE_RE = /(?<![\p{L}\p{N}])من(?![\p{L}\p{N}])[\s\S]{0,40}?(?<![\p{L}\p{N}])(?:الى|إلى)(?!\p{L})|(?<![\p{L}\p{N}])بين(?![\p{L}\p{N}])[\s\S]{0,60}?(?<![\p{L}\p{N}])و(?!\p{L})|\bfrom\b[\s\S]{0,40}?\bto\b|\bbetween\b[\s\S]{0,60}?\band\b|\d\s*-\s*\d/imu;
 
+// A SIZE RANGE IS NOT A BUDGET (owner 2026-10-13): «أرض في الرياض مساحتها بين 1000 متر إلى 1500» read 1500 as money (only the first number
+// carries «متر»), and the app then showed a land «سعر المتر». A bare number joined by «إلى / و / -» to a sized number is that size's other end.
+const SIZE_UNIT = "(?:bed|bedroom|br\\b|sqm|sq\\.?\\s*m|m2|m²|meter|metre|square|sqft|sq\\.?\\s*ft|ft2|ft²|foot|feet|متر|م٢|م2|غرف|غرفة|غرفه)";
+const SIZE_JOIN = "(?:الى|إلى|الي|لين|حتى|حتي|-|–|to|و)";
+const SIZE_RANGE_AFTER = new RegExp(`^\\s*${SIZE_JOIN}\\s*\\d[\\d,.]*\\s*${SIZE_UNIT}`, "i");
+const SIZE_RANGE_BEFORE = new RegExp(`${SIZE_UNIT}\\s*${SIZE_JOIN}\\s*$`, "i");
+
 function extractPrice(input: string): string {
   // Arabic numerals FIRST — JS \d is ASCII-only, so «٧٠ الف» was invisible here until 2026-08-29.
   // See toWesternDigits() in ./postModel.ts for why this was a silent Arabic-first product bug.
@@ -693,6 +700,9 @@ function extractPrice(input: string): string {
     const cur = (mm[3] || "").toLowerCase();
     if (cur) rate = CURRENCY_RATES[cur] ?? 0;
     if (!rate) { for (const [re, r] of AR_CURRENCY) { if (re.test(after)) { rate = r; break; } } }
+    // …the other end of a SIZE range («1000 متر إلى 1500», «من 1000 الى 1500 متر») is a size too — unless it says it is money.
+    const scaled = !!scale || /^\s*(?:ألف|الف|آلاف|مليون|ملايين|مليار)/.test(after);
+    if (!scaled && !rate && (SIZE_RANGE_AFTER.test(t.slice(mm.index! + mm[0].length)) || SIZE_RANGE_BEFORE.test(t.slice(Math.max(0, mm.index! - 24), mm.index!)))) continue;
     if (rate && rate !== 1) n = Math.round(n * rate);
     if (n >= 100) candidates.push({ n: Math.round(n), index: mm.index! });
   }

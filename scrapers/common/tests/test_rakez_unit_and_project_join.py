@@ -46,7 +46,7 @@ TREE = {
 def _seed(monkeypatch):
     """Catalog slice keyed the way PRODUCTION keys it (norm_district_tok), scoped per test."""
     monkeypatch.setitem(_al._CITY, "_stub_", [(1, 1)])
-    for cid, districts in ((_RIYADH, ["حي الياسمين", "حي العليا"]),
+    for cid, districts in ((_RIYADH, ["حي الياسمين", "حي العليا", "حي العارض"]),
                            (_KHOBAR, ["حي البندرية"])):
         monkeypatch.setitem(_al._DISTRICT_BY_CITY, cid,
                             {_al.norm_district_tok(d) for d in districts})
@@ -207,8 +207,36 @@ def test_a_region_root_does_not_become_a_city():
     row, _ = _map(proj=_project(city_terms=(4620,), title="شقق ألين 152 - البندرية الخبر"))
     assert row is not None
     assert row["city_ar"] != "الشرقية", "a region must never be stored as the city"
-    assert row["city_id"] is None and row["district_ar"] is None, (
-        "nothing in the chain validates as a catalog city, so location stays NULL — never guessed")
+
+
+def test_when_the_tree_skips_the_city_the_projects_own_title_places_it():
+    """2026-10-14: ~400 available units (ألين 152 «– البندرية الخبر» 66, برج جوان «– التحلية الخبر»
+    55, مشيد 18 «– الفردوس جدة» 44, مزية «– العارض الرياض» 6 …) were unsearchable with city NULL
+    although the project title states district and city. The title's tail is the source's words."""
+    row, _ = _map(proj=_project(city_terms=(4620,), title="شقق ألين 152 – البندرية الخبر"))
+    assert (row["city_ar"], row["city_id"], row["district_ar"]) == ("الخبر", _KHOBAR, "حي البندرية")
+    row, _ = _map(proj=_project(city_terms=(), title="تاون هاوس مزية – العارض الرياض"))
+    assert (row["city_id"], row["district_ar"]) == (_RIYADH, "حي العارض")
+    row, _ = _map(proj=_project(city_terms=(), title="أدوار هيو فلورز رواح- الياسمين الرياض"))
+    assert (row["city_id"], row["district_ar"]) == (_RIYADH, "حي الياسمين")
+
+
+def test_the_title_never_overrules_the_region_the_tree_named(monkeypatch):
+    # tree says الشرقية (region 5); a title naming a Riyadh city must not place it in Riyadh
+    monkeypatch.setattr(R, "_REGION_AR_FOR", {1: "منطقة الرياض", 5: "المنطقة الشرقية"})
+    row, _ = _map(proj=_project(city_terms=(4620,), title="شقق – العليا الرياض"))
+    assert row["city_id"] is None and row["district_ar"] is None
+
+
+def test_a_title_tail_that_is_only_a_region_stays_null():
+    # «الشبيلي الشرقية»: الشرقية is the region, the title names no catalog city → NULL, never guessed
+    row, _ = _map(proj=_project(city_terms=(), title="شقق برج ويف ( wave ) – الشبيلي الشرقية"))
+    assert row["city_id"] is None and row["district_ar"] is None
+
+
+def test_the_title_fills_a_district_the_tree_did_not_name():
+    row, _ = _map(proj=_project(city_terms=(443,), title="شقق ألين 130 – العليا الرياض"))
+    assert (row["city_id"], row["district_ar"]) == (_RIYADH, "حي العليا")
 
 
 def test_a_district_not_in_our_catalog_stays_null():
@@ -218,7 +246,7 @@ def test_a_district_not_in_our_catalog_stays_null():
 
 
 def test_no_location_terms_at_all_yields_nulls_not_a_default():
-    row, _ = _map(proj=_project(city_terms=()))
+    row, _ = _map(proj=_project(city_terms=(), title="أدوار إرث ( اي كيو )"))
     assert row["city_ar"] is None and row["city_id"] is None and row["district_ar"] is None
 
 

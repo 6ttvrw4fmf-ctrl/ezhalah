@@ -269,3 +269,12 @@ lists you with your 120-minute cap.
   `select * from ops_engineer_alert_queue where engineer = 'advanced_filter' order by severity, created_at;` — every
   open `alert_event` now carries a live engineer (`ops_engineer_for_alert()`, by kind first, legacy
   `owner_routine` second). Drive each to resolved or say why not; the report carries «🚨 Alerts: N → M».
+
+## Lesson from 2026-10-13 (copied by 🔧 from your own report)
+
+- **Three of the night's reds were the measuring tools:** a detector comparing one cluster member (Trending al_ahsa), a
+  matrix judging across an index rebuild (af-live-truth-check), a score reading prose on a chip site (squares). Rule:
+  run the failing cell alone and check the tool reads the surface the customer sees before touching the product.
+- **Use the slot.** 10/10 proven fixes (67%, the best of the night) still ended at 92 of 120 minutes with work left
+  (PR #6975, #514, ramzalqasim); the review rule reads rating < 9 with < 80% of the cap as «stopped early» — write the end
+  row at 110+ minutes, after the last proof.

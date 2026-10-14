@@ -1653,6 +1653,12 @@ function fill(template: string, vars?: Record<string, string | number>): string 
 // tests use it); only what an English reader sees changes. Owner 2026-10-09: «the English is just the translation»
 // — each entry is the faithful translation of the Arabic value, in plain sentence-case English.
 const EN: Record<string, string> = {
+  'الهيئة العامة للعقار': 'Real Estate General Authority',
+  'لايوجد': 'None',
+  'لا يوجد': 'None',
+  'That is every matching listing ({n}). For a new search, open the menu and choose Search.': 'That is every matching listing ({n}). Start a new search below.',
+  'آي باكس': 'iBaax',
+  'شركة المربعات العقارية': 'Squares',
   'Listing bedrooms': 'Bedrooms',
   'Focus your search on one or more specific websites. We show only their listings.': 'Choose one or more specific websites, or all of them. We show only their listings.',
   'Smart Assistant': 'Smart Broker', // «الوسيط الذكي»
@@ -1670,6 +1676,14 @@ const EN: Record<string, string> = {
 export function translate(loc: Locale, en: string, vars?: Record<string, string | number>): string {
   const base = loc === 'ar' ? AR[en] ?? en : EN[en] ?? en;
   return fill(base, vars);
+}
+
+// Display-only reverse lookup for source-supplied Arabic names and closed labels.
+// Unknown source content stays verbatim; this must never rewrite reference IDs or prose.
+export function englishCatalogText(text: string): string {
+  if (EN[text]) return EN[text];
+  const entry = Object.entries(AR).find(([, arabic]) => arabic === text);
+  return entry ? (EN[entry[0]] ?? entry[0]) : text;
 }
 
 // Core translate: Arabic when active (falling back to the English key), English otherwise.

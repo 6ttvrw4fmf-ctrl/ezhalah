@@ -86,6 +86,11 @@ def _f(v: Any) -> Optional[float]:
         return None
 
 
+def listed_ad_number(d: dict, p: dict) -> str:
+    """The ad_number map_property would give this record, for a record it may refuse to map."""
+    return f"{PREFIX}{d.get('property_id') or d.get('slug') or p.get('slug')}"
+
+
 def map_property(d: dict) -> tuple[Optional[tuple[dict, str]], str]:
     if d.get("display_status") != "active":
         return None, f"status_{d.get('display_status')}"
@@ -175,6 +180,12 @@ def main() -> int:
     com: list[dict] = []
     skipped: dict[str, int] = {}
     unreadable = 0
+    # Every ad the source's own list served AND whose own record we read, mapped or not (2026-10-13).
+    # On 10-13 the walk read 29 records and mapped 0 (status «available» x28, a value nobody measured),
+    # so the seen set was empty, strike_read_gone had no control and returned «nothing seen», and
+    # MNZ1403 — its own page 404 — stayed on screen. Being listed never stamps a row alive; it only
+    # keeps a row from being read as unseen and lets the own-page oracle find a known-live control.
+    listed: set[str] = set()
     try:
         for p in listing:
             try:
@@ -183,6 +194,7 @@ def main() -> int:
             except Exception:  # noqa: BLE001
                 unreadable += 1
                 continue
+            listed.add(listed_ad_number(d, p))
             got, why = map_property(d)
             if not got:
                 skipped[why] = skipped.get(why, 0) + 1
@@ -208,7 +220,7 @@ def main() -> int:
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip", flush=True)
         complete = unreadable == 0 and len(listing) >= declared > 0
-        seen_all = {r["ad_number"] for r in res + com}
+        seen_all = {r["ad_number"] for r in res + com} | listed
         for tbl, rr in (("manzo_residential_listings", res), ("manzo_commercial_listings", com)):
             if rr and complete:
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)

@@ -202,7 +202,7 @@ const bedsLabel = (n: string, ar: boolean): string => {
 const greetingText = (locale: Locale): string =>
   locale === 'ar'
     ? 'وش العقار اللي في بالك؟\nقل لنا مواصفاته، وإزهله.'
-    : 'What property are you after?\nDescribe it, and leave it to Ezhalah.';
+    : 'What property are you after?\nDescribe it, and Ezhalah it.';
 
 // Ezhalah's SEARCHING-phase voice — one Najdi-flavoured swagger line chosen at random before each
 // search (its recognizable Saudi personality, NOT generic "searching now"). Shown ONLY while searching,
@@ -2795,11 +2795,11 @@ export default function Agent() {
     // nothing — same query, same cards — so the turn keeps its buttons and the user can open the
     // interview again from it; replacing them with a receipt would strand them with no way back in.
     const askedThisRound = [...ageFlowAskedRef.current].filter((id) => !(carry?.asked ?? []).includes(id));
-    const roundLog = buildAfRoundLog(askedThisRound, ageFlowFacetsRef.current);
+    const roundLog = buildAfRoundLog(askedThisRound, ageFlowFacetsRef.current, locale);
     const roundCommitted = buildAfSummary(ageFlowFacetsRef.current);
     if (carry && roundCommitted) setAfReceipt((r) => ({ ...r, [carry.msgId]: roundLog }));
     // The user's bubble opens with a rotating Saudi courtesy + request (owner 2026-10-10: «لاهنت 🤍، أبغى …»).
-    const roundLabel = ageFlowLabelsRef.current.join('، ');
+    const roundLabel = ageFlowLabelsRef.current.join(locale === 'ar' ? '، ' : ', ');
     void runRefine(q, '__guided__', '', locale === 'ar' && roundLabel ? pickAfCourtesyOpening() + roundLabel : roundLabel, {
       guided,
       // The picks in the chips' own words, without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات») — clearer than the raw labels.
@@ -3088,6 +3088,7 @@ export default function Agent() {
   const send = async (override?: string) => {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
+    setFilterOrigin(false);
     const selectedSourcesForTurn = pickerSourceSlugs(selectedSources);
     const sourceChoiceForTurn = pickerSourceExplicit;
     // The user SENT something (typed or voice — sendVoice funnels in here): the small sign-in
@@ -3106,6 +3107,7 @@ export default function Agent() {
     finalizeReveal(); // stop the previous search's cards from drip-revealing now that the user moved on
     stopReadAloud(); // a new turn starting is "another response" — stop any read-aloud from the last one
     setStopped(false); // new turn — re-enable the refine CTA and clear the stopped state
+    setCompleted(false); // a finished search never locks the chat: the next message reopens it (owner 2026-10-13)
     setBusy(true);
     // REFINE INTERCEPT: if we just asked a «نتائج أدق» clarifying question, read THIS message as the answer,
     // merge it into the SAME filter, and re-search — never run it through the normal agent path. (user 2026-06-27.)
@@ -4293,13 +4295,10 @@ export default function Agent() {
           <View style={s.col}>
             {(() => { const lastId = msgs[msgs.length - 1]?.id; const latestResult = msgs.filter(x => x.role === 'results').slice(-1)[0]; return msgs.map((m) => {
               if (m.role === 'user') {
-                // User messages ALWAYS sit on the user side (alignSelf: 'flex-end') regardless of the
-                // message language — the page direction (RTL/LTR) decides which screen edge that is.
-                // Only the text follows its own writingDirection. A narrow green edge marks the
-                // speaker without turning every line into the same rounded chatbot tile.
+                // Owner: English bubbles sit on the left; Arabic bubbles sit on the right.
                 const rtl = msgRTL(m.text);
                 return (
-                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={s.userBubble}>
+                  <View key={m.id} ref={(n: any) => { msgNodeRef.current[m.id] = n; }} style={[s.userBubble, { alignSelf: rtl ? 'flex-end' : 'flex-start' }]}>
                     <Text style={[s.userText, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
                       {m.typing ? <Typer text={m.text} onDone={onBubbleDone} /> : m.text}
                     </Text>
@@ -4360,7 +4359,7 @@ export default function Agent() {
               // results — STRICT ORDER (user request, repeated as a bug fix): slogan → summary →
               // result intro → sort line → property cards. Slogan + summary persist from the searching
               // status into the same bubble (no duplicate slogan/summary block, no out-of-order intro).
-              const rtl = msgRTL(m.text);
+              const rtl = msgRTL(m.summary || m.text);
               // Hoisted out of the RESULT INTRO block below (§3) so Read Aloud speaks the EXACT
               // same sentence the reply types on screen — one computation, never a second copy that
               // could drift from what's actually shown.
@@ -4464,7 +4463,7 @@ export default function Agent() {
                             for every answer, scope or not: nothing on this row removes anything. */}
                         {guidedPills.facets.map((f, i) => (
                           <View key={`${f.id}-${i}`} testID={`af-pill-${i}`} style={s.guidedPill}>
-                            <Text style={s.guidedPillTx}>{buildAfSummaryItems([f]).join('، ')}</Text>
+                            <Text style={s.guidedPillTx}>{buildAfSummaryItems([f], rfLang).join(rfLang === 'ar' ? '، ' : ', ')}</Text>
                           </View>
                         ))}
                       </View>
@@ -4778,9 +4777,8 @@ export default function Agent() {
                                   {/* The round, in the order it happened — answers and skips in ONE
                                       sentence (see finishGuided). No «اخترت:» label any more: the line now
                                       mixes both, and the head above already says what this card is.
-                                      Untranslated by design, exactly as buildAfSummary's output always
-                                      was — the builder writes finished Arabic. A receipt stored before
-                                      2026-09-20 is a plain committed-only sentence and still renders. */}
+                                      New receipts use the interface language, including skip labels.
+                                      Older stored receipts remain verbatim as conversation history. */}
                                   <Text
                                     testID="af-round-receipt-choices"
                                     style={[s.afReceiptTx, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}
@@ -4829,16 +4827,12 @@ export default function Agent() {
             bottom edge as the box grows, and the input keeps paddingEnd so text never reaches it. */}
         {/* When the keyboard is open (web), the home-indicator safe area sits behind it, so drop
             insets.bottom and keep the composer tight above the keyboard instead of double-padding. */}
-        {/* COMPLETED SEARCH (owner 2026-08-30, composer restored 2026-09-05): Advanced Filter reached
-            the final set (R11.1) or no useful question remained (R11.2). The conversation is DONE, but
-            the composer keeps its normal look — no separate replacement card. The input goes inert
-            with an explanatory placeholder, the mic disappears, and the send arrow becomes a lock
-            (see the `completed` branches below). The real "start over" action is the hamburger, top
-            left, not a button inside the composer. The saved transcript stays readable; Back / reopen
-            restore this same state from `completed`. */}
+        {/* COMPLETED SEARCH (owner 2026-08-30): Advanced Filter reached the final set (R11.1), or every match is
+            shown. `completed` still ends THAT search (no «عرض المزيد», the closing note), but since 2026-10-13 it
+            never locks the composer (owner: «remove the lock»): the user keeps typing, and send() reopens. */}
         <View style={[s.composerWrap, { paddingBottom: (IS_WEB && kbInset > 0 ? 0 : insets.bottom) + 8 }]} testID="agent-footer" onLayout={e => setLoaderBottomInset(Math.ceil(e.nativeEvent.layout.height))}>
           <View style={[s.col, s.composerCol]}>
-            {/* FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11; tightened 2026-09-12): the free-text
+            {/* FILTER RESULTS: after completion the composer is available below the final note (owner, 2026-10-13; supersedes the prior no-chat rule for completed searches): the free-text
                 composer never shows for a Filter-origin conversation — the disclaimer below stays
                 always-on regardless of origin (it's a listings-source legal notice, not part of
                 "the chat"). See filterOrigin's own comment above.
@@ -4851,9 +4845,10 @@ export default function Agent() {
                 undressed as a composer — no input, no pill, no placeholder — while the AI-Agent path
                 keeps its full composer (input + Stop while busy/revealing, input + mic/send once
                 idle) exactly as before. */}
-            {/* A FINISHED search shows no box at all (owner 2026-10-05: «this message that the chat is closed
-                must not show» → «Hide it completely»); a new search starts from ☰ or «تصفية». */}
-            {!filterOrigin && !completed ? (
+            {/* THE CHAT NEVER LOCKS (owner 2026-10-13: «remove the lock», superseding 2026-10-05 «hide it completely»): a
+                finished search keeps the box, and the next message simply starts the next search (send() clears
+                `completed`). ☰ still starts a clean chat. */}
+            {!filterOrigin || completed ? (
             <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>
               {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
                   recording row is an absolute overlay on the same surface), so the composer's size
@@ -4933,14 +4928,13 @@ export default function Agent() {
                 // rotation stops (any interaction) the familiar static placeholder returns.
                 // COMPLETED (owner request 2026-09-05): the box stays, it just goes inert — the
                 // placeholder explains why instead of inviting a message that can never send.
-                placeholder={completed ? t('This chat is closed — tap ☰ at the top to start a new search') : (showIntroExamples ? '' : t("Type the property you're looking for in Saudi Arabia..."))}
+                placeholder={showIntroExamples ? '' : t("Type the property you're looking for in Saudi Arabia...")}
                 placeholderTextColor={colors.muted}
                 selectionColor={colors.primary}
-                editable={!completed}
                 // Stable Arabic label (owner brief §11): a screen reader always hears this one
                 // sentence for the field — never the rotating examples (those are aria-hidden).
                 accessibilityLabel={t('Describe the property you are looking for')}
-                value={completed ? '' : typed}
+                value={typed}
                 onChangeText={(v: string) => { setIntroInteracted(true); setTyped(v); if (!v) setInputH(COMPOSER_MIN_H); }}
                 // Grows only as text wraps, capped at COMPOSER_MAX_H (then scrolls internally); the
                 // TARGET comes from RN's own line metrics (native + web), the MOTION from INPUT_EASE.
@@ -4988,7 +4982,7 @@ export default function Agent() {
                   guess about the browser's name, is the same mistake in the other direction.
                   While Ezhalah searches it stays in place, dimmed and inert (owner 2026-10-10: the row
                   never rearranges mid-turn — «شاهين 2.2» sits under it). */}
-              {isVoiceInputSupported() && !completed ? (
+              {isVoiceInputSupported() ? (
               <Pressable
                 testID="voice-mic"
                 onPress={() => { void startVoice(); }}
@@ -5024,7 +5018,7 @@ export default function Agent() {
                       over" action is the hamburger, top left), so it always renders disabled. */}
                   <Pressable
                     onPress={() => send()}
-                    disabled={completed || !typed.trim()}
+                    disabled={!typed.trim()}
                     onPressIn={() => sendSpring(0.9)}
                     onPressOut={() => sendSpring(1)}
                     onHoverIn={() => { setSendHover(true); sendSpring(1.06); }}
@@ -5032,11 +5026,11 @@ export default function Agent() {
                     hitSlop={6}
                     // @ts-expect-error web-only DOM props on the RNW host node
                     dataSet={{ ...TAP44 }}
-                    accessibilityLabel={completed ? t('This chat is closed — tap ☰ at the top to start a new search') : t('Search')}
-                    style={completed || !typed.trim() ? s.sendDisabled : undefined}
+                    accessibilityLabel={t('Search')}
+                    style={!typed.trim() ? s.sendDisabled : undefined}
                   >
-                    <Animated.View style={[s.sendBtn, sendHover && !completed && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
-                      <Ionicons name={completed ? 'lock-closed' : 'arrow-up'} size={completed ? 15 : 17} color="#fff" />
+                    <Animated.View style={[s.sendBtn, sendHover && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
+                      <Ionicons name="arrow-up" size={17} color="#fff" />
                     </Animated.View>
                   </Pressable>
                 </>

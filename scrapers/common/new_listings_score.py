@@ -57,6 +57,12 @@ FLOOR_CAP = 5                      # …at this
 
 # Owner 2026-10-02: Gathern + Aqar Monthly stays are priced by length; never compare their price.
 SKIP_PRICE = {"gathern", "aqarmonthly"}
+# Websites whose served page names the district ONLY in the seller's free text, while the platform's own
+# structured neighbourhood (which we serve) lives in an API the page HTML does not carry. mobasher 17693081
+# (2026-10-14): API neighborhoodNameAr «حي الثقبة» (stored), page HTML contains «الثقبة» nowhere (re-read run
+# 38527021238, around=الثقبة: 0 hits), description «مدينة الخبر، حي الحمراء». Prose is never the source field
+# (rule 3), so on these pages the district is page-silent, never a mismatch.
+PROSE_ONLY_DISTRICT = {"mobasher"}
 
 MATCH, MISMATCH, WE_MISS, PAGE_SILENT, UNREADABLE = "match", "mismatch", "we_miss", "page_silent", "unreadable"
 
@@ -160,7 +166,8 @@ def _num_pattern(v) -> re.Pattern:
     return re.compile(r"(?<![\d.,])" + body + r"(?![\d])")
 
 
-def compare_listing(stored: dict, page: dict, *, skip_price: bool = False) -> dict[str, str]:
+def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
+                    prose_only_district: bool = False) -> dict[str, str]:
     """Every field we serve vs what the page itself says. Pure; no client, no network."""
     # Line-scoped checks (a small number near its keyword, negation) need real page lines.
     # text_head is page lines joined with " | " (source_reread), so splitting recovers them;
@@ -188,12 +195,21 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False) -> di
                 if stored_v == int(stored_v):
                     stored_v = int(stored_v)
             out[name] = _cmp_number(stored_v, lines, whole, kw)
+            # Rule 5: a per-m² rate × size is the total the card SHOWS. A page that prints only that total
+            # states our price, not another one. muktamel 17584328 (2026-10-14, re-read run 38530789154):
+            # land rate 420 (the API's offer.price) × 690 m² = «289,800», the only figure on the page.
+            ppm, area = stored.get("price_per_meter"), stored.get("area_m2")
+            if (out[name] != MATCH and not stored.get("price_total") and not stored.get("price_annual")
+                    and ppm and area):
+                total = float(ppm) * float(area)
+                if total == int(total) and _cmp_number(int(total), lines, whole, kw) == MATCH:
+                    out[name] = MATCH
         elif kind == "number":
             out[name] = _cmp_number(stored.get(col), lines, whole, kw)
         elif kind == "bool":
             out[name] = _cmp_bool(stored.get(col), lines, kw)
         elif kind == "district":
-            out[name] = _cmp_district(stored.get(col), whole_loc)
+            out[name] = PAGE_SILENT if prose_only_district else _cmp_district(stored.get(col), whole_loc)
         elif kind == "deal":
             out[name] = _cmp_valued(stored.get(col), whole, DEAL_KW)
         else:
@@ -339,6 +355,23 @@ def _cmp_district(stored, whole: str) -> str:
 # login banner and a featured ad «جدة - حي الزهراء» / «الغرف 1», and scored our الخرج / العيون villa (6 rooms)
 # as 3 mismatches. Such a page has said nothing about the ad: unreadable, never wrong.
 SHELL_PAGE_PLATFORMS = frozenset({"ebriza"})
+
+
+# A share link that names its ad by CODE in the query («/latest-offers?ads-N5470=1», nufouth) opens the ad in a JS
+# modal: if the served HTML never contains that code, the page is the table of OTHER units and has said nothing
+# about this ad. nufouth 17667724 (2026-10-14, re-read run 38527525460): «5470» appears nowhere in the body, one
+# of the table's units is also in حي العارض (so is_other_ads_page saw «ours» and stood down), and «6 غرف» /
+# «3 غرف» / «4 غرف» from other units scored our 2 bedrooms a MISMATCH.
+_AD_CODE_IN_URL = re.compile(r"[?&]ads-([A-Za-z]*\d+)=")
+
+
+def page_lacks_its_ad(url: str | None, body: str) -> bool:
+    m = _AD_CODE_IN_URL.search(url or "")
+    if not m:
+        return False
+    code = m.group(1)
+    digits = re.sub(r"\D", "", code)
+    return code not in (body or "") and not re.search(r"(?<!\d)" + digits + r"(?!\d)", body or "")
 
 
 def is_other_ads_page(stored: dict, page: dict) -> bool:
@@ -562,11 +595,13 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             row["unreadable_pages"] += 1
             continue
         page = page_evidence(body)
-        if platform in SHELL_PAGE_PLATFORMS or is_other_ads_page(stored, page):
+        if (platform in SHELL_PAGE_PLATFORMS or is_other_ads_page(stored, page)
+                or page_lacks_its_ad(url, body)):
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
-        fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE), stored)
+        fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
+                                       prose_only_district=platform in PROSE_ONLY_DISTRICT), stored)
     if row["unreadable_pages"]:
         row["note"] = f"{row['unreadable_pages']} page(s) unreadable (never counted as wrong)"
     return row

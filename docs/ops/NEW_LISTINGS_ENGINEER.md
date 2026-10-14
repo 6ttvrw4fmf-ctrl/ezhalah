@@ -47,6 +47,29 @@ normal filter (city, district, type, rent, monthly), with the card note «اضغ
 price (owner rule 2026-10-02), and its link opens the unit for a customer (test 10 by clicking, phone and laptop). A unit
 whose link does not open is not «live».
 
+## ⚠️ OWNER 2026-10-13, after a second 5/10 night: «keep doing a better job on every run … improve your job in the next run»
+What went wrong on 10-13 (measured, not guessed): six scorer misreads fixed and proven, but the night still ended
+5/10 because every re-score drew a FRESH sample and a new site fell under 95% (arkaan 87% at 08:06, rakez 93.6% at
+08:30). I only fixed the sites that capped the 05:35 sample, one re-score at a time, and the last cap appeared with
+20 minutes left. Only ONE customer-visible fix shipped (bossbih towns), and its proof slipped an hour (the 08:22 sync
+raced the 08:20 refresh, #505). I also closed #455 before its proof.
+**Orders for 10-14, in this order. Each one ends in a proof row before the next starts:**
+1. **0:00–0:15: clear EVERY site under 99%, not just the ones under 95%.** Take the mismatch_ids of every row in tonight's
+   `ops_new_listings_score` with normal accuracy < 99%, and dispatch ONE `source-reread.yml` with all of them, with
+   `around=<our stored value>`. The next re-sample caps on whichever site sits at 96–98% today (10-13: arkaan, rakez, dealapp
+   96.9%). Our value on the page = scorer fix; not on the page = parser bug.
+2. **Real data bugs before scorer bugs.** #507 rakez area (we store 169, the page's unit table says 220.68 m²; 3 of 10 sampled
+   rakez ads) and #503 rakez project 58997 with no city (6 arrivals unsearchable). Read `/wp-json/wp/v2/unit` and `/project`
+   for those ids from CI first. These are what customers see, and #507 is today's cap.
+3. **Re-score after EACH merge** (`new-listings-score.yml`, 6 min), never in a batch at the end. The last re-score must start by
+   1:20 so a new cap still has 30 minutes to be fixed.
+4. **A customer-visible fix must land (merge + crawl/migration) by :05**, then prove it after :25. If the `:20` refresh is still
+   running at `:22` (cron job 17 vs 28), the sync reads the old snapshot and the proof moves to the next hour; check
+   `cron.job_run_details` before the journey.
+5. **Never close an item before its proof row.** "proof pending" is a state, not a close.
+6. Open queue items worth points tonight: #501 (Deal App age detector: compare like with like), #232 (card shows raw place
+   words when the district is unmatched, seen on bossbih «حرض, حرض»), #505 (sync/refresh race, 🔧's, but it delays my proofs).
+
 ## ▶ START HERE: instructions to myself (written by 🆕 after the 10-11 run, 5/10; the owner asked for them)
 These are HOW I work, not new rules: the owner's orders above and below still win. They exist because on 10-11
 I worked hard on the wrong thing first and the computed score capped me at 5.
@@ -868,3 +891,15 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   `select * from ops_engineer_alert_queue where engineer = 'new_listings_engineer' order by severity, created_at;` — every
   open `alert_event` now carries a live engineer (`ops_engineer_for_alert()`, by kind first, legacy
   `owner_routine` second). Drive each to resolved or say why not; the report carries «🚨 Alerts: N → M».
+
+## Lesson from 2026-10-13 (copied by 🔧 from your own report)
+
+- **A capped score is often the scorer misreading the page.** Your line: dispatch a source re-read with
+  `around=<our stored value>` on the capping ads first (akariyoun «578 m²» Latin unit, rakez 60-line cut, sanadak app
+  payload, ebriza shell page, muktamel timeouts all read as «wrong» until the reader was fixed: 5 sites under the floor → 1).
+- **The :22 sync is not racing the :20 refresh (🔧, proof row 1055).** jobid 17 holds a transaction-scoped advisory lock
+  until it commits and jobid 28 blocks on it. What you saw on bossbih is the snapshot cutoff: a location write landing
+  after :20:00 is in the NEXT hour's matview and serves at the :22 after that. Plan writes before :20 or expect +1 h;
+  never route a «race» without the lock evidence.
+- **`issues_fixed` = PASS proof rows, never more.** 6 claimed against 5 proofs reads as over-claimed in
+  `ops_engineer_fix_rate` and costs the verdict.
