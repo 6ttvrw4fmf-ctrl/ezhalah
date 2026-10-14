@@ -2795,11 +2795,11 @@ export default function Agent() {
     // nothing — same query, same cards — so the turn keeps its buttons and the user can open the
     // interview again from it; replacing them with a receipt would strand them with no way back in.
     const askedThisRound = [...ageFlowAskedRef.current].filter((id) => !(carry?.asked ?? []).includes(id));
-    const roundLog = buildAfRoundLog(askedThisRound, ageFlowFacetsRef.current);
+    const roundLog = buildAfRoundLog(askedThisRound, ageFlowFacetsRef.current, locale);
     const roundCommitted = buildAfSummary(ageFlowFacetsRef.current);
     if (carry && roundCommitted) setAfReceipt((r) => ({ ...r, [carry.msgId]: roundLog }));
     // The user's bubble opens with a rotating Saudi courtesy + request (owner 2026-10-10: «لاهنت 🤍، أبغى …»).
-    const roundLabel = ageFlowLabelsRef.current.join('، ');
+    const roundLabel = ageFlowLabelsRef.current.join(locale === 'ar' ? '، ' : ', ');
     void runRefine(q, '__guided__', '', locale === 'ar' && roundLabel ? pickAfCourtesyOpening() + roundLabel : roundLabel, {
       guided,
       // The picks in the chips' own words, without their emoji («شارع ٢٥ م فأكثر», «+٤ حمامات») — clearer than the raw labels.

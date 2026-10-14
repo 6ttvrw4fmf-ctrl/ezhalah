@@ -210,14 +210,14 @@ const skipItem = (id: string): string | null => {
 // The trailing loop is not decoration: it guarantees that a committed facet whose question is
 // somehow absent from `askedIds` is still named. Rule 1 of the permanent summary rule — a facet in
 // the predicate MUST appear — is the half that must never fail quiet, so ordering yields to it.
-export function buildAfRoundLog(askedIds: string[], facets: AfFacet[]): string {
+export function buildAfRoundLog(askedIds: string[], facets: AfFacet[], locale: 'ar' | 'en' = 'ar'): string {
   const byId = new Map(facets.map((f) => [f.id, f]));
   const items: string[] = [];
   for (const id of askedIds) {
     const f = byId.get(id);
-    if (f) items.push(...facetItems(f));
-    else { const sk = skipItem(id); if (sk) items.push(sk); }
+    if (f) items.push(...facetItems(f, locale));
+    else { const sk = locale === 'en' ? (AF_LINE_LABEL[id] ? `Skipped ${AF_LINE_LABEL[id]} ${SKIP_MARK}` : null) : skipItem(id); if (sk) items.push(sk); }
   }
-  for (const f of facets) if (!askedIds.includes(f.id)) items.push(...facetItems(f));
-  return joinAr([...new Set(items)]);
+  for (const f of facets) if (!askedIds.includes(f.id)) items.push(...facetItems(f, locale));
+  return locale === 'en' ? [...new Set(items)].join(', ') : joinAr([...new Set(items)]);
 }
