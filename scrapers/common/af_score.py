@@ -349,6 +349,24 @@ def sanadak_page(url: str, fetch=None) -> dict | None:
             "evidence_lines": lines[:200], "text_head": " | ".join(lines)[:1500]}
 
 
+# A website whose every page carries a category MENU of internal links («أجهزة مطبخ», «مكيفات هواء» on opensooq):
+# the menu is not the ad, and the reader's line cut-off truncates it differently per page, so template_lines()
+# cannot see it as shared (CI source-reread 38543714404: every «مطبخ» on 13605230 / 13605245 was a menu link;
+# opensooq scored 0 of 5 with kitchen and AC «missed» 5 of 5 — backlog 76 / 129). On these sites the text of an
+# internal link is dropped before the page is read.
+NAV_LINK_SITES = {"opensooq"}
+_NAV_LINK = re.compile(r'<a\b[^>]*href="/[^"]*"[^>]*>([^<]{1,60})</a>')
+
+
+def strip_nav(page: dict, body: str) -> dict:
+    nav = {norm(t) for t in _NAV_LINK.findall(body or "") if t.strip()}
+    if not nav:
+        return page
+    keep = [x for x in (page.get("evidence_lines") or []) if norm(x) not in nav]
+    head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if norm(x) not in nav)
+    return {**page, "evidence_lines": keep, "text_head": head}
+
+
 # gathern's own amenity list, from the page's __NEXT_DATA__ (serverData.data.extraDescription[*].content): a listed
 # label is a yes, an unlisted one is silence (scrapers/gathern/run.py _amenity_flags, never «no»).
 GATHERN_LABELS = {"elevator": "مصعد", "parking": "موقف سيارة"}
@@ -477,6 +495,8 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
             except Exception:  # noqa: BLE001
                 status, body = None, ""
             page = page_evidence(body) if status == 200 and body else None
+            if page is not None and platform in NAV_LINK_SITES:
+                page = strip_nav(page, body)
             if page is not None and is_gathern(url):
                 page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": gathern_props(body)}]}
         if page is None:
