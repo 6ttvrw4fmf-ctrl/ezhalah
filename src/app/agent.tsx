@@ -4777,9 +4777,8 @@ export default function Agent() {
                                   {/* The round, in the order it happened — answers and skips in ONE
                                       sentence (see finishGuided). No «اخترت:» label any more: the line now
                                       mixes both, and the head above already says what this card is.
-                                      Untranslated by design, exactly as buildAfSummary's output always
-                                      was — the builder writes finished Arabic. A receipt stored before
-                                      2026-09-20 is a plain committed-only sentence and still renders. */}
+                                      New receipts use the interface language, including skip labels.
+                                      Older stored receipts remain verbatim as conversation history. */}
                                   <Text
                                     testID="af-round-receipt-choices"
                                     style={[s.afReceiptTx, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}

@@ -75,7 +75,7 @@ The AI Agent’s empty composer hint aligns left in English and right in Arabic 
 
 English property cards localize platform attribution, property-type labels and finite attribute values using the existing bilingual catalog (owner, 2026-10-13). Source reference IDs, including Arabic letters in plan numbers, remain verbatim; source images and logos remain original. Arabic card display is preserved.
 
-English Filter submissions localize city/district display and rotate short English greetings with emojis before the request, matching the Arabic treatment. The following searching status keeps its translated rotating lines and sparkle mark (owner, 2026-10-13).
+English Filter submissions localize city/district display and rotate short English greetings with emojis before the request, matching the Arabic treatment. Advanced Filter round receipts localize committed items and skip labels in ask order; English selections join with commas. The following searching status keeps its translated rotating lines and sparkle mark (owner, 2026-10-13).
 
 
 **Shell (`src/app/_layout.tsx`):** a single expo-router `Stack`. Provider tree: `GestureHandlerRootView`
