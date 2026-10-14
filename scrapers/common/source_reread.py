@@ -114,6 +114,44 @@ def _payload_area_lines(body: str) -> list[str]:
     return out
 
 
+# The same for the ad's PLACE. mobasher draws the page from its API payload, where the district is a structured
+# field (`"neighborhoodNameAr":"حي الثقبة"`), while the visible text is only the seller's description («الموقع:
+# المنطقة الشرقية، مدينة الخبر، حي الحمراء»). 17693081 (2026-10-14, re-read run 38527021238) was scored a district
+# MISMATCH against that prose although we serve exactly the structured value: prose is never the source field.
+_PAYLOAD_PLACE = re.compile(r'"(?:neighborhoodNameAr|districtNameAr|district_ar)":"([^"]{2,60})"')
+
+
+def _payload_place_lines(body: str) -> list[str]:
+    flat = (body or "").replace('\\', "")
+    out = []
+    for name in dict.fromkeys(_PAYLOAD_PLACE.findall(flat)):
+        name = name.strip()
+        out.append(name if name.startswith("حي ") else f"حي {name}")
+    return out
+
+
+# A spec table whose label and value sit in SIBLING elements, so the visible-text split puts them on different
+# lines and drops the bare value. hajer (WordPress «Real Estate Manager»: «<strong class="rem-single-field-title">
+# عدد غرف النوم</strong> … <span class="rem-single-field-value">3</span>») kept only the label line; the score
+# then read the description's «غرفتين نوم» / «غرفتين ماستر» as the count and called 17663701 (6) and 17663672
+# (3) wrong (2026-10-14). The pair is rejoined as one line «LABEL VALUE», read without our parser.
+_REM_PAIR = re.compile(r'rem-single-field-title"[^>]*>([^<]{1,40})</strong>(.*?)(?=rem-single-field-title"|$)', re.S)
+_REM_VALUE = re.compile(r'rem-single-field-value[^>]*>(.*)', re.S)
+
+
+def _label_value_lines(body: str) -> list[str]:
+    out = []
+    for m in _REM_PAIR.finditer(body or ""):
+        v = _REM_VALUE.search(m.group(2)[:2000])
+        if not v:
+            continue
+        value = re.sub(r"\s+", " ", html.unescape(TAG.sub(" ", v.group(1)))).strip()[:60]
+        label = re.sub(r"\s+", " ", html.unescape(m.group(1))).strip()
+        if label and value:
+            out.append(f"{label} {value}")
+    return out
+
+
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
     jsonld = []
@@ -136,7 +174,8 @@ def page_evidence(body: str) -> dict:
         # project 34830 (17539724, 890,000 / 161 m², re-read run 38361960175) sits past line 60, so the
         # score only saw the OTHER units and called our exact values wrong (backlog #124). The job log
         # still prints only the first n_evidence lines.
-        "evidence_lines": (_payload_area_lines(body) + _with_values(lines))[:400],
+        "evidence_lines": (_payload_area_lines(body) + _payload_place_lines(body) + _label_value_lines(body)
+                           + _with_values(lines))[:400],
         "text_head": " | ".join(lines)[:1500],
     }
 
