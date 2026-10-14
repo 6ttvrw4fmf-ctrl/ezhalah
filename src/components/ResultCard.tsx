@@ -673,6 +673,7 @@ export function arAttrValue(label: string, value: string, locale: string): strin
       const years = /^(أكثر من )?(\d+) (?:سنوات|سنة)$/.exec(v);
       if (years) return `${years[1] ? 'Over ' : ''}${years[2]} years`;
     }
+    if (['street', 'address', 'city', 'district', 'deed location'].includes(ll)) return translitPlace(v);
     return englishCatalogText(v);
   }
   if (AR_YESNO[lv]) return AR_YESNO[lv];                                   // Electricity/Water/booleans

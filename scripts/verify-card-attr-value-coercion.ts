@@ -100,7 +100,8 @@ const declarations = [
   { header: 'const FURNISH_VALUES_AR:' }, { header: 'const AR_ENUM:' },
   { header: 'export function arAttrValue(' },
 ];
-const prelude = `
+const translitSource = readFileSync('src/lib/translitPlace.ts', 'utf8').replace(/export /g, '').replace("import sa from '@/data/sa-locations.json';", 'const sa = ' + readFileSync('src/data/sa-locations.json', 'utf8') + ';');
+const prelude = `${translitSource}\n
 const englishCatalogText = ${englishCatalogText.toString()};
 const AR = ${JSON.stringify((await liftSymbols('src/i18n.tsx', [{header:'const AR:'}], ['AR'])).AR)};
 const EN = ${JSON.stringify((await liftSymbols('src/i18n.tsx', [{header:'const EN:'}], ['EN'])).EN)};
@@ -118,6 +119,7 @@ for (const [label, value, expected] of [
   ['Electricity', 'نعم', 'Yes'], ['Facade', 'شرق', 'East'],
   ['Facade', 'جنوبية - غربية', 'South West'], ['Street width', '20 متر', '20 m'],
   ['Building age (years)', 'سنه', '1 year'], ['Building age (years)', 'اكثر من عشر سنوات', 'Over 10 years'], ['Age', '2 years', '2 years'],
+  ['Street', 'حي الروضة', 'Al Rawdah'],
   ['Plan number', '7489/ق/ب', '7489/ق/ب'],
 ]) check(`English ${label}: ${value}`, format(label, value, 'en') === expected);
 check('Arabic enum rendering retained', format('Facade', 'east', 'ar') === 'شرقية');
