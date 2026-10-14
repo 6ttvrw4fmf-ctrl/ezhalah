@@ -673,6 +673,10 @@ export function arAttrValue(label: string, value: string, locale: string): strin
       const years = /^(أكثر من )?(\d+) (?:سنوات|سنة)$/.exec(v);
       if (years) return `${years[1] ? 'Over ' : ''}${years[2]} years`;
     }
+    if (ll === 'amenities' || ll === 'property services') {
+      const aliases: Record<string, string> = { موقف: 'Parking', الكهرباء: 'Electricity', المياه: 'Water Supply', الماء: 'Water Supply', 'الصرف الصحي': 'Sanitation' };
+      return v.split(/[،,]/).map(item => aliases[item.trim()] ?? englishCatalogText(item.trim())).join(', ');
+    }
     if (['street', 'address', 'city', 'district', 'deed location'].includes(ll)) return translitPlace(v);
     return englishCatalogText(v);
   }

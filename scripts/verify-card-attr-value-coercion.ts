@@ -120,6 +120,7 @@ for (const [label, value, expected] of [
   ['Facade', 'جنوبية - غربية', 'South West'], ['Street width', '20 متر', '20 m'],
   ['Building age (years)', 'سنه', '1 year'], ['Building age (years)', 'اكثر من عشر سنوات', 'Over 10 years'], ['Age', '2 years', '2 years'],
   ['Street', 'حي الروضة', 'Al Rawdah'],
+  ['Amenities', 'موقف', 'Parking'], ['Property services', 'الكهرباء، المياه، الصرف الصحي', 'Electricity, Water Supply, Sanitation'],
   ['Plan number', '7489/ق/ب', '7489/ق/ب'],
 ]) check(`English ${label}: ${value}`, format(label, value, 'en') === expected);
 check('Arabic enum rendering retained', format('Facade', 'east', 'ar') === 'شرقية');

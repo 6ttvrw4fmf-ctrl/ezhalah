@@ -1,3 +1,5 @@
+import { stripTypeScriptTypes } from 'node:module';
+import { windowBetween } from './lib/sourceWindow.ts';
 // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11; tightened 2026-09-12). Auto-discovered barrier.
 //
 // "when user uses the filter, gets the result the chat below doesn't exist, only exists with the AI
@@ -194,5 +196,17 @@ check('the AI-Agent composer keeps chip, mic and the Send/Stop slot in place whi
 mustCatch('the «بحث» chip hidden again while a search runs', !steadyRow(code.replace('<Pressable\n                  testID="initial-chat-search"', '{!busy && !revealing && <Pressable\n                  testID="initial-chat-search"')));
 mustCatch('a Stop button of its own size and shape (the row shifts)', !steadyRow(code.replace('<View style={[s.sendBtn, s.stopCircle]}>', '<View style={s.stopBtn}>')));
 
+
+// Execute the real guarded send prefix: a typed follow-up must keep chat input for later questions.
+const sendPrefix = windowBetween(code, 'const send = async (override?: string) => {', 'const selectedSourcesForTurn', 'src/app/agent.tsx');
+async function sendsAsChat(prefix: string, typed: string, busy = false) {
+  let origin = true;
+  const send = new Function('typed', 'busy', 'setFilterOrigin', stripTypeScriptTypes(prefix + '\n}; return send;'))(typed, busy, (value: boolean) => { origin = value; });
+  await send();
+  return origin;
+}
+check('typed follow-up leaves Filter mode so clarification retains its composer', await sendsAsChat(sendPrefix, 'Find apartments in Jeddah') === false);
+check('empty or busy sends retain Filter mode', await sendsAsChat(sendPrefix, '') === true && await sendsAsChat(sendPrefix, 'Find apartments', true) === true);
+mustCatch('typed follow-up retaining Filter origin (composer vanishes)', await sendsAsChat(sendPrefix.replace('setFilterOrigin(false);', ''), 'Find apartments') === true);
 console.log(failed ? `\n${failed} FAILED` : '\nAll filter-results-no-composer checks passed');
 process.exit(failed ? 1 : 0);
