@@ -3088,7 +3088,7 @@ export default function Agent() {
   const send = async (override?: string) => {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
-    setFilterOrigin(false); // a typed follow-up starts AI chat, so later clarification keeps its input
+    setFilterOrigin(false);
     const selectedSourcesForTurn = pickerSourceSlugs(selectedSources);
     const sourceChoiceForTurn = pickerSourceExplicit;
     // The user SENT something (typed or voice — sendVoice funnels in here): the small sign-in
