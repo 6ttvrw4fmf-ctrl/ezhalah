@@ -612,6 +612,7 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
   const tableScope = searchTableScope(q);
   if (!tableScope) return null;
 
+  if (q.geographicScope === 'REGION' && (!q.regionPin || !REGION_TO_ID[q.regionPin])) return PROBE_FAILED;
   const lm = q.locationMatch;
   let cities: string[] | null = null;
   if (q.geographicScope === 'REGION' || q.geographicScope === 'NATIONWIDE') {
@@ -691,7 +692,7 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
     p_cities: cities && cities.length ? cities : null,
     p_districts: q.districts && q.districts.length ? q.districts : null,
     p_platforms: q.sources && q.sources.length ? q.sources : null,
-    p_region_ids: q.regionPin
+    p_region_ids: q.geographicScope === 'NATIONWIDE' ? null : q.regionPin
       ? (REGION_TO_ID[q.regionPin] ? [REGION_TO_ID[q.regionPin]] : null)
       : regionIdsFor(lm),
     // CATEGORY PURITY — owner PERMANENT rule 2026-07-16, merged from PR#86. Independent RPC-layer

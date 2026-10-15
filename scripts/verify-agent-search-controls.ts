@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { liftSymbols } from './lib/liftSymbols.ts';
+import { resolve } from 'node:path';
 import { selectSourceTables } from '../src/lib/agentSourceSelection.ts';
 import { agentResultRequest } from '../src/lib/agentResultRequest.ts';
 import { initialReveal } from '../src/lib/initialReveal.ts';
@@ -32,3 +34,21 @@ assert.equal((await run({...ready,districts:['الملقا']},'أبي فيلا �
 const state=mergeConversationState({sources:['aqar'],excludedSources:['wasalt']} as any,{sources:[],excludedSources:[]} as any,['sources','excludedSources']);
 assert.deepEqual(state.sources,[]);assert.deepEqual(state.excludedSources,[]);
 console.log('PASS: explicit scope, source inclusion/exclusion, quantity and continuation controls');
+
+const remote = await liftSymbols(resolve('src/data/remote.ts'), [
+  {header:'export async function resolveSearchScope(', endsWith:/^\}$/},
+], ['resolveSearchScope'], `
+type SearchQuery=any; type SearchScope=any; type ProbeFailed=any;
+const PROBE_FAILED={failed:true};
+const searchTableScope=()=>({p_tables:['aqar_residential_listings']});
+const arCity=(x:any)=>x; const cityFilterFor=(x:any)=>x;
+const isCountryWideQuery=(q:any)=>q.geographicScope==='NATIONWIDE';
+const rentPeriodParam=()=>null; const impliedCategory=()=>null;
+const REGION_TO_ID={'المنطقة الشرقية':5}; const regionIdsFor=()=>null;
+`);
+const regional:any=await remote.resolveSearchScope({geographicScope:'REGION',regionPin:'المنطقة الشرقية',location:'المنطقة الشرقية'});
+assert.equal(regional.p_cities,null);assert.deepEqual(regional.p_region_ids,[5]);
+const national:any=await remote.resolveSearchScope({geographicScope:'NATIONWIDE',regionPin:'المنطقة الشرقية',location:'السعودية'});
+assert.equal(national.p_cities,null);assert.equal(national.p_region_ids,null);
+assert.deepEqual(await remote.resolveSearchScope({geographicScope:'REGION',location:'المنطقة الشرقية'}),{failed:true});
+console.log('PASS: actual RPC scope serialization preserves region and nationwide intent');
