@@ -95,7 +95,7 @@ import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
-import { useI18n, detectLocale, getLocale, translate, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
+import { useI18n, detectLocale, resolveReplyLocale, getLocale, translate, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { listingLocationAr, listingPrice } from '@/lib/listingDisplay';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
@@ -369,14 +369,7 @@ function locationClarification(q: SearchQuery, userText: string): string | null 
 }
 
 function detectMsgLang(s: string): 'en' | 'ar' | null {
-  const words = s.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  let ar = 0, en = 0;
-  for (const w of words) {
-    if (/[؀-ۿ]/.test(w)) ar++;
-    else if (/[A-Za-z]/.test(w)) en++;
-  }
-  if (ar === en) return null;
-  return ar > en ? 'ar' : 'en';
+  return detectLocale(s);
 }
 const hypePhrase = (locale: Locale, messageText?: string) => {
   const detected = messageText ? detectMsgLang(messageText) : null;
@@ -1743,7 +1736,7 @@ export default function Agent() {
     // 1) SEARCHING phase: status bubble shows the slogan + summary. Slogan language follows the
     // user's MESSAGE text (English message → English slogan) instead of the UI locale, so users
     // who chat in one language and have their UI in the other still get the matching slogan.
-    const replyLocale = (messageText ? detectLocale(messageText) : null) ?? locale;
+    const replyLocale: Locale = summary ? (msgRTL(summary) ? 'ar' : 'en') : ((messageText ? detectLocale(messageText) : null) ?? locale);
     const slogan = hypePhrase(replyLocale, messageText);
     // The searching status renders the platform-checking ANIMATION (SearchLoader), not the slogan.
     // We still carry slogan + summary through so they appear in the RESULTS bubble below (unchanged).
@@ -3095,7 +3088,41 @@ export default function Agent() {
     // card retires for the rest of this load (owner 2026-08-29). After the guard, so an empty or
     // busy-refused submit is not a send.
     dismissSignInCard();
-    const replyLocale = detectLocale(v) ?? locale;
+    const historyAll = msgs
+      .filter((m) => m.role === 'user' || m.role === 'agent' || m.role === 'results')
+      .map((m) => {
+        const role = m.role === 'user' ? ('user' as const) : ('model' as const);
+        // For a results turn, hand the agent the FACTS of the cards it showed (numbered #1..#N) so it
+        // can resolve later references like "the 2nd one", "#3", "the cheapest", "the Al Malqa one" —
+        // restating only what's on the card, never inventing. (user training decision.)
+        if (m.role === 'results') {
+          // JUNK_LOCATION_TOKENS guard, own display path (2026-07-10 location-data-quality audit):
+          // this text feeds straight into the AGENT's conversation memory (so it can later resolve
+          // "the Al Malqa one" etc.). l.city/l.district already went through remote.ts's junk guard,
+          // so a sentinel can't arrive as a literal string here, but an honestly-unresolved '' still
+          // needs a neutral label — otherwise this would show "in , " for a fully-unresolved location.
+          const cards = (m.result?.listings ?? []).map((l, i) => {
+            const locationLabel = l.district && l.city ? `${l.district}, ${l.city}`
+              : (l.district || l.city || LOCATION_UNRESOLVED_AR);
+            return `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${locationLabel} — ${listingPrice(l, 'en')}` +
+              `${l.area ? `, ${l.area} m²` : ''}${l.beds ? `, ${l.beds} bed` : ''}, on ${l.source}`;
+          });
+          const text = cards.length ? `${m.text}\n${cards.join('\n')}` : m.text;
+          return { role, text };
+        }
+        return { role, text: (m as { text?: string }).text ?? '' };
+      })
+      .filter((h) => !!h.text.trim());
+    // HISTORY TRIMMING (owner-approved consolidation, 2026-08-30). describeKnownState()'s ~150-token
+    // knownState snapshot (built from lastQueryRef.current below) already carries every FACT from
+    // older turns, so sending the full window a second time as raw prose was pure token cost with no
+    // new information. Trimmed to the last 2 raw entries — in this alternating user/model list that
+    // is always the immediately-preceding user message and the model's immediately-preceding reply,
+    // KEPT VERBATIM (never paraphrased): pronoun resolution ("that one") and exact-phrase-triggered
+    // behavior (e.g. «خلها شهري» flipping the rent period) both depend on the model seeing the
+    // literal prior exchange, not a summary of it.
+    const history = historyAll.slice(-2);
+    const replyLocale = resolveReplyLocale(v, history, locale);
     const t = (key: string, vars?: Record<string, string | number>) => translate(replyLocale, key, vars);
     // The CHAT agent accepts English as an input convenience: it normalizes any English place to the
     // canonical ARABIC location, searches in Arabic, and shows every location/result in Arabic (never an
@@ -3146,40 +3173,6 @@ export default function Agent() {
     const userMessageId = uid();
     // Build the conversation MEMORY from prior turns (before this new message) so the agent can
     // reason across the chat and never re-ask what was already said. The greeting (text:'') drops out.
-    const historyAll = msgs
-      .filter((m) => m.role === 'user' || m.role === 'agent' || m.role === 'results')
-      .map((m) => {
-        const role = m.role === 'user' ? ('user' as const) : ('model' as const);
-        // For a results turn, hand the agent the FACTS of the cards it showed (numbered #1..#N) so it
-        // can resolve later references like "the 2nd one", "#3", "the cheapest", "the Al Malqa one" —
-        // restating only what's on the card, never inventing. (user training decision.)
-        if (m.role === 'results') {
-          // JUNK_LOCATION_TOKENS guard, own display path (2026-07-10 location-data-quality audit):
-          // this text feeds straight into the AGENT's conversation memory (so it can later resolve
-          // "the Al Malqa one" etc.). l.city/l.district already went through remote.ts's junk guard,
-          // so a sentinel can't arrive as a literal string here, but an honestly-unresolved '' still
-          // needs a neutral label — otherwise this would show "in , " for a fully-unresolved location.
-          const cards = (m.result?.listings ?? []).map((l, i) => {
-            const locationLabel = l.district && l.city ? `${l.district}, ${l.city}`
-              : (l.district || l.city || LOCATION_UNRESOLVED_AR);
-            return `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${locationLabel} — ${listingPrice(l, 'en')}` +
-              `${l.area ? `, ${l.area} m²` : ''}${l.beds ? `, ${l.beds} bed` : ''}, on ${l.source}`;
-          });
-          const text = cards.length ? `${m.text}\n${cards.join('\n')}` : m.text;
-          return { role, text };
-        }
-        return { role, text: (m as { text?: string }).text ?? '' };
-      })
-      .filter((h) => !!h.text.trim());
-    // HISTORY TRIMMING (owner-approved consolidation, 2026-08-30). describeKnownState()'s ~150-token
-    // knownState snapshot (built from lastQueryRef.current below) already carries every FACT from
-    // older turns, so sending the full window a second time as raw prose was pure token cost with no
-    // new information. Trimmed to the last 2 raw entries — in this alternating user/model list that
-    // is always the immediately-preceding user message and the model's immediately-preceding reply,
-    // KEPT VERBATIM (never paraphrased): pronoun resolution ("that one") and exact-phrase-triggered
-    // behavior (e.g. «خلها شهري» flipping the rent period) both depend on the model seeing the
-    // literal prior exchange, not a summary of it.
-    const history = historyAll.slice(-2);
     // Pass auth state: a guest searches on any property query; a logged-in user only gets listings
     // when their message is a direct order, otherwise Ezhalah replies conversationally. (user request.)
     // The conversation's accumulated canonical state. Without it a clarification turn resets
@@ -4386,6 +4379,7 @@ export default function Agent() {
               // «لقينا {n} إعلان يطابق طلبك.» has no baked/DB fallback: the picker rotates from
               // search #1.
               const rfLang: 'ar' | 'en' = msgRTL(m.summary || m.text) ? 'ar' : 'en';
+              const replyT = (key: string, vars?: Record<string, string | number>) => translate(rfLang, key, vars);
               // pickName = the SAME function the sidebar and account menu print the name with. The
               // old fallback (nameAr, else the raw name) printed the Latin name whenever nameAr was not filled
               // yet, so an Arabic sentence greeted «يا Yusuf Saleh …» while the sidebar said «يوسف» (owner
@@ -4397,11 +4391,11 @@ export default function Agent() {
               // branch — the true generic catch-all, tagged by NO_RESULTS_GENERIC_FALLBACK_EN — is a
               // rotation across the owner's 80 messages, same (lang, hasName) shape as
               // pickResultsFoundSentence above.
-              const isGenericNoResults = introZeroResult && m.result.suggestion === t(NO_RESULTS_GENERIC_FALLBACK_EN);
+              const isGenericNoResults = introZeroResult && m.result.suggestion === replyT(NO_RESULTS_GENERIC_FALLBACK_EN);
               const introTextRaw = introZeroResult
                 ? (isGenericNoResults
                     ? pickNoResultsSentence({ lang: rfLang, name: rfName ?? null, stableKey: m.id })
-                    : (m.result.suggestion ?? t('No exact matches — try broadening your search.')))
+                    : (m.result.suggestion ?? replyT('No exact matches — try broadening your search.')))
                 : introTotal != null
                   ? pickResultsFoundSentence({
                       lang: rfLang,
@@ -4664,7 +4658,7 @@ export default function Agent() {
                         const offersNarrow = canNarrowFurther && showActionsRow;
                         // The KEY comes from the pure module that already owns the counts, so the gate and
                         // the sentence can never disagree and one exhaustive test locks both.
-                        const moreNoteText = t(
+                        const moreNoteText = replyT(
                           // `chatClosed` is the ONE fact here that is about the conversation rather
                           // than this turn: with the composer locked this turn will never gain a
                           // button, so a button-less note is the end of the road and must name the
@@ -4772,7 +4766,7 @@ export default function Agent() {
                                    the pills use, so skipped answers can never appear here. */
                                 <View style={s.afReceipt} testID="af-round-receipt">
                                   <Text style={[s.afReceiptHead, { writingDirection: rtl ? 'rtl' : 'ltr', textAlign: rtl ? 'right' : 'left' }]}>
-                                    {`✓ ${t('Continued with the advanced filter')}`}
+                                    {`✓ ${replyT('Continued with the advanced filter')}`}
                                   </Text>
                                   {/* The round, in the order it happened — answers and skips in ONE
                                       sentence (see finishGuided). No «اخترت:» label any more: the line now

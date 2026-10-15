@@ -133,7 +133,7 @@ check('agent.tsx imports the real picker (not a re-derived local rule)',
 check('agent.tsx imports the generic-fallback key from search.ts',
   /NO_RESULTS_GENERIC_FALLBACK_EN/.test(agentSrc));
 check('the intro-text render only swaps in the rotation for the GENERIC fallback, not every zero-result reply',
-  /isGenericNoResults = introZeroResult && m\.result\.suggestion === t\(NO_RESULTS_GENERIC_FALLBACK_EN\)/.test(agentSrc));
+  /isGenericNoResults = introZeroResult && m\.result\.suggestion === replyT\(NO_RESULTS_GENERIC_FALLBACK_EN\)/.test(agentSrc));
 
 const CALL_SITE_RE = /pickNoResultsSentence\(\{ lang: rfLang, name: rfName \?\? null, stableKey: m\.id \}\)/;
 check('agent.tsx PASSES stableKey: m.id at the call site (per-message pin, same class as PR #3232)',
@@ -141,7 +141,7 @@ check('agent.tsx PASSES stableKey: m.id at the call site (per-message pin, same 
   'without it the picker is re-invoked on every typewriter tick and the sentence flips mid-typing');
 check('a non-generic zero-result reply (e.g. a specific district/price/type diagnosis) still renders '
   + "m.result.suggestion untouched",
-  /: \(m\.result\.suggestion \?\? t\('No exact matches/.test(agentSrc));
+  /: \(m\.result\.suggestion \?\? replyT\('No exact matches/.test(agentSrc));
 
 // ── 5. NO NEW NAME SOURCE, NO LLM, NO EMAIL-BASED GUESS ─────────────────────────────────────────
 {

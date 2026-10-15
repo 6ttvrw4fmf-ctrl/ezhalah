@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useI18n, LOCALE_KEY, getLocale, detectLocale, setLocalePersistence, type Locale } from '@/i18n';
+import { useI18n, LOCALE_KEY, getLocale, getLocaleRevision, detectLocale, setLocalePersistence, type Locale } from '@/i18n';
 import { emptyQuery, runSearch, queryLabel, type SearchQuery, type SearchResult } from '@/data/search';
 import { HOME_DEFAULT_QUERY, migrateGroups } from '@/lib/searchDefaults';
 import { isSameSavedSearch } from '@/lib/savedSearchIdentity';
@@ -375,14 +375,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [user?.name, user?.nameEn, user?.nameAr, applySyncedName]);
 
-  // Language persistence is auth-gated. A SIGNED-IN user keeps their chosen/detected language across a
-  // refresh. A GUEST is ALWAYS Arabic-first on a fresh load — typing an English letter in the filter,
-  // or sending an English message to the agent, flips the UI live for that session, but a refresh /
-  // leaving resets to the Arabic default (nothing is saved). On WEB the signed-in language is applied
-  // synchronously at first paint (i18n readSavedLocale, no flash); the effects below cover NATIVE and
-  // enforce the guest reset. (user request.)
+  // Only an explicit UI choice is saved for a signed-in user. Chat language never changes it.
+  // Guests start in Arabic on a fresh load; web restores signed-in preference at first paint.
   const { locale, setLocale } = useI18n();
-  const localeInitRef = useRef(false);
+  const localeInitRef = useRef<string | null>(null);
   // WHICH account's history is currently loaded — not merely "did we load once". A boolean here was
   // a real bug: the hydrate effect is one-shot, so a user who signed in DURING a session (the guard
   // already having run while they were a guest) never had their own saved history read, and the
@@ -394,23 +390,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // disable persistence, clear any saved value, and snap back to the Arabic default for this load.
   useEffect(() => {
     if (!authChecked) return;
+    let cancelled = false;
     if (user) {
       setLocalePersistence(true);
-      if (!localeInitRef.current) {
-        localeInitRef.current = true;
+      if (localeInitRef.current !== user.sub) {
+        localeInitRef.current = user.sub;
+        const revisionBeforeRead = getLocaleRevision();
         AsyncStorage.getItem(LOCALE_KEY)
-          .then((v) => { if (v === 'en' || v === 'ar') setLocale(v as Locale); })
+          .then((v) => {
+            if (!cancelled && getLocaleRevision() === revisionBeforeRead && (v === 'en' || v === 'ar')) setLocale(v as Locale);
+          })
           .catch(() => {});
       }
     } else {
       setLocalePersistence(false); // guest → never remember the language
-      localeInitRef.current = false;
+      localeInitRef.current = null;
       AsyncStorage.removeItem(LOCALE_KEY).catch(() => {});
       // Fresh guest load (or just logged out): start in Arabic. This runs only when auth state changes,
       // not on every locale change, so a guest's in-session switch to English is left untouched.
       if (getLocale() !== 'ar') setLocale('ar');
     }
-  }, [authChecked, user, setLocale]);
+    return () => {
+      cancelled = true;
+      if (localeInitRef.current === user?.sub) localeInitRef.current = null;
+    };
+  }, [authChecked, user?.sub, setLocale]);
 
   // Persist the active language ONLY for a signed-in user (native; web persists synchronously via the
   // auth-gated persistLocale in setLocale). A guest never writes their language.

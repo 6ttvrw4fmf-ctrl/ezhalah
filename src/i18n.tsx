@@ -55,7 +55,7 @@ function readSavedLocale(): Locale {
 }
 
 // Whether the active language is REMEMBERED across a refresh. Only signed-in users persist their
-// language; a GUEST is always Arabic-first on a fresh load — typing English flips the UI live for the
+// language; a GUEST is always Arabic-first on a fresh load — an explicit language switch lasts for the
 // session, but a refresh/return resets to Arabic. The store toggles this on auth state. (user request.)
 let _persistEnabled = false;
 
@@ -82,6 +82,8 @@ export function persistLocale(l: Locale): void {
 }
 
 let _locale: Locale = readSavedLocale();
+let _localeRevision = 0;
+export const getLocaleRevision = (): number => _localeRevision;
 export const getLocale = (): Locale => _locale;
 export const isRTLNow = (): boolean => _locale === 'ar';
 
@@ -1692,14 +1694,33 @@ export function t(en: string, vars?: Record<string, string | number>): string {
 }
 
 // Detect input/message script; callers decide how to use it. Chat replies never change UI locale:
-// any Arabic letter → 'ar', otherwise any Latin letter → 'en'. Returns null for
-// digit-only/empty/symbol input so we don't flip the language on a lone number.
+// Count Arabic and Latin WORDS, never characters or numerals. Ties and letterless
+// messages inherit conversation language through resolveReplyLocale().
 const _arScript = /[؀-ۿ]/;
 const _latinScript = /[A-Za-z]/;
 export function detectLocale(text: string): Locale | null {
-  if (_arScript.test(text)) return 'ar';
-  if (_latinScript.test(text)) return 'en';
-  return null;
+  const words = text.match(/[\p{L}\p{M}]+/gu) ?? [];
+  let ar = 0, en = 0;
+  for (const word of words) {
+    if (/\p{Script=Arabic}/u.test(word)) ar++;
+    else if (/\p{Script=Latin}/u.test(word)) en++;
+  }
+  if (ar === en) return null;
+  return ar > en ? 'ar' : 'en';
+}
+
+
+// Match the server's established tie/number rules without changing the UI preference.
+export function resolveReplyLocale(text: string, history: readonly { text?: string }[], fallback: Locale): Locale {
+  const detected = detectLocale(text);
+  if (detected) return detected;
+  const mixedTie = /\p{Script=Arabic}/u.test(text) && /\p{Script=Latin}/u.test(text);
+  const turns = mixedTie ? history : [...history].reverse();
+  for (const turn of turns) {
+    const previous = detectLocale(turn.text ?? '');
+    if (previous) return previous;
+  }
+  return fallback;
 }
 
 // Arabic-only INPUT guard: true when the user typed in English (Latin letters present, no Arabic).
@@ -1887,6 +1908,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   // on Send, then call respond()) gets a reply in the NEW language — not the previous one. React
   // state stays the source of truth; this just removes the one-render lag for the static `t()`.
   const setLocale = useCallback((l: Locale) => {
+    _localeRevision++;
     // English re-enabled (owner, 2026-09-11) — see readSavedLocale()'s comment above for the full
     // rationale. This function was the single owner of the old Arabic-only guard; it is now the
     // single owner of turning both languages on, so nothing else needed a second copy of this check.
