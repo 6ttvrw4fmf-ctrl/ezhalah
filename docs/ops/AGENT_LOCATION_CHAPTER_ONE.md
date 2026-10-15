@@ -28,7 +28,8 @@ empty district selections. Existing property filters and the other chat's reply-
 1. Hold `agent-edge-surface`; merge the code through the repository gate and deploy the frontend
    and agent through their production workflows. The new behavior remains inactive without the marker.
 2. Hold `production` and execute `supabase/agent-notes/location-chapter-one.sql` verbatim.
-   It replaces note 3 and retires conflicting notes 4–7 after exact baseline checks. Other notes stay.
+   It replaces note 3, retires conflicting notes 4–7, and reconciles only the location clauses in
+   notes 8–9 after exact baseline checks. Unrelated policies stay.
    It refuses to exceed 20,000 wrapper-inclusive characters, below the loader's 21,000 limit.
 3. Wait for the 60-second notes cache, then test actual production UI conversations: city, region,
    multiple cities, unique/shared districts, add/replace/remove/clear, city switch, typo/transliteration,
@@ -36,8 +37,8 @@ empty district selections. Existing property filters and the other chat's reply-
    and compare its displayed fields/link with the source. Record observed results before certifying.
 
 Rollback: while holding `production`, run `location-chapter-one.rollback.sql`. It restores only the
-five replaced notes, refuses later edits, and removes the activation marker. The code then uses the
-prior behavior. `location-chapter-one.before.json` is the exact baseline of those five notes.
+seven affected notes, refuses later edits, and removes the activation marker. The code then uses the
+prior behavior. `location-chapter-one.before.json` is the exact baseline of those seven notes.
 
 `scripts/verify-agent-location-plan.ts` executes the validator and conversation merge, tests failed
 lookups/timeouts, and proves mutations to city uniqueness, district parentage, and full-catalog use
