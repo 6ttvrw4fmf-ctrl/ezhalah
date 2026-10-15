@@ -219,7 +219,7 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
       ['أبي ٥٠ شقة للبيع في المنطقة الشرقية من عقار فقط','REGION','المنطقة الشرقية',50,''],
       ['أبي ١٠٠ شقة للإيجار السنوي بالمنطقة الشرقية بحد أقصى ٥٠٠٠٠ ريال بالسنة','REGION','المنطقة الشرقية',100,'50000'],
     ] as const) {
-      model={kind:'listings',reply:'أبحث لك 🏡',location:region || 'السعودية',type:'Apartment',count:String(amount),price:String(amount),deal:'Buy',pricing_basis:'none',location_plan:{status:'ready',cities:[],districts:[],region:region === 'المنطقة الشرقية' ? 'الشرقية' : region,scope}};
+      model={kind:'listings',reply:'أبحث لك 🏡',location:region || 'السعودية',type:'Apartment',count:String(amount),price:String(amount),deal:'Buy',pricing_basis:'none',location_plan:{status:'clarify',cities:[],districts:[],region:region === 'المنطقة الشرقية' ? 'الشرقية' : region,scope}};
       const response=await handler!(new Request('https://fixture.invalid/agent',{method:'POST',headers:{apikey:'fixture'},body:JSON.stringify({text,prevQuery:prev})}));
       const actual=await response.json();
       assert.equal(actual.kind,'listings',JSON.stringify(actual));
@@ -227,6 +227,11 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
       assert.equal(actual.query.price,budget);
       assert.equal(actual.query.count,amount);
     }
+    model={kind:'listings',reply:"Zillow isn't one of the platforms Ezhalah searches, so I can't limit results to it.",location:'الرياض',type:'Apartment',platforms:[],location_plan:ready()};
+    const unsupportedResponse=await handler!(new Request('https://fixture.invalid/agent',{method:'POST',headers:{apikey:'fixture'},body:JSON.stringify({text:'Show apartments for sale in Riyadh from Zillow only',prevQuery:prev})}));
+    const unsupportedResult=await unsupportedResponse.json();
+    assert.equal(unsupportedResult.kind,'message');
+    assert.equal(unsupportedResult.keepState,true);
   } finally { globalThis.fetch = oldFetch; delete (globalThis as any).Deno; }
 }
 
@@ -243,15 +248,17 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE && !process.env.EZ_LOCATION_AGENT_SOURC
       assert.match(result.stderr, /AssertionError/);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }
+  for (const [before, after] of [['chapterLocationReply = plan.reply;', 'chapterLocationReply = null;'], ['unsupportedSourceReply || requestedSources.some', 'false || requestedSources.some']]) {
   const edgeDir = mkdtempSync(join(tmpdir(),'location-reply-mutant-'));
   try {
     cpSync(resolve('supabase/functions/agent'),edgeDir,{recursive:true});
     const file=join(edgeDir,'index.ts');
-    writeFileSync(file,readFileSync(file,'utf8').replace('chapterLocationReply = plan.reply;', 'chapterLocationReply = null;'));
+    writeFileSync(file,readFileSync(file,'utf8').replace(before, after));
     const result=spawnSync(process.execPath,['--experimental-strip-types',import.meta.filename],{env:{...process.env,EZ_LOCATION_AGENT_SOURCE:file},encoding:'utf8',timeout:20000});
-    assert.equal(result.status,1,'generic refusal must not override the specific location explanation');
+    assert.equal(result.status,1,`edge mutation must fail: ${before}`);
     assert.match(result.stderr,/AssertionError/);
   } finally { rmSync(edgeDir,{recursive:true,force:true}); }
+  }
   mustCatch('multiple cities cannot silently choose first', 'cities.length > 1 || (cities.length === 0 && p.districts.length === 0)', '(cities.length === 0 && p.districts.length === 0)');
   mustCatch('district must belong to chosen city', 'String(c.city_id) === String(chosen.city_id)', 'true');
   mustCatch('full catalog beats inventory shortlist', 'd.all_cities ?? d.cities', 'd.cities');
