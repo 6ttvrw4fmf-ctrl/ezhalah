@@ -81,7 +81,7 @@ console.log("\n── zero results: honest, and relaxation is an OFFER ──");
 // m.result.suggestion exactly as before.
 check("zero results renders the suggestion (or the rotation for the generic fallback), not a count",
   /const introZeroResult = m\.result\.listings\.length === 0;/.test(ui)
-  && /introZeroResult\s*\n?\s*\? \(isGenericNoResults\s*\n?\s*\? pickNoResultsSentence\([\s\S]{0,200}?\)\s*\n?\s*: \(m\.result\.suggestion \?\? t\('No exact matches/.test(ui));
+  && /introZeroResult\s*\n?\s*\? \(isGenericNoResults\s*\n?\s*\? pickNoResultsSentence\([\s\S]{0,200}?\)\s*\n?\s*: \(m\.result\.suggestion \?\? replyT\('No exact matches/.test(ui));
 check("the No-Results rotation pool never carries a count placeholder (zero results must stay non-numeric)",
   !readFileSync(new URL("../src/data/noResultsRotation.ts", import.meta.url), "utf8").includes("{count}"));
 const search = readFileSync(new URL("../src/data/search.ts", import.meta.url), "utf8");

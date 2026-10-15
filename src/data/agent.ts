@@ -13,7 +13,7 @@ import { toLatinDigits } from '@/lib/inputHygiene';
 import { vagueOrdering } from '@/lib/vagueOrdering';
 import { parseProximity, proximityKeywords, type ProximityIntent } from './proximity';
 import { type Category } from './taxonomy';
-import { getLocale, detectLocale, translate, type Locale } from '@/i18n';
+import { getLocale, detectLocale, resolveReplyLocale, translate, type Locale } from '@/i18n';
 import { supabase } from '@/lib/supabase';
 import { partitionRequestedAmenities, cohortAllows } from '@/lib/afCohorts';
 import { certifyAfOnMergedState as certifyAf, type CertifiableBackendQuery } from '@/lib/afCertify';
@@ -1175,7 +1175,7 @@ export async function respond(text: string, opts?: {
   askCount?: number; userMessageId?: string; historyTurnsRaw?: number;
 }): Promise<AgentTurn> {
   const v = text.trim();
-  const replyLocale = detectLocale(v) ?? opts?.locale ?? getLocale();
+  const replyLocale = resolveReplyLocale(v, opts?.history ?? [], opts?.locale ?? getLocale());
   const t = (key: string) => translate(replyLocale, key);
   const loggedIn = !!opts?.loggedIn;
   if (!v) return { kind: 'message', reply: t("Tell me what you're looking for and I'll search for it.") };

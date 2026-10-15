@@ -810,15 +810,27 @@ function originalCurrency(input: string): string {
 // more Latin words → "en". A tie or a letter-less message (digits/punctuation only, e.g. "4000")
 // returns null so the caller can fall back to the conversation's language. Counting words (not
 // letters) means a single foreign name — "ابحث عن فيلا في Riyadh" — doesn't flip the whole reply.
-function detectLang(s: string): "ar" | "en" | null {
-  const words = s.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+function detectLang(text: string): "ar" | "en" | null {
+  const words = text.match(/[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu) ?? [];
   let ar = 0, en = 0;
-  for (const w of words) {
-    if (/[؀-ۿ]/.test(w)) ar++;
-    else if (/[A-Za-z]/.test(w)) en++;
+  for (const word of words) {
+    if (/\p{Script=Arabic}/u.test(word)) ar++;
+    else if (/\p{Script=Latin}/u.test(word)) en++;
   }
   if (ar === en) return null;
-  return ar > en ? "ar" : "en";
+  return ar > en ? 'ar' : 'en';
+}
+
+function resolveReplyLanguage(text: string, history: readonly { text?: string }[], fallback: "ar" | "en"): "ar" | "en" {
+  const detected = detectLang(text);
+  if (detected) return detected;
+  const mixedTie = /\p{Script=Arabic}/u.test(text) && /\p{Script=Latin}/u.test(text);
+  const turns = mixedTie ? history : [...history].reverse();
+  for (const turn of turns) {
+    const previous = detectLang(turn.text ?? '');
+    if (previous) return previous;
+  }
+  return fallback;
 }
 
 // The model occasionally ignores the "no generic chatbot filler" rule, so strip the
@@ -928,29 +940,7 @@ Deno.serve(async (req: Request) => {
   // REPLY LANGUAGE = the language of the user's LATEST message, never the app's UI locale.
   // If this message is letters-free (e.g. just "4000"), keep the conversation going in the
   // language of the most recent message that HAD letters; only then fall back to the UI locale.
-  const appLocale = locale;
-  let replyLang = detectLang(text);
-  if (!replyLang) {
-    // detectLang returned null for one of two reasons:
-    //  (a) the message MIXES Arabic and Latin words evenly — a true tie. Per the
-    //      training rule, a tie follows the conversation's STARTING language, so we
-    //      scan history oldest→newest and take the first message that had letters.
-    //  (b) the message has NO letters at all (e.g. "4000") — keep the conversation in
-    //      the language of the most RECENT message that had letters.
-    const tie = /[؀-ۿ]/.test(text) && /[A-Za-z]/.test(text);
-    if (tie) {
-      for (let i = 0; i < history.length; i++) {
-        const d = detectLang(String(history[i]?.text ?? ""));
-        if (d) { replyLang = d; break; }
-      }
-    } else {
-      for (let i = history.length - 1; i >= 0; i--) {
-        const d = detectLang(String(history[i]?.text ?? ""));
-        if (d) { replyLang = d; break; }
-      }
-    }
-  }
-  locale = replyLang ?? appLocale;
+  locale = resolveReplyLanguage(text, history, locale);
 
   try {
     // Deterministic question-budget hint: the user gets ONE clarifying question, ever, before the

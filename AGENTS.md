@@ -46,6 +46,12 @@ and on PRs with `count=null`.
    and user agent (Anthropic = Claude cloud sessions, Microsoft = GitHub runners, `HeadlessChrome` =
    any Playwright) before touching SQL.
 
+# CHAT LANGUAGE AND UI LANGUAGE ARE SEPARATE (owner, 2026-10-14 — permanent)
+
+English user message → English reply. Arabic → Arabic. Mixed Arabic/English → the language with more words, never more characters; numerals and emoji do not count as words. A tie retains established conversation language; a letterless follow-up inherits the most recent language-bearing turn, falling back to the UI language only without one. Typed messages stay verbatim.
+
+The language button changes only the UI, settings and displayed account name. Existing chat replies, summaries and closing notes retain their own language; switching never translates history, reruns a search or adds paid translation calls. Save a signed-in user's UI language choice on the device and restore it on refresh/return. Guest fresh loads stay Arabic-first. Canonical detail: `docs/ARCHITECTURE.md` i18n section. Guard: `scripts/verify-chat-language-is-not-interface-language.ts`.
+
 # GATHERN + AQAR MONTHLY SHOW NO PRICE — ONLY THE STAY-LENGTH NOTE (owner, 2026-10-02 — permanent)
 
 **Every Gathern and Aqar Monthly listing, today's and every new one we ingest, shows
