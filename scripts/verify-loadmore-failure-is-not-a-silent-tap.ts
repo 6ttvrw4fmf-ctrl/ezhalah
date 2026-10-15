@@ -174,7 +174,7 @@ const runLoadMore = async (
   };
   const m = await liftSymbols(
     file,
-    [{ header: '  const loadMore = async (m: Extract<ChatMsg, { role: \'results\' }>) => {', endsWith: /^  \};$/ }],
+    [{ header: '  const loadMore = async (m: Extract<ChatMsg, { role: \'results\' }>, requestedTarget?: number) => {', endsWith: /^  \};$/ }],
     ['loadMore'],
     PRELUDE,
   );
@@ -428,8 +428,8 @@ check('store.tsx pages at the shared LOAD_MORE_PAGE_SIZE, not a private copy of 
 // reveals past what revealTarget returns reintroduces the over-reveal. Proves §2's first-press checks
 // are not vacuous: without the boundary, a first press on a 5,000-match search reveals past 100.
 const mFirstOverreveals = mutantOf(agentSrc,
-  'const target = revealTarget(cur, m.result.matchTotal ?? Infinity);',
-  'const target = revealTarget(cur, m.result.matchTotal ?? Infinity) + 500;');
+  'revealTarget(cur, m.result.matchTotal ?? Infinity)',
+  '(revealTarget(cur, m.result.matchTotal ?? Infinity) + 500)');
 const overrevealBus = await runLoadMore(
   mFirstOverreveals,
   [{ listings: PAGE(150, 10), nextOffset: 500, hasMore: true }],
@@ -491,8 +491,8 @@ mustCatch('M-unbounded — a drain with no page budget runs past it and is caugh
 // M-unbounded-reveal: THE CRASH, restored — remove the 500 cap so a press reveals the whole cohort,
 // exactly the code that mounted ~20,000 cards and killed the renderer. Proves §CEILING is not vacuous.
 const mUnboundedReveal = mutantOf(agentSrc,
-  'const target = revealTarget(cur, m.result.matchTotal ?? Infinity);',
-  'const target = Infinity;');
+  'revealTarget(cur, m.result.matchTotal ?? Infinity)',
+  'Infinity');
 {
   const pages = Array.from({ length: 40 }, (_, i) => ({
     listings: PAGE(LOAD_MORE_PAGE_SIZE, 100 + i * LOAD_MORE_PAGE_SIZE),
