@@ -164,7 +164,7 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
     throw Error(`Unexpected network request: ${u}`);
   };
   try {
-    await import('../supabase/functions/agent/index.ts');
+    await import(pathToFileURL(process.env.EZ_LOCATION_AGENT_SOURCE || resolve('supabase/functions/agent/index.ts')).href);
     for (const askCount of [0, 1, 5]) {
       model = { kind: 'listings', reply: 'بدور لك على شقق في الرياض 🏡', location: 'الرياض', type: 'Apartment', location_plan: ready(['الرياض', 'جدة']) };
       const res = await handler!(new Request('https://fixture.invalid/agent', { method: 'POST', headers: { apikey: 'fixture' }, body: JSON.stringify({ text: 'أبي شقة في الرياض وجدة', askCount, prevQuery: prev }) }));
@@ -200,6 +200,13 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
     const removeResult=await removeResponse.json();
     assert.equal(removeResult.kind,'listings');
     assert.deepEqual(removeResult.query.districts,['حي الياسمين']);
+    for (const askCount of [1,5]) {
+      model={kind:'listings',reply:'أبحث لك 🏡',location:'الرياض',type:'Apartment',location_plan:ready()};
+      const specificResponse=await handler!(new Request('https://fixture.invalid/agent',{method:'POST',headers:{apikey:'fixture'},body:JSON.stringify({text:'أبي شقة قريبة من برج المملكة في الرياض',prevQuery:prev,askCount})}));
+      const specific=await specificResponse.json();
+      assert.equal(specific.kind,'message');
+      assert.match(specific.reply,/غير متاح/);
+    }
     model={kind:'message',reply:'أي مدينة؟ 📍',location_plan:{status:'none'}};
     const resetResponse=await handler!(new Request('https://fixture.invalid/agent',{method:'POST',headers:{apikey:'fixture'},body:JSON.stringify({text:'ابدأ بحث جديد',prevQuery:prev})}));
     const resetResult=await resetResponse.json();
@@ -209,7 +216,7 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
   } finally { globalThis.fetch = oldFetch; delete (globalThis as any).Deno; }
 }
 
-if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
+if (!process.env.EZ_LOCATION_PLAN_SOURCE && !process.env.EZ_LOCATION_AGENT_SOURCE) {
   function mustCatch(name: string, before: string, after: string) {
     const original = readFileSync(source, 'utf8');
     assert.ok(original.includes(before));
@@ -222,6 +229,15 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
       assert.match(result.stderr, /AssertionError/);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }
+  const edgeDir = mkdtempSync(join(tmpdir(),'location-reply-mutant-'));
+  try {
+    cpSync(resolve('supabase/functions/agent'),edgeDir,{recursive:true});
+    const file=join(edgeDir,'index.ts');
+    writeFileSync(file,readFileSync(file,'utf8').replace('chapterLocationReply = plan.reply;', 'chapterLocationReply = null;'));
+    const result=spawnSync(process.execPath,['--experimental-strip-types',import.meta.filename],{env:{...process.env,EZ_LOCATION_AGENT_SOURCE:file},encoding:'utf8',timeout:20000});
+    assert.equal(result.status,1,'generic refusal must not override the specific location explanation');
+    assert.match(result.stderr,/AssertionError/);
+  } finally { rmSync(edgeDir,{recursive:true,force:true}); }
   mustCatch('multiple cities cannot silently choose first', 'cities.length > 1 || (cities.length === 0 && p.districts.length === 0)', '(cities.length === 0 && p.districts.length === 0)');
   mustCatch('district must belong to chosen city', 'String(c.city_id) === String(chosen.city_id)', 'true');
   mustCatch('full catalog beats inventory shortlist', 'd.all_cities ?? d.cities', 'd.cities');

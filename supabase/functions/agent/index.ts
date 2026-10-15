@@ -1341,7 +1341,7 @@ Deno.serve(async (req: Request) => {
 
       let validatedDistricts: string[] | undefined;
       let locationStateValidated = false;
-      let chapterFailureReply: string | null = null;
+      let chapterLocationReply: string | null = null;
       let chapterNotice: string | undefined;
       const understoodState = () => ({
         deal,
@@ -1580,7 +1580,7 @@ Deno.serve(async (req: Request) => {
           validatedDistricts = Array.isArray(confirmed?.districts) ? confirmed.districts.filter((d): d is string => typeof d === "string") : (districtPin ? [districtPin] : []);
           locationStateValidated = true; // authoritative unchanged state; this turn does not search
           ambiguityReply = plan.reply;
-          if (plan.failed) chapterFailureReply = plan.reply;
+          chapterLocationReply = plan.reply; // preserve the specific reason even after the question budget is exhausted
         }
       }
 
@@ -1690,7 +1690,7 @@ Deno.serve(async (req: Request) => {
         // which is precisely the ask-loop the new ceiling exists to end. This is a STATEMENT, not a
         // question — never re-ask, for location or anything else, and never fall back to a
         // nationwide search to escape it (2026-09-04: the product does not run those).
-        const unsearchableReply = chapterFailureReply ?? (decision.unsearchable ? unsearchableText(locale === "en", text, lastBotReply) : null);
+        const unsearchableReply = chapterLocationReply ?? (decision.unsearchable ? unsearchableText(locale === "en", text, lastBotReply) : null);
         // A NO-PLACE REFUSAL MUST ASK FOR THE CITY (owner, 2026-09-04). Same shape as ambiguityReply
         // directly below: when the PLATFORM is the reason this turn is a clarification, the platform
         // supplies the question — the model does not know it was refused and writes as if it were
