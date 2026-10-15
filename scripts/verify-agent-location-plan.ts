@@ -219,7 +219,7 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
       ['أبي ٥٠ شقة للبيع في المنطقة الشرقية من عقار فقط','REGION','المنطقة الشرقية',50,''],
       ['أبي ١٠٠ شقة للإيجار السنوي بالمنطقة الشرقية بحد أقصى ٥٠٠٠٠ ريال بالسنة','REGION','المنطقة الشرقية',100,'50000'],
     ] as const) {
-      model={kind:'listings',reply:'أبحث لك 🏡',location:region || 'السعودية',type:'Apartment',count:String(amount),price:String(amount),deal:'Buy',pricing_basis:'none',location_plan:{status:'clarify',cities:[],districts:[],region:region === 'المنطقة الشرقية' ? 'الشرقية' : region,scope}};
+      model={kind:'listings',reply:'أبحث لك 🏡',location:region || 'السعودية',type:'Apartment',platforms:text.includes('عقار')?['Aqar']:[],count:String(amount),price:String(amount),deal:'Buy',pricing_basis:'none',location_plan:{status:'clarify',cities:[],districts:[],region:region === 'المنطقة الشرقية' ? 'الشرقية' : region,scope}};
       const response=await handler!(new Request('https://fixture.invalid/agent',{method:'POST',headers:{apikey:'fixture'},body:JSON.stringify({text,prevQuery:prev})}));
       const actual=await response.json();
       assert.equal(actual.kind,'listings',JSON.stringify(actual));
@@ -227,11 +227,16 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
       assert.equal(actual.query.price,budget);
       assert.equal(actual.query.count,amount);
     }
-    model={kind:'listings',reply:"Zillow isn't one of the platforms Ezhalah searches, so I can't limit results to it.",location:'الرياض',type:'Apartment',platforms:[],location_plan:ready()};
-    const unsupportedResponse=await handler!(new Request('https://fixture.invalid/agent',{method:'POST',headers:{apikey:'fixture'},body:JSON.stringify({text:'Show apartments for sale in Riyadh from Zillow only',prevQuery:prev})}));
-    const unsupportedResult=await unsupportedResponse.json();
-    assert.equal(unsupportedResult.kind,'message');
-    assert.equal(unsupportedResult.keepState,true);
+    for (const sourceSelectionChanged of [false,true]) {
+      model={kind:'listings',reply:"I'll search apartments in Riyadh across the platforms we have 🏡",location:'الرياض',type:'Apartment',platforms:[],excludedPlatforms:[],sourceSelectionChanged,location_plan:ready()};
+      const unsupportedResponse=await handler!(new Request('https://fixture.invalid/agent',{method:'POST',headers:{apikey:'fixture'},body:JSON.stringify({text:'Show apartments for sale in Riyadh from Zillow only',prevQuery:prev})}));
+      const unsupportedResult=await unsupportedResponse.json();
+      assert.equal(unsupportedResult.kind,'message');
+      assert.equal(unsupportedResult.keepState,true);
+    }
+    model={kind:'listings',reply:'Searching all supported websites 🏡',location:'الرياض',type:'Apartment',platforms:[],excludedPlatforms:[],sourceSelectionChanged:true,location_plan:ready()};
+    const allSourceResponse=await handler!(new Request('https://fixture.invalid/agent',{method:'POST',headers:{apikey:'fixture'},body:JSON.stringify({text:'Show apartments for sale in Riyadh from all supported websites',prevQuery:prev})}));
+    assert.equal((await allSourceResponse.json()).kind,'listings');
   } finally { globalThis.fetch = oldFetch; delete (globalThis as any).Deno; }
 }
 
@@ -248,7 +253,7 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE && !process.env.EZ_LOCATION_AGENT_SOURC
       assert.match(result.stderr, /AssertionError/);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }
-  for (const [before, after] of [['chapterLocationReply = plan.reply;', 'chapterLocationReply = null;'], ['unsupportedSourceReply || requestedSources.some', 'false || requestedSources.some']]) {
+  for (const [before, after] of [['chapterLocationReply = plan.reply;', 'chapterLocationReply = null;'], ['droppedWebsiteRestriction || unsupportedSourceReply', 'false || unsupportedSourceReply']]) {
   const edgeDir = mkdtempSync(join(tmpdir(),'location-reply-mutant-'));
   try {
     cpSync(resolve('supabase/functions/agent'),edgeDir,{recursive:true});

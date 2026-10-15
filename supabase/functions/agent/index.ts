@@ -1664,7 +1664,10 @@ Deno.serve(async (req: Request) => {
       // A model may acknowledge an unsupported source in prose but omit it from platforms.
       // Never execute the resulting unrestricted search while that restriction is unresolved.
       const unsupportedSourceReply = /(?:website|platform|source).{0,100}(?:not supported|isn't supported|not one of|isn't one of|do not support|don't support)|(?:cannot|can't).{0,50}(?:search|limit).{0,50}(?:website|platform)|(?:not|isn't) one of.{0,60}(?:platforms|websites|sources)|(?:الموقع|المنصة|المواقع|المنصات).{0,60}(?:غير مدعوم|ما ندعم|لا ندعم|مو من)/iu.test(String(out.reply ?? ""));
-      if (unsupportedSourceReply || requestedSources.some(name => typeof name !== "string" || !supportedNames.has(name.trim().toLowerCase()))) {
+      const explicitWebsiteRestriction = /\b(?:from|on)\s+.{1,120}?\s+only\b|من\s+(?:موقع\s+)?[^،.!؟]{1,80}\s+(?:فقط|بس)(?:$|[،.!؟])/iu.test(text);
+      const clearWebsiteRestrictions = /\b(?:all|any|every)\s+(?:(?:supported|available|active)\s+)?(?:websites?|sites?|platforms?|sources?)\b|\b(?:clear|remove|reset)\b.{0,35}\b(?:website|platform|source|restriction)|(?:كل|جميع)\s*(?:المواقع|المنصات)|(?:امسح|احذف|شيل)\s*قيود\s*(?:المواقع|المنصات)/iu.test(text);
+      const droppedWebsiteRestriction = !requestedSources.length && !clearWebsiteRestrictions && (out.sourceSelectionChanged === true || explicitWebsiteRestriction);
+      if (droppedWebsiteRestriction || unsupportedSourceReply || requestedSources.some(name => typeof name !== "string" || !supportedNames.has(name.trim().toLowerCase()))) {
         const reply = locale === "en" ? "That website isn't supported. Which supported website would you like to search?" : "الموقع غير مدعوم. أي موقع من المواقع المتاحة تبي نبحث فيه؟";
         return json({ kind: "message", reply, locationQuestion: false, keepState: true, askCount });
       }
