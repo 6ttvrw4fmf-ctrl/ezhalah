@@ -3083,9 +3083,10 @@ export default function Agent() {
   const send = async (override?: string) => {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
-    // The user SENT something (typed or voice — sendVoice funnels in here): the small sign-in
-    // card retires for the rest of this load (owner 2026-08-29). After the guard, so an empty or
-    // busy-refused submit is not a send.
+    setFilterOrigin(false);
+    const selectedSourcesForTurn = pickerSourceSlugs(selectedSources);
+    const sourceChoiceForTurn = pickerSourceExplicit;
+    // Every accepted send, including pagination, dismisses the sign-in card.
     dismissSignInCard();
     const latestResult = [...msgs].reverse().find((m): m is Extract<ChatMsg, {role:'results'}> => m.role === 'results');
     if (latestResult && !pendingRefineRef.current && (msgs[msgs.length - 1]?.role === 'results' || lastPaginationResultRef.current === latestResult.id)) {
@@ -3108,9 +3109,6 @@ export default function Agent() {
       }
     }
     lastPaginationResultRef.current = null;
-    setFilterOrigin(false);
-    const selectedSourcesForTurn = pickerSourceSlugs(selectedSources);
-    const sourceChoiceForTurn = pickerSourceExplicit;
     const historyAll = msgs
       .filter((m) => m.role === 'user' || m.role === 'agent' || m.role === 'results')
       .map((m) => {

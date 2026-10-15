@@ -55,7 +55,7 @@ check("the local wrapper feeds it quotableTotal (the honest total) and INTERVIEW
   // was dropped in favour of exactly one card per platform (src/lib/initialReveal.ts has the full
   // history). The guarantee this check exists for is unchanged: the wrapper must still feed the
   // HONEST total and the canonical stopAt.
-  /initialRevealPure\(\{ fetched: r\?\.listings\?\.length \?\? 0, honestTotal: r \? quotableTotal\(r\) : null, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount\(r\?\.listings\), afCompleted \}\)/.test(agent));
+  /initialRevealPure\(\{ fetched: r\?\.listings\?\.length \?\? 0, honestTotal: r \? quotableTotal\(r\) : null, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount\(r\?\.listings\), requestedCount: r\?\.query\?\.count, afCompleted \}\)/.test(agent));
 const raw = (agent.match(/Math\.min\(FIRST_PAGE, [^)]*\)/g) ?? []);
 check(`no raw Math.min(FIRST_PAGE, …) reveal remains (found ${raw.length})`, raw.length === 0, raw.slice(0, 3).join(" | "));
 check("the initial drip, the restore path and the render path all use initialReveal",

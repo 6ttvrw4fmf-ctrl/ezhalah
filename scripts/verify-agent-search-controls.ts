@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { buildAgentSourceCatalog } from './build-agent-source-catalog.mjs';
 import assert from 'node:assert/strict';
 import { liftSymbols } from './lib/liftSymbols.ts';
@@ -9,10 +11,13 @@ import { initialReveal } from '../src/lib/initialReveal.ts';
 import { validateLocationPlan } from '../supabase/functions/agent/locationPlan.ts';
 import { mergeConversationState } from '../src/lib/conversationState.ts';
 const tables=['aqar_residential_listings','wasalt_commercial_listings','gathern_residential_listings'];
-assert.deepEqual(selectSourceTables(tables,undefined,['aqar']),tables.slice(1));
-assert.deepEqual(selectSourceTables(tables,['aqar','wasalt'],['aqar']),[tables[1]]);
-assert.deepEqual(selectSourceTables(tables,['aqar'],['aqar']),[]);
-assert.deepEqual(selectSourceTables(tables,[],[]),tables);
+function assertSources(select: typeof selectSourceTables) {
+assert.deepEqual(select(tables,undefined,['aqar']),tables.slice(1));
+assert.deepEqual(select(tables,['aqar','wasalt'],['aqar']),[tables[1]]);
+assert.deepEqual(select(tables,['aqar'],['aqar']),[]);
+assert.deepEqual(select(tables,[],[]),tables);
+}
+assertSources(selectSourceTables);
 for(const n of [1,10,25,50,100,200,500]) assert.equal(initialReveal({fetched:600,honestTotal:600,stopAt:25,platforms:3,requestedCount:n}),n);
 assert.equal(initialReveal({fetched:7,honestTotal:7,stopAt:25,requestedCount:3}),3);
 assert.equal(agentResultRequest('ورني ٥٠ زيادة',50,50),100);
@@ -67,3 +72,18 @@ assert.equal(agentResultRequest('خلها ١٠٠',20,20),null);
 
 assert.equal(resultQuantityChange('خلها ١٠٠',true),100);
 assert.equal(resultQuantityChange('another 50',true),null);
+
+// Execute the real selector with its exclusion removed; the same contract must reject it.
+async function mustCatch(name: string, before: string, after: string) {
+  const original = readFileSync('src/lib/agentSourceSelection.ts','utf8');
+  assert.ok(original.includes(before), 'mutation must apply');
+  const directory = mkdtempSync(resolve(tmpdir(),'ezhalah-source-mutation-'));
+  const file = resolve(directory,'selector.ts');
+  try {
+    writeFileSync(file,original.replace(before,after));
+    const mutant = await import(pathToFileURL(file).href);
+    assert.throws(() => assertSources(mutant.selectSourceTables));
+    console.log('PASS: mutation caught — '+name);
+  } finally { rmSync(directory,{recursive:true,force:true}); }
+}
+await mustCatch('excluded websites cannot leak into matches','&& !excluded?.includes(source)','&& true');
