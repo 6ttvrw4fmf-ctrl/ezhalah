@@ -89,8 +89,9 @@ async function validatePlan(
     if (citiesForGuard.length || !strings(p.districts) || p.districts.length) return blocked("تبي البحث في النطاق كامل أو في مدينة وأحياء محددة؟ 📍", "Should I search the entire scope or specific city districts? 📍");
     if (unsupportedLocationRequirement(text, citiesForGuard)) return blocked("تحديد القرب غير متاح حالياً. حدد منطقة أو مدينة. 📍", "Proximity filtering is unavailable. Please specify a region or city. 📍");
     const namedRegions = REGION_NAMES.filter(([en, ar]) => [ar, `${en} region`, `region of ${en}`, ...(en === "Eastern Province" ? [en] : [])].some(name => foldText(text).includes(foldText(name))));
+    if (namedRegions.length > 1) return blocked("أي منطقة تقصد من المناطق المذكورة؟ 📍", "Which of those regions should I search? 📍");
     const region = REGION_NAMES.find(([en, ar]) => norm(String(p.region ?? "")) === norm(ar) || norm(String(p.region ?? "")) === norm(ar.replace(/^منطقة\s+/, "")) || String(p.region ?? "").toLowerCase() === en.toLowerCase())
-      ?? (!p.region && namedRegions.length === 1 ? namedRegions[0] : undefined);
+      ?? (namedRegions.length === 1 ? namedRegions[0] : undefined);
     if (scope === "REGION" && (!region || (explicit && !(contextualRegion && norm(String(previous?.regionPin)) === norm(region[1])) && ![region[1], `${region[0]} region`, `region of ${region[0]}`, ...(region[0] === "Eastern Province" ? [region[0]] : [])].some(name => foldText(text).includes(foldText(name)))))) return blocked("أي منطقة داخل السعودية تقصد؟ 📍", "Which Saudi region do you mean? 📍");
     return { status: "ready", scope, location: scope === "REGION" ? region![1] : "السعودية", regionPin: scope === "REGION" ? region![1] : "", districts: [], notice: previousDistricts.length ? (en ? "Cleared the previous city districts for the requested wider scope." : "شلت أحياء المدينة السابقة للبحث في النطاق المطلوب.") : undefined };
   }
