@@ -62,9 +62,9 @@ const resComWired = (src: string) => /if \(!ambiguityReply\) ambiguityReply = re
   && src.indexOf('residentialCommercialQuestion(text') < src.indexOf('const wired = buildTurnDecision(');
 check('a residential + commercial message pauses the turn as a question BEFORE the one decision authority runs (so it can never search)', resComWired(edge));
 mustCatch('the residential + commercial question being dropped', !resComWired(edge.replace('if (!ambiguityReply) ambiguityReply = residentialCommercialQuestion(', 'if (!ambiguityReply) void (')));
-const nearWired = (src: string) => /const notMeasured = !districtPin && !regionPin \? proximityNotMeasuredText\(text, location, locale === "en", lastBotReply\) : null;/.test(src)
+const nearWired = (src: string) => /const notMeasured = !chapterOne && !districtPin && !regionPin \? proximityNotMeasuredText\(text, location, locale === "en", lastBotReply\) : null;/.test(src)
   && /else if \(notMeasured\) replyOut = notMeasured;/.test(src);
-check('a whole-city search with a distance wish replaces the model\'s «قريبة من …» reply', nearWired(edge));
+check('before Chapter 1 activation, a whole-city search with a distance wish replaces the model\'s «قريبة من …» reply', nearWired(edge));
 mustCatch('the model\'s promise coming back', !nearWired(edge.replace('else if (notMeasured) replyOut = notMeasured;', '')));
 
 // ── in the middle of a chat (the owner watching, 2026-10-13) ─────────────────────────────────────────────────────

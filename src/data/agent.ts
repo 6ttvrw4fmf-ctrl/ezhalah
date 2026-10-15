@@ -233,6 +233,8 @@ const AR_REALESTATE = new RegExp(
 // the same {kind, reply, query} contract. Build a full SearchQuery from the flat
 // fields it sends, deriving the category from the type (the engine needs both).
 type BackendQuery = {
+  locationStateValidated?: boolean;
+  districts?: string[];
   deal?: string;
   location?: string;
   type?: string | null;
@@ -543,6 +545,7 @@ function certifyAfOnMergedState(merged: SearchQuery, b: BackendQuery): SearchQue
 }
 export function statedKeys(b: BackendQuery): string[] {
   const said: string[] = [];
+  if (b.locationStateValidated === true) said.push("location", "regionPin", "districtPin", "districts");
   // RENT OR BUY IS ONE DECISION (found live 2026-10-11, owner's real-user test): «ابغى شقة» leaves it open
   // (bothDeals:true), then «الرياض ٢ غرف إيجار سنوي» says RENT — the edge answered deal:Rent, bothDeals:false, but
   // `bothDeals` was not counted as stated, so the merge rescued the old «open» flag and the search ran as
@@ -807,6 +810,15 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   // Largest-first on top of it only surfaced source outliers (a «villa» of 337,650 m² as #1, twice) and pushed the permanent
   // rule — match first, then diversify the platforms — aside (owner 2026-10-11).
   if (ordering && !q.sort && !(ordering === 'area_desc' && q.areaNote === 'big')) q.sort = ordering;
+
+  // A complete catalog-validated state replaces local extraction, including an intentional empty district set.
+  if (b.locationStateValidated === true && typeof b.location === 'string' && Array.isArray(b.districts)) {
+    q.location = b.location;
+    q.locationMatch = undefined;
+    q.regionPin = b.regionPin;
+    Object.assign(q, { districtPin: undefined });
+    q.districts = b.districts.filter((d): d is string => typeof d === 'string');
+  }
 
   return q;
 }
