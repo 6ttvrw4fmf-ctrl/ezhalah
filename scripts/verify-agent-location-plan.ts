@@ -97,7 +97,7 @@ for (const status of ['ready','none','clarify','unsupported']) {
   const result = await validateLocationPlan({...ready(['جدة']),status}, lookup, false, 'أبحث لك في منطقة الرياض كلها 🏙️', 20000,
     {text:'أبي شقة في منطقة الرياض كلها',previous:{...prev,location:'جدة',districts:[]}});
   assert.equal(result.status,'blocked');
-  assert.match(result.reply,/أي منطقة.*؟/);
+  assert.match(result.reply,/(?:أي منطقة|النطاق كامل).*؟/);
 }
 assert.match((await validateLocationPlan({status:'clarify'},lookup,false,'أبحث لك في المنطقة')).reply, /؟/);
 assert.equal((await contextual(ready(['جدة'],[],'منطقة مكة المكرمة'),'أبي شقة في جدة بمنطقة مكة',null)).status,'ready');
@@ -213,6 +213,20 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
     assert.equal(resetResult.kind,'message');
     assert.equal(resetResult.query.location,'');
     assert.deepEqual(resetResult.query.districts,[]);
+    for (const [text, scope, region, amount, budget] of [
+      ['أبي ٢٠٠ فيلا للبيع في كل السعودية','NATIONWIDE','',200,''],
+      ['Show 100 villas for sale across Saudi Arabia','NATIONWIDE','',100,''],
+      ['أبي ٥٠ شقة للبيع في المنطقة الشرقية من عقار فقط','REGION','المنطقة الشرقية',50,''],
+      ['أبي ١٠٠ شقة للإيجار السنوي بالمنطقة الشرقية بحد أقصى ٥٠٠٠٠ ريال بالسنة','REGION','المنطقة الشرقية',100,'50000'],
+    ] as const) {
+      model={kind:'listings',reply:'أبحث لك 🏡',location:region || 'السعودية',type:'Apartment',count:String(amount),price:String(amount),deal:'Buy',pricing_basis:'none',location_plan:{status:'ready',cities:[],districts:[],region,scope}};
+      const response=await handler!(new Request('https://fixture.invalid/agent',{method:'POST',headers:{apikey:'fixture'},body:JSON.stringify({text,prevQuery:prev})}));
+      const actual=await response.json();
+      assert.equal(actual.kind,'listings',JSON.stringify(actual));
+      assert.equal(actual.query.geographicScope,scope);
+      assert.equal(actual.query.price,budget);
+      assert.equal(actual.query.count,amount);
+    }
   } finally { globalThis.fetch = oldFetch; delete (globalThis as any).Deno; }
 }
 

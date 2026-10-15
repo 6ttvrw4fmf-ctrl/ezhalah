@@ -42,6 +42,7 @@ export function established(v: unknown): boolean {
 }
 
 export type EstablishedState = {
+  validatedNationwide?: boolean;
   location?: string | null;
   type?: string | null;
   price?: string | number | null;
@@ -126,6 +127,7 @@ function bareLocation(v: unknown): string {
  * a city/region/district — the two cases that produce an unscoped result set.
  */
 export function hasUsableLocation(state: EstablishedState): boolean {
+  if (state.validatedNationwide === true) return true;
   const loc = bareLocation(state.location);
   if (!loc) return false;
   if (COUNTRY_ONLY_RE.test(loc)) return false;
