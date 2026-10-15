@@ -20,6 +20,26 @@ const OPERATION = /(?<![\p{L}])و?(?:أضف|اضف|ضيف|زد|زيد|كمان|�
 
 const REMOVAL = /(?:احذف|شيل|ازل|أزل|امسح|بدل|بدال|خلها|خلي|غير|غيّر|فقط|بس)|\b(?:replace|instead|remove|delete|clear|only|change|switch)\b/iu;
 
+// Official names from src/data/sa-locations.json; the regression test pins this mirror.
+export const REGION_NAMES = [["Riyadh", "منطقة الرياض"], ["Makkah", "منطقة مكة المكرمة"], ["Madinah", "منطقة المدينة المنورة"], ["Qassim", "منطقة القصيم"], ["Eastern Province", "المنطقة الشرقية"], ["Asir", "منطقة عسير"], ["Tabuk", "منطقة تبوك"], ["Hail", "منطقة حائل"], ["Northern Borders", "منطقة الحدود الشمالية"], ["Jazan", "منطقة جازان"], ["Najran", "منطقة نجران"], ["Bahah", "منطقة الباحة"], ["Jawf", "منطقة الجوف"]] as const;
+function explicitRegionOnly(text: string, cities: string[], districts: string[]): boolean {
+  let remaining = foldText(text);
+  const phrases = REGION_NAMES.flatMap(([en, ar]) => [ar, `${en} region`, `region of ${en}`,
+    ...(en.includes("Province") ? [en] : []),
+    ...(ar === "منطقة مكة المكرمة" ? ["منطقة مكة"] : []),
+    ...(ar === "منطقة المدينة المنورة" ? ["منطقة المدينة"] : []),
+  ]).map(foldText).sort((a,b) => b.length-a.length);
+  let found = false;
+  for (const phrase of phrases) {
+    if (remaining.includes(phrase)) { found = true; remaining = remaining.split(phrase).join(" "); }
+  }
+  if (!found) return false;
+  const namedCity = cities.some(city => [city,listCities([city],true)].some(n => remaining.includes(foldText(n))));
+  const namedDistrict = districts.some(d => remaining.includes(foldText(norm(d)))) ||
+    (districts.length > 0 && /(?:حي\s|\bdistrict\b|\bneighbou?rhood\b)/iu.test(remaining));
+  return !namedCity && !namedDistrict;
+}
+
 // Capability checks use the request itself, not the model's promise that it understood it.
 export function unsupportedLocationRequirement(text: string, cityNames: string[]): boolean {
   const t = foldText(text);
@@ -57,6 +77,9 @@ async function validatePlan(
   const previous = startsNewLocationSearch(text) ? null : context.previous;
   const previousDistricts = strings(previous?.districts) ? previous.districts : typeof previous?.districtPin === "string" ? [previous.districtPin] : [];
   const citiesForGuard = strings(p.cities) ? p.cities : [];
+  if (explicitRegionOnly(text, citiesForGuard, strings(p.districts) ? p.districts : [])) {
+    return blocked("أي مدينة داخل هالمنطقة تقصد؟ 📍", "Which city within this region do you mean? 📍");
+  }
   if (unsupportedLocationRequirement(text, citiesForGuard)) {
     return blocked("تحديد القرب أو النطاق الجغرافي غير متاح حالياً. أي مدينة وحي تبي نبحث فيه؟ 📍", "Proximity and geographic area filtering aren't available yet. Which city and district should I search? 📍");
   }
@@ -64,7 +87,7 @@ async function validatePlan(
     ? blocked("أي مدينة تبي نبدأ فيها البحث الجديد؟ 📍", "Which city should the new search start in? 📍")
     : { status: "none" };
   if (p.status === "clarify" || p.status === "unsupported") {
-    return { status: "blocked", reply: modelReply.trim() || (en ? "Which Saudi city and district do you mean? 📍" : "أي مدينة وحي داخل السعودية تقصد؟ 📍") };
+    return { status: "blocked", reply: /[?؟]/u.test(modelReply) ? modelReply.trim() : (en ? "Which Saudi city and district do you mean? 📍" : "أي مدينة وحي داخل السعودية تقصد؟ 📍") };
   }
   if (p.status !== "ready" || !strings(p.cities) || !strings(p.districts) || (typeof p.region !== "string" || p.region.length > 120)) return blocked("ما قدرت أحدد موقع البحث، اكتب المدينة والحي. 📍", "I couldn't identify the search location. Please specify the city and district. 📍");
   if (p.cities.some(name => /^(?:ال)?منطقة\s/u.test(name.trim()))) return blocked("أي مدينة داخل هالمنطقة تقصد؟ 📍", "Which city within this region do you mean? 📍");
@@ -95,18 +118,6 @@ async function validatePlan(
     if (requestedRegion.trim()) candidates = candidates.filter(c => norm(String(c.region_ar)) === norm(requestedRegion));
     if (candidates.length !== 1) return blocked("أي منطقة تقصد لهالمدينة؟ 📍", "Which region do you mean for this city? 📍");
     const chosen = candidates[0];
-    // A region mention cannot authorize its namesake city. A separately stated city or
-    // validated district may narrow it; the model merely repeating the region name may not.
-    const regionName = foldText(String(chosen.region_ar)).replace(/^(?:ال)?منطقه\s+/u, "");
-    const regionPhrases = [`منطقه ${regionName}`, `${foldText(listCities([String(chosen.city_ar)], true))} region`, `region of ${foldText(listCities([String(chosen.city_ar)], true))}`];
-    let withoutRegion = foldText(text);
-    let mentionedRegion = false;
-    for (const phrase of regionPhrases) {
-      if (withoutRegion.includes(phrase)) { mentionedRegion = true; withoutRegion = withoutRegion.split(phrase).join(" "); }
-    }
-    const separateCity = [String(chosen.city_ar), listCities([String(chosen.city_ar)], true)]
-      .some(name => withoutRegion.includes(foldText(name)));
-    if (mentionedRegion && !separateCity && !p.districts.length) return blocked("أي مدينة داخل هالمنطقة تقصد؟ 📍", "Which city within this region do you mean? 📍");
     const cityChanged = typeof previous?.location === "string" && norm(previous.location) !== norm(String(chosen.city_ar));
     const explicitCityChange = cityChanged && !isFreshRequest(text, String(chosen.city_ar)) &&
       ([String(chosen.city_ar), listCities([String(chosen.city_ar)], true)].some(name => foldText(text).includes(foldText(name))) || /غير.*مدين|change.*city|switch.*city/iu.test(text));
