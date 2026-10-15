@@ -1,3 +1,4 @@
+import searchSources from '../../supabase/functions/agent/searchSources.json';
 // The Ezhalah AI Agent. Turns a free-text message into either a neutral listing search or a
 // plain reply. It is deliberately NON-ADVISORY (PRD §7): it never recommends a property, never
 // says "best/better/good deal", and never gives buying or financial advice — it only acknowledges
@@ -415,13 +416,15 @@ const PLATFORM_PATTERNS: Array<[RegExp, string]> = [
   [/1\s*october|october|اكتوبر|أكتوبر/i, 'october'],
 ];
 function resolveSourcesFromText(text: string): string[] {
+  const exact = Object.entries(searchSources).find(([name, slugs]) => name.toLowerCase() === text.trim().toLowerCase() || slugs.includes(text.trim().toLowerCase()));
+  if (exact) return exact[1];
   const out = new Set<string>();
   for (const [re, prefix] of PLATFORM_PATTERNS) if (re.test(text)) out.add(prefix);
   // Bare "Aqar" only when no aqar-compound already matched (so "Aqar Gate" → aqargate, not both).
   if (!out.has('aqargate') && !out.has('aqarcity') && !out.has('aqaratikom') && /\baqar\b|aqar\.fm/i.test(text)) {
     out.add('aqar');
   }
-  return Array.from(out);
+  return [...new Set(Array.from(out).flatMap(slug => Object.values(searchSources).find(slugs => slugs.includes(slug)) ?? [slug]))];
 }
 // Apply a platform filter (and Gathern's monthly implication) onto a query built from any path.
 // When the edge already gave its own platform-restriction judgment (edgePlatforms is a real array,

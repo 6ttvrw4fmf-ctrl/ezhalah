@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { buildAgentSourceCatalog } from './build-agent-source-catalog.mjs';
 import assert from 'node:assert/strict';
 import { liftSymbols } from './lib/liftSymbols.ts';
 import { resolve } from 'node:path';
@@ -52,3 +54,9 @@ const national:any=await remote.resolveSearchScope({geographicScope:'NATIONWIDE'
 assert.equal(national.p_cities,null);assert.equal(national.p_region_ids,null);
 assert.deepEqual(await remote.resolveSearchScope({geographicScope:'REGION',location:'المنطقة الشرقية'}),{failed:true});
 console.log('PASS: actual RPC scope serialization preserves region and nationwide intent');
+
+const sourceCatalog=JSON.parse(readFileSync('supabase/functions/agent/searchSources.json','utf8'));
+assert.deepEqual(sourceCatalog,buildAgentSourceCatalog());
+assert.deepEqual(sourceCatalog.Aqar,['aqar','aqarmonthly']);
+assert.deepEqual(sourceCatalog['عقار'],sourceCatalog.Aqar);
+assert.deepEqual(sourceCatalog['Aqar Gate'],sourceCatalog.Aqargate);
