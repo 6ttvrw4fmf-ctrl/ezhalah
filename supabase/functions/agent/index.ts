@@ -23,7 +23,7 @@
 // public project key; this endpoint does no privileged work and writes nothing.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { LOCATION_CHAPTER_MARKER, LOCATION_PLAN_SCHEMA, validateLocationPlan } from "./locationPlan.ts";
+import { LOCATION_CHAPTER_MARKER, LOCATION_PLAN_SCHEMA, validateLocationPlan, startsNewLocationSearch } from "./locationPlan.ts";
 
 const DEEPSEEK_API_KEY = Deno.env.get("DEEPSEEK_API_KEY") ?? "";
 // "flash" = DeepSeek's fast/non-reasoning tier, the fit for a short classification task; override
@@ -1339,6 +1339,7 @@ Deno.serve(async (req: Request) => {
       let validatedDistricts: string[] | undefined;
       let locationStateValidated = false;
       let chapterFailureReply: string | null = null;
+      let chapterNotice: string | undefined;
       const understoodState = () => ({
         deal,
         bothDeals,
@@ -1562,16 +1563,18 @@ Deno.serve(async (req: Request) => {
         const plan = await validateLocationPlan(out.location_plan, async (name) => {
           const result = await locClassify(name);
           return result === LOC_CLASSIFY_FAILED ? null : result;
-        }, locale === "en", String(out.reply ?? ""));
+        }, locale === "en", String(out.reply ?? ""), 20000, { text, previous: prevQuery, pendingQuestion: lastBotReply, landmarkHint: lmHint });
         if (plan.status === "ready") {
           location = plan.location; regionPin = plan.regionPin;
           districtPin = undefined; validatedDistricts = plan.districts;
           locationStateValidated = true; ambiguityReply = null;
+          chapterNotice = plan.notice;
         } else if (plan.status === "blocked") {
-          location = typeof prevQuery?.location === "string" ? prevQuery.location : "";
-          regionPin = typeof prevQuery?.regionPin === "string" ? prevQuery.regionPin : undefined;
-          districtPin = typeof prevQuery?.districtPin === "string" ? prevQuery.districtPin : undefined;
-          validatedDistricts = Array.isArray(prevQuery?.districts) ? prevQuery.districts.filter((d): d is string => typeof d === "string") : (districtPin ? [districtPin] : []);
+          const confirmed = startsNewLocationSearch(text) ? null : prevQuery;
+          location = typeof confirmed?.location === "string" ? confirmed.location : "";
+          regionPin = typeof confirmed?.regionPin === "string" ? confirmed.regionPin : undefined;
+          districtPin = typeof confirmed?.districtPin === "string" ? confirmed.districtPin : undefined;
+          validatedDistricts = Array.isArray(confirmed?.districts) ? confirmed.districts.filter((d): d is string => typeof d === "string") : (districtPin ? [districtPin] : []);
           locationStateValidated = true; // authoritative unchanged state; this turn does not search
           ambiguityReply = plan.reply;
           if (plan.failed) chapterFailureReply = plan.reply;
@@ -1751,6 +1754,7 @@ Deno.serve(async (req: Request) => {
       return json({
         kind: "listings",
         reply: groundReply(replyOut, locale, outAmenities, text, lastBotReply),
+        notice: chapterNotice,
         askCount: decision.askCount,
         query: {
           deal,

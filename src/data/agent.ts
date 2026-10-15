@@ -892,6 +892,7 @@ async function callAgentBackend(
       return {
         kind: 'listings',
         reply: String(d.reply ?? ''),
+        notice: typeof d.notice === 'string' ? d.notice : undefined,
         askCount: askCountOut,
         // CLARIFICATION MUST NOT RESET THE CONVERSATION (owner-reported bug 2026-08-29).
         // queryFromBackend builds a FRESH query from this turn's model output, so anything the model
@@ -1245,7 +1246,7 @@ export async function respond(text: string, opts?: {
       // ALSO a structured field (2026-09-11 fix), not just appended to `.reply`: the listings-turn
       // UI never renders `.reply` (see the AgentTurn comment above) — without this, the notice was
       // computed, consumed one-time from announcedRejections, and then shown to nobody.
-      backend.notice = notice;
+      backend.notice = [backend.notice, notice].filter(Boolean).join('\n');
     }
     return backend;
   }
