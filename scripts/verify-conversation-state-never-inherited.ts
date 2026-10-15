@@ -93,6 +93,7 @@ const CONVERSATION_SCOPED = [
     why: "the Advanced-Filter skip-only rounds per results turn (2026-10-06) — inherited, a new chat would skip questions it never asked" },
   { name: "pendingScopeRef", kind: "ref", cleared: (v: any) => v === null, why: "a half-answered clarifying question the next send() would consume" },
   { name: "pendingCityRef", kind: "ref", cleared: (v: any) => v === null, why: "the plain-city question's subject" },
+  { name: "lastPaginationResultRef", kind: "ref", cleared: (v: any) => v === null, why: "quantity navigation belongs to its results conversation" },
   { name: "lastQueryRef", kind: "ref", cleared: (v: any) => v === null, why: "the accumulated filters the previous conversation narrowed" },
   // ── added 2026-09-18, ops_incident #319: the rest of what send() consumes, and the second token ──
   { name: "pendingRefineRef", kind: "ref", cleared: (v: any) => v === null,
@@ -142,6 +143,7 @@ const afCarryRef = { current: { msgId: "m", facets: [1], asked: ["a"] } as unkno
 const afSkippedByMsgRef = { current: { m: ["a"] } as unknown };
 const pendingScopeRef = { current: "PREVIOUS-TWIN-QUESTION" as unknown };
 const pendingCityRef = { current: "الرياض" as unknown };
+const lastPaginationResultRef = { current: "PREVIOUS-RESULTS-TURN" as unknown };
 const lastQueryRef = { current: { location: "جدة", priceMax: 1_000_000 } as unknown };
 const runRef = { current: { cancelled: false } as { cancelled: boolean } | null };
 const flushPendingCapture = () => { calls.push("flushPendingCapture"); };
@@ -157,7 +159,7 @@ const liftFrom = async (file: string) =>
       { header: "    const startFresh = () => {", endsWith: /^    \};$/ },
     ],
     ["resetConversationState", "startFresh", "probe", "calls",
-     "chatIdRef", "liveTurnsRef", "afCarryRef", "afSkippedByMsgRef", "pendingScopeRef", "pendingCityRef", "lastQueryRef", "runRef",
+     "chatIdRef", "liveTurnsRef", "afCarryRef", "afSkippedByMsgRef", "pendingScopeRef", "pendingCityRef", "lastQueryRef", "lastPaginationResultRef", "runRef",
      "pendingRefineRef", "refineMsgIdRef", "saidRef", "askCountRef", "ageFlowTokenRef",
      "conversationEpochRef"],
     PRELUDE,
@@ -865,7 +867,7 @@ const loadMoreListings = async (_q: any, offset: number) => {
 `;
   const liftLoadMore = async (file: string) => await liftSymbols(
     file,
-    [{ header: "  const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>) => {", endsWith: /^  \};$/ }],
+    [{ header: "  const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>, requestedTarget?: number) => {", endsWith: /^  \};$/ }],
     ["loadMore", "probe", "world"], LOADMORE_PRELUDE,
   ) as { loadMore: (m: unknown) => Promise<void>; probe: any; world: any };
 

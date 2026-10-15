@@ -7,7 +7,7 @@ A deployed function or an active note alone does not establish verified behavior
 The model interprets Arabic, English and mixed-language location intent, proposes canonical Arabic
 city/district names, and sends the complete intended location in `location_plan`. The edge validates
 those proposals with the existing bounded `loc_classify` catalog RPC before allowing a search.
-Exactly one Saudi city is required. Multiple districts form an OR-set inside that city. A district
+The owner-approved [search controls](AGENT_SEARCH_CONTROLS.md) extend location scope to explicit REGION or NATIONWIDE requests. CITY remains the default and requires exactly one Saudi city. Multiple districts form an OR-set inside that city. A district
 without a city can infer its parent only when the full catalog, including zero-inventory places,
 leaves exactly one valid city. Inventory popularity cannot choose a location.
 
@@ -22,7 +22,7 @@ The existing clarification budget remains: when exhausted, unresolved geography 
 The model is responsible for interpreting the requested operation and spelling/alias proposals.
 `locationPlan.ts` enforces catalog membership, city uniqueness, district parentage, and bounded
 failure handling. This is not a claim that a saved prompt alone implements all validation.
-Request-based checks require a city for explicit region-only turns even when the model repeats a prior city.
+Request-based checks recognize explicit region/nationwide requests; broadening without explicit intent or confirmed scope is refused.
 Recognition hints are resolved against the catalog; administrative district aliases are allowed, including
 explicitly removed references validated against previous state. Unknown landmarks remain unsupported.
 Request-based checks additionally stop unsupported proximity/directional scopes and ambiguous bare

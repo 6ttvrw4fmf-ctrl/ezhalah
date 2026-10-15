@@ -72,8 +72,11 @@ check("NOT a real field: the phantom 'price' key was removed from STICKY_FIELDS"
 // that only narrowed the district silently dropped the order the user asked for a turn earlier.
 check("sticky: sort — a stated ordering survives the next turn (owner 2026-09-06)",
   (STICKY_FIELDS as readonly string[]).includes("sort"));
-// count/keywords keep the original rule: they really do describe one request.
-for (const f of ["count", "keywords"]) {
+// Owner 2026-10-15: requested quantity persists until changed; keywords stay per utterance.
+check("sticky: count — user-controlled result quantity survives refinements", STICKY_FIELDS.includes("count"));
+check("requested quantity is retained", mergeConversationState({count:100} as any, {} as any).count === 100);
+check("explicit quantity replaces the prior value", mergeConversationState({count:100} as any, {count:20} as any).count === 20);
+for (const f of ["keywords"]) {
   check(`NOT sticky (per-utterance): ${f}`, !(STICKY_FIELDS as readonly string[]).includes(f));
 }
 

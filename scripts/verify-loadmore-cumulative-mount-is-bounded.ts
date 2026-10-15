@@ -137,7 +137,7 @@ const press = async (
   };
   const m = await liftSymbols(
     file,
-    [{ header: '  const loadMore = async (m: Extract<ChatMsg, { role: \'results\' }>) => {', endsWith: /^  \};$/ }],
+    [{ header: '  const loadMore = async (m: Extract<ChatMsg, { role: \'results\' }>, requestedTarget?: number) => {', endsWith: /^  \};$/ }],
     ['loadMore'],
     PRELUDE,
   );
@@ -219,8 +219,8 @@ check('§2 every press ADVANCES the mount — no dead press while the button is 
 // in its purest form, and §2's cumulative-mount bound must refuse it.
 {
   const mUncapped = mutantOf(agentSrc,
-    'const target = revealTarget(cur, m.result.matchTotal ?? Infinity);',
-    'const target = revealTarget(cur, m.result.matchTotal ?? Infinity) + 10_000;');
+    'revealTarget(cur, m.result.matchTotal ?? Infinity)',
+    '(revealTarget(cur, m.result.matchTotal ?? Infinity) + 10_000)');
   const mutantMounts = await pressSequence(mUncapped, RENDER_CRASH_MEASURED, 8);
   mustCatch('M-uncapped — a press that mounts past the cap is caught by §2\'s cumulative-mount bound',
     Math.max(...mutantMounts) > SECOND_PAGE_CAP,

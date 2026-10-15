@@ -1,3 +1,4 @@
+import searchSources from '../../supabase/functions/agent/searchSources.json';
 // The Ezhalah AI Agent. Turns a free-text message into either a neutral listing search or a
 // plain reply. It is deliberately NON-ADVISORY (PRD §7): it never recommends a property, never
 // says "best/better/good deal", and never gives buying or financial advice — it only acknowledges
@@ -233,6 +234,9 @@ const AR_REALESTATE = new RegExp(
 // the same {kind, reply, query} contract. Build a full SearchQuery from the flat
 // fields it sends, deriving the category from the type (the engine needs both).
 type BackendQuery = {
+  sourceSelectionChanged?: boolean;
+  excludedPlatforms?: string[];
+  geographicScope?: "CITY" | "REGION" | "NATIONWIDE";
   locationStateValidated?: boolean;
   districts?: string[];
   deal?: string;
@@ -412,13 +416,15 @@ const PLATFORM_PATTERNS: Array<[RegExp, string]> = [
   [/1\s*october|october|اكتوبر|أكتوبر/i, 'october'],
 ];
 function resolveSourcesFromText(text: string): string[] {
+  const exact = Object.entries(searchSources).find(([name, slugs]) => name.toLowerCase() === text.trim().toLowerCase() || slugs.includes(text.trim().toLowerCase()));
+  if (exact) return exact[1];
   const out = new Set<string>();
   for (const [re, prefix] of PLATFORM_PATTERNS) if (re.test(text)) out.add(prefix);
   // Bare "Aqar" only when no aqar-compound already matched (so "Aqar Gate" → aqargate, not both).
   if (!out.has('aqargate') && !out.has('aqarcity') && !out.has('aqaratikom') && /\baqar\b|aqar\.fm/i.test(text)) {
     out.add('aqar');
   }
-  return Array.from(out);
+  return [...new Set(Array.from(out).flatMap(slug => Object.values(searchSources).find(slugs => slugs.includes(slug)) ?? [slug]))];
 }
 // Apply a platform filter (and Gathern's monthly implication) onto a query built from any path.
 // When the edge already gave its own platform-restriction judgment (edgePlatforms is a real array,
@@ -545,7 +551,9 @@ function certifyAfOnMergedState(merged: SearchQuery, b: BackendQuery): SearchQue
 }
 export function statedKeys(b: BackendQuery): string[] {
   const said: string[] = [];
-  if (b.locationStateValidated === true) said.push("location", "regionPin", "districtPin", "districts");
+  if (Array.isArray(b.platforms)) said.push("sources");
+  if (Array.isArray(b.excludedPlatforms)) said.push("excludedSources");
+  if (b.locationStateValidated === true) said.push("location", "regionPin", "districtPin", "districts", "geographicScope");
   // RENT OR BUY IS ONE DECISION (found live 2026-10-11, owner's real-user test): «ابغى شقة» leaves it open
   // (bothDeals:true), then «الرياض ٢ غرف إيجار سنوي» says RENT — the edge answered deal:Rent, bothDeals:false, but
   // `bothDeals` was not counted as stated, so the merge rescued the old «open» flag and the search ran as
@@ -704,7 +712,7 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
     }
   }
   if (typeof b.sort === 'string' && b.sort.trim() && b.sort !== 'none') q.sort = b.sort.trim() as SearchQuery['sort'];
-  if (typeof b.count === 'number' && b.count >= 1) q.count = Math.min(Math.floor(b.count), 25);
+  if (typeof b.count === 'number' && b.count >= 1) q.count = Math.min(Math.floor(b.count), 500);
   // Layer on the explicit district resolution from the raw user text — area phrases ("North
   // Riyadh") expand to known district lists; literal district mentions ("حي الرمال") pass through.
   const districts = resolveDistrictsFromText(userText, q.location);
@@ -720,7 +728,13 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
     const bare = (x: string) => x.replace(/^حي\s+/, '').trim();
     q.districts = [...(q.districts ?? []).filter((x) => bare(x) !== bare(d)), d];
   }
+  q.sourceSelectionChanged = b.sourceSelectionChanged === true;
   applySourceFilter(q, userText, b.platforms);
+  // Explicit transaction/period wins over a selected source's legacy defaults.
+  if (b.deal === 'Buy' || b.deal === 'Rent') { q.deal = b.deal; q.bothDeals = b.bothDeals === true; }
+  if (b.rentPeriod === 'monthly' || b.rentPeriod === 'annual' || b.rentPeriod === 'both') q.rentPeriod = b.rentPeriod;
+  if (Array.isArray(b.platforms) && !b.platforms.length) q.sources = [];
+  if (Array.isArray(b.excludedPlatforms)) q.excludedSources = [...new Set(b.excludedPlatforms.flatMap(resolveSourcesFromText))];
   // Street / "near a mosque|school|park" terms from the raw message (Q3) — matched against the
   // listing's own street/title/description in runSearch; empty for an ordinary search.
   // Location-RELATIONSHIP layer (2026-06-26): parse «قريب من مستشفى الحبيب» → {near, hospital,
@@ -813,6 +827,7 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
 
   // A complete catalog-validated state replaces local extraction, including an intentional empty district set.
   if (b.locationStateValidated === true && typeof b.location === 'string' && Array.isArray(b.districts)) {
+    q.geographicScope = b.geographicScope;
     q.location = b.location;
     q.locationMatch = undefined;
     q.regionPin = b.regionPin;

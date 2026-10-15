@@ -1,3 +1,4 @@
+import { selectSourceTables } from '@/lib/agentSourceSelection';
 import { supabase } from '@/lib/supabase';
 import { PROBE_FAILED, isProbeFailure, type ProbeFailed } from '@/lib/afProbe';
 import { listingPriceString, isDerivedTotal, type Listing } from './listings';
@@ -550,9 +551,7 @@ export function searchTableScope(q: SearchQuery): SearchTableScope | null {
   // table in this particular scope (e.g. Gathern + Buy) — that fallback bug let a platform filter
   // silently widen back to every platform.
   const platformScope = (tbls: string[]): string[] => {
-    if (!(q.sources && q.sources.length)) return tbls;
-    const wanted = new Set(q.sources);
-    return tbls.filter((t) => wanted.has(t.replace(/_(residential|commercial)_listings$/, '')));
+    return selectSourceTables(tbls, q.sources, q.excludedSources);
   };
   const mainTables = isBroadCommercial ? platformScope(resTables(q)) : tables;
 
@@ -613,9 +612,12 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
   const tableScope = searchTableScope(q);
   if (!tableScope) return null;
 
+  if (q.geographicScope === 'REGION' && (!q.regionPin || !REGION_TO_ID[q.regionPin])) return PROBE_FAILED;
   const lm = q.locationMatch;
   let cities: string[] | null = null;
-  if (q.regionPin && (q.location || '').trim()) {
+  if (q.geographicScope === 'REGION' || q.geographicScope === 'NATIONWIDE') {
+    cities = null;
+  } else if (q.regionPin && (q.location || '').trim()) {
     cities = [arCity(q.location) || q.location];
   } else if (lm?.exact && lm.kind === 'city' && lm.city) {
     cities = [arCity(lm.city) || lm.city];
@@ -676,7 +678,7 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
     // RPC call will correctly return an honest zero on its own.
   }
 
-  if ((!cities || !cities.length) && !countryWide && !(q.districts && q.districts.length) && (q.location || '').trim()) {
+  if ((!cities || !cities.length) && !countryWide && q.geographicScope !== 'REGION' && !(q.districts && q.districts.length) && (q.location || '').trim()) {
     return null;
   }
   if (lm?.kind === 'district' && !(q.districts && q.districts.length)) return null;
@@ -690,7 +692,7 @@ export async function resolveSearchScope(q: SearchQuery): Promise<SearchScope | 
     p_cities: cities && cities.length ? cities : null,
     p_districts: q.districts && q.districts.length ? q.districts : null,
     p_platforms: q.sources && q.sources.length ? q.sources : null,
-    p_region_ids: q.regionPin
+    p_region_ids: q.geographicScope === 'NATIONWIDE' ? null : q.regionPin
       ? (REGION_TO_ID[q.regionPin] ? [REGION_TO_ID[q.regionPin]] : null)
       : regionIdsFor(lm),
     // CATEGORY PURITY — owner PERMANENT rule 2026-07-16, merged from PR#86. Independent RPC-layer
@@ -1448,7 +1450,7 @@ function tablesFor(q: SearchQuery): string[] {
     const wanted = new Set(q.sources);
     tables = tables.filter((tbl) => wanted.has(tbl.replace(/_(residential|commercial)_listings$/, '')));
   }
-  return tables;
+  return selectSourceTables(tables, q.sources, q.excludedSources);
 }
 
 // Round-robin interleave so cards alternate between Aqar and Wasalt instead of front-loading one.
