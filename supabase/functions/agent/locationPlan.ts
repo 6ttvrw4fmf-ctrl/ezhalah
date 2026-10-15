@@ -14,7 +14,7 @@ export type LocationPlanResult =
 const norm = (s: string) => s.trim().replace(/^حي\s+|^منطقة\s+/u, "").replace(/[أإآ]/g, "ا").replace(/[\u064B-\u065Fـ]/g, "").replace(/\s+/g, " ");
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.length <= 30 && v.every(x => typeof x === "string" && x.trim().length > 0 && x.length <= 120);
 const rows = (v: unknown): Row[] => Array.isArray(v) ? v.filter(x => x && typeof x === "object" && !Array.isArray(x)) : [];
-const foldText = (s: string) => norm(s).toLowerCase().replace(/ة/g, "ه").replace(/ى/g, "ي");
+const foldText = (s: string) => s.trim().replace(/[أإآ]/g, "ا").replace(/[\u064B-\u065Fـ]/g, "").replace(/\s+/g, " ").toLowerCase().replace(/ة/g, "ه").replace(/ى/g, "ي");
 export const startsNewLocationSearch = (text: string) => /بحث\s*جديد|ابدا\s*من\s*جديد|\bnew search\b|\bstart over\b/iu.test(foldText(text));
 const OPERATION = /(?<![\p{L}])و?(?:أضف|اضف|ضيف|زد|زيد|كمان|بعد|مع|بدل|بدال|خل(?:ها|يها|يه|ه|ي)?|غير|غيّر|احذف|شيل|ازل|أزل|امسح|فقط|بس)(?![\p{L}])|\b(?:add|also|too|and|replace|instead|change|switch|make|remove|delete|clear|only)\b/iu;
 
@@ -96,7 +96,7 @@ async function validatePlan(
     // A region mention cannot authorize its namesake city. A separately stated city or
     // validated district may narrow it; the model merely repeating the region name may not.
     const regionName = foldText(String(chosen.region_ar)).replace(/^(?:ال)?منطقه\s+/u, "");
-    const regionPhrases = [`منطقه ${regionName}`, `${foldText(listCities([String(chosen.city_ar)], true))} region`];
+    const regionPhrases = [`منطقه ${regionName}`, `${foldText(listCities([String(chosen.city_ar)], true))} region`, `region of ${foldText(listCities([String(chosen.city_ar)], true))}`];
     let withoutRegion = foldText(text);
     let mentionedRegion = false;
     for (const phrase of regionPhrases) {

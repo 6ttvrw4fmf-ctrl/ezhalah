@@ -61,7 +61,7 @@ assert.equal((await contextual(ready(), 'أبي شقة في الرياض واج�
 assert.equal((await contextual(ready(['الرياض'], ['الياسمين']), 'ابدأ بحث جديد في حي الياسمين')).status, 'blocked');
 assert.equal((await contextual(ready(['الرياض'], ['الياسمين']), 'ابدأ بحث جديد في الرياض حي الياسمين')).status, 'ready');
 assert.equal((await contextual(ready(['الرياض'], ['الملقا']), 'ابدأ بحث جديد')).status, 'blocked');
-for (const text of ['أبي شقة في منطقة الرياض كلها', 'Apartment in Riyadh region']) {
+for (const text of ['أبي شقة في منطقة الرياض كلها', 'منطقة الرياض', 'Apartment in Riyadh region', 'Apartment in the region of Riyadh']) {
   assert.equal((await contextual(ready(), text, null)).status, 'blocked');
 }
 assert.equal((await contextual(ready(), 'أبي شقة في مدينة الرياض في منطقة الرياض', null)).status, 'ready');
