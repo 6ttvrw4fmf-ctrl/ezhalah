@@ -1,4 +1,4 @@
-import { agentResultRequest } from '@/lib/agentResultRequest';
+import { agentResultRequest, resultQuantityChange } from '@/lib/agentResultRequest';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -1191,6 +1191,7 @@ export default function Agent() {
   // One chunk eases in at a time — onScroll fires every frame and would otherwise start a new
   // stagger on top of the running one, so cards would arrive in bursts instead of a steady line.
   const scrollChunkRef = useRef(false);
+  const lastPaginationResultRef = useRef<string | null>(null);
   // revealCount, readable SYNCHRONOUSLY. The scroll handler needs the current value to decide the
   // next chunk; reading the state variable there would see the value from the render that installed
   // the handler and re-reveal the same cards every scroll.
@@ -3082,11 +3083,23 @@ export default function Agent() {
   const send = async (override?: string) => {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
+    // The user SENT something (typed or voice — sendVoice funnels in here): the small sign-in
+    // card retires for the rest of this load (owner 2026-08-29). After the guard, so an empty or
+    // busy-refused submit is not a send.
+    dismissSignInCard();
     const latestResult = [...msgs].reverse().find((m): m is Extract<ChatMsg, {role:'results'}> => m.role === 'results');
-    if (latestResult) {
+    if (latestResult && !pendingRefineRef.current && (msgs[msgs.length - 1]?.role === 'results' || lastPaginationResultRef.current === latestResult.id)) {
       const shown = revealCount[latestResult.id] ?? initialReveal(latestResult.result, latestResult.afCompleted);
-      const target = agentResultRequest(v, Math.max(shown, initialReveal(latestResult.result, latestResult.afCompleted)), latestResult.result.query?.count ?? 100);
+      const target = agentResultRequest(v, Math.max(shown, initialReveal(latestResult.result, latestResult.afCompleted)), latestResult.result.query?.count ?? 100, !!latestResult.result.query?.count);
       if (target != null) {
+        lastPaginationResultRef.current = latestResult.id;
+        const quantity = resultQuantityChange(v, !!latestResult.result.query?.count);
+        if (quantity != null && latestResult.result.query) {
+          const updatedQuery = {...latestResult.result.query, count:quantity};
+          lastQueryRef.current = updatedQuery;
+          setMsgs(m => m.map(message => message.id === latestResult.id && message.role === 'results'
+            ? {...message, result:{...message.result, query:updatedQuery}} : message));
+        }
         setTyped('');
         recordChatTurn(v);
         setMsgs(m => [...m, {id:uid(),role:'user',text:v}]);
@@ -3094,13 +3107,10 @@ export default function Agent() {
         return;
       }
     }
+    lastPaginationResultRef.current = null;
     setFilterOrigin(false);
     const selectedSourcesForTurn = pickerSourceSlugs(selectedSources);
     const sourceChoiceForTurn = pickerSourceExplicit;
-    // The user SENT something (typed or voice — sendVoice funnels in here): the small sign-in
-    // card retires for the rest of this load (owner 2026-08-29). After the guard, so an empty or
-    // busy-refused submit is not a send.
-    dismissSignInCard();
     const historyAll = msgs
       .filter((m) => m.role === 'user' || m.role === 'agent' || m.role === 'results')
       .map((m) => {

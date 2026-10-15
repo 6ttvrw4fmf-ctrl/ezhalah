@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { liftSymbols } from './lib/liftSymbols.ts';
 import { resolve } from 'node:path';
 import { selectSourceTables } from '../src/lib/agentSourceSelection.ts';
-import { agentResultRequest } from '../src/lib/agentResultRequest.ts';
+import { agentResultRequest, resultQuantityChange } from '../src/lib/agentResultRequest.ts';
 import { initialReveal } from '../src/lib/initialReveal.ts';
 import { validateLocationPlan } from '../supabase/functions/agent/locationPlan.ts';
 import { mergeConversationState } from '../src/lib/conversationState.ts';
@@ -18,7 +18,7 @@ assert.equal(initialReveal({fetched:7,honestTotal:7,stopAt:25,requestedCount:3})
 assert.equal(agentResultRequest('ورني ٥٠ زيادة',50,50),100);
 assert.equal(agentResultRequest('another 20',100,50),120);
 assert.equal(agentResultRequest('الصفحة الثالثة',50,50),150);
-assert.equal(agentResultRequest('خلها ١٠٠',20,20),100);
+assert.equal(agentResultRequest('خلها ١٠٠',20,20,true),100);
 assert.equal(agentResultRequest('ابي ٣ غرف',20,20),null);
 assert.equal(agentResultRequest('show 50 in Jeddah',20,20),null);
 const ready={status:'ready',cities:[],districts:[],region:'المنطقة الشرقية',scope:'REGION'};
@@ -62,3 +62,8 @@ assert.deepEqual(sourceCatalog['عقار'],sourceCatalog.Aqar);
 assert.deepEqual(sourceCatalog['Aqar Gate'],sourceCatalog.Aqargate);
 
 assert.equal((await run({...ready,cities:['الرياض']},'في الرياض',{geographicScope:'REGION',regionPin:'المنطقة الشرقية'})).status,'blocked');
+
+assert.equal(agentResultRequest('خلها ١٠٠',20,20),null);
+
+assert.equal(resultQuantityChange('خلها ١٠٠',true),100);
+assert.equal(resultQuantityChange('another 50',true),null);
