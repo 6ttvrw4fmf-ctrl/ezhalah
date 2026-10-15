@@ -40,8 +40,18 @@ async function validatePlan(
 ): Promise<LocationPlanResult> {
   const blocked = (ar: string, english: string): LocationPlanResult => ({ status: "blocked", reply: en ? english : ar });
   if (!value || typeof value !== "object" || Array.isArray(value)) return blocked("اكتب المدينة والحي اللي تقصده عشان أحدد موقع البحث. 📍", "Please specify the city and district so I can identify the search location. 📍");
-  const p = value as Row;
+  const p = { ...(value as Row) };
   const text = context.text ?? "";
+  if (startsNewLocationSearch(text) && context.previous) {
+    const prior = context.previous;
+    if (strings(p.cities) && typeof prior.location === "string") {
+      p.cities = p.cities.filter(city => norm(city) !== norm(String(prior.location)) ||
+        [city, listCities([city], true)].some(name => foldText(text).includes(foldText(name))));
+    }
+    const inherited = strings(prior.districts) ? prior.districts : [];
+    if (strings(p.districts)) p.districts = p.districts.filter(d => !inherited.some(old => norm(old) === norm(d)) || foldText(text).includes(foldText(d)));
+    if (strings(p.cities) && !p.cities.length) p.region = "";
+  }
   const previous = startsNewLocationSearch(text) ? null : context.previous;
   const previousDistricts = strings(previous?.districts) ? previous.districts : typeof previous?.districtPin === "string" ? [previous.districtPin] : [];
   const citiesForGuard = strings(p.cities) ? p.cities : [];
