@@ -91,7 +91,7 @@ export type SearchQuery = {
   // Absent → default freshness ranking. Strictly factual sorts only — never "best"/"popular" (that
   // would breach non-advisory neutrality). (user training decision.)
   sort?: SortKey;
-  // How many listings the user explicitly asked to see (1–25). Absent → the default grid.
+  // How many listings the user explicitly asked to see (up to the existing 500-card ceiling). Absent → the default grid.
   // Drives how many cards the chat reveals up front. (user training decision.)
   count?: number;
   // Specific district / neighborhood filter — populated when the user named one explicitly ("حي
