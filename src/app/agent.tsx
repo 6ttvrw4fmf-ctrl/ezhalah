@@ -1,3 +1,4 @@
+import { agentResultRequest } from '@/lib/agentResultRequest';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -1182,7 +1183,7 @@ export default function Agent() {
   // fully buffered on page 0; revealing listings.length IS revealing every match, and resultCounts()
   // then reports hasMore=false on its own — «عرض المزيد» simply never appears. Larger sets are untouched.
   const initialReveal = (r: SearchResult | undefined | null, afCompleted = false): number =>
-    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount(r?.listings), afCompleted });
+    initialRevealPure({ fetched: r?.listings?.length ?? 0, honestTotal: r ? quotableTotal(r) : null, stopAt: INTERVIEW_STOP_AT, platforms: distinctPlatformCount(r?.listings), requestedCount: r?.query?.count, afCompleted });
   // Page 0 fetches up to data/remote.ts QUERY_LIMIT (1500) MATCHING candidates (RPC filters before the cap).
   // If it fills that page the DB has more (m.result.hasMore) — the "how many" message then says «أكثر من N»
   // (never a faked exact total) and «عرض المزيد» fetches the next real page. Once fully paged, listings.length
@@ -1958,7 +1959,7 @@ export default function Agent() {
     if (revealIsTerminal) setCompleted(true);
   };
 
-  const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>) => {
+  const loadMore = async (m: Extract<ChatMsg, { role: 'results' }>, requestedTarget?: number) => {
     const mid = m.id;
     const q = m.result.query;
     // THE CONVERSATION THIS PRESS BELONGS TO (ops_incident #599). Captured before the first await so
@@ -1981,7 +1982,7 @@ export default function Agent() {
     // its 2,000-card ceiling are retired. `alreadyExpandedOnce` still tells the two taps apart for the
     // completion check below; the target itself now comes straight from revealTarget().
     void alreadyExpandedOnce;
-    const target = revealTarget(cur, m.result.matchTotal ?? Infinity);
+    const target = requestedTarget == null ? revealTarget(cur, m.result.matchTotal ?? Infinity) : Math.min(SECOND_PAGE_CAP, requestedTarget, m.result.matchTotal ?? Infinity);
     // De-dup against the CLOSURE copy (same data the message holds) so the merge is exact.
     const seen = new Set(m.result.listings.map((l) => `${l.source}:${l.id}`));
     const add: typeof m.result.listings = [];
@@ -2062,7 +2063,7 @@ export default function Agent() {
       // started while pages were fetching, reveal instantly (no cascade) — the drip machinery
       // belongs to the new turn now; cards still fade in via CardIn. (review fix, unchanged.)
       const revealTo = Math.min(target, mergedLen);
-      if (runRef.current) setRevealCount((c) => ({ ...c, [mid]: revealTo }));
+      if (runRef.current || revealTo <= cur) setRevealCount((c) => ({ ...c, [mid]: revealTo }));
       else cascadeIn(mid, cur, revealTo);
       // FINISHED ONLY WHEN NOTHING IS LEFT TO REVEAL, PERIOD (owner rule 2026-09-11, Task 4 rev. 2).
       // Two conditions, both required: the server confirms no more pages exist (`!hasMoreNow`) AND
@@ -3081,6 +3082,18 @@ export default function Agent() {
   const send = async (override?: string) => {
     const v = (override ?? typed).trim();
     if (!v || busy) return;
+    const latestResult = [...msgs].reverse().find((m): m is Extract<ChatMsg, {role:'results'}> => m.role === 'results');
+    if (latestResult) {
+      const shown = revealCount[latestResult.id] ?? initialReveal(latestResult.result, latestResult.afCompleted);
+      const target = agentResultRequest(v, Math.max(shown, initialReveal(latestResult.result, latestResult.afCompleted)), latestResult.result.query?.count ?? 100);
+      if (target != null) {
+        setTyped('');
+        recordChatTurn(v);
+        setMsgs(m => [...m, {id:uid(),role:'user',text:v}]);
+        await loadMore(latestResult, target);
+        return;
+      }
+    }
     setFilterOrigin(false);
     const selectedSourcesForTurn = pickerSourceSlugs(selectedSources);
     const sourceChoiceForTurn = pickerSourceExplicit;
@@ -3101,7 +3114,10 @@ export default function Agent() {
           // "the Al Malqa one" etc.). l.city/l.district already went through remote.ts's junk guard,
           // so a sentinel can't arrive as a literal string here, but an honestly-unresolved '' still
           // needs a neutral label — otherwise this would show "in , " for a fully-unresolved location.
-          const cards = (m.result?.listings ?? []).map((l, i) => {
+          const cards = (m.result?.listings ?? []).flatMap((l, i) => {
+            // Keep initial examples and a specifically referenced card, never the whole broad search.
+            const referenced = new RegExp(`(?:#|رقم\\s*)${i + 1}(?![0-9])`).test(v);
+            if (i >= 12 && !referenced) return [];
             const locationLabel = l.district && l.city ? `${l.district}, ${l.city}`
               : (l.district || l.city || LOCATION_UNRESOLVED_AR);
             return `#${i + 1}: ${l.type} ${l.deal === 'Rent' ? 'for rent' : 'for sale'} in ${locationLabel} — ${listingPrice(l, 'en')}` +
@@ -3187,7 +3203,12 @@ export default function Agent() {
     // Apply it after the agent has parsed the user's message so the model cannot widen the user's
     // explicit choice, and so every downstream path (search, summary, history) sees one query.
     if (turn.kind !== 'interview' && turn.query) {
-      turn = { ...turn, query: applyPickerSources(turn.query, selectedSourcesForTurn, sourceChoiceForTurn) };
+      if (turn.query.sourceSelectionChanged) {
+        setPickerSourceExplicit(false);
+        setSelectedSources([]);
+      } else {
+        turn = { ...turn, query: applyPickerSources(turn.query, selectedSourcesForTurn, sourceChoiceForTurn) };
+      }
     }
     // The server is the single decision authority for askCount too (decide.ts) — store whatever it
     // last echoed back. Never reset mid-chat by the client (owner-confirmed default); a brand new

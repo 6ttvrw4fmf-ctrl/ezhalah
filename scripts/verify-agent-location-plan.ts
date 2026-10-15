@@ -97,7 +97,7 @@ for (const status of ['ready','none','clarify','unsupported']) {
   const result = await validateLocationPlan({...ready(['جدة']),status}, lookup, false, 'أبحث لك في منطقة الرياض كلها 🏙️', 20000,
     {text:'أبي شقة في منطقة الرياض كلها',previous:{...prev,location:'جدة',districts:[]}});
   assert.equal(result.status,'blocked');
-  assert.match(result.reply,/أي مدينة.*؟/);
+  assert.match(result.reply,/أي منطقة.*؟/);
 }
 assert.match((await validateLocationPlan({status:'clarify'},lookup,false,'أبحث لك في المنطقة')).reply, /؟/);
 assert.equal((await contextual(ready(['جدة'],[],'منطقة مكة المكرمة'),'أبي شقة في جدة بمنطقة مكة',null)).status,'ready');

@@ -24,6 +24,10 @@ These rules are set by the product owner and are **permanent**:
 
 ---
 
+## Agent search controls (owner, 2026-10-15)
+
+[AGENT_SEARCH_CONTROLS.md](ops/AGENT_SEARCH_CONTROLS.md) is the approved contract for explicit city/region/nationwide scope, source inclusion/exclusion, requested result quantities and continuation. It supersedes the Chapter 1 city-only restriction for explicit wider searches. Implementation status is recorded there; approval alone is not production verification.
+
 ## 1. What Ezhalah is
 
 An **AI-powered, neutral property-search aggregator for Saudi Arabia**. It searches real-estate listings
