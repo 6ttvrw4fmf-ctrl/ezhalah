@@ -658,7 +658,7 @@ export function searchSummary(q: SearchQuery, loc: Locale = getLocale()): string
   // If the user didn't pick a SPECIFIC type, fall back to the CATEGORY they have selected (Residential/
   // Commercial — always one or the other), so a default-button "Search" still shows what they chose.
   // (user request: "if user just clicks search by default, it shows what the button clicked at.")
-  if (q.excludedSources?.length) lines.push(`• ${getLocale() === 'ar' ? 'المواقع المستبعدة' : 'Excluded websites'}: ${q.excludedSources.map(source => t(sourceName(source))).join('، ')}`);
+  if (q.excludedSources?.length) lines.push(`• ${getLocale() === 'ar' ? 'المواقع المستبعدة' : 'Excluded websites'}: ${[...new Set(q.excludedSources.map(source => t(sourceName(source))))].join(getLocale() === 'ar' ? '، ' : ', ')}`);
   if (q.count) lines.push(`• ${getLocale() === 'ar' ? 'عدد النتائج المطلوب' : 'Requested results'}: ${q.count}`);
   const summaryTypes = effectiveTypes(q);
   if (summaryTypes.length) lines.push(`• ${t('Property Type')}: ${summaryTypes.map((x) => getLocale() === 'ar' ? arabicOrTypeUnresolved(tWord(x)) : x).join('، ')}`);
