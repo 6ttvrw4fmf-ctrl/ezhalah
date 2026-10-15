@@ -61,6 +61,22 @@ assert.equal((await contextual(ready(), 'أبي شقة في الرياض واج�
 assert.equal((await contextual(ready(['الرياض'], ['الياسمين']), 'ابدأ بحث جديد في حي الياسمين')).status, 'blocked');
 assert.equal((await contextual(ready(['الرياض'], ['الياسمين']), 'ابدأ بحث جديد في الرياض حي الياسمين')).status, 'ready');
 assert.equal((await contextual(ready(['الرياض'], ['الملقا']), 'ابدأ بحث جديد')).status, 'blocked');
+for (const text of ['أبي شقة في منطقة الرياض كلها', 'منطقة الرياض', 'Apartment in Riyadh region', 'Apartment in the region of Riyadh']) {
+  assert.equal((await contextual(ready(), text, null)).status, 'blocked');
+}
+assert.equal((await contextual(ready(), 'أبي شقة في مدينة الرياض في منطقة الرياض', null)).status, 'ready');
+assert.equal((await contextual(ready(['الرياض'], ['الملقا']), 'أبي شقة في حي الملقا بمنطقة الرياض', null)).status, 'ready');
+const withHint = (hint: string) => validateLocationPlan(ready(['الرياض'], ['الملقا', 'الياسمين']), lookup, false, '', 20000,
+  {text:'أبي شقة في الرياض حي الملقا أو حي الياسمين', landmarkHint:hint});
+assert.equal((await withHint('الملقا = Al Malqa Center (Government), Al Malqa | حي الياسمين = Hayy Al Yasmin (Residential), Riyadh')).status, 'ready');
+assert.equal((await withHint('برج المملكة = Kingdom Tower (Landmark), Riyadh')).status, 'blocked');
+const englishHint = {text:'Apartment in Riyadh Al Malqa', landmarkHint:'malqa = Hayy Al Malqa (Residential), Riyadh', landmarkAliases: async () => ['حي الملقا']};
+assert.equal((await validateLocationPlan(ready(['الرياض'], ['الملقا']), lookup, true, '', 20000, englishHint)).status, 'ready');
+assert.equal((await validateLocationPlan(ready(['جدة']), lookup, true, '', 20000, englishHint)).status, 'blocked');
+assert.equal((await validateLocationPlan(ready(), lookup, true, '', 20000, {...englishHint,landmarkAliases:async()=>null})).failed, true);
+const { readLandmarkAliases } = await import('../supabase/functions/agent/landmarkAliases.ts');
+assert.deepEqual(await readLandmarkAliases('https://fixture.invalid','fixture','Hayy Al Malqa', async () => Response.json([{aliases:['Al Malqa','حي الملقا']}]) as any), ['حي الملقا']);
+assert.equal(await readLandmarkAliases('https://fixture.invalid','fixture','missing', async () => new Response('',{status:500}) as any), null);
 const next: any = { location: 'الرياض', districts: [], regionPin: 'منطقة الرياض', districtPin: undefined };
 const merged = mergeConversationState(prev, next, ['location', 'districts', 'districtPin', 'regionPin']);
 assert.deepEqual(merged.districts, []);
@@ -140,6 +156,7 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
     for (const [text, location_plan] of [
       ['أبي شقة في الرياض على بعد كيلومتر من برج المملكة',ready()],
       ['أبي شقة في شمال الرياض',ready()],
+      ['أبي شقة في منطقة الرياض كلها',ready()],
       ['حي الياسمين',ready(['الرياض'],['الياسمين'])],
     ]) {
       model={kind:'listings',reply:'أبحث لك 🏡',location:'الرياض',type:'Apartment',location_plan};
@@ -177,7 +194,9 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
   mustCatch('multiple cities cannot silently choose first', 'cities.length > 1 || (cities.length === 0 && p.districts.length === 0)', '(cities.length === 0 && p.districts.length === 0)');
   mustCatch('district must belong to chosen city', 'String(c.city_id) === String(chosen.city_id)', 'true');
   mustCatch('full catalog beats inventory shortlist', 'd.all_cities ?? d.cities', 'd.cities');
-  mustCatch('unsupported geographic requests cannot become citywide searches', 'return proximity || namedRoad || directional || !!landmarkHint.trim();', 'return false;');
+  mustCatch('unsupported geographic requests cannot become citywide searches', 'return proximity || namedRoad || directional;', 'return false;');
+  mustCatch('region cannot silently become its namesake city', 'mentionedRegion && !separateCity && !p.districts.length', 'false');
+  mustCatch('unmapped landmark cannot silently disappear', 'if (!authorized)', 'if (false)');
   mustCatch('bare district cannot silently replace a selection', 'previousDistricts.length && addsUnstatedDistrict', 'false && addsUnstatedDistrict');
   mustCatch('explicit city switch revalidates and removes incompatible old districts', '!matches.length && explicitCityChange && previousDistricts.some', '!matches.length && false && previousDistricts.some');
 }
