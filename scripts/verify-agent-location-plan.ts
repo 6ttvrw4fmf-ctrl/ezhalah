@@ -70,6 +70,13 @@ const withHint = (hint: string) => validateLocationPlan(ready(['الرياض'], 
   {text:'أبي شقة في الرياض حي الملقا أو حي الياسمين', landmarkHint:hint});
 assert.equal((await withHint('الملقا = Al Malqa Center (Government), Al Malqa | حي الياسمين = Hayy Al Yasmin (Residential), Riyadh')).status, 'ready');
 assert.equal((await withHint('برج المملكة = Kingdom Tower (Landmark), Riyadh')).status, 'blocked');
+const englishHint = {text:'Apartment in Riyadh Al Malqa', landmarkHint:'malqa = Hayy Al Malqa (Residential), Riyadh', landmarkAliases: async () => ['حي الملقا']};
+assert.equal((await validateLocationPlan(ready(['الرياض'], ['الملقا']), lookup, true, '', 20000, englishHint)).status, 'ready');
+assert.equal((await validateLocationPlan(ready(['جدة']), lookup, true, '', 20000, englishHint)).status, 'blocked');
+assert.equal((await validateLocationPlan(ready(), lookup, true, '', 20000, {...englishHint,landmarkAliases:async()=>null})).failed, true);
+const { readLandmarkAliases } = await import('../supabase/functions/agent/landmarkAliases.ts');
+assert.deepEqual(await readLandmarkAliases('https://fixture.invalid','fixture','Hayy Al Malqa', async () => Response.json([{aliases:['Al Malqa','حي الملقا']}]) as any), ['حي الملقا']);
+assert.equal(await readLandmarkAliases('https://fixture.invalid','fixture','missing', async () => new Response('',{status:500}) as any), null);
 const next: any = { location: 'الرياض', districts: [], regionPin: 'منطقة الرياض', districtPin: undefined };
 const merged = mergeConversationState(prev, next, ['location', 'districts', 'districtPin', 'regionPin']);
 assert.deepEqual(merged.districts, []);
@@ -189,7 +196,7 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
   mustCatch('full catalog beats inventory shortlist', 'd.all_cities ?? d.cities', 'd.cities');
   mustCatch('unsupported geographic requests cannot become citywide searches', 'return proximity || namedRoad || directional;', 'return false;');
   mustCatch('region cannot silently become its namesake city', 'mentionedRegion && !separateCity && !p.districts.length', 'false');
-  mustCatch('unmapped landmark cannot silently disappear', '!isChosenCity && !isChosenDistrict', 'false');
+  mustCatch('unmapped landmark cannot silently disappear', 'if (!authorized)', 'if (false)');
   mustCatch('bare district cannot silently replace a selection', 'previousDistricts.length && addsUnstatedDistrict', 'false && addsUnstatedDistrict');
   mustCatch('explicit city switch revalidates and removes incompatible old districts', '!matches.length && explicitCityChange && previousDistricts.some', '!matches.length && false && previousDistricts.some');
 }

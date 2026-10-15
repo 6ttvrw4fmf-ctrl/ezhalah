@@ -6,7 +6,7 @@ export const LOCATION_CHAPTER_MARKER = "EZHALAH LOCATION INTERPRETATION — CHAP
 export const LOCATION_PLAN_SCHEMA = `\nCHAPTER 1 OUTPUT EXTENSION (overrides the earlier exact-key list): also return location_plan: {status:"ready"|"clarify"|"unsupported"|"none",cities:string[],districts:string[],region:string}. This is the COMPLETE intended location after this turn, not a patch. Use canonical Arabic name proposals, never IDs. Retain confirmed city/districts for unrelated property changes; add, replace, remove, clear or reset only as requested. cities contains ALL requested cities, never silently pick one. districts contains ALL remaining selected districts, [] means no district restrictions. Ambiguous add-versus-replace or unresolved mandatory locations => clarify; put the focused question in reply. Unsupported foreign/proximity/landmark requests => unsupported, explain briefly and request a city/district; never silently search the whole city. Non-search conversation => none. For a valid city with no districts, ready is correct. For a district-only request without a confirmed city, propose status ready with cities:[] and the district names; the backend will infer a city only if the full catalog yields a unique combination. Directional areas require a supplied validated mapping; without one, use unsupported. A ready plan is only a proposal: the backend will validate it before searching. You have no catalog tools: propose names for validation; do not claim you already validated them. If status is clarify or unsupported, preserve confirmed state and do not claim a search will run. This module replaces older location-wide-search, landmark and first-city fallback instructions; unrelated policies remain in force.`;
 
 type Row = Record<string, unknown>;
-export type LocationPlanContext = { text?: string; previous?: Row | null; pendingQuestion?: string; landmarkHint?: string };
+export type LocationPlanContext = { text?: string; previous?: Row | null; pendingQuestion?: string; landmarkHint?: string; landmarkAliases?: (name: string) => Promise<string[] | null> };
 export type LocationPlanResult =
   | { status: "none" }
   | { status: "blocked"; reply: string; failed?: boolean }
@@ -136,14 +136,27 @@ async function validatePlan(
     // authority: resolve the matched alias against the location catalog before rejecting it.
     for (const hint of (context.landmarkHint ?? "").split(" | ").filter(Boolean)) {
       const alias = hint.split(" = ")[0].trim();
-      const place = await classify(alias);
-      if (!place) throw new Error("landmark alias lookup unavailable");
-      const isChosenCity = ["city", "region_or_city", "twin_city"].includes(String(place.kind)) &&
-        [...rows(place.cities), ...rows(place.regions)].some(c => String(c.city_id) === String(chosen.city_id));
-      const isChosenDistrict = ["district", "twin_district"].includes(String(place.kind)) &&
-        rows(place.all_cities ?? place.cities).some(c => String(c.city_id) === String(chosen.city_id) &&
-          districts.some(d => norm(d) === norm(String(c.district_ar ?? place.name ?? ""))));
-      if (!isChosenCity && !isChosenDistrict) return blocked("حدد المدينة والحي؛ البحث بمعلم جغرافي غير متاح حالياً. 📍", "Please specify the city and district; landmark filtering isn't available yet. 📍");
+      const aliases = [alias];
+      if (/[a-z]/iu.test(alias) && context.landmarkAliases) {
+        const canonicalName = hint.match(/ = (.+) \([^)]*\), /u)?.[1];
+        if (canonicalName) {
+          const recognized = await context.landmarkAliases(canonicalName);
+          if (!recognized) throw new Error("landmark aliases unavailable");
+          aliases.push(...recognized.slice(0, 10));
+        }
+      }
+      let authorized = false;
+      for (const candidate of aliases) {
+        const place = await classify(candidate);
+        if (!place) throw new Error("landmark alias lookup unavailable");
+        const isChosenCity = ["city", "region_or_city", "twin_city"].includes(String(place.kind)) &&
+          [...rows(place.cities), ...rows(place.regions)].some(c => String(c.city_id) === String(chosen.city_id));
+        const isChosenDistrict = ["district", "twin_district"].includes(String(place.kind)) &&
+          rows(place.all_cities ?? place.cities).some(c => String(c.city_id) === String(chosen.city_id) &&
+            districts.some(d => norm(d) === norm(String(c.district_ar ?? place.name ?? ""))));
+        if (isChosenCity || isChosenDistrict) { authorized = true; break; }
+      }
+      if (!authorized) return blocked("حدد المدينة والحي؛ البحث بمعلم جغرافي غير متاح حالياً. 📍", "Please specify the city and district; landmark filtering isn't available yet. 📍");
     }
     const notice = removed.length ? (en
       ? `Removed ${removed.join(", ")} because they do not belong to ${chosen.city_ar}.`

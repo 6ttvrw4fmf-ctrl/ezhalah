@@ -1,3 +1,4 @@
+import { readLandmarkAliases } from "./landmarkAliases.ts";
 // ──────────────────────────────────────────────────────────────────────────────
 // agent — Ezhalah real AI Agent (PRD §7, §13) — DeepSeek
 //
@@ -1563,7 +1564,7 @@ Deno.serve(async (req: Request) => {
         const plan = await validateLocationPlan(out.location_plan, async (name) => {
           const result = await locClassify(name);
           return result === LOC_CLASSIFY_FAILED ? null : result;
-        }, locale === "en", String(out.reply ?? ""), 20000, { text, previous: prevQuery, pendingQuestion: lastBotReply, landmarkHint: lmHint });
+        }, locale === "en", String(out.reply ?? ""), 20000, { text, previous: prevQuery, pendingQuestion: lastBotReply, landmarkHint: lmHint, landmarkAliases: name => readLandmarkAliases(SUPABASE_URL, SERVICE_KEY, name) });
         if (plan.status === "ready") {
           location = plan.location; regionPin = plan.regionPin;
           districtPin = undefined; validatedDistricts = plan.districts;
