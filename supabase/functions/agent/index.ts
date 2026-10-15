@@ -1657,7 +1657,8 @@ Deno.serve(async (req: Request) => {
       const supportedNames = new Set([...Object.keys(searchSources), ...Object.values(searchSources).flat()].map(name => name.toLowerCase()));
       const requestedSources = [...(Array.isArray(out.platforms) ? out.platforms : []), ...(Array.isArray(out.excludedPlatforms) ? out.excludedPlatforms : [])];
       if (requestedSources.some(name => typeof name !== "string" || !supportedNames.has(name.trim().toLowerCase()))) {
-        return json({kind:"message", reply:locale === "en" ? "That website isn't supported. Which supported website would you like to search?" : "الموقع غير مدعوم. أي موقع من المواقع المتاحة تبي نبحث فيه؟", keepState:true, askCount});
+        const reply = locale === "en" ? "That website isn't supported. Which supported website would you like to search?" : "الموقع غير مدعوم. أي موقع من المواقع المتاحة تبي نبحث فيه؟";
+        return json({ kind: "message", reply, locationQuestion: false, keepState: true, askCount });
       }
       const wired = buildTurnDecision({
         text, out, prevQuery, location, regionPin, districtPin, ambiguityReply, askCount,
