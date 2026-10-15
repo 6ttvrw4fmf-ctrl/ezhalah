@@ -18,6 +18,8 @@ const foldText = (s: string) => s.trim().replace(/[أإآ]/g, "ا").replace(/[\u
 export const startsNewLocationSearch = (text: string) => /بحث\s*جديد|ابدا\s*من\s*جديد|\bnew search\b|\bstart over\b/iu.test(foldText(text));
 const OPERATION = /(?<![\p{L}])و?(?:أضف|اضف|ضيف|زد|زيد|كمان|بعد|مع|بدل|بدال|خل(?:ها|يها|يه|ه|ي)?|غير|غيّر|احذف|شيل|ازل|أزل|امسح|فقط|بس)(?![\p{L}])|\b(?:add|also|too|and|replace|instead|change|switch|make|remove|delete|clear|only)\b/iu;
 
+const REMOVAL = /(?:احذف|شيل|ازل|أزل|امسح|بدل|بدال|خلها|خلي|غير|غيّر|فقط|بس)|\b(?:replace|instead|remove|delete|clear|only|change|switch)\b/iu;
+
 // Capability checks use the request itself, not the model's promise that it understood it.
 export function unsupportedLocationRequirement(text: string, cityNames: string[]): boolean {
   const t = foldText(text);
@@ -154,7 +156,16 @@ async function validatePlan(
         const isChosenDistrict = ["district", "twin_district"].includes(String(place.kind)) &&
           rows(place.all_cities ?? place.cities).some(c => String(c.city_id) === String(chosen.city_id) &&
             districts.some(d => norm(d) === norm(String(c.district_ar ?? place.name ?? ""))));
-        if (isChosenCity || isChosenDistrict) { authorized = true; break; }
+        // A removal/replacement names the OLD district too. Authorize that reference
+        // only against confirmed previous state and its catalog parent, never as a new filter.
+        const isRemovedDistrict = REMOVAL.test(text) && ["district", "twin_district"].includes(String(place.kind)) &&
+          rows(place.all_cities ?? place.cities).some(c => norm(String(c.city_ar)) === norm(String(previous?.location ?? "")) &&
+            previousDistricts.some(d => norm(d) === norm(String(c.district_ar ?? place.name ?? ""))) &&
+            !districts.some(d => norm(d) === norm(String(c.district_ar ?? place.name ?? ""))));
+        const isPreviousCity = explicitCityChange && REMOVAL.test(text) &&
+          ["city", "region_or_city", "twin_city"].includes(String(place.kind)) &&
+          [...rows(place.cities), ...rows(place.regions)].some(c => norm(String(c.city_ar)) === norm(String(previous?.location ?? "")));
+        if (isChosenCity || isChosenDistrict || isRemovedDistrict || isPreviousCity) { authorized = true; break; }
       }
       if (!authorized) return blocked("حدد المدينة والحي؛ البحث بمعلم جغرافي غير متاح حالياً. 📍", "Please specify the city and district; landmark filtering isn't available yet. 📍");
     }

@@ -77,6 +77,21 @@ assert.equal((await validateLocationPlan(ready(), lookup, true, '', 20000, {...e
 const { readLandmarkAliases } = await import('../supabase/functions/agent/landmarkAliases.ts');
 assert.deepEqual(await readLandmarkAliases('https://fixture.invalid','fixture','Hayy Al Malqa', async () => Response.json([{aliases:['Al Malqa','حي الملقا']}]) as any), ['حي الملقا']);
 assert.equal(await readLandmarkAliases('https://fixture.invalid','fixture','missing', async () => new Response('',{status:500}) as any), null);
+const districtHints = 'حي الملقا = Hayy Al Malqa (Residential), Riyadh | حي الياسمين = Hayy Al Yasmin (Residential), Riyadh';
+for (const text of ['احذف حي الملقا وخلي حي الياسمين فقط', 'بدل حي الملقا خلها حي الياسمين']) {
+  const result = await validateLocationPlan(ready(['الرياض'], ['الياسمين']), lookup, false, '', 20000,
+    {text,previous:prev,landmarkHint:districtHints});
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.districts, ['حي الياسمين']);
+}
+assert.equal((await validateLocationPlan(ready(['الرياض'], ['الياسمين']), lookup, false, '', 20000,
+  {text:'احذف حي الملقا وخلي حي الياسمين',previous:{...prev,districts:[]},landmarkHint:districtHints})).status, 'blocked');
+assert.equal((await validateLocationPlan(ready(['الرياض'], ['الياسمين']), lookup, false, '', 20000,
+  {text:'حي الملقا وحي الياسمين',landmarkHint:districtHints})).status, 'blocked');
+assert.equal((await validateLocationPlan(ready(['الرياض'], ['الياسمين']), lookup, true, '', 20000,
+  {text:'Yasmin and Malqa',previous:prev,landmarkHint:districtHints})).status, 'blocked');
+assert.equal((await validateLocationPlan(ready(['جدة']), lookup, false, '', 20000,
+  {text:'غير الرياض إلى جدة',previous:prev,landmarkHint:'الرياض = Riyadh (City), Riyadh'})).status, 'ready');
 const next: any = { location: 'الرياض', districts: [], regionPin: 'منطقة الرياض', districtPin: undefined };
 const merged = mergeConversationState(prev, next, ['location', 'districts', 'districtPin', 'regionPin']);
 assert.deepEqual(merged.districts, []);
@@ -169,6 +184,11 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
     assert.equal(cityResult.kind,'listings');
     assert.deepEqual(cityResult.query.districts,[]);
     assert.match(cityResult.notice,/الملقا.*جدة/);
+    model={kind:'listings',reply:'أبحث لك 🏡',location:'الرياض',type:'Apartment',location_plan:ready(['الرياض'],['الياسمين'])};
+    const removeResponse=await handler!(new Request('https://fixture.invalid/agent',{method:'POST',headers:{apikey:'fixture'},body:JSON.stringify({text:'احذف حي الملقا وخلي حي الياسمين فقط',prevQuery:prev,landmarkHint:districtHints})}));
+    const removeResult=await removeResponse.json();
+    assert.equal(removeResult.kind,'listings');
+    assert.deepEqual(removeResult.query.districts,['حي الياسمين']);
     model={kind:'message',reply:'أي مدينة؟ 📍',location_plan:{status:'none'}};
     const resetResponse=await handler!(new Request('https://fixture.invalid/agent',{method:'POST',headers:{apikey:'fixture'},body:JSON.stringify({text:'ابدأ بحث جديد',prevQuery:prev})}));
     const resetResult=await resetResponse.json();
@@ -197,6 +217,7 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
   mustCatch('unsupported geographic requests cannot become citywide searches', 'return proximity || namedRoad || directional;', 'return false;');
   mustCatch('region cannot silently become its namesake city', 'mentionedRegion && !separateCity && !p.districts.length', 'false');
   mustCatch('unmapped landmark cannot silently disappear', 'if (!authorized)', 'if (false)');
+  mustCatch('removed districts remain valid historical references', 'isChosenCity || isChosenDistrict || isRemovedDistrict', 'isChosenCity || isChosenDistrict');
   mustCatch('bare district cannot silently replace a selection', 'previousDistricts.length && addsUnstatedDistrict', 'false && addsUnstatedDistrict');
   mustCatch('explicit city switch revalidates and removes incompatible old districts', '!matches.length && explicitCityChange && previousDistricts.some', '!matches.length && false && previousDistricts.some');
 }
