@@ -952,7 +952,9 @@ Deno.serve(async (req: Request) => {
     // decideAgentTurn() in ./decide.ts is what actually enforces the ceiling afterward, reading
     // the structured askCount the client sent, never by regex-scanning history text (the old
     // `priorQuestions` scan this replaces).
-    const budgetDirective = askCount >= 1
+    const notes = await liveNotes();
+    const chapterOne = notes.includes(LOCATION_CHAPTER_MARKER);
+    const budgetDirective = askCount >= 1 && !chapterOne
       ? ` IMPORTANT: you have ALREADY asked your one clarifying question in this chat — do NOT ask another, about location or anything else. IF the user's latest message is continuing a PROPERTY SEARCH (an answer to your question, or more search detail), then SEARCH NOW (kind="listings") with whatever you have: infer the city from any landmark/geography/lifestyle clue, else leave location "" (the platform will state plainly that it needs a city and point to the Filter — never propose searching all of Saudi Arabia), and deal="Both" if rent vs buy is unknown. BUT if the latest message is NOT a property search — a utility/explanation/currency-or-unit-conversion/brand/support/general-Ezhalah question, or small talk — just ANSWER it directly (kind="message"); do NOT force a search.`
       : "";
     // Build a multi-turn conversation: prior turns (memory) + the current wrapped message. Contents
@@ -960,7 +962,9 @@ Deno.serve(async (req: Request) => {
     // (an assistant-first messages[] rejects with 400). The client already recognized any landmark
     // from the full catalog — feed it in as a known-place signal so the model infers the CITY and
     // searches it, never asking "which city?" for a landmark.
-    const lmLine = lmHint
+    const lmLine = lmHint && chapterOne
+      ? ` RECOGNIZED PLACE ALIASES (recognition only, not a validated geographic scope): ${lmHint}. Administrative city/district aliases may be proposed for catalog validation; a landmark does not authorize searching its whole city.`
+      : lmHint
       ? ` RECOGNIZED LANDMARKS (from Ezhalah's landmark database — treat each as a KNOWN place, infer its CITY and search that city; NEVER ask which city when a landmark is recognized): ${lmHint}.`
       : "";
     // ALREADY ESTABLISHED — the single most effective way to stop the agent re-asking something the
@@ -1155,8 +1159,6 @@ Deno.serve(async (req: Request) => {
     const langLine = `\n\nREPLY LANGUAGE FOR THIS TURN: ${langName} ONLY. The "reply" field MUST be written 100% in ${langName} — every single word, no exceptions, even if the user's message contains a word in the other language.`;
     // DB-driven behavior notes (editable in the agent_notes table, no redeploy) — appended last so
     // they're authoritative on any conflict with the baked-in prompt above.
-    const notes = await liveNotes();
-    const chapterOne = notes.includes(LOCATION_CHAPTER_MARKER);
     const notesBlock = notes
       ? `\n\n═══ LIVE BEHAVIOR NOTES (authoritative — override anything above on conflict) ═══\n${notes}`
       : "";
