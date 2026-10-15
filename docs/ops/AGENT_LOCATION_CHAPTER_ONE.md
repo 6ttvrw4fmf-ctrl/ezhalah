@@ -1,7 +1,8 @@
 # AI Agent location Chapter 1
 
-Owner approved installation on 2026-10-14. Production status: **NOT YET VERIFIED**.
-The first activation was rolled back after production probes found four intent-enforcement gaps.
+Owner approved installation on 2026-10-14. Deployment and observed production verification are recorded in
+[the installation PR](https://github.com/6ttvrw4fmf-ctrl/ezhalah/pull/7105).
+A deployed function or an active note alone does not establish verified behavior.
 
 The model interprets Arabic, English and mixed-language location intent, proposes canonical Arabic
 city/district names, and sends the complete intended location in `location_plan`. The edge validates
@@ -21,6 +22,9 @@ The existing clarification budget remains: when exhausted, unresolved geography 
 The model is responsible for interpreting the requested operation and spelling/alias proposals.
 `locationPlan.ts` enforces catalog membership, city uniqueness, district parentage, and bounded
 failure handling. This is not a claim that a saved prompt alone implements all validation.
+Request-based checks require a city for explicit region-only turns even when the model repeats a prior city.
+Recognition hints are resolved against the catalog; administrative district aliases are allowed, including
+explicitly removed references validated against previous state. Unknown landmarks remain unsupported.
 Request-based checks additionally stop unsupported proximity/directional scopes and ambiguous bare
 district replacements. Explicit city changes revalidate inherited districts; incompatible removals
 use the existing visible `notice` channel. An explicit new-search request clears location context.

@@ -8,7 +8,8 @@ import { mergeConversationState, describeKnownState } from '../src/lib/conversat
 import { liftSymbols } from './lib/liftSymbols.ts';
 
 const source = resolve('supabase/functions/agent/locationPlan.ts');
-const { validateLocationPlan } = await import(pathToFileURL(process.env.EZ_LOCATION_PLAN_SOURCE || source).href);
+const { validateLocationPlan, REGION_NAMES } = await import(pathToFileURL(process.env.EZ_LOCATION_PLAN_SOURCE || source).href);
+assert.deepEqual(REGION_NAMES, JSON.parse(readFileSync('src/data/sa-locations.json','utf8')).regions.map((r: any[]) => [r[1],r[2]]));
 const city = (city_ar: string, city_id: number, region_ar = 'منطقة الرياض') => ({ city_ar, city_id, region_ar, inv: 0 });
 const r = city('الرياض', 3), j = city('جدة', 18, 'منطقة مكة المكرمة');
 const catalog: Record<string, any> = {
@@ -92,6 +93,15 @@ assert.equal((await validateLocationPlan(ready(['الرياض'], ['الياسم�
   {text:'Yasmin and Malqa',previous:prev,landmarkHint:districtHints})).status, 'blocked');
 assert.equal((await validateLocationPlan(ready(['جدة']), lookup, false, '', 20000,
   {text:'غير الرياض إلى جدة',previous:prev,landmarkHint:'الرياض = Riyadh (City), Riyadh'})).status, 'ready');
+for (const status of ['ready','none','clarify','unsupported']) {
+  const result = await validateLocationPlan({...ready(['جدة']),status}, lookup, false, 'أبحث لك في منطقة الرياض كلها 🏙️', 20000,
+    {text:'أبي شقة في منطقة الرياض كلها',previous:{...prev,location:'جدة',districts:[]}});
+  assert.equal(result.status,'blocked');
+  assert.match(result.reply,/أي مدينة.*؟/);
+}
+assert.match((await validateLocationPlan({status:'clarify'},lookup,false,'أبحث لك في المنطقة')).reply, /؟/);
+assert.equal((await contextual(ready(['جدة'],[],'منطقة مكة المكرمة'),'أبي شقة في جدة بمنطقة مكة',null)).status,'ready');
+assert.equal((await contextual(ready(), 'أبي شقة في منطقة هادئة بالرياض', null)).status,'ready');
 const next: any = { location: 'الرياض', districts: [], regionPin: 'منطقة الرياض', districtPin: undefined };
 const merged = mergeConversationState(prev, next, ['location', 'districts', 'districtPin', 'regionPin']);
 assert.deepEqual(merged.districts, []);
@@ -172,6 +182,7 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
       ['أبي شقة في الرياض على بعد كيلومتر من برج المملكة',ready()],
       ['أبي شقة في شمال الرياض',ready()],
       ['أبي شقة في منطقة الرياض كلها',ready()],
+      ['أبي شقة في منطقة الرياض كلها',ready(['جدة'])],
       ['حي الياسمين',ready(['الرياض'],['الياسمين'])],
     ]) {
       model={kind:'listings',reply:'أبحث لك 🏡',location:'الرياض',type:'Apartment',location_plan};
@@ -215,7 +226,7 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
   mustCatch('district must belong to chosen city', 'String(c.city_id) === String(chosen.city_id)', 'true');
   mustCatch('full catalog beats inventory shortlist', 'd.all_cities ?? d.cities', 'd.cities');
   mustCatch('unsupported geographic requests cannot become citywide searches', 'return proximity || namedRoad || directional;', 'return false;');
-  mustCatch('region cannot silently become its namesake city', 'mentionedRegion && !separateCity && !p.districts.length', 'false');
+  mustCatch('region cannot silently become its namesake city', 'return !namedCity && !namedDistrict;', 'return false;');
   mustCatch('unmapped landmark cannot silently disappear', 'if (!authorized)', 'if (false)');
   mustCatch('removed districts remain valid historical references', 'isChosenCity || isChosenDistrict || isRemovedDistrict', 'isChosenCity || isChosenDistrict');
   mustCatch('bare district cannot silently replace a selection', 'previousDistricts.length && addsUnstatedDistrict', 'false && addsUnstatedDistrict');
