@@ -959,6 +959,11 @@ migration-drift-guard rule in `AGENTS.md`).
    code. New scrapers capture Arabic natively.
 6. **Location:** DB is sole truth; strict Region→City→District; exact-location-only (honest zero); never
    invent/substitute a place.
+   **AI Agent Chapter 1 (owner-approved 2026-10-14):** one validated Saudi city per search,
+   multiple districts within it as OR; preserve confirmed location on unrelated turns, explicitly
+   add/replace/remove/clear districts, and block unresolved or unsupported location requirements.
+   The model proposes intent; catalog validation authorizes it. See `docs/ops/AGENT_LOCATION_CHAPTER_ONE.md`
+   for integration, activation, rollback, and verification status. Filter region searches remain unchanged.
 7. **Type mapping:** raw → existing clean filter, backend-only and invisible; never remove/redesign
    filter UI.
 8. **Gathern = rent-only monthly.** Never in Buy results; price already annualized.

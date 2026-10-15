@@ -23,6 +23,8 @@
 // public project key; this endpoint does no privileged work and writes nothing.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { LOCATION_CHAPTER_MARKER, LOCATION_PLAN_SCHEMA, validateLocationPlan } from "./locationPlan.ts";
+
 const DEEPSEEK_API_KEY = Deno.env.get("DEEPSEEK_API_KEY") ?? "";
 // "flash" = DeepSeek's fast/non-reasoning tier, the fit for a short classification task; override
 // with DEEPSEEK_MODEL.
@@ -1023,7 +1025,7 @@ Deno.serve(async (req: Request) => {
         // Anything per-request (a timestamp, a user id, a counter) placed before or inside SYSTEM
         // breaks every cache entry. Per-turn text belongs in sysExtra, AFTER SYSTEM.
         // Pinned by scripts/verify-ai-spend-safety.ts.
-        { role: "system", content: SYSTEM + sysExtra + JSON_SHAPE_HINT },
+        { role: "system", content: SYSTEM + sysExtra + JSON_SHAPE_HINT + (chapterOne ? LOCATION_PLAN_SCHEMA : "") },
         ...cts.map((c) => ({ role: c.role === "model" ? "assistant" : "user", content: c.parts.map((p) => p.text).join("\n") })),
       ];
       const payload = JSON.stringify({
@@ -1153,6 +1155,7 @@ Deno.serve(async (req: Request) => {
     // DB-driven behavior notes (editable in the agent_notes table, no redeploy) — appended last so
     // they're authoritative on any conflict with the baked-in prompt above.
     const notes = await liveNotes();
+    const chapterOne = notes.includes(LOCATION_CHAPTER_MARKER);
     const notesBlock = notes
       ? `\n\n═══ LIVE BEHAVIOR NOTES (authoritative — override anything above on conflict) ═══\n${notes}`
       : "";
@@ -1333,6 +1336,9 @@ Deno.serve(async (req: Request) => {
           [text, ...history.filter((h) => h?.role !== "model").map((h) => String(h?.text ?? ""))])
         : [];
 
+      let validatedDistricts: string[] | undefined;
+      let locationStateValidated = false;
+      let chapterFailureReply: string | null = null;
       const understoodState = () => ({
         deal,
         bothDeals,
@@ -1341,6 +1347,8 @@ Deno.serve(async (req: Request) => {
         location,
         regionPin,
         districtPin,
+        districts: validatedDistricts,
+        locationStateValidated,
         type: typeof out.type === "string" && out.type ? out.type : null,
         detail: typeof out.detail === "string" && out.detail ? out.detail : null,
         price,
@@ -1382,6 +1390,7 @@ Deno.serve(async (req: Request) => {
         || /📍\s*$/.test(String(lastModel).trim());   // every place question the code writes ends with 📍, however it is worded (owner 2026-10-11: they now rotate)
       // «مو مهم / أي مدينة» answers the question we just asked and carries no place of its own: classify the place we asked about
       // (the previous turn's), so the «any city» branch below can start with the biggest city (owner 2026-10-11).
+      if (!chapterOne || out.location_plan?.status === "none") {
       if (!location && alreadyAsked && ANY_CITY_RE.test(text) && typeof prevQuery?.location === "string" && prevQuery.location.trim()) {
         location = prevQuery.location.trim();
       }
@@ -1547,6 +1556,28 @@ Deno.serve(async (req: Request) => {
         ambiguityReply = emptyLocationQuestion(text, lastBotReply, locale === "en");
       }
 
+      }
+
+      if (chapterOne) {
+        const plan = await validateLocationPlan(out.location_plan, async (name) => {
+          const result = await locClassify(name);
+          return result === LOC_CLASSIFY_FAILED ? null : result;
+        }, locale === "en", String(out.reply ?? ""));
+        if (plan.status === "ready") {
+          location = plan.location; regionPin = plan.regionPin;
+          districtPin = undefined; validatedDistricts = plan.districts;
+          locationStateValidated = true; ambiguityReply = null;
+        } else if (plan.status === "blocked") {
+          location = typeof prevQuery?.location === "string" ? prevQuery.location : "";
+          regionPin = typeof prevQuery?.regionPin === "string" ? prevQuery.regionPin : undefined;
+          districtPin = typeof prevQuery?.districtPin === "string" ? prevQuery.districtPin : undefined;
+          validatedDistricts = Array.isArray(prevQuery?.districts) ? prevQuery.districts.filter((d): d is string => typeof d === "string") : (districtPin ? [districtPin] : []);
+          locationStateValidated = true; // authoritative unchanged state; this turn does not search
+          ambiguityReply = plan.reply;
+          if (plan.failed) chapterFailureReply = plan.reply;
+        }
+      }
+
       // The model's own reply SENTENCE is free-form and inconsistently mentions a SIZE the user gave —
       // it always lands in query.detail and therefore always shows in the deterministic "Search Summary"
       // block, but the sentence itself sometimes omits it (found live 2026-07-27: "فيلا 500 متر" showed
@@ -1580,7 +1611,7 @@ Deno.serve(async (req: Request) => {
       // A reply that states a price, asks about the property type, or asks for bedrooms already given is replaced by a line the code
       // writes from the parsed search (owner 2026-10-11; found by the live battery: scripts/agent-live-battery.mjs).
       // A distance / «near a landmark» wish is not measured yet: the reply says the whole city is searched (rulebook Draft 2).
-      const notMeasured = !districtPin && !regionPin ? proximityNotMeasuredText(text, location, locale === "en", lastBotReply) : null;
+      const notMeasured = !chapterOne && !districtPin && !regionPin ? proximityNotMeasuredText(text, location, locale === "en", lastBotReply) : null;
       if (anyCityReply) replyOut = anyCityReply;
       else if (notMeasured) replyOut = notMeasured;
       else if (replyBreaksSearchRules(replyOut, text)) {
@@ -1653,7 +1684,7 @@ Deno.serve(async (req: Request) => {
         // which is precisely the ask-loop the new ceiling exists to end. This is a STATEMENT, not a
         // question — never re-ask, for location or anything else, and never fall back to a
         // nationwide search to escape it (2026-09-04: the product does not run those).
-        const unsearchableReply = decision.unsearchable ? unsearchableText(locale === "en", text, lastBotReply) : null;
+        const unsearchableReply = chapterFailureReply ?? (decision.unsearchable ? unsearchableText(locale === "en", text, lastBotReply) : null);
         // A NO-PLACE REFUSAL MUST ASK FOR THE CITY (owner, 2026-09-04). Same shape as ambiguityReply
         // directly below: when the PLATFORM is the reason this turn is a clarification, the platform
         // supplies the question — the model does not know it was refused and writes as if it were
@@ -1729,6 +1760,8 @@ Deno.serve(async (req: Request) => {
           location,
           regionPin,
           districtPin,
+          districts: validatedDistricts,
+          locationStateValidated,
           type: typeof out.type === "string" && out.type ? out.type : null,
           detail: typeof out.detail === "string" && out.detail ? out.detail : null,
           // A complete new request starts fresh: the app keeps nothing from the previous search, and a budget read from an EARLIER

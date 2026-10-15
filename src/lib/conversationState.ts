@@ -107,7 +107,8 @@ export function mergeConversationState(
   const defaulted = new Set<string>(DEFAULTED_FIELDS as readonly string[]);
   for (const key of STICKY_FIELDS) {
     // A defaulted field counts as established ONLY if this turn actually said it.
-    const establishedNow = said && defaulted.has(key) ? said.has(key) : established(out[key]);
+    const explicitLocation = said?.has(key) && ["location", "regionPin", "districtPin", "districts"].includes(key);
+    const establishedNow = explicitLocation || (said && defaulted.has(key) ? said.has(key) : established(out[key]));
     if (!establishedNow && established(p[key])) out[key] = p[key];
   }
   return out as unknown as SearchQuery;
@@ -149,6 +150,7 @@ export function describeKnownState(q: SearchQuery | null | undefined): string {
   push('location', s.location);
   push('region', s.regionPin);
   push('district', s.districtPin);
+  push('districts', s.districts);
   push('bedroomsOrSize', s.detail);
   // The budget is stored annualized for rent; say so, or the model will read 72000 as a monthly figure.
   //
