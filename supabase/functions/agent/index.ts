@@ -811,7 +811,7 @@ function originalCurrency(input: string): string {
 // returns null so the caller can fall back to the conversation's language. Counting words (not
 // letters) means a single foreign name — "ابحث عن فيلا في Riyadh" — doesn't flip the whole reply.
 function detectLang(text: string): "ar" | "en" | null {
-  const words = text.match(/[\p{L}\p{M}]+/gu) ?? [];
+  const words = text.match(/[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu) ?? [];
   let ar = 0, en = 0;
   for (const word of words) {
     if (/\p{Script=Arabic}/u.test(word)) ar++;

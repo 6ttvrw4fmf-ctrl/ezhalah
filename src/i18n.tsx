@@ -1699,7 +1699,7 @@ export function t(en: string, vars?: Record<string, string | number>): string {
 const _arScript = /[؀-ۿ]/;
 const _latinScript = /[A-Za-z]/;
 export function detectLocale(text: string): Locale | null {
-  const words = text.match(/[\p{L}\p{M}]+/gu) ?? [];
+  const words = text.match(/[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu) ?? [];
   let ar = 0, en = 0;
   for (const word of words) {
     if (/\p{Script=Arabic}/u.test(word)) ar++;

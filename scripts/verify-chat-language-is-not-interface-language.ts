@@ -63,6 +63,7 @@ const cases: Array<[string, 'ar' | 'en' | null]> = [
   ['I want a home in حي المهدية', 'en'], ['ابحث عن فيلا في Riyadh', 'ar'],
   ['hello مرحبا', null], ['hello المهديةالمهديةالمهدية', null],
   ['hello hi مرحبا', 'en'], ['hello أهلا وسهلا', 'ar'],
+  ["I'd like homes في شمال حي الرياض", 'ar'],
   ['٤٠٠٠ 5000 ۵۰۰۰ 🏡', null], ['', null], ['café home الرياض', 'en'],
 ];
 for (const [text, expected] of cases) {
@@ -219,7 +220,7 @@ function mustCatch(label: string, file: string, before: string, after: string) {
   console.log('PASS MUTATION: ' + label);
 }
 if (!process.env.EZ_LANGUAGE_MUTATION_CHILD) {
-  mustCatch('any Arabic word overrides English majority', 'src/i18n.tsx', "  const words = text.match(/[\\p{L}\\p{M}]+/gu) ?? [];", "  if (/[\\u0600-\\u06ff]/.test(text)) return 'ar';\n  const words = text.match(/[\\p{L}\\p{M}]+/gu) ?? [];");
+  mustCatch('any Arabic word overrides English majority', 'src/i18n.tsx', "  const words = text.match(", "  if (/[\\u0600-\\u06ff]/.test(text)) return 'ar';\n  const words = text.match(");
   mustCatch('request uses UI language', 'src/data/agent.ts', 'locale: ctx.locale ?? getLocale(),', 'locale: getLocale(),');
   mustCatch('stale restore overwrites current language', 'src/store.tsx', 'getLocaleRevision() === revisionBeforeRead', 'true');
   mustCatch('title summarizes in UI language', 'src/store.tsx', 'autoTitleForPrompt(v, detectLocale(v) ?? getLocale())', 'autoTitleForPrompt(v, getLocale())');
