@@ -60,3 +60,5 @@ assert.deepEqual(sourceCatalog,buildAgentSourceCatalog());
 assert.deepEqual(sourceCatalog.Aqar,['aqar','aqarmonthly']);
 assert.deepEqual(sourceCatalog['عقار'],sourceCatalog.Aqar);
 assert.deepEqual(sourceCatalog['Aqar Gate'],sourceCatalog.Aqargate);
+
+assert.equal((await run({...ready,cities:['الرياض']},'في الرياض',{geographicScope:'REGION',regionPin:'المنطقة الشرقية'})).status,'blocked');

@@ -85,6 +85,7 @@ async function validatePlan(
     if (p.status !== "ready") return blocked("أي منطقة داخل السعودية تقصد؟ 📍", "Please clarify the Saudi search scope. 📍");
     const explicit = scope === "REGION" ? regionOnly : nationwide;
     if (!explicit && previous?.geographicScope !== scope) return blocked("حدد نطاق البحث المطلوب. 📍", "Please specify the geographic scope. 📍");
+    if (citiesForGuard.some(city => [city, listCities([city], true)].some(name => foldText(text).includes(foldText(name)))) && !regionOnly) return blocked("تقصد المدينة المحددة أو النطاق كامل؟ 📍", "Do you mean the named city or the entire scope? 📍");
     if (!strings(p.districts) || p.districts.length) return blocked("تبي البحث في النطاق كامل أو في مدينة وأحياء محددة؟ 📍", "Should I search the entire scope or specific city districts? 📍");
     if (unsupportedLocationRequirement(text, citiesForGuard)) return blocked("تحديد القرب غير متاح حالياً. حدد منطقة أو مدينة. 📍", "Proximity filtering is unavailable. Please specify a region or city. 📍");
     const region = REGION_NAMES.find(([en, ar]) => norm(String(p.region ?? "")) === norm(ar) || String(p.region ?? "").toLowerCase() === en.toLowerCase());

@@ -1,6 +1,6 @@
 # Owner-approved agent search controls
 
-Approved 2026-10-15. Implementation and production verification pending.
+Approved 2026-10-15. Implementation status and observed production evidence are recorded in [PR #7126](https://github.com/6ttvrw4fmf-ctrl/ezhalah/pull/7126). A merged PR alone does not establish production verification.
 
 This supersedes Chapter 1’s city-only restriction when the user explicitly requests a region or nationwide search. Surrounding interface language remains independently selected; message language does not switch the application shell. Source listing content remains verbatim.
 
