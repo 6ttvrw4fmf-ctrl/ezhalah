@@ -82,8 +82,9 @@ async function validatePlan(
   const nationwide = /كل\s*السعود|جميع\s*انحاء\s*المملك|المملكه\s*العربيه\s*السعوديه\s*بالكامل|اي\s*مدينه\s*بالسعود|\b(?:nationwide|across Saudi Arabia|anywhere in Saudi Arabia|all of Saudi Arabia)\b/iu.test(foldText(text));
   const scope = nationwide ? "NATIONWIDE" : regionOnly ? "REGION" : p.scope;
   if (scope === "REGION" || scope === "NATIONWIDE") {
-    if (p.status !== "ready") return blocked("أي منطقة داخل السعودية تقصد؟ 📍", "Please clarify the Saudi search scope. 📍");
     const explicit = scope === "REGION" ? regionOnly : nationwide;
+    // An explicit canonical scope is validated below; a model clarification is not a veto.
+    if (p.status !== "ready" && !explicit) return blocked("أي منطقة داخل السعودية تقصد؟ 📍", "Please clarify the Saudi search scope. 📍");
     if (!explicit && previous?.geographicScope !== scope) return blocked("حدد نطاق البحث المطلوب. 📍", "Please specify the geographic scope. 📍");
     if (citiesForGuard.some(city => [city, listCities([city], true)].some(name => foldText(text).includes(foldText(name)))) && !regionOnly) return blocked("تقصد المدينة المحددة أو النطاق كامل؟ 📍", "Do you mean the named city or the entire scope? 📍");
     if (citiesForGuard.length || !strings(p.districts) || p.districts.length) return blocked("تبي البحث في النطاق كامل أو في مدينة وأحياء محددة؟ 📍", "Should I search the entire scope or specific city districts? 📍");

@@ -1661,7 +1661,10 @@ Deno.serve(async (req: Request) => {
       // only by a source-regex a plausible mutation could pass while reintroducing the bug.
       const supportedNames = new Set([...Object.keys(searchSources), ...Object.values(searchSources).flat()].map(name => name.toLowerCase()));
       const requestedSources = [...(Array.isArray(out.platforms) ? out.platforms : []), ...(Array.isArray(out.excludedPlatforms) ? out.excludedPlatforms : [])];
-      if (requestedSources.some(name => typeof name !== "string" || !supportedNames.has(name.trim().toLowerCase()))) {
+      // A model may acknowledge an unsupported source in prose but omit it from platforms.
+      // Never execute the resulting unrestricted search while that restriction is unresolved.
+      const unsupportedSourceReply = /(?:website|platform|source).{0,100}(?:not supported|isn't supported|not one of|isn't one of|do not support|don't support)|(?:cannot|can't).{0,50}(?:search|limit).{0,50}(?:website|platform)|(?:not|isn't) one of.{0,60}(?:platforms|websites|sources)|(?:الموقع|المنصة|المواقع|المنصات).{0,60}(?:غير مدعوم|ما ندعم|لا ندعم|مو من)/iu.test(String(out.reply ?? ""));
+      if (unsupportedSourceReply || requestedSources.some(name => typeof name !== "string" || !supportedNames.has(name.trim().toLowerCase()))) {
         const reply = locale === "en" ? "That website isn't supported. Which supported website would you like to search?" : "الموقع غير مدعوم. أي موقع من المواقع المتاحة تبي نبحث فيه؟";
         return json({ kind: "message", reply, locationQuestion: false, keepState: true, askCount });
       }
