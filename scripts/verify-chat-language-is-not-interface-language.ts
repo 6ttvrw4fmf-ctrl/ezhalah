@@ -147,8 +147,33 @@ h.rename(id, 'My own title'); h.recordChatTurn('أبي فيلا بجدة'); h.re
 assert.equal(h.rows()[0].title, 'My own title', 'manual rename must survive both paths');
 h.transcript('show me apartments in Riyadh'); h.rename(id, '');
 assert.equal(h.rows()[0].title, english, 'clearing a manual name restores the latest message language');
-const screen = readFileSync(join(root, 'src/app/agent.tsx'), 'utf8');
+const screen = readFileSync(process.env.EZ_LANGUAGE_SCREEN_SOURCE ?? join(root, 'src/app/agent.tsx'), 'utf8');
 assert.ok(!/\bsetLocale\s*\(/.test(screen), 'chat screen must never change interface locale');
+// Execute the real result-closing expressions under a changing interface locale.
+const screenAst = ts.createSourceFile('agent.tsx',screen,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+const resultExpressions: Record<string,string> = {};
+function findResultExpressions(n: ts.Node) {
+  if (ts.isVariableDeclaration(n) && ['rfLang','replyT','moreNoteText'].includes(n.name.getText(screenAst))) resultExpressions[n.name.getText(screenAst)]=n.initializer!.getText(screenAst);
+  ts.forEachChild(n,findResultExpressions);
+}
+findResultExpressions(screenAst);
+const realDirection = await liftSymbols(join(root,'src/lib/textDirection.ts'),[{header:'export const msgRTL =',endsWith:/^};$/}],['msgRTL']);
+const closing = new Function('msgRTL','m','ui',ts.transpileModule(`
+const translate=(locale:string,key:string)=>locale+':'+key;
+const t=(key:string)=>translate(ui,key);
+const rc={endKind:'more',endShown:12,endTotal:32,lastTapOffer:false,cappedAtCap:false};
+const quoteTotal=true,offersMore=true,offersNarrow=false,completed=false,clientNarrowed=false;
+const closingNoteKey=()=> 'I showed you the first {shown} listings. Want me to show more?';
+const revealTarget=()=>32;
+const rfLang=${resultExpressions.rfLang}; const replyT=${resultExpressions.replyT};
+const moreNoteText=${resultExpressions.moreNoteText}; return moreNoteText;
+`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText);
+for(const summary of ['Search Summary: Riyadh','ملخص البحث: الرياض']) {
+  const first=closing(realDirection.msgRTL,{summary,text:summary},'en');
+  assert.equal(closing(realDirection.msgRTL,{summary,text:summary},'ar'),first,'UI toggle must not translate existing closing note');
+  assert(first.startsWith(summary.startsWith('Search')?'en:':'ar:'));
+}
+
 // Execute device persistence and the actual delayed-restore effect, including rapid toggles.
 const i18nSource = readFileSync(process.env.EZ_LANGUAGE_I18N_SOURCE ?? join(root,'src/i18n.tsx'),'utf8');
 const i18nAst = ts.createSourceFile('i18n.tsx',i18nSource,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
@@ -211,7 +236,7 @@ function mustCatch(label: string, file: string, before: string, after: string) {
   assert.ok(source.includes(before), label + ': mutation target exists');
   const mutant = join(mkdtempSync(join(tmpdir(), 'ez-language-mutant-')), 'source.ts');
   writeFileSync(mutant, source.replace(before, after));
-  const key = file.includes('i18n') ? 'EZ_LANGUAGE_I18N_SOURCE' : file.includes('store') ? 'EZ_LANGUAGE_STORE_SOURCE' : 'EZ_LANGUAGE_AGENT_SOURCE';
+  const key = file.includes('app/agent') ? 'EZ_LANGUAGE_SCREEN_SOURCE' : file.includes('i18n') ? 'EZ_LANGUAGE_I18N_SOURCE' : file.includes('store') ? 'EZ_LANGUAGE_STORE_SOURCE' : 'EZ_LANGUAGE_AGENT_SOURCE';
   const result = spawnSync(process.execPath, ['--experimental-strip-types', import.meta.filename], {
     env: {...process.env, [key]: mutant, EZ_LANGUAGE_MUTATION_CHILD: '1'}, encoding: 'utf8', timeout: 30000,
   });
@@ -222,6 +247,7 @@ function mustCatch(label: string, file: string, before: string, after: string) {
 if (!process.env.EZ_LANGUAGE_MUTATION_CHILD) {
   mustCatch('any Arabic word overrides English majority', 'src/i18n.tsx', "  const words = text.match(", "  if (/[\\u0600-\\u06ff]/.test(text)) return 'ar';\n  const words = text.match(");
   mustCatch('request uses UI language', 'src/data/agent.ts', 'locale: ctx.locale ?? getLocale(),', 'locale: getLocale(),');
+  mustCatch('UI toggle rewrites existing result note', 'src/app/agent.tsx', 'const moreNoteText = replyT(', 'const moreNoteText = t(');
   mustCatch('stale restore overwrites current language', 'src/store.tsx', 'getLocaleRevision() === revisionBeforeRead', 'true');
   mustCatch('title summarizes in UI language', 'src/store.tsx', 'autoTitleForPrompt(v, detectLocale(v) ?? getLocale())', 'autoTitleForPrompt(v, getLocale())');
   mustCatch('results overwrite latest title', 'src/store.tsx', ': chatId && prior?.title ? prior.title', ': false ? prior!.title');
