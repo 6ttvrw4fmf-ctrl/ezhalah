@@ -87,3 +87,6 @@ async function mustCatch(name: string, before: string, after: string) {
   } finally { rmSync(directory,{recursive:true,force:true}); }
 }
 await mustCatch('excluded websites cannot leak into matches','&& !excluded?.includes(source)','&& true');
+
+assert.equal((await run({...ready,region:'الشرقية'},'أبي ١٠٠ شقة للإيجار السنوي بالمنطقة الشرقية بحد أقصى ٥٠٠٠٠ ريال')).status,'ready');
+assert.equal((await run(ready,'أبي شقة في المنطقة الشرقية أو منطقة الرياض')).status,'blocked');

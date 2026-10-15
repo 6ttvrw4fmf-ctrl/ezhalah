@@ -219,7 +219,7 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
       ['أبي ٥٠ شقة للبيع في المنطقة الشرقية من عقار فقط','REGION','المنطقة الشرقية',50,''],
       ['أبي ١٠٠ شقة للإيجار السنوي بالمنطقة الشرقية بحد أقصى ٥٠٠٠٠ ريال بالسنة','REGION','المنطقة الشرقية',100,'50000'],
     ] as const) {
-      model={kind:'listings',reply:'أبحث لك 🏡',location:region || 'السعودية',type:'Apartment',count:String(amount),price:String(amount),deal:'Buy',pricing_basis:'none',location_plan:{status:'ready',cities:[],districts:[],region,scope}};
+      model={kind:'listings',reply:'أبحث لك 🏡',location:region || 'السعودية',type:'Apartment',count:String(amount),price:String(amount),deal:'Buy',pricing_basis:'none',location_plan:{status:'ready',cities:[],districts:[],region:region === 'المنطقة الشرقية' ? 'الشرقية' : region,scope}};
       const response=await handler!(new Request('https://fixture.invalid/agent',{method:'POST',headers:{apikey:'fixture'},body:JSON.stringify({text,prevQuery:prev})}));
       const actual=await response.json();
       assert.equal(actual.kind,'listings',JSON.stringify(actual));
