@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -20,7 +20,7 @@ const catalog: Record<string, any> = {
   'الياسمين': { kind: 'twin_district', cities: [{ ...j, district_ar: 'حي الياسمين' }], all_cities: [{ ...j, district_ar: 'حي الياسمين' }, { ...r, district_ar: 'حي الياسمين' }] },
   'حي بجدة': { kind: 'district', cities: [{ ...j, district_ar: 'حي بجدة' }] },
 };
-const lookup = async (n: string) => catalog[n] ?? { kind: 'none', name: n };
+const lookup = async (n: string) => catalog[n] ?? catalog[n.replace(/^حي\s+/, '')] ?? { kind: 'none', name: n };
 const ready = (cities = ['الرياض'], districts: string[] = [], region = '') => ({ status: 'ready', cities, districts, region });
 const run = (p: unknown, f = lookup) => validateLocationPlan(p, f, false, 'أي مدينة تقصد؟');
 assert.equal((await run(ready())).status, 'ready'); // zero inventory is still a valid place
@@ -45,6 +45,20 @@ assert.equal((await run(ready(), async () => null)).failed, true);
 assert.equal((await run(ready(), async () => { throw Error('network'); })).failed, true);
 assert.equal((await validateLocationPlan(ready(), () => new Promise(() => {}), true, '', 5)).failed, true);
 const prev: any = { location: 'الرياض', districts: ['حي الملقا', 'حي الياسمين'], regionPin: 'منطقة الرياض', type: 'Apartment', detail: '3', priceInput: '60000' };
+const contextual = (p: unknown, text: string, previous: any = prev) => validateLocationPlan(p, lookup, false, '', 20000, {text, previous});
+for (const text of ['أبي شقة في الرياض على بعد كيلومتر من برج المملكة', 'أبي شقة في شمال الرياض', 'Apartment north of Riyadh', 'A villa near a school in Riyadh']) {
+  assert.equal((await contextual(ready(), text)).status, 'blocked');
+}
+assert.equal((await contextual(ready(['الرياض'], ['الياسمين']), 'حي الياسمين', {...prev,districts:['حي الملقا']})).status, 'blocked');
+assert.equal((await contextual(ready(['الرياض'], ['الياسمين']), 'بدل الملقا خلها في حي الياسمين')).status, 'ready');
+const switched = await contextual(ready(['جدة'], ['الملقا']), 'غير المدينة إلى جدة', {...prev,districts:['حي الملقا']});
+assert.equal(switched.status, 'ready');
+assert.deepEqual(switched.districts, []);
+assert.match(switched.notice, /الملقا.*جدة/);
+assert.equal((await contextual(ready(['جدة'], ['الملقا']), 'غير المدينة إلى جدة في الملقا', {...prev,districts:['حي الملقا']})).status, 'blocked');
+assert.equal((await contextual(ready(), 'Apartment in Riyadh within a budget of one million')).status, 'ready');
+assert.equal((await contextual(ready(), 'أبي شقة في الرياض واجهتها شمالية')).status, 'ready');
+assert.equal((await contextual(ready(['الرياض'], ['الياسمين']), 'ابدأ بحث جديد في حي الياسمين')).status, 'ready');
 const next: any = { location: 'الرياض', districts: [], regionPin: 'منطقة الرياض', districtPin: undefined };
 const merged = mergeConversationState(prev, next, ['location', 'districts', 'districtPin', 'regionPin']);
 assert.deepEqual(merged.districts, []);
@@ -57,7 +71,15 @@ assert.ok(describeKnownState(prev).includes('حي الملقا/حي الياسم
 // deliberately proposes an unwanted district: only the edge's validated full state may survive.
 const client = await liftSymbols(resolve('src/data/agent.ts'), [
   { header: 'export function queryFromBackend' }, { header: 'export function statedKeys' },
-], ['queryFromBackend', 'statedKeys'], `
+  { header: 'async function callAgentBackend', endsWith: /^\}$/ },
+], ['queryFromBackend', 'statedKeys', 'callAgentBackend', 'setResponse'], `
+import { mergeConversationState, describeKnownState } from ${JSON.stringify(pathToFileURL(resolve('src/lib/conversationState.ts')).href)};
+let fixtureResponse;
+function setResponse(value) { fixtureResponse = value; }
+const supabase = { functions: { invoke: async () => ({data: fixtureResponse, error: null}) } };
+const ensureLandmarks = async () => {}, landmarkHint = () => '', getLocale = () => 'ar';
+const certifyAfOnMergedState = q => q;
+const setTimeout = (fn, ms) => globalThis.setTimeout(fn, ms).unref();
 const emptyQuery = () => ({});
 const typeFromAgent = () => null;
 const RAW_LAND_PHRASE = /a^/, BARE_LAND_WORD = /a^/, LAND_QUALIFIER = /a^/, ROAD_PREFIX_RE = /a^/;
@@ -75,6 +97,10 @@ for (const districts of [[], ['حي الياسمين'], ['حي الملقا', '�
   assert.equal(combined.regionPin, 'منطقة الرياض');
   assert.equal(combined.priceInput, '60000');
 }
+(client.setResponse as Function)({kind:'listings',reply:'',notice:'Removed an incompatible district',query:{locationStateValidated:true,location:'جدة',regionPin:'منطقة مكة المكرمة',districts:[]}});
+const noticeTurn = await (client.callAgentBackend as Function)('غير المدينة إلى جدة',{loggedIn:false,order:false,prevQuery:prev});
+assert.equal(noticeTurn.notice, 'Removed an incompatible district');
+assert.deepEqual(noticeTurn.query.districts, []);
 
 if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
   // Boot the real edge entrypoint, with every network boundary replaced. No paid model or DB call.
@@ -109,6 +135,27 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
     assert.equal(result.kind, 'listings', JSON.stringify(result));
     assert.equal(result.query.locationStateValidated, true);
     assert.deepEqual(result.query.districts, []);
+    for (const [text, location_plan] of [
+      ['أبي شقة في الرياض على بعد كيلومتر من برج المملكة',ready()],
+      ['أبي شقة في شمال الرياض',ready()],
+      ['حي الياسمين',ready(['الرياض'],['الياسمين'])],
+    ]) {
+      model={kind:'listings',reply:'أبحث لك 🏡',location:'الرياض',type:'Apartment',location_plan};
+      const r=await handler!(new Request('https://fixture.invalid/agent',{method:'POST',headers:{apikey:'fixture'},body:JSON.stringify({text,prevQuery:{...prev,districts:['حي الملقا']}})}));
+      assert.equal((await r.json()).kind,'message');
+    }
+    model={kind:'listings',reply:'أبحث لك في جدة 🏡',location:'جدة',type:'Apartment',location_plan:ready(['جدة'],['الملقا'])};
+    const cityResponse=await handler!(new Request('https://fixture.invalid/agent',{method:'POST',headers:{apikey:'fixture'},body:JSON.stringify({text:'غير المدينة إلى جدة',prevQuery:{...prev,districts:['حي الملقا']}})}));
+    const cityResult=await cityResponse.json();
+    assert.equal(cityResult.kind,'listings');
+    assert.deepEqual(cityResult.query.districts,[]);
+    assert.match(cityResult.notice,/الملقا.*جدة/);
+    model={kind:'message',reply:'أي مدينة؟ 📍',location_plan:{status:'none'}};
+    const resetResponse=await handler!(new Request('https://fixture.invalid/agent',{method:'POST',headers:{apikey:'fixture'},body:JSON.stringify({text:'ابدأ بحث جديد',prevQuery:prev})}));
+    const resetResult=await resetResponse.json();
+    assert.equal(resetResult.kind,'message');
+    assert.equal(resetResult.query.location,'');
+    assert.deepEqual(resetResult.query.districts,[]);
   } finally { globalThis.fetch = oldFetch; delete (globalThis as any).Deno; }
 }
 
@@ -118,6 +165,7 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
     assert.ok(original.includes(before));
     const dir = mkdtempSync(join(tmpdir(), 'location-plan-mutant-'));
     try {
+      cpSync(resolve('supabase/functions/agent'), dir, { recursive: true });
       const file = join(dir, 'locationPlan.ts'); writeFileSync(file, original.replace(before, after));
       const result = spawnSync(process.execPath, ['--experimental-strip-types', import.meta.filename], { env: { ...process.env, EZ_LOCATION_PLAN_SOURCE: file }, encoding: 'utf8', timeout: 20000 });
       assert.equal(result.status, 1, `${name} must fail`);
@@ -127,5 +175,8 @@ if (!process.env.EZ_LOCATION_PLAN_SOURCE) {
   mustCatch('multiple cities cannot silently choose first', 'cities.length > 1 || (cities.length === 0 && p.districts.length === 0)', '(cities.length === 0 && p.districts.length === 0)');
   mustCatch('district must belong to chosen city', 'String(c.city_id) === String(chosen.city_id)', 'true');
   mustCatch('full catalog beats inventory shortlist', 'd.all_cities ?? d.cities', 'd.cities');
+  mustCatch('unsupported geographic requests cannot become citywide searches', 'return proximity || namedRoad || directional || !!landmarkHint.trim();', 'return false;');
+  mustCatch('bare district cannot silently replace a selection', 'previousDistricts.length && addsUnstatedDistrict', 'false && addsUnstatedDistrict');
+  mustCatch('explicit city switch revalidates and removes incompatible old districts', '!matches.length && explicitCityChange && previousDistricts.some', '!matches.length && false && previousDistricts.some');
 }
 console.log('PASS: location plan validates city/district state, preserves empty clears and unrelated filters, and bounds failures; mutation proofs pass.');

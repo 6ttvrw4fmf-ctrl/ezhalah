@@ -84,8 +84,16 @@ check('the id is normalised, so rating:VALUE and rating are the same caveat',
 const appTsx = readFileSync('src/app/agent.tsx', 'utf8').split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
 check('AgentTurn carries the notice as its OWN field, not only folded into .reply',
   /notice\?:\s*string/.test(code));
-check('respond() sets backend.notice, not only backend.reply',
-  /backend\.notice = notice/.test(code));
+const mergesNotices = (source: string): boolean => {
+  const statement = /backend\.notice = [^\n]+/.exec(source)?.[0];
+  if (!statement) return false;
+  const backend = { notice: 'location notice' };
+  new Function('backend', 'notice', statement)(backend, 'filter notice');
+  return backend.notice === 'location notice\nfilter notice';
+};
+check('respond() keeps both location and filter notices in the rendered field', mergesNotices(code));
+check('(mutation) overwriting the location notice with the filter notice is caught',
+  !mergesNotices(code.replace(/backend\.notice = [^\n]+/, 'backend.notice = notice;')));
 check('the render call site actually reads turn.notice (not just turn.reply) before showing results',
   /turn\.notice/.test(appTsx));
 check('a present notice is appended to what actually renders, not silently dropped',
