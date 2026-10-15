@@ -3097,12 +3097,12 @@ export default function Agent() {
         if (quantity != null && latestResult.result.query) {
           const updatedQuery = {...latestResult.result.query, count:quantity};
           lastQueryRef.current = updatedQuery;
-          setMsgs(m => m.map(message => message.id === latestResult.id && message.role === 'results'
+          setMsgs((m) => m.map(message => message.id === latestResult.id && message.role === 'results'
             ? {...message, result:{...message.result, query:updatedQuery}} : message));
         }
         setTyped('');
         recordChatTurn(v);
-        setMsgs(m => [...m, {id:uid(),role:'user',text:v}]);
+        setMsgs((m) => [...m, {id:uid(),role:'user',text:v}]);
         await loadMore(latestResult, target);
         return;
       }
@@ -3520,6 +3520,7 @@ export default function Agent() {
     pendingScopeRef.current = null; // …and so does a half-answered clarifying question
     pendingCityRef.current = null;  // …including the plain-city question's subject
     lastQueryRef.current = null;    // …and the accumulated filters it narrowed
+    lastPaginationResultRef.current = null;
     // THE THIRD RECURRENCE (routine #8, 2026-09-18, ops_incident #319). The list above was itself
     // enumerated by hand — from the two defects in hand on 2026-09-14 — so it ended the class for
     // the fields it named and for nothing else. Measured on main: `send()` reads NINE refs and this
