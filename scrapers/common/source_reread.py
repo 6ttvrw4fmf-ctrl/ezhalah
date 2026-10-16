@@ -308,7 +308,7 @@ def parse_ids(spec: str) -> list[tuple[str, int]]:
 
 # Which KEY of wasalt's page JSON states a fact (trap 1: «the site doesn't publish it» must be proven from the
 # raw payload). The score flattens propertyDetailsV3 into text lines and loses the key; this prints the path.
-_WASALT_FACT = re.compile(r"elevat|lift|مصعد|kitchen|مطبخ|bath|حمام|دورات|amenit|feature|facing|direction|واجهة", re.I)
+_WASALT_FACT = re.compile(r"elevat|lift|مصعد|kitchen|مطبخ|bath|حمام|دورات|amenit|feature|facing|direction|واجهة|area|مساحة|م²|sqm|bedroom|غرف", re.I)
 
 
 def wasalt_fact_paths(data, limit: int = 60) -> list[str]:
