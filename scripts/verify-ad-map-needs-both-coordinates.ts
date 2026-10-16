@@ -274,6 +274,61 @@ sourceMutant('the source link going back to plain text', !mojLinkOk(PREVIEW.repl
 sourceMutant('the source link pointing at another page', !mojLinkOk(PREVIEW, DATA_SRC.replace(MOJ_URL, 'https://moj.gov.sa/')));
 sourceMutant('the source shown inside our page in a frame', !mojLinkOk(PREVIEW + '\n<Frame src={MOJ_SOURCE_URL} />', DATA_SRC));
 
+// ── THE MINISTRY'S DEALS, ONE ROW EACH (owner 2026-10-16: «the exact same transactions») ────────────────────────────
+// The sheet lists public.moj_district_deals for this ad's city · district · class: newest first, every row complete,
+// the m² price the ministry's own column (never price ÷ area recomputed here); it is our list of stored rows, never the
+// ministry's page in a frame (that page forbids framing); the button names the count it lists.
+type DealRows = (data: unknown) => { ref: string; date: string; area: number; price: number; ppm: number }[];
+const liftDeals = async (file: string): Promise<DealRows> => (await liftSymbols(file, [
+  { header: 'const num = (', endsWith: /: NaN;$/ },
+  { header: 'export function mojDealRows(' },
+], ['mojDealRows'])).mojDealRows as DealRows;
+const DEAL_FIX = [
+  { deal_ref: 32078727, deal_date: '2025-09-15', area_m2: '719.5', price: '18000000', ppm: '25017.37' },
+  { deal_ref: '32130199', deal_date: '2025-09-17', area_m2: 109.53, price: 1159000, ppm: '10581.58' },
+  { deal_ref: '99', deal_date: '2026-05-14', area_m2: 10, price: 1000, ppm: '777' },          // the ministry's figure ≠ 1000 ÷ 10: it stays 777
+  { deal_ref: '7', deal_date: null, area_m2: 100, price: 1, ppm: '1' },                         // no date → not listed
+  { deal_ref: '', deal_date: '2026-01-01', area_m2: 100, price: 1, ppm: '1' },                  // no reference → not listed
+  { deal_ref: '8', deal_date: '2026-01-02', area_m2: 0, price: 1, ppm: '1' },                   // no area → not listed
+  { deal_ref: '9', deal_date: '2026-01-03', area_m2: 100, price: null, ppm: '1' },              // no price → not listed
+];
+const dealProblems = (rows: DealRows): string[] => {
+  const out: string[] = [];
+  const r = rows(DEAL_FIX);
+  if (r.map((d) => d.ref).join(',') !== '99,32130199,32078727') out.push(`listed ${r.map((d) => `${d.ref}@${d.date}`).join(' ')} ≠ 99 (2026-05-14), 32130199, 32078727 — newest first, half-known rows out`);
+  if (r[0]?.ppm !== 777) out.push(`the m² price must be the ministry's own column (777), got ${r[0]?.ppm}`);
+  if (r[2]?.area !== 719.5 || r[2]?.price !== 18_000_000) out.push(`values must arrive as numbers, unaltered: ${JSON.stringify(r[2])}`);
+  if (rows(null).length || rows('x').length || rows([{}]).length) out.push('a non-list or an empty object produced rows');
+  return out;
+};
+const dealsReal = dealProblems(await liftDeals(DATA));
+check('the deals sheet rows: newest first, complete rows only, the ministry\'s own m² price', dealsReal.length === 0, dealsReal.join('\n      '));
+const mustCatchDeals = async (what: string, from: string, to: string) => {
+  if (!DATA_SRC.includes(from)) { failed++; console.log(`FAIL  mutation anchor missing: ${what}`); return; }
+  const file = join(mkdtempSync(join(tmpdir(), 'ad-deals-')), 'adPageData.ts');
+  writeFileSync(file, DATA_SRC.replace(from, to));
+  const caught = dealProblems(await liftDeals(file)).length > 0;
+  if (!caught) failed++;
+  console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
+};
+await mustCatchDeals('the m² price recomputed as price ÷ area', 'const area = num(r?.area_m2), price = num(r?.price), ppm = num(r?.ppm);', 'const area = num(r?.area_m2), price = num(r?.price), ppm = num(r?.price) / num(r?.area_m2);');
+await mustCatchDeals('oldest first', 'return out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 :', 'return out.sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 :');
+await mustCatchDeals('a deal without a date listed', "if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || !ref ||", 'if (!ref ||');
+const dealsWired = (p: string, d: string): boolean =>
+  /supabase\.from\('moj_district_deals'\)\.select\('deal_ref,deal_date,area_m2,price,ppm'\)/.test(d) && /\.order\('deal_date', \{ ascending: false \}\)\.limit\(MOJ_DEALS_LIMIT\)/.test(d) && /return mojDealRows\(data\);/.test(d)
+  && /fetchMojDeals\(row, commercial \? 'تجاري' : 'سكني'\)/.test(p)
+  && /testID="listing-preview-moj-deals"[\s\S]{0,120}onPress=\{openDeals\}/.test(p) && /\{h\.gov && prices\.deals\.length > 0 \? \(/.test(p)
+  && /\{dealsOpen && IS_WEB && prices\.moj && prices\.deals\.length > 0 \? \(/.test(p)
+  && /testID="listing-preview-moj-deals-sheet"/.test(p) && /testID="listing-preview-moj-deals-close"[\s\S]{0,80}onPress=\{closeDeals\}/.test(p)
+  // our own rows, never the ministry's page in a frame; the source link reuses the one opener
+  && !/listing-preview-moj-deals-sheet"[\s\S]{0,3000}<Frame/.test(p) && /testID="listing-preview-moj-deals-source"[\s\S]{0,120}onPress=\{\(\) => open\(MOJ_SOURCE_URL\)\}/.test(p)
+  && /\{fmtInt\(d\.ppm\)\}/.test(p) && !/d\.price \/ d\.area/.test(p);
+check('the deals sheet is wired: the stored rows for this district, newest first, our own list (never a frame), the count on the button', dealsWired(PREVIEW, codeOnly(DATA_SRC)));
+sourceMutant('the sheet framing the ministry page', !dealsWired(PREVIEW.replace('testID="listing-preview-moj-deals-sheet" style={s.mapSheet}>', 'testID="listing-preview-moj-deals-sheet" style={s.mapSheet}><Frame src={MOJ_SOURCE_URL} />'), codeOnly(DATA_SRC)));
+sourceMutant('the sheet recomputing a deal\'s m² price', !dealsWired(PREVIEW.replace('{fmtInt(d.ppm)}', '{fmtInt(d.price / d.area)}'), codeOnly(DATA_SRC)));
+sourceMutant('the deals read losing its newest-first order', !dealsWired(PREVIEW, codeOnly(DATA_SRC).replace(".order('deal_date', { ascending: false })", '')));
+sourceMutant('the button shown with nothing to list', !dealsWired(PREVIEW.replace('{h.gov && prices.deals.length > 0 ? (', '{h.gov ? ('), codeOnly(DATA_SRC)));
+
 const honestReal = labelsHonest(PREVIEW, I18N);
 check('honest labels: no sold-average tile, the ministry half names its class, our half names its types, the explanation is wired', honestReal.length === 0, honestReal.join('\n      '));
 sourceMutant('the sold-average tile coming back', labelsHonest(PREVIEW + "\n<Text>{fmtInt(tileFromShown(prices.moj.avgPpm, prices.area))}</Text>", I18N).length > 0);

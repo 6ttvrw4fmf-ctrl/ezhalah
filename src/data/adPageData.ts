@@ -240,6 +240,44 @@ export function fetchMojSales(row: AdRow | null, cls: MojClass = 'سكني'): Pr
   return p;
 }
 
+// ── the ministry's deals, one row each (owner 2026-10-16: «the exact same transactions») ────────────────────────────
+// The public report cannot be opened pre-filtered, so the page lists the deals themselves from public.moj_district_deals
+// (filled by the same weekly job as the aggregates): the ministry's own date, m², price and per-deal m² price, unaltered.
+export type MojDeal = { ref: string; date: string; area: number; price: number; ppm: number };
+const MOJ_DEALS_LIMIT = 500;
+/** The stored deals as the sheet lists them: newest first, and ONLY rows whose every value is present — the m² price is
+ *  the ministry's own column, never price ÷ area recomputed here. Pure, so the barrier executes it. */
+export function mojDealRows(data: unknown): MojDeal[] {
+  if (!Array.isArray(data)) return [];
+  const out: MojDeal[] = [];
+  for (const r of data as Record<string, unknown>[]) {
+    const date = String(r?.deal_date ?? '').slice(0, 10), ref = String(r?.deal_ref ?? '').trim();
+    const area = num(r?.area_m2), price = num(r?.price), ppm = num(r?.ppm);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !ref || !Number.isFinite(area) || !(area > 0) || !Number.isFinite(price) || !Number.isFinite(ppm)) continue;
+    out.push({ ref, date, area, price, ppm });
+  }
+  return out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.ref < b.ref ? 1 : a.ref > b.ref ? -1 : 0));
+}
+const dealsCache = new Map<string, Promise<MojDeal[]>>();
+/** One bounded read of moj_district_deals for this ad's city · district · class; a failed read is [] and forgotten. */
+export function fetchMojDeals(row: AdRow | null, cls: MojClass = 'سكني'): Promise<MojDeal[]> {
+  if (!supabase || !row?.city_ar || !row.district_ar) return Promise.resolve([]);
+  const key = `${row.city_ar}|${row.district_ar}|${cls}`;
+  let p = dealsCache.get(key);
+  if (!p) {
+    p = boundedRpc<Record<string, unknown>[]>(
+      supabase.from('moj_district_deals').select('deal_ref,deal_date,area_m2,price,ppm')
+        .eq('city_ar', row.city_ar).eq('district_ar', row.district_ar).eq('property_class', cls)
+        .order('deal_date', { ascending: false }).limit(MOJ_DEALS_LIMIT),
+    ).then(({ data, error }) => {
+      if (error) { dealsCache.delete(key); return []; }
+      return mojDealRows(data);
+    });
+    dealsCache.set(key, p);
+  }
+  return p;
+}
+
 // ── the same ad on other sites ───────────────────────────────────────────────────────────────────
 /** The other sites' index rows for this ad: isSameAd, on the SAME live-platform set as the asking stats and
  *  the search (a hidden / down / dormant site neither appears nor counts), one row per platform, index order. */
