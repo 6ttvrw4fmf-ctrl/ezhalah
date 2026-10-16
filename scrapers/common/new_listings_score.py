@@ -567,11 +567,20 @@ def no_district_backlog(client) -> dict:
 
 
 def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: str,
-               pace: float = PACE_S, probe=None) -> dict:
+               pace: float = PACE_S, probe=None, wasalt=None, sanadak=None) -> dict:
     if probe is None:
         # Imported here, not at module level: af_score and its hermetic check load this module with
         # source_reread stubbed, and they always pass their own probe.
         from scrapers.common.source_reread import read_page as probe
+    # wasalt and sanadak are read the way af_score reads them (backlog #540 / #546, 2026-10-16). The shared
+    # probe answers a live wasalt page with an empty body (liveness needs only the status), so wasalt scored
+    # 0 decided ads every night (10-15: 5/5, 10-16: 10/10 unreadable). sanadak's page appends OTHER listings
+    # («شقة للإيجار في جدة النهضة 3 غرفة 183.56 متر 2»), so 17944083 (228 m²) and 17662112 scored area
+    # mismatches the ad never made; its own listing object is the ad. Lazy import: af_score imports this module.
+    if wasalt is None or sanadak is None:
+        from scrapers.common import af_score
+        wasalt = wasalt or af_score.wasalt_page
+        sanadak = sanadak or af_score.sanadak_page
     row = empty_row(night, platform)
     last = 0.0
     for table, rid in picks:
@@ -586,6 +595,16 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             continue
         time.sleep(max(0.0, last + pace - time.monotonic()))
         last = time.monotonic()
+        own = wasalt if ("wasalt.sa" in url or "wasalt.com" in url) else sanadak if "sanadak.sa" in url else None
+        if own is not None:
+            page = own(url)                 # the ad's own record; None = unreadable, never wrong
+            if page is None:
+                row["sampled"] += 1
+                row["unreadable_pages"] += 1
+                continue
+            fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
+                                           prose_only_district=platform in PROSE_ONLY_DISTRICT), stored)
+            continue
         try:
             status, body = probe(url)
         except Exception:  # noqa: BLE001 — a transport failure has said nothing about the ad

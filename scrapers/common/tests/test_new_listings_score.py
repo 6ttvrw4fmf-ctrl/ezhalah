@@ -518,3 +518,23 @@ def test_a_per_meter_rate_matches_the_total_the_page_prints_for_it():
     page = {"title": "أرض سكني للبيع في حي الجامعة في ثادق", "evidence_lines": ["690 م² 289,800", "للبيع 289,800"]}
     assert compare_listing({"price_per_meter": 420, "area_m2": 690}, page)["price"] == MATCH
     assert compare_listing({"price_per_meter": 400, "area_m2": 690}, page)["price"] != MATCH
+
+
+def test_wasalt_and_sanadak_are_read_from_their_own_record_not_the_shell():
+    # #540: the shared probe answers a live wasalt page with an empty body → 10/10 «unreadable» every night.
+    # #546: sanadak's page lists OTHER ads' areas; its own listing object is the ad.
+    stored = {"source_table": "wasalt_residential_listings", "listing_id": 9, "platform": "wasalt",
+              "district_ar": "حي النرجس", "deal_ar": "إيجار", "type_ar": "شقة"}
+    client = FakeClient({
+        "search_listings_ar": [stored],
+        "wasalt_residential_listings": [{"id": 9, "listing_url": "https://wasalt.sa/en/property/x-9"}],
+    })
+    own = {"title": "شقة للإيجار في حي النرجس", "meta": {}, "jsonld": [],
+           "evidence_lines": ["شقة للإيجار في حي النرجس"], "text_head": "شقة للإيجار في حي النرجس"}
+    shell = lambda url: (200, "<html><body></body></html>")          # what the probe really returns
+    row = score_site(client, "wasalt", [("wasalt_residential_listings", 9)], night="2026-10-16", pace=0,
+                     probe=shell, wasalt=lambda url: own, sanadak=lambda url: None)
+    assert row["decided_ads"] == 1 and row["fields"]["district"][MATCH] == 1
+    row = score_site(client, "wasalt", [("wasalt_residential_listings", 9)], night="2026-10-16", pace=0,
+                     probe=shell, wasalt=lambda url: None, sanadak=lambda url: None)
+    assert row["unreadable_pages"] == 1 and row["normal_mismatch"] == 0
