@@ -237,6 +237,15 @@ ONE_WORD = re.compile(r"(?<!\S)(?:واحد|واحده)(?!\S)")
 DUAL_WORD = re.compile(r"(?<![\u0621-\u064A])(?:غرفتين|غرفتان|حمامين|حمامان|دورتين|دورتان|صالتين|صالتان|مجلسين|مجلسان)(?![\u0621-\u064A])")
 
 
+# Three to ten are written as words too, on a source's own structured cell: aljassim's room cell reads «أربع غرف»
+# (17947950, 2026-10-16: stored 4 from that cell, scored MISMATCH against the description's «غرفتين نوم»). A
+# number word ON THE KEYWORD'S LINE states that figure, exactly like a digit there (norm() folds أ→ا, ة→ه).
+WORD_NUMBERS = {"ثلاث": 3, "ثلاثه": 3, "اربع": 4, "اربعه": 4, "خمس": 5, "خمسه": 5, "ست": 6, "سته": 6,
+                "سبع": 7, "سبعه": 7, "ثمان": 8, "ثماني": 8, "ثمانيه": 8, "تسع": 9, "تسعه": 9, "عشر": 10, "عشره": 10}
+WORD_NUMBER = re.compile(r"(?<![\u0621-\u064A])(" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
+                         + r")(?![\u0621-\u064A])")
+
+
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
     if not AREA_UNIT.search(kw):
@@ -265,6 +274,9 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # because the previous row's bare «220 م²» read as a stated age).
         # «دورة مياه واحدة» is gathern's way of printing ONE bathroom: the word, not the digit (af_score
         # 2026-10-07: gathern 12857258 / 13191014 / 13971729 stored 1, scored «mismatch» 3/3).
+        worded = {WORD_NUMBERS[m.group(1)] for i in kw_hits for m in WORD_NUMBER.finditer(lines[i])}
+        if worded:
+            return MATCH if float(stored) in worded else MISMATCH
         if any(ONE_WORD.search(lines[i]) for i in kw_hits):
             return MATCH if float(stored) == 1 else MISMATCH
         if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
