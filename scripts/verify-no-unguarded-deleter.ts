@@ -51,6 +51,11 @@ const NON_LISTING_DELETES = new Set([
   // persistence), never a listing row. Deletes here are the user deleting/clearing their own chats,
   // RLS-scoped to auth.uid() — the server cannot even see another user's rows to delete.
   'src/lib/chatSync.ts',
+  // moj_district_deals = the MINISTRY'S deal rows (owner 2026-10-16: «the exact same transactions»), not a
+  // listing: no scraper owns them, no card is built from them, and every row is re-derivable from the
+  // ministry's public report on the next weekly run. The one delete prunes deals whose date left the
+  // anchored 12-month window (the card's period moved on). The listings tables are never touched.
+  'scrapers/moj/sales.py',
 ]);
 
 // A COMMENT CANNOT DELETE ANYTHING. This guard's own barrier-14 migration explains the failure it

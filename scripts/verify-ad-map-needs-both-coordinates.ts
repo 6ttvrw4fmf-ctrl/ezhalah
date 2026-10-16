@@ -59,10 +59,10 @@ check('a pin needs BOTH published coordinates — strings or numbers, never a ha
 const sourceMutant = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  (mutation) catches ${label}`); };
 
 // ── asking prices: each house once, down sites out, junk out, never under 10 houses ──────────────
-type Stats = (rows: Record<string, unknown>[], down: Set<string>) => { houses: number; p10: number; median: number; p90: number; medianPpm: number | null } | null;
+type Stats = (rows: Record<string, unknown>[], down: Set<string>) => { houses: number; ads: number; sites: number; p10: number; median: number; p90: number; medianPpm: number | null } | null;
 const liftStats = async (file: string): Promise<Stats> => (await liftSymbols(file, [
   { header: 'const num = (', endsWith: /: NaN;$/ },
-  { header: 'const PRICE_MIN', endsWith: /;$/ }, { header: 'const PRICE_MAX', endsWith: /;$/ }, { header: 'const MIN_HOUSES', endsWith: /;$/ },
+  { header: 'export const PRICE_MIN', endsWith: /;$/ }, { header: 'export const PRICE_MAX', endsWith: /;$/ }, { header: 'const MIN_HOUSES', endsWith: /;$/ },
   { header: 'const percentile = (' },
   { header: 'export function askingPriceStats(' },
 ], ['askingPriceStats'])).askingPriceStats as Stats;
@@ -82,6 +82,9 @@ const statsProblems = (stats: Stats): string[] => {
   const out: string[] = [];
   const r = stats(FIXTURE, new Set(['toor']));
   if (!r) return ['the fixture (11 houses) produced no numbers'];
+  // what the explanation prints: the ads that passed the filters (13: the 10 + the repeat + two unlicensed; the 50k typo and the down site are out) and the websites they came from (aqar, wasalt, sakan)
+  if (r.ads !== 13) out.push(`ads ${r.ads} ≠ 13 (a typo or a down site's row was counted as an ad, or a row was dropped)`);
+  if (r.sites !== 3) out.push(`sites ${r.sites} ≠ 3 (a down site counted as a source, or one missed)`);
   if (r.houses !== 11) out.push(`houses: ${r.houses} ≠ 11 (a house listed twice was counted twice, or the junk/down rows got in)`);
   if (Math.abs(r.p10 - 1.1 * M) > 1) out.push(`p10 ${r.p10} ≠ 1.1M`);
   if (Math.abs(r.median - 1.4 * M) > 1) out.push(`median ${r.median} ≠ 1.4M`);
@@ -108,7 +111,8 @@ const mustCatchStats = async (what: string, from: string, to: string) => {
   console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
 };
 await mustCatchStats('a house counted once per row', 'if (!cur || price < cur.price) best.set(key, { price, area });', 'best.set(`${key}|${best.size}`, { price, area });');
-await mustCatchStats('a down site counted', 'if (!platform || downSlugs.has(platform)) continue;', 'if (!platform) continue;');
+await mustCatchStats('the ad count including a junk-price row', 'if (!Number.isFinite(price) || price < PRICE_MIN || price > PRICE_MAX) continue;\n    ads++;\n    sites.add(platform);', 'ads++;\n    sites.add(platform);\n    if (!Number.isFinite(price) || price < PRICE_MIN || price > PRICE_MAX) continue;');
+await mustCatchStats('the website count counting every ad as a website', 'sites.add(platform);', "sites.add(platform + ads);");
 await mustCatchStats('a junk price counted', 'if (!Number.isFinite(price) || price < PRICE_MIN || price > PRICE_MAX) continue;', 'if (!Number.isFinite(price)) continue;');
 await mustCatchStats('numbers shown from a handful of houses', 'if (best.size < MIN_HOUSES) return null;', 'if (best.size < 1) return null;');
 await mustCatchStats('the type dropped from the dedupe key', 'const key = lic ? `${lic}|${type}|${area}` : `${platform}|${type}|${price}|${area}`;', 'const key = lic ? `${lic}|${area}` : `${platform}|${price}|${area}`;');
@@ -119,12 +123,12 @@ type Block = {
   isSameAd: (a: Row, b: Row) => boolean;
   dearerSplit: (each: { price: number; area: number }[], adPpm: number) => Split;
   sameAdSiblings: (own: Row, rows: Row[], down: Set<string>) => Row[];
-  mojFacts: (row: Row | null) => { deals: number; avgDeal: number; avgPpm: number; p10: number | null; p90: number | null; from: string; to: string } | null;
+  mojFacts: (row: Row | null) => { path: string | null; updatedAt: string | null; deals: number; avgDeal: number; avgPpm: number; p10: number | null; p90: number | null; from: string; to: string } | null;
 };
 const liftBlock = async (file: string): Promise<Block & Stats> => {
   const mod = await liftSymbols(file, [
     { header: 'const num = (', endsWith: /: NaN;$/ },
-    { header: 'const PRICE_MIN', endsWith: /;$/ }, { header: 'const PRICE_MAX', endsWith: /;$/ }, { header: 'const MIN_HOUSES', endsWith: /;$/ }, { header: 'const MOJ_MIN_DEALS', endsWith: /;$/ },
+    { header: 'export const PRICE_MIN', endsWith: /;$/ }, { header: 'export const PRICE_MAX', endsWith: /;$/ }, { header: 'const MIN_HOUSES', endsWith: /;$/ }, { header: 'const MOJ_MIN_DEALS', endsWith: /;$/ },
     { header: 'const percentile = (' },
     { header: 'export function askingPriceStats(' },
     { header: 'export function dearerSplit(' },
@@ -144,7 +148,7 @@ const K_FIXTURE: Row[] = [
   ...['wasalt', 'sakan', 'dealapp', 'sukna', 'aqargate'].map((platform) => ({ platform, license_number: 'K9', area_m2: 200, price_total: '1900000' })),
 ];
 // The seeded ministry row (الرياض · حي الرمال, 2026-10-10): the period ends in May 2026, not today.
-const MOJ_ROW: Row = { deals: 285, avg_deal: '1390633.21', avg_ppm: '4449.37', p10_deal: '430000', p90_deal: '1650000', window_from: '2025-10-10', window_to: '2026-05-18', source_refreshed_at: '2026-10-10T03:09:39+00:00' };
+const MOJ_ROW: Row = { moj_region: 'منطقة الرياض', moj_area: 'الرياض/الرمال', fetched_at: '2026-10-10T17:42:39.135211+00:00', deals: 285, avg_deal: '1390633.21', avg_ppm: '4449.37', p10_deal: '430000', p90_deal: '1650000', window_from: '2025-10-10', window_to: '2026-05-18', source_refreshed_at: '2026-10-10T03:09:39+00:00' };
 const blockProblems = (b: Block & Stats): string[] => {
   const out: string[] = [];
   if (!b.isSameAd(SAME_A, SAME_B) || !b.isSameAd(SAME_B, SAME_A)) out.push('the real aqar/wasalt pair (same licence + area, different price) was not matched');
@@ -183,6 +187,13 @@ const blockProblems = (b: Block & Stats): string[] => {
   if (f.avgDeal !== 1390633.21) out.push(`avg_deal ${f.avgDeal} ≠ 1390633.21`);
   if (f.from !== '2025-10-10' || f.to !== '2026-05-18') out.push(`period ${f.from} → ${f.to} ≠ the row’s own 2025-10-10 → 2026-05-18 (taken from the clock?)`);
   if (f.p10 !== 430000 || f.p90 !== 1650000) out.push(`the ministry spread ${f.p10} – ${f.p90} ≠ the row’s 430,000 – 1,650,000`);
+  // where to find them in the ministry's report: Region / City / District exactly as the ministry names them; none when it is incomplete
+  // «updated weekly · last update …» prints the job's OWN stamp, never the clock; no stamp → no date (never invented)
+  if (f.updatedAt !== '2026-10-10') out.push(`the last-update day «${f.updatedAt}» ≠ the row's fetched_at day 2026-10-10 (taken from the clock?)`);
+  if (b.mojFacts({ ...MOJ_ROW, fetched_at: null })?.updatedAt !== null) out.push('a last-update day was invented without a stamp');
+  if (f.path !== 'منطقة الرياض / الرياض / الرمال') out.push(`the ministry path «${f.path}» ≠ «منطقة الرياض / الرياض / الرمال»`);
+  if (b.mojFacts({ ...MOJ_ROW, moj_area: 'الرياض' })?.path !== null) out.push('a path was built from a half-known area');
+  if (b.mojFacts({ ...MOJ_ROW, moj_region: null })?.path !== null) out.push('a path was built without the region');
   const half = b.mojFacts({ ...MOJ_ROW, p90_deal: null });
   if (!half || half.p10 !== null || half.p90 !== null) out.push('a half-filled spread was shown (or the row dropped)');
   if (b.mojFacts({ ...MOJ_ROW, deals: 9 }) !== null) out.push('nine deals still produced a card (floor is 10)');
@@ -209,24 +220,127 @@ await mustCatchBlock('a hidden site shown and counted as a duplicate', 'if (!pla
 await mustCatchBlock('the ministry period taken from the clock', "const from = String(row.window_from ?? '').slice(0, 10), to = String(row.window_to ?? '').slice(0, 10);", "const from = String(row.window_from ?? '').slice(0, 10), to = new Date().toISOString().slice(0, 10);");
 await mustCatchBlock('avg_ppm recomputed instead of shown', 'const deals = num(row.deals), avgDeal = num(row.avg_deal), avgPpm = num(row.avg_ppm);', 'const deals = num(row.deals), avgDeal = num(row.avg_deal), avgPpm = Math.round(num(row.avg_deal) / 312);');
 await mustCatchBlock('the ministry spread invented from its average', "const p10 = num(row.p10_deal), p90 = num(row.p90_deal);", 'const p10 = num(row.avg_deal) * 0.3, p90 = num(row.avg_deal) * 1.2;');
+await mustCatchBlock('the last-update day taken from the clock', "const updatedAt = /^\\d{4}-\\d{2}-\\d{2}/.test(String(row.fetched_at ?? '')) ? String(row.fetched_at).slice(0, 10) : null;", "const updatedAt = new Date().toISOString().slice(0, 10);");
+await mustCatchBlock('the ministry path built without its region', "const path = region && city && district ? `${region} / ${city} / ${district}` : null;", "const path = city && district ? `${city} / ${district}` : null;");
+await mustCatchBlock('the ministry path built from a half-known area', "const path = region && city && district ?", "const path = region && city ?");
 await mustCatchBlock('the ministry card shown from a handful of deals', 'deals < MOJ_MIN_DEALS', 'deals < 1');
 // The tiles multiply the SHOWN averages by the ad's own area; k comes from the deduped set.
 const tilesWired = (p: string) => /dearerSplit\(prices\.stats\.each, adPpm\)/.test(p)
   // the sentence prints the EXACT counts and the glyphs read split.k; the duplicates wrap in two columns, no sideways scroll
   && /\{ n: fmtInt\(split\.n\), type: typePlural\(\), dearer: fmtInt\(split\.dearer\), cheaper: fmtInt\(split\.cheaper\) \}/.test(p) && /i < split\.k \? s\.houseUp : s\.houseDn/.test(p)
   && /sameRow: \{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 \}/.test(p) && !/<ScrollView horizontal[^>]*s\.sameRow/.test(p)
-  // each product tile is computed from the SHOWN figures (tileFromShown) and prints exactly those figures beneath it
-  && /fmtInt\(tileFromShown\(prices\.moj\.avgPpm, prices\.area\)\)/.test(p) && /fmtInt\(tileFromShown\(prices\.stats\.meanPpm, prices\.area\)\)/.test(p)
-  && /\$\{fmtInt\(prices\.moj\.avgPpm\)\} × \$\{fmtInt\(prices\.area\)\}/.test(p) && /\$\{fmtInt\(prices\.stats\.meanPpm\)\} × \$\{fmtInt\(prices\.area\)\}/.test(p)
+  // the tile is computed from the SHOWN figure (tileFromShown) and prints exactly those figures beneath it
+  && /fmtInt\(tileFromShown\(prices\.stats\.meanPpm, prices\.area\)\)/.test(p)
+  && /\$\{fmtInt\(prices\.stats\.meanPpm\)\} × \$\{fmtInt\(prices\.area\)\}/.test(p)
   // the split card prints our MEANS beside the ministry's means, and the same four labels on both halves
   && /fmtM\(st\.mean\)/.test(p) && /fmtInt\(st\.meanPpm\)/.test(p) && /fmtInt\(mj\.avgPpm\)/.test(p) && /labels\.map\(\(label, i\) => cell\(label, h\.rows\[i\]/.test(p)
   // the ministry half names its source and its window; a figure the row lacks is a hidden cell («—»), never an estimate
-  && /h\.gov \? <Text[^>]*>\{t\('Source: Ministry of Justice'\)\}/.test(p) && /mj\.p10 != null && mj\.p90 != null \? `\$\{fmtM\(mj\.p10\)\} – \$\{fmtM\(mj\.p90\)\} \$\{t\('million'\)\}` : null/.test(p);
+  && /h\.gov \? \(\s*<Pressable[\s\S]{0,600}\{t\('Source: Ministry of Justice'\)\}/.test(p) && /mj\.p10 != null && mj\.p90 != null \? `\$\{fmtM\(mj\.p10\)\} – \$\{fmtM\(mj\.p90\)\} \$\{t\('million'\)\}` : null/.test(p);
 check('the tiles multiply the shown averages by this ad’s area and k reads the deduped set', tilesWired(PREVIEW));
-sourceMutant('a tile recomputing the ministry’s per-m² figure', !tilesWired(PREVIEW.replace('tileFromShown(prices.moj.avgPpm, prices.area)', 'Math.round(prices.moj.avgDeal)')));
+sourceMutant('the listed tile recomputing the per-m² figure', !tilesWired(PREVIEW.replace('tileFromShown(prices.stats.meanPpm, prices.area)', 'Math.round(prices.stats.mean)')));
 sourceMutant('the duplicates row scrolling sideways again', !tilesWired(PREVIEW.replace("sameRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }", 'sameRow: { gap: 8 }')));
 sourceMutant('the sentence back to rounded tenths', !tilesWired(PREVIEW.replaceAll('dearer: fmtInt(split.dearer), cheaper: fmtInt(split.cheaper) }', 'dearer: split.k, cheaper: 10 - split.k }')));
-sourceMutant('a tile multiplying the unrounded figure instead of the shown one', !tilesWired(PREVIEW.replace('fmtInt(tileFromShown(prices.moj.avgPpm, prices.area))', 'fmtInt(Math.round(prices.moj.avgPpm * prices.area / 1000) * 1000)')));
+sourceMutant('a tile multiplying the unrounded figure instead of the shown one', !tilesWired(PREVIEW.replace('fmtInt(tileFromShown(prices.stats.meanPpm, prices.area))', 'fmtInt(Math.round(prices.stats.meanPpm * prices.area / 1000) * 1000)')));
+
+// ── HONEST LABELS (owner 2026-10-16: «accuracy, transparency, legal safety — no misleading comparisons») ─────────────
+// 1. NO tile may multiply the ministry's per-m² mean by THIS ad's area: the ministry's mean spans every deal it classified
+//    residential (it records no property type), so «villa area × that mean» reads as «what a similar villa sold for».
+// 2. The ministry's half says what it IS (its class, and that the type is not recorded) and never lists types it does not know.
+// 3. Our half lists EXACTLY the types the query uses; the explanation prints the ads / websites / properties from the stats
+//    object, the price band from the constants, and says the numbers are neighbourhood numbers, not a valuation.
+const I18N = readFileSync(join(ROOT, 'src/i18n.tsx'), 'utf8');
+const RESIDENTIAL_TYPES = (DATA_SRC.match(/export const RESIDENTIAL_GROUP_AR: readonly string\[\] = \[([^\]]*)\]/)?.[1] ?? '').split(',').map((x) => x.trim().replace(/['"]/g, '')).filter(Boolean);
+const labelsHonest = (p: string, i18n: string): string[] => {
+  const out: string[] = [];
+  if (/prices\.moj\.avgPpm,\s*prices\.area/.test(p) || /prices\.moj\.avg\w*\s*\*\s*prices\.area/.test(p) || /At the sold average/.test(p) || /At the sold average/.test(i18n))
+    out.push('a tile multiplies the ministry’s per-m² mean by this ad’s area («At the sold average»)');
+  if (/villas, apartments and land/.test(p) || /villas, apartments and land/.test(i18n)) out.push('the ministry’s half lists property types the ministry does not record');
+  if (!/Classified residential by the Ministry, which does not record the property type\./.test(p) || !/Classified commercial by the Ministry, which does not record the property type\./.test(p)) out.push('the ministry’s half does not say it records no property type');
+  if (!/All residential types listed for sale: \{types\}/.test(p) || !/\{ types: typesList \}/.test(p)) out.push('our half does not list the types it is made of');
+  for (const need of ['Updated weekly from the Ministry’s data · last update {date}', 'h.cadence ?', "t('Updated weekly')", 'prices.moj?.path', 'path: prices.moj.path', 'The report cannot open already filtered.', 'prices.group.ads', 'prices.group.sites', 'prices.group.houses', 'PRICE_MIN', 'PRICE_MAX', 'These are neighbourhood numbers. They are not a valuation of this property and not the sale price of a similar one.', "setExplainOpen((o) => !o)", 'listing-preview-prices-explain'])
+    if (!p.includes(need)) out.push(`the explanation is missing «${need}»`);
+  // our half's type list names every type the query uses (so adding a type to RESIDENTIAL_GROUP_AR fails here until the words follow)
+  const words: Record<string, string> = { 'فيلا': 'villas', 'شقة': 'apartments', 'دور': 'floors', 'أرض سكنية': 'residential land', 'عمارة': 'buildings', 'تاون هاوس': 'townhouses', 'ملحق علوي': 'rooftop annexes' };
+  const listed = p.match(/'(villas, apartments, floors[^']*)'/)?.[1] ?? '';
+  if (RESIDENTIAL_TYPES.length !== 7 || RESIDENTIAL_TYPES.some((t) => !words[t])) out.push(`RESIDENTIAL_GROUP_AR changed (${RESIDENTIAL_TYPES.join(' | ')}): update the words in the explanation`);
+  for (const t of RESIDENTIAL_TYPES) if (words[t] && !listed.includes(words[t])) out.push(`our type list omits «${words[t]}» (${t})`);
+  return out;
+};
+// The ministry's source is a REAL LINK that opens a new tab (owner 2026-10-16). The page cannot be framed (X-Frame-Options SAMEORIGIN and
+// CSP frame-ancestors allow only itself and Microsoft domains), so an in-page viewer would show a blank box: new tab only, URL pinned.
+const MOJ_URL = 'https://moj.gov.sa/ar/OpenData/PowerBIReport/Pages/BIReportRealestate.aspx';
+const mojLinkOk = (p: string, d: string): boolean =>
+  new RegExp(`export const MOJ_SOURCE_URL = '${MOJ_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}';`).test(d)
+  && /testID="listing-preview-moj-source"[\s\S]{0,200}onPress=\{\(\) => open\(MOJ_SOURCE_URL\)\}[\s\S]{0,120}accessibilityRole="link"/.test(p)
+  && /h\.gov \? \(\s*<Pressable/.test(p) && !/<iframe|<Frame[^>]*MOJ_SOURCE_URL|src=\{MOJ_SOURCE_URL\}/.test(p);
+check('the ministry source is a real link that opens the exact ministry page in a new tab (never framed)', mojLinkOk(PREVIEW, DATA_SRC));
+sourceMutant('the source link going back to plain text', !mojLinkOk(PREVIEW.replace('onPress={() => open(MOJ_SOURCE_URL)}', ''), DATA_SRC));
+sourceMutant('the source link pointing at another page', !mojLinkOk(PREVIEW, DATA_SRC.replace(MOJ_URL, 'https://moj.gov.sa/')));
+sourceMutant('the source shown inside our page in a frame', !mojLinkOk(PREVIEW + '\n<Frame src={MOJ_SOURCE_URL} />', DATA_SRC));
+
+// ── THE MINISTRY'S DEALS, ONE ROW EACH (owner 2026-10-16: «the exact same transactions») ────────────────────────────
+// The sheet lists public.moj_district_deals for this ad's city · district · class: newest first, every row complete,
+// the m² price the ministry's own column (never price ÷ area recomputed here); it is our list of stored rows, never the
+// ministry's page in a frame (that page forbids framing); the button names the count it lists.
+type DealRows = (data: unknown) => { ref: string; date: string; area: number; price: number; ppm: number }[];
+const liftDeals = async (file: string): Promise<DealRows> => (await liftSymbols(file, [
+  { header: 'const num = (', endsWith: /: NaN;$/ },
+  { header: 'export function mojDealRows(' },
+], ['mojDealRows'])).mojDealRows as DealRows;
+const DEAL_FIX = [
+  { deal_ref: 32078727, deal_date: '2025-09-15', area_m2: '719.5', price: '18000000', ppm: '25017.37' },
+  { deal_ref: '32130199', deal_date: '2025-09-17', area_m2: 109.53, price: 1159000, ppm: '10581.58' },
+  { deal_ref: '99', deal_date: '2026-05-14', area_m2: 10, price: 1000, ppm: '777' },          // the ministry's figure ≠ 1000 ÷ 10: it stays 777
+  { deal_ref: '7', deal_date: null, area_m2: 100, price: 1, ppm: '1' },                         // no date → not listed
+  { deal_ref: '', deal_date: '2026-01-01', area_m2: 100, price: 1, ppm: '1' },                  // no reference → not listed
+  { deal_ref: '8', deal_date: '2026-01-02', area_m2: 0, price: 1, ppm: '1' },                   // no area → not listed
+  { deal_ref: '9', deal_date: '2026-01-03', area_m2: 100, price: null, ppm: '1' },              // no price → not listed
+];
+const dealProblems = (rows: DealRows): string[] => {
+  const out: string[] = [];
+  const r = rows(DEAL_FIX);
+  if (r.map((d) => d.ref).join(',') !== '99,32130199,32078727') out.push(`listed ${r.map((d) => `${d.ref}@${d.date}`).join(' ')} ≠ 99 (2026-05-14), 32130199, 32078727 — newest first, half-known rows out`);
+  if (r[0]?.ppm !== 777) out.push(`the m² price must be the ministry's own column (777), got ${r[0]?.ppm}`);
+  if (r[2]?.area !== 719.5 || r[2]?.price !== 18_000_000) out.push(`values must arrive as numbers, unaltered: ${JSON.stringify(r[2])}`);
+  if (rows(null).length || rows('x').length || rows([{}]).length) out.push('a non-list or an empty object produced rows');
+  return out;
+};
+const dealsReal = dealProblems(await liftDeals(DATA));
+check('the deals sheet rows: newest first, complete rows only, the ministry\'s own m² price', dealsReal.length === 0, dealsReal.join('\n      '));
+const mustCatchDeals = async (what: string, from: string, to: string) => {
+  if (!DATA_SRC.includes(from)) { failed++; console.log(`FAIL  mutation anchor missing: ${what}`); return; }
+  const file = join(mkdtempSync(join(tmpdir(), 'ad-deals-')), 'adPageData.ts');
+  writeFileSync(file, DATA_SRC.replace(from, to));
+  const caught = dealProblems(await liftDeals(file)).length > 0;
+  if (!caught) failed++;
+  console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
+};
+await mustCatchDeals('the m² price recomputed as price ÷ area', 'const area = num(r?.area_m2), price = num(r?.price), ppm = num(r?.ppm);', 'const area = num(r?.area_m2), price = num(r?.price), ppm = num(r?.price) / num(r?.area_m2);');
+await mustCatchDeals('oldest first', 'return out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 :', 'return out.sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 :');
+await mustCatchDeals('a deal without a date listed', "if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || !ref ||", 'if (!ref ||');
+const dealsWired = (p: string, d: string): boolean =>
+  /supabase\.from\('moj_district_deals'\)\.select\('deal_ref,deal_date,area_m2,price,ppm'\)/.test(d) && /\.order\('deal_date', \{ ascending: false \}\)\.limit\(MOJ_DEALS_LIMIT\)/.test(d) && /return mojDealRows\(data\);/.test(d)
+  && /fetchMojDeals\(row, commercial \? 'تجاري' : 'سكني'\)/.test(p)
+  && /testID="listing-preview-moj-deals"[\s\S]{0,120}onPress=\{openDeals\}/.test(p) && /\{h\.gov && prices\.deals\.length > 0 \? \(/.test(p)
+  && /\{dealsOpen && IS_WEB && prices\.moj && prices\.deals\.length > 0 \? \(/.test(p)
+  && /testID="listing-preview-moj-deals-sheet"/.test(p) && /testID="listing-preview-moj-deals-close"[\s\S]{0,80}onPress=\{closeDeals\}/.test(p)
+  // our own rows, never the ministry's page in a frame; the source link reuses the one opener
+  && !/listing-preview-moj-deals-sheet"[\s\S]{0,3000}<Frame/.test(p) && /testID="listing-preview-moj-deals-source"[\s\S]{0,120}onPress=\{\(\) => open\(MOJ_SOURCE_URL\)\}/.test(p)
+  && /\{fmtInt\(d\.ppm\)\}/.test(p) && !/d\.price \/ d\.area/.test(p);
+check('the deals sheet is wired: the stored rows for this district, newest first, our own list (never a frame), the count on the button', dealsWired(PREVIEW, codeOnly(DATA_SRC)));
+sourceMutant('the sheet framing the ministry page', !dealsWired(PREVIEW.replace('testID="listing-preview-moj-deals-sheet" style={s.mapSheet}>', 'testID="listing-preview-moj-deals-sheet" style={s.mapSheet}><Frame src={MOJ_SOURCE_URL} />'), codeOnly(DATA_SRC)));
+sourceMutant('the sheet recomputing a deal\'s m² price', !dealsWired(PREVIEW.replace('{fmtInt(d.ppm)}', '{fmtInt(d.price / d.area)}'), codeOnly(DATA_SRC)));
+sourceMutant('the deals read losing its newest-first order', !dealsWired(PREVIEW, codeOnly(DATA_SRC).replace(".order('deal_date', { ascending: false })", '')));
+sourceMutant('the button shown with nothing to list', !dealsWired(PREVIEW.replace('{h.gov && prices.deals.length > 0 ? (', '{h.gov ? ('), codeOnly(DATA_SRC)));
+
+const honestReal = labelsHonest(PREVIEW, I18N);
+check('honest labels: no sold-average tile, the ministry half names its class, our half names its types, the explanation is wired', honestReal.length === 0, honestReal.join('\n      '));
+sourceMutant('the sold-average tile coming back', labelsHonest(PREVIEW + "\n<Text>{fmtInt(tileFromShown(prices.moj.avgPpm, prices.area))}</Text>", I18N).length > 0);
+sourceMutant('the ministry half listing types again', labelsHonest(PREVIEW.replace('Classified residential by the Ministry, which does not record the property type.', 'villas, apartments and land'), I18N).length > 0);
+sourceMutant('the explanation losing its «not a valuation» line', labelsHonest(PREVIEW.replace('These are neighbourhood numbers. They are not a valuation of this property and not the sale price of a similar one.', 'x'), I18N).length > 0);
+sourceMutant('our type list forgetting townhouses', labelsHonest(PREVIEW.replace('townhouses and rooftop annexes', 'and rooftop annexes'), I18N).length > 0);
+sourceMutant('the weekly-update note leaving the card', labelsHonest(PREVIEW.replace('{h.cadence ? <Text style={[s.halfFoot, tx]}>{h.cadence}</Text> : null}', ''), I18N).length > 0);
+sourceMutant('the explanation hiding the number of ads', labelsHonest(PREVIEW.replace('prices.group.ads', '0'), I18N).length > 0);
 
 // ── the tile equals the formula it displays (owner: a reader who multiplies the two printed numbers gets our number) ──
 type Tile = (ppm: number, area: number) => number;

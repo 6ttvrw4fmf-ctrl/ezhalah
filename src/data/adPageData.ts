@@ -113,10 +113,14 @@ export type PriceRow = { platform?: string | null; license_number?: string | nul
 export type House = { price: number; area: number };
 // mean / meanPpm are what the split card prints (owner update 23: like for like with the ministry's
 // means); median / medianPpm stay for any surface that wants them. meanPpm = mean of per-house price ÷ area.
-export type AskingPrices = { houses: number; p10: number; median: number; p90: number; mean: number; medianPpm: number | null; meanPpm: number | null; each: House[] };
+export type AskingPrices = { houses: number; ads: number; sites: number; p10: number; median: number; p90: number; mean: number; medianPpm: number | null; meanPpm: number | null; each: House[] };
 // A sale price under 100k or over 500M SAR is a typo or a per-metre figure in the wrong column, not a house.
-const PRICE_MIN = 100_000;
-const PRICE_MAX = 500_000_000;
+// The ministry page the sold numbers come from: it embeds the public Power BI report «البورصة العقارية» (resource key in
+// scrapers/moj/sales.py). Its response headers (X-Frame-Options SAMEORIGIN + CSP frame-ancestors: itself and Microsoft domains only)
+// forbid showing it inside another site, so the link opens a NEW TAB — never an iframe (verified 2026-10-16).
+export const MOJ_SOURCE_URL = 'https://moj.gov.sa/ar/OpenData/PowerBIReport/Pages/BIReportRealestate.aspx';
+export const PRICE_MIN = 100_000;
+export const PRICE_MAX = 500_000_000;
 const MIN_HOUSES = 10;
 
 const percentile = (sorted: number[], q: number): number => {
@@ -128,11 +132,17 @@ const percentile = (sorted: number[], q: number): number => {
  *  is listed at), down sites out, junk prices out; null under MIN_HOUSES. Pure, so the barrier executes it. */
 export function askingPriceStats(rows: PriceRow[], downSlugs: Set<string>): AskingPrices | null {
   const best = new Map<string, { price: number; area: number }>();
+  // What the numbers are made of, shown to the reader: the ADS that passed the filters (live site, sane price), the
+  // distinct WEBSITES they came from, and — after the dedupe below — the houses. «1,433 ads from 38 sites → 1,160 houses».
+  let ads = 0;
+  const sites = new Set<string>();
   for (const r of rows) {
     const platform = String(r.platform ?? '').trim().toLowerCase();
     if (!platform || downSlugs.has(platform)) continue;
     const price = num(r.price_total);
     if (!Number.isFinite(price) || price < PRICE_MIN || price > PRICE_MAX) continue;
+    ads++;
+    sites.add(platform);
     const area = num(r.area_m2);
     const lic = String(r.license_number ?? '').trim();
     const type = String(r.type_ar ?? '').trim();
@@ -145,7 +155,7 @@ export function askingPriceStats(rows: PriceRow[], downSlugs: Set<string>): Aski
   const ppm = [...best.values()].filter((h) => h.area > 0).map((h) => h.price / h.area).sort((a, b) => a - b);
   const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
   return {
-    houses: best.size,
+    houses: best.size, ads, sites: sites.size,
     p10: percentile(prices, 0.1), median: percentile(prices, 0.5), p90: percentile(prices, 0.9), mean: mean(prices),
     medianPpm: ppm.length ? percentile(ppm, 0.5) : null, meanPpm: ppm.length ? mean(ppm) : null,
     each: [...best.values()],
@@ -187,8 +197,8 @@ export function isSameAd(own: AdRow, other: AdRow): boolean {
 }
 
 // ── the ministry's actual sales ──────────────────────────────────────────────────────────────────
-export type MojRow = { deals?: unknown; avg_deal?: unknown; avg_ppm?: unknown; p10_deal?: unknown; p90_deal?: unknown; window_from?: string | null; window_to?: string | null; source_refreshed_at?: string | null };
-export type MojFacts = { deals: number; avgDeal: number; avgPpm: number; p10: number | null; p90: number | null; from: string; to: string };
+export type MojRow = { moj_region?: string | null; moj_area?: string | null; fetched_at?: string | null; deals?: unknown; avg_deal?: unknown; avg_ppm?: unknown; p10_deal?: unknown; p90_deal?: unknown; window_from?: string | null; window_to?: string | null; source_refreshed_at?: string | null };
+export type MojFacts = { path: string | null; updatedAt: string | null; deals: number; avgDeal: number; avgPpm: number; p10: number | null; p90: number | null; from: string; to: string };
 const MOJ_MIN_DEALS = 10;
 
 /** The ministry's numbers as the card shows them — unaltered; the period from the ROW's own two dates. Null under 10 deals. */
@@ -201,7 +211,16 @@ export function mojFacts(row: MojRow | null | undefined): MojFacts | null {
   // The ministry's own per-deal spread, when the job has filled it; a half-filled pair is no spread.
   const p10 = num(row.p10_deal), p90 = num(row.p90_deal);
   const spread = Number.isFinite(p10) && Number.isFinite(p90) && p10 > 0 && p90 >= p10;
-  return { deals, avgDeal, avgPpm, p10: spread ? p10 : null, p90: spread ? p90 : null, from, to };
+  // Where to find these sales in the ministry's own report: its hierarchical filter is Region / City / District, and the
+  // ministry's area value reads «city/district» (الرياض/الملقا). The public report cannot be opened pre-filtered (Power BI
+  // «publish to web» ignores URL filters — tested 2026-10-16), so the reader is told the exact picks instead.
+  const region = String(row.moj_region ?? '').trim();
+  const [city, district] = String(row.moj_area ?? '').split('/').map((x) => x.trim());
+  const path = region && city && district ? `${region} / ${city} / ${district}` : null;
+  // When WE last re-read the ministry (the weekly job's fetched_at) — the card says «updated weekly · last update …»
+  // from this stored stamp, never from the clock.
+  const updatedAt = /^\d{4}-\d{2}-\d{2}/.test(String(row.fetched_at ?? '')) ? String(row.fetched_at).slice(0, 10) : null;
+  return { path, updatedAt, deals, avgDeal, avgPpm, p10: spread ? p10 : null, p90: spread ? p90 : null, from, to };
 }
 
 const mojCache = new Map<string, Promise<MojFacts | null>>();
@@ -213,13 +232,51 @@ export function fetchMojSales(row: AdRow | null, cls: MojClass = 'سكني'): Pr
   let p = mojCache.get(key);
   if (!p) {
     p = boundedRpc<MojRow[]>(
-      supabase.from('moj_district_sales').select('deals,avg_deal,avg_ppm,p10_deal,p90_deal,window_from,window_to,source_refreshed_at')
+      supabase.from('moj_district_sales').select('moj_region,moj_area,fetched_at,deals,avg_deal,avg_ppm,p10_deal,p90_deal,window_from,window_to,source_refreshed_at')
         .eq('city_ar', row.city_ar).eq('district_ar', row.district_ar).eq('property_class', cls).limit(1),
     ).then(({ data, error }) => {
       if (error) { mojCache.delete(key); return null; }
       return mojFacts(data?.[0]);
     });
     mojCache.set(key, p);
+  }
+  return p;
+}
+
+// ── the ministry's deals, one row each (owner 2026-10-16: «the exact same transactions») ────────────────────────────
+// The public report cannot be opened pre-filtered, so the page lists the deals themselves from public.moj_district_deals
+// (filled by the same weekly job as the aggregates): the ministry's own date, m², price and per-deal m² price, unaltered.
+export type MojDeal = { ref: string; date: string; area: number; price: number; ppm: number };
+const MOJ_DEALS_LIMIT = 500;
+/** The stored deals as the sheet lists them: newest first, and ONLY rows whose every value is present — the m² price is
+ *  the ministry's own column, never price ÷ area recomputed here. Pure, so the barrier executes it. */
+export function mojDealRows(data: unknown): MojDeal[] {
+  if (!Array.isArray(data)) return [];
+  const out: MojDeal[] = [];
+  for (const r of data as Record<string, unknown>[]) {
+    const date = String(r?.deal_date ?? '').slice(0, 10), ref = String(r?.deal_ref ?? '').trim();
+    const area = num(r?.area_m2), price = num(r?.price), ppm = num(r?.ppm);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !ref || !Number.isFinite(area) || !(area > 0) || !Number.isFinite(price) || !Number.isFinite(ppm)) continue;
+    out.push({ ref, date, area, price, ppm });
+  }
+  return out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.ref < b.ref ? 1 : a.ref > b.ref ? -1 : 0));
+}
+const dealsCache = new Map<string, Promise<MojDeal[]>>();
+/** One bounded read of moj_district_deals for this ad's city · district · class; a failed read is [] and forgotten. */
+export function fetchMojDeals(row: AdRow | null, cls: MojClass = 'سكني'): Promise<MojDeal[]> {
+  if (!supabase || !row?.city_ar || !row.district_ar) return Promise.resolve([]);
+  const key = `${row.city_ar}|${row.district_ar}|${cls}`;
+  let p = dealsCache.get(key);
+  if (!p) {
+    p = boundedRpc<Record<string, unknown>[]>(
+      supabase.from('moj_district_deals').select('deal_ref,deal_date,area_m2,price,ppm')
+        .eq('city_ar', row.city_ar).eq('district_ar', row.district_ar).eq('property_class', cls)
+        .order('deal_date', { ascending: false }).limit(MOJ_DEALS_LIMIT),
+    ).then(({ data, error }) => {
+      if (error) { dealsCache.delete(key); return []; }
+      return mojDealRows(data);
+    });
+    dealsCache.set(key, p);
   }
   return p;
 }
