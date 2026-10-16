@@ -48,16 +48,19 @@ their exception text; `select date_trunc('day',started_at), sum(rows_seen) from 
 'wasalt_enum%' group by 1`.
 
 **Owed → first thing next run:**
-- **wasalt enumeration (532/569, P1, 4th night).** 10-16 finding from the 10-15 enum's own notes: every shard stopped on a
-  VALID empty page (count=0 totalPages=0) at a DIFFERENT depth (page 2, 3, 6, 7, 8, 10, 14, 18, 21, 23). A source cap would
-  stop them all at one page; this is the one sticky proxy exit each shard holds being throttled. PR (10-16) re-asks an
-  empty page up to 3× on a FRESH exit (`rotate_route()` → `BoundedBrowserFetcher.recycle()`), and writes «fresh exit
-  recovered N empty page(s)» into the notes. Read: (1) the 10-16 proof sweep (`wasalt-residential-sweep.yml`, input
-  `pages=25`) — per-slice `rows_upserted` vs 750 and the «fresh exit recovered» notes; (2) the 10-17 21:00 UTC enum:
-  sum ≥ 100,000 = fixed (write the proof row). If fresh exits are ALSO empty, the throttle is per-account/per-session,
-  not per-exit: next step is a pause-and-resume (sleep 60-120 s on the empty page) and fewer parallel shards.
-  Side finding to check: every COMMERCIAL slug reports the same count (rent 1,893 / sale 329) — the type filter looks
-  ignored for commercial; compare 3 commercial slices' first ids before trusting their counts.
+- **wasalt enumeration (532/569, P1, 4th night).** Every shard stops on a VALID empty page (count=0 totalPages=0) at
+  a different depth (10-15: page 2..23), so it is not a cap. **10-16, measured: it is not a throttled exit either.**
+  PR #7184 re-asked the empty page on 3 FRESH exits (new browser, new sticky port, no cookies); the proof sweep (run
+  38919794892, `pages=25`) recovered 0 pages on the first 5 slices, each re-ask empty within ~3 s. On 10-15 even
+  floor/sale's PAGE 1 said «0 listings» and said 6,376 on 10-16. One URL that is empty for every client looks like a
+  stored render of that URL, so the second PR adds a cache-busting parameter (`&_ezh=<n>`) to every re-ask, and the
+  notes say «cache-busted re-ask recovered N empty page(s)». Read: (1) the proof sweep after that merge
+  (`wasalt-residential-sweep.yml`, `pages=25`): per-slice `rows_upserted` vs 750 and the «recovered» notes; (2) the
+  10-17 21:00 UTC enum: sum ≥ 100,000 = fixed (proof row). **If cache-busting ALSO recovers nothing, stop re-asking
+  and change source:** capture the XHR/fetch the search page makes when a user presses «next page» (wasalt's own
+  client-side search API) and walk that instead of `?page=N` server renders.
+  Side finding: every COMMERCIAL slug reports the same count (rent 1,893 / sale 329), so the type filter looks
+  ignored for commercial. Compare 3 commercial slices' first ids before trusting their counts.
 - **576 dangling-run remediation (class bug, backlog 584).** Detector raises at 3 h, remediation only closes > 12 h, so
   every dangling row escalates to a P0. The tested patch is `docs/ops/pending/2026-10-16-dangling-remediation-at-
   detector-threshold.sql.txt` (its self-test fails on the live function). It was NOT applied: `apply_migration` waits

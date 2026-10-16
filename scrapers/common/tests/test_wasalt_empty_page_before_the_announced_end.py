@@ -25,8 +25,8 @@ from scrapers.wasalt import run as R  # noqa: E402
 def _setup(monkeypatch, pages):
     calls: list[int] = []
 
-    def _fp(s, deal, cat, slug, page):
-        calls.append(page)
+    def _fp(s, deal, cat, slug, page, bust=None):
+        calls.append(page if bust is None else (page, "bust"))
         v = pages[page]
         return v.pop(0) if isinstance(v, list) else v
 
@@ -51,7 +51,8 @@ def test_the_10_13_shape_is_truncated_and_named(monkeypatch):
     up, count, page1_valid, truncated = R.scrape_slice(None, "sale", "residential", "apartment", max_pages=2000)
     assert truncated is True, "an empty page 3 of 1,053 is an incomplete slice, not the end"
     assert up == 60 and count == 33814 and page1_valid is True
-    assert calls.count(3) == 1 + R._EMPTY_PAGE_RETRIES, "the empty page is re-asked before giving up"
+    assert calls.count(3) == 1 and calls.count((3, "bust")) == R._EMPTY_PAGE_RETRIES, \
+        "the empty page is re-asked, cache-busted, before giving up"
     assert R._STOPS and "empty page 3 of 1053" in R._STOPS[0]
 
 
@@ -88,10 +89,10 @@ def test_all_rows_already_read_is_a_clean_end(monkeypatch):
     assert truncated is False and up == 30
 
 
-def test_every_re_ask_goes_out_on_a_fresh_exit(monkeypatch):
-    """2026-10-16 (backlog 532/569): the 10-15 enum stopped at page 2, 3, 6 … 23 — wherever the one
-    sticky exit ran out — and re-asking on that SAME exit was empty every time. Each re-ask must be
-    preceded by a route rotation, and a page the fresh exit answers keeps the walk going."""
+def test_every_re_ask_is_cache_busted_on_a_fresh_exit(monkeypatch):
+    """2026-10-16 (backlog 532/569): re-asking the SAME url — on the same exit or on 3 fresh ones —
+    got the same empty page every time. Each re-ask must be preceded by a route rotation AND carry
+    a cache-busting parameter, and a page that answers keeps the walk going."""
     row = [{"id": i} for i in range(30)]
     calls = _setup(monkeypatch, {
         1: (120, 4, row, True),
@@ -102,7 +103,7 @@ def test_every_re_ask_goes_out_on_a_fresh_exit(monkeypatch):
     up, _c, _v, truncated = R.scrape_slice(None, "sale", "residential", "apartment", max_pages=10)
     assert truncated is False and up == 120, "a fresh exit answered page 2; the slice is whole"
     i = calls.index(2)
-    assert calls[i:i + 5] == [2, "rotate", 2, "rotate", 2], calls
+    assert calls[i:i + 5] == [2, "rotate", (2, "bust"), "rotate", (2, "bust")], calls
     assert R._ROUTE_ROTATIONS_RECOVERED == ["apartment/sale p2"]
 
 
@@ -113,3 +114,19 @@ def test_recycle_drops_the_browser_process():
     f._discard = lambda: seen.append("discard")
     f.recycle()
     assert seen == ["discard"]
+
+
+def test_fetch_page_puts_the_bust_on_the_url(monkeypatch):
+    seen = []
+
+    class _B:
+        def next_data(self, url):
+            seen.append(url)
+            return {"props": {"pageProps": {"searchResult": {"count": 0, "totalPages": 0, "properties": []}}}}
+
+    monkeypatch.setattr(R, "_browser_fetch_enabled", lambda: True)
+    monkeypatch.setattr(R, "_browser", lambda: _B())
+    monkeypatch.setattr(R, "_throttle", lambda: None)
+    R.fetch_page(None, "sale", "residential", "floor", 2)
+    R.fetch_page(None, "sale", "residential", "floor", 2, bust="17")
+    assert "_ezh" not in seen[0] and seen[1].endswith("&page=2&_ezh=17")
