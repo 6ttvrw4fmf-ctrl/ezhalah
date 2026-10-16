@@ -1113,6 +1113,12 @@ or rewrite another engineer's work, and never start a big change in another engi
   29 listed records, mapped 0 (status «available»), so `strike_read_gone` got an empty seen set and a
   404 ad stayed on screen for three nights (#6980). And a unit whose project leaves the sitemap is never
   read again: wahadat now reads struck units' unlisted project pages (14 units, 5-8 strikes).
+- **2026-10-16 (♻️):** a reader that looks only for «gone» can never clear a strike. #6981 read the
+  unlisted wahadat project pages for sold/reserved alone, so units whose own record still says
+  `available` stayed UNKNOWN and climbed 14 → 57 at 4-11 strikes (all live: unit 504dc5f5 read
+  «available» from CI, source-reread 38893210922). Those pages now join the main walk
+  (`struck_unlisted_projects`), so every answer, live included, is recorded. When a struck cohort
+  grows after a fix, check which answers the new reader throws away.
 
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the

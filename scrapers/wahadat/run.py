@@ -254,6 +254,29 @@ def read_unlisted_projects(sess, read_urls: set[str], struck: list[dict]) -> dic
     return out
 
 
+def struck_unlisted_projects(sitemap_urls: list[str]) -> list[str]:
+    """Project pages of active, struck units that the sitemap no longer lists (2026-10-16, ♻️).
+
+    read_unlisted_projects (10-13) read those pages only for a «sold/reserved» answer, so a unit
+    its own record still states `available` stayed UNKNOWN for ever: 57 such units at 4-11 strikes
+    on 10-16, all six projects is_active=true, and unit 504dc5f5 (دام 101) read «available» on its
+    own page from CI (source-reread 38893210922). Live ads were never re-seen and never stamped.
+    These pages now join the main walk, so each unit is decided exactly as a sitemap unit is:
+    available → upserted (seen, strikes cleared), sold/reserved → off market, anything else → held
+    by the walk's own rules. An unread page stays unknown. Nothing here can hide a unit."""
+    listed = set(sitemap_urls)
+    out: set[str] = set()
+    for tbl in ("wahadat_residential_listings", "wahadat_commercial_listings"):
+        try:
+            rows = (db.sb().table(tbl).select("listing_url").eq("source", SOURCE).eq("active", True)
+                    .gt("missing_count", 0).limit(2000).execute().data or [])
+        except Exception:                               # noqa: BLE001 — unread stays unknown
+            continue
+        out |= {r["listing_url"] for r in rows
+                if isinstance(r.get("listing_url"), str) and "/project/" in r["listing_url"]}
+    return sorted(out - listed)
+
+
 def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[str, Any], str]:
     """(row, category) for ONE unit already proven `status == available` and type-resolved."""
     category = normalize.category_for_type(ptype).lower()
@@ -357,6 +380,12 @@ def main() -> int:
     if a.limit:
         urls = urls[: a.limit]
     print(f"{SOURCE}: {len(urls)} project(s) in sitemap", flush=True)
+    if not a.limit:
+        extra = struck_unlisted_projects(urls)
+        if extra:
+            print(f"  + {len(extra)} unlisted project page(s) of struck units, read like the sitemap's",
+                  flush=True)
+            urls = urls + extra
 
     run_id = None if dry else db.begin_run(SLUG)
     res: list[dict] = []
