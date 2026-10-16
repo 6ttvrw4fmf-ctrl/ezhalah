@@ -77,19 +77,22 @@ class _Q:
         self.f["limit"] = n
         return self
 
+    def _match(self, r):
+        if any(r.get(col) is not None for col in self.f.get("null", [])):
+            return False
+        return all(r.get(k) == v for k, v in self.f.items() if k not in ("null", "gt", "limit", "active", "id"))
+
     def execute(self):
         rows = self.db.rows
         if self.op == "update":
             r = next(r for r in rows if r["id"] == self.f["id"])
-            for col in self.f.get("null", []):
-                if r.get(col) is not None:
-                    return type("R", (), {"data": []})()
+            if not self._match(r):
+                return type("R", (), {"data": []})()
             r.update(self.payload)
             self.db.writes.append((r["id"], dict(self.payload)))
             return type("R", (), {"data": [r]})()
-        col = self.f["null"][0]
         got = [{"id": r["id"], "desc": r["desc"]} for r in rows
-               if r["id"] > self.f.get("gt", 0) and r.get(col) is None][: self.f["limit"]]
+               if r["id"] > self.f.get("gt", 0) and self._match(r)][: self.f["limit"]]
         return type("R", (), {"data": got})()
 
 
@@ -109,7 +112,41 @@ def test_backfill_writes_yes_only_into_null_columns_and_never_overwrites():
         {"id": 4, "desc": None, "elevator": None, "air_conditioner": None, "private_entrance": None},
     ])
     out = E.prose_backfill(db, "wasalt_residential_listings", page=2)
-    assert out == {"elevator": 1, "air_conditioner": 0, "private_entrance": 0}
+    assert {k: v for k, v in out.items() if not k.endswith("_unset")} == {"elevator": 1, "air_conditioner": 0, "private_entrance": 0}
     assert db.writes == [(1, {"elevator": True})]
     assert db.rows[1]["elevator"] is None and db.rows[2]["elevator"] is False
     assert all(v is True for _, w in db.writes for v in w.values())
+
+
+def test_the_four_wrong_yes_of_the_first_backfill_are_unknown():
+    """Verbatim shapes of rows 9313822, 11923578, 442940 and 526753 (2026-10-16): each was written elevator = YES."""
+    assert E.prose_amenities(_d("الخدمات: شبكة كهرباء - شبكة مياه\\n\\n🔘 المصعد: لا يوجد مصعد\\n\\n☀️ مميزات العقار:")) == {}
+    assert "elevator" not in E.prose_amenities(_d("<p>المصعد: غير راكب، ويوجد تأسيس للمصعد</p><p>تأسيس مصعد</p>"))
+    assert E.prose_amenities(_d("ضمانات تصل حتى 25 سنة\\n\\n \\n•\\n \\nتأسيس مصعد\\n\\n \\n•\\n \\nعدادات كهرباء")) == {}
+    assert "elevator" not in E.prose_amenities(_d("* سطح مع الملحق&nbsp;\\n\\n* مؤسس مصعد.\\n\\n* يتوفر لكل وحدة خزان"))
+
+
+def test_a_labelled_yes_still_reads_yes():
+    assert E.prose_amenities(_d("<p>المصعد: يوجد مصعد كهربائي</p>")) == {"elevator": True}
+    assert E.prose_amenities(_d("<p>التكييف: مكيفات سبليت راكبة</p>")) == {"air_conditioner": True}
+    assert E.prose_amenities(_d("التجهيزات:\\n - مصعد كهربائي\\n - تكييف سبليت")) == {"elevator": True, "air_conditioner": True}
+
+
+def test_a_prepared_or_uninstalled_fixture_anywhere_makes_the_answer_unknown():
+    """526753: «مدخل مرورا بالمصعد» on one line, «مؤسس مصعد» on another — never YES."""
+    assert "elevator" not in E.prose_amenities(_d("* مدخل مرورا بالمصعد\\n\\n* مؤسس مصعد."))
+    assert "air_conditioner" not in E.prose_amenities(_d("<p>مكيفات في الصالة</p><p>تأسيس تكييف مركزي</p>"))
+    assert E.prose_amenities(_d("<p>مصعد</p><p>تأسيس مكيفات</p>")) == {"elevator": True}
+
+
+def test_recheck_returns_a_yes_the_current_reader_no_longer_reads_to_unknown():
+    """The first backfill wrote 9313822 elevator = YES from «المصعد: لا يوجد مصعد»; the next run must undo it,
+    and must leave a real YES alone."""
+    db = _DB([
+        {"id": 1, "desc": "🔘 المصعد: لا يوجد مصعد", "elevator": True, "air_conditioner": None, "private_entrance": None},
+        {"id": 2, "desc": "<p>يتوفر مصعد</p>", "elevator": True, "air_conditioner": None, "private_entrance": None},
+    ])
+    out = E.prose_backfill(db, "wasalt_residential_listings", page=1)
+    assert out["elevator_unset"] == 1
+    assert db.rows[0]["elevator"] is None and db.rows[1]["elevator"] is True
+    assert (1, {"elevator": None}) in db.writes
