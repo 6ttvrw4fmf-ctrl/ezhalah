@@ -208,7 +208,8 @@ def close_browser() -> None:
         _BROWSER = None
 
 
-def fetch_page(s: RotatingSession, deal: str, cat: str, slug: str, page: int) -> tuple[int, int, list[dict], bool]:
+def fetch_page(s: RotatingSession, deal: str, cat: str, slug: str, page: int,
+               bust: Optional[str] = None) -> tuple[int, int, list[dict], bool]:
     """Return (count, total_pages, properties[], valid) for one search page.
 
     `valid` is True only when the response carried a parseable __NEXT_DATA__ searchResult —
@@ -218,6 +219,10 @@ def fetch_page(s: RotatingSession, deal: str, cat: str, slug: str, page: int) ->
     seg = "sale" if deal == "sale" else "rent"
     url = (f"{BASE}/en/{seg}/search?propertyFor={deal}&countryId=1&type={cat}"
            f"&propertyTypeData={slug}&page={page}")
+    if bust:
+        # A cache-busting parameter the search ignores: a re-ask must not be served the same
+        # stored empty render of this exact URL (2026-10-16, backlog 532).
+        url += f"&_ezh={bust}"
     _throttle()
 
     # CLOUDFLARE PATH (WASALT_BROWSER=1). wasalt.sa tightened bot protection on 2026-08-17 and
@@ -721,8 +726,8 @@ _STOPS: list[str] = []
 _EMPTY_PAGE_RETRY_PAUSE_S = float(os.environ.get("WASALT_EMPTY_PAGE_RETRY_PAUSE_S", "8"))
 # Re-asks of a valid empty mid-walk page, each on a fresh proxy exit (2026-10-16, backlog 532).
 _EMPTY_PAGE_RETRIES = int(os.environ.get("WASALT_EMPTY_PAGE_RETRIES", "3"))
-# Pages a fresh exit answered after the held exit served them empty: the evidence that the stop
-# was the exit's quota, printed in the run's notes.
+# Pages a cache-busted re-ask answered after the plain URL served them empty, printed in the
+# run's notes: the evidence for (or against) the stored-empty-render explanation.
 _ROUTE_ROTATIONS_RECOVERED: list[str] = []
 
 
@@ -781,18 +786,17 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[
             # once more after a pause; a second empty answer is an INCOMPLETE slice, named with what
             # the empty page itself reported so the run's notes say where and how the source stopped.
             #
-            # 2026-10-16 (third night, backlog 532/569): the 10-15 enum's notes show WHERE each shard
-            # stopped — page 2, 3, 6, 7, 8, 10, 14, 18, 21, 23 of slices announcing up to 2,000 pages,
-            # every empty page reporting count=0 totalPages=0. A cap at the source would stop every
-            # slice at the same page; these stop wherever the ONE sticky proxy exit the browser holds
-            # for the whole slice has spent its quota. Asking again on that same exit (the 10-14 fix)
-            # got the same empty answer every time. So each re-ask now goes out on a FRESH exit:
-            # rotate_route() drops the browser (or the http session) and the next fetch opens a new
-            # sticky port.
+            # 2026-10-16 (fourth night, backlog 532/569): the stop is not a cap (shards stop at page
+            # 2..23) and not a throttled exit: a sweep that re-asked on 3 FRESH exits (new browser,
+            # new sticky port, no cookies) got the same empty page within ~3 s each, on 5 of 5 slices.
+            # One URL answering empty to every client is a stored render of that URL; on 10-15 even
+            # floor/sale's page 1 answered «0 listings», and it answered 6,376 the next day. So each
+            # re-ask now carries a cache-busting parameter AND goes out on a fresh exit.
             for _ask in range(_EMPTY_PAGE_RETRIES):
                 time.sleep(_EMPTY_PAGE_RETRY_PAUSE_S)
                 rotate_route(s)
-                pg_count, pg_total, props, valid = fetch_page(s, deal, cat, slug, page)
+                pg_count, pg_total, props, valid = fetch_page(
+                    s, deal, cat, slug, page, bust=f"{int(time.time())}{_ask}")
                 if props or not valid:
                     break
             if props:
@@ -917,7 +921,7 @@ def main() -> int:
                 from scrapers.wasalt import browser as _b
                 notes += _b.fail_reasons_summary()
         if _ROUTE_ROTATIONS_RECOVERED:
-            notes += (f" | fresh exit recovered {len(_ROUTE_ROTATIONS_RECOVERED)} empty page(s): "
+            notes += (f" | cache-busted re-ask recovered {len(_ROUTE_ROTATIONS_RECOVERED)} empty page(s): "
                       + ", ".join(_ROUTE_ROTATIONS_RECOVERED[:8]))
     except Exception as e:
         ok = False
