@@ -67,6 +67,7 @@ class World:
     def __init__(self, truncate=False, drop_group=None, missing_deal="n2"):
         self.truncate, self.drop_group, self.missing_deal = truncate, drop_group, missing_deal
         self.windows: list[tuple[str, str]] = []
+        self.last_names: list[str] = []
 
     def post(self, payload: bytes) -> bytes:
         b = json.loads(payload)
@@ -75,6 +76,7 @@ class World:
                 return json.dumps(rec["response"]).encode()
         q = b["queries"][0]["Query"]["Commands"][0]["SemanticQueryDataShapeCommand"]["Query"]
         names = [s["Name"] for s in q["Select"]]
+        self.last_names = names
         lo, hi, filt = "0000", "9999", {}
         for w in q.get("Where", []):
             c = w["Condition"]
@@ -89,8 +91,10 @@ class World:
         complete = True
         if names == ["n"]:
             rows = [[len(ds)]]
-        elif "ref" in names:
-            rows = [[d[0], d[2], d[3], d[4], d[5]] for d in ds if d[4] != self.missing_deal]
+        elif "ref" in names:   # the ministry's per-deal row: its date is 'YYYY/MM/DD' text, its m² price a decimal string
+            full = [{"region": d[0], "area": d[2], "cls": d[3], "ref": d[4], "price": d[5], "date": d[7].replace("-", "/"),
+                     "area_m2": d[6], "ppm": str(d[5] / d[6])} for d in ds if d[4] != self.missing_deal]
+            rows = [[f[n] for n in names] for f in full]
         else:
             groups: dict = {}
             for d in ds:
@@ -220,6 +224,7 @@ def check_partial(m) -> list[str]:
     m.MIN_GROUPS = 1
     m.fetch = lambda mj: saved["fetch"](ministry(m, World(truncate=True)))
     m.write, m.load_ours, m.stored_rows = writes.append, (lambda: OURS), (lambda cols: [])
+    m.write_deals = lambda rows, window_start: writes.append(rows)   # the deals table write, stubbed like the aggregates write
     argv, sys.argv = sys.argv, ["run"]
     try:
         m.main()
@@ -249,7 +254,49 @@ def check_monitor(m) -> list[str]:
     return out
 
 
-CHECKS = [check_truth, check_window, check_ppm, check_matching, check_spread, check_partial, check_monitor]
+def check_deal_rows(m) -> list[str]:
+    """Every deal of a MATCHED district rides into moj_district_deals with the ministry's own date, m², price and
+    per-deal m² price (owner 2026-10-16: «the exact same transactions»); nothing for an unmatched or ambiguous
+    area, nothing outside the window, nothing half-known, and the m² price is never recomputed here."""
+    out = []
+    w = World(missing_deal=None)
+    m.MIN_GROUPS = 1
+    try:
+        got = m.fetch(ministry(m, w))
+    except m.SourceChanged as e:   # a per-deal read that no longer matches the ministry's recorded answer refuses to run: caught
+        return [f"fetch refused: {str(e)[:80]}"]
+    if not {"date", "area_m2", "ppm"} <= set(w.last_names):
+        out.append(f"the per-deal read no longer asks for date / m² / m² price: {w.last_names}")
+    at = "2026-10-16T00:00:00+00:00"
+    rows = m.deal_table_rows(got["deal_rows"], got["aggs"], OURS, at)
+    got_refs: dict = {}
+    for r in rows:
+        got_refs.setdefault((r["city_ar"], r["district_ar"], r["property_class"]), []).append(r["deal_ref"])
+    want = {("الرياض", "حي الرمال", "سكني"): ["r1", "r2", "r3", "r4"], ("الرياض", "حي النرجس", "سكني"): ["n1", "n2"],
+            ("جدة", "حي الحمراء", "تجاري"): ["h1"], ("عفيف", "حي الورود", "سكني"): ["a1"]}
+    if {k: sorted(v) for k, v in got_refs.items()} != want:
+        out.append(f"deal rows per matched district {got_refs} ≠ {want} (an unmatched/ambiguous area, a زراعي deal, or r0 outside the window got in — or a matched one is missing)")
+    r1 = next((r for r in rows if r["deal_ref"] == "r1"), None)
+    if r1 != {"moj_region": RIY, "moj_area": "الرياض/الرمال", "property_class": "سكني", "deal_ref": "r1", "deal_date": "2025-09-20",
+              "area_m2": "300", "price": "1000000.00", "ppm": "3333.33", "city_ar": "الرياض", "district_ar": "حي الرمال", "fetched_at": at}:
+        out.append(f"r1 as stored: {r1}")
+    base = {"region": RIY, "area": "الرياض/الرمال", "cls": "سكني", "ref": "z1", "price": 1000, "date": "2026/01/05", "area_m2": 10, "ppm": "777"}
+    def one(**kw):
+        try:
+            return m.deal_table_rows([{**base, **kw}], got["aggs"], OURS, at)
+        except Exception as e:   # one bad deal must never crash the run — and a mutant that crashes is caught, not skipped
+            return [{"deal_ref": "z1", "ppm": f"raised {type(e).__name__}"}]
+    if [r["ppm"] for r in one()] != ["777.00"]:
+        out.append(f"the m² price must be the ministry's own column, never price ÷ area: {one()}")
+    for kw in ({"date": None}, {"date": "soon"}, {"ref": None}, {"price": None}, {"area_m2": None}, {"area_m2": 0}, {"ppm": None}, {"ppm": "x"}):
+        if one(**kw):
+            out.append(f"a half-known deal was written: {kw}")
+    if one(area="الرياض/مجهول") or one(area="الرياض/الملقا", cls="تجاري") or one(cls="زراعي"):
+        out.append("a deal of an unmatched / ambiguous area or of a class we do not store was written")
+    return out
+
+
+CHECKS = [check_truth, check_window, check_ppm, check_matching, check_spread, check_partial, check_monitor, check_deal_rows]
 
 TRANSLATE = '.translate(str.maketrans({"ة": "ه", "أ": "ا", "إ": "ا", "آ": "ا", "ى": "ي"}))'
 NORM_BODY = '    s = (s or "")' + TRANSLATE + '\n    return _HAY.sub("", re.sub(r"\\s+", " ", s).strip())'
@@ -257,6 +304,16 @@ NORM_BODY_STRIP_FIRST = '    s = _HAY.sub("", (s or "").strip())' + TRANSLATE + 
 
 # ── mutants: the real source with one line changed; each must turn at least one named check red ──────
 MUTANTS = [
+    ("deals of an ambiguous / unmatched area written", check_deal_rows,
+     'if not hit or hit[0] != "matched":', "if not hit:"),
+    ("per-deal m² price recomputed as price ÷ area", check_deal_rows,
+     'area_m2, price, ppm = Decimal(str(r["area_m2"])), money(r["price"]), money(r["ppm"])',
+     'area_m2, price, ppm = Decimal(str(r["area_m2"])), money(r["price"]), money(Decimal(str(r["price"])) / Decimal(str(r["area_m2"])))'),
+    ("a deal without a date written", check_deal_rows,
+     'if d is None or r.get("ref") is None', 'if r.get("ref") is None'),
+    ("the per-deal read dropping the ministry's own m² price", check_deal_rows,
+     '("date", col("تاريخ الصفقة ميلادي")), ("area_m2", col("المساحة")), ("ppm", mea("سعر المتر المربع"))],',
+     '("date", col("تاريخ الصفقة ميلادي")), ("area_m2", col("المساحة"))],'),
     ("avg_ppm recomputed as total ÷ total", check_ppm,
      '"avg_ppm": str(money(a["avg_ppm"]))', '"avg_ppm": str(money(Decimal(str(a["sum_price"])) / Decimal(str(a["sum_area"]))))'),
     ("window anchored to today", check_window,

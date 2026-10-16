@@ -44,7 +44,7 @@ import urllib.error
 import urllib.request
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 URL = "https://wabi-west-europe-d-primary-api.analysis.windows.net/public/reports/querydata?synchronous=true"
 RESOURCE_KEY = "4b99c877-0115-4e0a-b12f-72212fa3833c"
@@ -170,6 +170,18 @@ def money(v) -> Decimal:
     return Decimal(str(v)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def deal_day(v) -> str | None:
+    """The ministry's per-deal date («تاريخ الصفقة ميلادي» arrives as 'YYYY/MM/DD' text) → 'YYYY-MM-DD'; None if unreadable."""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return day(v)
+    try:
+        return date.fromisoformat(str(v).strip()[:10].replace("/", "-")).isoformat()
+    except ValueError:
+        return None
+
+
 def window(anchor: date) -> tuple[date, date]:
     """The latest 12 months the ministry HAS: (anchor − 12 months, anchor]. anchor = max deal date in
     its data — never today's date (its data trails the calendar by months)."""
@@ -289,6 +301,34 @@ def build_rows(aggs: list[dict], deal_rows: list[dict], ours: list[dict], refres
     return rows, dict(stats)
 
 
+def deal_table_rows(deal_rows: list[dict], aggs: list[dict], ours: list[dict], fetched_at: str) -> list[dict]:
+    """One row per deal of a MATCHED district·class — the rows the ad page lists as «the same transactions» — every
+    value the ministry's own: its date, its m², its price, ITS per-deal m² price (never price ÷ area recomputed here).
+    A deal missing any of them is left out, never half-written; an unmatched area has no district to show under."""
+    areas = {(a["region"], a["area"]): a["city"] for a in aggs}
+    m = match([(rg, ar, c) for (rg, ar), c in areas.items()], ours)
+    out = []
+    for r in deal_rows:
+        if r.get("cls") not in CLASSES or r.get("region") is None or r.get("area") is None:
+            continue
+        hit = m.get((r["region"], r["area"]))
+        if not hit or hit[0] != "matched":
+            continue
+        d = deal_day(r.get("date"))
+        if d is None or r.get("ref") is None or r.get("price") is None or r.get("area_m2") is None or r.get("ppm") is None:
+            continue
+        try:
+            area_m2, price, ppm = Decimal(str(r["area_m2"])), money(r["price"]), money(r["ppm"])
+        except (InvalidOperation, ValueError):
+            continue
+        if not (area_m2 > 0 and price >= 0 and ppm >= 0):
+            continue
+        out.append({"moj_region": r["region"], "moj_area": r["area"], "property_class": r["cls"], "deal_ref": str(r["ref"]),
+                    "deal_date": d, "area_m2": str(area_m2), "price": str(price), "ppm": str(ppm),
+                    "city_ar": hit[1], "district_ar": hit[2], "fetched_at": fetched_at})
+    return out
+
+
 # ── the ministry (sequential, paused, retried, capped) ────────────────────────────────────────────
 def _tls() -> ssl.SSLContext:
     try:
@@ -366,10 +406,12 @@ class Ministry:
         return rows
 
     def deals(self, start: str, end: str, where: list[dict] = ()) -> list[dict]:
-        """Deal-level rows (one per «الرقم المرجعي للصفقة») between two dates; a truncated slice is halved."""
+        """Deal-level rows (one per «الرقم المرجعي للصفقة») between two dates, each with the ministry's own deal
+        date, m² and per-deal m² price (kept in moj_district_deals, shown unaltered); a truncated slice is halved."""
         rows, complete = self.query(
             [("region", col("المنطقة")), ("area", col("الحي")), ("cls", col("تصنيف العقار")),
-             ("ref", col("الرقم المرجعي للصفقة")), ("price", mea("السعر بالريال السعودي"))],
+             ("ref", col("الرقم المرجعي للصفقة")), ("price", mea("السعر بالريال السعودي")),
+             ("date", col("تاريخ الصفقة ميلادي")), ("area_m2", col("المساحة")), ("ppm", mea("سعر المتر المربع"))],
             [on_or_after(DATE, start), on_or_before(DATE, end), is_in("تصنيف العقار", CLASSES), *where])
         if complete:
             return rows
@@ -465,6 +507,17 @@ def write(rows: list[dict]) -> None:
            what=f"moj upsert {i}")
 
 
+def write_deals(rows: list[dict], window_start: str) -> None:
+    """Upsert the window's matched deals, then prune the ones that fell out of the anchored window (the card's period
+    moved on). ponytail: one global prune by date — the window is global; a district that stops matching keeps its
+    old rows until they age out."""
+    client, ex = _db()
+    for i in range(0, len(rows), BATCH):
+        ex(client.table("moj_district_deals").upsert(rows[i:i + BATCH], on_conflict="moj_region,moj_area,property_class,deal_ref"),
+           what=f"moj deals upsert {i}")
+    ex(client.table("moj_district_deals").delete().lt("deal_date", window_start), what="moj deals prune")
+
+
 def guard_against_regression(meta: dict, stored: list[dict]) -> None:
     """The ministry's data never moves backwards; if its anchor is older than what we already store, the
     model changed — write nothing."""
@@ -517,10 +570,12 @@ def main() -> int:
         guard_against_regression(got, stored)
         fetched_at = datetime.now(timezone.utc).isoformat()
         rows, stats = build_rows(got["aggs"], got["deal_rows"], ours, got["refreshed_at"], fetched_at)
+        deal_table = deal_table_rows(got["deal_rows"], got["aggs"], ours, fetched_at)
         report = {k: got[k] for k in ("anchor", "first", "all_deals", "refreshed_at", "start", "end", "window_deals")}
         shown = [r for r in rows if r["match_status"] == "matched" and r["deals"] >= 10]
         owner = sorted((r for r in rows if r["match_status"] != "matched" and r["deals"] >= 10), key=lambda r: -r["deals"])
         report.update(groups=len(got["aggs"]), deal_rows=len(got["deal_rows"]), rows=len(rows), stats=stats,
+                      deals_table_rows=len(deal_table),
                       shown_on_ad_page=len(shown),
                       not_matched_with_10_plus_deals=[f"{r['match_status']} {r['moj_area']} {r['property_class']} {r['deals']}" for r in owner[:40]],
                       requests=mj.n, seconds=round(time.time() - t0, 1))
@@ -531,6 +586,8 @@ def main() -> int:
             return 0
         write(rows)
         print(f"✓ upserted {len(rows)} rows in {round(time.time() - t0, 1)}s", flush=True)
+        write_deals(deal_table, got["start"])
+        print(f"✓ upserted {len(deal_table)} deals, pruned those before {got['start']}", flush=True)
     for c in monitor(mj, random.Random()):
         s, f = c["stored"], c["fresh"]
         print(f"✓ monitor {s['city_ar']} · {s['district_ar']} · {s['property_class']}: "
