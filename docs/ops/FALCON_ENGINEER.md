@@ -261,6 +261,21 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
 16. `--sample N` in `customer-journey.mjs` is capped at 8 and `--listings` at 12 per run: 100 journeys are nine
    batches from your own per-platform sample, three per website, sequentially.
 
+17. Your own last fix can regress the next morning (10-16): the 10-09 bossbih «0 SAR» fix assumed «no total block»,
+   but the live pages print «الإجمالي 0» (the site's calculator), and the 04:42 crawl put all six back at 0. Re-read
+   the live pages of every ad you «fixed» last Friday before trusting its proof row; build the test from the page.
+18. A robot red for days is usually two bugs, one in the robot (10-16 journey-sweep, 19 days red): the expired-token
+   watch stopped looking at 4 s while the product opens at 8-15 s; the tap-target one was a real product overlap.
+   Reproduce ONE journey by hand the same day instead of reading its summary.
+19. Prose capture must be read back against the ad text before you call it done (10-16 wasalt): 2,845 of 2,849
+   elevator YES were right; the 4 wrong were a literal «\n» in the text and a labelled «المصعد: لا يوجد مصعد».
+   Ship the reader with a re-check pass so the next run corrects what the last one got wrong.
+20. A fold in a list that is also the search key must keep label == key (10-16): district_options_ar sends the
+   folded LABEL back as the search value, so relabelling «(حي رقم (» alone would have emptied a district.
+   Dry-run every list change against the search it feeds (count == results), rolled back, before applying.
+21. Before a heavy scan, explain it or bound it: a per-row _redact_pii_sql over 170k descriptions ran past 60 s
+   on production (10-16) and had to be cancelled with pg_cancel_backend. Use one regex pass, gated to the daily slot.
+
 ## Rating (computed, must be earned)
 - **10/10** only when: every map line A–E is covered 100% (or its minimum), the sweep is green, all 10 golden searches pass,
   the quick searches show 0 missing / extra / duplicates / count mismatches, ≥ 99 of 100 real listings were found in each
