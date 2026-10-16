@@ -52,8 +52,10 @@ def test_the_10_13_shape_is_truncated_and_named(monkeypatch):
     assert up == 60 and count == 33814 and page1_valid is True
     assert calls.count(3) == 1 and calls.count((3, "bust")) == R._EMPTY_PAGE_RETRIES, \
         "the empty page is re-asked, cache-busted, before it is skipped"
-    assert 6 not in calls, "three empty pages in a row end the walk"
-    assert R._STOPS and "3 empty pages in a row, the last 5 of 1053" in R._STOPS[0]
+    n = R._MAX_EMPTY_PAGES_IN_A_ROW
+    last = 2 + n
+    assert last + 1 not in calls, f"{n} empty pages in a row end the walk"
+    assert R._STOPS and f"{n} empty pages in a row, the last {last} of 1053" in R._STOPS[0]
 
 
 def test_one_page_the_source_cannot_render_is_skipped_not_the_end(monkeypatch):
@@ -146,3 +148,14 @@ def test_fetch_page_puts_the_bust_on_the_url(monkeypatch):
     R.fetch_page(None, "sale", "residential", "floor", 2)
     R.fetch_page(None, "sale", "residential", "floor", 2, bust="17")
     assert "_ezh" not in seen[0] and seen[1].endswith("&page=2&_ezh=17")
+
+
+def test_a_cluster_shorter_than_the_limit_is_walked_through(monkeypatch):
+    """10-16 third sweep: villa-townhouse/rent answered again after empty 16, 18, 19; a cluster of
+    empties shorter than the limit must not end the slice."""
+    row = [{"id": i} for i in range(30)]
+    pages = {p: (300, 10, row, True) for p in (1, 2, 7, 8, 9, 10)}   # 3-6 empty: a cluster of 4
+    _setup(monkeypatch, pages)
+    up, _c, _v, truncated = R.scrape_slice(None, "rent", "residential", "villa-townhouse", max_pages=10)
+    assert R._MAX_EMPTY_PAGES_IN_A_ROW > 4
+    assert up == 180 and truncated is True
