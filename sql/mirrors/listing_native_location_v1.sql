@@ -10,7 +10,7 @@
 --   The arms were spliced into the previous body in the rendering the wiring migrations use, and the
 --   result was PROVEN equal to production: md5 of the spliced body (trailing newline stripped, which
 --   is how pg_get_viewdef returns it) == md5(pg_get_viewdef('public.listing_native_location_v1',true)).
---   • md5 of everything below this header block: 5f223424d56192158ef4e40c69e12c31
+--   • md5 of everything below this header block: ea8174b63953cfc25aef4a39af032f0a
 --   • 111,322 -> 127,992 chars; then batch5 (holoul eightfloor manzo, 20260927021406) -> 131,577,
 --     registry caught up by sql_mirror_expected_catches_up_to_batch5_arms; then batch6 (arsh,
 --     20260927034721) -> 132,712, registry caught up by sql_mirror_expected_catches_up_to_batch6_arms;
