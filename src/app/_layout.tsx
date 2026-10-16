@@ -37,7 +37,16 @@ if (Platform.OS === 'web' && typeof globalThis !== 'undefined' && !(globalThis a
   globalThis.addEventListener?.('unhandledrejection', (ev: any) => {
     // eslint-disable-next-line no-console
     console.error('[ezhalah] unhandled promise rejection:', ev?.reason);
-    reportError(ev?.reason ?? new Error('unhandledrejection'), { source: 'unhandledrejection' });
+    // 🔧 2026-10-16: Sentry REACT-NATIVE-D/E were bare «NetworkError» rejections with no stack and
+    // url=/, so the class could not be diagnosed. Carry what the browser knows at that instant.
+    const r: any = ev?.reason;
+    reportError(ev?.reason ?? new Error('unhandledrejection'), {
+      source: 'unhandledrejection',
+      reasonName: r?.name, reasonCode: r?.code,
+      online: (globalThis as any).navigator?.onLine,
+      visibility: (globalThis as any).document?.visibilityState,
+      path: (globalThis as any).location?.pathname,
+    });
   });
   globalThis.addEventListener?.('error', (ev: any) => {
     // eslint-disable-next-line no-console

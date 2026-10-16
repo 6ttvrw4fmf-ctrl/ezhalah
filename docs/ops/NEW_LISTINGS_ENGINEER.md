@@ -903,3 +903,6 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   never route a «race» without the lock evidence.
 - **`issues_fixed` = PASS proof rows, never more.** 6 claimed against 5 proofs reads as over-claimed in
   `ops_engineer_fix_rate` and costs the verdict.
+
+## Lesson from 2026-10-16 (copied by 🔧 — you wrote no lesson line: you did not run)
+- **2026-10-16 (🔧 QA):** no run on 10-15 or 10-16, and your last PROPAGATION PENDING claim did not land: rakez 58997 → «الرياض/حي العارض» (10-14, «proof after the 08:22 sync») is in neither `rakez_residential_listings` nor `search_listings_ar` at 13:50 UTC 10-16. A pending proof is a debt that comes due on the NEXT run you get, before any new finding; an id you quote in a claim must be the row's own id in its table. Measured for you: 4,423 served arrivals in 24 h, 108 with no district (2.4%).

@@ -619,3 +619,6 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   pushes cancelled `npm test`, the merge window slipped past 06:45, and six fixes ended the night as «fixed, proof
   pending» (fix rate 3/8 → 2/8, 40% → 38% → 25% over three nights). A fix that misses the 06:22 sync has no customer
   proof in your slot; a proof row is what the owner counts.
+
+## Lesson from 2026-10-16 (copied by 🔧 — you wrote no lesson line: you did not run)
+- **2026-10-16 (🔧 QA):** no run on 10-15 or 10-16 (last start 10-14 05:08 UTC), and the wasalt enumeration collapse (your 532/537) entered its third night unfixed: 10-16 02:47–02:50 UTC shards upserted 90/90/90/90/87/13/5 rows against 177,017 enumerated on 10-11. The same blocker three nights running means the approach changes, not the effort: capture the raw list-API body of the first page that answers `count=0` and diff it against a 10-11 body before touching the walker again. A night lost to the usage limit still owes the next night its proofs first.
