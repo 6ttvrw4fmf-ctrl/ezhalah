@@ -945,7 +945,10 @@ def amenities_from_text(raw: Optional[str]) -> dict[str, bool]:
         for col, val in _amenities_in_clause(clause).items():
             seen.setdefault(col, set()).add(val)
     # Two clauses that disagree («مصعد، بدون مصعد») have not stated the fact: NULL, not line order.
-    return {col: vals.pop() for col, vals in seen.items() if len(vals) == 1}
+    out = {col: vals.pop() for col, vals in seen.items() if len(vals) == 1}
+    if _says_partly_furnished(raw):
+        out.pop("furnished", None)
+    return out
 
 
 # «المطابخ: 1» — a labelled kitchen COUNT, printed per floor in the «تفاصيل الدور …» block of one broker
@@ -973,7 +976,25 @@ def amenities_from_lines(raw: Optional[str]) -> dict[str, bool]:
     for line in re.split(r"[\n\r]+", str(raw)):
         for col, val in amenities_from_text(line).items():
             seen.setdefault(col, set()).add(val)
-    return {col: next(iter(vals)) for col, vals in seen.items() if len(vals) == 1}
+    out = {col: next(iter(vals)) for col, vals in seen.items() if len(vals) == 1}
+    if _says_partly_furnished(raw):
+        out.pop("furnished", None)
+    return out
+
+
+def _says_partly_furnished(raw: Optional[str]) -> bool:
+    """«فيلا مفروشه … الفيلا مفروشه جزئيا» (eaqartabuk 598379): a PARTLY-furnished statement anywhere is the
+    more specific one, so it outranks a plain «مفروشة» elsewhere in the ad and the yes/no answer is unknown."""
+    t = _norm_ar(str(raw or "")).lower()
+    for tok in _AMENITY_TOKENS["furnished"]:
+        k = _norm_ar(tok).lower()
+        for m in re.finditer(re.escape(k), t):
+            after = t[m.end():m.end() + 14]
+            before = t[max(0, m.start() - 6):m.start()]
+            if any(_norm_ar(q).lower() in after for q in _PARTIAL_ONLY) or \
+               any(_norm_ar(q).lower() in before for q in _PARTIAL_BEFORE):
+                return True
+    return False
 
 
 def prose_amenities_yes(raw: Optional[str], skip: tuple[str, ...] = ()) -> dict[str, bool]:

@@ -629,8 +629,17 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
         "date_added": item.get("date") or None,
         "additional_info": info,
         **feature_answers(features),
+        # eaqartabuk's feature checklist has no furnished item, so the ad's own words are the statement (law §2):
+        # «مفروشة» / «مؤثثة» yes, «غير مفروشة» / «الغير مفروش» no, partly furnished or silence unknown (🔬 2026-10-16,
+        # backlog 552). Omitted when unknown, so an unstated ad never writes a value.
+        **furnished_answer(description),
     }
     return row, category
+
+
+def furnished_answer(description: Optional[str]) -> dict[str, bool]:
+    f = normalize.amenities_from_lines(description).get("furnished")
+    return {} if f is None else {"furnished": f}
 
 
 # eaqartabuk publishes a STRUCTURED feature checklist (candles-map «features»: «مصعد», «مطبخ», «مداخل خاصة»,

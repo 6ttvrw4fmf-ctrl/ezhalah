@@ -23,6 +23,8 @@ from scrapers.common import normalize
     ("semi furnished", None),
     ("سطح مفروش نجيلة مظلة", None),
     ("الدرج مفروش بالرخام", None),
+    ("فيلا مفروشه للايجار السنوي الفيلا مفروشه جزئيا موقعها حي الهضيبه", None),
+    ("شقة مفروشة\nالمجلس نصف مفروش", None),
 ])
 def test_phrasings_that_are_not_a_yes(text, want):
     assert normalize.amenities_from_lines(text).get("furnished") is want
