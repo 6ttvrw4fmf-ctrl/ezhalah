@@ -282,6 +282,17 @@ These cost your first runs a lot of time. Use them instead of working them out a
   artifact's download host is blocked from the cloud; the log prints the same comparison). It shows
   what the page itself says next to what we store.
 
+## Lesson from 2026-10-16 (🦅 Falcon: «the site has no field for it» is where prose starts, not where capture ends)
+- wasalt publishes NO structured elevator, air-conditioning or private-entrance field (62,491 stored payloads:
+  not in `attributes`, `additionalAttributes` or `propertyInfo`), so those columns were NULL on every wasalt row
+  while 3,222 / 2,817 / 547 of its own descriptions state them, and the Advanced Filter could not find one wasalt
+  ad by elevator. The law (ADVANCED_FILTER_SOURCE_TRUTH §2) allows prose for exactly this case, YES-only:
+  `normalize.prose_amenities_yes(normalize.html_block_lines(desc))`. Now in `scrapers/wasalt/enrich_ar.py`
+  (`PROSE_ONLY`), with a proxy-free backfill from the stored `ar_data` at the start of every enrich run.
+- The same gap is open on 23 more sites whose amenity columns are 0% captured for homes (rakez, arkaan, razre,
+  aqargate, vmksa, aouj, souq24, holoul, azure, awal, …). Before calling a site «it doesn't publish amenities»,
+  check its ad text: if the words are there and no structured field exists, wire `prose_amenities_yes`.
+
 ## Lessons from 2026-10-13
 - **«CertificateVerifyError» on every route is the SITE's certificate, not our network.** abralosol.com served an expired
   certificate (curl 60 «certificate has expired») to 3 profiles direct AND 3 through the residential proxy; a customer
