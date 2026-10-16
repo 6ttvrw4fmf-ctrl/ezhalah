@@ -96,7 +96,14 @@ jobs:
     # rule below still applies — whenever a step is ADDED, re-measure, because a budget that
     # silently becomes too small skips the TAIL of this job, and the tail is where the AF pill and
     # strict-parity checks live.
-    timeout-minutes: 50
+    #
+    # RE-MEASURED 2026-10-16 (🦅 Falcon, backlog 324), because that is exactly what happened: the job
+    # grew to 17 steps and the 50-minute wall killed run 38878124643 at step 13 with 8 steps never run
+    # (attendance then reported the whole workflow cancelled — 8+ days in a row). Measured that run:
+    # 9 AF journeys 32.9m, agent CTA 1.9m, Trending 3.3m, certified cohorts 8.2m, predicate counts
+    # 0.3m, scope 1.4m, served scope 1.5m+ = 49.5m before the tail. 90 matches the sibling region/city
+    # jobs and leaves room for the tail plus one pacing wait; the steps' own budgets are unchanged.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
