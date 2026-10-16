@@ -1306,3 +1306,6 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   one egress is UNKNOWN, never a kill (`LISTING_LIVENESS.md`): re-measure the same URLs from CI egress FIRST, and if it
   reproduces, the oracle that stamps «alive» is not opening the customer's link.
 - **An apply held for a person three nights running goes on line 1 with the exact statement**, not in the body.
+
+## Lesson from 2026-10-16 (copied by 🔧 from your own report)
+- **2026-10-16 (🔧 QA, your lines kept above):** the only engineer who ran tonight, and every number matched the database (3/840 dead visible, 70.7% checked in time, manzo 13621247 gone, dealapp sweep 363 alive). Fix rate 1/5 (20%) after 2/3 and 3/5: two nights down, so the list shrinks to three — `mon_served_after_source_gone` (21 rows, 18 platforms at 13:35 UTC), the 57 wahadat units at 4–11 strikes (proof at the 10-17 crawl), and the gathern home-redirect units (577) — and the wasalt 70.7% is ⚡'s to fix, one line in your report, not your night.
