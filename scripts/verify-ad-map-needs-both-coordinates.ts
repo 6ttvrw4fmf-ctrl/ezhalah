@@ -123,7 +123,7 @@ type Block = {
   isSameAd: (a: Row, b: Row) => boolean;
   dearerSplit: (each: { price: number; area: number }[], adPpm: number) => Split;
   sameAdSiblings: (own: Row, rows: Row[], down: Set<string>) => Row[];
-  mojFacts: (row: Row | null) => { path: string | null; deals: number; avgDeal: number; avgPpm: number; p10: number | null; p90: number | null; from: string; to: string } | null;
+  mojFacts: (row: Row | null) => { path: string | null; updatedAt: string | null; deals: number; avgDeal: number; avgPpm: number; p10: number | null; p90: number | null; from: string; to: string } | null;
 };
 const liftBlock = async (file: string): Promise<Block & Stats> => {
   const mod = await liftSymbols(file, [
@@ -148,7 +148,7 @@ const K_FIXTURE: Row[] = [
   ...['wasalt', 'sakan', 'dealapp', 'sukna', 'aqargate'].map((platform) => ({ platform, license_number: 'K9', area_m2: 200, price_total: '1900000' })),
 ];
 // The seeded ministry row (الرياض · حي الرمال, 2026-10-10): the period ends in May 2026, not today.
-const MOJ_ROW: Row = { moj_region: 'منطقة الرياض', moj_area: 'الرياض/الرمال', deals: 285, avg_deal: '1390633.21', avg_ppm: '4449.37', p10_deal: '430000', p90_deal: '1650000', window_from: '2025-10-10', window_to: '2026-05-18', source_refreshed_at: '2026-10-10T03:09:39+00:00' };
+const MOJ_ROW: Row = { moj_region: 'منطقة الرياض', moj_area: 'الرياض/الرمال', fetched_at: '2026-10-10T17:42:39.135211+00:00', deals: 285, avg_deal: '1390633.21', avg_ppm: '4449.37', p10_deal: '430000', p90_deal: '1650000', window_from: '2025-10-10', window_to: '2026-05-18', source_refreshed_at: '2026-10-10T03:09:39+00:00' };
 const blockProblems = (b: Block & Stats): string[] => {
   const out: string[] = [];
   if (!b.isSameAd(SAME_A, SAME_B) || !b.isSameAd(SAME_B, SAME_A)) out.push('the real aqar/wasalt pair (same licence + area, different price) was not matched');
@@ -188,6 +188,9 @@ const blockProblems = (b: Block & Stats): string[] => {
   if (f.from !== '2025-10-10' || f.to !== '2026-05-18') out.push(`period ${f.from} → ${f.to} ≠ the row’s own 2025-10-10 → 2026-05-18 (taken from the clock?)`);
   if (f.p10 !== 430000 || f.p90 !== 1650000) out.push(`the ministry spread ${f.p10} – ${f.p90} ≠ the row’s 430,000 – 1,650,000`);
   // where to find them in the ministry's report: Region / City / District exactly as the ministry names them; none when it is incomplete
+  // «updated weekly · last update …» prints the job's OWN stamp, never the clock; no stamp → no date (never invented)
+  if (f.updatedAt !== '2026-10-10') out.push(`the last-update day «${f.updatedAt}» ≠ the row's fetched_at day 2026-10-10 (taken from the clock?)`);
+  if (b.mojFacts({ ...MOJ_ROW, fetched_at: null })?.updatedAt !== null) out.push('a last-update day was invented without a stamp');
   if (f.path !== 'منطقة الرياض / الرياض / الرمال') out.push(`the ministry path «${f.path}» ≠ «منطقة الرياض / الرياض / الرمال»`);
   if (b.mojFacts({ ...MOJ_ROW, moj_area: 'الرياض' })?.path !== null) out.push('a path was built from a half-known area');
   if (b.mojFacts({ ...MOJ_ROW, moj_region: null })?.path !== null) out.push('a path was built without the region');
@@ -217,6 +220,7 @@ await mustCatchBlock('a hidden site shown and counted as a duplicate', 'if (!pla
 await mustCatchBlock('the ministry period taken from the clock', "const from = String(row.window_from ?? '').slice(0, 10), to = String(row.window_to ?? '').slice(0, 10);", "const from = String(row.window_from ?? '').slice(0, 10), to = new Date().toISOString().slice(0, 10);");
 await mustCatchBlock('avg_ppm recomputed instead of shown', 'const deals = num(row.deals), avgDeal = num(row.avg_deal), avgPpm = num(row.avg_ppm);', 'const deals = num(row.deals), avgDeal = num(row.avg_deal), avgPpm = Math.round(num(row.avg_deal) / 312);');
 await mustCatchBlock('the ministry spread invented from its average', "const p10 = num(row.p10_deal), p90 = num(row.p90_deal);", 'const p10 = num(row.avg_deal) * 0.3, p90 = num(row.avg_deal) * 1.2;');
+await mustCatchBlock('the last-update day taken from the clock', "const updatedAt = /^\\d{4}-\\d{2}-\\d{2}/.test(String(row.fetched_at ?? '')) ? String(row.fetched_at).slice(0, 10) : null;", "const updatedAt = new Date().toISOString().slice(0, 10);");
 await mustCatchBlock('the ministry path built without its region', "const path = region && city && district ? `${region} / ${city} / ${district}` : null;", "const path = city && district ? `${city} / ${district}` : null;");
 await mustCatchBlock('the ministry path built from a half-known area', "const path = region && city && district ?", "const path = region && city ?");
 await mustCatchBlock('the ministry card shown from a handful of deals', 'deals < MOJ_MIN_DEALS', 'deals < 1');
@@ -253,7 +257,7 @@ const labelsHonest = (p: string, i18n: string): string[] => {
   if (/villas, apartments and land/.test(p) || /villas, apartments and land/.test(i18n)) out.push('the ministry’s half lists property types the ministry does not record');
   if (!/Classified residential by the Ministry, which does not record the property type\./.test(p) || !/Classified commercial by the Ministry, which does not record the property type\./.test(p)) out.push('the ministry’s half does not say it records no property type');
   if (!/All residential types listed for sale: \{types\}/.test(p) || !/\{ types: typesList \}/.test(p)) out.push('our half does not list the types it is made of');
-  for (const need of ['prices.moj?.path', 'path: prices.moj.path', 'The report cannot open already filtered.', 'prices.group.ads', 'prices.group.sites', 'prices.group.houses', 'PRICE_MIN', 'PRICE_MAX', 'These are neighbourhood numbers. They are not a valuation of this property and not the sale price of a similar one.', "setExplainOpen((o) => !o)", 'listing-preview-prices-explain'])
+  for (const need of ['Updated weekly from the Ministry’s data · last update {date}', 'h.cadence ?', "t('Updated weekly')", 'prices.moj?.path', 'path: prices.moj.path', 'The report cannot open already filtered.', 'prices.group.ads', 'prices.group.sites', 'prices.group.houses', 'PRICE_MIN', 'PRICE_MAX', 'These are neighbourhood numbers. They are not a valuation of this property and not the sale price of a similar one.', "setExplainOpen((o) => !o)", 'listing-preview-prices-explain'])
     if (!p.includes(need)) out.push(`the explanation is missing «${need}»`);
   // our half's type list names every type the query uses (so adding a type to RESIDENTIAL_GROUP_AR fails here until the words follow)
   const words: Record<string, string> = { 'فيلا': 'villas', 'شقة': 'apartments', 'دور': 'floors', 'أرض سكنية': 'residential land', 'عمارة': 'buildings', 'تاون هاوس': 'townhouses', 'ملحق علوي': 'rooftop annexes' };
@@ -335,6 +339,7 @@ sourceMutant('the sold-average tile coming back', labelsHonest(PREVIEW + "\n<Tex
 sourceMutant('the ministry half listing types again', labelsHonest(PREVIEW.replace('Classified residential by the Ministry, which does not record the property type.', 'villas, apartments and land'), I18N).length > 0);
 sourceMutant('the explanation losing its «not a valuation» line', labelsHonest(PREVIEW.replace('These are neighbourhood numbers. They are not a valuation of this property and not the sale price of a similar one.', 'x'), I18N).length > 0);
 sourceMutant('our type list forgetting townhouses', labelsHonest(PREVIEW.replace('townhouses and rooftop annexes', 'and rooftop annexes'), I18N).length > 0);
+sourceMutant('the weekly-update note leaving the card', labelsHonest(PREVIEW.replace('{h.cadence ? <Text style={[s.halfFoot, tx]}>{h.cadence}</Text> : null}', ''), I18N).length > 0);
 sourceMutant('the explanation hiding the number of ads', labelsHonest(PREVIEW.replace('prices.group.ads', '0'), I18N).length > 0);
 
 // ── the tile equals the formula it displays (owner: a reader who multiplies the two printed numbers gets our number) ──

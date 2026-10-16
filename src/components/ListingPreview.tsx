@@ -373,6 +373,11 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
     try { return new Intl.DateTimeFormat(locale === 'ar' ? 'ar-u-nu-latn-ca-gregory' : 'en-u-ca-gregory', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`)); }
     catch { return iso.slice(0, 7); }
   };
+  // A specific day, Gregorian, Western digits: «10 أكتوبر 2026».
+  const dayLabel = (iso: string) => {
+    try { return new Intl.DateTimeFormat(locale === 'ar' ? 'ar-u-nu-latn-ca-gregory' : 'en-u-ca-gregory', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`)); }
+    catch { return iso; }
+  };
   // The type's plural for card 3's sentence («من كل 10 فلل»), in Arabic and in English.
   const typePlural = () => (locale === 'ar' ? typePluralAr(prices.typeAr || typeLabel) : (/s$/i.test(typeLabel) ? typeLabel : `${typeLabel}s`));
   // The property types «Listed now» is built from — the SAME list the query uses (RESIDENTIAL_GROUP_AR), spelled out.
@@ -598,12 +603,15 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                   rows: [fmtInt(st.houses), `${fmtM(st.mean)} ${t('million')}`, st.meanPpm != null ? fmtInt(st.meanPpm) : null, `${fmtM(st.p10)} – ${fmtM(st.p90)} ${t('million')}`],
                   foot: `${district || city} · ${t('now')}`,
                   note: `${t(commercial ? 'All commercial types listed for sale: {types}' : 'All residential types listed for sale: {types}', { types: typesList })}`,
+                  cadence: '',
                 } : null;
                 const gov = mj ? {
                   key: 'moj', title: t('Actual sales'), sub: t(commercial ? 'commercial property' : 'residential property'), tag: t('Ministry of Justice'), gov: true,
                   rows: [fmtInt(mj.deals), `${fmtM(mj.avgDeal)} ${t('million')}`, fmtInt(mj.avgPpm), mj.p10 != null && mj.p90 != null ? `${fmtM(mj.p10)} – ${fmtM(mj.p90)} ${t('million')}` : null],
                   foot: `${district || city} · ${monthLabel(mj.from)} – ${monthLabel(mj.to)}`,
                   note: t(commercial ? 'Classified commercial by the Ministry, which does not record the property type.' : 'Classified residential by the Ministry, which does not record the property type.'),
+                  // owner 2026-10-16: say on the card that it is refreshed weekly, with the day of the last refresh (the job's own stamp)
+                  cadence: mj.updatedAt ? t('Updated weekly from the Ministry’s data · last update {date}', { date: dayLabel(mj.updatedAt) }) : t('Updated weekly from the Ministry’s data'),
                 } : null;
                 const halves = [ours, gov].filter((h): h is NonNullable<typeof h> => !!h);
                 const labels = [t('Count'), t('Average price'), t('Average price per m²'), t('8 of every 10 between')];
@@ -618,6 +626,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                           {labels.map((label, i) => cell(label, h.rows[i], `${h.key}-${i}`))}
                           <Text style={[s.halfFoot, tx]}>{h.foot}</Text>
                           <Text style={[s.halfFoot, tx]}>{h.note}</Text>
+                          {h.cadence ? <Text style={[s.halfFoot, tx]}>{h.cadence}</Text> : null}
                           {h.gov ? (
                             <Pressable
                               testID="listing-preview-moj-source"
@@ -676,6 +685,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                         : 'Actual sales: the deals recorded by the Ministry of Justice in the period shown, with its numbers unchanged. The Ministry classifies each deal as residential or commercial and does not record the property type, so the figures cover every deal it classified residential in this district; villa, apartment and land deals are not separated.')) : null}
                       {prices.deals.length > 0 ? bullet(t('Tap «Show the deals» under the ministry’s half to see those deals one by one, as the ministry recorded them.')) : null}
                       {prices.moj?.path ? bullet(t('To see the same sales in the ministry’s report: open «Source: Ministry of Justice», then choose in its filters Region / City / District: {path}, property class: {cls}, and the period {from} to {to}. The report cannot open already filtered.', { path: prices.moj.path, cls: commercial ? 'تجاري' : 'سكني', from: prices.moj.from, to: prices.moj.to })) : null}
+                      {prices.moj ? bullet(t('We refresh the Ministry’s numbers and deals automatically every week{last}. The Ministry’s own records can lag, so we print the exact period of the deals.', { last: prices.moj.updatedAt ? t(' (last update {date})', { date: dayLabel(prices.moj.updatedAt) }) : '' })) : null}
                       {bullet(t('These are neighbourhood numbers. They are not a valuation of this property and not the sale price of a similar one.'))}
                     </View>
                   ) : null}
@@ -817,7 +827,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
         <View testID="listing-preview-moj-deals-sheet" style={s.mapSheet}>
           <View style={s.dealsHead}>
             <Text style={[s.dealsTitle, tx]}>{t('Deals recorded by the Ministry of Justice')}</Text>
-            <Text style={[s.dealsSub, tx]}>{`${district || city} · ${t(commercial ? 'commercial property' : 'residential property')} · ${monthLabel(prices.moj.from)} – ${monthLabel(prices.moj.to)} · ${t('{n} deals', { n: fmtInt(prices.deals.length) })}`}</Text>
+            <Text style={[s.dealsSub, tx]}>{`${district || city} · ${t(commercial ? 'commercial property' : 'residential property')} · ${monthLabel(prices.moj.from)} – ${monthLabel(prices.moj.to)} · ${t('{n} deals', { n: fmtInt(prices.deals.length) })} · ${t('Updated weekly')}`}</Text>
             <Text style={[s.dealsSub, tx]}>{t('As the Ministry recorded them, unaltered. The Ministry does not record the property type.')}</Text>
             <Pressable
               testID="listing-preview-moj-deals-source"

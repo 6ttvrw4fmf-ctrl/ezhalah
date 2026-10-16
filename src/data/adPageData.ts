@@ -197,8 +197,8 @@ export function isSameAd(own: AdRow, other: AdRow): boolean {
 }
 
 // ── the ministry's actual sales ──────────────────────────────────────────────────────────────────
-export type MojRow = { moj_region?: string | null; moj_area?: string | null; deals?: unknown; avg_deal?: unknown; avg_ppm?: unknown; p10_deal?: unknown; p90_deal?: unknown; window_from?: string | null; window_to?: string | null; source_refreshed_at?: string | null };
-export type MojFacts = { path: string | null; deals: number; avgDeal: number; avgPpm: number; p10: number | null; p90: number | null; from: string; to: string };
+export type MojRow = { moj_region?: string | null; moj_area?: string | null; fetched_at?: string | null; deals?: unknown; avg_deal?: unknown; avg_ppm?: unknown; p10_deal?: unknown; p90_deal?: unknown; window_from?: string | null; window_to?: string | null; source_refreshed_at?: string | null };
+export type MojFacts = { path: string | null; updatedAt: string | null; deals: number; avgDeal: number; avgPpm: number; p10: number | null; p90: number | null; from: string; to: string };
 const MOJ_MIN_DEALS = 10;
 
 /** The ministry's numbers as the card shows them — unaltered; the period from the ROW's own two dates. Null under 10 deals. */
@@ -217,7 +217,10 @@ export function mojFacts(row: MojRow | null | undefined): MojFacts | null {
   const region = String(row.moj_region ?? '').trim();
   const [city, district] = String(row.moj_area ?? '').split('/').map((x) => x.trim());
   const path = region && city && district ? `${region} / ${city} / ${district}` : null;
-  return { path, deals, avgDeal, avgPpm, p10: spread ? p10 : null, p90: spread ? p90 : null, from, to };
+  // When WE last re-read the ministry (the weekly job's fetched_at) — the card says «updated weekly · last update …»
+  // from this stored stamp, never from the clock.
+  const updatedAt = /^\d{4}-\d{2}-\d{2}/.test(String(row.fetched_at ?? '')) ? String(row.fetched_at).slice(0, 10) : null;
+  return { path, updatedAt, deals, avgDeal, avgPpm, p10: spread ? p10 : null, p90: spread ? p90 : null, from, to };
 }
 
 const mojCache = new Map<string, Promise<MojFacts | null>>();
@@ -229,7 +232,7 @@ export function fetchMojSales(row: AdRow | null, cls: MojClass = 'سكني'): Pr
   let p = mojCache.get(key);
   if (!p) {
     p = boundedRpc<MojRow[]>(
-      supabase.from('moj_district_sales').select('moj_region,moj_area,deals,avg_deal,avg_ppm,p10_deal,p90_deal,window_from,window_to,source_refreshed_at')
+      supabase.from('moj_district_sales').select('moj_region,moj_area,fetched_at,deals,avg_deal,avg_ppm,p10_deal,p90_deal,window_from,window_to,source_refreshed_at')
         .eq('city_ar', row.city_ar).eq('district_ar', row.district_ar).eq('property_class', cls).limit(1),
     ).then(({ data, error }) => {
       if (error) { mojCache.delete(key); return null; }
