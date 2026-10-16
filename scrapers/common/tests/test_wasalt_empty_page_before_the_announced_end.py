@@ -35,6 +35,8 @@ def _setup(monkeypatch, pages):
     monkeypatch.setattr(R.db, "upsert_wasalt_residential_batch", lambda batch: None)
     monkeypatch.setattr(R, "_EMPTY_PAGE_RETRY_PAUSE_S", 0)
     monkeypatch.setattr(R, "_STOPS", [])
+    monkeypatch.setattr(R, "_ROUTE_ROTATIONS_RECOVERED", [])
+    monkeypatch.setattr(R, "rotate_route", lambda s: calls.append("rotate"))
     return calls
 
 
@@ -49,7 +51,7 @@ def test_the_10_13_shape_is_truncated_and_named(monkeypatch):
     up, count, page1_valid, truncated = R.scrape_slice(None, "sale", "residential", "apartment", max_pages=2000)
     assert truncated is True, "an empty page 3 of 1,053 is an incomplete slice, not the end"
     assert up == 60 and count == 33814 and page1_valid is True
-    assert calls.count(3) == 2, "the empty page is asked once more before giving up"
+    assert calls.count(3) == 1 + R._EMPTY_PAGE_RETRIES, "the empty page is re-asked before giving up"
     assert R._STOPS and "empty page 3 of 1053" in R._STOPS[0]
 
 
@@ -84,3 +86,30 @@ def test_all_rows_already_read_is_a_clean_end(monkeypatch):
     })
     up, _c, _v, truncated = R.scrape_slice(None, "sale", "residential", "apartment", max_pages=10)
     assert truncated is False and up == 30
+
+
+def test_every_re_ask_goes_out_on_a_fresh_exit(monkeypatch):
+    """2026-10-16 (backlog 532/569): the 10-15 enum stopped at page 2, 3, 6 … 23 — wherever the one
+    sticky exit ran out — and re-asking on that SAME exit was empty every time. Each re-ask must be
+    preceded by a route rotation, and a page the fresh exit answers keeps the walk going."""
+    row = [{"id": i} for i in range(30)]
+    calls = _setup(monkeypatch, {
+        1: (120, 4, row, True),
+        2: [(0, 0, [], True), (0, 0, [], True), (120, 4, row, True)],
+        3: (120, 4, row, True),
+        4: (120, 4, row, True),
+    })
+    up, _c, _v, truncated = R.scrape_slice(None, "sale", "residential", "apartment", max_pages=10)
+    assert truncated is False and up == 120, "a fresh exit answered page 2; the slice is whole"
+    i = calls.index(2)
+    assert calls[i:i + 5] == [2, "rotate", 2, "rotate", 2], calls
+    assert R._ROUTE_ROTATIONS_RECOVERED == ["apartment/sale p2"]
+
+
+def test_recycle_drops_the_browser_process():
+    from scrapers.wasalt import browser as B
+    f = B.BoundedBrowserFetcher(factory=None, deadline_s=1)
+    seen = []
+    f._discard = lambda: seen.append("discard")
+    f.recycle()
+    assert seen == ["discard"]
