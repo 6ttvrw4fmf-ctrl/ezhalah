@@ -663,6 +663,12 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
             # is dropped by db._unknown_must_not_overwrite_known). A FAILED detail fetch is not the
             # source speaking, so it still sends None.
             price_total = detail.get("site_total")
+            # «الإجمالي 0» beside a positive rate is the site's own calculator multiplying the rate by an
+            # EMPTY area field, not a published total (Falcon 2026-10-16, CI source-reread 38963817563:
+            # nids 12209, 13994, 14199, 10372, 14144 print «المتر 1/200/4/3/250 ريال» and «الإجمالي 0»).
+            # Read as a total it booked six live ads at «0 ر.س» again, a week after 2026-10-09 cleared them.
+            if price_total == 0 and amount > 0:
+                price_total = None
             if price_total is None and detail_read:
                 price_total = db.AUTHORITATIVE_NULL
     elif amount is not None and basis == "total" and transaction_type == "Rent":
