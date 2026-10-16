@@ -37,6 +37,7 @@
 -- CAUGHT BY verify-sql-mirrors-not-stale only because the w3b wiring landed on a NEW calendar day:
 -- the four same-day passes before it left this mirror stale and the barrier green (it compares
 -- dates, not bodies), while mon_detect_sql_mirror_drift compared live against the wave-2 digest.
+-- Re-verified 2026-10-16 (Haraj wiring): two haraj arms spliced after the maktab commercial arm; md5 ea8174b63953cfc25aef4a39af032f0a == live.
  WITH native AS (
          SELECT 'alhoshan'::text AS platform,
             'alhoshan_residential_listings'::text AS source_table,
@@ -565,6 +566,30 @@
             maktab_commercial_listings.transaction_type
            FROM maktab_commercial_listings
           WHERE maktab_commercial_listings.active
+        UNION ALL
+         SELECT 'haraj'::text AS platform,
+            'haraj_residential_listings'::text AS source_table,
+            haraj_residential_listings.id AS listing_id,
+            haraj_residential_listings.city_ar,
+            haraj_residential_listings.city_id,
+            haraj_residential_listings.district_ar,
+            haraj_residential_listings.region_id,
+            'native_scraper'::text AS source_method,
+            haraj_residential_listings.transaction_type
+           FROM haraj_residential_listings
+          WHERE haraj_residential_listings.active
+        UNION ALL
+         SELECT 'haraj'::text AS platform,
+            'haraj_commercial_listings'::text AS source_table,
+            haraj_commercial_listings.id AS listing_id,
+            haraj_commercial_listings.city_ar,
+            haraj_commercial_listings.city_id,
+            haraj_commercial_listings.district_ar,
+            haraj_commercial_listings.region_id,
+            'native_scraper'::text AS source_method,
+            haraj_commercial_listings.transaction_type
+           FROM haraj_commercial_listings
+          WHERE haraj_commercial_listings.active
         UNION ALL
          SELECT 'superoffice'::text AS platform,
             'superoffice_residential_listings'::text AS source_table,
