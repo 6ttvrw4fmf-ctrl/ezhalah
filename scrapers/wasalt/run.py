@@ -719,6 +719,22 @@ def upsert(row: dict, main_type: str) -> None:
 # writes it into the run's notes so a shard's own row says why it is short.
 _STOPS: list[str] = []
 _EMPTY_PAGE_RETRY_PAUSE_S = float(os.environ.get("WASALT_EMPTY_PAGE_RETRY_PAUSE_S", "8"))
+# Re-asks of a valid empty mid-walk page, each on a fresh proxy exit (2026-10-16, backlog 532).
+_EMPTY_PAGE_RETRIES = int(os.environ.get("WASALT_EMPTY_PAGE_RETRIES", "3"))
+# Pages a fresh exit answered after the held exit served them empty: the evidence that the stop
+# was the exit's quota, printed in the run's notes.
+_ROUTE_ROTATIONS_RECOVERED: list[str] = []
+
+
+def rotate_route(s) -> None:
+    """Move the NEXT fetch onto a new proxy exit: a fresh browser process (new sticky port) on
+    the browser path, a fresh curl session on the http path."""
+    if _browser_fetch_enabled():
+        if _BROWSER is not None:
+            _BROWSER.recycle()
+        return
+    if hasattr(s, "rotate"):
+        s.rotate()
 
 
 def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[int, int, bool, bool]:
@@ -764,8 +780,23 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[
             # one reported ok=true, so only the roll-up's 40,000 floor noticed 177,017 → 5,408. Ask
             # once more after a pause; a second empty answer is an INCOMPLETE slice, named with what
             # the empty page itself reported so the run's notes say where and how the source stopped.
-            time.sleep(_EMPTY_PAGE_RETRY_PAUSE_S)
-            pg_count, pg_total, props, valid = fetch_page(s, deal, cat, slug, page)
+            #
+            # 2026-10-16 (third night, backlog 532/569): the 10-15 enum's notes show WHERE each shard
+            # stopped — page 2, 3, 6, 7, 8, 10, 14, 18, 21, 23 of slices announcing up to 2,000 pages,
+            # every empty page reporting count=0 totalPages=0. A cap at the source would stop every
+            # slice at the same page; these stop wherever the ONE sticky proxy exit the browser holds
+            # for the whole slice has spent its quota. Asking again on that same exit (the 10-14 fix)
+            # got the same empty answer every time. So each re-ask now goes out on a FRESH exit:
+            # rotate_route() drops the browser (or the http session) and the next fetch opens a new
+            # sticky port.
+            for _ask in range(_EMPTY_PAGE_RETRIES):
+                time.sleep(_EMPTY_PAGE_RETRY_PAUSE_S)
+                rotate_route(s)
+                pg_count, pg_total, props, valid = fetch_page(s, deal, cat, slug, page)
+                if props or not valid:
+                    break
+            if props:
+                _ROUTE_ROTATIONS_RECOVERED.append(f"{slug}/{deal} p{page}")
             if not props and valid:
                 _STOPS.append(f"{slug}/{deal}: source served an empty page {page} of {pages} "
                               f"(page 1 count={count}; empty page reported count={pg_count} "
@@ -885,6 +916,9 @@ def main() -> int:
             if _browser_fetch_enabled():
                 from scrapers.wasalt import browser as _b
                 notes += _b.fail_reasons_summary()
+        if _ROUTE_ROTATIONS_RECOVERED:
+            notes += (f" | fresh exit recovered {len(_ROUTE_ROTATIONS_RECOVERED)} empty page(s): "
+                      + ", ".join(_ROUTE_ROTATIONS_RECOVERED[:8]))
     except Exception as e:
         ok = False
         notes = str(e)[:400]
