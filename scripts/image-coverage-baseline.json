@@ -402,6 +402,12 @@
       "today_pct": 60.5,
       "active_rows": 119
     },
+    "haraj": {
+      "floor_pct": 85,
+      "today_pct": 96,
+      "active_rows": 25,
+      "note": "Declared 2026-10-16 at onboarding (licensed offers only), before the first production crawl, from the REAL map_post over a live 900-post sample (network live, catalogue read-only): 24 of 25 licensed offers carried photo_urls (the post's own JSON-LD image list, every photo in order). Floor ~10 points below: a single post is 4 points on a sample this small; re-measure on the first week of production rows."
+    },
     "hasaad": {
       "floor_pct": 90,
       "today_pct": 100.0,

@@ -64,7 +64,10 @@ _USAGE = {"residential": "سكني", "سكني": "سكني", "commercial": "تج
           "agricultural": "زراعي", "زراعي": "زراعي", "industrial": "صناعي", "صناعي": "صناعي"}
 # REGA's English «نوع العقار» enum words the shared English map does not carry.
 _TYPE_EN_EXTRA = {"Rest house": "Rest House", "Resthouse": "Rest House", "Esteraha": "Rest House",
-                  "Istiraha": "Rest House", "Building": "Building", "Land": "أرض"}
+                  "Istiraha": "Rest House", "Building": "Building", "Land": "أرض",
+                  # REGA's Arabic enum for a studio (11190678205 «شقَّة صغيرة (استوديو)», tashkeel folded first)
+                  "شقة صغيرة (استوديو)": "Studio", "شقه صغيره (استوديو)": "Studio"}
+_TASHKEEL = re.compile(r"[\u064B-\u0652\u0670\u0640]")
 
 
 def usage_of(raw: Optional[str]) -> Optional[str]:
@@ -75,7 +78,7 @@ def usage_of(raw: Optional[str]) -> Optional[str]:
 def type_of(raw_type: Optional[str], usage: Optional[str], title: Optional[str]) -> Optional[str]:
     """REGA «نوع العقار» (Arabic or English enum) → our type. Land follows the licence's own usage; with
     usage silent, the ad's own title naming «سكنية/تجارية» decides; else «أرض» (no usage stated)."""
-    raw = P._clean(raw_type)
+    raw = P._clean(_TASHKEEL.sub("", raw_type or ""))
     if not raw:
         return None
     t = N.map_type_exact(raw) or N.map_type_en(raw) or _TYPE_EN_EXTRA.get(raw) \
@@ -198,7 +201,7 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
         **N.prose_amenities_yes(f"{title}\n{free_text}", skip=tuple(services)),
         **services,
         "property_type": ptype,
-        "transaction_type": p["deal"],
+        "transaction_type": "Rent" if p["deal"] == "Rent" else "Buy",   # deal is validated above
         "city": N.map_city(p["city_ar"]),
         "region": N.region_for_city(N.map_city(p["city_ar"])),
         "city_ar": p["city_ar"],

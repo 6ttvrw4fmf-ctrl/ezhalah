@@ -188,3 +188,10 @@ def test_page_licence_number_and_data_key():
 ])
 def test_own_page_removal_signal(status, body, want):
     assert R._signal(status, body, False) == want
+
+
+def test_rega_arabic_studio_enum_with_tashkeel():
+    assert R.type_of("شقَّة صغيرة (استوديو)", None, "استديوهات للإيجار") == "Studio"
+    assert R.type_of("Apartment", None, "") == "Apartment" and R.type_of("Land", "سكني", "") == "Residential Land"
+    assert R.type_of("أرض", None, "ارض للبيع") == "أرض"                     # no usage stated: no guess
+    assert R.type_of("عمارة", "تجاري", "") == "Commercial Building"
