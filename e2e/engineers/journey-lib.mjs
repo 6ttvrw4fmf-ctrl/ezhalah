@@ -78,6 +78,7 @@ export const TYPE_UI = {
   'فيلا': { cat: 'سكني', group: G.villa, tap: 'فيلا' },
   'بيت': { cat: 'سكني', group: G.villa, tap: 'فيلا' },
   'دوبلكس': { cat: 'سكني', group: G.villa, tap: 'دوبلكس' },
+  'تاون هاوس': { cat: 'سكني', group: G.villa, tap: 'دوبلكس' }, // owner 2026-10-12: town house is filed under Duplex
   'استراحة': { cat: 'سكني', group: G.vac, tap: 'استراحة' },
   'شاليه': { cat: 'سكني', group: G.vac, tap: 'شاليه' },
   'مخيم': { cat: 'سكني', group: G.vac, tap: 'مخيم' },

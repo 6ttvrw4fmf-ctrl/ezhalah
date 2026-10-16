@@ -39,8 +39,11 @@ STORED = ("platform,source_table,listing_id,region_ar,city_ar,district_ar,deal_a
           "floor_number,license_number,first_seen_at,production_ready,has_photo")
 
 # Lines of visible text worth a human's eye: money, size, rooms, and the Advanced Filter words.
+# «السعر» is a label in its own right: abaad prints «إجمالي السعر» / «290720» with the currency as an IMAGE,
+# so neither line matched and the score read the description's «السوم 300,000» as the price (17954821,
+# 2026-10-16, re-read run 38916643786) — while «سعر المتر» survived only because it says «متر».
 EVIDENCE = re.compile(
-    r"(ريال|ر\.س|SAR|م²|م2|m²|متر|مساحة|غرف|غرفة|حمام|دورات? مياه|مفروش|مؤثث|مصعد|موقف|مطبخ|مكيف|تكييف|"
+    r"(ريال|ر\.س|SAR|السعر|م²|م2|m²|متر|مساحة|غرف|غرفة|حمام|دورات? مياه|مفروش|مؤثث|مصعد|موقف|مطبخ|مكيف|تكييف|"
     r"غرفة (?:خادمة|سائق)|مدخل خاص|عمر العقار|سنوي|شهري|للبيع|للإيجار|حي\s)")
 TAG = re.compile(r"<[^>]+>")
 DROP = re.compile(r"<(script|style|noscript|svg)[^>]*>.*?</\1>", re.S | re.I)

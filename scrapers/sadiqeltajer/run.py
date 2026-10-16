@@ -630,8 +630,15 @@ def fetch_catalogue(s: cc.Session, limit: int = 0) -> list[str]:
                 INCOMPLETE.append(f"{sub} answered HTTP {rs.status_code}")
         if seen:
             break
-    out = sorted(seen)
+    out = sorted(u for u in seen if not PLATFORM_TEST_AD.search(u))
     return out[:limit] if limit else out
+
+
+# The platform's own test ad sits in its sitemap: /ads/fake-1001-2 renders «fake - 1002» with no price, no
+# title, no description and the default «default-build.png» image, and was served as a 50 m² villa for sale
+# in مكة (17956334, 2026-10-16, re-read run 38916270732). It is not a property. It is withdrawn and
+# adjudicated by migration (🆕 backlog #589); this keeps the next crawl from re-ingesting it.
+PLATFORM_TEST_AD = re.compile(r"/ads/fake-\d")
 
 
 def main() -> int:

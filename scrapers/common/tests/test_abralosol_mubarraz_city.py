@@ -48,3 +48,11 @@ def test_mutation_without_mubarraz_bases_falls_back_to_hofuf(monkeypatch):
     # booked as Hofuf again — the defect this file exists for.
     monkeypatch.setattr(R, "MUBARRAZ_DISTRICTS", frozenset())
     assert R._city("الغسانية ٢", "أرض للبيع")[0] == "Hofuf"
+
+
+def test_an_ad_in_another_region_never_takes_the_office_city():
+    # 17994690 (2026-10-16): a Hail land served under الهفوف.
+    assert R._city("مدينة الروضة – حائل", "أرض تجارية للبيع في مدينة الروضة بمنطقة حائل") == (None, None, "names_other_region")
+    # Al-Ahsa's own «الرياض» district and «شارع مكة» stay Hofuf.
+    assert R._city("الرياض", "أرض للبيع في الرياض ب")[0] == "Hofuf"
+    assert R._city("شارع مكة", "محل للإيجار")[0] == "Hofuf"
