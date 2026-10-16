@@ -426,7 +426,14 @@ def main() -> int:
         db.upsert_haraj_commercial_batch(com)
         db.retire_superseded_siblings(res_table=RES_TABLE, com_table=COM_TABLE, res_ads={r["ad_number"] for r in res},
                                       com_ads={r["ad_number"] for r in com}, source=SOURCE)
-        # A stream: NO absence prune (an ad missing from these hours is not gone). Removal = _verify_gone.
+        # A stream: NO absence prune (an ad missing from these hours is not gone). Removal = own-page proof:
+        # strike_read_gone reads the oldest-seen stored ads' OWN pages through _verify_gone and hands the same
+        # verify_gone= to db.prune_unseen for ONLY the ones that read gone (3 strikes, collapse cap kept);
+        # fleet_liveness reads every active row daily with the same oracle.
+        if not a.limit:
+            seen = {r["ad_number"] for r in res + com}     # empty → strike_read_gone reads nothing (no control)
+            for tbl in (RES_TABLE, COM_TABLE):
+                db.strike_read_gone(tbl, seen, SOURCE, verify_gone=_verify_gone, max_reads=30)
         healthy = db.end_run(run_id, ok=True, rows_seen=c["fetched"], rows_upserted=len(res) + len(com),
                              notes=_notes(c, unresolved),
                              check_tables=["haraj_residential_listings", "haraj_commercial_listings"])

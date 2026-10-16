@@ -1107,6 +1107,7 @@ const AR: Record<string, string> = {
   'Arsh': 'عرش العقارية',                    // the site's own Arabic name (arshglobal.com.sa)
   'SuperOffice': 'سوبر أوفيس',     // the site's own Arabic name (superoffice.sa)
   'Shomou': 'شموع العقار',         // «مكتب شموع العقار للاستثمار والتطوير العقاري» (shomoalaqar.com.sa footer)
+  'Haraj': 'حراج',                  // the site's own name (haraj.com.sa)
   'Maktab': 'منصة مكتب',            // the site's own title (maktab.sa)
   'Sirdab': 'سرداب',               // the site's own Arabic name (marketplace.sirdab.co)
   'Ashab': 'عشاب العقارية',        // the site's own Arabic name (ashab.sa)
