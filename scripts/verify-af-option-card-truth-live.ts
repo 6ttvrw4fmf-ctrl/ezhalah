@@ -105,6 +105,8 @@ const FIRST_PAGE = 10;
 // backend round trip plus a ~100-card cascade, so it is budgeted as a backend turn rather than a
 // paint — the shared constant, not a number typed here (owner rule 2026-09-06).
 const REVEAL_SETTLE_MS = AGENT_TURN_MS;
+/** Consecutive unchanged polls (700 ms apart) before a reveal counts as settled. */
+const REVEAL_QUIET_POLLS = 3;
 const ID_CAP = 30000;
 
 const AF_PREDICATE_KEYS = [
@@ -1016,13 +1018,18 @@ try {
     // The wait is QUIESCENCE (grew, then stopped moving, with the button idle), never "reached the
     // number I am about to assert" — waiting for the boundary would hide a genuine under-reveal by
     // turning it into a timeout. A cascade that never settles FAILS below with what it reached.
+    // QUIET MEANS QUIET FOR A WHILE (🔬 2026-10-16, backlog 594). One unchanged 700 ms poll is not rest: the
+    // cascade pauses between batches longer than that, and a local production run read «revealed=114» after
+    // the second click while the same turn held 500 distinct cards moments later. Three polls in a row.
     let shown = shownBefore;
+    let still = 0;
     const settled = await settleUntil(
       async () => {
         const ids: number[] = await page.evaluate(READ_TURN_CARDS, SENTENCE_SRC);
         const n = ids.length;
         const busy = await page.evaluate(() => { const b = document.querySelector('[data-testid="results-load-more"]') as any; return !!b && (b.getAttribute('aria-disabled') === 'true' || b.disabled === true); });
-        const quiet = n > shownBefore && n === shown && !busy;
+        still = n > shownBefore && n === shown && !busy ? still + 1 : 0;
+        const quiet = still >= REVEAL_QUIET_POLLS;
         shown = n;
         return { n, ids, quiet };
       },
