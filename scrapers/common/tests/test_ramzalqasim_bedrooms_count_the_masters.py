@@ -1,5 +1,5 @@
 """ramzalqasim: the API splits bedrooms into `bedrooms` (non-master) + `master_room`; bathroom 0 is the form's
-blank (🆕 2026-10-16, backlog #590; /x/268 «غرفة نوم ماستر … غرفة نوم إضافية», stored 1 bedroom / 0 bathrooms)."""
+blank (🆕 2026-10-16, backlog #582; /x/268 «غرفة نوم ماستر … غرفة نوم إضافية», stored 1 bedroom / 0 bathrooms)."""
 import scrapers.ramzalqasim.run as R
 
 

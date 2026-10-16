@@ -263,7 +263,7 @@ def rooms(rec: dict, category: str, property_type: Optional[str]) -> tuple[Optio
 
     The API's `bedrooms` counts the bedrooms that are NOT master suites; `master_room` counts the
     masters. The page's own description states the TOTAL, and it equals the sum on every row read
-    on 2026-10-16 (🆕, backlog #590): /x/268 bedrooms 1 + master 1 = «غرفة نوم ماستر … غرفة نوم
+    on 2026-10-16 (🆕, backlog #582): /x/268 bedrooms 1 + master 1 = «غرفة نوم ماستر … غرفة نوم
     إضافية» (2); 9336255 2 + 1 = «3 غرف نوم (منها غرفة ماستر)»; 1033414 1 + 2 = «3 غرف نوم (٢ منها
     ماستر)»; 10547051 2 + 3 = «5 غرف نوم، منها 3 غرف ماستر»; 1800149 0 + 5 = «خمس غرف نوم ماستر».
     Storing `bedrooms` alone filed every villa with a master suite under too few bedrooms. Measured
