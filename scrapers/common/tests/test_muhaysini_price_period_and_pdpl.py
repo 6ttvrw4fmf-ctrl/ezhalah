@@ -1923,13 +1923,16 @@ def test_a_period_beside_the_wrong_number_is_refused():
     MHS1834 «اجار شهري 5500 السنوي 65000» — 5,500 monthly, 65,000 annual; the structured field holds
             the annual. The loose rule stored 780,000.
     """
-    for name, published in (("APT_RENT_TWO_INSTALMENTS_NOT_MONTHLY", 35000),
-                            ("FLOOR_RENT_MONTHLY_AND_ANNUAL_BOTH_PRINTED", 65000)):
+    # MHS1834's «السنوي» IS attached to the stored 65,000 (nearest number), so since 2026-10-16 (backlog #585)
+    # it reads annual — the reading this file's notes always said was right; it converts nothing. «الشهري»
+    # still never multiplies either figure.
+    for name, published, period in (("APT_RENT_TWO_INSTALMENTS_NOT_MONTHLY", 35000, None),
+                                    ("FLOOR_RENT_MONTHLY_AND_ANNUAL_BOTH_PRINTED", 65000, "annual")):
         rec = RECORDS[name]
         assert "شهري" in rec["description"]
         assert rec["AdValidator"]["advertisement"]["propertyPrice"] == published
         row = mapped(name)
-        assert row.get("rent_period") is None, f"{name}: the period describes the OTHER figure"
+        assert row.get("rent_period") == period, f"{name}: the monthly word describes the OTHER figure"
         assert row["price_annual"] == published, f"{name}: the price must be stored as published"
         assert row["price_annual"] != published * 12
 

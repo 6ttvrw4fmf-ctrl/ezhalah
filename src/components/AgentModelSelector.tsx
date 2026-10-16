@@ -4,7 +4,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { useI18n } from '@/i18n';
 import { cardShadow, colors, radius } from '@/theme/tokens';
-import { TAP44 } from '@/theme/palette';
+import { TAP44, TAP44_DOWN } from '@/theme/palette';
 
 const MODELS = [
   { id: 'shaheen', ar: 'شاهين', en: 'Shaheen', version: '2.2',
@@ -61,9 +61,10 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
         accessibilityRole="button" accessibilityState={{ expanded: !!anchor, disabled }}
         accessibilityLabel={`${arabic ? 'اختيار النموذج' : 'Select model'}: ${arabic ? model.ar : model.en} ${model.version}`}
         onPress={() => { setAbout(false); trigger.current?.measureInWindow((x, y, measuredWidth) => setAnchor({ x, y, width: measuredWidth })); }}
-        // Visually a 24px line; the 44px floor comes from TAP_TARGET_CSS via this marker.
+        // Visually a 24px line; the 44px floor comes from TAP_TARGET_CSS via this marker, grown DOWNWARD
+        // (TAP44_DOWN) so it never takes the bottom of the mic 3px above it.
         // @ts-expect-error web-only DOM props on the RNW host node
-        dataSet={{ ...TAP44 }}
+        dataSet={{ ...TAP44, ...TAP44_DOWN }}
         style={({ pressed }) => [styles.trigger, { direction: 'ltr', flexDirection: arabic ? 'row-reverse' : 'row', opacity: disabled ? 0.45 : 1 }, pressed && styles.pressed]}>
         {/* No ⌄ arrow (owner 2026-10-10: «for shaheen 2.2 don't include this drop menu thing») — keep the name and decorative mark compact. */}
         <ModelMark model={model} size={16} />

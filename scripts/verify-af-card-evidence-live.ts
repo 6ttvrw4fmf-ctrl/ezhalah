@@ -174,7 +174,7 @@ async function main() {
   // ── 2. commit real AF answers through the agent flow ─────────────────────────────────────────
   const opened = await openAfOffer(page);
   if (!opened.opened) {
-    skip('the AF offer opened', `NOT VERIFIED — ${opened.reason} after ${opened.waitedMs}ms`);
+    skip('the AF offer opened', `NOT VERIFIED — ${opened.reason} after ${opened.waitedMs}ms${(opened as any).hit ? ` · hit: ${(opened as any).hit}` : ""}`);
     console.log(`\n✗ could not reach Advanced Filter; nothing about §12A was proved`);
     await browser.close(); process.exit(1);
   }

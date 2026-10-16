@@ -33,47 +33,46 @@ safety rules (deploy lock, `safe-pr-merge.ts`, source truth, migration rules) st
 
 These win over THE PLAN's timeline below; THE PLAN's rules still hold. Replace this block at the end of every run.
 
-> **Owner, 2026-10-13, after the 10-13 run (8/10, fix rate 3/8 → 2/10, two sites left broken until he said «fix those»):**
-> «I want you to keep doing a better job on every run. Improve your job in the next run.»
-> **Bar for 10-14 (all five, measured in the `:end` row): fix rate ≥ 6/10 proven like a customer · 0 sites broken on our
-> side at the end · rating ≥ 9 · the owner never has to ask for a fix afterwards · no over-claim.**
+> **Owner bar (10-13, still standing):** fix rate ≥ 6/10 proven like a customer · 0 sites broken on our side at the end ·
+> rating ≥ 9 · the owner never has to ask for a fix afterwards · no over-claim.
 
-> **Same bar on 10-15.** 10-14: PR #7041 merged at minute 29, its re-crawls proven inside the slot; the numbers are
-> in the 10-14 `:end` row.
+> **10-15 and 10-16 05:00 slots were MISSED** (🔧 row 1216: RED). The 10-16 run was a retry at 14:29 UTC. A missed slot
+> costs a whole night of proofs; if the slot is missed again, run the minute you are started, whatever the hour.
 
-> **Kept from 10-13 (hard rules; on 10-14 they got the merge in at minute 29 and the re-crawl proven by minute ~50):** ship ONE
-> PR early (`pytest scrapers/common/tests` + `npm run test:all` locally, then push once); read every failed site's
-> exception TEXT in the first 15 min and classify OURS/THEIRS; no heavy dispatch before your PR merges; one push per
-> cycle; pick rotation listings with `deal_ar='بيع' or rent_period_ar is not null`; `issues_fixed` = PASS `:proof` rows
-> for tonight's backlog items, counted by query.
-
-**New rule from 10-14: a fix is not «fixed» until the RAW row changed.** The 10-13 akariyoun fix passed its test and
-merged, and the next night's crawl stored nothing: the test markup was not the live markup (the live page indents
-`</h6>` by 52 spaces). After any parser fix, re-crawl and `select <field>, count(*)` on the RAW table before the :22
-sync; a test fixture must be copied VERBATIM from `source-reread` output, whitespace included.
+**Kept hard rules:** ship ONE PR early (`pytest scrapers/common/tests` + `npm run test:all` locally, then push once); read
+every failed site's exception TEXT in the first 15 min and classify OURS/THEIRS; a parser fix is fixed only when the RAW
+row changed; `issues_fixed` = PASS `:proof` rows for tonight's backlog items, counted by query.
 
 **Minute 0–15 (DB clock):** `select now()`; `:end`/`:followup` rows; failed and absent sites of the 04:22 nightly with
-their exception text; ALSO `select date_trunc('day',started_at), sum(rows_seen) from scrape_runs where platform like
-'wasalt_enum%' group by 1` (the enum runs every 2 days at 21:00 UTC; its collapse is invisible in per-site checks).
+their exception text; `select date_trunc('day',started_at), sum(rows_seen) from scrape_runs where platform like
+'wasalt_enum%' group by 1`.
 
-**Owed → first thing on 10-15/10-16:**
-- **wasalt enumeration (backlog 532, P1).** The 10-13 21:00 enum summed 5,408 rows vs 177,017 on 10-11: every shard
-  stopped after ~5-6 pages on a VALID empty page (apartment/sale count=33,814, 176 upserted). PR #7041 makes such a
-  slice TRUNCATED and writes «source served an empty page N of M (… empty page reported count=… totalPages=…)» into
-  the shard's notes. The next enum is 10-15 21:00 UTC; on 10-16 read those notes. If every shard stops at the same
-  page (a pagination cap at the source), redesign the enumeration to slice under the cap (city / price-band filters
-  on the search URL) and re-measure bandwidth first (~894 KB per browser page). Do NOT dispatch
-  `wasalt-enum-liveness.yml` yourself (liveness workflows are not yours to run). Nothing is deactivated meanwhile:
-  the roll-up refuses, so the listings are UNKNOWN, not dead.
-- **akariyoun (backlog 493/525):** if the customer proof did not land on 10-14, run it: rent search Riyadh إشبيلية
-  سنوي finds 17376257 (87,000). The raw table already reads 145 annual / 4 monthly / 17 no-field after the 05:37 re-crawl.
-- **backlog 535:** the roll-up refusal label `wasalt_enum_rollup_refused` auto-registered as kind='source' (the
-  auto-register regex in `mon_auto_register_platform` lacks `_enum|_shard|_rollup|_refused`). Before flipping it and
-  `wasalt_enum_shard` to internal, check that `mon_detect_silent_scraper_death` and the wasalt enum watchers still see
-  an internal label. Otherwise the only P0 on an enum collapse goes dark.
+**Owed → first thing next run:**
+- **wasalt enumeration (532/569, P1, 4th night) — ROOT CAUSE MEASURED 10-16.** Every slice stops on a VALID empty
+  page (count=0 totalPages=0) that is NOT a cap (stops at page 2..23), NOT a throttled exit (3 fresh exits: 0 of 10
+  stops recovered, run 38919794892) and NOT a stored render (cache-busted re-ask: 0 recovered, second sweep). It is
+  DETERMINISTIC per page: floor/rent, villa/sale and villa/rent stopped on the same page (2, 6, 2) twenty minutes
+  apart, and floor/sale (2 → 3) and apartment/rent (7 → 8) moved down by exactly one page as new ads arrived at the
+  top: one listing whose page the source cannot render, sliding down the catalogue. The third PR (10-16) re-asks once,
+  then SKIPS that page and keeps walking (stops after 3 empty pages in a row); a slice with skipped pages stays
+  TRUNCATED (ok=false), so the roll-up (ok shards only) still strikes nothing. Notes say «skipped N empty page(s) the
+  source could not render: …». Read: (1) the third proof sweep (`wasalt-residential-sweep.yml`, `pages=25`):
+  per-slice `rows_upserted` should approach 750; (2) the 10-17 21:00 UTC enum: rows read (sum of ALL shards' rows_seen,
+  ok or not) ≥ 100,000 = intake fixed (proof row + a new wasalt ad found in the Filter). The roll-up will still REFUSE
+  while any page is skipped: deciding whether a shard missing ≤ 1% of its pages may count as complete is the next
+  step (it feeds strikes, so prove it with ♻️ first). Commercial side finding: every commercial slug reports the same
+  count (rent 1,893 / sale 329), so the type filter looks ignored for commercial. Compare 3 slices' first ids.
+- **576 dangling-run remediation (class bug, backlog 584).** Detector raises at 3 h, remediation only closes > 12 h, so
+  every dangling row escalates to a P0. The tested patch is `docs/ops/pending/2026-10-16-dangling-remediation-at-
+  detector-threshold.sql.txt` (its self-test fails on the live function). It was NOT applied: `apply_migration` waits
+  for a human to confirm the UPDATE in its body and timed out. Apply it from a session that can confirm, then mirror it
+  into `supabase/migrations/` with the minted version and delete the pending copy.
+- **564 gathern 577 units redirecting home** — a link-proof decision inside `scrapers/gathern/liveness.py` (♻️'s 519).
+- **565 almuteb 503 on ad pages from CI** — the crawl reads the REST API (200); the HTML page needs a browser read.
 
 **Proof timing facts:** search sync :22 (commits ~:24–:26); detector sweep :59; Wasalt enum 21:00 UTC every 2 days
-(~7 h when healthy); muhaysini nightly ends ~07:10 UTC; `scraper-early-warning` 07:45 UTC.
+(~7 h when healthy); muhaysini nightly ends ~07:10 UTC; `scraper-early-warning` 07:45 UTC; the 12 h dangling-run
+reconcile cron closes an orphaned row 12 h after it started.
 
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «wire them so the next run turns out perfect … at the point where I don't need to check and agree on
@@ -282,6 +281,17 @@ These cost your first runs a lot of time. Use them instead of working them out a
   dispatch `source-reread.yml` with `ids: table:id,…` and read its job log with `get_job_logs` (the
   artifact's download host is blocked from the cloud; the log prints the same comparison). It shows
   what the page itself says next to what we store.
+
+## Lesson from 2026-10-16 (🦅 Falcon: «the site has no field for it» is where prose starts, not where capture ends)
+- wasalt publishes NO structured elevator, air-conditioning or private-entrance field (62,491 stored payloads:
+  not in `attributes`, `additionalAttributes` or `propertyInfo`), so those columns were NULL on every wasalt row
+  while 3,222 / 2,817 / 547 of its own descriptions state them, and the Advanced Filter could not find one wasalt
+  ad by elevator. The law (ADVANCED_FILTER_SOURCE_TRUTH §2) allows prose for exactly this case, YES-only:
+  `normalize.prose_amenities_yes(normalize.html_block_lines(desc))`. Now in `scrapers/wasalt/enrich_ar.py`
+  (`PROSE_ONLY`), with a proxy-free backfill from the stored `ar_data` at the start of every enrich run.
+- The same gap is open on 23 more sites whose amenity columns are 0% captured for homes (rakez, arkaan, razre,
+  aqargate, vmksa, aouj, souq24, holoul, azure, awal, …). Before calling a site «it doesn't publish amenities»,
+  check its ad text: if the words are there and no structured field exists, wire `prose_amenities_yes`.
 
 ## Lessons from 2026-10-13
 - **«CertificateVerifyError» on every route is the SITE's certificate, not our network.** abralosol.com served an expired
