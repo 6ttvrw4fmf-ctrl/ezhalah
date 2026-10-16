@@ -13,7 +13,7 @@ import { useAtLeast } from '@/lib/useAtLeast';
 import { PICKER_SHEET_BREAKPOINT } from '@/lib/responsive';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SourceBadge, FEATURE_META, arAttrValue } from '@/components/ResultCard';
-import { PRICE_MAX, PRICE_MIN, dearerSplit, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojFacts } from '@/data/adPageData';
+import { MOJ_SOURCE_URL, PRICE_MAX, PRICE_MIN, dearerSplit, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojFacts } from '@/data/adPageData';
 import { listingOpenUrl } from '@/lib/openListing';
 import type { Listing } from '@/data/listings';
 
@@ -593,7 +593,18 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                           {labels.map((label, i) => cell(label, h.rows[i], `${h.key}-${i}`))}
                           <Text style={[s.halfFoot, tx]}>{h.foot}</Text>
                           <Text style={[s.halfFoot, tx]}>{h.note}</Text>
-                          {h.gov ? <Text style={[s.halfFoot, tx]}>{t('Source: Ministry of Justice')}</Text> : null}
+                          {h.gov ? (
+                            <Pressable
+                              testID="listing-preview-moj-source"
+                              onPress={() => open(MOJ_SOURCE_URL)}
+                              accessibilityRole="link"
+                              accessibilityLabel={t('Open the Ministry of Justice page in a new tab')}
+                              style={s.srcLink}
+                            >
+                              <Text style={[s.halfFoot, s.srcLinkTx, tx]}>{t('Source: Ministry of Justice')}</Text>
+                              <Ionicons name="open-outline" size={12} color={colors.primary} />
+                            </Pressable>
+                          ) : null}
                         </View>
                       ))}
                     </View>
@@ -866,6 +877,9 @@ const s = StyleSheet.create({
   // The value does NOT stretch (alignSelf start): it sits under its label at the RTL start, numerals LTR inside.
   cellV2: { alignSelf: 'flex-start', fontSize: 14.5, fontWeight: '700', color: colors.dark, fontVariant: ['tabular-nums'] },
   halfFoot: { fontSize: 11, lineHeight: 15, color: colors.muted, marginTop: 2 },
+  // the ministry source: a real link (new tab), underlined and in the brand colour so it reads as one
+  srcLink: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 4, marginTop: 2 },
+  srcLinkTx: { color: colors.primary, textDecorationLine: 'underline', marginTop: 0 },
   same: { gap: 6 },
   sameH: { fontSize: 13.5, color: colors.ink },
   // Two columns that wrap into rows — a third site goes to the next row, nothing scrolls sideways.

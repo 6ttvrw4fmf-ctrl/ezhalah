@@ -1285,6 +1285,7 @@ const AR: Record<string, string> = {
   'Tap to view it': 'اضغط لعرضه',
   'Ministry of Justice': 'وزارة العدل',
   'Source: Ministry of Justice': 'المصدر: وزارة العدل',
+  'Open the Ministry of Justice page in a new tab': 'افتح صفحة وزارة العدل في نافذة جديدة',
   'Price per m²: {n} SAR': 'سعر المتر: {n} ر.س',
   'Of {n} {type} listed in the district: {dearer} cost more per m² than this ad, and {cheaper} less': 'من {n} {type} معروضة في الحي: {dearer} أغلى للمتر من هذا الإعلان، و{cheaper} أرخص',
   'Price in the ad': 'السعر في الإعلان',

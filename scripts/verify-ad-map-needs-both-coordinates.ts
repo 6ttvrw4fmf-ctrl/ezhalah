@@ -225,7 +225,7 @@ const tilesWired = (p: string) => /dearerSplit\(prices\.stats\.each, adPpm\)/.te
   // the split card prints our MEANS beside the ministry's means, and the same four labels on both halves
   && /fmtM\(st\.mean\)/.test(p) && /fmtInt\(st\.meanPpm\)/.test(p) && /fmtInt\(mj\.avgPpm\)/.test(p) && /labels\.map\(\(label, i\) => cell\(label, h\.rows\[i\]/.test(p)
   // the ministry half names its source and its window; a figure the row lacks is a hidden cell («—»), never an estimate
-  && /h\.gov \? <Text[^>]*>\{t\('Source: Ministry of Justice'\)\}/.test(p) && /mj\.p10 != null && mj\.p90 != null \? `\$\{fmtM\(mj\.p10\)\} – \$\{fmtM\(mj\.p90\)\} \$\{t\('million'\)\}` : null/.test(p);
+  && /h\.gov \? \(\s*<Pressable[\s\S]{0,600}\{t\('Source: Ministry of Justice'\)\}/.test(p) && /mj\.p10 != null && mj\.p90 != null \? `\$\{fmtM\(mj\.p10\)\} – \$\{fmtM\(mj\.p90\)\} \$\{t\('million'\)\}` : null/.test(p);
 check('the tiles multiply the shown averages by this ad’s area and k reads the deduped set', tilesWired(PREVIEW));
 sourceMutant('the listed tile recomputing the per-m² figure', !tilesWired(PREVIEW.replace('tileFromShown(prices.stats.meanPpm, prices.area)', 'Math.round(prices.stats.mean)')));
 sourceMutant('the duplicates row scrolling sideways again', !tilesWired(PREVIEW.replace("sameRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }", 'sameRow: { gap: 8 }')));
@@ -256,6 +256,18 @@ const labelsHonest = (p: string, i18n: string): string[] => {
   for (const t of RESIDENTIAL_TYPES) if (words[t] && !listed.includes(words[t])) out.push(`our type list omits «${words[t]}» (${t})`);
   return out;
 };
+// The ministry's source is a REAL LINK that opens a new tab (owner 2026-10-16). The page cannot be framed (X-Frame-Options SAMEORIGIN and
+// CSP frame-ancestors allow only itself and Microsoft domains), so an in-page viewer would show a blank box: new tab only, URL pinned.
+const MOJ_URL = 'https://moj.gov.sa/ar/OpenData/PowerBIReport/Pages/BIReportRealestate.aspx';
+const mojLinkOk = (p: string, d: string): boolean =>
+  new RegExp(`export const MOJ_SOURCE_URL = '${MOJ_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}';`).test(d)
+  && /testID="listing-preview-moj-source"[\s\S]{0,200}onPress=\{\(\) => open\(MOJ_SOURCE_URL\)\}[\s\S]{0,120}accessibilityRole="link"/.test(p)
+  && /h\.gov \? \(\s*<Pressable/.test(p) && !/<iframe|<Frame[^>]*MOJ_SOURCE_URL|src=\{MOJ_SOURCE_URL\}/.test(p);
+check('the ministry source is a real link that opens the exact ministry page in a new tab (never framed)', mojLinkOk(PREVIEW, DATA_SRC));
+sourceMutant('the source link going back to plain text', !mojLinkOk(PREVIEW.replace('onPress={() => open(MOJ_SOURCE_URL)}', ''), DATA_SRC));
+sourceMutant('the source link pointing at another page', !mojLinkOk(PREVIEW, DATA_SRC.replace(MOJ_URL, 'https://moj.gov.sa/')));
+sourceMutant('the source shown inside our page in a frame', !mojLinkOk(PREVIEW + '\n<Frame src={MOJ_SOURCE_URL} />', DATA_SRC));
+
 const honestReal = labelsHonest(PREVIEW, I18N);
 check('honest labels: no sold-average tile, the ministry half names its class, our half names its types, the explanation is wired', honestReal.length === 0, honestReal.join('\n      '));
 sourceMutant('the sold-average tile coming back', labelsHonest(PREVIEW + "\n<Text>{fmtInt(tileFromShown(prices.moj.avgPpm, prices.area))}</Text>", I18N).length > 0);

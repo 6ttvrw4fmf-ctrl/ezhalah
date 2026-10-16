@@ -115,6 +115,10 @@ export type House = { price: number; area: number };
 // means); median / medianPpm stay for any surface that wants them. meanPpm = mean of per-house price ÷ area.
 export type AskingPrices = { houses: number; ads: number; sites: number; p10: number; median: number; p90: number; mean: number; medianPpm: number | null; meanPpm: number | null; each: House[] };
 // A sale price under 100k or over 500M SAR is a typo or a per-metre figure in the wrong column, not a house.
+// The ministry page the sold numbers come from: it embeds the public Power BI report «البورصة العقارية» (resource key in
+// scrapers/moj/sales.py). Its response headers (X-Frame-Options SAMEORIGIN + CSP frame-ancestors: itself and Microsoft domains only)
+// forbid showing it inside another site, so the link opens a NEW TAB — never an iframe (verified 2026-10-16).
+export const MOJ_SOURCE_URL = 'https://moj.gov.sa/ar/OpenData/PowerBIReport/Pages/BIReportRealestate.aspx';
 export const PRICE_MIN = 100_000;
 export const PRICE_MAX = 500_000_000;
 const MIN_HOUSES = 10;
