@@ -13,7 +13,7 @@ import { useAtLeast } from '@/lib/useAtLeast';
 import { PICKER_SHEET_BREAKPOINT } from '@/lib/responsive';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SourceBadge, FEATURE_META, arAttrValue } from '@/components/ResultCard';
-import { dearerSplit, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojFacts } from '@/data/adPageData';
+import { PRICE_MAX, PRICE_MIN, dearerSplit, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojFacts } from '@/data/adPageData';
 import { listingOpenUrl } from '@/lib/openListing';
 import type { Listing } from '@/data/listings';
 
@@ -197,6 +197,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
   type Prices = { stats: AskingPrices | null; group: AskingPrices | null; moj: MojFacts | null; same: Listing[]; price: number | null; area: number | null; typeAr: string };
   const [prices, setPrices] = useState<Prices>({ stats: null, group: null, moj: null, same: [], price: null, area: null, typeAr: '' });
   const commercial = l.macro === 'Commercial';
+  const [explainOpen, setExplainOpen] = useState(false);
   useEffect(() => {
     if (!IS_WEB) return;
     let alive = true;
@@ -349,6 +350,10 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
   };
   // The type's plural for card 3's sentence («من كل 10 فلل»), in Arabic and in English.
   const typePlural = () => (locale === 'ar' ? typePluralAr(prices.typeAr || typeLabel) : (/s$/i.test(typeLabel) ? typeLabel : `${typeLabel}s`));
+  // The property types «Listed now» is built from — the SAME list the query uses (RESIDENTIAL_GROUP_AR), spelled out.
+  const typesList = t(commercial
+    ? 'shops, offices, showrooms, warehouses, commercial land and the other commercial types'
+    : 'villas, apartments, floors, residential land, buildings, townhouses and rooftop annexes');
   const bullet = (text: string, key?: string) => (
     <View key={key ?? text} style={s.bullet}>
       <View style={s.bulletDot} />
@@ -566,12 +571,14 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                 const ours = st ? {
                   key: 'ours', title: t('Listed now'), sub: t(commercial ? 'commercial property' : 'residential property'), tag: t('Ezhalah'), gov: false,
                   rows: [fmtInt(st.houses), `${fmtM(st.mean)} ${t('million')}`, st.meanPpm != null ? fmtInt(st.meanPpm) : null, `${fmtM(st.p10)} – ${fmtM(st.p90)} ${t('million')}`],
-                  foot: `${district || city} · ${t('now')} · ${t(commercial ? 'shops, offices and land' : 'villas, apartments, floors and land')}`,
+                  foot: `${district || city} · ${t('now')}`,
+                  note: `${t(commercial ? 'All commercial types listed for sale: {types}' : 'All residential types listed for sale: {types}', { types: typesList })}`,
                 } : null;
                 const gov = mj ? {
                   key: 'moj', title: t('Actual sales'), sub: t(commercial ? 'commercial property' : 'residential property'), tag: t('Ministry of Justice'), gov: true,
                   rows: [fmtInt(mj.deals), `${fmtM(mj.avgDeal)} ${t('million')}`, fmtInt(mj.avgPpm), mj.p10 != null && mj.p90 != null ? `${fmtM(mj.p10)} – ${fmtM(mj.p90)} ${t('million')}` : null],
-                  foot: `${district || city} · ${monthLabel(mj.from)} – ${monthLabel(mj.to)} · ${t(commercial ? 'shops, offices and land' : 'villas, apartments and land')}`,
+                  foot: `${district || city} · ${monthLabel(mj.from)} – ${monthLabel(mj.to)}`,
+                  note: t(commercial ? 'Classified commercial by the Ministry, which does not record the property type.' : 'Classified residential by the Ministry, which does not record the property type.'),
                 } : null;
                 const halves = [ours, gov].filter((h): h is NonNullable<typeof h> => !!h);
                 const labels = [t('Count'), t('Average price'), t('Average price per m²'), t('8 of every 10 between')];
@@ -585,6 +592,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                           <View style={[s.tag, h.gov && s.tagGov, s.halfTag]}><Text style={[s.tagTx, h.gov && s.tagGovTx]}>{h.tag}</Text></View>
                           {labels.map((label, i) => cell(label, h.rows[i], `${h.key}-${i}`))}
                           <Text style={[s.halfFoot, tx]}>{h.foot}</Text>
+                          <Text style={[s.halfFoot, tx]}>{h.note}</Text>
                           {h.gov ? <Text style={[s.halfFoot, tx]}>{t('Source: Ministry of Justice')}</Text> : null}
                         </View>
                       ))}
@@ -592,6 +600,37 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                   </View>
                 );
               })()}
+
+              {/* HOW THESE NUMBERS ARE MADE (owner 2026-10-16): the types, the area, the ads and the filters behind
+                  «Listed now», and what the ministry's figures do and do not say. Every figure in a line is read from
+                  the same stats object the card above prints — never typed. */}
+              {prices.group ? (
+                <View testID="listing-preview-prices-explain" style={s.pcard}>
+                  <Pressable
+                    onPress={() => setExplainOpen((o) => !o)}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: explainOpen }}
+                    style={s.pcardHead}
+                  >
+                    <Text style={[s.pcardTitle, tx]}>{t('How we calculate these numbers')}</Text>
+                    <Ionicons name={explainOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.muted} />
+                  </Pressable>
+                  {explainOpen ? (
+                    <View style={{ gap: 6 }}>
+                      {bullet(t('Listed now: the average of the sale ads listed today in {district}, {city}, from every website Ezhalah shows, not from one website.', { district: district || city, city }))}
+                      {bullet(t('Property types included: {types}.', { types: typesList }))}
+                      {bullet(t('Each property counts once, even when several websites list it: {ads} ads from {sites} websites became {houses} properties.', { ads: fmtInt(prices.group.ads), sites: fmtInt(prices.group.sites), houses: fmtInt(prices.group.houses) }))}
+                      {bullet(t('Prices below {min} or above {max} SAR are left out as likely typing errors.', { min: fmtInt(PRICE_MIN), max: fmtInt(PRICE_MAX) }))}
+                      {bullet(t('The average per m² is the average of each property’s price divided by its own area (a mean, not a median).'))}
+                      {bullet(t('Other websites can show different numbers because each one calculates in its own way (property types, the area covered, mean or median). We show our method in full so you can compare.'))}
+                      {prices.moj ? bullet(t(commercial
+                        ? 'Actual sales: the deals recorded by the Ministry of Justice in the period shown, with its numbers unchanged. The Ministry classifies each deal as residential or commercial and does not record the property type, so the figures cover every deal it classified commercial in this district.'
+                        : 'Actual sales: the deals recorded by the Ministry of Justice in the period shown, with its numbers unchanged. The Ministry classifies each deal as residential or commercial and does not record the property type, so the figures cover every deal it classified residential in this district; villa, apartment and land deals are not separated.')) : null}
+                      {bullet(t('These are neighbourhood numbers. They are not a valuation of this property and not the sale price of a similar one.'))}
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
 
               {prices.same.length > 0 && (
                 <View testID="listing-preview-same-ad" style={[s.pcard, s.same]}>
@@ -635,7 +674,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                     ))}
                   </View>
                   {bullet(t('Of {n} {type} listed in the district: {dearer} cost more per m² than this ad, and {cheaper} less', { n: fmtInt(split.n), type: typePlural(), dearer: fmtInt(split.dearer), cheaper: fmtInt(split.cheaper) }))}
-                  <Text style={[s.pcardSub, tx]}>{t('The same property ({area} m²) priced at the district average:', { area: fmtInt(prices.area) })}</Text>
+                  <Text style={[s.pcardSub, tx]}>{t('This property’s area ({area} m²) at the average listed price per m² in the district ({type}):', { area: fmtInt(prices.area), type: typePlural() })}</Text>
                   <View style={s.tiles}>
                     <View style={[s.tile, s.tileMe]}>
                       <Text style={s.tileK}>{t('Price in the ad')}</Text>
@@ -646,13 +685,6 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                         <Text style={s.tileK}>{t('At the listed average ≈')}</Text>
                         <Text style={s.tileV}>{fmtInt(tileFromShown(prices.stats.meanPpm, prices.area))}</Text>
                         <Text style={s.tileSmall}>{`${fmtInt(prices.stats.meanPpm)} × ${fmtInt(prices.area)}`}</Text>
-                      </View>
-                    )}
-                    {prices.moj && (
-                      <View style={s.tile}>
-                        <Text style={s.tileK}>{t('At the sold average ≈')}</Text>
-                        <Text style={s.tileV}>{fmtInt(tileFromShown(prices.moj.avgPpm, prices.area))}</Text>
-                        <Text style={s.tileSmall}>{`${fmtInt(prices.moj.avgPpm)} × ${fmtInt(prices.area)} · ${t(commercial ? 'all commercial types' : 'all residential types')}`}</Text>
                       </View>
                     )}
                   </View>

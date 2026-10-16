@@ -113,10 +113,10 @@ export type PriceRow = { platform?: string | null; license_number?: string | nul
 export type House = { price: number; area: number };
 // mean / meanPpm are what the split card prints (owner update 23: like for like with the ministry's
 // means); median / medianPpm stay for any surface that wants them. meanPpm = mean of per-house price ÷ area.
-export type AskingPrices = { houses: number; p10: number; median: number; p90: number; mean: number; medianPpm: number | null; meanPpm: number | null; each: House[] };
+export type AskingPrices = { houses: number; ads: number; sites: number; p10: number; median: number; p90: number; mean: number; medianPpm: number | null; meanPpm: number | null; each: House[] };
 // A sale price under 100k or over 500M SAR is a typo or a per-metre figure in the wrong column, not a house.
-const PRICE_MIN = 100_000;
-const PRICE_MAX = 500_000_000;
+export const PRICE_MIN = 100_000;
+export const PRICE_MAX = 500_000_000;
 const MIN_HOUSES = 10;
 
 const percentile = (sorted: number[], q: number): number => {
@@ -128,11 +128,17 @@ const percentile = (sorted: number[], q: number): number => {
  *  is listed at), down sites out, junk prices out; null under MIN_HOUSES. Pure, so the barrier executes it. */
 export function askingPriceStats(rows: PriceRow[], downSlugs: Set<string>): AskingPrices | null {
   const best = new Map<string, { price: number; area: number }>();
+  // What the numbers are made of, shown to the reader: the ADS that passed the filters (live site, sane price), the
+  // distinct WEBSITES they came from, and — after the dedupe below — the houses. «1,433 ads from 38 sites → 1,160 houses».
+  let ads = 0;
+  const sites = new Set<string>();
   for (const r of rows) {
     const platform = String(r.platform ?? '').trim().toLowerCase();
     if (!platform || downSlugs.has(platform)) continue;
     const price = num(r.price_total);
     if (!Number.isFinite(price) || price < PRICE_MIN || price > PRICE_MAX) continue;
+    ads++;
+    sites.add(platform);
     const area = num(r.area_m2);
     const lic = String(r.license_number ?? '').trim();
     const type = String(r.type_ar ?? '').trim();
@@ -145,7 +151,7 @@ export function askingPriceStats(rows: PriceRow[], downSlugs: Set<string>): Aski
   const ppm = [...best.values()].filter((h) => h.area > 0).map((h) => h.price / h.area).sort((a, b) => a - b);
   const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
   return {
-    houses: best.size,
+    houses: best.size, ads, sites: sites.size,
     p10: percentile(prices, 0.1), median: percentile(prices, 0.5), p90: percentile(prices, 0.9), mean: mean(prices),
     medianPpm: ppm.length ? percentile(ppm, 0.5) : null, meanPpm: ppm.length ? mean(ppm) : null,
     each: [...best.values()],

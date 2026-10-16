@@ -59,10 +59,10 @@ check('a pin needs BOTH published coordinates — strings or numbers, never a ha
 const sourceMutant = (label: string, ok: boolean) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  (mutation) catches ${label}`); };
 
 // ── asking prices: each house once, down sites out, junk out, never under 10 houses ──────────────
-type Stats = (rows: Record<string, unknown>[], down: Set<string>) => { houses: number; p10: number; median: number; p90: number; medianPpm: number | null } | null;
+type Stats = (rows: Record<string, unknown>[], down: Set<string>) => { houses: number; ads: number; sites: number; p10: number; median: number; p90: number; medianPpm: number | null } | null;
 const liftStats = async (file: string): Promise<Stats> => (await liftSymbols(file, [
   { header: 'const num = (', endsWith: /: NaN;$/ },
-  { header: 'const PRICE_MIN', endsWith: /;$/ }, { header: 'const PRICE_MAX', endsWith: /;$/ }, { header: 'const MIN_HOUSES', endsWith: /;$/ },
+  { header: 'export const PRICE_MIN', endsWith: /;$/ }, { header: 'export const PRICE_MAX', endsWith: /;$/ }, { header: 'const MIN_HOUSES', endsWith: /;$/ },
   { header: 'const percentile = (' },
   { header: 'export function askingPriceStats(' },
 ], ['askingPriceStats'])).askingPriceStats as Stats;
@@ -82,6 +82,9 @@ const statsProblems = (stats: Stats): string[] => {
   const out: string[] = [];
   const r = stats(FIXTURE, new Set(['toor']));
   if (!r) return ['the fixture (11 houses) produced no numbers'];
+  // what the explanation prints: the ads that passed the filters (13: the 10 + the repeat + two unlicensed; the 50k typo and the down site are out) and the websites they came from (aqar, wasalt, sakan)
+  if (r.ads !== 13) out.push(`ads ${r.ads} ≠ 13 (a typo or a down site's row was counted as an ad, or a row was dropped)`);
+  if (r.sites !== 3) out.push(`sites ${r.sites} ≠ 3 (a down site counted as a source, or one missed)`);
   if (r.houses !== 11) out.push(`houses: ${r.houses} ≠ 11 (a house listed twice was counted twice, or the junk/down rows got in)`);
   if (Math.abs(r.p10 - 1.1 * M) > 1) out.push(`p10 ${r.p10} ≠ 1.1M`);
   if (Math.abs(r.median - 1.4 * M) > 1) out.push(`median ${r.median} ≠ 1.4M`);
@@ -108,7 +111,8 @@ const mustCatchStats = async (what: string, from: string, to: string) => {
   console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
 };
 await mustCatchStats('a house counted once per row', 'if (!cur || price < cur.price) best.set(key, { price, area });', 'best.set(`${key}|${best.size}`, { price, area });');
-await mustCatchStats('a down site counted', 'if (!platform || downSlugs.has(platform)) continue;', 'if (!platform) continue;');
+await mustCatchStats('the ad count including a junk-price row', 'if (!Number.isFinite(price) || price < PRICE_MIN || price > PRICE_MAX) continue;\n    ads++;\n    sites.add(platform);', 'ads++;\n    sites.add(platform);\n    if (!Number.isFinite(price) || price < PRICE_MIN || price > PRICE_MAX) continue;');
+await mustCatchStats('the website count counting every ad as a website', 'sites.add(platform);', "sites.add(platform + ads);");
 await mustCatchStats('a junk price counted', 'if (!Number.isFinite(price) || price < PRICE_MIN || price > PRICE_MAX) continue;', 'if (!Number.isFinite(price)) continue;');
 await mustCatchStats('numbers shown from a handful of houses', 'if (best.size < MIN_HOUSES) return null;', 'if (best.size < 1) return null;');
 await mustCatchStats('the type dropped from the dedupe key', 'const key = lic ? `${lic}|${type}|${area}` : `${platform}|${type}|${price}|${area}`;', 'const key = lic ? `${lic}|${area}` : `${platform}|${price}|${area}`;');
@@ -124,7 +128,7 @@ type Block = {
 const liftBlock = async (file: string): Promise<Block & Stats> => {
   const mod = await liftSymbols(file, [
     { header: 'const num = (', endsWith: /: NaN;$/ },
-    { header: 'const PRICE_MIN', endsWith: /;$/ }, { header: 'const PRICE_MAX', endsWith: /;$/ }, { header: 'const MIN_HOUSES', endsWith: /;$/ }, { header: 'const MOJ_MIN_DEALS', endsWith: /;$/ },
+    { header: 'export const PRICE_MIN', endsWith: /;$/ }, { header: 'export const PRICE_MAX', endsWith: /;$/ }, { header: 'const MIN_HOUSES', endsWith: /;$/ }, { header: 'const MOJ_MIN_DEALS', endsWith: /;$/ },
     { header: 'const percentile = (' },
     { header: 'export function askingPriceStats(' },
     { header: 'export function dearerSplit(' },
@@ -215,18 +219,50 @@ const tilesWired = (p: string) => /dearerSplit\(prices\.stats\.each, adPpm\)/.te
   // the sentence prints the EXACT counts and the glyphs read split.k; the duplicates wrap in two columns, no sideways scroll
   && /\{ n: fmtInt\(split\.n\), type: typePlural\(\), dearer: fmtInt\(split\.dearer\), cheaper: fmtInt\(split\.cheaper\) \}/.test(p) && /i < split\.k \? s\.houseUp : s\.houseDn/.test(p)
   && /sameRow: \{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 \}/.test(p) && !/<ScrollView horizontal[^>]*s\.sameRow/.test(p)
-  // each product tile is computed from the SHOWN figures (tileFromShown) and prints exactly those figures beneath it
-  && /fmtInt\(tileFromShown\(prices\.moj\.avgPpm, prices\.area\)\)/.test(p) && /fmtInt\(tileFromShown\(prices\.stats\.meanPpm, prices\.area\)\)/.test(p)
-  && /\$\{fmtInt\(prices\.moj\.avgPpm\)\} × \$\{fmtInt\(prices\.area\)\}/.test(p) && /\$\{fmtInt\(prices\.stats\.meanPpm\)\} × \$\{fmtInt\(prices\.area\)\}/.test(p)
+  // the tile is computed from the SHOWN figure (tileFromShown) and prints exactly those figures beneath it
+  && /fmtInt\(tileFromShown\(prices\.stats\.meanPpm, prices\.area\)\)/.test(p)
+  && /\$\{fmtInt\(prices\.stats\.meanPpm\)\} × \$\{fmtInt\(prices\.area\)\}/.test(p)
   // the split card prints our MEANS beside the ministry's means, and the same four labels on both halves
   && /fmtM\(st\.mean\)/.test(p) && /fmtInt\(st\.meanPpm\)/.test(p) && /fmtInt\(mj\.avgPpm\)/.test(p) && /labels\.map\(\(label, i\) => cell\(label, h\.rows\[i\]/.test(p)
   // the ministry half names its source and its window; a figure the row lacks is a hidden cell («—»), never an estimate
   && /h\.gov \? <Text[^>]*>\{t\('Source: Ministry of Justice'\)\}/.test(p) && /mj\.p10 != null && mj\.p90 != null \? `\$\{fmtM\(mj\.p10\)\} – \$\{fmtM\(mj\.p90\)\} \$\{t\('million'\)\}` : null/.test(p);
 check('the tiles multiply the shown averages by this ad’s area and k reads the deduped set', tilesWired(PREVIEW));
-sourceMutant('a tile recomputing the ministry’s per-m² figure', !tilesWired(PREVIEW.replace('tileFromShown(prices.moj.avgPpm, prices.area)', 'Math.round(prices.moj.avgDeal)')));
+sourceMutant('the listed tile recomputing the per-m² figure', !tilesWired(PREVIEW.replace('tileFromShown(prices.stats.meanPpm, prices.area)', 'Math.round(prices.stats.mean)')));
 sourceMutant('the duplicates row scrolling sideways again', !tilesWired(PREVIEW.replace("sameRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }", 'sameRow: { gap: 8 }')));
 sourceMutant('the sentence back to rounded tenths', !tilesWired(PREVIEW.replaceAll('dearer: fmtInt(split.dearer), cheaper: fmtInt(split.cheaper) }', 'dearer: split.k, cheaper: 10 - split.k }')));
-sourceMutant('a tile multiplying the unrounded figure instead of the shown one', !tilesWired(PREVIEW.replace('fmtInt(tileFromShown(prices.moj.avgPpm, prices.area))', 'fmtInt(Math.round(prices.moj.avgPpm * prices.area / 1000) * 1000)')));
+sourceMutant('a tile multiplying the unrounded figure instead of the shown one', !tilesWired(PREVIEW.replace('fmtInt(tileFromShown(prices.stats.meanPpm, prices.area))', 'fmtInt(Math.round(prices.stats.meanPpm * prices.area / 1000) * 1000)')));
+
+// ── HONEST LABELS (owner 2026-10-16: «accuracy, transparency, legal safety — no misleading comparisons») ─────────────
+// 1. NO tile may multiply the ministry's per-m² mean by THIS ad's area: the ministry's mean spans every deal it classified
+//    residential (it records no property type), so «villa area × that mean» reads as «what a similar villa sold for».
+// 2. The ministry's half says what it IS (its class, and that the type is not recorded) and never lists types it does not know.
+// 3. Our half lists EXACTLY the types the query uses; the explanation prints the ads / websites / properties from the stats
+//    object, the price band from the constants, and says the numbers are neighbourhood numbers, not a valuation.
+const I18N = readFileSync(join(ROOT, 'src/i18n.tsx'), 'utf8');
+const RESIDENTIAL_TYPES = (DATA_SRC.match(/export const RESIDENTIAL_GROUP_AR: readonly string\[\] = \[([^\]]*)\]/)?.[1] ?? '').split(',').map((x) => x.trim().replace(/['"]/g, '')).filter(Boolean);
+const labelsHonest = (p: string, i18n: string): string[] => {
+  const out: string[] = [];
+  if (/prices\.moj\.avgPpm,\s*prices\.area/.test(p) || /prices\.moj\.avg\w*\s*\*\s*prices\.area/.test(p) || /At the sold average/.test(p) || /At the sold average/.test(i18n))
+    out.push('a tile multiplies the ministry’s per-m² mean by this ad’s area («At the sold average»)');
+  if (/villas, apartments and land/.test(p) || /villas, apartments and land/.test(i18n)) out.push('the ministry’s half lists property types the ministry does not record');
+  if (!/Classified residential by the Ministry, which does not record the property type\./.test(p) || !/Classified commercial by the Ministry, which does not record the property type\./.test(p)) out.push('the ministry’s half does not say it records no property type');
+  if (!/All residential types listed for sale: \{types\}/.test(p) || !/\{ types: typesList \}/.test(p)) out.push('our half does not list the types it is made of');
+  for (const need of ['prices.group.ads', 'prices.group.sites', 'prices.group.houses', 'PRICE_MIN', 'PRICE_MAX', 'These are neighbourhood numbers. They are not a valuation of this property and not the sale price of a similar one.', "setExplainOpen((o) => !o)", 'listing-preview-prices-explain'])
+    if (!p.includes(need)) out.push(`the explanation is missing «${need}»`);
+  // our half's type list names every type the query uses (so adding a type to RESIDENTIAL_GROUP_AR fails here until the words follow)
+  const words: Record<string, string> = { 'فيلا': 'villas', 'شقة': 'apartments', 'دور': 'floors', 'أرض سكنية': 'residential land', 'عمارة': 'buildings', 'تاون هاوس': 'townhouses', 'ملحق علوي': 'rooftop annexes' };
+  const listed = p.match(/'(villas, apartments, floors[^']*)'/)?.[1] ?? '';
+  if (RESIDENTIAL_TYPES.length !== 7 || RESIDENTIAL_TYPES.some((t) => !words[t])) out.push(`RESIDENTIAL_GROUP_AR changed (${RESIDENTIAL_TYPES.join(' | ')}): update the words in the explanation`);
+  for (const t of RESIDENTIAL_TYPES) if (words[t] && !listed.includes(words[t])) out.push(`our type list omits «${words[t]}» (${t})`);
+  return out;
+};
+const honestReal = labelsHonest(PREVIEW, I18N);
+check('honest labels: no sold-average tile, the ministry half names its class, our half names its types, the explanation is wired', honestReal.length === 0, honestReal.join('\n      '));
+sourceMutant('the sold-average tile coming back', labelsHonest(PREVIEW + "\n<Text>{fmtInt(tileFromShown(prices.moj.avgPpm, prices.area))}</Text>", I18N).length > 0);
+sourceMutant('the ministry half listing types again', labelsHonest(PREVIEW.replace('Classified residential by the Ministry, which does not record the property type.', 'villas, apartments and land'), I18N).length > 0);
+sourceMutant('the explanation losing its «not a valuation» line', labelsHonest(PREVIEW.replace('These are neighbourhood numbers. They are not a valuation of this property and not the sale price of a similar one.', 'x'), I18N).length > 0);
+sourceMutant('our type list forgetting townhouses', labelsHonest(PREVIEW.replace('townhouses and rooftop annexes', 'and rooftop annexes'), I18N).length > 0);
+sourceMutant('the explanation hiding the number of ads', labelsHonest(PREVIEW.replace('prices.group.ads', '0'), I18N).length > 0);
 
 // ── the tile equals the formula it displays (owner: a reader who multiplies the two printed numbers gets our number) ──
 type Tile = (ppm: number, area: number) => number;
