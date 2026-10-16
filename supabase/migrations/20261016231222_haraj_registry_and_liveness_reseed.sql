@@ -1,6 +1,7 @@
 -- Haraj joins the fleet registry (owner 2026-10-16: «licensed ads only»): its platform_registry row (what was
 -- MEASURED, including the traps), its ops_liveness_registry row (CANDIDATE_PLUS_DIRECT — the same entry as
--- scrapers/common/liveness_policies.py and sql/mirrors/liveness_registry.json), and its 2-hourly crawl dispatch.
+-- scrapers/common/liveness_policies.py and sql/mirrors/liveness_registry.json). The 2-hourly dispatch is its own
+-- migration, applied once haraj-sync.yml is on main (a dispatch of a workflow main lacks fails).
 -- No other platform's row changes (the reseed below re-writes the same values it already holds).
 insert into public.platform_registry (platform, status, kind, expected_cadence_hours, window_days, notes)
 values ('haraj', 'active', 'source', 4, 7,
@@ -28,14 +29,6 @@ on conflict (platform) do update
 delete from public.ops_liveness_registry
 where platform not in ('aalbarrak','abaad','abeea','abralosol','abwbna','akariyoun','alajlan','albdah','albukaeri','aldarim','alhoshan','alhumaidan','aljassim','alkhaas','almotmkenah','almuteb','alobid','alqasem','alrifai','alsaedan','alshawaf','alsidra','alta','amaall','amlakalahsa','aouj','aqalemhajer','aqar','aqaralriyadh','aqaralsaudia','aqaratikom','aqarcity','aqargate','aqarmonthly','aqarnajran','arkaan','arsh','ashab','awal','azdad','azure','bahadhabab','bossbih','compoundin','dallali','daraa','daryusuf','dealapp','dwelleo','eaqartabuk','earthapp','eastabha','ebriza','ego','eightfloor','eilmalriyada','erapulse','expattrusted','eydah','fahadalshahri','fkralemar','flow','fursaghyr','gathern','goldendeal','gomenassat','gudai','hajer','haraj','hasaad','hazim','holoul','ialqarawi','ibaax','jawher','jazwtn','jurash','justsa','ksaaqar','livingcompound','m3tmd','macsaib','maktab','manafe','manzo','maqam','maqrat','marksa','masar','mizlaj','mobasher','moftah','muajarh','muhaysini','muktamel','mustqr','nafithh','nawafeth','nofodh','nowaisiry','nufouth','october','opensooq','qmra','raghdan','rakez','ramzalqasim','rawaf','rawasidark','razre','reinvest','remal','remaxsa','rightcompound','ryadah','sadin','sadiqeltajer','safa','safera','sakan','sakani','sanadak','satel','senan','shatri','shmoualshmal','shomou','sirdab','snam','sodasyat','sokok','souq24','sqcc','squares','sukna','superoffice','suwar','tamyaz','tawia','therc','thousand','tuba','villassa','vmksa','wadod','wahadat','wajaf','wasalt','wslnaa','yameen');
 
-do $sched$
-begin
-  if not exists (select 1 from cron.job where jobname = 'gh-haraj-sync') then
-    -- :05 of every odd hour — clear of the :20/:22 search refresh + sync; a 2-file run takes ~45 min.
-    perform cron.schedule('gh-haraj-sync', '5 1-23/2 * * *', $c$select public.trigger_gh_workflow('haraj-sync.yml')$c$);
-  end if;
-end $sched$;
-
 do $verify$
 begin
   if not exists (select 1 from public.platform_registry where platform = 'haraj' and status = 'active' and kind = 'source') then
@@ -44,8 +37,5 @@ begin
   if not exists (select 1 from public.ops_liveness_registry where platform = 'haraj' and strategy = 'CANDIDATE_PLUS_DIRECT') then
     raise exception 'haraj has no CANDIDATE_PLUS_DIRECT liveness registry row';
   end if;
-  if not exists (select 1 from cron.job where jobname = 'gh-haraj-sync' and command like '%haraj-sync.yml%') then
-    raise exception 'gh-haraj-sync is not scheduled';
-  end if;
-  raise notice 'haraj: registry row, liveness row and the 2-hourly dispatch are in place';
+  raise notice 'haraj: registry row and liveness row are in place';
 end $verify$;
