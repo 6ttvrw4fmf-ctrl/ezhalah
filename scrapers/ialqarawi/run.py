@@ -574,6 +574,13 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
     area_m2, area_skip = parse_area(f.get("مساحة الأرض"))
     som, som_ppm, som_skip = parse_money(f.get("سعر السوم"))
     lim, lim_ppm, lim_skip = parse_money(f.get("سعر الحد"))
+    # «سعر السوم: 0» is the CURRENT BID on an ad nobody has bid on yet, not an asking price (🦅 Falcon
+    # 2026-10-16, backlog 316: ids 556 and 557 print «سعر السوم 0» beside «سعر الحد: على السوم» and were
+    # served as Buy ads at «0 ر.س» for weeks). No bid is no figure. Because the page WAS read and printed
+    # that 0, the silence is written as AUTHORITATIVE_NULL below, so a stored 0 cannot survive the upsert.
+    zero_bid = som == 0
+    if zero_bid:
+        som = None
     # «سعر السوم» is the figure being asked/bid, «سعر الحد» the seller's floor — the السوم wins when
     # both are stated, and additional_info always records WHICH one the card is showing.
     price, price_basis = ((som, "سعر السوم") if som is not None
@@ -634,7 +641,7 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         if period:
             row["rent_period"] = period
     else:
-        row["price_total"] = price
+        row["price_total"] = price if (price is not None or not zero_bid) else db.AUTHORITATIVE_NULL
     row["additional_info"] = {k: v for k, v in {
         "property_number": f.get("رقم العقار"),
         "category_ar": cat_ar,
