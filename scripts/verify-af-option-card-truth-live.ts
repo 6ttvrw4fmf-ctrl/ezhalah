@@ -58,6 +58,7 @@
 
 import { chromium } from 'playwright';
 import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
+import { dismissStrayOverlay } from './lib/liveClick.ts';
 import { gotoLive } from './lib/liveNav.ts';
 import { buildOracleQS, AMENITY_TOKEN_COL } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
@@ -931,7 +932,13 @@ try {
   for (let hop = 0; hop < 8 && searches.length === armed3; hop++) {
     const open = await page.evaluate(() => !!document.querySelector('[data-testid="af-card"]'));
     if (!open) break;
-    const hq = await page.evaluate(() => (document.querySelector('[data-testid="af-card"] [data-testid="af-question-title"]') as any)?.innerText?.trim() || '');
+    // The title is read once it has rendered (up to 4 s): a card mid-transition reads empty, and a question
+    // missed here would read «a question is still unasked» against a spent pool (seen once, 2026-10-16).
+    let hq = '';
+    for (let w = 0; w < 10 && !hq; w++) {
+      hq = await page.evaluate(() => (document.querySelector('[data-testid="af-card"] [data-testid="af-question-title"]') as any)?.innerText?.trim() || '');
+      if (!hq) await page.waitForTimeout(400);
+    }
     if (hq) asked3.add(hq);
     const sk = await page.$('[data-testid="af-skip"]');
     if (!sk) break;
@@ -939,6 +946,7 @@ try {
     await page.waitForTimeout(1200);
   }
   poolBurnedBySkips = roundClosed && seenQ.length > 0 && seenQ.every((q) => asked3.has(q));
+  console.log(`      [diag] session-2 questions answered or skipped: ${[...asked3].join(' | ')} · round-1 pool: ${seenQ.join(' | ')} · pool spent=${poolBurnedBySkips}`);
   landed = await waitForSearch(armed3, 40_000, (s) => afKeysOn(s.body).length > 0);
   check('3. confirming the answer produced a search', !!landed);
   if (!landed) throw new Error('no search after confirm');
@@ -1007,7 +1015,18 @@ try {
     }
     if (!btn) break;
     const shownBefore: number = (await page.evaluate(READ_TURN_CARDS, SENTENCE_SRC)).length;
-    await btn.click();
+    // A BUTTON THAT WILL NOT TAKE A CLICK IS RETRIED ONCE, THE WAY A PERSON WOULD (🔬 2026-10-16, backlog 597).
+    // A local production run spent Playwright's whole 30 s waiting on the first «عرض المزيد» and died as a
+    // harness error. Close a listing a stray tap may have opened, find the button again, try once more.
+    try {
+      await btn.click({ timeout: 10_000 });
+    } catch {
+      await dismissStrayOverlay(page);
+      await scrollToBottom();
+      const again = (await page.$$('[data-testid="results-load-more"]')).at(-1);
+      if (!again) break;
+      await again.click({ timeout: 10_000 });
+    }
     clicks++;
     // OBSERVE THE REVEAL SETTLING; NEVER SAMPLE A MOVING CASCADE (owner rule, 2026-09-06: the
     // ten-second searching beat is INTENTIONAL product behaviour, so an AF/Trending journey observes
