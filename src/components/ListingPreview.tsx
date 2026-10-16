@@ -845,12 +845,12 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             testID="listing-preview-map-close"
             onPress={closeMap}
             accessibilityRole="button"
-            accessibilityLabel={t('Close')}
+            accessibilityLabel={t('Back')}
             style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
             // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
             dataSet={{ ...TAP44 }}
           >
-            <Ionicons name="close" size={22} color={colors.ink} />
+            <Ionicons name={isRTL ? 'arrow-forward' : 'arrow-back'} size={22} color={colors.ink} />
           </Pressable>
         </View>
       ) : null}
@@ -891,12 +891,12 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             testID="listing-preview-similar-close"
             onPress={closeSimilar}
             accessibilityRole="button"
-            accessibilityLabel={t('Close')}
+            accessibilityLabel={t('Back')}
             style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
             // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
             dataSet={{ ...TAP44 }}
           >
-            <Ionicons name="close" size={22} color={colors.ink} />
+            <Ionicons name={isRTL ? 'arrow-forward' : 'arrow-back'} size={22} color={colors.ink} />
           </Pressable>
         </View>
       ) : null}
@@ -940,12 +940,12 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             testID="listing-preview-moj-deals-close"
             onPress={closeDeals}
             accessibilityRole="button"
-            accessibilityLabel={t('Close')}
+            accessibilityLabel={t('Back')}
             style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
             // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
             dataSet={{ ...TAP44 }}
           >
-            <Ionicons name="close" size={22} color={colors.ink} />
+            <Ionicons name={isRTL ? 'arrow-forward' : 'arrow-back'} size={22} color={colors.ink} />
           </Pressable>
         </View>
       ) : null}
