@@ -564,3 +564,11 @@ def test_wasalt_structured_rows_are_read_as_labelled_lines():
     out = compare_listing({"area_m2": 96, "bedrooms": 3}, p)
     assert out["area"] == MATCH and out["bedrooms"] == MATCH
     assert compare_listing({"area_m2": 120}, p)["area"] == MISMATCH
+
+
+def test_wasalt_photo_classifier_labels_are_not_the_ads_statement():
+    from scrapers.common.af_score import wasalt_page
+    data = {"props": {"pageProps": {"propertyDetailsV3": {"classificationData": [
+        {"classificationScore": 0.99, "classificationName": "kitchen", "name": "a.jpg"}]}}}}
+    p = wasalt_page("https://wasalt.sa/en/property/x", fetch=lambda url: (data, 200, 0))
+    assert not any("kitchen" in x for x in p["evidence_lines"])

@@ -251,7 +251,9 @@ def findable(rows: list[dict] | None, source_table: str, listing_id: int) -> boo
 
 
 # Keys under propertyDetailsV3 that can hold a person or a contact: never read (PDPL).
-_WASALT_SKIP = re.compile(r"agent|broker|owner|advertiser|user|phone|mobile|whats|email|contact|licen|\bid$|_id$|uuid",
+# «classification» = wasalt's PHOTO classifier («classificationName»: «kitchen», «bathroom» per image): a model's guess
+# about a picture, not the advertiser's statement, so it never counts as the page saying the ad has one (🆕 2026-10-16).
+_WASALT_SKIP = re.compile(r"agent|broker|owner|advertiser|user|phone|mobile|whats|email|contact|licen|classification|\bid$|_id$|uuid",
                           re.I)
 
 
