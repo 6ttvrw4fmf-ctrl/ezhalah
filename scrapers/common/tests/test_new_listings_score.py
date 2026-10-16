@@ -551,3 +551,16 @@ def test_muktamel_rooms_come_from_its_offer_record():
     assert out["bedrooms"] == MATCH and out["bathrooms"] == MATCH
     assert muktamel_room_lines("https://www.muktamel.com/real-estates/1", fetch=lambda i: None) == []
     assert muktamel_room_lines("https://example.test/x", fetch=lambda i: got) == []
+
+
+def test_wasalt_structured_rows_are_read_as_labelled_lines():
+    # 17926766 (2026-10-16, re-read 38925580390): builtUpArea «96» = ours, while the REGA deed text names a land share.
+    from scrapers.common.af_score import wasalt_page
+    data = {"props": {"pageProps": {"propertyDetailsV3": {
+        "regaMojDesc": "حي قرطبة بمدينة الرياض  مساحة الوحدة من الأرض 51.52 متر",
+        "attributes": [{"key": "noOfBedrooms", "name": "Bedrooms", "value": 3},
+                       {"key": "builtUpArea", "name": "Built-Up Area", "value": "96", "unit": "SQM"}]}}}}
+    p = wasalt_page("https://wasalt.sa/en/property/x", fetch=lambda url: (data, 200, 0))
+    out = compare_listing({"area_m2": 96, "bedrooms": 3}, p)
+    assert out["area"] == MATCH and out["bedrooms"] == MATCH
+    assert compare_listing({"area_m2": 120}, p)["area"] == MISMATCH
