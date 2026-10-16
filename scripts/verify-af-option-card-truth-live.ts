@@ -108,11 +108,11 @@ const REVEAL_SETTLE_MS = AGENT_TURN_MS;
 const ID_CAP = 30000;
 
 const AF_PREDICATE_KEYS = [
-  'p_bath_min', 'p_bath_exact', 'p_age_min', 'p_age_max', 'p_is_new_construction', 'p_age_unknown',
+  'p_bath_min', 'p_bath_exact', 'p_age_min', 'p_age_max', 'p_is_new_construction', 'p_age_unknown', 'p_age_buckets',
   'p_amenities', 'p_furnished', 'p_rating_min', 'p_reviews_min', 'p_unit_subtypes',
   'p_street_width_min', 'p_street_width_max', 'p_directions', 'p_rnpl',
 ];
-const AGE_KEYS = ['p_age_min', 'p_age_max', 'p_is_new_construction'];
+const AGE_KEYS = ['p_age_min', 'p_age_max', 'p_is_new_construction', 'p_age_buckets'];
 const SCOPE_KEYS = ['p_cities', 'p_types', 'p_deal', 'p_rent_period', 'p_category'];
 // Every non-AF key that narrows a search: a pill click, a confirm or a later page may move NONE of them.
 const SCOPE_ALL_KEYS = [...SCOPE_KEYS, 'p_tables', 'p_tables2', 'p_types2', 'p_region_ids', 'p_districts', 'p_platforms',
@@ -139,6 +139,7 @@ const EXPECTED_LABEL: Record<string, string[]> = {
   yes: ['مفروشة', 'مفروش'], no: ['غير مفروشة'],
   '9.5': ['9.5+'], '9.0': ['9.0+'], '9.0_rc10': ['9.0+ مع 10 تقييمات'],
   'استديو': ['استديو'], 'شقق مخدومة': ['شقة مخدومة'], 'شقة': ['شقة عادية'],
+  upto2: ['حتى سنتين'], upto5: ['حتى ٥ سنوات'], upto9: ['حتى ٩ سنوات'],
   new: ['جديد'], '1_2': ['1-2 سنوات'], '3_5': ['3-5 سنوات'], '6_9': ['6-9 سنوات'], '10p': ['10 سنوات فأكثر'],
 };
 
@@ -189,6 +190,18 @@ const OPTION_COL: Record<string, { rpc: Rpc; col: string }> = {
   'شقة': { rpc: 'guided', col: 'cnt_sub_regular' },
   new: { rpc: 'age', col: 'cnt_new' }, '1_2': { rpc: 'age', col: 'cnt_1_2' }, '3_5': { rpc: 'age', col: 'cnt_3_5' },
   '6_9': { rpc: 'age', col: 'cnt_6_9' }, '10p': { rpc: 'age', col: 'cnt_10p' },
+  // THE «UP TO» AGE LADDER (owner 2026-10-05, src/data/advancedFilters.ts AGE_LADDER). Each option's
+  // pill is the exact SUM of the disjoint buckets under it, and its query is p_age_buckets. A `+` in
+  // `col` names that sum. Unknown to this file until 2026-10-16, so every run failed «unknown key»
+  // on three correct options (af-card-state, runs 38723916365 and 38878124643).
+  upto2: { rpc: 'age', col: 'cnt_new+cnt_1_2' }, upto5: { rpc: 'age', col: 'cnt_new+cnt_1_2+cnt_3_5' },
+  upto9: { rpc: 'age', col: 'cnt_new+cnt_1_2+cnt_3_5+cnt_6_9' },
+};
+/** The count a spec reads off a count row: one column, or the sum a `+`-joined spec names. */
+const specValue = (row: any, col: string): number =>
+  row == null ? NaN : col.split('+').reduce((s, c) => s + Number(row?.[c]), 0);
+const AGE_LADDER_BUCKETS: Record<string, string[]> = {
+  upto2: ['new', '1_2'], upto5: ['new', '1_2', '3_5'], upto9: ['new', '1_2', '3_5', '6_9'],
 };
 const DIRECTION_KEYS = new Set(['شمال', 'جنوب', 'شرق', 'غرب', 'شمال شرق', 'شمال غرب', 'جنوب شرق', 'جنوب غرب']);
 const BATH_KEYS = new Set(['1', '2', '3', '4']);
@@ -209,6 +222,7 @@ const predicateFor = (key: string, base: any): Record<string, unknown> => {
   if (key === '9.5') return { p_rating_min: Math.max(9.5, Number(base?.p_rating_min ?? 0)) };
   if (key === '9.0') return { p_rating_min: Math.max(9, Number(base?.p_rating_min ?? 0)) };
   if (key === '9.0_rc10') return { p_rating_min: Math.max(9, Number(base?.p_rating_min ?? 0)), p_reviews_min: Math.max(10, Number(base?.p_reviews_min ?? 0)) };
+  if (AGE_LADDER_BUCKETS[key]) return { p_is_new_construction: null, p_age_min: null, p_age_max: null, p_age_buckets: AGE_LADDER_BUCKETS[key] };
   if (key === 'new') return { p_is_new_construction: true, p_age_min: null, p_age_max: null };
   if (key === '1_2') return { p_is_new_construction: null, p_age_min: 1, p_age_max: 2 };
   if (key === '3_5') return { p_is_new_construction: null, p_age_min: 3, p_age_max: 5 };
@@ -712,7 +726,7 @@ const proveQuestion = async (label: string, st: CardState, ctxBody: any, ctxTota
     if (!spec) return;
     o.col = spec.col;
     const c = pairCount(spec.rpc, ctxBody);
-    o.rpcVal = c ? Number(c.row?.[spec.col]) : NaN;
+    o.rpcVal = c ? specValue(c.row, spec.col) : NaN;
     const body = { ...ctxBody, ...predicateFor(o.key, ctxBody) };
     const { count, unhandled } = await oracleCount(body);
     o.oracle = count; o.unhandled = unhandled;
@@ -795,6 +809,7 @@ try {
   {
     const family = (col: string) => col.startsWith('cnt_bath') ? 'p_bath_min' : col.startsWith('cnt_stw') ? 'p_street_width_min' : col.startsWith('cnt_dir_') ? 'p_directions'
       : col.startsWith('cnt_sub_') ? 'p_unit_subtypes' : col.startsWith('cnt_rating') ? 'p_rating_min' : col === 'cnt_unfurnished' ? 'p_furnished'
+      : col.includes('+') ? 'p_age_buckets'
       : ['cnt_new', 'cnt_1_2', 'cnt_3_5', 'cnt_6_9', 'cnt_10p'].includes(col) ? (col === 'cnt_new' ? 'p_is_new_construction' : 'p_age_min') : null;
     const drift = Object.entries(OPTION_COL).filter(([key, spec]) => {
       const p = predicateFor(key, {});
@@ -820,6 +835,7 @@ try {
     throw new Error('AF did not open — the card assertions cannot run');
   }
   const seenQ: string[] = [];
+  let poolBurnedBySkips = false;
   let roundEnd: Search | null = null;
   let roundClosed = false;
   let roundCardNeverArrived = false;
@@ -907,14 +923,20 @@ try {
   const armed3 = searches.length;
   await page.click('[data-testid="af-confirm"]');
   await page.waitForTimeout(1200);
+  // Every question this session answered or skipped — so section 4 can tell «the pool is spent»
+  // (R8.1.3 → R11.2, AF retired by contract) from «a question is still unasked» (a stranded user).
+  const asked3 = new Set<string>([q1.q].filter(Boolean) as string[]);
   for (let hop = 0; hop < 8 && searches.length === armed3; hop++) {
     const open = await page.evaluate(() => !!document.querySelector('[data-testid="af-card"]'));
     if (!open) break;
+    const hq = await page.evaluate(() => (document.querySelector('[data-testid="af-card"] [data-testid="af-question-title"]') as any)?.innerText?.trim() || '');
+    if (hq) asked3.add(hq);
     const sk = await page.$('[data-testid="af-skip"]');
     if (!sk) break;
     await sk.click();
     await page.waitForTimeout(1200);
   }
+  poolBurnedBySkips = roundClosed && seenQ.length > 0 && seenQ.every((q) => asked3.has(q));
   landed = await waitForSearch(armed3, 40_000, (s) => afKeysOn(s.body).length > 0);
   check('3. confirming the answer produced a search', !!landed);
   if (!landed) throw new Error('no search after confirm');
@@ -1121,9 +1143,21 @@ try {
       check('4. R10.1.1 — at the cap the pager is RETIRED (zero «عرض المزيد» anywhere in the DOM)',
         pagerEls === 0,
         `revealed=${revealed} of ${landed.total} at the ${SECOND_PAGE_CAP} cap, but ${pagerEls} «عرض المزيد» element(s) remain — pressing again would mount past the only proven-safe size`);
-      check('4. R10.1.1 — at the cap the user is NOT stranded: «تحديد أكثر» offers the forward path',
-        narrowEls > 0,
-        `revealed=${revealed} of ${landed.total} at the cap, pager retired, and NO «تحديد أكثر» — ${(landed.total ?? 0) - revealed} eligible listing(s) are unreachable from this turn`);
+      // THE CONTRACT DECIDES WHEN «تحديد أكثر» MAY BE ABSENT (🔬 2026-10-16). Section 2 walked EVERY
+      // question of the round with Skip, and section 3 skipped out the rest, so this session has
+      // burned the whole pool (R8.1.3: a skipped question is never asked again). R11.2 then retires
+      // AF, so an absent offer HERE is the contract working, not a stranded user. It failed every
+      // run from 10-14 to 10-16 (runs 38723916365, 38878124643) against a correct production. An
+      // absent offer is a defect only while a question is still unasked, which this journey can
+      // never reach, so it is reported as NOT EXERCISED, never as PASS. A present offer still passes.
+      if (narrowEls > 0 || !poolBurnedBySkips) {
+        check('4. R10.1.1 — at the cap the user is NOT stranded: «تحديد أكثر» offers the forward path',
+          narrowEls > 0,
+          `revealed=${revealed} of ${landed.total} at the cap, pager retired, and NO «تحديد أكثر» — ${(landed.total ?? 0) - revealed} eligible listing(s) are unreachable from this turn`);
+      } else {
+        skip('4. R10.1.1 — at the cap the user is NOT stranded: «تحديد أكثر» offers the forward path',
+          `NOT EXERCISED: this journey skipped all ${seenQ.length} question(s) of the round (R8.1.3), so R11.2 retires AF by contract; the offer can only be judged while a question is unasked`);
+      }
     }
   }
 
