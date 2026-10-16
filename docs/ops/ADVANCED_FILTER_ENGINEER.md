@@ -232,6 +232,24 @@ lists you with your 120-minute cap.
    (c) open AF backlog count at the end vs at your start.
    If any of the three is worse than last night, the report's first line says which and why, and tomorrow's self-note names the
    one change of approach that fixes it. A night that is not measurably better is never rated above 8.
+7. **The 10-13 run was not good enough (owner, 2026-10-13: «keep doing a better job on every run»). Fix rate fell
+   to 2 proven of 7 new (from 8 of 14). These four orders win over any other order in this file:**
+   - **Fix the worst site FIRST, not last.** Read tonight's `ops_af_score` worst site × field in the first 10 minutes and
+     start on it before any proof-chasing or tool diagnosis. On 10-13 alsaedan (0 of 8) was started at minute 85, so its
+     fix could only be «pending».
+   - **Every parser fix ships with its data half before :22.** Parser + NULL-only back-fill from the row's own captured
+     evidence + mirror, applied before the hourly :22 sync, so the proof lands the same night. A fix whose proof needs a
+     merge and a crawl counts as «pending», never as fixed. Plan the night around the two syncs inside the window
+     (09:22 and 10:22 UTC): first fix applied by 09:20, second batch by 10:20.
+   - **Tool diagnosis is time-boxed at 15 minutes per red check.** Reproduce the one failing cell alone; if it passes,
+     record it as measurement and move on. On 10-13 three of the night's reds were the tools (Trending detector, matrix,
+     score), and chasing them ate the time the worst site needed.
+   - **Never pull a huge CI log into context.** `get_job_logs` saves it to a file; parse it with python at once. Never
+     write SQL text with semicolons or parentheses in a string (the connector hangs, 60 s lost twice on 10-13). Read the
+     clock from the database (`now() - start row`), not the container.
+   - Measured target for the next run: proven ÷ found ≥ 60%, worst site moved and proven live, touched-site findability
+     re-scored in a dry run before the end.
+
 6. **Tonight's lessons (10-12), so they are not learned twice:**
    - Two live AF checks were red because the MEASURING TOOL was wrong (the «Raw Land» tag, the nested age ladder), not the product.
      Reproduce one failing cell with `AF_MATRIX_ONLY=… AF_MATRIX_MODES=…` before touching any RPC.
