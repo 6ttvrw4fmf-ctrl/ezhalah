@@ -686,7 +686,13 @@ def _line(r: dict) -> str:
     return (f"{r['platform']}: sampled={r['sampled']} decided_ads={r['decided_ads']} "
             f"normal={_pct(normal_accuracy(r))} af_precision={_pct(af_precision(r))} "
             f"af_recall={_pct(af_recall(r))} mismatches={len(r['mismatch_ids'])}"
-            + (f" | {r['note']}" if r["note"] else ""))
+            + (f" | {r['note']}" if r["note"] else "")
+            # Which field and which ad: without these the log names a cap but not its cause, and every
+            # mismatch had to be re-derived by hand (10-16: wasalt 92.9% with 6 mismatches, no ids printed).
+            + "".join(f"\n    {name}: " + " ".join(f"{k}={v}" for k, v in c.items() if v and k != MATCH)
+                      for name, c in sorted((r.get("fields") or {}).items())
+                      if c.get(MISMATCH) or c.get(WE_MISS))
+            + (f"\n    ids: {' '.join(r['mismatch_ids'])}" if r["mismatch_ids"] else ""))
 
 
 def main() -> int:
