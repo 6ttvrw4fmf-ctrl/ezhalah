@@ -572,3 +572,12 @@ def test_wasalt_photo_classifier_labels_are_not_the_ads_statement():
         {"classificationScore": 0.99, "classificationName": "kitchen", "name": "a.jpg"}]}}}}
     p = wasalt_page("https://wasalt.sa/en/property/x", fetch=lambda url: (data, 200, 0))
     assert not any("kitchen" in x for x in p["evidence_lines"])
+
+
+def test_sanadak_structured_area_beats_its_approximate_prose():
+    # 17944027 (2026-10-16): lotSize 105.6 (page «مساحة العقار 105.6 م²»), description «المساحة : 120م تقريبا».
+    from scrapers.common.af_score import sanadak_page
+    o = {"title": "شقة للإيجار في الرياض قرطبة 2 غرفة", "lotSize": 105.6, "numberBedrooms": 2,
+         "description": "الموقع : الرياض حي قرطبة\nالمساحة : 120م تقريبا"}
+    p = sanadak_page("https://sanadak.sa/property-details/x", fetch=lambda url: (o, "", url))
+    assert compare_listing({"area_m2": 105, "bedrooms": 2}, p)["area"] == MATCH

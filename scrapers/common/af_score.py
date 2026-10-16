@@ -364,6 +364,14 @@ def sanadak_page(url: str, fetch=None) -> dict | None:
     texts = [str(o.get(x)).strip() for x in ("title", "city", "district", "description", "propertyTypeText",
                                                "listingTypeText") if o.get(x)]
     lines = [y.strip() for t in texts for y in t.splitlines() if y.strip()]
+    # The listing object's own structured counts, labelled the way its page prints them («مساحة العقار 105.6 م²»).
+    # Without them only the description was read, and 17944027's «المساحة : 120م تقريبا» scored our structured
+    # 105 (lotSize 105.6) wrong (🆕 2026-10-16, re-read run 38927458882).
+    for label, key in (("مساحة العقار م²", "lotSize"), ("عدد غرف النوم", "numberBedrooms"),
+                       ("عدد دورات المياه", "numberBathrooms")):
+        v = o.get(key)
+        if isinstance(v, (int, float, str)) and not isinstance(v, bool) and str(v).strip():
+            lines.insert(0, f"{label} {v}")
     return {"title": o.get("title"), "meta": {}, "jsonld": [{"additionalProperty": props}],
             "evidence_lines": lines[:200], "text_head": " | ".join(lines)[:1500]}
 
