@@ -726,8 +726,11 @@ _STOPS: list[str] = []
 _EMPTY_PAGE_RETRY_PAUSE_S = float(os.environ.get("WASALT_EMPTY_PAGE_RETRY_PAUSE_S", "8"))
 # Re-asks of a valid empty mid-walk page, each on a fresh proxy exit (2026-10-16, backlog 532).
 _EMPTY_PAGE_RETRIES = int(os.environ.get("WASALT_EMPTY_PAGE_RETRIES", "1"))
-# Consecutive pages the source serves empty before the walk gives up on the slice.
-_MAX_EMPTY_PAGES_IN_A_ROW = int(os.environ.get("WASALT_MAX_EMPTY_PAGES_IN_A_ROW", "3"))
+# Consecutive pages the source serves empty before the walk gives up on the slice. The empty
+# pages come in CLUSTERS and the catalogue answers again after them: the 10-16 third proof sweep
+# read villa-townhouse/rent's pages 20-25 after empty 16, 18, 19 (30 -> 630 rows), while three
+# slices gave up at 3 in a row (apartment/rent 8-10, villa/sale 7-9, floor/sale 3-5).
+_MAX_EMPTY_PAGES_IN_A_ROW = int(os.environ.get("WASALT_MAX_EMPTY_PAGES_IN_A_ROW", "10"))
 # Pages a cache-busted re-ask answered after the plain URL served them empty, printed in the
 # run's notes: the evidence for (or against) the stored-empty-render explanation.
 _ROUTE_ROTATIONS_RECOVERED: list[str] = []
