@@ -538,3 +538,16 @@ def test_wasalt_and_sanadak_are_read_from_their_own_record_not_the_shell():
     row = score_site(client, "wasalt", [("wasalt_residential_listings", 9)], night="2026-10-16", pace=0,
                      probe=shell, wasalt=lambda url: None, sanadak=lambda url: None)
     assert row["unreadable_pages"] == 1 and row["normal_mismatch"] == 0
+
+
+def test_muktamel_rooms_come_from_its_offer_record():
+    from scrapers.common.new_listings_score import muktamel_room_lines
+    got = (34519, {"offer": {"bedRoomsCount": 4, "bathroomsCount": 4}}, True)
+    lines = muktamel_room_lines("https://www.muktamel.com/real-estates/34519", fetch=lambda i: got)
+    assert lines == ["عدد غرف النوم 4", "عدد دورات المياه 4"]
+    # 17886575 (2026-10-16): stored 4/4, the description's prose says otherwise; the offer is the ad.
+    p = page(*lines, "شقة 3 غرف نوم و 2 حمام")
+    out = compare_listing({"bedrooms": 4, "bathrooms": 4}, p)
+    assert out["bedrooms"] == MATCH and out["bathrooms"] == MATCH
+    assert muktamel_room_lines("https://www.muktamel.com/real-estates/1", fetch=lambda i: None) == []
+    assert muktamel_room_lines("https://example.test/x", fetch=lambda i: got) == []

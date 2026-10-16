@@ -566,8 +566,33 @@ def no_district_backlog(client) -> dict:
     return out
 
 
+def muktamel_room_lines(url: str, fetch=None) -> list[str]:
+    """muktamel's own room counts, from the offer record its page renders (backlog #547, 2026-10-16).
+
+    The page is client-rendered: its «غرف النوم» / «دورات المياه» exist only inside a minified Nuxt payload the
+    reader cannot see (re-read run 38918001860), so the score compared our structured bedRoomsCount /
+    bathroomsCount with the description's prose and called 17886543 / 17886575 wrong. These lines restate the
+    offer's own fields; [] when the record cannot be read (unknown, never wrong)."""
+    m = re.search(r"/real-estates/(\d+)", url or "")
+    if not m:
+        return []
+    if fetch is None:
+        from scrapers.muktamel.run import fetch_one as fetch
+    try:
+        got = fetch(int(m.group(1)))
+    except Exception:  # noqa: BLE001
+        return []
+    offer = ((got[1] if got else None) or {}).get("offer") or {}
+    out = []
+    for label, key in (("عدد غرف النوم", "bedRoomsCount"), ("عدد دورات المياه", "bathroomsCount")):
+        v = offer.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            out.append(f"{label} {int(v)}")
+    return out
+
+
 def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: str,
-               pace: float = PACE_S, probe=None, wasalt=None, sanadak=None) -> dict:
+               pace: float = PACE_S, probe=None, wasalt=None, sanadak=None, muktamel=None) -> dict:
     if probe is None:
         # Imported here, not at module level: af_score and its hermetic check load this module with
         # source_reread stubbed, and they always pass their own probe.
@@ -619,6 +644,9 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
+        if "muktamel.com" in url:
+            extra = (muktamel or muktamel_room_lines)(url)
+            page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
         fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
                                        prose_only_district=platform in PROSE_ONLY_DISTRICT), stored)
     if row["unreadable_pages"]:
