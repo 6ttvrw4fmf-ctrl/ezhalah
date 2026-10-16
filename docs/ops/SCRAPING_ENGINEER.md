@@ -48,16 +48,20 @@ their exception text; `select date_trunc('day',started_at), sum(rows_seen) from 
 'wasalt_enum%' group by 1`.
 
 **Owed → first thing next run:**
-- **wasalt enumeration (532/569, P1, 4th night).** 10-16 finding from the 10-15 enum's own notes: every shard stopped on a
-  VALID empty page (count=0 totalPages=0) at a DIFFERENT depth (page 2, 3, 6, 7, 8, 10, 14, 18, 21, 23). A source cap would
-  stop them all at one page; this is the one sticky proxy exit each shard holds being throttled. PR (10-16) re-asks an
-  empty page up to 3× on a FRESH exit (`rotate_route()` → `BoundedBrowserFetcher.recycle()`), and writes «fresh exit
-  recovered N empty page(s)» into the notes. Read: (1) the 10-16 proof sweep (`wasalt-residential-sweep.yml`, input
-  `pages=25`) — per-slice `rows_upserted` vs 750 and the «fresh exit recovered» notes; (2) the 10-17 21:00 UTC enum:
-  sum ≥ 100,000 = fixed (write the proof row). If fresh exits are ALSO empty, the throttle is per-account/per-session,
-  not per-exit: next step is a pause-and-resume (sleep 60-120 s on the empty page) and fewer parallel shards.
-  Side finding to check: every COMMERCIAL slug reports the same count (rent 1,893 / sale 329) — the type filter looks
-  ignored for commercial; compare 3 commercial slices' first ids before trusting their counts.
+- **wasalt enumeration (532/569, P1, 4th night) — ROOT CAUSE MEASURED 10-16.** Every slice stops on a VALID empty
+  page (count=0 totalPages=0) that is NOT a cap (stops at page 2..23), NOT a throttled exit (3 fresh exits: 0 of 10
+  stops recovered, run 38919794892) and NOT a stored render (cache-busted re-ask: 0 recovered, second sweep). It is
+  DETERMINISTIC per page: floor/rent, villa/sale and villa/rent stopped on the same page (2, 6, 2) twenty minutes
+  apart, and floor/sale (2 → 3) and apartment/rent (7 → 8) moved down by exactly one page as new ads arrived at the
+  top: one listing whose page the source cannot render, sliding down the catalogue. The third PR (10-16) re-asks once,
+  then SKIPS that page and keeps walking (stops after 3 empty pages in a row); a slice with skipped pages stays
+  TRUNCATED (ok=false), so the roll-up (ok shards only) still strikes nothing. Notes say «skipped N empty page(s) the
+  source could not render: …». Read: (1) the third proof sweep (`wasalt-residential-sweep.yml`, `pages=25`):
+  per-slice `rows_upserted` should approach 750; (2) the 10-17 21:00 UTC enum: rows read (sum of ALL shards' rows_seen,
+  ok or not) ≥ 100,000 = intake fixed (proof row + a new wasalt ad found in the Filter). The roll-up will still REFUSE
+  while any page is skipped: deciding whether a shard missing ≤ 1% of its pages may count as complete is the next
+  step (it feeds strikes, so prove it with ♻️ first). Commercial side finding: every commercial slug reports the same
+  count (rent 1,893 / sale 329), so the type filter looks ignored for commercial. Compare 3 slices' first ids.
 - **576 dangling-run remediation (class bug, backlog 584).** Detector raises at 3 h, remediation only closes > 12 h, so
   every dangling row escalates to a P0. The tested patch is `docs/ops/pending/2026-10-16-dangling-remediation-at-
   detector-threshold.sql.txt` (its self-test fails on the live function). It was NOT applied: `apply_migration` waits
