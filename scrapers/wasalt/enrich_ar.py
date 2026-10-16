@@ -130,6 +130,31 @@ def _extract(pdv: dict) -> tuple[dict, Optional[str], Optional[str]]:
 PROSE_ONLY = ("elevator", "air_conditioner", "private_entrance")
 
 
+# Two shapes measured on the first backfill (2,849 elevator YES, 4 wrong, 2026-10-16):
+#  · some descriptions carry the two CHARACTERS «\\n» instead of a line break, so html_block_lines() saw one long
+#    line and a «تأسيس مصعد» bullet shared a clause with the next bullet (442940, 526753);
+#  · a LABELLED line, «المصعد: لا يوجد مصعد» / «المصعد: غير راكب، ويوجد تأسيس للمصعد», let the label word itself vote
+#    YES (9313822, 11923578). When the value after a short label says no / not installed / prepared, the label is
+#    not a statement: only the value is read, so the line resolves to NULL.
+_LITERAL_NL = "\\n"
+_LABEL_LINE = re.compile(r"^\s*([^:\n]{1,24}):\s*(.+)$")
+_NO_WORDS = re.compile(r"(?<![ء-ي\w])(?:و?غير|لا|بدون|تأسيس|مؤسس)(?![ء-ي])")
+
+
+_NOT_INSTALLED = {
+    "elevator": re.compile(r"(?:تأسيس|مؤسس|مهيأ|غير\s+راكب)\S*\s*(?:ل|لل|ال)?مصعد|مصعد\s*(?:مؤسس|غير\s+راكب)"),
+    "air_conditioner": re.compile(r"(?:تأسيس|مؤسس)\S*\s*(?:ل|لل|ال)?(?:مكيف|تكييف)|(?:مكيفات|تكييف)\s*(?:مؤسس|غير\s+راكب)"),
+}
+
+
+def _statement_lines(text: str) -> str:
+    out = []
+    for line in text.split("\n"):
+        m = _LABEL_LINE.match(line)
+        out.append(m.group(2) if m and _NO_WORDS.search(m.group(2)) else line)
+    return "\n".join(out)
+
+
 def prose_amenities(d: Any) -> dict[str, bool]:
     """{column: True} for the PROSE_ONLY amenities this ad's own description states; {} otherwise."""
     if not isinstance(d, dict) or "_err" in d:
@@ -139,7 +164,13 @@ def prose_amenities(d: Any) -> dict[str, bool]:
         return {}
     # Imported here, not at module top: the enrich barriers stub `scrapers.common` with only `db`.
     from scrapers.common import normalize
-    found = normalize.prose_amenities_yes(normalize.html_block_lines(desc))
+    lines = _statement_lines(normalize.html_block_lines(desc.replace(_LITERAL_NL, "\n")))
+    found = normalize.prose_amenities_yes(lines)
+    # An ad that ANYWHERE calls the fixture prepared-only or not installed has not stated YES, whatever another
+    # line implies («مدخل مرورا بالمصعد» beside «مؤسس مصعد», 526753): unknown, never YES.
+    for col, rx in _NOT_INSTALLED.items():
+        if found.get(col) and rx.search(lines):
+            found.pop(col)
     return {k: True for k in PROSE_ONLY if found.get(k) is True}
 
 
@@ -170,6 +201,21 @@ def prose_backfill(c: Any, table: str, page: int = 500, cap: int = 20000) -> dic
                     c.table(table).update({col: True}).eq("id", r["id"]).is_(col, "null").execute()
                     written += 1
         out[col] = written
+        # RE-CHECK what an earlier reader wrote: a YES whose own description no longer reads YES under the
+        # current reader goes back to unknown. Only this module writes these three wasalt columns (run.py maps
+        # none of them), so a YES here is always one of ours to re-judge.
+        unset, last = 0, 0
+        while True:
+            rows = (c.table(table).select(f"id,desc:{_DESC}").eq("active", True).eq(col, True)
+                    .gt("id", last).order("id").limit(page).execute().data or [])
+            if not rows:
+                break
+            last = rows[-1]["id"]
+            for r in rows:
+                if not prose_amenities({"propertyInfo": {"description": r.get("desc")}}).get(col):
+                    c.table(table).update({col: None}).eq("id", r["id"]).eq(col, True).execute()
+                    unset += 1
+        out[f"{col}_unset"] = unset
     return out
 
 
