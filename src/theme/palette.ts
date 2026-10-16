@@ -157,6 +157,7 @@ export function buildThemeCss(): string {
     // subtree root beats every :root block above for everything inside it — both dark paths.
     `[data-ez-light]{${decl(lightColors)}color-scheme:light;}`,
     TAP_TARGET_CSS,
+    TAP44_DOWN_CSS,
     COMPOSER_PLACEHOLDER_CSS,
   ].join('\n');
 }
@@ -208,6 +209,18 @@ export const TAP_TARGET_CSS =
   `[data-tap44]::after{content:"";position:absolute;top:50%;left:50%;`
   + `transform:translate(-50%,-50%);width:100%;height:100%;`
   + `min-width:${TAP_TARGET_MIN}px;min-height:${TAP_TARGET_MIN}px;z-index:-1;}`;
+
+/** A SECOND, DIRECTIONAL marker (🦅 Falcon 2026-10-16): the floor grows DOWN from the control's top edge
+ *  instead of out from its centre. For a short control parked just under another one, a centred 44px
+ *  box reaches UP into its neighbour's own visual area. Measured on production at 375px: the agent
+ *  composer's «شاهين 2.2» line (24px tall, 3px under the 34px mic) grew 10px up and took the mic's
+ *  bottom edge — a press on the mic opened the model menu (journey-sweep tap-targets-meet-44, red
+ *  daily). Stacking the row above it only moved the theft onto the model line's top edge (the mic's
+ *  own floor grows 5px down); growing the model line downward fixes both: all five probe points then
+ *  resolve to their own control, and the extra area lands on the disclaimer text, not a control.
+ *  Used WITH TAP44 (it only re-anchors the same overlay); a separate rule so TAP_TARGET_CSS stays one. */
+export const TAP44_DOWN = { tap44Down: '1' } as const;
+export const TAP44_DOWN_CSS = '[data-tap44-down]::after{top:0;transform:translate(-50%,0);}';
 
 /** The opt-in marker, spread into a control's `dataSet`. It lives beside the rule that implements
  *  it so the attribute and the CSS can never drift apart, and so a barrier can import both.

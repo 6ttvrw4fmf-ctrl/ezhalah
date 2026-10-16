@@ -8,6 +8,7 @@
 // EXIT CODE: non-zero when any journey found a DEFECT. Never read it through a pipe (§41.12
 // corollary: `… | tail` reports tail's status) — redirect to a file and read $?.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
+import { readFileSync } from 'node:fs';
 import { withPage, settle, bodyText, storedHistory, clickText, clickReason, sleep, defect, note, pass,
          findings, skips, skip, passes, classifyRunOutcome, classifyBlockedControl,
          ledgerRecord, registerJourneys, engineAvailable, openMobileSidebar,
@@ -2970,9 +2971,19 @@ JOURNEYS['expired-token-still-opens-the-gate'] = async (mobile) => {
   // poll until the pair stops changing, from a budget generous enough to clear auth-js's own retry
   // window (30 000 ms) — the fix is supposed to beat that by 5×, and the point is to measure whether
   // it does, not to give it a deadline it cannot miss.
+  // THE WATCH MAY NOT END BEFORE THE PRODUCT'S OWN BOUND HAS HAD ITS CHANCE (🦅 Falcon 2026-10-16). The loop
+  // used to stop after three identical reads, i.e. ~4 s in, while the product deliberately holds the gate
+  // up to GETSESSION_TIMEOUT_MS AFTER MOUNT (6 s + bundle load + the cards' entrance). Reproduced on
+  // production that day, blocked-refresh arm: 0/0 at 3 s and 8 s, 1/1 at 15 s — the gate opened, the
+  // journey had already stopped looking and filed «never opened» every day for 19 days. The floor is
+  // READ from src/lib/sessionRestore.ts so it moves with the product, plus a 10 s load/animation margin.
+  const boundMs = Number((readFileSync(new URL('../../src/lib/sessionRestore.ts', import.meta.url), 'utf8')
+    .match(/GETSESSION_TIMEOUT_MS\s*=\s*([\d_]+)/) || [])[1]?.replace(/_/g, ''));
+  if (!Number.isFinite(boundMs) || boundMs <= 0) throw new Error('GETSESSION_TIMEOUT_MS not readable from src/lib/sessionRestore.ts');
+  const minWatch = Math.ceil((boundMs + 10_000) / 1000);
   const gateState = async (page) => {
     let last = null, stable = 0;
-    for (let i = 0; i < 40 && stable < 3; i++) {
+    for (let i = 0; i < 40 && (stable < 3 || i < minWatch); i++) {
       await sleep(1000);
       const now = await page.evaluate(() => ({
         cookie: document.querySelectorAll('[data-testid="cookie-consent"]').length,
