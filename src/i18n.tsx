@@ -1286,6 +1286,7 @@ const AR: Record<string, string> = {
   'Ministry of Justice': 'وزارة العدل',
   'Source: Ministry of Justice': 'المصدر: وزارة العدل',
   'Open the Ministry of Justice page in a new tab': 'افتح صفحة وزارة العدل في نافذة جديدة',
+  'To see the same sales in the ministry’s report: open «Source: Ministry of Justice», then choose in its filters Region / City / District: {path}, property class: {cls}, and the period {from} to {to}. The report cannot open already filtered.': 'لرؤية نفس الصفقات في تقرير الوزارة: افتح «المصدر: وزارة العدل»، ثم اختر في فلاترها المنطقة / المدينة / الحي: {path}، وتصنيف العقار: {cls}، والفترة من {from} إلى {to}. التقرير لا يُفتح مفلتراً مسبقاً.',
   'Price per m²: {n} SAR': 'سعر المتر: {n} ر.س',
   'Of {n} {type} listed in the district: {dearer} cost more per m² than this ad, and {cheaper} less': 'من {n} {type} معروضة في الحي: {dearer} أغلى للمتر من هذا الإعلان، و{cheaper} أرخص',
   'Price in the ad': 'السعر في الإعلان',

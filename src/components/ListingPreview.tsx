@@ -637,6 +637,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                       {prices.moj ? bullet(t(commercial
                         ? 'Actual sales: the deals recorded by the Ministry of Justice in the period shown, with its numbers unchanged. The Ministry classifies each deal as residential or commercial and does not record the property type, so the figures cover every deal it classified commercial in this district.'
                         : 'Actual sales: the deals recorded by the Ministry of Justice in the period shown, with its numbers unchanged. The Ministry classifies each deal as residential or commercial and does not record the property type, so the figures cover every deal it classified residential in this district; villa, apartment and land deals are not separated.')) : null}
+                      {prices.moj?.path ? bullet(t('To see the same sales in the ministry’s report: open «Source: Ministry of Justice», then choose in its filters Region / City / District: {path}, property class: {cls}, and the period {from} to {to}. The report cannot open already filtered.', { path: prices.moj.path, cls: commercial ? 'تجاري' : 'سكني', from: prices.moj.from, to: prices.moj.to })) : null}
                       {bullet(t('These are neighbourhood numbers. They are not a valuation of this property and not the sale price of a similar one.'))}
                     </View>
                   ) : null}

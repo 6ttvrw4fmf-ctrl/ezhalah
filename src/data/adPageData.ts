@@ -197,8 +197,8 @@ export function isSameAd(own: AdRow, other: AdRow): boolean {
 }
 
 // ── the ministry's actual sales ──────────────────────────────────────────────────────────────────
-export type MojRow = { deals?: unknown; avg_deal?: unknown; avg_ppm?: unknown; p10_deal?: unknown; p90_deal?: unknown; window_from?: string | null; window_to?: string | null; source_refreshed_at?: string | null };
-export type MojFacts = { deals: number; avgDeal: number; avgPpm: number; p10: number | null; p90: number | null; from: string; to: string };
+export type MojRow = { moj_region?: string | null; moj_area?: string | null; deals?: unknown; avg_deal?: unknown; avg_ppm?: unknown; p10_deal?: unknown; p90_deal?: unknown; window_from?: string | null; window_to?: string | null; source_refreshed_at?: string | null };
+export type MojFacts = { path: string | null; deals: number; avgDeal: number; avgPpm: number; p10: number | null; p90: number | null; from: string; to: string };
 const MOJ_MIN_DEALS = 10;
 
 /** The ministry's numbers as the card shows them — unaltered; the period from the ROW's own two dates. Null under 10 deals. */
@@ -211,7 +211,13 @@ export function mojFacts(row: MojRow | null | undefined): MojFacts | null {
   // The ministry's own per-deal spread, when the job has filled it; a half-filled pair is no spread.
   const p10 = num(row.p10_deal), p90 = num(row.p90_deal);
   const spread = Number.isFinite(p10) && Number.isFinite(p90) && p10 > 0 && p90 >= p10;
-  return { deals, avgDeal, avgPpm, p10: spread ? p10 : null, p90: spread ? p90 : null, from, to };
+  // Where to find these sales in the ministry's own report: its hierarchical filter is Region / City / District, and the
+  // ministry's area value reads «city/district» (الرياض/الملقا). The public report cannot be opened pre-filtered (Power BI
+  // «publish to web» ignores URL filters — tested 2026-10-16), so the reader is told the exact picks instead.
+  const region = String(row.moj_region ?? '').trim();
+  const [city, district] = String(row.moj_area ?? '').split('/').map((x) => x.trim());
+  const path = region && city && district ? `${region} / ${city} / ${district}` : null;
+  return { path, deals, avgDeal, avgPpm, p10: spread ? p10 : null, p90: spread ? p90 : null, from, to };
 }
 
 const mojCache = new Map<string, Promise<MojFacts | null>>();
@@ -223,7 +229,7 @@ export function fetchMojSales(row: AdRow | null, cls: MojClass = 'سكني'): Pr
   let p = mojCache.get(key);
   if (!p) {
     p = boundedRpc<MojRow[]>(
-      supabase.from('moj_district_sales').select('deals,avg_deal,avg_ppm,p10_deal,p90_deal,window_from,window_to,source_refreshed_at')
+      supabase.from('moj_district_sales').select('moj_region,moj_area,deals,avg_deal,avg_ppm,p10_deal,p90_deal,window_from,window_to,source_refreshed_at')
         .eq('city_ar', row.city_ar).eq('district_ar', row.district_ar).eq('property_class', cls).limit(1),
     ).then(({ data, error }) => {
       if (error) { mojCache.delete(key); return null; }
