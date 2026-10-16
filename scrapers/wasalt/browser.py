@@ -432,6 +432,10 @@ class BoundedBrowserFetcher:
             except Exception:
                 pass
 
+    def recycle(self) -> None:
+        """Drop the browser process; the next call starts a new one on a new sticky proxy exit."""
+        self._discard()
+
     def page_data(self, url: str) -> tuple[Optional[dict], Optional[int], int]:
         return self._call("page_data", url, _NO_ANSWER)
 
