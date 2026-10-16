@@ -191,6 +191,23 @@ MEASURED_LABELS = {
 }
 
 
+def test_a_zero_site_total_beside_a_positive_rate_is_not_a_total():
+    """Falcon 2026-10-16: the live pages of nids 12209, 13994, 14199, 10372, 14144 print «المتر» 1 / 200 / 4 / 3 /
+    250 ريال and a «الإجمالي» block reading 0 — the site multiplying the rate by an empty area field. Taken as a
+    published total it put all six back at «0 ر.س» a week after the 2026-10-09 fix. Mutation: without the
+    zero guard price_total is 0 and this fails."""
+    for rate in (1, 200, 250):
+        row, _c, _w = mapped("أرض    للبيع في حرض    ",
+                             fields=[("als-r2", "list-string", "المتر")], price=rate, site_total=0)
+        assert row["price_per_meter"] == rate
+        assert row["price_total"] is db.AUTHORITATIVE_NULL, f"rate {rate}: a 0 total is the calculator, not the ad"
+    # A real published total is still kept, and a real 0 RATE is not this case.
+    row, _c, _w = mapped("أرض    للبيع في حرض    ",
+                         fields=[("almsaha", "decimal", "المساحة 428 م"), ("als-r2", "list-string", "المتر")],
+                         price=1300, site_total=556400)
+    assert row["price_total"] == 556400
+
+
 def test_no_label_containing_almitr_is_ever_read_as_a_total():
     """The invariant behind PRICE_LABELS' ordering, over every label the catalogue actually uses.
     «المتر على السوم» (nid 12673: 2,500 on a 548 m² plot) matched «على السوم» and was booked as a
