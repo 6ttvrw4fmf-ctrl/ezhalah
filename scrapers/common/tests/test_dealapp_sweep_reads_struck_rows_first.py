@@ -49,3 +49,26 @@ def test_probe_order_puts_struck_before_never_probed():
              "last_liveness_probe_at": "2026-10-12"}]
     rows.sort(key=lambda r: L._probe_order(r, None))
     assert [r["id"] for r in rows] == [2, 1]
+
+
+def _rows(n, struck, start=0):
+    return [{"id": start + i, "listing_url": f"u/ad-details/{start + i}", "missing_count": 2 if struck else 0,
+             "last_liveness_probe_at": "2026-10-16"} for i in range(n)]
+
+
+def test_struck_rows_cannot_take_the_whole_budget():
+    """2026-10-16: 959 struck rows > --limit 600, so every run re-read 600 UNKNOWN struck rows and the
+    28,203 unstruck rows got no reading for 8 days (alive 0, checked in time 96% -> 56.5%)."""
+    plan = L._plan_worklist(_rows(959, True) + _rows(2000, False, 10_000), 600)
+    assert len(plan) == 600
+    assert sum(r["missing_count"] > 0 for r in plan) == 150
+    assert plan[0]["missing_count"] > 0, "struck rows still lead"
+
+
+def test_an_unused_share_goes_to_the_other_side():
+    plan = L._plan_worklist(_rows(10, True) + _rows(2000, False, 10_000), 600)
+    assert len(plan) == 600 and sum(r["missing_count"] > 0 for r in plan) == 10
+    plan = L._plan_worklist(_rows(959, True) + _rows(100, False, 10_000), 600)
+    assert len(plan) == 600 and sum(r["missing_count"] == 0 for r in plan) == 100
+    small = _rows(5, True) + _rows(5, False, 100)
+    assert L._plan_worklist(small, 600) == small

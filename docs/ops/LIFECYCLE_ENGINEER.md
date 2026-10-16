@@ -1119,6 +1119,12 @@ or rewrite another engineer's work, and never start a big change in another engi
   «available» from CI, source-reread 38893210922). Those pages now join the main walk
   (`struck_unlisted_projects`), so every answer, live included, is recorded. When a struck cohort
   grows after a fix, check which answers the new reader throws away.
+- **2026-10-16 (♻️):** «struck rows first» needs a ceiling. dealapp's sweep put every struck row ahead
+  of the rotation (10-12); once 959 struck rows outnumbered its 600-read budget, every run re-read
+  the same struck shells (all UNKNOWN) two hours apart and the 28,203 unstruck rows got no reading
+  for 8 days: alive 3,508/day → 0, checked in time 96% → 56.5%, while the canaries stayed 3/3.
+  Struck rows now get at most a quarter of the budget (`_plan_worklist`). A sweep whose alive count
+  falls to 0 with healthy canaries is reading the wrong rows, not a dead site.
 
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the

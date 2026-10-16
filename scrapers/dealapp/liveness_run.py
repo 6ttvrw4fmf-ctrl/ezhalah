@@ -176,6 +176,29 @@ def _probe_order(r: dict, sitemap) -> tuple:
             -sitemap_candidate_rank(_adid(r["listing_url"]), sitemap) if sitemap else 0)
 
 
+# A QUARTER OF THE BUDGET FOR STRUCK ROWS, NEVER ALL OF IT (2026-10-16, ♻️). Struck-first (10-12)
+# had no ceiling: once more struck rows existed than one run reads (959 on 10-16 > --limit 600),
+# every run re-read the same 600 struck rows two hours after the last read (all UNKNOWN: dealapp
+# serves a removed ad the bogus-id shell), and the 28,203 unstruck rows got no sweep reading from
+# 10-08 on — alive 3,508/day on 10-11 → 0 on 10-16, checked-in-time 96% → 56.5%. Struck rows still
+# lead, inside their share; any share they do not use goes to the rotation, and vice versa.
+STRUCK_SHARE = 0.25
+
+
+def _plan_worklist(cands: list[dict], limit: int) -> list[dict]:
+    """Take at most STRUCK_SHARE of `limit` from struck rows (in their sorted order), fill the rest
+    from the rotation, and give any unused share to whichever side still has rows. Order only:
+    nothing is added, nothing is decided."""
+    if not limit or len(cands) <= limit:
+        return cands
+    struck = [r for r in cands if (r.get("missing_count") or 0) > 0]
+    rest = [r for r in cands if not (r.get("missing_count") or 0) > 0]
+    k = min(len(struck), max(1, int(limit * STRUCK_SHARE)))
+    take_rest = min(len(rest), limit - k)
+    k = min(len(struck), limit - take_rest)
+    return struck[:k] + rest[:take_rest]
+
+
 BOGUS_ADID = "999999999"
 
 
@@ -322,7 +345,7 @@ def main() -> int:
         # last_liveness_probe_at, so they head every window and are dropped again — 567 active rows
         # had never been opened once (backlog #84, unchanged 10-05 → 10-06).
         cands.sort(key=lambda r: _probe_order(r, sitemap))
-        cands = cands[:args.limit] if args.limit else cands
+        cands = _plan_worklist(cands, args.limit)
 
         # Every write goes through db._execute: a dropped HTTP/2 connection (ConnectionTerminated)
         # on ONE update killed the 2026-10-06 06:49 run after 600 reads, so none of its verdicts
