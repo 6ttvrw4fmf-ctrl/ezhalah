@@ -84,7 +84,7 @@ export const WELCOME_LINES: readonly WelcomeLine[] = [
   { id: 40, when: 'any', needs: ['top2'], ar: '{n}، أنشط مدينتين في المملكة الحين: {c1} و{c2}. ابدأ منهما مع إزهله.', en: "{n}, the Kingdom's two most active cities right now: {c1} and {c2}. Start there with Ezhalah." },
   // THE USER'S OWN DISTRICT (owner 2026-10-17: «include districts»). Only for a user whose last search
   // picked a district; that district's live count and rank inside its city. No line promises to watch
-  // or alert — Ezhalah has no such feature. The district is always named (never the word «حيك»).
+  // or alert — Ezhalah has no such feature. The district is always NAMED (owner rule: no second-person word for it).
   { id: 41, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، {myDistrict} فيه {myDistrictMore} إعلان الحين. شوف الجديد مع إزهله.', en: '{n}, {myDistrict} has {myDistrictMore} listings right now. See what is new with Ezhalah.' },
   { id: 42, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، {myDistrict} فيه {myDistrictMore} إعلان من أصل {cityExact} في {city}. تصفحها مع إزهله.', en: '{n}, {myDistrict} has {myDistrictMore} of the {cityExact} listings in {city}. Browse them with Ezhalah.' },
   { id: 43, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، {myDistrict} رقم {myRank} في {city} بعدد الإعلانات. اكتشفه مع إزهله.', en: '{n}, {myDistrict} is number {myRank} in {city} by listings. Explore it with Ezhalah.' },
