@@ -388,9 +388,10 @@ operating on the restored turns' own embedded queries and paging state.
 
 Owner-approved web behaviour (2026-10-03): Deal App and Gathern open their real pages in plain
 iframes, with their own headers unchanged. No proxy, header stripping, or framing bypass is permitted.
-Owner 2026-10-16: more sites open the same way, with no new design. On 2026-10-16, 47 more hosts were
-added to `IN_APP_VIEWER_HOSTS` (49 in all). ryadah.com.sa and wahadat.sa were added and then removed after
-the live guard caught them (ryadah refuses framing for phones, and wahadat took ~6 s from the US runner). A host joins only after a live frame proof, which means
+Owner 2026-10-16: more sites open the same way, with no new design. On 2026-10-16, 46 more hosts were
+added to `IN_APP_VIEWER_HOSTS` (48 in all). ryadah.com.sa, wahadat.sa and just.sa were added and then
+removed after the live guard caught them: ryadah refuses framing for phones, wahadat took ~6 s from the
+US runner, and most of just's sampled ads were removed at source («ليس لديك صلاحيات»). A host joins only after a live frame proof, which means
 two live ads framed like AdViewer, a top-level control load, and a calibration where Aqar and Wasalt
 must fail. It must also show its ad within about 2 s on phone 4G, so `e2e/viewer/speed-live.mjs`
 (which must list every host) stays green. A host that later refuses framing or turns slow comes off
