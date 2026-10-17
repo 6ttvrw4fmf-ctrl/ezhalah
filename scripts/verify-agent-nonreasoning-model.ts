@@ -40,10 +40,25 @@ if (!m) {
 }
 
 // 2. max_tokens must leave real headroom. 800 is the exact value that broke production.
-const t = src.match(/max_tokens:\s*(\d+)/);
-if (!t) failures.push("could not find max_tokens in the DeepSeek payload");
+const t = src.match(/const DEEPSEEK_MAX_TOKENS\s*=\s*(\d+)/);
+if (!t) failures.push("could not find DEEPSEEK_MAX_TOKENS (the DeepSeek payload's max_tokens)");
 else if (Number(t[1]) < 1200) {
-  failures.push(`max_tokens is ${t[1]}; must be >= 1200. A truncated JSON body fails JSON.parse and 502s the whole turn.`);
+  failures.push(`DEEPSEEK_MAX_TOKENS is ${t[1]}; must be >= 1200. A truncated JSON body fails JSON.parse and 502s the whole turn.`);
+}
+if (!/max_tokens:\s*prov\.maxTokens/.test(src)) {
+  failures.push("the model payload no longer sends max_tokens: prov.maxTokens — the per-provider ceiling would not apply.");
+}
+
+// 2b. GROQ GPT-OSS IS A REASONING MODEL (owner chose it, 2026-10-17). This file's own rule for a
+// deliberate move to a reasoning model applies: the ceiling must sit well past the measured reasoning
+// burn (≥4000), and the reasoning must be held to "low" so a classification turn stays short.
+const g = src.match(/const GROQ_MAX_TOKENS\s*=\s*(\d+)/);
+if (!g) failures.push("could not find GROQ_MAX_TOKENS");
+else if (Number(g[1]) < 4000) {
+  failures.push(`GROQ_MAX_TOKENS is ${g[1]}; must be >= 4000. GPT-OSS spends hidden reasoning tokens from this ceiling — the 2026-08-28 empty-reply outage.`);
+}
+if (!/const GROQ_REASONING_EFFORT\s*=\s*"low"/.test(src) || !/reasoning_effort:\s*GROQ_REASONING_EFFORT/.test(src)) {
+  failures.push('Groq must send reasoning_effort: GROQ_REASONING_EFFORT with GROQ_REASONING_EFFORT = "low".');
 }
 
 // 3. Truncation must stay diagnosable — finish_reason has to reach the error payload.
@@ -56,4 +71,4 @@ if (failures.length) {
   for (const f of failures) console.error("  - " + f);
   process.exit(1);
 }
-console.log(`verify-agent-nonreasoning-model: OK — non-reasoning alias "${m?.[1]}", max_tokens ${t?.[1]}, finish_reason surfaced.`);
+console.log(`verify-agent-nonreasoning-model: OK — DeepSeek non-reasoning alias "${m?.[1]}" @ ${t?.[1]}; Groq reasoning "low" @ ${g?.[1]}; finish_reason surfaced.`);

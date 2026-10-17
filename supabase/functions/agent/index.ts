@@ -50,8 +50,31 @@ const DEEPSEEK_MODEL = Deno.env.get("DEEPSEEK_MODEL") ?? "deepseek-chat";
 // DeepSeek says it actually billed — is recorded per call in public.ai_usage.model and watched by
 // mon_detect_ai_cost_health(). Widening this list is an owner cost decision, not a fix for an alert.
 // Mirrors public.ai_spend_config.allowed_models; pinned by scripts/verify-ai-spend-safety.ts.
-const ALLOWED_MODELS = ["deepseek-chat", "deepseek-v4-flash"];
+const ALLOWED_MODELS = ["deepseek-chat", "deepseek-v4-flash", "openai/gpt-oss-20b"];
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
+const DEEPSEEK_MAX_TOKENS = 1500;
+
+// GROQ — the owner-decided replacement for DeepSeek (owner 2026-10-17: «replace DeepSeek with Groq
+// GPT-OSS 20B»). Same OpenAI-compatible request, same prompt, same JSON mode, same rules; only the
+// address, key and model differ. GPT-OSS ALWAYS reasons — the trap the MODEL CHOICE note above
+// describes — so it runs with reasoning_effort "low" AND a ceiling far past the measured reasoning
+// burn (≥4000, scripts/verify-agent-nonreasoning-model.ts), never DeepSeek's 1500.
+const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY") ?? "";
+const GROQ_MODEL = Deno.env.get("GROQ_MODEL") ?? "openai/gpt-oss-20b";
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_MAX_TOKENS = 4000;
+const GROQ_REASONING_EFFORT = "low";
+// THE PROVIDER SWITCH — a ROLLBACK lever for the cut-over, not a coexistence layer. AI_PROVIDER is a
+// Supabase secret: "deepseek" (default — unset or anything else) or "groq". Flipping it, either way,
+// needs no redeploy. Once Groq is proven in production, DeepSeek's integration is removed and this
+// switch goes with it (Git keeps it recoverable).
+const AI_PROVIDER: "deepseek" | "groq" = (Deno.env.get("AI_PROVIDER") ?? "").trim().toLowerCase() === "groq" ? "groq" : "deepseek";
+type ModelProvider = { name: "deepseek" | "groq"; url: string; key: string; model: string; maxTokens: number; extra: Record<string, unknown> };
+function modelProvider(name: "deepseek" | "groq"): ModelProvider {
+  return name === "groq"
+    ? { name, url: GROQ_URL, key: GROQ_API_KEY, model: GROQ_MODEL, maxTokens: GROQ_MAX_TOKENS, extra: { reasoning_effort: GROQ_REASONING_EFFORT } }
+    : { name, url: DEEPSEEK_URL, key: DEEPSEEK_API_KEY, model: DEEPSEEK_MODEL, maxTokens: DEEPSEEK_MAX_TOKENS, extra: {} };
+}
 
 // Deterministic post-model rules (owner ruling 2026-08-29). Pure functions, unit-tested and
 // mutation-proven by scripts/verify-agent-postmodel-rules.ts. The model proposes; these decide.
@@ -879,8 +902,16 @@ Deno.serve(async (req: Request) => {
     return json({ error: "unauthorized" }, 401);
   }
 
-  if (!DEEPSEEK_API_KEY) {
-    recordHealth("model_not_configured", 0);
+  // Which model answers this turn. The AI_PROVIDER secret decides for everyone. One exception lets the
+  // cut-over be tested on the live function while users stay on the default: a request that carries
+  // the SERVICE-ROLE key as its bearer (never present in the app bundle — only our own test scripts
+  // hold it) may ask for a provider with `x-ezhalah-provider`. Any other caller's header is ignored.
+  const askedProvider = (req.headers.get("x-ezhalah-provider") ?? "").trim().toLowerCase();
+  const trustedCaller = !!SERVICE_KEY && token === SERVICE_KEY;
+  const prov = modelProvider(trustedCaller && (askedProvider === "groq" || askedProvider === "deepseek") ? askedProvider : AI_PROVIDER);
+
+  if (!prov.key) {
+    recordHealth("model_not_configured", 0, { provider: prov.name });
     // Tell the client to fall back to its bundled heuristic.
     return json({ error: "model not configured" }, 503);
   }
@@ -1012,9 +1043,9 @@ Deno.serve(async (req: Request) => {
       //    change (ours or the provider's) could point it at a reasoning/pro tier costing 3x, and
       //    the first evidence would be the bill. An unrecognised model is not a call we are willing
       //    to pay for, so we do not make it. Deterministic, no false positives.
-      if (!ALLOWED_MODELS.includes(DEEPSEEK_MODEL)) {
-        recordHealth("model_not_allowlisted", 0, { requested_model: DEEPSEEK_MODEL, allowed: ALLOWED_MODELS });
-        return { __err: json({ error: "model not allowlisted", requested_model: DEEPSEEK_MODEL }, 503) };
+      if (!ALLOWED_MODELS.includes(prov.model)) {
+        recordHealth("model_not_allowlisted", 0, { requested_model: prov.model, allowed: ALLOWED_MODELS });
+        return { __err: json({ error: "model not allowlisted", requested_model: prov.model }, 503) };
       }
 
       // 2. SPEND CIRCUIT BREAKER — authoritative, server-side, atomic. ai_spend_gate() checks the
@@ -1025,7 +1056,7 @@ Deno.serve(async (req: Request) => {
       //    unbounded one, and the product survives it — the client falls back to its deterministic
       //    offline heuristic, and Normal Filter, Advanced Filter, pagination and sort never call the
       //    model at all. The AI degrades; the balance does not drain.
-      const headers = { Authorization: `Bearer ${DEEPSEEK_API_KEY}`, "content-type": "application/json" };
+      const headers = { Authorization: `Bearer ${prov.key}`, "content-type": "application/json" };
       const messages = [
         // CACHE PREFIX INVARIANT — do not reorder. SYSTEM must be the FIRST content in the FIRST
         // message and byte-identical every request, because DeepSeek's prefix cache is what makes an
@@ -1038,16 +1069,18 @@ Deno.serve(async (req: Request) => {
         ...cts.map((c) => ({ role: c.role === "model" ? "assistant" : "user", content: c.parts.map((p) => p.text).join("\n") })),
       ];
       const payload = JSON.stringify({
-        model: DEEPSEEK_MODEL,
+        model: prov.model,
         messages,
         temperature: 0.3,
-        // A non-reasoning turn spends ~100–250 tokens; 1500 is generous headroom for a long Arabic
-        // reply (Arabic tokenizes heavier than English) without inviting a truncated JSON body.
-        // A truncation here is NOT recoverable — a half-written object fails JSON.parse and the whole
-        // turn 502s, so the ceiling must never be tight. See the MODEL CHOICE note at the top.
-        max_tokens: 1500,
+        // A non-reasoning turn spends ~100–250 tokens; 1500 (DEEPSEEK_MAX_TOKENS) is generous headroom
+        // for a long Arabic reply (Arabic tokenizes heavier than English) without inviting a truncated
+        // JSON body. Groq's GPT-OSS also spends hidden reasoning tokens from this same ceiling, so it
+        // gets GROQ_MAX_TOKENS. A truncation here is NOT recoverable — a half-written object fails
+        // JSON.parse and the whole turn 502s, so the ceiling must never be tight. See MODEL CHOICE.
+        max_tokens: prov.maxTokens,
         // Guarantees the reply parses as JSON; does NOT constrain keys/values (see JSON_SHAPE_HINT).
         response_format: { type: "json_object" },
+        ...prov.extra,
       });
       let res: Response | null = null;
       const t0 = Date.now();
@@ -1061,14 +1094,14 @@ Deno.serve(async (req: Request) => {
           recordHealth("spend_gate_blocked", Date.now() - t0, { reason: g.reason, state: g.state, attempt });
           return { __err: json({ error: "ai spend guard", reason: g.reason, state: g.state }, 503) };
         }
-        const r = await fetch(DEEPSEEK_URL, { method: "POST", headers, body: payload });
+        const r = await fetch(prov.url, { method: "POST", headers, body: payload });
         if (r.ok) { res = r; break; }
         res = r;
         // COUNT THE FAILED ATTEMPT. It was transmitted and may well have been billed; without this
         // row ai_usage undercounts precisely when calls are failing — and the circuit breaker counts
         // rows, so an undercount weakens the breaker at the worst possible moment.
         logUsage({
-          source: clientSource, requested_model: DEEPSEEK_MODEL, model: null, kind: null,
+          source: clientSource, requested_model: prov.model, model: null, kind: null,
           locale, call_seq: seq, attempt: attempt + 1, http_status: r.status,
           finish_reason: `http_${r.status}`, history_turns: history.length, latency_ms: Date.now() - t0,
           user_message_id: userMessageId, call_reason: "http_retry",
@@ -1080,7 +1113,7 @@ Deno.serve(async (req: Request) => {
       if (!res || !res.ok) {
         const detail = res ? await res.text() : "no response";
         recordHealth("model_http_error", Date.now() - t0, { status: res?.status ?? 0 });
-        return { __err: json({ error: `deepseek ${res?.status ?? 0}`, detail }, 502) };
+        return { __err: json({ error: `${prov.name} ${res?.status ?? 0}`, detail }, 502) };
       }
       const data = await res.json();
       const choice = data?.choices?.[0];
@@ -1102,6 +1135,7 @@ Deno.serve(async (req: Request) => {
       // Emitted for SUCCESS as well as failure; the errors above only carry `why`.
       console.log(JSON.stringify({
         evt: "deepseek_usage",
+        provider: prov.name,
         prompt_tokens: data?.usage?.prompt_tokens ?? null,
         completion_tokens: data?.usage?.completion_tokens ?? null,
         cache_hit_tokens: data?.usage?.prompt_cache_hit_tokens ?? null,
@@ -1117,7 +1151,7 @@ Deno.serve(async (req: Request) => {
       logUsage({
         source: clientSource,
         attempt: 1,
-        requested_model: DEEPSEEK_MODEL,
+        requested_model: prov.model,
         model: data?.model ?? null,
         kind: /"kind"\s*:\s*"(listings|message|interview)"/.exec(raw)?.[1] ?? null,
         locale,
@@ -1125,7 +1159,9 @@ Deno.serve(async (req: Request) => {
         prompt_tokens: u.prompt_tokens ?? null,
         completion_tokens: u.completion_tokens ?? null,
         reasoning_tokens: u.completion_tokens_details?.reasoning_tokens ?? null,
-        cache_hit_tokens: u.prompt_cache_hit_tokens ?? null,
+        // DeepSeek reports its cache split as prompt_cache_hit/miss_tokens; Groq reports cached input
+        // as prompt_tokens_details.cached_tokens (the miss is then prompt - hit, as ai_usage_costed derives).
+        cache_hit_tokens: u.prompt_cache_hit_tokens ?? u.prompt_tokens_details?.cached_tokens ?? null,
         cache_miss_tokens: u.prompt_cache_miss_tokens ?? null,
         total_tokens: u.total_tokens ?? null,
         finish_reason: choice?.finish_reason ?? null,
