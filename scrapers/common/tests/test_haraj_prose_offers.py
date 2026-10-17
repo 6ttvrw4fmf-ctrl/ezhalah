@@ -129,7 +129,14 @@ def test_real_unlicensed_post_end_to_end(catalog):
 
 def test_silent_price_and_area_stay_null_and_the_post_is_still_stored(catalog):
     row, _, skip, _ = post("عمارة جاهزة للبيع")
-    assert skip == "" and row["price_total"] is None and row["area_m2"] is None
+    assert skip == "" and row["price_total"] is None and not row["area_m2"]
+
+
+def test_an_area_the_words_no_longer_state_is_cleared_not_kept(catalog):
+    # «10 في 8» is two sides: no area, and the 10 m² an older parser stored must be cleared (2026-10-17)
+    from scrapers.common import db
+    row, _, skip, _ = post("استراحة للإيجار اليومي", "حديقة بجلسة خارجية مساحتة 10في 8")
+    assert skip == "" and row["area_m2"] is db.AUTHORITATIVE_NULL
 
 
 def test_unresolved_city_or_request_is_never_stored(catalog):

@@ -350,7 +350,10 @@ def map_unlicensed(pid: str, ld: dict, p: dict, verdict: str, why: str, facts: d
         "region_id": region_id,
         "district_ar": district,
         "neighborhood": district,
-        "area_m2": round(area["area"]) if area["area"] else None,
+        # The seller's own words are this post's ONLY area source and this fetch read them: no area phrase
+        # means the source states none, so a value an older parser misread from the same words is cleared
+        # (HRJ11190652057 «مساحتة 10في 8» kept 10 m² after the fix, 2026-10-17) — never kept as None would.
+        "area_m2": round(area["area"]) if area["area"] else db.AUTHORITATIVE_NULL,
         "license_number": None,
         "license_expiry": None,
         "rega_location_verified": False,
@@ -532,7 +535,7 @@ def main() -> int:
                 print("   ", json.dumps({k: row.get(k) for k in (
                     "ad_number", "property_type", "transaction_type", "price_total", "price_annual",
                     "price_per_meter", "rent_period", "city_ar", "district_ar", "area_m2", "license_number",
-                    "license_expiry", "direction", "street_width_m", "property_age")}, ensure_ascii=False), flush=True)
+                    "license_expiry", "direction", "street_width_m", "property_age")}, ensure_ascii=False, default=repr), flush=True)
             return 0
         db.upsert_haraj_residential_batch(res)
         db.upsert_haraj_commercial_batch(com)
