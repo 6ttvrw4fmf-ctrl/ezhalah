@@ -10,6 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AMENITY_TOKEN_COL } from './lib/afOracleFilter.ts';
+import { STRAY_OVERLAY_SRC } from './lib/liveClick.ts';
 import { AMEN_UNKNOWN_COLUMNS, NOT_APPLICABLE, classifySkip, runFails, unknownColumnFilter } from './lib/afLiveSkipLedger.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -77,6 +78,27 @@ check('the live check resolves the caption column through unknownColumnFilter', 
 check('the live check exits through runFails', /const bad = runFails\(failures, skips\)/.test(live));
 check('both registered ids are used by the live check', Object.keys(NOT_APPLICABLE).every((id) => live.includes(`notApplicableOr('${id}'`)));
 check('the old blanket «no single unknown column» SKIP is gone', !live.includes("'this question has no single unknown column'"));
+
+// ── 5. the stray-viewer probe (backlog 597) sees a visible viewer behind a hidden one ─────────
+// Executed against a stub DOM: the app keeps a hidden viewer mounted, and the forced case on production
+// showed the first-match probe answering «no viewer» while a visible one swallowed every press.
+const runProbe = (src: () => boolean, viewers: Array<{ w: number; display?: string }>) => {
+  const els = viewers.map((v) => ({ getBoundingClientRect: () => ({ width: v.w, height: v.w }), display: v.display ?? 'flex' }));
+  const g = globalThis as any;
+  const prev = { document: g.document, getComputedStyle: g.getComputedStyle };
+  g.document = { querySelector: () => els[0] ?? null, querySelectorAll: () => els };
+  g.getComputedStyle = (e: any) => ({ display: e.display });
+  try { return src(); } finally { g.document = prev.document; g.getComputedStyle = prev.getComputedStyle; }
+};
+const firstOnly = () => {
+  const v = (globalThis as any).document.querySelector('[data-testid="ad-viewer"]');
+  if (!v) return false;
+  const r = v.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 && (globalThis as any).getComputedStyle(v).display !== 'none';
+};
+check('a visible viewer behind a hidden one is seen', runProbe(STRAY_OVERLAY_SRC, [{ w: 0, display: 'none' }, { w: 800 }]) === true);
+check('no visible viewer → false', runProbe(STRAY_OVERLAY_SRC, [{ w: 0, display: 'none' }]) === false && runProbe(STRAY_OVERLAY_SRC, []) === false);
+mustCatch('the first-match probe that missed the visible viewer', runProbe(firstOnly, [{ w: 0, display: 'none' }, { w: 800 }]) !== runProbe(STRAY_OVERLAY_SRC, [{ w: 0, display: 'none' }, { w: 800 }]));
 
 console.log(failures ? `\n✗ ${failures} failed` : '\n✓ the live AF card check fails only on a real failure or a real inconclusive');
 process.exit(failures ? 1 : 0);

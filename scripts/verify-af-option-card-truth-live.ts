@@ -1045,8 +1045,8 @@ try {
       const d = document.createElement('div');
       d.setAttribute('data-testid', 'ad-viewer');
       d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.01)';
-      const close = (e: KeyboardEvent) => { if (e.key === 'Escape') { d.remove(); document.removeEventListener('keydown', close); } };
-      document.addEventListener('keydown', close);
+      const close = (e: KeyboardEvent) => { if (e.key === 'Escape') { d.remove(); window.removeEventListener('keydown', close, true); } };
+      window.addEventListener('keydown', close, true);
       document.body.appendChild(d);
     });
     let retried = false;
