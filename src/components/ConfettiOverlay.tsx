@@ -40,7 +40,7 @@ function makePieces(): Piece[] {
         side,
         ux: Math.cos(a) * side * -1, // pointing toward the screen's middle
         uy: -Math.sin(a),
-        v: 0.5 + ((i * 37) % 100) / 100 * 0.65, // 0.5–1.15 × the screen's height
+        v: 0.38 + ((i * 37) % 100) / 100 * 0.5, // 0.38–0.88 × the screen's height: the fan stays in view on a phone
         rot: ((i * 131) % 1440) - 720,
         w: 8 + (i % 4) * 3,
         h: 14 + (i % 5) * 4,
