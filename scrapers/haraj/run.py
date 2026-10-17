@@ -65,6 +65,8 @@ _USAGE = {"residential": "سكني", "سكني": "سكني", "commercial": "تج
 # REGA's English «نوع العقار» enum words the shared English map does not carry.
 _TYPE_EN_EXTRA = {"Rest house": "Rest House", "Resthouse": "Rest House", "Esteraha": "Rest House",
                   "Istiraha": "Rest House", "Building": "Building", "Land": "أرض",
+                  # REGA's English enum prints the plural (first production crawl 2026-10-17: «Warehouses»)
+                  "Warehouses": "Warehouse",
                   # REGA's Arabic enum for a studio (11190678205 «شقَّة صغيرة (استوديو)», tashkeel folded first)
                   "شقة صغيرة (استوديو)": "Studio", "شقه صغيره (استوديو)": "Studio"}
 _TASHKEEL = re.compile(r"[\u064B-\u0652\u0670\u0640]")
@@ -312,8 +314,8 @@ def candidate_ids(files: int, skip_hours: int) -> tuple[list[str], dict]:
     return ids, {"files": picked, "prefiltered": dict(pre)}
 
 
-def crawl(files: int, skip_hours: int, limit: int = 0, today: Any = None):
-    ids, meta = candidate_ids(files, skip_hours)
+def crawl(files: int, skip_hours: int, limit: int = 0, today: Any = None, only: Optional[list[str]] = None):
+    ids, meta = (only, {"files": ["--ids"], "prefiltered": {}}) if only else candidate_ids(files, skip_hours)
     if limit:
         ids = ids[:limit]
     print(f"{SOURCE}: {len(ids)} candidate post(s) from {len(meta['files'])} hourly file(s) "
@@ -409,11 +411,13 @@ def main() -> int:
     ap.add_argument("--files", type=int, default=2, help="complete hourly sitemap files to read")
     ap.add_argument("--skip-hours", type=int, default=0, help="skip the newest N complete hours")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--ids", default="", help="re-read exactly these post ids (comma list) instead of the sitemap — a parser repair")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     run_id = None if a.dry_run else db.begin_run(SLUG)
     try:
-        res, com, c, unresolved = crawl(a.files, a.skip_hours, a.limit)
+        only = [i.strip().removeprefix(PREFIX) for i in a.ids.split(",") if i.strip()]
+        res, com, c, unresolved = crawl(a.files, a.skip_hours, a.limit, only=only or None)
         print(f"  counts: {_notes(c, unresolved)}", flush=True)
         if a.dry_run:
             for row in (res + com)[:20]:
@@ -430,7 +434,7 @@ def main() -> int:
         # strike_read_gone reads the oldest-seen stored ads' OWN pages through _verify_gone and hands the same
         # verify_gone= to db.prune_unseen for ONLY the ones that read gone (3 strikes, collapse cap kept);
         # fleet_liveness reads every active row daily with the same oracle.
-        if not a.limit:
+        if not a.limit and not only:
             seen = {r["ad_number"] for r in res + com}     # empty → strike_read_gone reads nothing (no control)
             for tbl in (RES_TABLE, COM_TABLE):
                 db.strike_read_gone(tbl, seen, SOURCE, verify_gone=_verify_gone, max_reads=30)
