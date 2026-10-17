@@ -403,8 +403,11 @@ def main() -> int:
                                                 dead_marker=PLATFORMS.get(platform, {}).get("dead_marker"))
             item["page"] = page_evidence(body or "")
             if a.around and body:
-                for m in list(re.finditer(re.escape(a.around), body))[:3]:
-                    snip = body[max(0, m.start() - 400):m.end() + 200]
+                # Searched in the DECODED markup: alsaedan and arkaan write their Arabic as HTML entities, so a raw
+                # search for «موقف» or «ثلاث دورات» found nothing on pages that print it (🔬 2026-10-17).
+                hay = html.unescape(body)
+                for m in list(re.finditer(re.escape(a.around), hay))[:3]:
+                    snip = hay[max(0, m.start() - 400):m.end() + 200]
                     snip = re.sub(r"(?:\+?966|0)?5\d{8}|\d{9,}", "<num>", snip)   # PDPL: no phone ever printed
                     print(f"   around «{a.around}»: {snip!r}", flush=True)
             if "wasalt" in table:
