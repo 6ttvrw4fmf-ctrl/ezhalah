@@ -1,22 +1,21 @@
-"""Haraj (haraj.com.sa) LIVE ingest — LICENSED property OFFERS only (owner 2026-10-16, backlog 311).
-
-The owner: «Haraj is public, like Facebook Marketplace»: a post becomes a listing ONLY when ALL hold
+"""Haraj (haraj.com.sa) LIVE ingest — real-estate OFFERS (owner 2026-10-17: «all real-estate offers», reversing
+10-16's licensed-only; backlog 311). A post becomes a listing only when ALL hold
   1. it carries the حراج العقار tag (the site's own real-estate section);
   2. scrapers/haraj/classify.py says «offer» — a request («مطلوب», «ابغى»), a non-property post (jobs,
      cars, furniture, «تقبيل», broker catalogues) and a doubt are NEVER stored;
-  3. it carries REGA's ad-licence block «معلومات العقار حسب الرخصة» (parse.py) — no licence, however
-     clear the offer, is never a listing;
-  4. that licence's own «تاريخ انتهاء رخصة الإعلان» has not passed (normalize.ad_expiry_state).
-Everything the licence block and the ad's own words state is kept (parse.py; silent → NULL), in Arabic,
-the city/district through the SHARED catalogue resolver (deed lines first; an unresolved district is
-NULL and its raw spelling is kept in additional_info.district_raw_ar).
+  3a. WITH REGA's ad-licence block «معلومات العقار حسب الرخصة» (parse.py): every licence field is read, the
+     licence number + expiry are stored, and an EXPIRED licence is never a listing;
+  3b. WITHOUT it (prose.py): a resolved TYPE, DEAL and CITY from the seller's own words / the post's city, every
+     other fact only when the seller states it (price tied to a price word, area from an area phrase, «حي X»);
+     the licence fields stay NULL; a plural unit word (several units) is a catalogue, never stored.
+Silent → NULL, never guessed; city/district through the SHARED catalogue resolver.
 
 DISCOVERY. Haraj's sitemap index lists one .txt file per HOUR of new/updated posts (every category,
 ~4,400 an hour). The URL slug is the post's own title, so a property word in it picks the candidates
 (shadow.property_slug_ids); a title the classifier already calls a request/non-property is not fetched.
 This is a STREAM, not a catalogue: an ad missing from tonight's files is not gone (no absence prune,
-ever). REMOVAL is own-page proof only: `_verify_gone` (404/410, «العرض محذوف او قديم», the licence
-block gone from its own page, or its licence expired) — read daily by scrapers/common/fleet_liveness.py.
+ever). REMOVAL is own-page proof only: `_verify_gone` (404/410, «العرض محذوف او قديم», or a licensed
+ad's own licence expired) — strikes each crawl, and the daily scrapers/common/fleet_liveness.py read.
 
 HONEST ACCESS (owner rule): our own bot user-agent, no impersonation, ≤ 1 request a second (shadow.fetch),
 only paths robots.txt allows (ad pages /<id>/<slug>/ are allowed; /post/*, /chat, /users/*/edit are not).
@@ -43,6 +42,7 @@ from scrapers.common.arabic_location import REGION_EN_TO_ID, catalog_district, r
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
 from scrapers.haraj import parse as P  # noqa: E402
+from scrapers.haraj import prose as X  # noqa: E402
 from scrapers.haraj.classify import classify  # noqa: E402
 from scrapers.haraj.shadow import BASE, TAG, UA, _POST_RE, fetch, property_slug_ids  # noqa: E402
 
@@ -65,6 +65,8 @@ _USAGE = {"residential": "سكني", "سكني": "سكني", "commercial": "تج
 # REGA's English «نوع العقار» enum words the shared English map does not carry.
 _TYPE_EN_EXTRA = {"Rest house": "Rest House", "Resthouse": "Rest House", "Esteraha": "Rest House",
                   "Istiraha": "Rest House", "Building": "Building", "Land": "أرض",
+                  # REGA's English enum prints the plural (first production crawl 2026-10-17: «Warehouses»)
+                  "Warehouses": "Warehouse",
                   # REGA's Arabic enum for a studio (11190678205 «شقَّة صغيرة (استوديو)», tashkeel folded first)
                   "شقة صغيرة (استوديو)": "Studio", "شقه صغيره (استوديو)": "Studio"}
 _TASHKEEL = re.compile(r"[\u064B-\u0652\u0670\u0640]")
@@ -148,7 +150,9 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
     if verdict != "offer":
         return None, "", f"not_offer_{verdict}", facts
     if not p["rega_block"]:
-        return None, "", "no_licence_block", facts
+        # Owner 2026-10-17 (reverses 10-16's licensed-only): an OFFER without REGA's block is a listing too,
+        # read from the seller's own words only (prose.py). Its licence fields stay NULL.
+        return map_unlicensed(pid, ld, p, verdict, why, facts)
     state = N.ad_expiry_state(p["licence_expiry"], today)
     if state == "expired":
         return None, "", "licence_expired", facts
@@ -277,6 +281,106 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
     return row, category, "", facts
 
 
+# Haraj's own city list spells a few catalogue cities its own way (sample 2026-10-17: «الطايف» on 7 of 140 posts,
+# unresolved). An exact spelling fold, never a guess: anything not listed goes to the resolver as written.
+HARAJ_CITY_SPELLING = {"الطايف": "الطائف"}
+
+
+def map_unlicensed(pid: str, ld: dict, p: dict, verdict: str, why: str, facts: dict
+                   ) -> tuple[Optional[dict], str, str, dict]:
+    """An unlicensed offer: stored only with a resolved TYPE, DEAL and CITY (owner 2026-10-17, rule 3). Price,
+    area and the rest are the seller's own phrases (prose.py) — silent or ambiguous → NULL."""
+    title = ld.get("name") or ""
+    description = P.strip_person_lines(_html.unescape(ld.get("description") or ""))
+    ptype, type_why = X.type_of(title, description)
+    facts["licensed"] = False
+    if not ptype:
+        return None, "", ("catalogue" if type_why.startswith("catalogue") else "type_unresolved"), facts
+    deal = X.deal_of(title, description)
+    if not deal:
+        return None, "", "deal_unresolved", facts
+    city_raw = (ld.get("address") or {}).get("addressLocality")
+    facts["city_raw_ar"] = city_raw
+    loc = resolve(HARAJ_CITY_SPELLING.get(city_raw or "", city_raw))
+    city_id, region_id = loc.get("city_id"), loc.get("region_id")
+    facts["city_resolved"] = bool(city_id)
+    if not city_id:
+        return None, "", "city_not_in_catalog", facts
+    districts = {d for d in (catalog_district(city_id, c) for c in X.district_phrases(title, description)) if d}
+    stated = X.district_phrases(title, description)
+    facts["district_raw_ar"] = stated[0] if stated else None
+    district = districts.pop() if len(districts) == 1 else None      # two different districts → NULL
+    facts["district_resolved"] = bool(district)
+    category = category_of(ptype, None)
+    # PRICE from the seller's own words — owner decision 2026-10-17 (declared in verify-no-derived-price.ts):
+    # only a figure tied to a price word; a bid («السوم»), a range or two figures → NULL.
+    prose_price = X.asking_price(title, description)
+    price = prose_price["price"]
+    price_total = price_annual = price_per_meter = rent_period = None
+    if price and prose_price["per_meter"]:
+        price_per_meter = price if ptype in LAND_TYPES else None
+    elif price and deal == "Buy":
+        price_total = price
+    elif price and deal == "Rent":
+        if prose_price["period"] == "daily":
+            price_annual = None                                           # no daily bucket: not a figure we store
+        elif prose_price["period"]:
+            rent_period, price_annual = N.rent_period_and_annual(
+                price, {"monthly": "شهري", "annual": "سنوي"}[prose_price["period"]])
+        else:
+            rent_period, price_annual = N.rent_period_from_ad(price, prose_price["phrase"], None, title)
+    area = X.area_of(title, description)
+    more = X.facts(title, description, ptype)
+    if category == "commercial":
+        more.pop("furnished", None)
+    row: dict[str, Any] = {
+        "ad_number": f"{PREFIX}{pid}",
+        "listing_url": ld.get("url") or f"{BASE}/{pid}/",
+        "source": SOURCE,
+        "active": True,
+        "title": redact_pii(title) or None,
+        "description": redact_pii(description) or None,
+        **more,
+        "property_type": ptype,
+        "transaction_type": "Rent" if deal == "Rent" else "Buy",
+        "city": N.map_city(city_raw),
+        "region": N.region_for_city(N.map_city(city_raw)),
+        "city_ar": city_raw,
+        "city_id": city_id,
+        "region_id": region_id,
+        "district_ar": district,
+        "neighborhood": district,
+        "area_m2": round(area["area"]) if area["area"] else None,
+        "license_number": None,
+        "license_expiry": None,
+        "rega_location_verified": False,
+        "price_total": price_total,
+        "price_annual": price_annual,
+        "price_per_meter": price_per_meter,
+        "rent_period": rent_period,
+        "photo_urls": [u for u in dict.fromkeys(ld.get("image") or []) if isinstance(u, str) and u.startswith("http")],
+        "date_added": ld.get("datePosted"),
+        "last_update": ld.get("dateModified"),
+    }
+    info = {
+        "post_id": pid, "licensed": False, "classifier": f"{verdict}: {why}", "type_basis": type_why,
+        "price_phrase": prose_price["phrase"], "price_basis": prose_price["why"], "price_period_stated": prose_price["period"],
+        "area_phrase": area["phrase"], "area_basis": area["why"], "city_raw_ar": city_raw,
+        "district_raw_ar": facts["district_raw_ar"], "photo_count": len(row["photo_urls"]),
+        "date_posted": ld.get("datePosted"), "city_basis": "post_address_locality",
+    }
+    row["additional_info"] = redact_capture({k: v for k, v in info.items() if v not in (None, "", [], {})})
+    row["source_capture"] = redact_capture({"schema": "haraj.post.v2.unlicensed", "post_id": pid, "url": ld.get("url"),
+                                            "price_phrase": prose_price["phrase"], "area_phrase": area["phrase"]})
+    row["price_evidence"] = N.price_evidence(
+        field="the seller's own price phrase (owner 2026-10-17)", raw=prose_price["phrase"],
+        stored=price_total or price_annual or price_per_meter,
+        kind="per_meter" if price_per_meter else ("annual" if price_annual else "total"),
+        unit="per_meter" if price_per_meter else "total", origin="seller_text",
+        authoritative_absent=prose_price["why"].startswith("bid"))
+    return row, category, "", facts
+
+
 def _has_tag(h: str) -> bool:
     return TAG in h or quote(TAG) in h
 
@@ -312,8 +416,8 @@ def candidate_ids(files: int, skip_hours: int) -> tuple[list[str], dict]:
     return ids, {"files": picked, "prefiltered": dict(pre)}
 
 
-def crawl(files: int, skip_hours: int, limit: int = 0, today: Any = None):
-    ids, meta = candidate_ids(files, skip_hours)
+def crawl(files: int, skip_hours: int, limit: int = 0, today: Any = None, only: Optional[list[str]] = None):
+    ids, meta = (only, {"files": ["--ids"], "prefiltered": {}}) if only else candidate_ids(files, skip_hours)
     if limit:
         ids = ids[:limit]
     print(f"{SOURCE}: {len(ids)} candidate post(s) from {len(meta['files'])} hourly file(s) "
@@ -352,7 +456,8 @@ def crawl(files: int, skip_hours: int, limit: int = 0, today: Any = None):
             if skip.startswith("type_unmapped"):
                 c[skip[:60]] += 1
             continue
-        if not row.get("license_number"):
+        c["stored_licensed" if row["additional_info"].get("licensed", True) else "stored_unlicensed"] += 1
+        if lic and not row.get("license_number"):
             c["stored_without_licence_number"] += 1
         if not facts.get("district_resolved"):
             c["district_unresolved"] += 1
@@ -377,8 +482,8 @@ def _signal(status, body, moved):
     if not ld:
         return None
     desc = _html.unescape(ld.get("description") or "")
-    if P.LICENCE_HEAD not in desc:
-        return "gone"                       # no licence on its own page any more: never a listing
+    # (2026-10-17) the licence block is no longer required, so its absence is not a removal; an ad whose
+    # OWN licence has ended still is.
     if N.ad_expiry_state(P.licence_expiry(desc)) == "expired":
         return "gone"                       # its own licence has ended
     return "live"
@@ -409,11 +514,13 @@ def main() -> int:
     ap.add_argument("--files", type=int, default=2, help="complete hourly sitemap files to read")
     ap.add_argument("--skip-hours", type=int, default=0, help="skip the newest N complete hours")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--ids", default="", help="re-read exactly these post ids (comma list) instead of the sitemap — a parser repair")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     run_id = None if a.dry_run else db.begin_run(SLUG)
     try:
-        res, com, c, unresolved = crawl(a.files, a.skip_hours, a.limit)
+        only = [i.strip().removeprefix(PREFIX) for i in a.ids.split(",") if i.strip()]
+        res, com, c, unresolved = crawl(a.files, a.skip_hours, a.limit, only=only or None)
         print(f"  counts: {_notes(c, unresolved)}", flush=True)
         if a.dry_run:
             for row in (res + com)[:20]:
@@ -430,7 +537,7 @@ def main() -> int:
         # strike_read_gone reads the oldest-seen stored ads' OWN pages through _verify_gone and hands the same
         # verify_gone= to db.prune_unseen for ONLY the ones that read gone (3 strikes, collapse cap kept);
         # fleet_liveness reads every active row daily with the same oracle.
-        if not a.limit:
+        if not a.limit and not only:
             seen = {r["ad_number"] for r in res + com}     # empty → strike_read_gone reads nothing (no control)
             for tbl in (RES_TABLE, COM_TABLE):
                 db.strike_read_gone(tbl, seen, SOURCE, verify_gone=_verify_gone, max_reads=30)

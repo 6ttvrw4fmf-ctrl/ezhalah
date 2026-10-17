@@ -22,6 +22,7 @@
 
 import {
   shouldShowCookieBanner,
+  earlyTapConsent,
   analyticsAllowed,
   getCookieConsent,
   setCookieConsent,
@@ -70,6 +71,23 @@ mustCatch('hidden before the session restore settles (authChecked=false → no f
   shouldShowCookieBanner({ ...guest, authChecked: false }) === false);
 mustCatch('hidden on native (not web)',
   shouldShowCookieBanner({ ...guest, isWeb: false }) === false);
+
+// A tap BEFORE the card rose (e.g. «English» during the session restore) is agreement too
+// (owner 2026-10-16) — the card must not rise afterwards and wait for a second tap.
+mustCatch('hidden when the visitor already tapped before it could rise',
+  shouldShowCookieBanner({ ...guest, tappedBeforeShown: true }) === false);
+check('an early tap records "all" once the restore proves the visitor signed out',
+  earlyTapConsent({ ...guest, tappedBeforeShown: true }) === 'all');
+mustCatch('an early tap records nothing for a signed-in user',
+  earlyTapConsent({ ...guest, user: { sub: 'u1' }, tappedBeforeShown: true }) === null);
+mustCatch('an early tap records nothing before the restore settles',
+  earlyTapConsent({ ...guest, authChecked: false, tappedBeforeShown: true }) === null);
+mustCatch('no tap → no consent recorded',
+  earlyTapConsent({ ...guest, tappedBeforeShown: false }) === null);
+mustCatch('an early tap never overwrites an explicit "necessary"',
+  earlyTapConsent({ ...guest, consent: 'necessary', tappedBeforeShown: true }) === null);
+mustCatch('an early tap records nothing on native',
+  earlyTapConsent({ ...guest, isWeb: false, tappedBeforeShown: true }) === null);
 
 // 3. Persistence round-trips — the LIBRARY still round-trips so analyticsAllowed() keeps the
 // visitor's preference across visits. The COMPONENT is separately pinned in section 5 to not READ
