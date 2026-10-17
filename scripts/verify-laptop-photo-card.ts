@@ -139,7 +139,7 @@ const R_TONE = 'GOLD = opens inside Ezhalah, SILVER = everything else: tone = in
 mustCatch('every card gold again (tone pinned to gold)', R_TONE,
   rules(CARD.replace("const tone: 'gold' | 'silver' = inside ? 'gold' : 'silver';", "const tone: 'gold' | 'silver' = 'gold';"), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('a ring that ignores the tone', R_TONE,
-  rules(CARD.replace('<GoldSurface tone={tone} style={card.goldRing} testID="card-gold-frame">\n    <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow', '<GoldSurface style={card.goldRing} testID="card-gold-frame">\n    <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow'), BUZZ, GRID, AGENT, I18N, RESP));
+  rules(CARD.replace('\n    <GoldSurface tone={tone} style={card.goldRing} testID="card-gold-frame">\n    <View ', '\n    <GoldSurface style={card.goldRing} testID="card-gold-frame">\n    <View '), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('GoldSurface painting gold for the silver tone', R_TONE,
   rules(CARD, BUZZ, GRID, AGENT, I18N, RESP, OVERLAY, REVEAL.replace("tone === 'silver' ? [pal.silverLight, pal.silverDeep] : [pal.goldLight, pal.goldDeep]", '[pal.goldLight, pal.goldDeep]')));
 mustCatch('the overlay unmounted from the agent screen', 'the ConfettiOverlay is the LAST child of the agent screen (above the AdViewer), and it never takes a tap',
@@ -154,7 +154,8 @@ mustCatch('the buzzer layer gated back to laptop rows only', 'the buzzer layer m
   rules(CARD.replace('\n      <BuzzLayer burst={burst} />\n    </View>\n    </GoldSurface>\n  );\n}', '\n      {row ? <BuzzLayer burst={burst} /> : null}\n    </View>\n    </GoldSurface>\n  );\n}'), BUZZ, GRID, AGENT, I18N, RESP));
 const R_GOLD = 'EVERY card sits in a shining gold ring and its «اضغط هنا» strip is a shining gold surface (GoldSurface = the gold button\'s gradient + CSS glint)';
 mustCatch('the phone/compact card losing its gold ring', R_GOLD,
-  rules(CARD.replace('    <GoldSurface tone={tone} style={card.goldRing} testID="card-gold-frame">\n    <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow', '    <View style={card.goldRing} testID="card-gold-frame">\n    <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow'), BUZZ, GRID, AGENT, I18N, RESP));
+  // (the 4-space indent is the compact/phone card's ring; the photo-first card's sits at 6 spaces)
+  rules(CARD.replace('\n    <GoldSurface tone={tone} style={card.goldRing} testID="card-gold-frame">\n    <View ', '\n    <View style={card.goldRing} testID="card-gold-frame">\n    <View '), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('the strip back to the flat dark-green View', R_GOLD,
   rules(CARD.replace('<GoldSurface tone={tone} style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none" testID="card-gold-strip">', '<View style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none">'), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('a gold surface that does not shine', R_GOLD,
