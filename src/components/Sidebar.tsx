@@ -624,7 +624,10 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
           openAccountMenu()/openSignIn() above, but a guest never gets that far. Single tap toggles
           ar<->en directly via the now-bilingual setLocale(); the label names the language a tap
           switches TO, same convention as AccountMenu's two Language rows. */}
-      <Pressable testID="sidebar-language-toggle" style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => setLocale(locale === 'ar' ? 'en' : 'ar')}>
+      {/* data-consent-keep: switching language is not agreement to cookies (owner 2026-10-17), the guest card stays up. */}
+      <Pressable testID="sidebar-language-toggle" style={(st) => [s.navLink, WEB_SMOOTH, isOn(st) && s.navLinkHover]} onPress={() => setLocale(locale === 'ar' ? 'en' : 'ar')}
+        // @ts-expect-error web-only DOM props on the RNW host node
+        dataSet={{ consentKeep: '1' }}>
         {(st) => (<>
           <Ionicons name="globe-outline" size={19} color={isOn(st) ? colors.onFill : TC.ink} />
           <Text style={[s.navText, dark && dks.navText, isOn(st) && s.navTextOn]}>{locale === 'ar' ? 'English' : 'العربية'}</Text>
@@ -1018,7 +1021,10 @@ export default function Sidebar({ onClose, docked = false }: { onClose: () => vo
   // Mobile / native: tap-to-open overlay drawer that slides in over the dimmed page.
   return (
     <View style={s.overlay}>
-      <AnimatedPressable style={[s.backdrop, backdropStyle]} onPress={close} />
+      {/* Closing the menu is not agreement to cookies either (owner 2026-10-17): the guest card stays up after a language switch. */}
+      <AnimatedPressable style={[s.backdrop, backdropStyle]} onPress={close}
+        // @ts-expect-error web-only DOM props on the RNW host node
+        dataSet={{ consentKeep: '1' }} />
       <Animated.View ref={panelRef as any} style={[s.panel, dark && dks.panel, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 14 }, panelStyle, LTR_PIN]}>
         {!dark && <HeroBackground imageOpacity={0.5} fadeStart={0.85} fadeEnd={1} />}
         {body}
