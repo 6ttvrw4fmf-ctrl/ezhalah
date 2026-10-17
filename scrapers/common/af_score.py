@@ -572,6 +572,8 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
                     row["find_found"] += 1
                 else:
                     row["find_missed_ids"].append(key)
+                    # What the customer asked for, so a miss names its field in the run log (keys only, no PII).
+                    print(f"  miss {key} asked {answers}", flush=True)
             same = parity(anon, params)
             if same is not None:
                 row["parity_tried"] += 1
