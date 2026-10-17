@@ -5094,7 +5094,7 @@ export default function Agent() {
                 // @ts-expect-error web-only DOM props on the RNW host node
                 dataSet={{ ...TAP44 }}
                 accessibilityLabel={t('Voice input')}
-                style={({ pressed }: any) => [s.micBtn, pressed && s.micBtnPressed, (busy || revealing) && s.sendDisabled]}
+                style={({ pressed }: any) => [s.micBtn, s.micLift, pressed && s.micBtnPressed, (busy || revealing) && s.sendDisabled]}
               >
                 <Ionicons name="mic-outline" size={19} color={colors.body} />
               </Pressable>
@@ -5105,6 +5105,7 @@ export default function Agent() {
                 // 2026-10-10). Tap it to cancel the search and freeze the cards shown.
                 <Pressable
                   onPress={stop}
+                  style={s.rowBtnLift}
                   hitSlop={6}
                   // @ts-expect-error web-only DOM props on the RNW host node
                   dataSet={{ ...TAP44 }}
@@ -5130,7 +5131,7 @@ export default function Agent() {
                     // @ts-expect-error web-only DOM props on the RNW host node
                     dataSet={{ ...TAP44 }}
                     accessibilityLabel={t('Search')}
-                    style={!typed.trim() ? s.sendDisabled : undefined}
+                    style={[s.rowBtnLift, !typed.trim() && s.sendDisabled]}
                   >
                     <Animated.View style={[s.sendBtn, sendHover && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
                       <Ionicons name="arrow-up" size={17} color="#fff" />
@@ -5592,6 +5593,10 @@ const s = StyleSheet.create({
   chipBadge: { width: 22, height: 22, overflow: 'hidden' },
   // The FIRST pick sits on top (zIndex inline), the rest peek out from behind it.
   chipBadgeOverlap: { marginLeft: CHIP_GAP },
+  // The row is 44 px and its buttons hug the bottom, so the 38 px Send/Stop circle sat 3 px (the 34 px mic 5 px) below the
+  // text's centre line — «it doesn't feel like it's in the same sentence» (owner 2026-10-17). Lift them onto it.
+  rowBtnLift: { marginBottom: 3 },
+  micLift: { marginBottom: 5 },
   micBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   micBtnPressed: { backgroundColor: colors.segTrack, transform: [{ scale: 0.96 }] },
 
