@@ -1,4 +1,4 @@
-"""Haraj goes live LICENSED-OFFERS-ONLY (owner 2026-10-16). Real post shapes measured 2026-10-16
+"""Haraj licensed posts (owner 2026-10-16; since 10-17 unlicensed offers are stored too — test_haraj_prose_offers.py). Real post shapes measured 2026-10-16
 (11190690713, 11190682544, 11190682681, 11190684322, 11190691040); names and phones replaced (PDPL).
 
 Pins: no licence block → never a listing (however clear the offer); a request / non-property post → never;
@@ -133,9 +133,12 @@ def test_unresolved_district_is_null_with_raw_kept():
     assert row["additional_info"]["district_raw_ar"] == "حي غير معروف" and facts["district_resolved"] is False
 
 
-def test_unlicensed_offer_is_never_stored():
-    row, _, skip, _ = mapped("شقة للايجار حي الحمدانية جدة", "شقة 3 غرف وصالة للايجار 25 الف سنوي", city="جده")
-    assert row is None and skip == "no_licence_block"
+def test_unlicensed_offer_is_stored_from_its_own_words_owner_2026_10_17():
+    # Owner 2026-10-17 reversed «licensed only»: an offer without the block is a listing, licence NULL.
+    row, _, skip, _ = mapped("شقة للايجار حي الحمدانية جدة", "شقة 3 غرف وصالة الايجار 25 الف سنوي", city="جده")
+    assert skip == "" and row["license_number"] is None and row["license_expiry"] is None
+    assert (row["transaction_type"], row["property_type"], row["rent_period"], row["price_annual"]) == (
+        "Rent", "Apartment", "annual", 25000)
 
 
 def test_request_and_non_property_are_never_stored():
@@ -179,7 +182,7 @@ def test_page_licence_number_and_data_key():
     (404, "", "gone"),
     (200, "<p>العرض محذوف او قديم.</p>", "gone"),
     (200, '<script type="application/ld+json">' + json.dumps(ld("x", "شقة للايجار"), ensure_ascii=False)
-     + "</script>", "gone"),                                      # licence block no longer on its own page
+     + "</script>", "live"),                                      # no licence block: still a live offer (2026-10-17)
     (200, '<script type="application/ld+json">' + json.dumps(ld("x", FLAT_AR.replace("2026-12-31", "2025-01-01")),
      ensure_ascii=False) + "</script>", "gone"),                  # its licence expired
     (200, '<script type="application/ld+json">' + json.dumps(ld("x", FLAT_AR), ensure_ascii=False) + "</script>", "live"),

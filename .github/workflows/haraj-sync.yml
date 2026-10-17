@@ -42,10 +42,11 @@ jobs:
           cache-dependency-path: scrapers/requirements.txt
       - name: Install scraper dependencies
         run: pip install -r scrapers/requirements.txt
-      - name: Haraj tests (classifier + licensed-only gate)
+      - name: Haraj tests (offer gate, licence block, seller-text facts)
         run: >-
           pip install pytest && python -m pytest -q scrapers/common/tests/test_haraj_classify.py
           scrapers/common/tests/test_haraj_parse.py scrapers/common/tests/test_haraj_live_licensed_only.py
+          scrapers/common/tests/test_haraj_prose_offers.py
       - name: Sync Haraj
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
