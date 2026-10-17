@@ -44,7 +44,6 @@ const SITES = [
   { host: 'alta.com.sa', table: 'alta_residential_listings' },
   { host: 'ebriza.com.sa', table: 'ebriza_residential_listings' },
   { host: 'expattrustedhousingriyadh.com', table: 'expattrusted_residential_listings' },
-  { host: 'ryadah.com.sa', table: 'ryadah_residential_listings' },
   { host: 'daraa.sa', table: 'daraa_residential_listings' },
   { host: 'razre.sa', table: 'razre_residential_listings' },
   { host: 'shatrirealestate.com', table: 'shatri_residential_listings' },
