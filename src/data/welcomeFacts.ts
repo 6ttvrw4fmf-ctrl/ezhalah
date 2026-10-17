@@ -17,7 +17,7 @@ import { cityNameEn, districtNameEn } from '@/data/locations';
 import type { WelcomeFacts, WelcomeLine } from '@/lib/filterWelcome';
 
 type CityRow = { city_id: number; city_ar: string; region_ar: string | null; listing_count: number };
-type DistrictRow = { district_ar: string; listing_count: number };
+type DistrictRow = { district_ar: string; listing_count: number; match_values?: string[] | null };
 
 const WELCOME_RPC_MS = 6000; // a welcome line is decoration: give up fast and keep the normal subtitle
 const once = <T,>(fn: () => Promise<T | null>) => {
@@ -62,6 +62,9 @@ function topDistrictsOf(cityId: number): Promise<DistrictRow[] | null> {
 }
 
 const stripCity = (s: string) => s.trim().replace(/^مدينة\s+/, '');
+// Loose Arabic place key: no «حي», no «ال», unified alif / ta-marbuta / ya, no spaces — «حي النرجس» = «النرجس».
+export const placeKey = (s: string) => s.trim().replace(/^حي\s+/, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه')
+  .replace(/ى/g, 'ي').replace(/^ال/, '').replace(/\s+/g, '').toLowerCase();
 
 /** The user's most recent searched city, matched against the live pool; else the city with most listings. */
 export function resolveCity(pool: CityRow[], lastLocation: string | null | undefined): CityRow | undefined {
@@ -75,7 +78,7 @@ export function resolveCity(pool: CityRow[], lastLocation: string | null | undef
 }
 
 /** Fetch exactly the facts `line` states. Missing pieces stay undefined (→ the line is not shown). */
-export async function loadWelcomeFacts(line: WelcomeLine, lastLocation: string | null | undefined): Promise<WelcomeFacts> {
+export async function loadWelcomeFacts(line: WelcomeLine, lastLocation: string | null | undefined, lastDistrict?: string | null): Promise<WelcomeFacts> {
   const f: WelcomeFacts = {};
   const needs = new Set(line.needs);
   const jobs: Promise<void>[] = [];
@@ -86,7 +89,8 @@ export async function loadWelcomeFacts(line: WelcomeLine, lastLocation: string |
       f.listings = s.listingCount; f.cities = s.cityCount; f.districts = s.districtCount;
     }).catch(() => {}));
   }
-  const wantsPool = ['allRegions', 'city', 'district', 'district3', 'rank', 'riyadhShare', 'top2', 'riyadh', 'makkah', 'eastern', 'qassim'].some((k) => needs.has(k as never));
+  const wantsMine = needs.has('myDistrict') || needs.has('myTop10');
+  const wantsPool = wantsMine || ['allRegions', 'city', 'district', 'district3', 'rank', 'riyadhShare', 'top2', 'riyadh', 'makkah', 'eastern', 'qassim'].some((k) => needs.has(k as never));
   if (wantsPool) {
     jobs.push((async () => {
       const pool = await cityPool();
@@ -99,15 +103,24 @@ export async function loadWelcomeFacts(line: WelcomeLine, lastLocation: string |
       if (needs.has('top2')) {
         f.topCities = ranked.slice(0, 2).map((c) => ({ ar: stripCity(c.city_ar), en: cityNameEn(c.city_id, c.city_ar), count: c.listing_count }));
       }
-      if (needs.has('city') || needs.has('district') || needs.has('district3')) {
+      if (needs.has('city') || needs.has('district') || needs.has('district3') || wantsMine) {
         const row = resolveCity(pool, lastLocation);
         if (!row) return;
         // Official English names, the same ones the Filter home's own pickers show in the English UI.
         f.city = { ar: stripCity(row.city_ar), en: cityNameEn(row.city_id, row.city_ar), count: row.listing_count };
         const pos = ranked.findIndex((c) => c.city_id === row.city_id);
         if (pos >= 0) f.cityRank = pos + 1;
-        if (needs.has('district') || needs.has('district3')) {
+        if (needs.has('district') || needs.has('district3') || wantsMine) {
           const ds = await topDistrictsOf(row.city_id);
+          if (ds && wantsMine && lastDistrict) {
+            // The user's own district, found in the city's LIVE ranking (rank = its position by listings).
+            const want = placeKey(translate('ar', lastDistrict));
+            const wantEn = lastDistrict.trim().toLowerCase();
+            const i = ds.findIndex((d) => placeKey(d.district_ar) === want
+              || (d.match_values ?? []).some((m) => placeKey(m) === want)
+              || districtNameEn(row.city_id, d.district_ar).trim().toLowerCase() === wantEn);
+            if (i >= 0) f.myDistrict = { ar: ds[i].district_ar, en: districtNameEn(row.city_id, ds[i].district_ar), count: Number(ds[i].listing_count), rank: i + 1 };
+          }
           if (ds) {
             const shaped = ds.map((d) => ({ ar: d.district_ar, en: districtNameEn(row.city_id, d.district_ar), count: Number(d.listing_count) }));
             f.topDistrict = shaped[0];

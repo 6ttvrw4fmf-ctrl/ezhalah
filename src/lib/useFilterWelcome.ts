@@ -20,6 +20,7 @@ const writeHeld = (h: HeldWelcome) => { try { globalThis.localStorage?.setItem(H
 
 export function useFilterWelcome(
   signedIn: boolean, name: string, locale: 'ar' | 'en', lastLocation: string | null | undefined,
+  lastDistrict?: string | null,
 ): string | null {
   const [picked, setPicked] = useState<{ line: WelcomeLine; facts: WelcomeFacts } | null>(null);
 
@@ -28,9 +29,9 @@ export function useFilterWelcome(
     let live = true;
     const now = new Date();
     const held = readHeld();
-    const choice = welcomeForNow(now, held);
+    const choice = welcomeForNow(now, held, Math.random, !!lastDistrict);
     if (!choice) return;
-    loadWelcomeFacts(choice.line, lastLocation).then((facts) => {
+    loadWelcomeFacts(choice.line, lastLocation, lastDistrict).then((facts) => {
       if (!live) return;
       let line = choice.line;
       // A line whose fact is unknown right now is never shown; a factless line stands in for this load.

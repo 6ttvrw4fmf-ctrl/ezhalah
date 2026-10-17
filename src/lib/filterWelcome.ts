@@ -24,11 +24,12 @@ export type WelcomeFacts = {
   topDistricts?: Array<{ ar: string; en?: string; count: number }>; // that city's top districts, most listings first
   cityRank?: number;     // the city's position among all cities by listing count (1 = most)
   topCities?: Array<{ ar: string; en?: string; count: number }>; // the cities with the most listings, first first
+  myDistrict?: { ar: string; en?: string; count: number; rank: number }; // the district the user last searched, in its city
 };
 
 type When = 'morning' | 'evening' | 'friday' | 'weekend' | 'any';
 type Need = 'sites' | 'listings' | 'cities' | 'districts' | 'allRegions' | 'city' | 'district'
-  | 'district3' | 'rank' | 'riyadhShare' | 'top2'
+  | 'district3' | 'rank' | 'riyadhShare' | 'top2' | 'myDistrict' | 'myTop10'
   | 'riyadh' | 'makkah' | 'eastern' | 'qassim';
 
 export type WelcomeLine = { id: number; when: When; needs: Need[]; ar: string; en: string };
@@ -78,6 +79,14 @@ export const WELCOME_LINES: readonly WelcomeLine[] = [
   { id: 38, when: 'any', needs: ['city', 'district3'], ar: '{n}، من {d1} إلى {d3}، أنشط أحياء {city} في مكان واحد. إزهله.', en: "{n}, from {d1} to {d3}, {city}'s most active districts in one place. Ezhalah." },
   { id: 39, when: 'any', needs: ['city', 'district'], ar: '{n}، {city} فيها أكثر من {cityMore} إعلان، و{district} لحاله أكثر من {districtCountMore}. إزهله.', en: '{n}, {city} has more than {cityMore} listings, and {district} alone more than {districtCountMore}. Ezhalah.' },
   { id: 40, when: 'any', needs: ['top2'], ar: '{n}، أنشط مدينتين في المملكة الحين: {c1} و{c2}. إزهله.', en: "{n}, the Kingdom's two most active cities right now: {c1} and {c2}. Ezhalah." },
+  // THE USER'S OWN DISTRICT (owner 2026-10-17: «include districts»). Only for a user whose last search
+  // picked a district; that district's live count and rank inside its city. No line promises to watch
+  // or alert — Ezhalah has no such feature.
+  { id: 41, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، {myDistrict} فيه أكثر من {myDistrictMore} إعلان الحين. إزهله.', en: '{n}, {myDistrict} has more than {myDistrictMore} listings right now. Ezhalah.' },
+  { id: 42, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، {myDistrict} فيه أكثر من {myDistrictMore} إعلان من أصل {cityExact} في {city}. إزهله.', en: '{n}, {myDistrict} has more than {myDistrictMore} of the {cityExact} listings in {city}. Ezhalah.' },
+  { id: 43, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، {myDistrict} رقم {myRank} في {city} بعدد الإعلانات. إزهله.', en: '{n}, {myDistrict} is number {myRank} in {city} by listings. Ezhalah.' },
+  { id: 44, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، كل إعلانات {myDistrict} من كل المواقع، في مكان واحد. إزهله.', en: "{n}, all of {myDistrict}'s listings from every website, in one place. Ezhalah." },
+  { id: 45, when: 'any', needs: ['city', 'myTop10'], ar: '{n}، {myDistrict} من أنشط أحياء {city} الحين. إزهله.', en: '{n}, {myDistrict} is one of the most active districts in {city} right now. Ezhalah.' },
 ];
 
 /** Saudi Arabia has 13 administrative regions; «كل المناطق» is said only when every one has listings. */
@@ -89,6 +98,10 @@ const REGION_AR = { riyadh: 'منطقة الرياض', makkah: 'منطقة مك�
  * hours» → every 4 hours, and a signed-in user always sees a personal line).
  */
 export const HOLD_MS = 4 * 60 * 60 * 1000;
+/** A user with a searched district sees one of THEIR district's lines about this share of periods. */
+export const MY_DISTRICT_SHARE = 1 / 3;
+/** «من أنشط أحياء {city}» is said only when the district is within this rank in its city. */
+export const MY_DISTRICT_TOP = 10;
 /** Lines that state no live fact and fit any hour — the fallback when a chosen line's fact is unknown. */
 export const FACTLESS_ANYTIME_IDS: readonly number[] = WELCOME_LINES.filter((l) => !l.needs.length && l.when === 'any').map((l) => l.id);
 
@@ -188,6 +201,21 @@ export function renderWelcome(line: WelcomeLine, name: string, f: WelcomeFacts, 
         [v.c1, v.c2] = names as string[];
         break;
       }
+      case 'myDistrict': case 'myTop10': {
+        const d = f.myDistrict;
+        if (!d || !positive(d.count) || !positive(d.rank)) return null;
+        if (need === 'myTop10' && d.rank > MY_DISTRICT_TOP) return null; // «من أنشط الأحياء» only when true
+        if (locale === 'ar') v.myDistrict = /^حي\s/.test(d.ar) ? d.ar : `حي ${d.ar}`;
+        else if (d.en && !/[؀-ۿ]/.test(d.en)) v.myDistrict = d.en;
+        else return null;
+        v.myRank = fmt(d.rank);
+        const m = moreThan(d.count, locale);
+        if (m) v.myDistrictMore = m;
+        else if (line.ar.includes('{myDistrictMore}')) return null;
+        if (f.city && positive(f.city.count)) v.cityExact = fmt(f.city.count);
+        else if (line.ar.includes('{cityExact}')) return null;
+        break;
+      }
       default: {
         const m = moreThan(f.regionCounts?.[REGION_AR[need]], locale); if (!m) return null;
         v[`${need}More`] = m;
@@ -199,9 +227,18 @@ export function renderWelcome(line: WelcomeLine, name: string, f: WelcomeFacts, 
   return out.includes('\u0000') ? null : out;
 }
 
-/** A fresh line for a new period: fits the moment, never the previous one. `rand` is injectable for tests. */
-export function chooseWelcomeLine(now: Date, lastId: number | null, rand: () => number = Math.random): WelcomeLine | null {
-  const pool = WELCOME_LINES.filter((l) => l.id !== lastId && lineFitsTime(l, now));
+const isMyDistrictLine = (l: WelcomeLine) => l.needs.includes('myDistrict') || l.needs.includes('myTop10');
+
+/**
+ * A fresh line for a new period: fits the moment, never the previous one. `rand` is injectable for tests.
+ * A user with a searched district gets one of THEIR district's lines about 1 period in 3 (owner
+ * 2026-10-17: the most personal lines should come up often); without one, those lines never come up.
+ */
+export function chooseWelcomeLine(now: Date, lastId: number | null, rand: () => number = Math.random, hasMyDistrict = false): WelcomeLine | null {
+  const fits = (l: WelcomeLine) => l.id !== lastId && lineFitsTime(l, now);
+  const mine = WELCOME_LINES.filter((l) => isMyDistrictLine(l) && fits(l));
+  const others = WELCOME_LINES.filter((l) => !isMyDistrictLine(l) && fits(l));
+  const pool = hasMyDistrict && mine.length && rand() < MY_DISTRICT_SHARE ? mine : others;
   if (!pool.length) return null;
   return pool[Math.min(pool.length - 1, Math.floor(rand() * pool.length))];
 }
@@ -213,13 +250,13 @@ export type HeldWelcome = { id: number; at: number };
  * the moment (a morning line does not survive into the evening); otherwise a new period starts with a
  * new line. `keep` says whether the caller should leave the held record untouched.
  */
-export function welcomeForNow(now: Date, held: HeldWelcome | null, rand: () => number = Math.random): { line: WelcomeLine; keep: boolean } | null {
+export function welcomeForNow(now: Date, held: HeldWelcome | null, rand: () => number = Math.random, hasMyDistrict = false): { line: WelcomeLine; keep: boolean } | null {
   if (held) {
     const line = WELCOME_LINES.find((l) => l.id === held.id);
     const age = now.getTime() - held.at;
-    if (line && age >= 0 && age < HOLD_MS && lineFitsTime(line, now)) return { line, keep: true };
+    if (line && age >= 0 && age < HOLD_MS && lineFitsTime(line, now) && (hasMyDistrict || !isMyDistrictLine(line))) return { line, keep: true };
   }
-  const line = chooseWelcomeLine(now, held?.id ?? null, rand);
+  const line = chooseWelcomeLine(now, held?.id ?? null, rand, hasMyDistrict);
   return line ? { line, keep: false } : null;
 }
 

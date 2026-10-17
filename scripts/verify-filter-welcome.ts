@@ -11,7 +11,8 @@
 //      and the English keeps "Ezhalah" untranslated;
 //   7. rotation: one line held for 4 hours then a different one, always personal, time lines only at their time.
 import {
-  WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, FACTLESS_ANYTIME_IDS, type WelcomeFacts,
+  WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, FACTLESS_ANYTIME_IDS,
+  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, type WelcomeFacts,
 } from '../src/lib/filterWelcome.ts';
 
 let failed = 0;
@@ -37,11 +38,12 @@ const FACTS: WelcomeFacts = {
   ],
   cityRank: 1,
   topCities: [{ ar: 'الرياض', en: 'Riyadh', count: 162_312 }, { ar: 'جدة', en: 'Jeddah', count: 88_241 }],
+  myDistrict: { ar: 'حي النرجس', en: 'An Narjis', count: 11_385, rank: 2 },
 };
 
 // ── 6. shape ───────────────────────────────────────────────────────────────────────────────────
 const ids = WELCOME_LINES.map((l) => l.id);
-check('exactly the 40 approved lines (30 + 10 insight lines), ids 1..40', ids.length === 40 && ids.every((id, i) => id === i + 1));
+check('exactly the 45 approved lines (30 + 10 insight + 5 own-district), ids 1..45', ids.length === 45 && ids.every((id, i) => id === i + 1));
 check('every Arabic line ends with «إزهله»', WELCOME_LINES.every((l) => /إزهله[.؟!]?$/.test(l.ar)));
 check('every English line ends with "Ezhalah" (the brand is never translated)', WELCOME_LINES.every((l) => /Ezhalah[.?!]?$/.test(l.en)));
 check('Arabic lines carry no diacritics (owner: «remove alharakat»)', WELCOME_LINES.every((l) => !/[ً-ْ]/.test(l.ar)));
@@ -118,6 +120,40 @@ check('insight lines never say people are searching there, and never «نار»'
 console.log('  e.g. ' + renderWelcome(line(33), 'يوسف', FACTS, 'ar'));
 console.log('  e.g. ' + renderWelcome(line(36), 'يوسف', FACTS, 'ar'));
 console.log('  e.g. ' + renderWelcome(line(32), 'Yusuf', FACTS, 'en'));
+
+// ── 9. the user's own district (owner 2026-10-17) ───────────────────────────────────────────────
+const mine = WELCOME_LINES.filter((l) => l.needs.includes('myDistrict') || l.needs.includes('myTop10'));
+check('five own-district lines exist', mine.length === 5);
+check('«من أنشط أحياء» is hidden when the district ranks outside the top 10',
+  renderWelcome(line(45), 'يوسف', { ...FACTS, myDistrict: { ...FACTS.myDistrict!, rank: MY_DISTRICT_TOP + 1 } }, 'ar') === null
+  && renderWelcome(line(45), 'يوسف', FACTS, 'ar') !== null);
+check('no own-district line promises to watch or alert (Ezhalah has no such feature)',
+  mine.every((l) => !/يتابع|ينبه|تنبيه|watch|alert|notify/i.test(l.ar + l.en)));
+check('own-district lines never render without a matched district', mine.every((l) => renderWelcome(l, 'يوسف', { ...FACTS, myDistrict: undefined }, 'ar') === null));
+const neverMineWithout = (pick: typeof chooseWelcomeLine) => {
+  for (let i = 0; i < 200; i++) {
+    const r = [i / 200, (i * 7 % 200) / 200];
+    const l = pick(new Date('2026-10-14T13:00:00'), null, () => r.shift() ?? 0, false);
+    if (l && mine.includes(l)) return false;
+  }
+  return true;
+};
+check('a user without a searched district never gets an own-district line', neverMineWithout(chooseWelcomeLine));
+mustCatch('a picker that offers own-district lines to everyone', !neverMineWithout((now, last, rand = Math.random) => {
+  const pool = WELCOME_LINES.filter((l) => l.id !== last && lineFitsTime(l, now));
+  return pool[Math.min(pool.length - 1, Math.floor(rand() * pool.length))];
+}));
+let mineHits = 0;
+for (let i = 0; i < 300; i++) {
+  const r = [i / 300, 0.5];
+  const l = chooseWelcomeLine(new Date('2026-10-14T13:00:00'), null, () => r.shift() ?? 0, true);
+  if (l && mine.includes(l)) mineHits++;
+}
+check(`with a searched district, about 1 in 3 periods is one of THEIR lines (got ${mineHits}/300)`,
+  MY_DISTRICT_SHARE === 1 / 3 && Math.abs(mineHits / 300 - MY_DISTRICT_SHARE) < 0.02);
+console.log('  e.g. ' + renderWelcome(line(41), 'يوسف', FACTS, 'ar'));
+console.log('  e.g. ' + renderWelcome(line(42), 'يوسف', FACTS, 'ar'));
+console.log('  e.g. ' + renderWelcome(line(43), 'Yusuf', FACTS, 'en'));
 
 // ── 7. rotation ─────────────────────────────────────────────────────────────────────────────────
 const at = (iso: string) => new Date(iso);
