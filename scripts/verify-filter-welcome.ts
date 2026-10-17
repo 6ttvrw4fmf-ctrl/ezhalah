@@ -1,0 +1,124 @@
+// verify-filter-welcome — the Filter home's rotating welcome may only ever say TRUE things.
+//
+// Owner 2026-10-17: «those number count should be true … gets updated». So this check EXECUTES
+// src/lib/filterWelcome.ts (pure) and proves, with mutation proofs for each guard:
+//   1. no line has a number typed into it — every number is a live placeholder;
+//   2. «أكثر من» / "more than" always precedes a number STRICTLY below the real count;
+//   3. a line whose fact is missing / not true today renders nothing (the normal subtitle stays);
+//   4. «كل مناطق المملكة» is said only when all 13 regions have listings;
+//   5. English never carries Arabic script (city/district names come from the official English names);
+//   6. the owner's shape: 30 lines, Arabic without diacritics, every line ends with the brand,
+//      and the English keeps "Ezhalah" untranslated;
+//   7. rotation: about half of loads only, never the previous line, time lines only at their time.
+import {
+  WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, SHOW_PROBABILITY, type WelcomeFacts,
+} from '../src/lib/filterWelcome.ts';
+
+let failed = 0;
+const check = (label: string, ok: boolean, detail = '') => {
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !detail ? '' : `  — ${detail}`}`);
+  if (!ok) failed++;
+};
+const mustCatch = (label: string, caught: boolean) => {
+  console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${label}`);
+  if (!caught) failed++;
+};
+
+// Real production values on 2026-10-17, so the rendered examples read like the live site.
+const FACTS: WelcomeFacts = {
+  sites: 149, listings: 372_889, cities: 341, districts: 3_752, regions: 13,
+  regionCounts: { 'منطقة الرياض': 170_363, 'منطقة مكة المكرمة': 104_681, 'المنطقة الشرقية': 48_662, 'منطقة القصيم': 16_235 },
+  city: { ar: 'الرياض', en: 'Riyadh', count: 162_312 },
+  topDistrict: { ar: 'حي المهدية', en: 'Al Mahdiyah', count: 11_994 },
+};
+
+// ── 6. shape ───────────────────────────────────────────────────────────────────────────────────
+const ids = WELCOME_LINES.map((l) => l.id);
+check('exactly the 30 approved lines, ids 1..30', ids.length === 30 && ids.every((id, i) => id === i + 1));
+check('every Arabic line ends with «إزهله»', WELCOME_LINES.every((l) => /إزهله[.؟!]?$/.test(l.ar)));
+check('every English line ends with "Ezhalah" (the brand is never translated)', WELCOME_LINES.every((l) => /Ezhalah[.?!]?$/.test(l.en)));
+check('Arabic lines carry no diacritics (owner: «remove alharakat»)', WELCOME_LINES.every((l) => !/[ً-ْ]/.test(l.ar)));
+check('every line greets the user by name', WELCOME_LINES.every((l) => l.ar.includes('{n}') && l.en.includes('{n}')));
+
+// ── 1. no typed numbers ──────────────────────────────────────────────────────────────────────────
+const typedNumber = (s: string) => /[0-9٠-٩]/.test(s.replace(/\{\w+\}/g, ''));
+const noTypedNumbers = (lines: typeof WELCOME_LINES) => lines.every((l) => !typedNumber(l.ar) && !typedNumber(l.en));
+check('no line has a number typed into it — every number is a live placeholder', noTypedNumbers(WELCOME_LINES));
+mustCatch('a hard-coded "149" in a line', !noTypedNumbers([{ ...WELCOME_LINES[0], ar: 'صباح الخير {n}، 149 موقع في إزهله.' }]));
+
+// ── 2. "more than" is honest ─────────────────────────────────────────────────────────────────────
+const asNumber = (s: string) => (s.endsWith(' ألف') ? Number(s.replace(/[^\d]/g, '')) * 1000 : Number(s.replace(/,/g, '')));
+const honest = (fn: typeof moreThan) => {
+  for (const n of [1001, 1_500, 3_752, 9_999, 10_000, 16_235, 48_662, 100_000, 104_681, 162_312, 170_363, 370_000, 372_889, 1_000_000]) {
+    for (const loc of ['ar', 'en'] as const) {
+      const s = fn(n, loc);
+      if (s === null) return false;
+      if (!(asNumber(s) < n)) return false;
+    }
+  }
+  return fn(999, 'ar') === null && fn(undefined, 'ar') === null && fn(Number.NaN, 'en') === null;
+};
+check('«أكثر من» is always strictly below the real count, and absent below 1,000', honest(moreThan));
+check('today\'s numbers read as approved: 370 ألف · 3,700 · 170 ألف · 100 ألف · 48 ألف · 16 ألف',
+  moreThan(372_889, 'ar') === '370 ألف' && moreThan(3_752, 'ar') === '3,700' && moreThan(170_363, 'ar') === '170 ألف'
+  && moreThan(104_681, 'ar') === '100 ألف' && moreThan(48_662, 'ar') === '48 ألف' && moreThan(16_235, 'ar') === '16 ألف'
+  && moreThan(372_889, 'en') === '370,000');
+mustCatch('rounding UP ("more than 380 thousand" for 372,889)', !honest((n, l) => (typeof n === 'number' && n > 1000 ? (l === 'ar' ? `${Math.ceil(n / 10_000) * 10} ألف` : String(Math.ceil(n / 10_000) * 10_000)) : null)));
+mustCatch('"more than X" where X equals the count (370,000 for exactly 370,000)', !honest((n) => (typeof n === 'number' && n > 1000 ? String(Math.floor(n / 1000) * 1000) : null)));
+
+// ── 3. a missing fact hides the line ─────────────────────────────────────────────────────────────
+const everyLineRenders = WELCOME_LINES.every((l) => {
+  const ar = renderWelcome(l, 'يوسف', FACTS, 'ar'); const en = renderWelcome(l, 'Yusuf', FACTS, 'en');
+  return !!ar && !!en && !/[{}]/.test(ar + en) && ar.includes('يوسف') && en.includes('Yusuf');
+});
+check('with every fact known, all 30 lines render in both languages with no leftover placeholder', everyLineRenders);
+const hidesWhenMissing = (render: typeof renderWelcome) => WELCOME_LINES.filter((l) => l.needs.length).every((l) => {
+  const empty: WelcomeFacts = {};
+  return render(l, 'يوسف', empty, 'ar') === null && render(l, 'Yusuf', empty, 'en') === null;
+});
+check('every line that states a fact renders NOTHING when that fact is unknown', hidesWhenMissing(renderWelcome));
+mustCatch('a renderer that prints a zero for an unknown count',
+  !hidesWhenMissing((l, n, f, loc) => renderWelcome(l, n, { ...FACTS, ...f, sites: f.sites ?? 0, listings: f.listings ?? 0 } as WelcomeFacts, loc)));
+check('no name → no personal line', WELCOME_LINES.every((l) => renderWelcome(l, '  ', FACTS, 'ar') === null));
+
+// ── 4. "all 13 regions" only when true ───────────────────────────────────────────────────────────
+const allRegionLines = WELCOME_LINES.filter((l) => l.needs.includes('allRegions'));
+check('«كل مناطق المملكة» lines are hidden when only 12 regions have listings',
+  allRegionLines.length > 0 && allRegionLines.every((l) => renderWelcome(l, 'يوسف', { ...FACTS, regions: 12 }, 'ar') === null));
+
+// ── 5. no Arabic inside English ─────────────────────────────────────────────────────────────────
+const arabicLeak = WELCOME_LINES.some((l) => {
+  const en = renderWelcome(l, 'Yusuf', { ...FACTS, city: { ar: 'الرياض', en: 'الرياض', count: 162_312 }, topDistrict: { ar: 'حي المهدية', en: 'حي المهدية', count: 11_994 } }, 'en');
+  return en !== null && /[؀-ۿ]/.test(en);
+});
+check('an English line is never shown with an Arabic city/district name in it', !arabicLeak);
+
+// ── 7. rotation ─────────────────────────────────────────────────────────────────────────────────
+const at = (iso: string) => new Date(iso);
+check('a roll at/above SHOW_PROBABILITY keeps the normal subtitle', chooseWelcomeLine(at('2026-10-14T10:00:00'), null, () => SHOW_PROBABILITY) === null);
+const neverRepeats = (pick: typeof chooseWelcomeLine) => {
+  for (const last of WELCOME_LINES.map((l) => l.id)) {
+    for (let i = 0; i < 97; i++) {
+      const r = [0.1, i / 97];
+      if (pick(at('2026-10-16T09:00:00'), last, () => r.shift() ?? 0)?.id === last) return false;
+    }
+  }
+  return true;
+};
+check('the previous line is never shown twice in a row', neverRepeats(chooseWelcomeLine));
+const wed = at('2026-10-14T14:00:00'); // Wednesday afternoon
+check('on a Wednesday afternoon no morning/evening/Friday/weekend line is eligible',
+  WELCOME_LINES.filter((l) => lineFitsTime(l, wed)).every((l) => l.when === 'any'));
+const friMorning = at('2026-10-16T08:00:00'); // Friday 08:00
+check('Friday morning allows morning, Friday and weekend lines',
+  ['morning', 'friday', 'weekend'].every((w) => WELCOME_LINES.some((l) => l.when === w && lineFitsTime(l, friMorning))));
+mustCatch('a picker that ignores the previous line', !neverRepeats((now, _last, rand = Math.random) => {
+  if (rand() >= SHOW_PROBABILITY) return null;
+  const pool = WELCOME_LINES.filter((l) => lineFitsTime(l, now));
+  return pool[Math.min(pool.length - 1, Math.floor(rand() * pool.length))];
+}));
+
+console.log(`\nExample (ar): ${renderWelcome(WELCOME_LINES[3], 'يوسف', FACTS, 'ar')}`);
+console.log(`Example (en): ${renderWelcome(WELCOME_LINES[23], 'Yusuf', FACTS, 'en')}`);
+if (failed) { console.error(`\n❌ verify-filter-welcome: ${failed} check(s) failed.`); process.exit(1); }
+console.log('\n✅ verify-filter-welcome: every welcome line is live, honest, branded and rotates as approved.');

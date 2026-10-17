@@ -388,14 +388,13 @@ operating on the restored turns' own embedded queries and paging state.
 
 Owner-approved web behaviour (2026-10-03): Deal App and Gathern open their real pages in plain
 iframes, with their own headers unchanged. No proxy, header stripping, or framing bypass is permitted.
-Owner 2026-10-16: more sites open the same way, with no new design. On 2026-10-16, 46 more hosts were
-added to `IN_APP_VIEWER_HOSTS` (48 in all). ryadah.com.sa, wahadat.sa and just.sa were added and then
-removed after the live guard caught them: ryadah refuses framing for phones, wahadat took ~6 s from the
-US runner, and most of just's sampled ads were removed at source («ليس لديك صلاحيات»). A host joins only after a live frame proof, which means
-two live ads framed like AdViewer, a top-level control load, and a calibration where Aqar and Wasalt
-must fail. It must also show its ad within about 2 s on phone 4G, so `e2e/viewer/speed-live.mjs`
-(which must list every host) stays green. A host that later refuses framing or turns slow comes off
-the list.
+Owner 2026-10-16: more sites open the same way, with no new design. A host joins only after a live
+frame proof, which means two live ads framed like AdViewer, a top-level control load, and a calibration
+where Aqar and Wasalt must fail. It must also show its ad within the speed budget on phone 4G, measured
+from the GitHub runner by `e2e/viewer/speed-live.mjs` (which must list every host): 3 s until
+2026-10-17, then **10 s** by owner decision («if it's below 10 seconds no problem»). A host that later
+refuses framing, goes down, or goes over budget comes off the list; the guard runs every 6 hours and
+after every deploy. 2026-10-17: 67 hosts on the list.
 
 Aqar, Aqar Monthly and the 50 owner-approved non-embeddable platforms (2026-10-04, exact hosts in
 `IN_APP_PREVIEW_HOSTS`) use the same panel with a native `ListingPreview` of the
