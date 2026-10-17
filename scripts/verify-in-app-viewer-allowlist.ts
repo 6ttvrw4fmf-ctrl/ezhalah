@@ -320,7 +320,7 @@ mustCatch('an Arabic app that leaves Deal App on /en', localeFails((u, l) => loc
 // A first-segment rule that forgets the 2026-10-16 sites (Rakez stays /ar in an English app).
 mustCatch('an English app that leaves Rakez on /ar', localeFails((u, l) => (u.includes('rakez.sa') ? u : localizeAdUrl(u, l))).length > 0);
 // A rule applied to every host (mar-ksa /en redirects to /ar; daryusuf /ar is a 404).
-mustCatch('a language swap applied to sites without a proven rule', localeFails((u, l) => { const x = new URL(u); if (/^\/(ar|en)\//.test(x.pathname)) { x.pathname = x.pathname.replace(/^\/(ar|en)/, l === 'en' ? '/en' : '/ar'); return x.href; } return localizeAdUrl(u, l); }).length > 0);
+mustCatch('a language swap applied to sites without a proven rule', localeFails((u, l) => { if (!u) return localizeAdUrl(u, l); const x = new URL(u); if (/^\/(ar|en)\//.test(x.pathname)) { x.pathname = x.pathname.replace(/^\/(ar|en)/, l === 'en' ? '/en' : '/ar'); return x.href; } return localizeAdUrl(u, l); }).length > 0);
 // A rule that invents a language segment on a link that has none.
 mustCatch('a language segment invented on a bare link', localeFails((u, l) => (u === 'https://rakez.sa/project/1/' ? 'https://rakez.sa/en/project/1/' : localizeAdUrl(u, l))).length > 0);
 mustCatch('a pane ✕ that deletes the tabs', paneFails({ ...realPane, hide: () => ({ tabs: [], active: 0, hidden: true }) }).length > 0);
