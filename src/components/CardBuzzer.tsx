@@ -5,8 +5,10 @@ import { useReducedMotion } from '@/lib/useReducedMotion';
 
 const IS_WEB = Platform.OS === 'web';
 
-// THE GOLDEN BUZZER (owner 2026-10-11): pressing a laptop card's photo or its gold «اضغط هنا» button
-// flashes the whole card gold, like a talent-show buzzer, and throws a short burst of confetti. It is
+// THE GOLDEN BUZZER (owner 2026-10-11, extended to EVERY card 2026-10-17: «whenever a user clicks on a
+// listing I want this party confetti … on everything»): pressing a card's photo, body or gold «اضغط هنا»
+// button — laptop roomy, laptop tight, phone, native alike — flashes the whole card gold, like a
+// talent-show buzzer, and throws a short burst of confetti. It is
 // DECORATION ONLY — the press handler opens the ad first and bumps `burst` second, so the ad opens
 // even if this layer never paints (backgrounded tab, reduced motion, a throw here).
 //

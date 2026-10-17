@@ -175,6 +175,13 @@ chat, which renders results inline. (Deliberate; single search engine — see §
 
 ## 5. Frontend — the Property Card (`src/components/ResultCard.tsx`) — SOURCE OF TRUTH
 
+**Every press on a card plays the golden buzzer + confetti (owner 2026-10-17: «whenever a user clicks
+on a listing I want this party confetti to appear … on everything»).** Photo, body or gold button, on
+the laptop photo-first card, the laptop compact row and the phone card alike: one shared `fire()`
+opens the ad first, synchronously, then bumps the card's `BuzzLayer` (`src/components/CardBuzzer.tsx`).
+Decoration only — reduced motion draws nothing and the ad opens even if the layer never paints.
+Guard: `scripts/verify-laptop-photo-card.ts`.
+
 **Card data is locked. Display scraped values verbatim; change presentation only with owner approval.** Fix data
 problems via backend mapping only (see §16), never by editing the card.
 

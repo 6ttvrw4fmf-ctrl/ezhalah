@@ -104,8 +104,13 @@ export function ResultCard({
   const tight = row === 'tight';
   // 'tight' only: the two truncated secondary lines, unfolded by a tap on them.
   const [unfolded, setUnfolded] = useState(false);
-  // Laptop photo-first card: bumped by a press on the photo or the gold button — plays the golden buzzer.
+  // EVERY card, every layout (owner 2026-10-17: «whenever a user clicks on a listing I want this party
+  // confetti to appear … on everything»): a press on the photo, the body or the gold button bumps
+  // `burst`, and the golden buzzer + confetti play over the card — laptop roomy, laptop tight, phone.
   const [burst, setBurst] = useState(0);
+  // PRESS = OPEN. The ad opens first, synchronously inside the click (a delayed window.open would be
+  // popup-blocked); the buzzer is bumped second and is pure decoration.
+  const fire = () => { onOpen(); setBurst((b) => b + 1); };
   // Evidence for the «مطابق لطلبك» strip: NEVER read from listing.features / listing.bathrooms (raw,
   // NULL-coerced) — only from listing.canon, the canonical row the predicate actually passed on.
   const evidence = useMemo(() => afEvidence(activeAf ?? [], listing.canon, t), [activeAf, listing.canon, t]);
@@ -215,9 +220,6 @@ export function ResultCard({
   if (row === 'roomy') {
     const photos = listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []);
     const stay = isStayLengthPriced(listing.source);
-    // PRESS = OPEN. The ad opens first, synchronously inside the click (a delayed window.open would be
-    // popup-blocked); the buzzer is bumped second and is pure decoration.
-    const fire = () => { onOpen(); setBurst((b) => b + 1); };
     const typeIcon = typeImg(listing.cleanType ?? '');
     // PLAIN + SAME SIZE (owner 2026-10-11): every laptop card has the same fixed rows — one title line, one
     // main line, ONE row of at most 3 chips (the Advanced-Filter picks come first) with a plain «+N».
@@ -371,7 +373,7 @@ export function ResultCard({
     // Rendering-only: no style, no behaviour, and web-only `testID` becomes `data-testid`.
     <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow, { direction: wDir }]}>
       {/* The whole photo keeps the existing source-listing action. */}
-      <Pressable onPress={onOpen} accessibilityRole="link" accessibilityLabel={t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })} style={[card.photoCol, row ? [card.photoColRow, tight && card.photoColTight] : horizontal ? card.photoColWide : card.photoColMobile]}>
+      <Pressable onPress={fire} accessibilityRole="link" accessibilityLabel={t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })} style={[card.photoCol, row ? [card.photoColRow, tight && card.photoColTight] : horizontal ? card.photoColWide : card.photoColMobile]}>
         <ListingPhoto photos={(listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []))} style={card.photo} t={t} />
         {rank ? (
           <View style={[card.rankBadge, row && card.rankBadgeRow]} pointerEvents="none">
@@ -390,7 +392,7 @@ export function ResultCard({
 
       <View style={row ? card.bodyRow : card.body}>
       {/* ─── property info ───────────────────────── */}
-      <Pressable onPress={onOpen} style={[card.midCol, row && card.midColRow]}>
+      <Pressable onPress={fire} style={[card.midCol, row && card.midColRow]}>
         <View style={card.sourceRow}>
           <View style={card.hostHead}>
             <View style={card.hostBadge}><SourceBadge source={listing.source} /></View>
@@ -576,8 +578,8 @@ export function ResultCard({
       </View>
       )}
       </View>
-      {/* keeps the golden-buzzer party playing while this card re-flows into the compact row */}
-      {row ? <BuzzLayer burst={burst} /> : null}
+      {/* the golden-buzzer party on EVERY card — laptop tight row and phone alike (owner 2026-10-17) */}
+      <BuzzLayer burst={burst} />
     </View>
   );
 }
