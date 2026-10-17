@@ -1,6 +1,6 @@
 // THE FILTER HOME'S ROTATING WELCOME (owner 2026-10-17).
 //
-// The line under the Filter home headline («إزهله محرك بحث عقاري…») sometimes becomes a short,
+// The Filter home's BIG HEADLINE («موقع واحد للبحث…») sometimes becomes a short,
 // personal marketing line for a SIGNED-IN user: a greeting, their name, a live fact, and the brand
 // «إزهله» / "Ezhalah" at the end. The owner approved these 30 lines word for word (Arabic), with an
 // English translation in which the brand name is never translated.
@@ -67,8 +67,13 @@ export const WELCOME_LINES: readonly WelcomeLine[] = [
 export const SAUDI_REGION_COUNT = 13;
 const REGION_AR = { riyadh: 'منطقة الرياض', makkah: 'منطقة مكة المكرمة', eastern: 'المنطقة الشرقية', qassim: 'منطقة القصيم' } as const;
 
-/** How often a signed-in load shows a line instead of the normal subtitle («sometimes, not always»). */
-export const SHOW_PROBABILITY = 0.5;
+/**
+ * How long one line stays before the next (owner 2026-10-17: «not every refresh … every now and then,
+ * hours» → every 4 hours, and a signed-in user always sees a personal line).
+ */
+export const HOLD_MS = 4 * 60 * 60 * 1000;
+/** Lines that state no live fact and fit any hour — the fallback when a chosen line's fact is unknown. */
+export const FACTLESS_ANYTIME_IDS: readonly number[] = WELCOME_LINES.filter((l) => !l.needs.length && l.when === 'any').map((l) => l.id);
 
 const fmt = (n: number) => Math.trunc(n).toLocaleString('en-US');
 
@@ -146,13 +151,33 @@ export function renderWelcome(line: WelcomeLine, name: string, f: WelcomeFacts, 
   return out.includes('\u0000') ? null : out;
 }
 
-/**
- * Which line (if any) this page load shows. `rand` is injectable for tests. Returns null for "keep the
- * normal subtitle" — about half the time, or when no line fits the moment. Never the previous line.
- */
+/** A fresh line for a new period: fits the moment, never the previous one. `rand` is injectable for tests. */
 export function chooseWelcomeLine(now: Date, lastId: number | null, rand: () => number = Math.random): WelcomeLine | null {
-  if (rand() >= SHOW_PROBABILITY) return null;
   const pool = WELCOME_LINES.filter((l) => l.id !== lastId && lineFitsTime(l, now));
   if (!pool.length) return null;
   return pool[Math.min(pool.length - 1, Math.floor(rand() * pool.length))];
+}
+
+export type HeldWelcome = { id: number; at: number };
+
+/**
+ * The line for this page load. The held line is KEPT while it is younger than HOLD_MS and still fits
+ * the moment (a morning line does not survive into the evening); otherwise a new period starts with a
+ * new line. `keep` says whether the caller should leave the held record untouched.
+ */
+export function welcomeForNow(now: Date, held: HeldWelcome | null, rand: () => number = Math.random): { line: WelcomeLine; keep: boolean } | null {
+  if (held) {
+    const line = WELCOME_LINES.find((l) => l.id === held.id);
+    const age = now.getTime() - held.at;
+    if (line && age >= 0 && age < HOLD_MS && lineFitsTime(line, now)) return { line, keep: true };
+  }
+  const line = chooseWelcomeLine(now, held?.id ?? null, rand);
+  return line ? { line, keep: false } : null;
+}
+
+/** When the chosen line's fact is unknown right now, a factless any-time line stands in (never the previous one). */
+export function fallbackLine(avoidId: number | null, rand: () => number = Math.random): WelcomeLine {
+  const ids = FACTLESS_ANYTIME_IDS.filter((id) => id !== avoidId);
+  const id = ids[Math.min(ids.length - 1, Math.floor(rand() * ids.length))];
+  return WELCOME_LINES.find((l) => l.id === id)!;
 }
