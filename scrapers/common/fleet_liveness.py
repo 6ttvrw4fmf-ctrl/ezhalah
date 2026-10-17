@@ -203,6 +203,21 @@ def controls(client, tables) -> list[dict]:
     return sorted(ctl, key=lambda r: r.get("last_seen_at") or "", reverse=True)[:MIN_CANARIES]
 
 
+# A site whose crawl evidence goes stale within hours gets its controls from its own source instead
+# (2026-10-17, Haraj: sellers delete within hours — 2 of the 5 ads the crawl saw last were already
+# «العرض محذوف او قديم» when the first shadow run read them, so the gate quarantined every run).
+# "module:attr" → a callable(n) returning up to n {ad_number, listing_url} rows the oracle should read
+# live; a blocked or lying site yields fewer live rows, so the gate still fails closed.
+CONTROL_POOLS: dict[str, str] = {"haraj": "scrapers.haraj.run:liveness_controls"}
+
+
+def controls_for(client, site: str, tables) -> list[dict]:
+    if site in CONTROL_POOLS:
+        mod, attr = CONTROL_POOLS[site].split(":")
+        return list(getattr(importlib.import_module(mod), attr)(MIN_CANARIES))[:MIN_CANARIES]
+    return controls(client, tables)
+
+
 def controls_ok(ctl, oracle) -> tuple[bool, str]:
     ok, why, _all = _controls_read(ctl, oracle)
     return ok, why
@@ -247,7 +262,7 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
     try:
         tables = tables_for(client, site)
         st["active"] = sum(tables.values())
-        ctl = controls(client, tables)
+        ctl = controls_for(client, site, tables)
         oracle = oracle_for(spec, ctl[0] if ctl else None)
         ok, why, open_all = _controls_read(ctl, oracle)
         if not ok:
