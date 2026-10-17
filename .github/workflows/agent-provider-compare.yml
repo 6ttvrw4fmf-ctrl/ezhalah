@@ -1,0 +1,87 @@
+name: Agent provider comparison (manual, read-only)
+
+# Owner 2026-10-17: test Groq GPT-OSS 20B against the current DeepSeek setup on Ezhalah's REAL agent
+# contract before any switch. This runs scripts/agent-provider-compare.ts, which loads the production
+# edge function UNMODIFIED and re-addresses only its model request, in this runner, to the chosen arm.
+# It changes no provider, deploys nothing and writes nothing to production (telemetry writes are
+# swallowed; only agent_notes and the read-only loc_classify are read). Manual only — never scheduled.
+#
+# Secrets (Settings → Secrets and variables → Actions): GROQ_API_KEY and DEEPSEEK_API_KEY, added by the
+# owner. SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / EXPO_PUBLIC_SUPABASE_ANON_KEY already exist.
+
+on:
+  workflow_dispatch:
+    inputs:
+      repeats:
+        description: 'Runs per case (consistency check), 1–10'
+        default: '3'
+      providers:
+        description: 'Arms to run: deepseek,groq | groq | deepseek'
+        default: 'deepseek,groq'
+      groq_model:
+        description: 'Groq model id'
+        default: 'openai/gpt-oss-20b'
+      reasoning_effort:
+        description: 'GPT-OSS reasoning_effort: low | medium | high | empty to omit'
+        default: 'low'
+
+concurrency:
+  group: agent-provider-compare
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Which model is production calling today? (read-only)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          node -e '
+            const u = process.env.SUPABASE_URL, k = process.env.KEY;
+            fetch(`${u}/rest/v1/ai_usage?select=requested_model,model,at&order=at.desc&limit=500`,
+              { headers: { apikey: k, Authorization: `Bearer ${k}` } })
+              .then(async (r) => {
+                const rows = r.ok ? await r.json() : [];
+                const c = {};
+                for (const x of rows) { const key = `requested=${x.requested_model} billed=${x.model}`; c[key] = (c[key] ?? 0) + 1; }
+                const lines = Object.entries(c).sort((a, b) => b[1] - a[1]).map(([k2, n]) => `- ${k2}: ${n}`);
+                const md = `## Production model (last ${rows.length} agent calls, newest ${rows[0]?.at ?? "–"})\n\n${lines.join("\n") || `unreadable (HTTP ${r.status})`}\n`;
+                console.log(md);
+                require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + "\n");
+              });'
+
+      - name: Compare providers on the real agent contract
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          REPEATS: ${{ inputs.repeats }}
+          PROVIDERS: ${{ inputs.providers }}
+          GROQ_MODEL: ${{ inputs.groq_model }}
+          GROQ_REASONING_EFFORT: ${{ inputs.reasoning_effort }}
+        run: |
+          node --experimental-strip-types --no-warnings scripts/agent-provider-compare.ts
+          cat agent-provider-compare-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the full results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-provider-compare
+          path: |
+            agent-provider-compare-report.md
+            agent-provider-compare-results.json
+          if-no-files-found: ignore
