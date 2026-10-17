@@ -4952,7 +4952,7 @@ export default function Agent() {
                 // rotation stops (any interaction) the familiar static placeholder returns.
                 // COMPLETED (owner request 2026-09-05): the box stays, it just goes inert — the
                 // placeholder explains why instead of inviting a message that can never send.
-                placeholder={showIntroExamples ? '' : t("Tell Ezhalah what you want...")}
+                placeholder={showIntroExamples ? '' : t("Find your property with Ezhalah")}
                 placeholderTextColor={colors.muted}
                 selectionColor={colors.primary}
                 // Stable Arabic label (owner brief §11): a screen reader always hears this one

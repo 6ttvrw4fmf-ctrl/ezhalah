@@ -807,9 +807,10 @@ const AR: Record<string, string> = {
   'I can get you something more precise.': 'أقدر أجيب لك نتائج أدق.',
   // Composer placeholder (owner wording 2026-08-16) — names the domain and the country, in the
   // conversational register the rest of the agent speaks.
-  // The box's hint (owner 2026-10-17: «one sentence, Arabic and English the same, with the word Ezhalah, readable»). Brand first
-  // and short: it reads whole once the chip is gone, and at the start (~17 characters beside the chip) it still reads «Tell Ezhalah what…».
-  "Tell Ezhalah what you want...": 'قل لإزهله وش تبغى...',
+  // The box's hint (owner 2026-10-17: «one sentence, the same in Arabic and English, about the property, ENDING with Ezhalah»).
+  // 31 characters so it shows whole once the «بحث» chip is gone (the box then holds about 33); no trailing dots, because the
+  // sentence must end on the name — the field's own text-overflow adds the ellipsis if a narrow screen ever cuts it.
+  "Find your property with Ezhalah": 'دوّر على عقارك مع إزهله',
   // Stable composer accessibility label (owner brief 2026-08-23 §11) — the ONE sentence a screen
   // reader hears for the AI input; the rotating examples are aria-hidden decoration.
   'Describe the property you are looking for': 'اكتب وصف العقار اللي تبحث عنه',
