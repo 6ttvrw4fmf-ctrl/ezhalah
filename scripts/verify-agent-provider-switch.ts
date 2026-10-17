@@ -36,10 +36,10 @@ console.log = (...a: unknown[]) => { if (typeof a[0] === "string" && a[0].starts
 
 const BASE = { DEEPSEEK_API_KEY: "ds-key", GROQ_API_KEY: "groq-key", SUPABASE_URL: "https://stub.invalid", SUPABASE_SERVICE_ROLE_KEY: "service-key", SUPABASE_ANON_KEY: "anon-key" };
 let n = 0;
-async function load(env: Record<string, string>) {
+async function load(env: Record<string, string>, file = "index.ts") {
   let handler: ((r: Request) => Promise<Response>) | null = null;
   (globalThis as any).Deno = { env: { get: (k: string) => env[k] }, serve: (h: any) => { handler = h; } };
-  await import(`../supabase/functions/agent/index.ts?instance=${++n}`); // fresh module: env is read at load
+  await import(`../supabase/functions/agent/${file}?instance=${++n}`); // fresh module: env is read at load
   if (!handler) throw new Error("agent did not register a handler");
   return async (headers: Record<string, string>) => {
     sent = [];
@@ -81,6 +81,30 @@ check("Groq selected but GROQ_API_KEY missing → 503 'model not configured', NO
 const typo = await load({ ...BASE, AI_PROVIDER: "gorq" });
 r = await typo(user);
 check("an unrecognised AI_PROVIDER value falls back to the DeepSeek default", isDeepSeek(r.sent), where(r.sent));
+
+// ── mutation proof — the two safety properties, re-run against a broken copy of the REAL file ─────
+// The mutant sits beside index.ts (its relative imports must resolve) and is always deleted.
+const { readFileSync, writeFileSync, rmSync } = await import("node:fs");
+const AGENT_DIR = new URL("../supabase/functions/agent/", import.meta.url);
+const realSrc = readFileSync(new URL("index.ts", AGENT_DIR), "utf8");
+const userCannotForceGroq = async (file: string) => isDeepSeek((await (await load({ ...BASE }, file))({ ...user, "x-ezhalah-provider": "groq" })).sent);
+const missingKeyFailsClosed = async (file: string) => {
+  const res = await (await load({ ...BASE, AI_PROVIDER: "groq", GROQ_API_KEY: "" }, file))(user);
+  return res.status === 503 && res.sent.length === 0;
+};
+async function mustCatch(label: string, find: string, replace: string, holds: (file: string) => Promise<boolean>) {
+  if (!realSrc.includes(find)) { check(`(mutation) ${label} — anchor still present in index.ts`, false, `anchor not found: ${find}`); return; }
+  const name = `__mutant_provider_switch_${process.pid}_${n}.ts`;
+  const path = new URL(name, AGENT_DIR);
+  writeFileSync(path, realSrc.replace(find, replace));
+  try {
+    check(`(mutation) catches ${label}`, !(await holds(name)), "the property still held on the broken copy — this check cannot see that defect");
+  } finally { rmSync(path, { force: true }); }
+}
+await mustCatch("ANY caller choosing the provider (service-key gate removed)",
+  "const prov = modelProvider(trustedCaller && ", "const prov = modelProvider(true && ", userCannotForceGroq);
+await mustCatch("a missing provider key no longer failing closed",
+  "if (!prov.key) {", "if (false) {", missingKeyFailsClosed);
 
 if (failures.length) {
   console.error(`\nverify-agent-provider-switch: FAIL (${failures.length})`);
