@@ -43,7 +43,7 @@ async function run(label, viewport, isMobile) {
   for (let i = 0; i < Math.min(r.cards, 6); i++) { const b = await cards.nth(i).boundingBox(); const id = (await cards.nth(i).getAttribute('data-testid')).replace('card-listing-', ''); boxes.push({ id, src: rows.get(id) || null, x: Math.round(b?.x ?? -1), y: Math.round(b?.y ?? -1), w: Math.round(b?.width ?? -1), h: Math.round(b?.height ?? -1) }); }
   r.first_cards = boxes;
   r.columns_in_first_row = new Set(boxes.filter((b) => b.y === boxes[0].y).map((b) => b.x)).size;
-  r.gold_button_count = await page.getByText('اضغط هنا').count();
+  r.gold_button_count = await page.getByText(/اضغط هنا/).count();
   r.shot_results = `${OUT}/card_${label}_results.png`;
   await page.screenshot({ path: r.shot_results, fullPage: false });
   // click an in-app card (Deal App / Gathern) if one is on screen, else the first card
@@ -56,14 +56,14 @@ async function run(label, viewport, isMobile) {
   if (target) {
     const card = page.locator(`[data-testid="card-listing-${target.id}"]`);
     await card.scrollIntoViewIfNeeded().catch(() => {});
-    const gold = card.getByText('اضغط هنا');
+    const gold = card.getByText(/اضغط هنا/);
     if (await gold.count()) await gold.first().click({ timeout: 8000 }); else await card.click({ timeout: 8000 });
     await sleep(5000);
     r.iframes_after_click = await page.locator('iframe').count();
     r.opened_tabs_after_in_app_click = await page.evaluate(() => window.__opened);
     const after = []; for (let i = 0; i < Math.min(await cards.count(), 3); i++) { const b = await cards.nth(i).boundingBox(); after.push({ x: Math.round(b?.x ?? -1), y: Math.round(b?.y ?? -1), w: Math.round(b?.width ?? -1), h: Math.round(b?.height ?? -1) }); }
     r.cards_after_click = after;
-    r.gold_button_count_after_click = await page.getByText('اضغط هنا').count();
+    r.gold_button_count_after_click = await page.getByText(/اضغط هنا/).count();
     r.shot_pane = `${OUT}/card_${label}_pane.png`;
     await page.screenshot({ path: r.shot_pane, fullPage: false });
   }
@@ -73,7 +73,7 @@ async function run(label, viewport, isMobile) {
     const before = (await page.evaluate(() => window.__opened)).length;
     const card = page.locator(`[data-testid="card-listing-${other.id}"]`);
     await card.scrollIntoViewIfNeeded().catch(() => {});
-    const gold = card.getByText('اضغط هنا');
+    const gold = card.getByText(/اضغط هنا/);
     if (await gold.count()) await gold.first().click({ timeout: 8000 }); else await card.click({ timeout: 8000 });
     await sleep(3000);
     const opened = await page.evaluate(() => window.__opened);
