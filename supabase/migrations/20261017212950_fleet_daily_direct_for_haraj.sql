@@ -1,3 +1,4 @@
+-- APPLIED 2026-10-17 21:29:50 UTC (owner session, DB quiet: 1 active API query). Impact checked first: exactly 1 row changes (haraj), 0 deleted, 0 new.
 -- Owner session 2026-10-17: Haraj joins the daily DIRECT tier, CANDIDATE_PLUS_DIRECT/168h -> DIRECT_REVISIT/48h
 -- (liveness_policies.FLEET_DAILY_DIRECT, which is fleet_liveness.APPLY), with its own-hour controls
 -- (fleet_liveness.CONTROL_POOLS). Before this, 0 of 680 Haraj ads had ever been removed: the generic
