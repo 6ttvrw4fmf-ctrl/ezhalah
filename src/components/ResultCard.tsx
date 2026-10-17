@@ -16,7 +16,7 @@ import { sourceName } from '@/lib/listingDisplay';
 import { isStayLengthPriced, listingPrice } from '@/lib/listingDisplay';
 import { afEvidence, AMENITY_COL, type ActiveAf } from '@/lib/afEvidence';
 import { typeImg } from '@/theme/propertyIcons';
-import { GoldShineButton } from './CardReveal';
+import { GoldShineButton, GoldSurface } from './CardReveal';
 import { BuzzLayer } from './CardBuzzer';
 import { partyConfetti } from './ConfettiOverlay';
 import { inAppViewerHost } from '@/lib/inAppViewer';
@@ -245,6 +245,9 @@ export function ResultCard({
     const shownFeats = visible.slice(0, CHIP_CAP);
     const moreFeats = visible.length - shownFeats.length;
     return (
+      // THE GOLD FRAME (owner 2026-10-17, «make the frame … golden shining like a buzzer … for all»): a
+      // thin shining gold ring around EVERY card, painted like the gold button; the card sits inside it.
+      <GoldSurface style={card.goldRing} testID="card-gold-frame">
       <View testID={`card-listing-${listing.id}`} style={[card.wrap, card.lpWrap, { direction: wDir }]}>
         <Pressable onPress={fire} accessibilityRole="link" accessibilityLabel={t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })} style={card.lpPhoto}>
           <ListingPhoto photos={photos} style={card.photo} t={t} />
@@ -366,6 +369,7 @@ export function ResultCard({
         </View>
         <BuzzLayer burst={burst} />
       </View>
+      </GoldSurface>
     );
   }
 
@@ -378,6 +382,7 @@ export function ResultCard({
     // checkable if a rendered card can be identified in the DOM; matching strips to rows by position
     // is unsound, because a row that earns no chip renders no strip and silently shifts the rest.
     // Rendering-only: no style, no behaviour, and web-only `testID` becomes `data-testid`.
+    <GoldSurface style={card.goldRing} testID="card-gold-frame">
     <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow, { direction: wDir }]}>
       {/* The whole photo keeps the existing source-listing action. */}
       <Pressable onPress={fire} accessibilityRole="link" accessibilityLabel={t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })} style={[card.photoCol, row ? [card.photoColRow, tight && card.photoColTight] : horizontal ? card.photoColWide : card.photoColMobile]}>
@@ -390,10 +395,11 @@ export function ResultCard({
         {/* user request: removed the white "AQAR" pill that floated over the photo's top-right.
             Source attribution appears in the photo strip and the compact source row. */}
         {listing.source_url ? (
-          <View style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none">
+          {/* THE GOLD STRIP (owner 2026-10-17): the «اضغط هنا» strip shines gold like the buzzer, on every card. */}
+          <GoldSurface style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none" testID="card-gold-strip">
             <Text style={[card.photoAction, row && card.photoActionRow]}>{t('Click here 👆')}</Text>
             <Text style={[card.sourceText, row && card.sourceTextRow]} numberOfLines={row ? 1 : undefined}>{sourceHost(listing.source)}</Text>
-          </View>
+          </GoldSurface>
         ) : null}
       </Pressable>
 
@@ -588,6 +594,7 @@ export function ResultCard({
       {/* the golden-buzzer party on EVERY card — laptop tight row and phone alike (owner 2026-10-17) */}
       <BuzzLayer burst={burst} />
     </View>
+    </GoldSurface>
   );
 }
 
@@ -1479,10 +1486,13 @@ const card = StyleSheet.create({
   platformText: { color: colors.primary, fontSize: 10.5, fontWeight: '700' },
   sourceStrip: {
     position: 'absolute', bottom: 0, left: 0, right: 0, paddingVertical: 9, paddingHorizontal: 10,
-    backgroundColor: 'rgba(22,52,35,0.93)', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 5,
+    flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 5,
   },
-  sourceText: { color: '#fff', fontSize: 10, fontWeight: '500', writingDirection: 'ltr' },
-  photoAction: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  // Dark text ON the gold strip (goldOnFill), the same pairing as the gold button.
+  sourceText: { color: colors.goldOnFill, fontSize: 10, fontWeight: '700', writingDirection: 'ltr' },
+  photoAction: { color: colors.goldOnFill, fontSize: 12, fontWeight: '800' },
+  // The shining gold ring around every card: 3px of gradient showing around the card's own corners.
+  goldRing: { borderRadius: 13, padding: 3 },
 
 
   // ─── LAPTOP PHOTO-FIRST CARD (owner 2026-10-11) ───

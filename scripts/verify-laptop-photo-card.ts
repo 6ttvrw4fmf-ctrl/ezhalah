@@ -30,6 +30,7 @@ const read = (f: string) => readFileSync(join(ROOT, f), 'utf8');
 const CARD = read('src/components/ResultCard.tsx');
 const BUZZ = read('src/components/CardBuzzer.tsx');
 const OVERLAY = read('src/components/ConfettiOverlay.tsx');
+const REVEAL = read('src/components/CardReveal.tsx');
 const GRID = read('src/components/ResultCardGrid.tsx');
 const AGENT = read('src/app/agent.tsx');
 const I18N = read('src/i18n.tsx');
@@ -49,7 +50,7 @@ const lpStyles = (src: string): string => {
   return a >= 0 && b > a ? src.slice(a, b) : '';
 };
 
-const rules = (card: string, buzz: string, grid: string, agent: string, i18n: string, resp: string, overlay: string = OVERLAY): Record<string, boolean> => {
+const rules = (card: string, buzz: string, grid: string, agent: string, i18n: string, resp: string, overlay: string = OVERLAY, reveal: string = REVEAL): Record<string, boolean> => {
   const lp = laptopBlock(card);
   const styles = lpStyles(card);
   return {
@@ -75,7 +76,13 @@ const rules = (card: string, buzz: string, grid: string, agent: string, i18n: st
       /if \(!live \|\| reduced\) return null;/.test(buzz) && /setTimeout\(\(\) => setLive\(false\)/.test(buzz)
       && !/\.start\(\s*\(/.test(buzz) && !/Math\.random/.test(buzz),
     'the buzzer layer mounts in the photo-first card AND unconditionally in the compact/phone card (every layout, owner 2026-10-17)':
-      /<BuzzLayer burst=\{burst\} \/>/.test(lp) && /\n      <BuzzLayer burst=\{burst\} \/>\n    <\/View>\n  \);\n\}/.test(card) && !/\{row \? <BuzzLayer/.test(card),
+      /<BuzzLayer burst=\{burst\} \/>/.test(lp) && /\n      <BuzzLayer burst=\{burst\} \/>\n    <\/View>\n    <\/GoldSurface>\n  \);\n\}/.test(card) && !/\{row \? <BuzzLayer/.test(card),
+    // Owner 2026-10-17: «make the frame and this golden shining like a buzzer … for all».
+    'EVERY card sits in a shining gold ring and its «اضغط هنا» strip is a shining gold surface (GoldSurface = the gold button\'s gradient + CSS glint)':
+      (card.match(/<GoldSurface style=\{card\.goldRing\} testID="card-gold-frame">/g) || []).length === 2
+      && /<GoldSurface style=\{\[card\.sourceStrip, row && card\.sourceStripRow\]\} pointerEvents="none" testID="card-gold-strip">/.test(card)
+      && /export function GoldSurface\(/.test(reveal) && /<CssShine \/>/.test(reveal.slice(reveal.indexOf('export function GoldSurface(')))
+      && /sourceText: \{ color: colors\.goldOnFill/.test(card) && /photoAction: \{ color: colors\.goldOnFill/.test(card),
     'the TYPE (with its Filter icon) comes before the rooms in the main line':
       lp.indexOf('style={card.lpType}') > 0 && lp.indexOf('style={card.lpType}') < lp.indexOf('listing.beds > 0 ? <Stat') && /typeImg\(listing\.cleanType/.test(lp),
     'the Advanced-Filter picks are the lit chips (✓), driven by pickedFeatures':
@@ -128,7 +135,16 @@ mustCatch('the photo no longer pressing the shared handler', 'the photo AND the 
 mustCatch('the phone/compact card pressing onOpen directly (no confetti there)', 'EVERY card presses the shared handler — the compact row and the phone card too, never onOpen directly',
   rules(CARD.replace('<Pressable onPress={fire} style={[card.midCol', '<Pressable onPress={onOpen} style={[card.midCol'), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('the buzzer layer gated back to laptop rows only', 'the buzzer layer mounts in the photo-first card AND unconditionally in the compact/phone card (every layout, owner 2026-10-17)',
-  rules(CARD.replace('\n      <BuzzLayer burst={burst} />\n    </View>\n  );\n}', '\n      {row ? <BuzzLayer burst={burst} /> : null}\n    </View>\n  );\n}'), BUZZ, GRID, AGENT, I18N, RESP));
+  rules(CARD.replace('\n      <BuzzLayer burst={burst} />\n    </View>\n    </GoldSurface>\n  );\n}', '\n      {row ? <BuzzLayer burst={burst} /> : null}\n    </View>\n    </GoldSurface>\n  );\n}'), BUZZ, GRID, AGENT, I18N, RESP));
+const R_GOLD = 'EVERY card sits in a shining gold ring and its «اضغط هنا» strip is a shining gold surface (GoldSurface = the gold button\'s gradient + CSS glint)';
+mustCatch('the phone/compact card losing its gold ring', R_GOLD,
+  rules(CARD.replace('    <GoldSurface style={card.goldRing} testID="card-gold-frame">\n    <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow', '    <View style={card.goldRing} testID="card-gold-frame">\n    <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('the strip back to the flat dark-green View', R_GOLD,
+  rules(CARD.replace('<GoldSurface style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none" testID="card-gold-strip">', '<View style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none">'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('a gold surface that does not shine', R_GOLD,
+  rules(CARD, BUZZ, GRID, AGENT, I18N, RESP, OVERLAY, REVEAL.replace(/(export function GoldSurface\([\s\S]*?)<CssShine \/>/, '$1')));
+mustCatch('white text on the gold strip', R_GOLD,
+  rules(CARD.replace("photoAction: { color: colors.goldOnFill", "photoAction: { color: '#fff'"), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('a still (non-shining) gold button', 'the gold button SHINES on every card, by a CSS keyframe (no worklet per card)',
   rules(CARD.replace('<GoldShineButton shine="css" onPress={fire}', '<GoldShineButton shine="none" onPress={fire}'), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('the buzzer ignoring reduced motion', 'the buzzer is decoration: reduced motion draws nothing; removed by a timer; no .start(callback); no Math.random',

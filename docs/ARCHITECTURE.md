@@ -187,6 +187,12 @@ takes a tap). Cards that open a new tab or the native preview page open exactly 
 party. Decoration only — reduced motion draws nothing and the ad opens even if nothing paints.
 Guard: `scripts/verify-laptop-photo-card.ts`.
 
+**Every card wears gold (owner 2026-10-17: «make the frame and this golden shining like a buzzer … for
+all»):** a 3 px shining gold ring around every card and a shining gold «اضغط هنا» photo strip, both
+`GoldSurface` (`src/components/CardReveal.tsx`) — the gold button's own metallic gradient plus its CSS
+glint, one compositor keyframe per surface, dark `goldOnFill` text on the strip. Reduced motion: a
+still gold. Same guard.
+
 **Card data is locked. Display scraped values verbatim; change presentation only with owner approval.** Fix data
 problems via backend mapping only (see §16), never by editing the card.
 
