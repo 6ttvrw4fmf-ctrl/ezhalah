@@ -99,6 +99,15 @@ check('we ship our own public/favicon.ico instead', existsSync('public/favicon.i
 // ── the live rules ───────────────────────────────────────────────────────────────────────────────
 for (const problem of auditIcons(REAL, existsSync)) check(problem, false);
 const links = parseIconLinks(REAL);
+// Reuse the existing transparent brand asset verbatim; an opaque tile must not return.
+const transparentBrand = readFileSync('assets/images/ezhalah-logo.png');
+const matchesBrand = (bytes: Buffer) => bytes.equals(transparentBrand);
+check('tab PNG preserves the transparent original logo', matchesBrand(readFileSync('public/icon-200.png')));
+const ico = readFileSync('public/favicon.ico');
+check('ICO preserves the same transparent original logo', matchesBrand(ico.subarray(ico.readUInt32LE(18))));
+check('transparent logo is the declared PNG tab icon', links.some(l => l.rel === 'icon' && l.href.startsWith('/icon-200.png?v=')));
+mustCatch('an opaque tab tile replaces the transparent artwork',
+  matchesBrand(readFileSync('public/apple-touch-icon.png')) ? [] : ['different artwork']);
 check('an apple-touch-icon is declared (Safari Favorites / iOS home screen read this one)',
   links.some((l) => l.rel === 'apple-touch-icon'));
 check('every icon href carries a ?v= cache-busting token', links.every((l) => /\?v=\d+/.test(l.href)));
@@ -121,4 +130,4 @@ if (failed) {
   console.error(`\n${failed} check(s) FAILED — a browser would fall back to a stale or missing icon`);
   process.exit(1);
 }
-console.log(`\nOK — ${links.length} icon link(s) declared, versioned, present on disk; 6 mutations caught.`);
+console.log(`\nOK — ${links.length} icon link(s) declared, versioned, present on disk; 7 mutations caught.`);
