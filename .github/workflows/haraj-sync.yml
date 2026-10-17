@@ -1,4 +1,4 @@
-# Haraj LIVE ingest (owner 2026-10-16: «licensed ads only»). Reads the last N COMPLETE hourly sitemap
+# Haraj LIVE ingest (owner 2026-10-16; all offers since 10-17) + the licensed catch-up of older hours (10-17). Reads the last N COMPLETE hourly sitemap
 # files of haraj.com.sa with our honest bot user-agent (≤ 1 request a second), keeps only real-estate
 # OFFERS that carry REGA's ad-licence block with an in-date licence (scrapers/haraj/run.py), and upserts
 # them into haraj_{residential,commercial}_listings. A STREAM: nothing is ever pruned on absence; removal
@@ -20,6 +20,9 @@ on:
       ids:
         description: "Re-read exactly these post ids (comma list) — a parser repair; blank = the sitemap"
         default: ""
+      catchup_minutes:
+        description: "After the live hours, walk older hour files for LICENSED offers this long (0 = off)"
+        default: "70"
 
 concurrency:
   group: haraj-sync
@@ -55,4 +58,10 @@ jobs:
           FILES: ${{ github.event.inputs.files || '2' }}
           SKIP_HOURS: ${{ github.event.inputs.skip_hours || '0' }}
           IDS: ${{ github.event.inputs.ids || '' }}
-        run: exec python -m scrapers.haraj.run --files "$FILES" --skip-hours "$SKIP_HOURS" --ids "$IDS"
+          # owner 2026-10-17: the licensed catch-up rides every scheduled run (one crawler, still ≤ 1 req/s);
+          # live ~35 min + 70 min ends before the next 2-hourly dispatch. It stops by itself when Haraj's
+          # ~3-month sitemap is walked (the cursor «catchup_before» lives in scrape_runs.notes).
+          CATCHUP_MINUTES: ${{ github.event.inputs.catchup_minutes || '70' }}
+        run: >-
+          exec python -m scrapers.haraj.run --files "$FILES" --skip-hours "$SKIP_HOURS" --ids "$IDS"
+          --catchup-minutes "$CATCHUP_MINUTES"
