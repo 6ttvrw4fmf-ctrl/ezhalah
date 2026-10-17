@@ -96,7 +96,7 @@ import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
-import { useI18n, detectLocale, resolveReplyLocale, getLocale, translate, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
+import { useI18n, LocaleScope, detectLocale, resolveReplyLocale, getLocale, translate, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { listingLocationAr, listingPrice } from '@/lib/listingDisplay';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
@@ -4591,6 +4591,9 @@ export default function Agent() {
                           per user request ("remove that, not nice"). The cards just appear, no fade,
                           no scale, no stagger. The responsive grid fills the available result width
                           while keeping the original card order in either language. */}
+                      {/* THE CARDS FOLLOW THE REPLY'S LANGUAGE (owner 2026-10-17: «the property cards should follow the language»):
+                          an English message in the Arabic app gets English cards, an Arabic one in the English app Arabic cards. */}
+                      <LocaleScope locale={(m.summary || m.text) ? (msgRTL(m.summary || m.text) ? 'ar' : 'en') : locale}>
                       <ResultCardGrid wide={viewerSplit} cols={cardCols}>
                         {/* Live typed turn: default to 0 visible until startReveal begins the one-by-one
                             drip (prevents a full-grid flash if setDoneTyping flushes a render before
@@ -4611,6 +4614,7 @@ export default function Agent() {
                           </CardIn>
                         ))}
                       </ResultCardGrid>
+                      </LocaleScope>
                       {/* MORE-RESULTS message + actions (user 2026-06-27, paging owner 2026-07-08): a NORMAL
                           assistant message shown once the first 10 are on screen and MORE matches exist.
                           Correctness: the RPC filtered the FULL matching set before any cap, so we page it —

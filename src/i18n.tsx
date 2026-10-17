@@ -1974,3 +1974,19 @@ export function useI18n(): I18nValue {
   if (!v) throw new Error('useI18n must be used within LocaleProvider');
   return v;
 }
+
+/**
+ * Render `children` in `locale`, whatever language the app itself is in (owner 2026-10-17: «the property cards should follow
+ * the language» of the message). Every `useI18n()` below it (card labels, «Click here», prices, places, alignment) reads this
+ * language; the app language, its saved choice and the page direction are untouched. No extra view: layout is unchanged.
+ */
+export function LocaleScope({ locale, children }: { locale: Locale; children: ReactNode }) {
+  const parent = useI18n();
+  const value = useMemo<I18nValue>(
+    () => (parent.locale === locale
+      ? parent
+      : { locale, isRTL: locale === 'ar', t: (en: string, vars?: Record<string, string | number>) => translate(locale, en, vars), setLocale: parent.setLocale }),
+    [locale, parent],
+  );
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
