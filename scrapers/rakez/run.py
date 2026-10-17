@@ -504,7 +504,20 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
             "source_unit_status": acf.get("unit_status"),
         }.items() if v not in (None, "", [], {})},
     }
+    # rakez publishes NO structured amenity field per unit, but its own description lists them («مطبخ»,
+    # «موقف خاص», «يسار المصعد»): 1,660 / 385 / 85 of 3,535 active units on 2026-10-17 while every amenity
+    # column was NULL. Prose says YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2), never False.
+    row.update(prose_answers(acf.get("description_ar")))
     return row, category.lower()
+
+
+# The amenity columns search reads (listing_extra_attrs); prose may answer only these, YES-only.
+_PROSE_COLS = ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "private_entrance")
+
+
+def prose_answers(description: Optional[str]) -> dict[str, bool]:
+    yes = normalize.prose_amenities_yes(normalize.html_block_lines(description))
+    return {c: True for c in _PROSE_COLS if yes.get(c)}
 
 
 def _page_gone(path: str) -> tuple[bool, str]:
