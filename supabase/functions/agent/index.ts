@@ -1080,7 +1080,9 @@ Deno.serve(async (req: Request) => {
           res = r;
           data = await r.json();
           const content = String(data?.choices?.[0]?.message?.content ?? "").trim();
-          if (content || emptyRetried) break;
+          // break on a real reply, after the one re-ask, or when no attempt is left to re-ask with (an
+          // empty reply on the HTTP-retry attempt answers 502 below with empty_retried: false).
+          if (content || emptyRetried || attempt === 1) break;
           // EMPTY REPLY: count the paid attempt (it was billed), then re-ask once with the output rule.
           emptyRetried = true;
           logUsage({
