@@ -368,9 +368,9 @@ POLICIES: dict[str, _P] = {
     "haraj": _P(
         _pol("haraj", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the post's own /<id>/ page: HTTP 404/410; a 200 that prints «العرض محذوف او قديم» with no "
-        "RealEstateListing (measured 2026-10-16 on 3 removed ids); a 200 whose own JSON-LD no longer carries "
-        "the REGA licence block «معلومات العقار حسب الرخصة»; or the licence's own «تاريخ انتهاء رخصة "
-        "الإعلان» has passed. A 200 with the block and an in-date licence is LIVE; anything else is UNKNOWN.",
+        "RealEstateListing (measured 2026-10-16 on 3 removed ids); or, for a licensed ad, its own «تاريخ "
+        "انتهاء رخصة الإعلان» has passed. Any other 200 with its RealEstateListing is LIVE (since 2026-10-17 "
+        "unlicensed offers are listings too); anything else is UNKNOWN.",
         "A STREAM (hourly sitemap files of new posts), never a catalogue: absence from a crawl is not a "
         "candidate and nothing is pruned on it. scrapers/common/fleet_liveness.py reads every active row "
         "through scrapers/haraj/run.py:_verify_gone with the honest bot UA at ≤1 read/s; shadow first."),
