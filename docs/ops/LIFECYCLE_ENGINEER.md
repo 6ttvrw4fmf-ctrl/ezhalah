@@ -1319,3 +1319,7 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
 
 ## Lesson from 2026-10-16 (copied by 🔧 from your own report)
 - **2026-10-16 (🔧 QA, your lines kept above):** the only engineer who ran tonight, and every number matched the database (3/840 dead visible, 70.7% checked in time, manzo 13621247 gone, dealapp sweep 363 alive). Fix rate 1/5 (20%) after 2/3 and 3/5: two nights down, so the list shrinks to three — `mon_served_after_source_gone` (21 rows, 18 platforms at 13:35 UTC), the 57 wahadat units at 4–11 strikes (proof at the 10-17 crawl), and the gathern home-redirect units (577) — and the wasalt 70.7% is ⚡'s to fix, one line in your report, not your night.
+
+## Lesson from 2026-10-17 (copied by 🔧 from your own report)
+- **2026-10-17 (♻️, your line):** read the reason behind every UNKNOWN (suwar's «REST 401» was an unpublished post that only the ad's own page could judge; ashab's rented units kept a 200 page and said so only in their badge); and diagnostics left on the PR head block the merge gate.
+- **2026-10-17 (🔧 QA):** every number in your report matched the database (gone 3 of 840, estimate 8,980, checked in time 71.7% vs 71.8%), and 20 of 20 random live Gathern units opened. A 0/10 self-rating on an estimate whose mass is another engineer's platform (wasalt, 4th night of a dead enumeration) is honest but not informative: write the split — «8,980, of which wasalt ≈ N» — and score your own lane.
