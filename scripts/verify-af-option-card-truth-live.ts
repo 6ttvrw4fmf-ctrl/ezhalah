@@ -58,14 +58,17 @@
 
 import { chromium } from 'playwright';
 import { openAfOffer, type OfferResult } from './lib/afOfferLive.ts';
-import { dismissStrayOverlay } from './lib/liveClick.ts';
+import { dismissStrayOverlay, STRAY_OVERLAY_SRC } from './lib/liveClick.ts';
 import { gotoLive } from './lib/liveNav.ts';
+import { classifySkip, NOT_APPLICABLE, runFails, unknownColumnFilter } from './lib/afLiveSkipLedger.ts';
 import { buildOracleQS, AMENITY_TOKEN_COL } from './lib/afOracleFilter.ts';
 import { loadDirectionVariants } from './lib/afOracleLive.ts';
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 // The SHIPPED per-press reveal ceiling, imported from the module production uses — never a
 // re-typed number. Raising or lowering it moves this journey's assertion with it.
 import { SECOND_PAGE_CAP } from '../src/data/resultCount.ts';
+/** backlog 597: force the stray-viewer case once (see section 4). Off by default. */
+const FORCE_STRAY_OVERLAY = process.env.AF_FORCE_STRAY_OVERLAY === '1';
 import { AGENT_TURN_MS, PACE_BUDGET_MS, PACE_POLL_MS, describeLoad, paceUntilHealthy, readSearchLoad, settleUntil, verdictForNonArrival } from './lib/afJourneyPacing.ts';
 import { resultsFoundCount, resultsSentenceAtStartSource } from '../e2e/lib/resultsSentence.mjs';
 
@@ -248,6 +251,17 @@ const check = (label: string, ok: boolean, detail = '') => {
 const skip = (label: string, reason: string) => {
   console.log(`SKIP  ${label}\n      inconclusive: ${reason}`);
   skips++; skippedLabels.push(label);
+};
+/** NOT APPLICABLE is narrower than SKIP (🔬 2026-10-17, backlog 598): only a case registered in
+ *  NOT_APPLICABLE (scripts/lib/afLiveSkipLedger.ts) whose code fact HOLDS on this run. Anything else
+ *  falls back to an inconclusive SKIP and still fails the run. */
+let notApplicable = 0;
+const naLabels: string[] = [];
+const notApplicableOr = (id: string, factHolds: boolean, label: string, inconclusiveReason: string) => {
+  if (classifySkip(id, factHolds) === 'not-applicable') {
+    console.log(`N/A   ${label}\n      not applicable: ${NOT_APPLICABLE[id].reason}`);
+    notApplicable++; naLabels.push(label);
+  } else skip(label, inconclusiveReason);
 };
 
 // ── A UI STATE THAT NEVER ARRIVED IS NOT A MEASUREMENT ─────────────────────────────────────────
@@ -758,15 +772,19 @@ const proveQuestion = async (label: string, st: CardState, ctxBody: any, ctxTota
   // whose source did not state the fact, in the CURRENT search body. The column is implied by the
   // option keys on the card (age buckets → property_age, yes/no → furnished, compass → direction_ar).
   if (st.unknown != null) {
-    const keys = st.options.map((o) => o.key);
-    const col = keys.some((k) => ['new', '1_2', '3_5', '6_9', '10p'].includes(k)) ? 'property_age'
-      : keys.some((k) => k === 'yes' || k === 'no') ? 'furnished'
-      : keys.some((k) => DIRECTION_KEYS.has(k)) ? 'direction_ar' : null;
-    if (!col) skip(`${label}: R7.1.3 — the unknown caption (${st.unknown}) is the DB's NULL count`, 'this question has no single unknown column');
+    // THE COLUMN IS NAMED, NEVER SKIPPED (🔬 2026-10-17, backlog 598). Amenities, bathrooms, street
+    // width, rating, unit type and RNPL used to SKIP here as «no single unknown column», on every run.
+    // They have one: the RPC counts each with its own IS NULL (cnt_*_unknown). scripts/lib/afLiveSkipLedger.ts.
+    const u = unknownColumnFilter(st.options.map((o) => o.key), AMENITY_KEYS);
+    if (!u) skip(`${label}: R7.1.3 — the unknown caption (${st.unknown}) is the DB's NULL count`, `no known question owns the keys ${J(st.options.map((o) => o.key))}`);
     else {
-      const { count, unhandled } = await oracleCount(ctxBody, `${col}=is.null`);
+      const { count, unhandled } = await oracleCount(ctxBody, u.qs);
       if (unhandled.length) skip(`${label}: R7.1.3 — the unknown caption is the DB's NULL count`, unhandled.join(', '));
-      else check(`${label}: R7.1.3 — the unknown caption (${st.unknown}) == rows with NULL ${col} in this search`, count === st.unknown, `caption=${st.unknown} db=${count}`);
+      else check(`${label}: R7.1.3 — the unknown caption (${st.unknown}) == rows with NULL ${u.what} in this search`, count === st.unknown, `caption=${st.unknown} db=${count}`);
+      if (u.rpcCol) {
+        const c = pairCount('guided', ctxBody);
+        if (c) check(`${label}: R7.1.3 — the unknown caption == ${u.rpcCol} the app was handed`, Number(c.row?.[u.rpcCol]) === st.unknown, `caption=${st.unknown} ${u.rpcCol}=${c.row?.[u.rpcCol]}`);
+      }
     }
   }
   return reads;
@@ -1018,15 +1036,32 @@ try {
     // A BUTTON THAT WILL NOT TAKE A CLICK IS RETRIED ONCE, THE WAY A PERSON WOULD (🔬 2026-10-16, backlog 597).
     // A local production run spent Playwright's whole 30 s waiting on the first «عرض المزيد» and died as a
     // harness error. Close a listing a stray tap may have opened, find the button again, try once more.
+    // FORCING THE CASE (🔬 2026-10-17, backlog 597). The retry above is only proven when it has run.
+    // AF_FORCE_STRAY_OVERLAY=1 lays, before the FIRST press only, a full-screen sheet carrying the ad
+    // viewer's testid that swallows every tap and closes on Escape, exactly as the real viewer does.
+    // The first press must then time out, and the retry must close it and land.
+    const forcing = FORCE_STRAY_OVERLAY && i === 0;
+    if (forcing) await page.evaluate(() => {
+      const d = document.createElement('div');
+      d.setAttribute('data-testid', 'ad-viewer');
+      d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.01)';
+      const close = (e: KeyboardEvent) => { if (e.key === 'Escape') { d.remove(); window.removeEventListener('keydown', close, true); } };
+      window.addEventListener('keydown', close, true);
+      document.body.appendChild(d);
+    });
+    let retried = false;
     try {
-      await btn.click({ timeout: 10_000 });
+      await btn.click({ timeout: forcing ? 3_000 : 10_000 });
     } catch {
+      retried = true;
       await dismissStrayOverlay(page);
       await scrollToBottom();
       const again = (await page.$$('[data-testid="results-load-more"]')).at(-1);
       if (!again) break;
       await again.click({ timeout: 10_000 });
     }
+    if (forcing) check('4. backlog 597 — a press swallowed by a stray ad viewer is retried after closing it, and lands',
+      retried && !(await page.evaluate(STRAY_OVERLAY_SRC)), retried ? 'the first press timed out under the sheet; Escape closed it; the second press landed' : 'the first press was NOT blocked, so the forced case did not happen');
     clicks++;
     // OBSERVE THE REVEAL SETTLING; NEVER SAMPLE A MOVING CASCADE (owner rule, 2026-09-06: the
     // ten-second searching beat is INTENTIONAL product behaviour, so an AF/Trending journey observes
@@ -1118,10 +1153,8 @@ try {
   if (paginationPossible) {
     check(`4. R10.1.1 — a NETWORK page (p_offset > 0) actually fired after ${clicks} click(s) on a ${landed.total}-row set`, pages.length > 0,
       pages.length ? `p_offset ${pages.map((p) => p.body.p_offset).join(',')}` : `no p_offset > 0 request within ${MAX_LOAD_MORE_CLICKS} clicks`);
-  } else skip('4. R10.1.1 — a NETWORK page (p_offset > 0) fired',
-    capReachesNetwork
-      ? `no option on Q1 exceeds the ${PAGE0_BUFFER}-row buffer in this scope (largest ${eligible[eligible.length - 1]?.count ?? '?'}); the page-continuity assertions cannot be exercised here`
-      : `the ${SECOND_PAGE_CAP}-card cap (owner 2026-09-14) sits under the ${PAGE0_BUFFER}-row buffer, so «عرض المزيد» never pages the network; predicate-continuity across pages is proven in verify-af-compound-predicate*.ts`);
+  } else notApplicableOr('network-page-below-cap', !capReachesNetwork, '4. R10.1.1 — a NETWORK page (p_offset > 0) fired',
+    `no option on Q1 exceeds the ${PAGE0_BUFFER}-row buffer in this scope (largest ${eligible[eligible.length - 1]?.count ?? '?'}); the page-continuity assertions cannot be exercised here`);
   for (const [i, pb] of pageBodies.entries()) {
     check(`4. R10.1.1 — page ${i + 1} (p_offset=${pb.p_offset}) carries the SAME whole predicate as page 0 (only paging differs)`, R.samePredicate(landed.body, pb) && R.scopeIs(pb),
       [...SCOPE_ALL_KEYS, ...AF_PREDICATE_KEYS].filter((k) => JN(landed!.body[k]) !== JN(pb[k])).map((k) => `${k}: ${J(landed!.body[k])} → ${J(pb[k])}`).join(' · ') || 'identical');
@@ -1181,7 +1214,8 @@ try {
           narrowEls > 0,
           `revealed=${revealed} of ${landed.total} at the cap, pager retired, and NO «تحديد أكثر» — ${(landed.total ?? 0) - revealed} eligible listing(s) are unreachable from this turn`);
       } else {
-        skip('4. R10.1.1 — at the cap the user is NOT stranded: «تحديد أكثر» offers the forward path',
+        notApplicableOr('cap-offer-after-pool-burned', poolBurnedBySkips && narrowEls === 0,
+          '4. R10.1.1 — at the cap the user is NOT stranded: «تحديد أكثر» offers the forward path',
           `NOT EXERCISED: this journey skipped all ${seenQ.length} question(s) of the round (R8.1.3), so R11.2 retires AF by contract; the offer can only be judged while a question is unasked`);
       }
     }
@@ -1441,7 +1475,8 @@ try {
   await browser.close();
 }
 
-const bad = failures + skips;
+const bad = runFails(failures, skips);
+if (notApplicable) console.log(`\n(${notApplicable} case(s) NOT APPLICABLE by a registered rule:\n${naLabels.map((l) => `    • N/A ${l}`).join('\n')})`);
 console.log(bad
   ? `\n✗ ${failures} check(s) FAILED, ${skips} SKIPPED (inconclusive):\n` +
     failedLabels.map((l) => `    • FAIL ${l}`).concat(skippedLabels.map((l) => `    • SKIP ${l}`)).join('\n') + '\n'

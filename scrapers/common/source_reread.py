@@ -50,6 +50,10 @@ DROP = re.compile(r"<(script|style|noscript|svg)[^>]*>.*?</\1>", re.S | re.I)
 JSONLD = re.compile(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', re.S | re.I)
 META = re.compile(r'<meta\s+[^>]*(?:property|name)=["\']([^"\']+)["\'][^>]*content=["\']([^"\']*)["\']', re.I)
 TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I)
+# An UNTICKED checklist item a theme prints with an ✗ (WordPress «WP Residence»: `<div class="listing_detail
+# not_present …"><i class="fas fa-times"></i>مصعد</div>`) is the theme listing its whole taxonomy, not the ad
+# saying anything. Read as a line it became «the page says مصعد» (eastabha 2026-10-17, re-read 39020724177).
+NOT_PRESENT = re.compile(r'<div[^>]*class="[^"]*\bnot_present\b[^"]*"[^>]*>.*?</div>', re.S | re.I)
 
 
 # A spec table renders its label and its value as two elements («عدد غرف النوم» / «1»): split on tags they
@@ -167,7 +171,7 @@ def page_evidence(body: str) -> dict:
     meta = {k: html.unescape(v) for k, v in META.findall(body or "")
             if k.startswith(("og:", "twitter:", "description", "product:"))}
     title = TITLE.search(body or "")
-    text = TAG.sub("\n", DROP.sub(" ", body or ""))
+    text = TAG.sub("\n", DROP.sub(" ", NOT_PRESENT.sub(" ", body or "")))
     lines = [re.sub(r"\s+", " ", html.unescape(x)).strip() for x in text.split("\n")]
     lines = [x for x in lines if x]
     return {
@@ -399,8 +403,11 @@ def main() -> int:
                                                 dead_marker=PLATFORMS.get(platform, {}).get("dead_marker"))
             item["page"] = page_evidence(body or "")
             if a.around and body:
-                for m in list(re.finditer(re.escape(a.around), body))[:3]:
-                    snip = body[max(0, m.start() - 400):m.end() + 200]
+                # Searched in the DECODED markup: alsaedan and arkaan write their Arabic as HTML entities, so a raw
+                # search for «موقف» or «ثلاث دورات» found nothing on pages that print it (🔬 2026-10-17).
+                hay = html.unescape(body)
+                for m in list(re.finditer(re.escape(a.around), hay))[:3]:
+                    snip = hay[max(0, m.start() - 400):m.end() + 200]
                     snip = re.sub(r"(?:\+?966|0)?5\d{8}|\d{9,}", "<num>", snip)   # PDPL: no phone ever printed
                     print(f"   around «{a.around}»: {snip!r}", flush=True)
             if "wasalt" in table:

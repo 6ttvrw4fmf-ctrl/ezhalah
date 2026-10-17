@@ -37,3 +37,19 @@ def test_each_unit_page_is_read_once_and_a_failed_read_is_unknown(monkeypatch):
     assert calls == ["https://alsaedan.com/sales/unit/1", "https://alsaedan.com/sales/unit/9"]
     assert rows[0]["kitchen"] is True and rows[1]["kitchen"] is True
     assert "kitchen" not in rows[2]
+
+
+# CI source-reread 39021282972 (2026-10-17), unit 3133, verbatim (icon path trimmed): the parking cell.
+PARKING = ('<div><svg class="as-icon" width="22" height="22" viewBox="0 0 24 24"><rect x="3" y="3" width="18" '
+           'height="18" rx="3"/></svg><small>مواقف</small><b>1</b></div>')
+
+
+def test_the_parking_cell_answers_parking():
+    assert R.unit_page_answers(CELL + PARKING) == {"kitchen": True, "parking": True}
+    assert R.unit_page_answers(PARKING.replace("<b>1</b>", "<b>0</b>")) == {"parking": False}
+
+
+def test_an_entity_encoded_label_is_read_like_a_plain_one():
+    # The served page writes the label as entities; the source re-read only found it once decoded.
+    encoded = PARKING.replace("مواقف", "".join(f"&#{ord(c)};" for c in "مواقف"))
+    assert R.unit_page_answers(encoded) == {"parking": True}

@@ -513,7 +513,9 @@ def map_listing(card: dict[str, Any], project: Optional[dict[str, Any]],
 # figure, so unlike a project-level list it may be stored: N >= 1 → True, a printed 0 → False, a cell
 # the page does not print or a page that could not be read → unknown (never «no»).
 _CELL_RE = re.compile(r"<small>\s*([^<]{1,40}?)\s*</small>\s*<b>\s*([^<]{1,20}?)\s*</b>", re.S)
-_CELL_COLS = {"مطبخ": "kitchen"}
+# «مواقف N» sits in the same grid (🔬 2026-10-17, CI source-reread 39021282972 on unit 3133: `<small>مواقف</small>
+# <b>1</b>`, entity-encoded in the served HTML). alsaedan scored «parking» we-miss 8 of 8 and 0 of 8 findable.
+_CELL_COLS = {"مطبخ": "kitchen", "مواقف": "parking", "موقف": "parking"}
 UNIT_PAGE_PACE = 0.5
 
 
