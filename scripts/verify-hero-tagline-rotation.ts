@@ -30,7 +30,9 @@ const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'u
 // ── the HOME WIRING, as a pure predicate over the screen's source ───────────────────────────────
 export function heroWiringProblems(home: string): string[] {
   const bad: string[] = [];
-  if (!/heroTitle[^>]*>\{t\(HERO_TAGLINE_KEYS\[heroTagline\]\)\}/.test(home))
+  // A signed-in user's personal welcome line (lib/filterWelcome.ts, owner 2026-10-17) may stand in front
+  // of the rotating pool — `welcomeLine ?? t(HERO_TAGLINE_KEYS[heroTagline])` — and ONLY that token.
+  if (!/heroTitle[^>]*>\{(?:welcomeLine \?\? )?t\(HERO_TAGLINE_KEYS\[heroTagline\]\)\}/.test(home))
     bad.push('the headline is no longer read from HERO_TAGLINE_KEYS — a fixed string would never rotate');
   if (!/useEffect\(\(\) => \{ setHeroTagline\(nextHeroTaglineIndex\(\)\); \}, \[\]\);/.test(home))
     bad.push('the pick is not in a mount effect — a module-scope pick is baked into the pre-rendered HTML and never changes');
@@ -100,7 +102,7 @@ check('the home screen is wired to the rotating pool, client-side, hydration-saf
 
 // ── MUTATION PROOFS (executable) ────────────────────────────────────────────────────────────────
 mustCatch('a fixed headline re-inlined into the hero',
-  heroWiringProblems(home.replace('{t(HERO_TAGLINE_KEYS[heroTagline])}',
+  heroWiringProblems(home.replace(/\{(?:welcomeLine \?\? )?t\(HERO_TAGLINE_KEYS\[heroTagline\]\)\}/,
     "{t('Looking for a property and want to see all available listings in one place? Ezhalah.')}")));
 mustCatch('the pick moved out of the mount effect (frozen into the pre-rendered HTML)',
   heroWiringProblems(home.replace(/useEffect\(\(\) => \{ setHeroTagline\(nextHeroTaglineIndex\(\)\); \}, \[\]\);/, '')));
