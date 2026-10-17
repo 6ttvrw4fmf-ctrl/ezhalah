@@ -7,7 +7,8 @@
 //
 // THE FACTS MUST BE TRUE AND STAY TRUE (owner: «all this needs to be true … gets updated»):
 //   • no number is typed into a line — every number is a placeholder filled from a live read;
-//   • «أكثر من» / "more than" only ever precedes a number rounded DOWN strictly below the real count;
+//   • every count is the exact live number in digits (owner 2026-10-17: «the actual number … not word form»);
+//     «أكثر من» survives only on the Riyadh SHARE (a percentage floored strictly below the truth);
 //   • a line whose fact is missing, failed, or not true today (e.g. «كل مناطق المملكة الـ13» when not
 //     every region has listings) is NOT shown — the normal subtitle stays. Never a stale or made-up number.
 // Pure: no React, no network, no storage. Executed by scripts/verify-filter-welcome.ts.
@@ -36,57 +37,59 @@ export type WelcomeLine = { id: number; when: When; needs: Need[]; ar: string; e
 
 // The owner-approved lines, in order. {n} = name; other {keys} are live values (see fill()).
 export const WELCOME_LINES: readonly WelcomeLine[] = [
-  { id: 1, when: 'morning', needs: ['sites'], ar: 'صباح الخير {n}، {sites} موقع عقاري جاهز لك اليوم في إزهله.', en: 'Good morning {n}, {sites} real-estate websites ready for you today on Ezhalah.' },
-  { id: 2, when: 'morning', needs: ['listings'], ar: 'صباح الخير {n}، أكثر من {listingsMore} إعلان بانتظارك في إزهله.', en: 'Good morning {n}, more than {listingsMore} listings waiting for you on Ezhalah.' },
-  { id: 3, when: 'morning', needs: ['allRegions'], ar: 'صباح الخير {n}، من الرياض إلى الجوف، كل مناطق المملكة الـ{regions} في إزهله.', en: 'Good morning {n}, from Riyadh to Al-Jouf, all {regions} regions of the Kingdom on Ezhalah.' },
-  { id: 4, when: 'morning', needs: ['city', 'district'], ar: 'صباح الخير {n}، {district} من أكثر الأحياء إعلانات في {city} الحين. شوفها في إزهله.', en: 'Good morning {n}, {district} is one of the busiest districts in {city} right now. See it on Ezhalah.' },
-  { id: 5, when: 'morning', needs: ['cities'], ar: 'صباح الخير {n}، {cities} مدينة في بحث واحد مع إزهله.', en: 'Good morning {n}, {cities} cities in one search with Ezhalah.' },
-  { id: 6, when: 'morning', needs: [], ar: 'صباح الخير {n}، وفر وقتك، المنصات الكبيرة والمكاتب المحلية في إزهله.', en: 'Good morning {n}, save your time: big platforms and local offices on Ezhalah.' },
-  { id: 7, when: 'evening', needs: ['districts'], ar: 'مساء الخير {n}، أكثر من {districtsMore} حي في السعودية تلقاها في إزهله.', en: 'Good evening {n}, more than {districtsMore} districts across Saudi Arabia on Ezhalah.' },
-  { id: 8, when: 'evening', needs: ['city'], ar: 'مساء الخير {n}، {city} فيها أكثر من {cityMore} إعلان الحين، كلها في إزهله.', en: 'Good evening {n}, {city} has more than {cityMore} listings right now, all on Ezhalah.' },
-  { id: 9, when: 'evening', needs: ['sites'], ar: 'مساء الخير {n}، {sites} موقع في شاشة واحدة، هذا هو إزهله.', en: "Good evening {n}, {sites} websites on one screen. That's Ezhalah." },
-  { id: 10, when: 'evening', needs: [], ar: 'مساء الخير {n}، مكاتب عقارية محلية يصعب تلاقيها، تلقاها في إزهله.', en: 'Good evening {n}, local real-estate offices that are hard to find, on Ezhalah.' },
-  { id: 11, when: 'evening', needs: ['riyadh'], ar: 'مساء الخير {n}، منطقة الرياض وحدها فيها أكثر من {riyadhMore} إعلان في إزهله.', en: 'Good evening {n}, the Riyadh region alone has more than {riyadhMore} listings on Ezhalah.' },
-  { id: 12, when: 'evening', needs: ['city', 'district'], ar: 'مساء الخير {n}، السوق نشط في {district}، تابعه في إزهله.', en: 'Good evening {n}, the market is active in {district}. Follow it on Ezhalah.' },
-  { id: 13, when: 'friday', needs: ['sites'], ar: 'جمعة مباركة {n}، {sites} موقع في بحث واحد، وفر وقتك مع إزهله.', en: 'Jumma Mubarak {n}, {sites} websites in one search. Save your time with Ezhalah.' },
-  { id: 14, when: 'friday', needs: ['listings'], ar: 'جمعة مباركة {n}، أكثر من {listingsMore} إعلان، خذ راحتك فيها مع إزهله.', en: 'Jumma Mubarak {n}, more than {listingsMore} listings. Take your time with Ezhalah.' },
-  { id: 15, when: 'friday', needs: ['cities'], ar: 'جمعة مباركة {n}، من المدن الكبيرة للصغيرة، {cities} مدينة في إزهله.', en: 'Jumma Mubarak {n}, from big cities to small ones, {cities} cities on Ezhalah.' },
-  { id: 16, when: 'weekend', needs: ['sites'], ar: 'إجازة سعيدة {n}، استمتع بإجازتك، والتدوير في {sites} موقع على إزهله.', en: 'Happy weekend {n}, enjoy your break and leave the search across {sites} websites to Ezhalah.' },
-  { id: 17, when: 'weekend', needs: ['city'], ar: 'إجازة سعيدة {n}، الأحياء الأكثر إعلانات في {city} تلقاها في إزهله.', en: 'Happy weekend {n}, the busiest districts in {city} are on Ezhalah.' },
-  { id: 18, when: 'weekend', needs: ['allRegions'], ar: 'إجازة سعيدة {n}، كل مناطق المملكة الـ{regions} في بحث واحد مع إزهله.', en: 'Happy weekend {n}, all {regions} regions of the Kingdom in one search with Ezhalah.' },
+  // CALL-TO-ACTION WORDING (owner 2026-10-17: «should tell them to use us», not just state a fact).
+  // Every line keeps its live fact and ends by inviting the user to act, then the brand.
+  { id: 1, when: 'morning', needs: ['sites'], ar: 'صباح الخير {n}، {sites} موقع عقاري بانتظارك. ابدأ بحثك مع إزهله.', en: 'Good morning {n}, {sites} real-estate websites are waiting for you. Start your search with Ezhalah.' },
+  { id: 2, when: 'morning', needs: ['listings'], ar: 'صباح الخير {n}، {listingsMore} إعلان بانتظارك. دور الحين مع إزهله.', en: 'Good morning {n}, {listingsMore} listings are waiting for you. Search now with Ezhalah.' },
+  { id: 3, when: 'morning', needs: ['allRegions'], ar: 'صباح الخير {n}، من الرياض إلى الجوف، المملكة كلها بين يديك. ابحث مع إزهله.', en: 'Good morning {n}, from Riyadh to Al-Jouf, the whole Kingdom is in your hands. Search with Ezhalah.' },
+  { id: 4, when: 'morning', needs: ['city', 'district'], ar: 'صباح الخير {n}، {district} من أكثر الأحياء إعلانات في {city} الحين. اكتشفه مع إزهله.', en: 'Good morning {n}, {district} is one of the busiest districts in {city} right now. Explore it with Ezhalah.' },
+  { id: 5, when: 'morning', needs: ['cities'], ar: 'صباح الخير {n}، {cities} مدينة في بحث واحد. اختر مدينتك وخلها على إزهله.', en: 'Good morning {n}, {cities} cities in one search. Pick your city and leave the rest to Ezhalah.' },
+  { id: 6, when: 'morning', needs: [], ar: 'صباح الخير {n}، وفر وقتك، المنصات الكبيرة والمكاتب المحلية في مكان واحد. ابحث مع إزهله.', en: 'Good morning {n}, save your time: big platforms and local offices in one place. Search with Ezhalah.' },
+  { id: 7, when: 'evening', needs: ['districts'], ar: 'مساء الخير {n}، {districtsMore} حي بانتظارك. اختر الحي اللي يناسبك مع إزهله.', en: 'Good evening {n}, {districtsMore} districts are waiting for you. Pick the one that suits you with Ezhalah.' },
+  { id: 8, when: 'evening', needs: ['city'], ar: 'مساء الخير {n}، {city} فيها {cityMore} إعلان الحين. شوفها مع إزهله.', en: 'Good evening {n}, {city} has {cityMore} listings right now. See them with Ezhalah.' },
+  { id: 9, when: 'evening', needs: ['sites'], ar: 'مساء الخير {n}، {sites} موقع في شاشة واحدة. جرب بحثك الحين مع إزهله.', en: 'Good evening {n}, {sites} websites on one screen. Try your search now with Ezhalah.' },
+  { id: 10, when: 'evening', needs: [], ar: 'مساء الخير {n}، مكاتب محلية يصعب تلاقيها، كلها هنا. اكتشفها مع إزهله.', en: 'Good evening {n}, local offices that are hard to find, all here. Discover them with Ezhalah.' },
+  { id: 11, when: 'evening', needs: ['riyadh'], ar: 'مساء الخير {n}، منطقة الرياض وحدها فيها {riyadhMore} إعلان. ابدأ منها مع إزهله.', en: 'Good evening {n}, the Riyadh region alone has {riyadhMore} listings. Start there with Ezhalah.' },
+  { id: 12, when: 'evening', needs: ['city', 'district'], ar: 'مساء الخير {n}، السوق نشط في {district} الحين. لا يفوتك مع إزهله.', en: "Good evening {n}, the market is active in {district} right now. Don't miss it with Ezhalah." },
+  { id: 13, when: 'friday', needs: ['sites'], ar: 'جمعة مباركة {n}، {sites} موقع في بحث واحد. خذ راحتك ودور مع إزهله.', en: 'Jumma Mubarak {n}, {sites} websites in one search. Take your time and search with Ezhalah.' },
+  { id: 14, when: 'friday', needs: ['listings'], ar: 'جمعة مباركة {n}، {listingsMore} إعلان بانتظارك. تصفحها على راحتك مع إزهله.', en: 'Jumma Mubarak {n}, {listingsMore} listings are waiting for you. Browse them at your pace with Ezhalah.' },
+  { id: 15, when: 'friday', needs: ['cities'], ar: 'جمعة مباركة {n}، من المدن الكبيرة للصغيرة، {cities} مدينة. اختر وجهتك مع إزهله.', en: 'Jumma Mubarak {n}, from big cities to small ones, {cities} cities. Pick your destination with Ezhalah.' },
+  { id: 16, when: 'weekend', needs: ['sites'], ar: 'إجازة سعيدة {n}، استمتع بإجازتك وخل التدوير في {sites} موقع على إزهله.', en: 'Happy weekend {n}, enjoy your break and leave the search across {sites} websites to Ezhalah.' },
+  { id: 17, when: 'weekend', needs: ['city'], ar: 'إجازة سعيدة {n}، الأحياء الأكثر إعلانات في {city} بانتظارك. اكتشفها مع إزهله.', en: 'Happy weekend {n}, the busiest districts in {city} are waiting for you. Explore them with Ezhalah.' },
+  { id: 18, when: 'weekend', needs: ['allRegions'], ar: 'إجازة سعيدة {n}، كل مناطق المملكة في بحث واحد. ابدأ الحين مع إزهله.', en: 'Happy weekend {n}, all {regions} regions of the Kingdom in one search. Start now with Ezhalah.' },
   { id: 19, when: 'any', needs: [], ar: 'هلا بعودتك {n}… اللي تدور عليه، أنا ألقاه لك. عشان كذا اسمي إزهله.', en: "Welcome back {n}… whatever you're looking for, I'll find it for you. That's why my name is Ezhalah." },
-  { id: 20, when: 'any', needs: ['sites'], ar: 'هلا {n}، {sites} موقع عقاري، وبحث واحد. هذا هو إزهله.', en: "Hi {n}, {sites} real-estate websites, one search. That's Ezhalah." },
-  { id: 21, when: 'any', needs: ['listings'], ar: 'هلا {n}، {listings} إعلان عقاري تنتظرك في إزهله.', en: 'Hi {n}, {listings} real-estate listings waiting for you on Ezhalah.' },
-  { id: 22, when: 'any', needs: ['makkah'], ar: 'حياك {n}، منطقة مكة المكرمة فيها أكثر من {makkahMore} إعلان في إزهله.', en: 'Welcome {n}, the Makkah region has more than {makkahMore} listings on Ezhalah.' },
-  { id: 23, when: 'any', needs: ['eastern'], ar: 'حياك {n}، المنطقة الشرقية فيها أكثر من {easternMore} إعلان في إزهله.', en: 'Welcome {n}, the Eastern Province has more than {easternMore} listings on Ezhalah.' },
-  { id: 24, when: 'any', needs: ['city'], ar: 'رجعت يا {n}؟ {city} فيها أكثر من {cityMore} إعلان، نكمل مع إزهله.', en: "Back again, {n}? {city} has more than {cityMore} listings. Let's continue with Ezhalah." },
-  { id: 25, when: 'any', needs: [], ar: 'هلا {n}، حتى المدن الصغيرة لها مكان في إزهله.', en: 'Hi {n}, even small cities have a place on Ezhalah.' },
-  { id: 26, when: 'any', needs: [], ar: 'حياك {n}، وفر ساعات من التدوير، كلها في إزهله.', en: 'Welcome {n}, save hours of searching, all on Ezhalah.' },
-  { id: 27, when: 'any', needs: ['city', 'district'], ar: 'هلا {n}، {district} من الأكثر إعلانات في {city}، شوفها في إزهله.', en: 'Hi {n}, {district} is among the busiest districts in {city}. See it on Ezhalah.' },
-  { id: 28, when: 'any', needs: ['districts', 'cities'], ar: 'رجعت يا {n}؟ أكثر من {districtsMore} حي و{cities} مدينة، بحث واحد في إزهله.', en: 'Back again, {n}? More than {districtsMore} districts and {cities} cities, one search on Ezhalah.' },
-  { id: 29, when: 'any', needs: ['qassim'], ar: 'حياك {n}، القصيم وحدها فيها أكثر من {qassimMore} إعلان في إزهله.', en: 'Welcome {n}, Al-Qassim alone has more than {qassimMore} listings on Ezhalah.' },
-  { id: 30, when: 'any', needs: [], ar: 'هلا {n}، السوق كله في شاشة واحدة، وفر وقتك مع إزهله.', en: 'Hi {n}, the whole market on one screen. Save your time with Ezhalah.' },
+  { id: 20, when: 'any', needs: ['sites'], ar: 'هلا {n}، {sites} موقع عقاري وبحث واحد. جربه الحين مع إزهله.', en: 'Hi {n}, {sites} real-estate websites and one search. Try it now with Ezhalah.' },
+  { id: 21, when: 'any', needs: ['listings'], ar: 'هلا {n}، {listings} إعلان عقاري تنتظرك. ابدأ بحثك مع إزهله.', en: 'Hi {n}, {listings} real-estate listings are waiting for you. Start your search with Ezhalah.' },
+  { id: 22, when: 'any', needs: ['makkah'], ar: 'حياك {n}، منطقة مكة المكرمة فيها {makkahMore} إعلان. شوفها مع إزهله.', en: 'Welcome {n}, the Makkah region has {makkahMore} listings. See them with Ezhalah.' },
+  { id: 23, when: 'any', needs: ['eastern'], ar: 'حياك {n}، المنطقة الشرقية فيها {easternMore} إعلان. اكتشفها مع إزهله.', en: 'Welcome {n}, the Eastern Province has {easternMore} listings. Discover them with Ezhalah.' },
+  { id: 24, when: 'any', needs: ['city'], ar: 'رجعت يا {n}؟ {city} فيها {cityMore} إعلان. نكمل البحث مع إزهله.', en: "Back again, {n}? {city} has {cityMore} listings. Let's keep searching with Ezhalah." },
+  { id: 25, when: 'any', needs: [], ar: 'هلا {n}، حتى المدن الصغيرة لها مكان هنا. ابحث عن مدينتك مع إزهله.', en: 'Hi {n}, even small cities have a place here. Look up your city with Ezhalah.' },
+  { id: 26, when: 'any', needs: [], ar: 'حياك {n}، وفر ساعات من التدوير. بحث واحد يكفي مع إزهله.', en: 'Welcome {n}, save hours of searching. One search is enough with Ezhalah.' },
+  { id: 27, when: 'any', needs: ['city', 'district'], ar: 'هلا {n}، {district} من الأكثر إعلانات في {city}. شوفها الحين مع إزهله.', en: 'Hi {n}, {district} is among the busiest districts in {city}. See it now with Ezhalah.' },
+  { id: 28, when: 'any', needs: ['districts', 'cities'], ar: 'رجعت يا {n}؟ {districtsMore} حي و{cities} مدينة بانتظارك. ابدأ مع إزهله.', en: 'Back again, {n}? More than {districtsMore} districts and {cities} cities are waiting for you. Start with Ezhalah.' },
+  { id: 29, when: 'any', needs: ['qassim'], ar: 'حياك {n}، القصيم وحدها فيها {qassimMore} إعلان. اكتشفها مع إزهله.', en: 'Welcome {n}, Al-Qassim alone has {qassimMore} listings. Discover them with Ezhalah.' },
+  { id: 30, when: 'any', needs: [], ar: 'هلا {n}، السوق كله في شاشة واحدة. وفر وقتك وابحث مع إزهله.', en: 'Hi {n}, the whole market on one screen. Save your time and search with Ezhalah.' },
   // INSIGHT LINES (owner 2026-10-17: «include insights from Ezhalah's database … trending places»).
   // "Busiest" = most listings right now — the same measure the app's Trending lists use. Never a claim
   // about what people search, and never a deal tip («نشط», not «نار»).
-  { id: 31, when: 'any', needs: ['city', 'district'], ar: '{n}، أكثر حي إعلانات في {city} الحين: {district}. إزهله.', en: '{n}, the district with the most listings in {city} right now: {district}. Ezhalah.' },
-  { id: 32, when: 'any', needs: ['city', 'district'], ar: '{n}، {district} يتصدر {city} بأكثر من {districtCountMore} إعلان. إزهله.', en: '{n}, {district} leads {city} with more than {districtCountMore} listings. Ezhalah.' },
-  { id: 33, when: 'any', needs: ['city', 'district3'], ar: '{n}، أقوى ثلاثة أحياء في {city} الحين: {d1}، {d2}، {d3}. إزهله.', en: '{n}, the top three districts in {city} right now: {d1}, {d2}, {d3}. Ezhalah.' },
-  { id: 34, when: 'any', needs: ['city', 'district'], ar: '{n}، {district} نشط في {city} الحين، شوف إعلاناته في إزهله.', en: '{n}, {district} is active in {city} right now. See its listings on Ezhalah.' },
-  { id: 35, when: 'any', needs: ['city', 'rank'], ar: '{n}، {city} رقم {rank} في المملكة بعدد الإعلانات. إزهله.', en: '{n}, {city} is number {rank} in the Kingdom by listings. Ezhalah.' },
-  { id: 36, when: 'any', needs: ['riyadhShare'], ar: '{n}، منطقة الرياض فيها أكثر من {riyadhShare}% من إعلانات المملكة. إزهله.', en: "{n}, the Riyadh region holds more than {riyadhShare}% of the Kingdom's listings. Ezhalah." },
-  { id: 37, when: 'any', needs: [], ar: '{n}، كل يوم السوق يتحرك، ويتابعه لك إزهله.', en: '{n}, the market moves every day. Follow it with Ezhalah.' },
-  { id: 38, when: 'any', needs: ['city', 'district3'], ar: '{n}، من {d1} إلى {d3}، أنشط أحياء {city} في مكان واحد. إزهله.', en: "{n}, from {d1} to {d3}, {city}'s most active districts in one place. Ezhalah." },
-  { id: 39, when: 'any', needs: ['city', 'district'], ar: '{n}، {city} فيها أكثر من {cityMore} إعلان، و{district} لحاله أكثر من {districtCountMore}. إزهله.', en: '{n}, {city} has more than {cityMore} listings, and {district} alone more than {districtCountMore}. Ezhalah.' },
-  { id: 40, when: 'any', needs: ['top2'], ar: '{n}، أنشط مدينتين في المملكة الحين: {c1} و{c2}. إزهله.', en: "{n}, the Kingdom's two most active cities right now: {c1} and {c2}. Ezhalah." },
+  { id: 31, when: 'any', needs: ['city', 'district'], ar: '{n}، أكثر حي إعلانات في {city} الحين: {district}. شوفه مع إزهله.', en: '{n}, the district with the most listings in {city} right now: {district}. See it with Ezhalah.' },
+  { id: 32, when: 'any', needs: ['city', 'district'], ar: '{n}، {district} يتصدر {city} بـ{districtCountMore} إعلان. اكتشفه مع إزهله.', en: '{n}, {district} leads {city} with {districtCountMore} listings. Explore it with Ezhalah.' },
+  { id: 33, when: 'any', needs: ['city', 'district3'], ar: '{n}، أقوى ثلاثة أحياء في {city} الحين: {d1}، {d2}، {d3}. اختر منها مع إزهله.', en: '{n}, the top three districts in {city} right now: {d1}, {d2}, {d3}. Pick one with Ezhalah.' },
+  { id: 34, when: 'any', needs: ['city', 'district'], ar: '{n}، {district} نشط في {city} الحين. لا يفوتك مع إزهله.', en: "{n}, {district} is active in {city} right now. Don't miss it with Ezhalah." },
+  { id: 35, when: 'any', needs: ['city', 'rank'], ar: '{n}، {city} رقم {rank} في المملكة بعدد الإعلانات. ابحث فيها مع إزهله.', en: '{n}, {city} is number {rank} in the Kingdom by listings. Search it with Ezhalah.' },
+  { id: 36, when: 'any', needs: ['riyadhShare'], ar: '{n}، منطقة الرياض فيها أكثر من {riyadhShare}% من إعلانات المملكة. ابدأ منها مع إزهله.', en: "{n}, the Riyadh region holds more than {riyadhShare}% of the Kingdom's listings. Start there with Ezhalah." },
+  { id: 37, when: 'any', needs: [], ar: '{n}، السوق يتحرك كل يوم. خلك أول من يشوف الجديد مع إزهله.', en: '{n}, the market moves every day. Be the first to see what is new with Ezhalah.' },
+  { id: 38, when: 'any', needs: ['city', 'district3'], ar: '{n}، من {d1} إلى {d3}، أنشط أحياء {city} في مكان واحد. تصفحها مع إزهله.', en: "{n}, from {d1} to {d3}, {city}'s most active districts in one place. Browse them with Ezhalah." },
+  { id: 39, when: 'any', needs: ['city', 'district'], ar: '{n}، {city} فيها {cityMore} إعلان، و{district} لحاله {districtCountMore}. شوفها مع إزهله.', en: '{n}, {city} has {cityMore} listings, and {district} alone {districtCountMore}. See them with Ezhalah.' },
+  { id: 40, when: 'any', needs: ['top2'], ar: '{n}، أنشط مدينتين في المملكة الحين: {c1} و{c2}. ابدأ منهما مع إزهله.', en: "{n}, the Kingdom's two most active cities right now: {c1} and {c2}. Start there with Ezhalah." },
   // THE USER'S OWN DISTRICT (owner 2026-10-17: «include districts»). Only for a user whose last search
   // picked a district; that district's live count and rank inside its city. No line promises to watch
-  // or alert — Ezhalah has no such feature.
-  { id: 41, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، {myDistrict} فيه أكثر من {myDistrictMore} إعلان الحين. إزهله.', en: '{n}, {myDistrict} has more than {myDistrictMore} listings right now. Ezhalah.' },
-  { id: 42, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، {myDistrict} فيه أكثر من {myDistrictMore} إعلان من أصل {cityExact} في {city}. إزهله.', en: '{n}, {myDistrict} has more than {myDistrictMore} of the {cityExact} listings in {city}. Ezhalah.' },
-  { id: 43, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، {myDistrict} رقم {myRank} في {city} بعدد الإعلانات. إزهله.', en: '{n}, {myDistrict} is number {myRank} in {city} by listings. Ezhalah.' },
-  { id: 44, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، كل إعلانات {myDistrict} من كل المواقع، في مكان واحد. إزهله.', en: "{n}, all of {myDistrict}'s listings from every website, in one place. Ezhalah." },
-  { id: 45, when: 'any', needs: ['city', 'myTop10'], ar: '{n}، {myDistrict} من أنشط أحياء {city} الحين. إزهله.', en: '{n}, {myDistrict} is one of the most active districts in {city} right now. Ezhalah.' },
+  // or alert — Ezhalah has no such feature. The district is always NAMED (owner rule: no second-person word for it).
+  { id: 41, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، {myDistrict} فيه {myDistrictMore} إعلان الحين. شوف الجديد مع إزهله.', en: '{n}, {myDistrict} has {myDistrictMore} listings right now. See what is new with Ezhalah.' },
+  { id: 42, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، {myDistrict} فيه {myDistrictMore} إعلان من أصل {cityExact} في {city}. تصفحها مع إزهله.', en: '{n}, {myDistrict} has {myDistrictMore} of the {cityExact} listings in {city}. Browse them with Ezhalah.' },
+  { id: 43, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، {myDistrict} رقم {myRank} في {city} بعدد الإعلانات. اكتشفه مع إزهله.', en: '{n}, {myDistrict} is number {myRank} in {city} by listings. Explore it with Ezhalah.' },
+  { id: 44, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، كل إعلانات {myDistrict} من كل المواقع في مكان واحد. شوفها مع إزهله.', en: "{n}, all of {myDistrict}'s listings from every website in one place. See them with Ezhalah." },
+  { id: 45, when: 'any', needs: ['city', 'myTop10'], ar: '{n}، {myDistrict} من أنشط أحياء {city} الحين. لا يفوتك مع إزهله.', en: "{n}, {myDistrict} is one of the most active districts in {city} right now. Don't miss it with Ezhalah." },
 ];
 
 /** Saudi Arabia has 13 administrative regions; «كل المناطق» is said only when every one has listings. */
@@ -137,6 +140,8 @@ export function lineFitsTime(line: WelcomeLine, now: Date): boolean {
 }
 
 const positive = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0;
+// EXACT, IN DIGITS (owner 2026-10-17): the live count as it is — «372,889», never «370 ألف».
+const exact = (n: unknown): string | null => (positive(n) ? fmt(n) : null);
 
 /** Fill a line, or null when any fact it states is missing or not true today. */
 export function renderWelcome(line: WelcomeLine, name: string, f: WelcomeFacts, locale: 'ar' | 'en'): string | null {
@@ -149,17 +154,17 @@ export function renderWelcome(line: WelcomeLine, name: string, f: WelcomeFacts, 
       case 'listings': {
         if (!positive(f.listings)) return null;
         v.listings = fmt(f.listings);
-        const m = moreThan(f.listings, locale); if (!m) return null; v.listingsMore = m; break;
+        const m = exact(f.listings); if (!m) return null; v.listingsMore = m; break;
       }
       case 'cities': if (!positive(f.cities)) return null; v.cities = fmt(f.cities); break;
-      case 'districts': { const m = moreThan(f.districts, locale); if (!m) return null; v.districtsMore = m; break; }
+      case 'districts': { const m = exact(f.districts); if (!m) return null; v.districtsMore = m; break; }
       case 'allRegions': if (f.regions !== SAUDI_REGION_COUNT) return null; v.regions = fmt(f.regions); break;
       case 'city': {
         const c = f.city; if (!c || !positive(c.count)) return null;
         const label = locale === 'ar' ? c.ar : c.en;
         if (!label || (locale === 'en' && /[؀-ۿ]/.test(label))) return null;
         v.city = label;
-        const m = moreThan(c.count, locale); if (!m && line.ar.includes('{cityMore}')) return null;
+        const m = exact(c.count); if (!m && line.ar.includes('{cityMore}')) return null;
         if (m) v.cityMore = m;
         break;
       }
@@ -168,7 +173,7 @@ export function renderWelcome(line: WelcomeLine, name: string, f: WelcomeFacts, 
         if (locale === 'ar') v.district = /^حي\s/.test(d.ar) ? d.ar : `حي ${d.ar}`;
         else if (d.en && !/[؀-ۿ]/.test(d.en)) v.district = d.en; // never Arabic mid-English
         else return null;
-        const m = moreThan(d.count, locale);
+        const m = exact(d.count);
         if (m) v.districtCountMore = m;
         else if (line.ar.includes('{districtCountMore}')) return null;
         break;
@@ -209,7 +214,7 @@ export function renderWelcome(line: WelcomeLine, name: string, f: WelcomeFacts, 
         else if (d.en && !/[؀-ۿ]/.test(d.en)) v.myDistrict = d.en;
         else return null;
         v.myRank = fmt(d.rank);
-        const m = moreThan(d.count, locale);
+        const m = exact(d.count);
         if (m) v.myDistrictMore = m;
         else if (line.ar.includes('{myDistrictMore}')) return null;
         if (f.city && positive(f.city.count)) v.cityExact = fmt(f.city.count);
@@ -217,7 +222,7 @@ export function renderWelcome(line: WelcomeLine, name: string, f: WelcomeFacts, 
         break;
       }
       default: {
-        const m = moreThan(f.regionCounts?.[REGION_AR[need]], locale); if (!m) return null;
+        const m = exact(f.regionCounts?.[REGION_AR[need]]); if (!m) return null;
         v[`${need}More`] = m;
       }
     }
@@ -265,4 +270,26 @@ export function fallbackLine(avoidId: number | null, rand: () => number = Math.r
   const ids = FACTLESS_ANYTIME_IDS.filter((id) => id !== avoidId);
   const id = ids[Math.min(ids.length - 1, Math.floor(rand() * ids.length))];
   return WELCOME_LINES.find((l) => l.id === id)!;
+}
+
+// THE HEADLINE NEVER CHANGES ONCE SHOWN (owner 2026-10-17: «I see it changing … make sure it never
+// happens, never ever»). The swap the owner saw had two causes: the page paints before the session
+// restore knows who the visitor is (guest headline → personal line), and the personal line's live
+// numbers arrive a moment after mount. So the headline's entrance is HELD until this state settles,
+// and after it settles nothing may replace it for the rest of the page load:
+//   guest (after the restore)  → normal headline, final
+//   facts arrived              → the personal line, final
+//   cap reached (SETTLE_CAP_MS) → normal headline, final; late facts are IGNORED, never swapped in
+// Pure reducer so scripts/verify-filter-welcome.ts can execute the "late facts are ignored" rule.
+export const SETTLE_CAP_MS = 2500;
+export type HeadlineState = { settled: boolean; line: WelcomeLine | null; facts: WelcomeFacts | null };
+export type HeadlineEvent =
+  | { type: 'guest' }
+  | { type: 'timeout' }
+  | { type: 'facts'; line: WelcomeLine; facts: WelcomeFacts };
+export const HEADLINE_UNSETTLED: HeadlineState = { settled: false, line: null, facts: null };
+export function headlineReduce(s: HeadlineState, ev: HeadlineEvent): HeadlineState {
+  if (s.settled) return s; // whatever is on screen stays on screen
+  if (ev.type === 'facts') return { settled: true, line: ev.line, facts: ev.facts };
+  return { settled: true, line: null, facts: null };
 }
