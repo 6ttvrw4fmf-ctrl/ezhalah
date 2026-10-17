@@ -807,7 +807,10 @@ const AR: Record<string, string> = {
   'I can get you something more precise.': 'أقدر أجيب لك نتائج أدق.',
   // Composer placeholder (owner wording 2026-08-16) — names the domain and the country, in the
   // conversational register the rest of the agent speaks.
-  "Type the property you're looking for in Saudi Arabia...": 'اكتب العقار اللي تبحث عنه في السعودية...',
+  // The box's hint (owner 2026-10-17: «include the word Ezhalah … marketing attractive»). Two lengths: at the start the «بحث» chip,
+  // mic and Send leave ~17 characters, so it is the short call; once the chip is gone the box is wide and the long promise fits.
+  "Ask Ezhalah...": 'اسأل إزهله...',
+  "Let Ezhalah find your property...": 'خلّ إزهله يدوّر لك على عقارك...',
   // Stable composer accessibility label (owner brief 2026-08-23 §11) — the ONE sentence a screen
   // reader hears for the AI input; the rotating examples are aria-hidden decoration.
   'Describe the property you are looking for': 'اكتب وصف العقار اللي تبحث عنه',
