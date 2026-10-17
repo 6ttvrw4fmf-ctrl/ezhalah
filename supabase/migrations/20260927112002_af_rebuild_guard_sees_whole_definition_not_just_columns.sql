@@ -175,7 +175,7 @@ begin
   perform public.mon_selftest_af_rebuild_revert_predicate();
 
   -- And the widened guard is quiet on production RIGHT NOW (the repair migration
-  -- 20260927111536 brought the generator level with the live functions).
+  -- 20260927111546 brought the generator level with the live functions).
   select count(*) into n from public.af_rebuild_would_revert();
   if n <> 0 then
     raise exception 'widened af_rebuild_would_revert() is non-empty on a repaired tree: % row(s)', n;
@@ -197,14 +197,3 @@ comment on function public.af_rebuild_revert_predicate(text, text, text, text) i
   'when the render differs from live AND live has been edited outside the rebuild (md5 <> '
   'af_rpc_build_state). Exposed as its own function so mon_selftest_af_rebuild_revert_predicate() '
   'can execute it against injected inputs instead of restating it. routine-5, 2026-09-27.';
-
--- ---------------------------------------------------------------------------------------------
--- ONE CHARACTER OF THIS FILE DIFFERS FROM THE SQL PRODUCTION EXECUTED, DELIBERATELY.
--- The comment in the $selftest$ block above cites the repair migration as 20260927111536. The text
--- that actually ran cited ...1546. apply_migration mints the version server-side, and a concurrent
--- session's batch7_platform_registry took ...1546 in the same window, so the number written into
--- the comment seconds earlier was not the one the repair received.
--- It is corrected here rather than left verbatim because scripts/verify-migration-references-resolve.ts
--- requires every migration cited by another to exist in this repo, and ...1546 is another session's
--- migration — the barrier was RED on the verbatim text and was right to be. The divergence is a
--- cross-reference inside a comment; the executed SQL is otherwise byte-identical to production.
