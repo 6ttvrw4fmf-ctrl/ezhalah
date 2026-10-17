@@ -138,15 +138,19 @@ export default function Home() {
   // ROTATING WELCOME (owner 2026-10-17): a signed-in user sometimes sees a personal line with a live
   // fact IN PLACE OF THE BIG HEADLINE (owner: «i meant the big text»); the subtitle below never changes. lib/filterWelcome.ts holds the approved lines
   // and the truth rules; null keeps the normal subtitle.
-  const lastSearchedLocation = useMemo(() => {
-    let best: { ts: number; loc: string } | null = null;
+  const lastSearched = useMemo(() => {
+    let best: { ts: number; loc: string; district: string | null } | null = null;
     for (const h of history ?? []) {
-      const loc = h?.query?.location;
-      if (loc && (!best || h.ts > best.ts)) best = { ts: h.ts, loc };
+      const q = h?.query;
+      if (q?.location && (!best || h.ts > best.ts)) {
+        // The district the user PICKED (one district only — an area nickname expands to many and names none).
+        const district = q.districtLabel || (q.districts?.length === 1 ? q.districts[0] : null);
+        best = { ts: h.ts, loc: q.location, district: district || null };
+      }
     }
-    return best?.loc ?? null;
+    return best;
   }, [history]);
-  const welcomeLine = useFilterWelcome(!!user, pickName(user, locale), locale, lastSearchedLocation);
+  const welcomeLine = useFilterWelcome(!!user, pickName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
   // THE ONE QUERY THIS SCREEN DERIVES EVERYTHING FROM (owner P0 2026-09-01).
   //
   // The store may now carry Advanced Filter answers committed in the chat — that is the whole fix:
