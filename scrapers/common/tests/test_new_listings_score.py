@@ -520,6 +520,68 @@ def test_a_per_meter_rate_matches_the_total_the_page_prints_for_it():
     assert compare_listing({"price_per_meter": 400, "area_m2": 690}, page)["price"] != MATCH
 
 
+def test_wasalt_and_sanadak_are_read_from_their_own_record_not_the_shell():
+    # #540: the shared probe answers a live wasalt page with an empty body → 10/10 «unreadable» every night.
+    # #546: sanadak's page lists OTHER ads' areas; its own listing object is the ad.
+    stored = {"source_table": "wasalt_residential_listings", "listing_id": 9, "platform": "wasalt",
+              "district_ar": "حي النرجس", "deal_ar": "إيجار", "type_ar": "شقة"}
+    client = FakeClient({
+        "search_listings_ar": [stored],
+        "wasalt_residential_listings": [{"id": 9, "listing_url": "https://wasalt.sa/en/property/x-9"}],
+    })
+    own = {"title": "شقة للإيجار في حي النرجس", "meta": {}, "jsonld": [],
+           "evidence_lines": ["شقة للإيجار في حي النرجس"], "text_head": "شقة للإيجار في حي النرجس"}
+    shell = lambda url: (200, "<html><body></body></html>")          # what the probe really returns
+    row = score_site(client, "wasalt", [("wasalt_residential_listings", 9)], night="2026-10-16", pace=0,
+                     probe=shell, wasalt=lambda url: own, sanadak=lambda url: None)
+    assert row["decided_ads"] == 1 and row["fields"]["district"][MATCH] == 1
+    row = score_site(client, "wasalt", [("wasalt_residential_listings", 9)], night="2026-10-16", pace=0,
+                     probe=shell, wasalt=lambda url: None, sanadak=lambda url: None)
+    assert row["unreadable_pages"] == 1 and row["normal_mismatch"] == 0
+
+
+def test_muktamel_rooms_come_from_its_offer_record():
+    from scrapers.common.new_listings_score import muktamel_room_lines
+    got = (34519, {"offer": {"bedRoomsCount": 4, "bathroomsCount": 4}}, True)
+    lines = muktamel_room_lines("https://www.muktamel.com/real-estates/34519", fetch=lambda i: got)
+    assert lines == ["عدد غرف النوم 4", "عدد دورات المياه 4"]
+    # 17886575 (2026-10-16): stored 4/4, the description's prose says otherwise; the offer is the ad.
+    p = page(*lines, "شقة 3 غرف نوم و 2 حمام")
+    out = compare_listing({"bedrooms": 4, "bathrooms": 4}, p)
+    assert out["bedrooms"] == MATCH and out["bathrooms"] == MATCH
+    assert muktamel_room_lines("https://www.muktamel.com/real-estates/1", fetch=lambda i: None) == []
+    assert muktamel_room_lines("https://example.test/x", fetch=lambda i: got) == []
+
+
+def test_wasalt_structured_rows_are_read_as_labelled_lines():
+    # 17926766 (2026-10-16, re-read 38925580390): builtUpArea «96» = ours, while the REGA deed text names a land share.
+    from scrapers.common.af_score import wasalt_page
+    data = {"props": {"pageProps": {"propertyDetailsV3": {
+        "regaMojDesc": "حي قرطبة بمدينة الرياض  مساحة الوحدة من الأرض 51.52 متر",
+        "attributes": [{"key": "noOfBedrooms", "name": "Bedrooms", "value": 3},
+                       {"key": "builtUpArea", "name": "Built-Up Area", "value": "96", "unit": "SQM"}]}}}}
+    p = wasalt_page("https://wasalt.sa/en/property/x", fetch=lambda url: (data, 200, 0))
+    out = compare_listing({"area_m2": 96, "bedrooms": 3}, p)
+    assert out["area"] == MATCH and out["bedrooms"] == MATCH
+    assert compare_listing({"area_m2": 120}, p)["area"] == MISMATCH
+
+
+def test_wasalt_photo_classifier_labels_are_not_the_ads_statement():
+    from scrapers.common.af_score import wasalt_page
+    data = {"props": {"pageProps": {"propertyDetailsV3": {"classificationData": [
+        {"classificationScore": 0.99, "classificationName": "kitchen", "name": "a.jpg"}]}}}}
+    p = wasalt_page("https://wasalt.sa/en/property/x", fetch=lambda url: (data, 200, 0))
+    assert not any("kitchen" in x for x in p["evidence_lines"])
+
+
+def test_sanadak_structured_area_beats_its_approximate_prose():
+    # 17944027 (2026-10-16): lotSize 105.6 (page «مساحة العقار 105.6 م²»), description «المساحة : 120م تقريبا».
+    from scrapers.common.af_score import sanadak_page
+    o = {"title": "شقة للإيجار في الرياض قرطبة 2 غرفة", "lotSize": 105.6, "numberBedrooms": 2,
+         "description": "الموقع : الرياض حي قرطبة\nالمساحة : 120م تقريبا"}
+    p = sanadak_page("https://sanadak.sa/property-details/x", fetch=lambda url: (o, "", url))
+    assert compare_listing({"area_m2": 105, "bedrooms": 2}, p)["area"] == MATCH
+
 def test_three_to_ten_written_as_words_on_the_keyword_line():
     # aljassim 17947950 (2026-10-16): the structured room cell «أربع غرف», stored 4, scored MISMATCH because the
     # description's dual «غرفتين نوم» was the only figure the scorer could read.

@@ -266,6 +266,14 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
                 return MATCH
             if any(0 <= j < len(lines) and bare.match(lines[j]) for j in (i - 1, i + 1)):
                 return MATCH
+        # area_m2 is an integer column (backlog #123), so a page «232.8 م²» is stored as its nearest whole
+        # number, 233. tuba 18258569 (2026-10-17): «المساحة:» / «232.8 م²» read as a contradiction of any
+        # whole number. Half rounds up; a truncated 232 still scores wrong.
+        if "مساحه" in kw and float(stored) == int(float(stored)):
+            near = " | ".join(lines[j] for i in kw_hits for j in (i - 1, i, i + 1) if 0 <= j < len(lines))
+            if any(int(float(m.group(1).replace(",", ".")) + 0.5) == int(float(stored))
+                   for m in re.finditer(r"(?<![\d.,])(\d+[.,]\d+)(?![\d])", near)):
+                return MATCH
         # «عمر العقار جديد» is how aqar (and others) publish a new building; we store it as 0. Read as
         # the figure 0 both ways: stored 0 + «جديد» is a MATCH, stored 5 + «جديد» stays a MISMATCH
         # (aqar 15415047, 2026-10-05: spec block «عمر العقار جديد», stored 0, was scored wrong).
@@ -578,12 +586,46 @@ def no_district_backlog(client) -> dict:
     return out
 
 
+def muktamel_room_lines(url: str, fetch=None) -> list[str]:
+    """muktamel's own room counts, from the offer record its page renders (backlog #547, 2026-10-16).
+
+    The page is client-rendered: its «غرف النوم» / «دورات المياه» exist only inside a minified Nuxt payload the
+    reader cannot see (re-read run 38918001860), so the score compared our structured bedRoomsCount /
+    bathroomsCount with the description's prose and called 17886543 / 17886575 wrong. These lines restate the
+    offer's own fields; [] when the record cannot be read (unknown, never wrong)."""
+    m = re.search(r"/real-estates/(\d+)", url or "")
+    if not m:
+        return []
+    if fetch is None:
+        from scrapers.muktamel.run import fetch_one as fetch
+    try:
+        got = fetch(int(m.group(1)))
+    except Exception:  # noqa: BLE001
+        return []
+    offer = ((got[1] if got else None) or {}).get("offer") or {}
+    out = []
+    for label, key in (("عدد غرف النوم", "bedRoomsCount"), ("عدد دورات المياه", "bathroomsCount")):
+        v = offer.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            out.append(f"{label} {int(v)}")
+    return out
+
+
 def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: str,
-               pace: float = PACE_S, probe=None) -> dict:
+               pace: float = PACE_S, probe=None, wasalt=None, sanadak=None, muktamel=None) -> dict:
     if probe is None:
         # Imported here, not at module level: af_score and its hermetic check load this module with
         # source_reread stubbed, and they always pass their own probe.
         from scrapers.common.source_reread import read_page as probe
+    # wasalt and sanadak are read the way af_score reads them (backlog #540 / #546, 2026-10-16). The shared
+    # probe answers a live wasalt page with an empty body (liveness needs only the status), so wasalt scored
+    # 0 decided ads every night (10-15: 5/5, 10-16: 10/10 unreadable). sanadak's page appends OTHER listings
+    # («شقة للإيجار في جدة النهضة 3 غرفة 183.56 متر 2»), so 17944083 (228 m²) and 17662112 scored area
+    # mismatches the ad never made; its own listing object is the ad. Lazy import: af_score imports this module.
+    if wasalt is None or sanadak is None:
+        from scrapers.common import af_score
+        wasalt = wasalt or af_score.wasalt_page
+        sanadak = sanadak or af_score.sanadak_page
     row = empty_row(night, platform)
     last = 0.0
     for table, rid in picks:
@@ -598,6 +640,16 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             continue
         time.sleep(max(0.0, last + pace - time.monotonic()))
         last = time.monotonic()
+        own = wasalt if ("wasalt.sa" in url or "wasalt.com" in url) else sanadak if "sanadak.sa" in url else None
+        if own is not None:
+            page = own(url)                 # the ad's own record; None = unreadable, never wrong
+            if page is None:
+                row["sampled"] += 1
+                row["unreadable_pages"] += 1
+                continue
+            fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
+                                           prose_only_district=platform in PROSE_ONLY_DISTRICT), stored)
+            continue
         try:
             status, body = probe(url)
         except Exception:  # noqa: BLE001 — a transport failure has said nothing about the ad
@@ -612,6 +664,9 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
+        if "muktamel.com" in url:
+            extra = (muktamel or muktamel_room_lines)(url)
+            page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
         fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
                                        prose_only_district=platform in PROSE_ONLY_DISTRICT), stored)
     if row["unreadable_pages"]:
@@ -651,7 +706,13 @@ def _line(r: dict) -> str:
     return (f"{r['platform']}: sampled={r['sampled']} decided_ads={r['decided_ads']} "
             f"normal={_pct(normal_accuracy(r))} af_precision={_pct(af_precision(r))} "
             f"af_recall={_pct(af_recall(r))} mismatches={len(r['mismatch_ids'])}"
-            + (f" | {r['note']}" if r["note"] else ""))
+            + (f" | {r['note']}" if r["note"] else "")
+            # Which field and which ad: without these the log names a cap but not its cause, and every
+            # mismatch had to be re-derived by hand (10-16: wasalt 92.9% with 6 mismatches, no ids printed).
+            + "".join(f"\n    {name}: " + " ".join(f"{k}={v}" for k, v in c.items() if v and k != MATCH)
+                      for name, c in sorted((r.get("fields") or {}).items())
+                      if c.get(MISMATCH) or c.get(WE_MISS))
+            + (f"\n    ids: {' '.join(r['mismatch_ids'])}" if r["mismatch_ids"] else ""))
 
 
 def main() -> int:
