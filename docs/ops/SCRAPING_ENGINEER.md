@@ -36,43 +36,36 @@ These win over THE PLAN's timeline below; THE PLAN's rules still hold. Replace t
 > **Owner bar (10-13, still standing):** fix rate ≥ 6/10 proven like a customer · 0 sites broken on our side at the end ·
 > rating ≥ 9 · the owner never has to ask for a fix afterwards · no over-claim.
 
-> **10-15 and 10-16 05:00 slots were MISSED** (🔧 row 1216: RED). The 10-16 run was a retry at 14:29 UTC. A missed slot
-> costs a whole night of proofs; if the slot is missed again, run the minute you are started, whatever the hour.
+**Kept hard rules:** ONE PR early (`pytest scrapers/common/tests` + `npm run test:all` locally, then push once); read
+every failed site's exception TEXT in the first 15 min; a parser fix is fixed only when the RAW row changed;
+`issues_fixed` = PASS `:proof` rows for tonight's backlog items, counted by query.
 
-**Kept hard rules:** ship ONE PR early (`pytest scrapers/common/tests` + `npm run test:all` locally, then push once); read
-every failed site's exception TEXT in the first 15 min and classify OURS/THEIRS; a parser fix is fixed only when the RAW
-row changed; `issues_fixed` = PASS `:proof` rows for tonight's backlog items, counted by query.
+**NEW (10-17): pick the proof before the fix.** Before writing a fix, name the listing and the journey that will prove
+it, and check the tool can drive it: `customer-journey.mjs` cannot search type «أرض» (no box) and no rent search shows a
+rental without a period. A fix whose only carriers are unprovable stays UNKNOWN (10-17: two Haraj area fixes). Merge by
+~06:00 UTC so a ~15-min crawl lands before the 06:22 sync (rakez 10-17: merged 05:57, crawled 06:09–06:17, proven 06:27).
 
-**Minute 0–15 (DB clock):** `select now()`; `:end`/`:followup` rows; failed and absent sites of the 04:22 nightly with
-their exception text; `select date_trunc('day',started_at), sum(rows_seen) from scrape_runs where platform like
-'wasalt_enum%' group by 1`.
+**Owed → first thing next run (10-18):**
+- **wasalt enumeration (532/537/569, P1, 5th night).** The 10-17 21:00 UTC enum is the first run on #7188/#7189.
+  Read: sum of ALL shards' rows_seen (≥ 100,000 = intake fixed), pages skipped and why, then a new wasalt ad in the
+  Filter (proof row) and ♻️'s wasalt in-time number off 3.6%. If the roll-up still refuses, say why; never weaken the guard.
+  Same run: wasalt 13746442 (613) — list now 8,925,000 → alert 6703 clears; still 3.35 bn → the list lags the detail.
+- **Haraj (608/610/616):** HRJ11190645357 (a «طلب» request, still searchable) must leave via the own-page strike path
+  (3 strikes); HRJ11190652057 area 10 → NULL after the 06:3x `--ids` re-read (#7261). Prove both in search.
+  615: a catalogue in the BODY (several «للبيع <type>») is stored as one offer — body rule, tuned on one window, gated
+  on an untouched one. Hand-check reached 85 unlicensed offers (5 bad); finish to 100 on fresh posts.
+- **awal (617):** #7261 merged 06:31; the awal crawl was dispatched behind the nightly → kitchen true in search → AF journey.
+- **584 dangling-run remediation:** `apply_migration` timed out twice on 10-17 (function body with an UPDATE on
+  scrape_runs; nothing reached the database, nothing was blocked). Patch: the 10-16 dangling-remediation file in `docs/ops/pending/`.
+  NEEDS A HUMAN CLICK. Do not retry the tool.
+- **575/612 photo floors:** aqar's 91.6% is mostly source truth (7/8 photo-less ads serve aqar's own
+  `villa-default.png`); one ad got its photo AFTER our capture and re-sweeps never refresh photos. Next: count the
+  placeholder as imageless-at-source in the coverage check, and refresh photo_urls on re-seen rows captured with 0 images.
+- 564 gathern 577 units redirecting home · 565 almuteb 503 (11 ads) — both need a browser+proxy read from CI.
 
-**Owed → first thing next run:**
-- **wasalt enumeration (532/569, P1, 4th night) — ROOT CAUSE MEASURED 10-16.** Every slice stops on a VALID empty
-  page (count=0 totalPages=0) that is NOT a cap (stops at page 2..23), NOT a throttled exit (3 fresh exits: 0 of 10
-  stops recovered, run 38919794892) and NOT a stored render (cache-busted re-ask: 0 recovered, second sweep). It is
-  DETERMINISTIC per page: floor/rent, villa/sale and villa/rent stopped on the same page (2, 6, 2) twenty minutes
-  apart, and floor/sale (2 → 3) and apartment/rent (7 → 8) moved down by exactly one page as new ads arrived at the
-  top: one listing whose page the source cannot render, sliding down the catalogue. The third PR (10-16) re-asks once,
-  then SKIPS that page and keeps walking (stops after 3 empty pages in a row); a slice with skipped pages stays
-  TRUNCATED (ok=false), so the roll-up (ok shards only) still strikes nothing. Notes say «skipped N empty page(s) the
-  source could not render: …». Read: (1) the third proof sweep (`wasalt-residential-sweep.yml`, `pages=25`):
-  per-slice `rows_upserted` should approach 750; (2) the 10-17 21:00 UTC enum: rows read (sum of ALL shards' rows_seen,
-  ok or not) ≥ 100,000 = intake fixed (proof row + a new wasalt ad found in the Filter). The roll-up will still REFUSE
-  while any page is skipped: deciding whether a shard missing ≤ 1% of its pages may count as complete is the next
-  step (it feeds strikes, so prove it with ♻️ first). Commercial side finding: every commercial slug reports the same
-  count (rent 1,893 / sale 329), so the type filter looks ignored for commercial. Compare 3 slices' first ids.
-- **576 dangling-run remediation (class bug, backlog 584).** Detector raises at 3 h, remediation only closes > 12 h, so
-  every dangling row escalates to a P0. The tested patch is `docs/ops/pending/2026-10-16-dangling-remediation-at-
-  detector-threshold.sql.txt` (its self-test fails on the live function). It was NOT applied: `apply_migration` waits
-  for a human to confirm the UPDATE in its body and timed out. Apply it from a session that can confirm, then mirror it
-  into `supabase/migrations/` with the minted version and delete the pending copy.
-- **564 gathern 577 units redirecting home** — a link-proof decision inside `scrapers/gathern/liveness.py` (♻️'s 519).
-- **565 almuteb 503 on ad pages from CI** — the crawl reads the REST API (200); the HTML page needs a browser read.
-
-**Proof timing facts:** search sync :22 (commits ~:24–:26); detector sweep :59; Wasalt enum 21:00 UTC every 2 days
-(~7 h when healthy); muhaysini nightly ends ~07:10 UTC; `scraper-early-warning` 07:45 UTC; the 12 h dangling-run
-reconcile cron closes an orphaned row 12 h after it started.
+**Proof timing facts:** search sync :22 (commits ~:24–:26); detector sweep :29/:59; Wasalt enum 21:00 UTC every 2 days
+(~7 h when healthy); muhaysini nightly ends ~07:10 UTC; small-sources-sync is ONE queue — a dispatch during the nightly
+waits for it (rakez 10-17 waited 12 min); a Haraj crawl upserts everything at its END (04:19 run → rows at 04:59).
 
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «wire them so the next run turns out perfect … at the point where I don't need to check and agree on
