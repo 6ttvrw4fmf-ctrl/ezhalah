@@ -9,9 +9,9 @@
 //   5. English never carries Arabic script (city/district names come from the official English names);
 //   6. the owner's shape: 30 lines, Arabic without diacritics, every line ends with the brand,
 //      and the English keeps "Ezhalah" untranslated;
-//   7. rotation: about half of loads only, never the previous line, time lines only at their time.
+//   7. rotation: one line held for 4 hours then a different one, always personal, time lines only at their time.
 import {
-  WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, SHOW_PROBABILITY, type WelcomeFacts,
+  WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, FACTLESS_ANYTIME_IDS, type WelcomeFacts,
 } from '../src/lib/filterWelcome.ts';
 
 let failed = 0;
@@ -95,16 +95,46 @@ check('an English line is never shown with an Arabic city/district name in it', 
 
 // ── 7. rotation ─────────────────────────────────────────────────────────────────────────────────
 const at = (iso: string) => new Date(iso);
-check('a roll at/above SHOW_PROBABILITY keeps the normal subtitle', chooseWelcomeLine(at('2026-10-14T10:00:00'), null, () => SHOW_PROBABILITY) === null);
 const neverRepeats = (pick: typeof chooseWelcomeLine) => {
   for (const last of WELCOME_LINES.map((l) => l.id)) {
     for (let i = 0; i < 97; i++) {
-      const r = [0.1, i / 97];
-      if (pick(at('2026-10-16T09:00:00'), last, () => r.shift() ?? 0)?.id === last) return false;
+      if (pick(at('2026-10-16T09:00:00'), last, () => i / 97)?.id === last) return false;
     }
   }
   return true;
 };
+// HOLD (owner: «not every refresh … every now and then, hours» → 4 h, always personal).
+const holdsFourHours = (decide: typeof welcomeForNow) => {
+  const t0 = at('2026-10-14T13:00:00').getTime(); // Wednesday 13:00 — only any-time lines fit
+  const held = { id: 20, at: t0 };
+  const kept1h = decide(new Date(t0 + 1 * 3600_000), held, () => 0.3);
+  const kept3h = decide(new Date(t0 + 3.9 * 3600_000), held, () => 0.7);
+  const after = decide(new Date(t0 + 4 * 3600_000 + 1), held, () => 0.3);
+  return kept1h?.line.id === 20 && kept1h.keep && kept3h?.line.id === 20
+    && !!after && !after.keep && after.line.id !== 20;
+};
+check('one line is held for 4 hours, then a different line takes over', holdsFourHours(welcomeForNow));
+check('HOLD_MS is 4 hours', HOLD_MS === 4 * 3600_000);
+mustCatch('a picker that changes on every refresh', !holdsFourHours((now, held, rand) => {
+  const line = chooseWelcomeLine(now, held?.id ?? null, rand); return line ? { line, keep: false } : null;
+}));
+mustCatch('a picker that holds a line forever', !holdsFourHours((_now, held) => {
+  const line = WELCOME_LINES.find((l) => l.id === held?.id)!; return { line, keep: true };
+}));
+const morningHeld = { id: 1, at: at('2026-10-14T11:00:00').getTime() };
+const afternoon = welcomeForNow(at('2026-10-14T13:00:00'), morningHeld, () => 0.5);
+check('a held MORNING line does not survive into the afternoon, even within 4 hours', !!afternoon && afternoon.line.id !== 1 && !afternoon.keep);
+let alwaysALine = true;
+for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) {
+  const now = new Date(2026, 9, 11 + d, h, 30);
+  if (!welcomeForNow(now, null, () => 0.99) || !welcomeForNow(now, { id: 30, at: now.getTime() - 5 * 3600_000 }, () => 0.99)) alwaysALine = false;
+}
+check('a signed-in user always gets a personal line, every hour of every day', alwaysALine);
+check('the fallback line (fact unknown) states no fact, fits any hour, and is never the previous line',
+  FACTLESS_ANYTIME_IDS.length >= 2 && [null, ...FACTLESS_ANYTIME_IDS].every((avoid) => {
+    for (let i = 0; i < 20; i++) { const l = fallbackLine(avoid, () => i / 20); if (l.needs.length || l.when !== 'any' || l.id === avoid) return false; }
+    return true;
+  }));
 check('the previous line is never shown twice in a row', neverRepeats(chooseWelcomeLine));
 const wed = at('2026-10-14T14:00:00'); // Wednesday afternoon
 check('on a Wednesday afternoon no morning/evening/Friday/weekend line is eligible',
@@ -113,7 +143,6 @@ const friMorning = at('2026-10-16T08:00:00'); // Friday 08:00
 check('Friday morning allows morning, Friday and weekend lines',
   ['morning', 'friday', 'weekend'].every((w) => WELCOME_LINES.some((l) => l.when === w && lineFitsTime(l, friMorning))));
 mustCatch('a picker that ignores the previous line', !neverRepeats((now, _last, rand = Math.random) => {
-  if (rand() >= SHOW_PROBABILITY) return null;
   const pool = WELCOME_LINES.filter((l) => lineFitsTime(l, now));
   return pool[Math.min(pool.length - 1, Math.floor(rand() * pool.length))];
 }));
