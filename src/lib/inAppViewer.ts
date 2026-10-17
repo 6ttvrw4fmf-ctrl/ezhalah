@@ -8,19 +8,19 @@
 // A host earns its place here ONLY after its real ad page was proven to render inside a plain
 // <iframe> with the site's own headers — no X-Frame-Options, no CSP frame-ancestors, no
 // frame-busting script. Deal App and Gathern were proven 2026-10-03 with Playwright against a local
-// page (dealapp.sa/ar/ad-details/530440, gathern.co/view/193264/unit/270328). The other 46 were
-// proven 2026-10-16 the same way: two live ads each, framed like AdViewer (same allow=, no sandbox),
-// each checked against a top-level control load; the test was calibrated first (aqar + wasalt
-// refused, dealapp + gathern opened). Every one also showed its ad in about 2 s or less on a phone
-// over throttled 4G (e2e/viewer/speed-live.mjs, budget 3 s), so the live speed guard stays green.
-// Left off on 2026-10-16: frames refused (aqarcity.net, nawafethalwatan.com, nafithh.sa), bot check
-// or blank inside a frame (ashab.sa, dwelleo.sa 404, masaraqarat.com), login wall (nawait.sa), site
-// down (almuteb.sa 503), and too slow on phone 4G (aqaralmuhaysini.com, muktamel.com, eaqartabuk.com
-// and 19 small sites). ryadah.com.sa was added, then taken off the same day: the live speed guard's
-// first production run saw it answer SAMEORIGIN to a phone user agent. wahadat.sa came off the same
-// way: from the US runner its cold loads took ~6.1 s (budget 3 s). just.sa came off too: 2 of the
-// guard's 3 active ads showed «ليس لديك صلاحيات» (removed at source), so they render no ad. We never
-// proxy or strip a site's headers to force an embed; the preview allowlist uses already-loaded data.
+// page (dealapp.sa/ar/ad-details/530440, gathern.co/view/193264/unit/270328). The rest were proven
+// 2026-10-16/17 the same way: two live ads each, framed like AdViewer (same allow=, no sandbox), each
+// checked against a top-level control load; the test was calibrated first (aqar + wasalt refused,
+// dealapp + gathern opened). Every host must also show its ad within the speed budget on a phone over
+// throttled 4G, measured from the GitHub runner by e2e/viewer/speed-live.mjs: 3 s until 2026-10-17,
+// when the owner set it to 10 s («if it's below 10 seconds no problem»), which let 20 slower sites in.
+// Left off: frames refused (aqarcity.net, nawafethalwatan.com, nafithh.sa, ryadah.com.sa and
+// sodasyat.sa for phones), bot check or blank inside a frame (ashab.sa, dwelleo.sa 404,
+// masaraqarat.com), login wall (nawait.sa), site down when tested (almuteb.sa 503, albukaeri.sa
+// timing out 2026-10-17 — re-prove and re-add when it is back), removed-at-source ads (just.sa),
+// and over budget (muktamel.com ~37 s, aqaralmuhaysini.com 9.96 s — too close to 10 s to stay green).
+// We never proxy or strip a site's headers to force an embed; the preview allowlist uses already-
+// loaded data.
 export const IN_APP_VIEWER_HOSTS = [
   'dealapp.sa',
   'gathern.co',
@@ -68,8 +68,27 @@ export const IN_APP_VIEWER_HOSTS = [
   'eilmalriyada.com',
   'aoujestates.com',
   'aqarnajran.com',
-  'albukaeri.sa',
   'mar-ksa.com',
+  'amaall.com',
+  'jurash.sa',
+  'awaalun.com',
+  'ego-aqar.com',
+  'rawaf.ai',
+  'rawasi-dark.com',
+  'mobasher.sa',
+  'villas-sa.com',
+  'vm-ksa.com',
+  'eaqartabuk.com',
+  '24.com.sa',
+  'livingcompound.com',
+  'tamyaz-sa.com',
+  'wahadat.sa',
+  'dallali.com',
+  'remalre.com',
+  'safainv.sa',
+  'remax.sa',
+  'ibaax.sa',
+  'qmra.sa',
 ] as const;
 
 /** The allowlisted host a listing URL belongs to, or null when it must open the old way. */
