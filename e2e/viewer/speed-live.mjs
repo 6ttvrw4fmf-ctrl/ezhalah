@@ -55,7 +55,6 @@ const SITES = [
   { host: 'sqcc.sa', table: 'sqcc_commercial_listings' },
   { host: 'aalbarrak.com', table: 'aalbarrak_residential_listings' },
   { host: 'abeea.com.sa', table: 'abeea_residential_listings' },
-  { host: 'just.sa', table: 'justsa_residential_listings' },
   { host: 'wajaf.sa', table: 'wajaf_commercial_listings' },
   { host: 'alsidra.com.sa', table: 'alsidra_residential_listings' },
   { host: 'squares.com.sa', table: 'squares_commercial_listings' },
