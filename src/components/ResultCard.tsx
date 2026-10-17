@@ -882,6 +882,8 @@ const EILMALRIYADA_LOGO = require('../../assets/images/eilmalriyada.png');
 const GOLDENDEAL_LOGO = require('../../assets/images/platform-logos/goldendeal-sa.png');
 const EBRIZA_LOGO = require('../../assets/images/platform-logos/ebriza-com-sa.png');
 const SHOMOU_LOGO = require('../../assets/images/platform-logos/shomoalaqar-com-sa.png');
+// Haraj (2026-10-16): the shared placeholder until the owner supplies Haraj's own logo file.
+const HARAJ_LOGO = require('../../assets/images/platform-placeholder.png');
 const VMKSA_LOGO = require('../../assets/images/platform-logos/vm-ksa-com.png');
 const IBAAX_LOGO = require('../../assets/images/platform-logos/ibaax-sa.png');
 const THOUSAND_LOGO = require('../../assets/images/platform-logos/1000-com-sa.png');
@@ -1139,6 +1141,7 @@ export function SourceBadge({ source }: { source: string }) {
   if (raw === 'arsh' || s.includes('عرش العقارية') || s.includes('arshglobal')) return <PlatformLogo source={ARSHGLOBAL_LOGO} />;
   if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return <PlatformLogo source={SUPEROFFICE_LOGO} />;
   if (s.includes('شموع العقار') || s.includes('shomou')) return <PlatformLogo source={SHOMOU_LOGO} />;
+  if (s.includes('حراج') || s.includes('haraj')) return <PlatformLogo source={HARAJ_LOGO} />;
   if (s.includes('منصة مكتب') || s.includes('maktab')) return <PlatformLogo source={MAKTAB_LOGO} />;
   if (s.includes('سرداب') || s.includes('sirdab')) return <PlatformLogo source={SIRDAB_LOGO} />;
   if (raw === 'ashab' || s.includes('عشاب العقارية') || s.includes('ashab.sa')) return <PlatformLogo source={ASHAB_LOGO} />;
@@ -1328,6 +1331,7 @@ function sourceHost(source: string): string {
   if (s.includes('عرش العقارية') || s.includes('arshglobal')) return 'arshglobal.com.sa';
   if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return 'superoffice.sa';
   if (s.includes('شموع العقار') || s.includes('shomou')) return 'shomoalaqar.com.sa';
+  if (s.includes('حراج') || s.includes('haraj')) return 'haraj.com.sa';
   if (s.includes('منصة مكتب') || s.includes('maktab')) return 'maktab.sa';
   if (s.includes('سرداب') || s.includes('sirdab')) return 'marketplace.sirdab.co';
   if (s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'ashab.sa';

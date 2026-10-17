@@ -554,6 +554,17 @@ _PLAN_WORD = "مخطط"  # a subdivision-PLAN reference ("مخطط الربوة"
 # (20260911201847) for the same rule enforced DB-side on already-stored text.
 
 
+def catalog_district(city_id: Optional[int], district_ar: Optional[str]) -> Optional[str]:
+    """THAT city's catalogue spelling of a district FIELD the source states («الحي: الروابي», «حي
+    الوفاء», «المحمدية 3»), matched on the catalogue's own key (norm_district_tok: «حي»/«ال», hamza,
+    trailing numbers folded). Not in the catalogue for this city → None: never a guess (Haraj, 2026-10-16)."""
+    _load()
+    if not city_id or not district_ar:
+        return None
+    n = norm_district_tok(district_ar)
+    return _DISTRICT_AR_BY_CITY.get((city_id, n)) if n in _DISTRICT_BY_CITY.get(city_id, ()) else None
+
+
 def find_district_in_text(text: Optional[str], city_id: Optional[int]) -> Optional[str]:
     """Recognizes a REAL district of `city_id` mentioned in free text (a title, a description) — for
     sources that publish no separate district field/taxonomy at all (remal: class_list gives only an

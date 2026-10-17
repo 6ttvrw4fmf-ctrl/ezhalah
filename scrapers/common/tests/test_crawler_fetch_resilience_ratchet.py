@@ -31,6 +31,12 @@ SHARED = re.compile(
     r"|from scrapers\.common\.http import [^\n]*\bget\b")
 
 
+# A source the OWNER requires to be read with our own honest bot user-agent and NO browser impersonation
+# or proxy (Haraj, owner 2026-10-09/10-16: «honest access, never bypass anything»). The shared resilient
+# path is exactly impersonation + a proxy leg, so it is forbidden there; a refused read stays a failed run.
+OWNER_HONEST_CLIENT = frozenset({"haraj"})
+
+
 def _code(p: Path) -> str:
     return "\n".join(l.split("#", 1)[0] for l in p.read_text(encoding="utf-8").splitlines())
 
@@ -57,7 +63,7 @@ def baseline() -> set[str]:
 
 
 def test_no_new_crawler_opens_its_own_single_profile_session():
-    weak = {s for s, ok in crawlers().items() if not ok}
+    weak = {s for s, ok in crawlers().items() if not ok} - OWNER_HONEST_CLIENT
     new = sorted(weak - baseline())
     assert not new, (f"{new}: a new crawler must fetch through scrapers.common.http (get() / "
                      f"retry_smarter_session()) — see this file's docstring")

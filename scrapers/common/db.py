@@ -1905,6 +1905,14 @@ def upsert_superoffice_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("superoffice_commercial_listings", rows)
 
 
+def upsert_haraj_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("haraj_residential_listings", rows)
+
+
+def upsert_haraj_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("haraj_commercial_listings", rows)
+
+
 def upsert_shomou_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("shomou_residential_listings", rows)
 

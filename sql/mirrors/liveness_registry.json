@@ -408,6 +408,12 @@
     "grace": 3
   },
   {
+    "platform": "haraj",
+    "strategy": "CANDIDATE_PLUS_DIRECT",
+    "sla_hours": 168,
+    "grace": 3
+  },
+  {
     "platform": "hasaad",
     "strategy": "DIRECT_REVISIT",
     "sla_hours": 48,
