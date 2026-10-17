@@ -581,8 +581,6 @@ def catchup(locs: list[str], live_files: list[str], budget_s: float, cursor: Opt
     c, unresolved = Counter(), Counter()
     done, t0 = floor, time.time()
     for u in reversed(older):
-        if time.time() - t0 > budget_s:
-            break
         pre = Counter()
         try:
             ids = ids_in(u, pre, tight=True)
@@ -599,6 +597,8 @@ def catchup(locs: list[str], live_files: list[str], budget_s: float, cursor: Opt
         unresolved.update(un)
         c["catchup_files"] += 1
         done = _stamp(u)
+        if time.time() - t0 > budget_s:   # checked after a file: every run moves the cursor at least one file
+            break
     left = sum(1 for u in older if _stamp(u) < done)
     return res, com, c, unresolved, {"catchup_before": done, "catchup_files_left": left,
                                      "catchup_stored": len(res) + len(com)}
