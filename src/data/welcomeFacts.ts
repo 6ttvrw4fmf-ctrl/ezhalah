@@ -34,7 +34,7 @@ const siteCount = once(async () => {
   return !error && Array.isArray(data) && data.length > 0 ? data.length : null;
 });
 
-const cityPool = once(async () => {
+export const cityPool = once(async () => {
   if (!supabase) return null;
   const { data, error } = await boundedRpc<CityRow[]>(supabase.rpc('top_cities_by_deal_ar', { p_deal: null }), WELCOME_RPC_MS);
   return !error && Array.isArray(data) && data.length > 0 ? data : null;
@@ -42,7 +42,7 @@ const cityPool = once(async () => {
 
 const districtCache = new Map<number, Promise<DistrictRow[] | null>>();
 /** The city's districts, most listings first (Trending's own ranking). */
-function topDistrictsOf(cityId: number): Promise<DistrictRow[] | null> {
+export function topDistrictsOf(cityId: number): Promise<DistrictRow[] | null> {
   let p = districtCache.get(cityId);
   if (!p) {
     p = (async () => {
@@ -66,15 +66,29 @@ const stripCity = (s: string) => s.trim().replace(/^مدينة\s+/, '');
 export const placeKey = (s: string) => s.trim().replace(/^حي\s+/, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه')
   .replace(/ى/g, 'ي').replace(/^ال/, '').replace(/\s+/g, '').toLowerCase();
 
-/** The user's most recent searched city, matched against the live pool; else the city with most listings. */
-export function resolveCity(pool: CityRow[], lastLocation: string | null | undefined): CityRow | undefined {
-  const parts = (lastLocation ?? '').split(/[,،]/).map((s) => s.trim()).filter(Boolean);
+/** A location string's city, matched STRICTLY against the live pool (Arabic or canonical English name); else undefined. */
+export function matchCity(pool: CityRow[], location: string | null | undefined): CityRow | undefined {
+  const parts = (location ?? '').split(/[,،]/).map((s) => s.trim()).filter(Boolean);
   for (const part of parts) {
     const ar = stripCity(translate('ar', part));
     const row = pool.find((c) => stripCity(c.city_ar) === ar);
     if (row) return row;
   }
-  return [...pool].sort((a, b) => b.listing_count - a.listing_count)[0];
+  return undefined;
+}
+
+/** The user's most recent searched city, matched against the live pool; else the city with most listings. */
+export function resolveCity(pool: CityRow[], lastLocation: string | null | undefined): CityRow | undefined {
+  return matchCity(pool, lastLocation) ?? [...pool].sort((a, b) => b.listing_count - a.listing_count)[0];
+}
+
+/** Where a named district sits in a city's live ranking (Arabic key, any raw spelling, or the official English name); -1 if absent. */
+export function findDistrictIndex(ds: DistrictRow[], cityId: number, name: string): number {
+  const want = placeKey(translate('ar', name));
+  const wantEn = name.trim().toLowerCase();
+  return ds.findIndex((d) => placeKey(d.district_ar) === want
+    || (d.match_values ?? []).some((m) => placeKey(m) === want)
+    || districtNameEn(cityId, d.district_ar).trim().toLowerCase() === wantEn);
 }
 
 /** Fetch exactly the facts `line` states. Missing pieces stay undefined (→ the line is not shown). */
@@ -114,11 +128,7 @@ export async function loadWelcomeFacts(line: WelcomeLine, lastLocation: string |
           const ds = await topDistrictsOf(row.city_id);
           if (ds && wantsMine && lastDistrict) {
             // The user's own district, found in the city's LIVE ranking (rank = its position by listings).
-            const want = placeKey(translate('ar', lastDistrict));
-            const wantEn = lastDistrict.trim().toLowerCase();
-            const i = ds.findIndex((d) => placeKey(d.district_ar) === want
-              || (d.match_values ?? []).some((m) => placeKey(m) === want)
-              || districtNameEn(row.city_id, d.district_ar).trim().toLowerCase() === wantEn);
+            const i = findDistrictIndex(ds, row.city_id, lastDistrict);
             if (i >= 0) f.myDistrict = { ar: ds[i].district_ar, en: districtNameEn(row.city_id, ds[i].district_ar), count: Number(ds[i].listing_count), rank: i + 1 };
           }
           if (ds) {

@@ -617,6 +617,19 @@ const AR: Record<string, string> = {
   // Live-number variants (owner 2026-09-12) — {count}/{cities}/{districts} are real, derived
   // figures (loaderScaleStats.ts), never hardcoded; see SEARCH_TITLES's comment in SearchLoader.tsx.
   'Checking more than {count} properties…': 'نفحص أكثر من {count} عقار…',
+  // THE SEARCH FUNNEL (owner 2026-10-17) — every line an action, the numbers of THIS search inside it,
+  // narrowing all websites → Kingdom → the user's city → their district → their request. {count} is
+  // live and worded by lib/searchLoaderTitles.ts countWording(): «أكثر من» only strictly below the
+  // truth; small exact counts said exactly; unknown → the line is not shown.
+  'Searching {count} real-estate platforms…': 'نبحث في {count} منصة عقارية…',
+  'Checking more than {count} listings across the Kingdom…': 'نفحص أكثر من {count} إعلان في المملكة…',
+  'Reviewing more than {count} listings in {city}…': 'نراجع أكثر من {count} إعلان في {city}…',
+  'Reviewing {count} listings in {city}…': 'نراجع {count} إعلان في {city}…',
+  'Going through more than {count} listings in {district}…': 'ندقق في أكثر من {count} إعلان في {district}…',
+  'Going through {count} listings in {district}…': 'ندقق في {count} إعلان في {district}…',
+  'Matching your request: {what}…': 'نطابق طلبك: {what}…',
+  'for rent': 'للإيجار',
+  'for sale': 'للبيع',
   // The Advanced Filter round's beat (owner 2026-10-11): CHECKING with the real size of the set each answer is checked
   // against — «نفحص 1,425 عقار…» → «نفحص 830 عقار…» (and «نفحص مصعد…» when that size was never known).
   'Checking {count} properties…': 'نفحص {count} عقار…',
