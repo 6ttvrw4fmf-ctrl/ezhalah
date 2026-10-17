@@ -251,8 +251,17 @@ def findable(rows: list[dict] | None, source_table: str, listing_id: int) -> boo
 
 
 # Keys under propertyDetailsV3 that can hold a person or a contact: never read (PDPL).
-_WASALT_SKIP = re.compile(r"agent|broker|owner|advertiser|user|phone|mobile|whats|email|contact|licen|\bid$|_id$|uuid",
+# «classification» = wasalt's PHOTO classifier («classificationName»: «kitchen», «bathroom» per image): a model's guess
+# about a picture, not the advertiser's statement, so it never counts as the page saying the ad has one (🆕 2026-10-16).
+_WASALT_SKIP = re.compile(r"agent|broker|owner|advertiser|user|phone|mobile|whats|email|contact|licen|classification|\bid$|_id$|uuid",
                           re.I)
+
+
+# wasalt's structured attribute keys → the Arabic label the comparison's keywords read («م²», «غرف», «دورات المياه»).
+WASALT_FIELD_LABELS = {
+    "builtUpArea": "مساحة البناء م²", "propertyArea": "مساحة العقار م²", "plotArea": "مساحة الأرض م²",
+    "noOfBedrooms": "عدد غرف النوم", "noOfBathrooms": "عدد دورات المياه",
+}
 
 
 def wasalt_page(url: str, fetch=None) -> dict | None:
@@ -280,6 +289,12 @@ def wasalt_page(url: str, fetch=None) -> dict | None:
         if key and _WASALT_SKIP.search(key):
             return
         if isinstance(node, dict):
+            label = WASALT_FIELD_LABELS.get(str(node.get("key")))
+            if label and isinstance(node.get("value"), (str, int, float)) and str(node["value"]).strip():
+                # wasalt's own {key, value} row as ONE labelled line: split into loose leaves, «96» never sat next
+                # to a size word while the REGA deed text («… من الأرض 51.52 متر») did, and 17926766's structured
+                # builtUpArea 96 (= ours) scored a mismatch (🆕 2026-10-16, re-read run 38925580390).
+                texts.append(f"{label} {node['value']}")
             for k, v in node.items():
                 walk(v, str(k))
         elif isinstance(node, list):
@@ -349,6 +364,14 @@ def sanadak_page(url: str, fetch=None) -> dict | None:
     texts = [str(o.get(x)).strip() for x in ("title", "city", "district", "description", "propertyTypeText",
                                                "listingTypeText") if o.get(x)]
     lines = [y.strip() for t in texts for y in t.splitlines() if y.strip()]
+    # The listing object's own structured counts, labelled the way its page prints them («مساحة العقار 105.6 م²»).
+    # Without them only the description was read, and 17944027's «المساحة : 120م تقريبا» scored our structured
+    # 105 (lotSize 105.6) wrong (🆕 2026-10-16, re-read run 38927458882).
+    for label, key in (("مساحة العقار م²", "lotSize"), ("عدد غرف النوم", "numberBedrooms"),
+                       ("عدد دورات المياه", "numberBathrooms")):
+        v = o.get(key)
+        if isinstance(v, (int, float, str)) and not isinstance(v, bool) and str(v).strip():
+            lines.insert(0, f"{label} {v}")
     return {"title": o.get("title"), "meta": {}, "jsonld": [{"additionalProperty": props}],
             "evidence_lines": lines[:200], "text_head": " | ".join(lines)[:1500]}
 
