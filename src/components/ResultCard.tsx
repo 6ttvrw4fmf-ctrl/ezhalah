@@ -394,8 +394,8 @@ export function ResultCard({
         ) : null}
         {/* user request: removed the white "AQAR" pill that floated over the photo's top-right.
             Source attribution appears in the photo strip and the compact source row. */}
+        {/* THE GOLD STRIP (owner 2026-10-17): the «اضغط هنا» strip shines gold like the buzzer, on every card. */}
         {listing.source_url ? (
-          {/* THE GOLD STRIP (owner 2026-10-17): the «اضغط هنا» strip shines gold like the buzzer, on every card. */}
           <GoldSurface style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none" testID="card-gold-strip">
             <Text style={[card.photoAction, row && card.photoActionRow]}>{t('Click here 👆')}</Text>
             <Text style={[card.sourceText, row && card.sourceTextRow]} numberOfLines={row ? 1 : undefined}>{sourceHost(listing.source)}</Text>
