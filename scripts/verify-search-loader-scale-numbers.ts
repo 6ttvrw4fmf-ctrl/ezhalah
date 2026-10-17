@@ -191,15 +191,21 @@ console.log('\n── 3. the copy uses the SAME platform count the pills render,
 const loaderSrc = readFileSync(join(root, 'src/components/SearchLoader.tsx'), 'utf8');
 check('PhaseTitle is called with platformCount={platforms.length} (the roster actually on screen)',
   /<PhaseTitle[^>]*platformCount=\{platforms\.length\}/.test(loaderSrc));
-check('the reviewing line keys off that same platformCount prop, not a separate fetch/count',
-  /platformCount > 0 \? t\('Reviewing \{count\} real-estate platforms…', \{ count: platformCount \}\)/.test(loaderSrc));
+check('the websites line keys off that same platformCount prop, not a separate fetch/count',
+  /platformCount > 0 \? t\('Searching \{count\} real-estate platforms…', \{ count: platformCount \}\)/.test(loaderSrc));
+check('PhaseTitle receives THIS search (query), which drives the city/district lines',
+  /<PhaseTitle[^>]*query=\{query\}/.test(loaderSrc));
 
-console.log('\n── source shape: the three new i18n keys exist with their placeholders, both languages ──');
+console.log('\n── source shape: the funnel i18n keys exist with their placeholders, both languages ──');
 const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
 for (const [key, placeholders] of [
-  ['Checking more than {count} properties…', ['{count}']],
-  ['Reviewing {count} real-estate platforms…', ['{count}']],
-  ['Covering more than {count} places across Saudi Arabia…', ['{count}']],
+  ['Searching {count} real-estate platforms…', ['{count}']],
+  ['Checking more than {count} listings across the Kingdom…', ['{count}']],
+  ['Reviewing more than {count} listings in {city}…', ['{count}', '{city}']],
+  ['Reviewing {count} listings in {city}…', ['{count}', '{city}']],
+  ['Going through more than {count} listings in {district}…', ['{count}', '{district}']],
+  ['Going through {count} listings in {district}…', ['{count}', '{district}']],
+  ['Matching your request: {what}…', ['{what}']],
 ] as const) {
   check(`EN key referenced from SearchLoader/i18n: "${key}"`, loaderSrc.includes(key) || i18n.includes(`'${key}'`));
   const arMatch = i18n.match(new RegExp(`'${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}':\\s*'([^']*)'`));
@@ -207,8 +213,18 @@ for (const [key, placeholders] of [
   check(`AR translation exists and carries every placeholder (${placeholders.join(', ')})`,
     !!arLine && placeholders.every((p) => arLine.includes(p)), `got: "${arLine}"`);
 }
-check('coverage is ONE combined number (cityCount + districtCount), not a separate cities/districts pair',
-  /coverage: scaleStats \? t\('Covering more than \{count\} places across Saudi Arabia…', \{ count: grouped\(scaleStats\.cityCount \+ scaleStats\.districtCount\) \}\) : null/.test(loaderSrc));
+// THE FUNNEL'S HONESTY IS WIRED, NOT JUST AVAILABLE (owner 2026-10-17). The Kingdom line may only
+// say «أكثر من» through countWording (the old line printed the EXACT total after "more than"); the
+// city/district lines go through placeLine, which omits an unknown place and never puts an Arabic
+// name inside an English sentence; and the loader adds no per-search round trip of its own.
+check('the Kingdom line is worded by countWording, never the exact total after «أكثر من»',
+  /checking: kingdom\?\.kind === 'more' \? t\('Checking more than \{count\} listings across the Kingdom…', \{ count: kingdom\.text \}\)/.test(loaderSrc)
+  && !/grouped\(scaleStats\.listingCount\)/.test(loaderSrc));
+check('the city and district lines both go through placeLine (omit-when-unknown, no Arabic mid-English)',
+  /city: placeLine\(funnel\.city,/.test(loaderSrc) && /district: placeLine\(funnel\.district,/.test(loaderSrc));
+check('the old coverage line is gone from the loader (replaced by the city/district lines)', !loaderSrc.includes('Covering more than'));
+check('the loader makes no supabase.rpc call of its own for the funnel (session caches only — the 2026-09-21 lesson)',
+  !/supabase\.rpc\(/.test(loaderSrc) && /loadSearchFunnelFacts\(query\)/.test(loaderSrc));
 
 console.log('\n── 4. reading-pace rotation: every line gets time proportional to its length, not one fixed window ──');
 const { readingDurationMs } = await import('../src/lib/searchLoaderTitles.ts');
