@@ -31,22 +31,47 @@ const check = (label: string, ok: boolean, detail = '') => {
 };
 const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
 
-console.log('\n── 1. buildSearchLoaderTitles: preparing is ALWAYS last ──');
-const { buildSearchLoaderTitles } = await import('../src/lib/searchLoaderTitles.ts');
+console.log('\n── 1. buildSearchLoaderTitles: the funnel order, optional lines omitted, preparing ALWAYS last ──');
+const { buildSearchLoaderTitles, countWording } = await import('../src/lib/searchLoaderTitles.ts');
 
-const partsNoCoverage = { search: 'S', checking: 'C', matchFilters: 'M', reviewing: 'R', coverage: null, preparing: 'P' };
-const partsWithCoverage = { ...partsNoCoverage, coverage: 'COV' };
+const base = { search: 'S', checking: 'K', city: null, district: null, matching: 'M', preparing: 'P' };
+const bare = buildSearchLoaderTitles(base);
+const withCity = buildSearchLoaderTitles({ ...base, city: 'CITY' });
+const withBoth = buildSearchLoaderTitles({ ...base, city: 'CITY', district: 'DIST' });
+const districtOnly = buildSearchLoaderTitles({ ...base, district: 'DIST' });
 
-const withoutCoverage = buildSearchLoaderTitles(partsNoCoverage as any);
-const withCoverage = buildSearchLoaderTitles(partsWithCoverage as any);
+check('no known place: 4 lines in funnel order, preparing last', JSON.stringify(bare) === JSON.stringify(['S', 'K', 'M', 'P']), JSON.stringify(bare));
+check('known city: its line sits after the Kingdom line, before the request', JSON.stringify(withCity) === JSON.stringify(['S', 'K', 'CITY', 'M', 'P']), JSON.stringify(withCity));
+check('known city + district: websites → Kingdom → city → district → request → results',
+  JSON.stringify(withBoth) === JSON.stringify(['S', 'K', 'CITY', 'DIST', 'M', 'P']), JSON.stringify(withBoth));
+check('a district line can stand without a city line (and preparing is still last)', districtOnly.at(-1) === 'P' && districtOnly.includes('DIST'));
+check('an unknown place line is OMITTED — never shown empty, null or "null"',
+  [bare, withCity, districtOnly].every((t) => !t.includes(null as any) && !t.includes('') && !t.includes('null')));
+mustCatch('a builder that appends after preparing', (() => {
+  const broken = (p: typeof base) => [...buildSearchLoaderTitles(p), 'EXTRA'];
+  return broken(base).at(-1) !== 'P';
+})());
 
-check('without coverage: 5 lines, preparing last', withoutCoverage.length === 5 && withoutCoverage.at(-1) === 'P',
-  JSON.stringify(withoutCoverage));
-check('with coverage: 6 lines, coverage second-to-last, preparing still last',
-  withCoverage.length === 6 && withCoverage.at(-2) === 'COV' && withCoverage.at(-1) === 'P',
-  JSON.stringify(withCoverage));
-check('coverage line is OMITTED (not shown empty/null) when not yet resolved',
-  !withoutCoverage.includes(null as any) && !withoutCoverage.includes('null'));
+console.log('\n── 1b. countWording: «أكثر من» strictly below the truth, small counts exact, unknown → omitted ──');
+const asNum = (s: string) => (s.endsWith(' ألف') ? Number(s.replace(/[^\d]/g, '')) * 1000 : Number(s.replace(/,/g, '')));
+const honest = (w: typeof countWording) => {
+  for (const n of [1001, 1500, 11_385, 88_241, 162_312, 370_000, 372_889]) {
+    for (const loc of ['ar', 'en'] as const) {
+      const r = w(n, loc);
+      if (!r || r.kind !== 'more' || !(asNum(r.text) < n)) return false;
+    }
+  }
+  for (const n of [1, 42, 300, 1000]) { const r = w(n, 'ar'); if (!r || r.kind !== 'exact' || asNum(r.text) !== n) return false; }
+  return w(0, 'ar') === null && w(undefined, 'ar') === null && w(null, 'en') === null && w(Number.NaN, 'ar') === null;
+};
+check('countWording is honest across real production counts', honest(countWording));
+check("today's numbers read as approved: 372,889 → «370 ألف» / 370,000; 162,312 → «160 ألف»; 11,385 → «11 ألف»",
+  countWording(372_889, 'ar')?.text === '370 ألف' && countWording(372_889, 'en')?.text === '370,000'
+  && countWording(162_312, 'ar')?.text === '160 ألف' && countWording(11_385, 'ar')?.text === '11 ألف');
+mustCatch('a wording that says "more than" the exact count (the old «أكثر من 372,889»)',
+  !honest((n, loc) => (typeof n === 'number' && n > 0 ? { kind: 'more', text: n.toLocaleString('en-US') } : null)));
+mustCatch('a wording that prints a zero for an unknown count',
+  !honest((n, loc) => countWording(typeof n === 'number' && Number.isFinite(n) ? n : 0, loc) ?? { kind: 'exact', text: '0' }));
 
 console.log('\n── 2. fetchLoaderScaleStats fails CLOSED, never fabricates a number ──');
 const dataSrc = join(root, 'src/data/loaderScaleStats.ts');
