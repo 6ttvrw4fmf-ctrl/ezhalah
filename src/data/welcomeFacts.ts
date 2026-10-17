@@ -40,8 +40,9 @@ const cityPool = once(async () => {
   return !error && Array.isArray(data) && data.length > 0 ? data : null;
 });
 
-const districtCache = new Map<number, Promise<DistrictRow | null>>();
-function topDistrictOf(cityId: number): Promise<DistrictRow | null> {
+const districtCache = new Map<number, Promise<DistrictRow[] | null>>();
+/** The city's districts, most listings first (Trending's own ranking). */
+function topDistrictsOf(cityId: number): Promise<DistrictRow[] | null> {
   let p = districtCache.get(cityId);
   if (!p) {
     p = (async () => {
@@ -49,8 +50,10 @@ function topDistrictOf(cityId: number): Promise<DistrictRow | null> {
       const { data, error } = await boundedRpc<DistrictRow[]>(
         supabase.rpc('district_options_ar', { p_city_id: cityId, p_deal: null, p_category: null }), WELCOME_RPC_MS);
       if (error || !Array.isArray(data) || data.length === 0) return null;
-      const top = [...data].sort((a, b) => Number(b.listing_count) - Number(a.listing_count))[0];
-      return top && top.district_ar && Number(top.listing_count) > 0 ? top : null;
+      const ranked = [...data]
+        .filter((d) => d.district_ar && Number(d.listing_count) > 0)
+        .sort((a, b) => Number(b.listing_count) - Number(a.listing_count));
+      return ranked.length ? ranked : null;
     })();
     p.then((v) => { if (v === null) districtCache.delete(cityId); });
     districtCache.set(cityId, p);
@@ -83,7 +86,7 @@ export async function loadWelcomeFacts(line: WelcomeLine, lastLocation: string |
       f.listings = s.listingCount; f.cities = s.cityCount; f.districts = s.districtCount;
     }).catch(() => {}));
   }
-  const wantsPool = ['allRegions', 'city', 'district', 'riyadh', 'makkah', 'eastern', 'qassim'].some((k) => needs.has(k as never));
+  const wantsPool = ['allRegions', 'city', 'district', 'district3', 'rank', 'riyadhShare', 'top2', 'riyadh', 'makkah', 'eastern', 'qassim'].some((k) => needs.has(k as never));
   if (wantsPool) {
     jobs.push((async () => {
       const pool = await cityPool();
@@ -92,14 +95,24 @@ export async function loadWelcomeFacts(line: WelcomeLine, lastLocation: string |
       for (const c of pool) if (c.region_ar && c.listing_count > 0) regionCounts[c.region_ar] = (regionCounts[c.region_ar] ?? 0) + c.listing_count;
       f.regionCounts = regionCounts;
       f.regions = Object.keys(regionCounts).length;
-      if (needs.has('city') || needs.has('district')) {
+      const ranked = [...pool].filter((c) => c.listing_count > 0).sort((a, b) => b.listing_count - a.listing_count);
+      if (needs.has('top2')) {
+        f.topCities = ranked.slice(0, 2).map((c) => ({ ar: stripCity(c.city_ar), en: cityNameEn(c.city_id, c.city_ar), count: c.listing_count }));
+      }
+      if (needs.has('city') || needs.has('district') || needs.has('district3')) {
         const row = resolveCity(pool, lastLocation);
         if (!row) return;
         // Official English names, the same ones the Filter home's own pickers show in the English UI.
         f.city = { ar: stripCity(row.city_ar), en: cityNameEn(row.city_id, row.city_ar), count: row.listing_count };
-        if (needs.has('district')) {
-          const d = await topDistrictOf(row.city_id);
-          if (d) f.topDistrict = { ar: d.district_ar, en: districtNameEn(row.city_id, d.district_ar), count: Number(d.listing_count) };
+        const pos = ranked.findIndex((c) => c.city_id === row.city_id);
+        if (pos >= 0) f.cityRank = pos + 1;
+        if (needs.has('district') || needs.has('district3')) {
+          const ds = await topDistrictsOf(row.city_id);
+          if (ds) {
+            const shaped = ds.map((d) => ({ ar: d.district_ar, en: districtNameEn(row.city_id, d.district_ar), count: Number(d.listing_count) }));
+            f.topDistrict = shaped[0];
+            f.topDistricts = shaped.slice(0, 3);
+          }
         }
       }
     })().catch(() => {}));
