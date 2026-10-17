@@ -27,13 +27,32 @@ const check = (name: string, ok: boolean) => {
   if (!ok) failed++;
 };
 
-check('allowlist is exactly the two proven sites', IN_APP_VIEWER_HOSTS.join(',') === 'dealapp.sa,gathern.co');
+// Every host here passed a live frame proof (Deal App + Gathern 2026-10-03, the rest 2026-10-16; the
+// proof table is in src/lib/inAppViewer.ts and the PR that added them). A host joins only with one.
+const PROVEN_HOSTS = [
+  'dealapp.sa', 'gathern.co',
+  'sadiq-eltajer.sa', 'rakez.sa', 'wahadat.sa', 'tuba.com.sa', 'amlakalahsa.com', 'listings.satel.sa',
+  'snam.sa', 'alqasem.com.sa', 'moftah-aleaqar.com', 'safera.inblaj.net', 'tawia.sa', 'daryusuf.com',
+  'hajerhouses.com', 'wslnaa.com', 'alrifai.com.sa', 'shmoua-alshmal.com', 'alkhaas.net',
+  'ramzalqasim.com', 'alajlan-re.com', 'alta.com.sa', 'ebriza.com.sa', 'expattrustedhousingriyadh.com',
+  'ryadah.com.sa', 'daraa.sa', 'razre.sa', 'shatrirealestate.com', 'azdadalaqaria.com',
+  'aqaralriyadh.com', 'fkralemar.com', 'fahadalshahri.com', 'eastabha.sa', 'suwar.sa', 'sqcc.sa',
+  'aalbarrak.com', 'abeea.com.sa', 'just.sa', 'wajaf.sa', 'alsidra.com.sa', 'squares.com.sa',
+  'muajarh.com', 'compoundin.com', 'gomenassat.com', 'almotmkenah.com', 'gudai.inblaj.net',
+  'eilmalriyada.com', 'aoujestates.com', 'aqarnajran.com', 'albukaeri.sa', 'mar-ksa.com',
+].join(',');
+check('allowlist is exactly the proven sites', IN_APP_VIEWER_HOSTS.join(',') === PROVEN_HOSTS);
 
 // Allowed → in-app (returns the host).
 check('dealapp ad → in-app', inAppViewerHost('https://dealapp.sa/ar/ad-details/530440') === 'dealapp.sa');
 check('gathern ad → in-app', inAppViewerHost('https://gathern.co/view/193264/unit/270328') === 'gathern.co');
 check('www. prefix still matches', inAppViewerHost('https://www.dealapp.sa/ar/ad-details/1') === 'dealapp.sa');
 check('host match is case-insensitive', inAppViewerHost('https://Gathern.CO/view/1/unit/2') === 'gathern.co');
+for (const h of PROVEN_HOSTS.split(',')) {
+  check(`${h} ad → in-app`, inAppViewerHost(`https://${h}/ad/1`) === h);
+  check(`www.${h} ad → in-app`, inAppViewerHost(`https://www.${h}/ad/1`) === h);
+}
+check('rakez ad (real link) → in-app', inAppViewerHost('https://rakez.sa/ar/project/59340/') === 'rakez.sa');
 
 // Everyone else → unchanged (null).
 for (const u of [
@@ -44,6 +63,14 @@ for (const u of [
   'https://notdealapp.sa/x',          // suffix lookalike
   'https://dealapp.sa.evil.com/x',     // allowlisted host as a subdomain of another
   'https://evil.com/?u=https://dealapp.sa/x',
+  'https://notrakez.sa/x',            // suffix lookalike of a 2026-10-16 host
+  'https://rakez.sa.evil.com/x',
+  'https://inblaj.net/x',             // only the two proven inblaj.net subdomains frame, not the parent
+  'https://other.inblaj.net/x',
+  'https://satel.sa/x',               // listings.satel.sa was proven, not the bare domain
+  'https://www.aqarcity.net/property/28633',   // refuses framing (2026-10-16)
+  'https://aqaralmuhaysini.com/x',    // frames, but too slow on phone 4G (2026-10-16)
+  'https://ashab.sa/properties/1/unit/1',      // bot check inside a frame (2026-10-16)
   '', null, undefined, 'not a url',
 ]) check(`${JSON.stringify(u)} → new tab (unchanged)`, inAppViewerHost(u) === null);
 
@@ -244,7 +271,11 @@ mustCatch('a decision that opens every site in-app', letsEveryoneIn('https://sa.
 const sloppySuffix = (url: string) => IN_APP_VIEWER_HOSTS.find((h) => new URL(url).hostname.endsWith(h)) ?? null;
 mustCatch('a host match without the dot boundary', sloppySuffix('https://notdealapp.sa/x') !== null);
 // A third host slipped into the list without an embed proof.
-mustCatch('an allowlist grown without proof', [...IN_APP_VIEWER_HOSTS, 'sa.aqar.fm'].join(',') !== 'dealapp.sa,gathern.co');
+mustCatch('an allowlist grown without proof', [...IN_APP_VIEWER_HOSTS, 'sa.aqar.fm'].join(',') !== PROVEN_HOSTS);
+// A host that failed the 2026-10-16 proof (too slow on phone 4G) slipped back in.
+mustCatch('a host that failed the proof re-added', [...IN_APP_VIEWER_HOSTS, 'aqaralmuhaysini.com'].join(',') !== PROVEN_HOSTS);
+// A parent domain added where only a subdomain was proven (inblaj.net hosts many unrelated sites).
+mustCatch('a parent domain instead of the proven subdomain', [...IN_APP_VIEWER_HOSTS.filter((h) => h !== 'gudai.inblaj.net'), 'inblaj.net'].join(',') !== PROVEN_HOSTS);
 // The wiring regexes against mutated sources.
 mustCatch('an agent screen that bypasses the allowlist', !/inAppViewerHost\(/.test(agent.replace(/inAppViewerHost\(/g, 'alwaysInApp(')));
 mustCatch('a card open that skips trackOpen', !/trackOpen\(l\);\s*(?:if|openAd)/.test(agent.replace(/trackOpen\(l\);\s*/g, '')));
