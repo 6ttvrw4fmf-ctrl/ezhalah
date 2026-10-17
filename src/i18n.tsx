@@ -807,9 +807,12 @@ const AR: Record<string, string> = {
   'I can get you something more precise.': 'أقدر أجيب لك نتائج أدق.',
   // Composer placeholder (owner wording 2026-08-16) — names the domain and the country, in the
   // conversational register the rest of the agent speaks.
-  // The box's hint (owner 2026-10-17: «it should be like: type what you're looking for and Ezhalah…»). One line holds about 33
-  // characters once the «بحث» chip is gone, so «what you're looking for» is «what you want»; the name comes last, before the dots.
-  "Type what you want and Ezhalah...": 'اكتب اللي تبغاه وإزهله...',
+  // The box's hint AFTER the first message (owner 2026-10-17: «include these messages after the user sends, not first thing; first
+  // thing will be a rotation of messages»): «type … and Ezhalah», with the word property in it, the name last, before the dots.
+  // The «بحث» chip is gone by then, so the line shows whole in both languages. At the very start the box keeps the older sentence
+  // below (and the rotating examples) until the owner's new rotation of start messages is written.
+  "Type your property and Ezhalah...": 'اكتب عقارك وإزهله...',
+  "Type the property you're looking for in Saudi Arabia...": 'اكتب العقار اللي تبحث عنه في السعودية...',
   // Stable composer accessibility label (owner brief 2026-08-23 §11) — the ONE sentence a screen
   // reader hears for the AI input; the rotating examples are aria-hidden decoration.
   'Describe the property you are looking for': 'اكتب وصف العقار اللي تبحث عنه',

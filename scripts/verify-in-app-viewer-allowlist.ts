@@ -239,6 +239,23 @@ const localeFails = (f: (u: string, l: string) => string | undefined): string[] 
   eq(f(GE, 'ar'), G1, 'Arabic app strips /en from a Gathern ad');
   eq(f(G1, 'en'), GE, 'English app adds /en to a Gathern ad');
   eq(f(GE, 'en'), GE, 'English app does not double the /en');
+  // 2026-10-16: the same /ar ↔ /en first-segment rule, proven on real ads of each site.
+  for (const [ar, en] of [
+    ['https://rakez.sa/ar/project/59340/', 'https://rakez.sa/en/project/59340/'],
+    ['https://snam.sa/ar/properties/86', 'https://snam.sa/en/properties/86'],
+    ['https://gomenassat.com/ar/offer/666', 'https://gomenassat.com/en/offer/666'],
+    ['https://aoujestates.com/ar/properties/villa-2', 'https://aoujestates.com/en/properties/villa-2'],
+    ['https://abeea.com.sa/ar/property/villa-for-sale-in-hana-villa-2-project-2/', 'https://abeea.com.sa/en/property/villa-for-sale-in-hana-villa-2-project-2/'],
+  ]) {
+    eq(f(ar, 'en'), en, `English app turns ${new URL(ar).hostname} /ar/ into /en/`);
+    eq(f(en, 'ar'), ar, `Arabic app turns ${new URL(ar).hostname} /en/ into /ar/`);
+    eq(f(ar, 'ar'), ar, `Arabic app keeps ${new URL(ar).hostname} /ar/`);
+  }
+  // Proven NOT to work, so left untouched: mar-ksa /en redirects to /ar, and daryusuf /ar is a 404.
+  eq(f('https://mar-ksa.com/ar/property/showitem/875', 'en'), 'https://mar-ksa.com/ar/property/showitem/875', 'mar-ksa is untouched');
+  eq(f('https://daryusuf.com/en/portfolio/x/', 'ar'), 'https://daryusuf.com/en/portfolio/x/', 'daryusuf is untouched');
+  // A link with no language segment is never given one (that would invent a path).
+  eq(f('https://rakez.sa/project/1/', 'en'), 'https://rakez.sa/project/1/', 'a Rakez link without /ar is untouched');
   eq(f('https://sa.aqar.fm/x/1', 'en'), 'https://sa.aqar.fm/x/1', 'other sites are untouched');
   eq(f('', 'ar'), undefined, 'empty in, undefined out');
   return bad;
@@ -300,6 +317,12 @@ mustCatch('a «+» tab coming back', /ad-tab-new/.test(viewer + 'testID="ad-tab-
 mustCatch('an ad language that ignores the app language', localeFails((u) => u).length > 0);
 mustCatch('an English app that doubles Gathern /en', localeFails((u, l) => (l === 'en' && u.includes('gathern.co') ? u.replace('gathern.co', 'gathern.co/en') : localizeAdUrl(u, l))).length > 0);
 mustCatch('an Arabic app that leaves Deal App on /en', localeFails((u, l) => localizeAdUrl(u, 'en')).length > 0);
+// A first-segment rule that forgets the 2026-10-16 sites (Rakez stays /ar in an English app).
+mustCatch('an English app that leaves Rakez on /ar', localeFails((u, l) => (u.includes('rakez.sa') ? u : localizeAdUrl(u, l))).length > 0);
+// A rule applied to every host (mar-ksa /en redirects to /ar; daryusuf /ar is a 404).
+mustCatch('a language swap applied to sites without a proven rule', localeFails((u, l) => { if (!u) return localizeAdUrl(u, l); const x = new URL(u); if (/^\/(ar|en)\//.test(x.pathname)) { x.pathname = x.pathname.replace(/^\/(ar|en)/, l === 'en' ? '/en' : '/ar'); return x.href; } return localizeAdUrl(u, l); }).length > 0);
+// A rule that invents a language segment on a link that has none.
+mustCatch('a language segment invented on a bare link', localeFails((u, l) => (u === 'https://rakez.sa/project/1/' ? 'https://rakez.sa/en/project/1/' : localizeAdUrl(u, l))).length > 0);
 mustCatch('a pane ✕ that deletes the tabs', paneFails({ ...realPane, hide: () => ({ tabs: [], active: 0, hidden: true }) }).length > 0);
 mustCatch('a tab ✕ that only hides the pane', paneFails({ ...realPane, close: (p) => ({ ...p, hidden: true }) }).length > 0);
 mustCatch('a last-tab ✕ that leaves an empty hidden pane (chip over nothing)',

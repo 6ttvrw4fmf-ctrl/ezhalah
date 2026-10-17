@@ -601,7 +601,19 @@ def map_listing(p: dict, body: Optional[str]) -> tuple[Optional[dict], str, Opti
         "photo_urls": _images(body),
         "additional_info": info,
     }
+    # awal publishes no structured amenity field, but its ad text lists the rooms («مجلس – مطبخ – 2 غرف»,
+    # «يوجد مدخل كراج»): YES-only from the ad's own words (ADVANCED_FILTER_SOURCE_TRUTH §2), 2026-10-17.
+    row.update(prose_answers((p.get("content") or {}).get("rendered", "")))
     return row, category, gone
+
+
+# The amenity columns search reads (listing_extra_attrs); prose may answer only these, YES-only.
+_PROSE_COLS = ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "private_entrance")
+
+
+def prose_answers(content_html: Optional[str]) -> dict[str, bool]:
+    yes = normalize.prose_amenities_yes(normalize.html_block_lines(content_html))
+    return {c: True for c in _PROSE_COLS if yes.get(c)}
 
 
 def _pin_sold_inactive(table: str, ad_numbers: list[str],
