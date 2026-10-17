@@ -36,10 +36,10 @@ const check = (label: string, ok: boolean, detail = '') => {
 // ── 1. THE CHOKE POINT: the gate is checked before the paid fetch ───────────────
 // Order matters absolutely. If the gate check sits AFTER the fetch, the money is already spent.
 const runModelIdx = agent.indexOf('const runModel = async');
-const fetchIdx = agent.indexOf('fetch(DEEPSEEK_URL', runModelIdx);
+const fetchIdx = agent.indexOf('fetch(prov.url', runModelIdx);
 const gateIdx = agent.indexOf('await spendGate(', runModelIdx);
 check('the agent has a spend gate', gateIdx > -1);
-check('the gate is checked BEFORE the paid DeepSeek fetch',
+check('the gate is checked BEFORE the paid model fetch',
   gateIdx > -1 && fetchIdx > -1 && gateIdx < fetchIdx,
   'a gate after the request cannot prevent the spend');
 check('a denied gate returns without calling DeepSeek',
@@ -49,14 +49,17 @@ check('a denied gate returns without calling DeepSeek',
 const loopStart = agent.indexOf('for (let attempt = 0;', runModelIdx);
 check('the gate is re-checked inside the retry loop, not once per turn',
   loopStart > -1 && agent.indexOf('await spendGate(', loopStart) > loopStart
-    && agent.indexOf('await spendGate(', loopStart) < agent.indexOf('fetch(DEEPSEEK_URL', loopStart));
+    && agent.indexOf('await spendGate(', loopStart) < agent.indexOf('fetch(prov.url', loopStart));
 check('a FAILED attempt is still cost-logged (ai_usage must not undercount when calls fail)',
   /http_status: r\.status/.test(agent),
   'without this, a 402/5xx call is transmitted, possibly billed, and invisible to the breaker');
 
 // There must be exactly ONE place that pays. More than one means the gate can be bypassed.
-const paidFetches = (agent.match(/fetch\(DEEPSEEK_URL/g) ?? []).length;
-check('there is exactly ONE paid DeepSeek fetch site (nothing can route around the gate)',
+// Every provider (DeepSeek, and Groq during the 2026-10-17 cut-over) is reached through ONE fetch of
+// prov.url — and no fetch may name a provider URL directly, which would route around the gate.
+const paidFetches = (agent.match(/fetch\(prov\.url/g) ?? []).length
+  + (agent.match(/fetch\((?:DEEPSEEK_URL|GROQ_URL)|fetch\(["'`]https:\/\/api\.(?:deepseek|groq)\.com/g) ?? []).length;
+check('there is exactly ONE paid model fetch site (nothing can route around the gate)',
   paidFetches === 1, `found ${paidFetches}`);
 
 // ── 2. FAIL CLOSED ─────────────────────────────────────────────────────────────
@@ -77,7 +80,7 @@ check('an allowlist of payable models exists', /const ALLOWED_MODELS\s*=/.test(a
 check('the allowlist is checked BEFORE the paid fetch',
   agent.indexOf('ALLOWED_MODELS.includes') > -1 && agent.indexOf('ALLOWED_MODELS.includes') < fetchIdx);
 check('a non-allowlisted model is REFUSED, not merely reported',
-  /!ALLOWED_MODELS\.includes\(DEEPSEEK_MODEL\)[\s\S]{0,300}return \{ __err/.test(agent));
+  /!ALLOWED_MODELS\.includes\(prov\.model\)[\s\S]{0,300}return \{ __err/.test(agent));
 check('the allowlist does not contain an expensive tier',
   !/ALLOWED_MODELS\s*=\s*\[[^\]]*pro[^\]]*\]/i.test(agent),
   'v4-pro is 3x v4-flash on the identical call');
