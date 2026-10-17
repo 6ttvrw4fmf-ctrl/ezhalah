@@ -54,6 +54,10 @@ TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I)
 # not_present …"><i class="fas fa-times"></i>مصعد</div>`) is the theme listing its whole taxonomy, not the ad
 # saying anything. Read as a line it became «the page says مصعد» (eastabha 2026-10-17, re-read 39020724177).
 NOT_PRESENT = re.compile(r'<div[^>]*class="[^"]*\bnot_present\b[^"]*"[^>]*>.*?</div>', re.S | re.I)
+# ANOTHER listing's card is not this ad. ksaaqar ends every page with related ads, each an `<a href=
+# "https://ksaaqar.com/ad/…"><h5>title</h5></a>`; 12226090 (a Makkah sale) scored «kitchen» from a Jeddah
+# rental's card title «… غرفتين وصالة ومطبخ …» (CI re-read 39021296467, 🔬 2026-10-17, backlog 628).
+RELATED_CARD = re.compile(r'<a href="https://ksaaqar\.com/ad/[^"]*">\s*<h5>.*?</h5>\s*</a>', re.S | re.I)
 
 
 # A spec table renders its label and its value as two elements («عدد غرف النوم» / «1»): split on tags they
@@ -171,7 +175,7 @@ def page_evidence(body: str) -> dict:
     meta = {k: html.unescape(v) for k, v in META.findall(body or "")
             if k.startswith(("og:", "twitter:", "description", "product:"))}
     title = TITLE.search(body or "")
-    text = TAG.sub("\n", DROP.sub(" ", NOT_PRESENT.sub(" ", body or "")))
+    text = TAG.sub("\n", DROP.sub(" ", RELATED_CARD.sub(" ", NOT_PRESENT.sub(" ", body or ""))))
     lines = [re.sub(r"\s+", " ", html.unescape(x)).strip() for x in text.split("\n")]
     lines = [x for x in lines if x]
     return {
