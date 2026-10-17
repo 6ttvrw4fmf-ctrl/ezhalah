@@ -17,6 +17,9 @@ on:
       skip_hours:
         description: "Skip the newest N complete hours (a backfill window)"
         default: "0"
+      ids:
+        description: "Re-read exactly these post ids (comma list) — a parser repair; blank = the sitemap"
+        default: ""
 
 concurrency:
   group: haraj-sync
@@ -47,6 +50,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: >-
-          exec python -m scrapers.haraj.run --files "${{ github.event.inputs.files || '2' }}"
-          --skip-hours "${{ github.event.inputs.skip_hours || '0' }}"
+          # inputs reach the shell as env values, never spliced into the script text
+          FILES: ${{ github.event.inputs.files || '2' }}
+          SKIP_HOURS: ${{ github.event.inputs.skip_hours || '0' }}
+          IDS: ${{ github.event.inputs.ids || '' }}
+        run: exec python -m scrapers.haraj.run --files "$FILES" --skip-hours "$SKIP_HOURS" --ids "$IDS"
