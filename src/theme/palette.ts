@@ -231,8 +231,8 @@ export const TAP44_DOWN_CSS = '[data-tap44-down]::after{top:0;transform:translat
 export const TAP44 = { tap44: '1' } as const;
 
 /** The AI-chat composer's empty-box hint stays on ONE line and ends in an ellipsis (owner 2026-10-05).
- *  With the typed text sharing a line with the mic and Send, the long hint «اكتب العقار اللي تبحث عنه في
- *  السعودية...» wrapped to two lines on a phone, which made the box taller and lifted typed text above
+ *  With the typed text sharing a line with the mic and Send, the old long hint «اكتب العقار اللي تبحث عنه في
+ *  السعودية...» wrapped to two lines on a phone (since 2026-10-17 the hint is the short «اكتب اللي تبغاه وإزهله...»), which made the box taller and lifted typed text above
  *  the buttons. `text-overflow` trails at the END of the line in the field's own direction, so in Arabic
  *  the dots sit on the left, after the words. Opt-in by marker, like TAP44. */
 export const COMPOSER_INPUT = { composerInput: '1' } as const;
