@@ -1049,7 +1049,21 @@ Deno.serve(async (req: Request) => {
         // Guarantees the reply parses as JSON; does NOT constrain keys/values (see JSON_SHAPE_HINT).
         response_format: { type: "json_object" },
       });
+      // DeepSeek's json_object mode occasionally answers a run of blank lines — completion_tokens > 0,
+      // finish_reason "stop", content whitespace — which its docs list as a known issue. Measured
+      // 2026-10-17 (backlog 643): the audit's broad-search-after-budget probe answered empty 3/3 (37
+      // completion tokens, model deepseek-flash) and the customer got a 502. An empty reply is re-asked
+      // ONCE with an output rule appended AFTER the cached SYSTEM prefix — through the same fetch site,
+      // the same spend gate and the same 2-attempt bound as an HTTP retry, so nothing routes around
+      // the guards and spend stays bounded.
+      const EMPTY_REPLY_NUDGE = "\nOUTPUT RULE: the previous attempt returned an empty reply. Output the complete JSON object now — never an empty or whitespace-only reply.";
+      const nudgedPayload = JSON.stringify({
+        ...JSON.parse(payload),
+        messages: [{ ...messages[0], content: String(messages[0].content) + EMPTY_REPLY_NUDGE }, ...messages.slice(1)],
+      });
       let res: Response | null = null;
+      let data: any = null;
+      let emptyRetried = false;
       const t0 = Date.now();
       for (let attempt = 0; attempt < 2; attempt++) {
         // RE-CHECK PER ATTEMPT, not once per runModel. The retry below re-sends the identical ~18k
@@ -1061,8 +1075,25 @@ Deno.serve(async (req: Request) => {
           recordHealth("spend_gate_blocked", Date.now() - t0, { reason: g.reason, state: g.state, attempt });
           return { __err: json({ error: "ai spend guard", reason: g.reason, state: g.state }, 503) };
         }
-        const r = await fetch(DEEPSEEK_URL, { method: "POST", headers, body: payload });
-        if (r.ok) { res = r; break; }
+        const r = await fetch(DEEPSEEK_URL, { method: "POST", headers, body: emptyRetried ? nudgedPayload : payload });
+        if (r.ok) {
+          res = r;
+          data = await r.json();
+          const content = String(data?.choices?.[0]?.message?.content ?? "").trim();
+          // break on a real reply, after the one re-ask, or when no attempt is left to re-ask with (an
+          // empty reply on the HTTP-retry attempt answers 502 below with empty_retried: false).
+          if (content || emptyRetried || attempt === 1) break;
+          // EMPTY REPLY: count the paid attempt (it was billed), then re-ask once with the output rule.
+          emptyRetried = true;
+          logUsage({
+            source: clientSource, requested_model: DEEPSEEK_MODEL, model: data?.model ?? null, kind: null,
+            locale, call_seq: seq, attempt: attempt + 1, http_status: 200,
+            completion_tokens: data?.usage?.completion_tokens ?? null,
+            finish_reason: `empty_${data?.choices?.[0]?.finish_reason ?? "none"}`, history_turns: history.length,
+            latency_ms: Date.now() - t0, user_message_id: userMessageId, call_reason: "http_retry",   // ai_call_reason enum has no empty value; finish_reason carries empty_<reason>
+          });
+          continue;
+        }
         res = r;
         // COUNT THE FAILED ATTEMPT. It was transmitted and may well have been billed; without this
         // row ai_usage undercounts precisely when calls are failing — and the circuit breaker counts
@@ -1082,7 +1113,7 @@ Deno.serve(async (req: Request) => {
         recordHealth("model_http_error", Date.now() - t0, { status: res?.status ?? 0 });
         return { __err: json({ error: `deepseek ${res?.status ?? 0}`, detail }, 502) };
       }
-      const data = await res.json();
+      // `data` was parsed inside the loop (the body is consumed there so an empty reply can be re-asked).
       const choice = data?.choices?.[0];
       const raw = String(choice?.message?.content ?? "").trim();
       // finish_reason "length" means the ceiling was hit — the single most likely cause of both the
@@ -1141,8 +1172,9 @@ Deno.serve(async (req: Request) => {
         call_reason: callReason,
       });
       if (!raw) {
-        recordHealth("empty_output", Date.now() - t0, why);
-        return { __err: json({ error: "empty model output", ...why }, 502) };
+        const shape = { message_keys: Object.keys(choice?.message ?? {}), content_len: String(choice?.message?.content ?? "").length, empty_retried: emptyRetried };
+        recordHealth("empty_output", Date.now() - t0, { ...why, ...shape });
+        return { __err: json({ error: "empty model output", ...why, ...shape }, 502) };
       }
       try {
         const parsed = JSON.parse(raw);
