@@ -266,6 +266,14 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
                 return MATCH
             if any(0 <= j < len(lines) and bare.match(lines[j]) for j in (i - 1, i + 1)):
                 return MATCH
+        # area_m2 is an integer column (backlog #123), so a page «232.8 م²» is stored as its nearest whole
+        # number, 233. tuba 18258569 (2026-10-17): «المساحة:» / «232.8 م²» read as a contradiction of any
+        # whole number. Half rounds up; a truncated 232 still scores wrong.
+        if "مساحه" in kw and float(stored) == int(float(stored)):
+            near = " | ".join(lines[j] for i in kw_hits for j in (i - 1, i, i + 1) if 0 <= j < len(lines))
+            if any(int(float(m.group(1).replace(",", ".")) + 0.5) == int(float(stored))
+                   for m in re.finditer(r"(?<![\d.,])(\d+[.,]\d+)(?![\d])", near)):
+                return MATCH
         # «عمر العقار جديد» is how aqar (and others) publish a new building; we store it as 0. Read as
         # the figure 0 both ways: stored 0 + «جديد» is a MATCH, stored 5 + «جديد» stays a MISMATCH
         # (aqar 15415047, 2026-10-05: spec block «عمر العقار جديد», stored 0, was scored wrong).
