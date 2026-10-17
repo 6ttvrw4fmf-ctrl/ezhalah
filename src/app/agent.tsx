@@ -4147,7 +4147,7 @@ export default function Agent() {
             // hitSlop is a NO-OP on react-native-web; the 44px floor comes from
             // TAP_TARGET_CSS via this marker (ops_incident #17).
             // @ts-expect-error web-only DOM props on the RNW host node
-            dataSet={{ ...TAP44 }}
+            dataSet={{ ...TAP44, consentKeep: '1' }}
             onPress={() => setSidebarOpen(true)}
           >
             <Ionicons name="menu" size={22} color={colors.ink} />
