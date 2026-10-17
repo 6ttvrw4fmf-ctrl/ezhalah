@@ -543,6 +543,20 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
                          url_for=lambda _ad: f"{BASE}/{pid}/").verify_gone(ad_number)
 
 
+def liveness_controls(n: int, max_reads: int = 20) -> list[dict]:
+    """fleet_liveness controls (CONTROL_POOLS): property offers posted in Haraj's newest COMPLETE hour
+    whose own page reads live now. Fresh posts are alive almost always; a block or a redesign reads
+    none live, so fewer than n come back and the run quarantines (fails closed)."""
+    locs = hour_files()
+    out: list[dict] = []
+    for pid in ids_in(locs[-2], Counter(), tight=True)[:max_reads]:
+        if _verify_gone(f"{PREFIX}{pid}")[0] == "live":
+            out.append({"ad_number": f"{PREFIX}{pid}", "listing_url": f"{BASE}/{pid}/"})
+            if len(out) >= n:
+                break
+    return out
+
+
 def _notes(c: Counter, unresolved: Counter, head: Optional[dict] = None) -> str:
     top = ", ".join(f"{k}×{v}" for k, v in unresolved.most_common(10))
     return json.dumps({**(head or {}), **dict(c), "district_unresolved_top": top}, ensure_ascii=False)[:1900]
