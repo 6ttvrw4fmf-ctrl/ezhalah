@@ -47,6 +47,7 @@ const PROVEN_HOSTS = [
   'ibaax.sa', 'qmra.sa',
   'aqaralmuhaysini.com', // 9.96 s on the runner; owner keeps it on (2026-10-17)
   'albukaeri.sa', 'tamyaz-sa.com', 'ashab.sa', 'macsaib.sa', 'sanadak.sa', 'masaraqarat.com', // 0.7–2.7 s, run 39026362475
+  'ryadah.com.sa', 'sodasyat.sa', 'app.abaadapp.sa', // 1.6–4.8 s, run 39033523902 (challenge-aware guard)
 ].join(',');
 check('allowlist is exactly the proven sites', IN_APP_VIEWER_HOSTS.join(',') === PROVEN_HOSTS);
 
@@ -79,7 +80,6 @@ for (const u of [
   'https://www.muktamel.com/property/1',   // frames, but ~37 s on phone 4G (2026-10-17)
   'https://haraj.com.sa/1',           // SAMEORIGIN (2026-10-17)
   'https://ialqarawi.com/index.php?router=card&id=1', // ads removed at source + 11 s (2026-10-17)
-  'https://sodasyat.sa/single/1',     // SAMEORIGIN for phones (2026-10-17)
   '', null, undefined, 'not a url',
 ]) check(`${JSON.stringify(u)} → new tab (unchanged)`, inAppViewerHost(u) === null);
 
@@ -385,7 +385,6 @@ const additionalPreviewHosts = [
   'reinvest.sa',
   'marketplace.sirdab.co',
   'therc.aqar.digital',
-  'app.abaadapp.sa',
   'sokok.sa',
   'raghdan.sa',
   'alsaedan.com',
