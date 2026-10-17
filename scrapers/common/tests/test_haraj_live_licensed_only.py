@@ -181,6 +181,9 @@ def test_page_licence_number_and_data_key():
 @pytest.mark.parametrize("status,body,want", [
     (404, "", "gone"),
     (200, "<p>العرض محذوف او قديم.</p>", "gone"),
+    # census 2026-10-17: a gone page can still carry its JSON-LD — the banner alone decides
+    (200, "<p>العرض محذوف او قديم.</p>" + '<script type="application/ld+json">'
+     + json.dumps(ld("x", FLAT_AR), ensure_ascii=False) + "</script>", "gone"),
     (200, '<script type="application/ld+json">' + json.dumps(ld("x", "شقة للايجار"), ensure_ascii=False)
      + "</script>", "live"),                                      # no licence block: still a live offer (2026-10-17)
     (200, '<script type="application/ld+json">' + json.dumps(ld("x", FLAT_AR.replace("2026-12-31", "2025-01-01")),
@@ -207,3 +210,44 @@ def test_first_crawl_enums_fibreoptics_and_warehouses():
     assert P.services_of("Electricity, Waters, Sanitation, FixedPhone, FibreOptics, FloodDrainage") == {
         "electricity": True, "water_supply": True, "sanitation": True, "optical_fibers": True}
     assert R.type_of("Warehouses", None, "") == "Warehouse"
+
+
+# ── licensed catch-up (owner 2026-10-17) ──────────────────────────────────────────────────────────
+@pytest.mark.parametrize("title,keep", [
+    ("ارض للبيع", True), ("شقة دورين للإيجار", True), ("دور علوي للايجار", True),
+    ("للبيع فله خلف مستشفى السعودي الالماني خميس مشيط", True), ("محل للتقبيل", True),
+    ("ارض في الجلة زراعي المساحة 10 متر", False),      # no deal word: the 1 of 12 the gate gives up
+    ("مطلوب شقة", False), ("ابي ارض", False),
+])
+def test_catchup_title_gate(title, keep):
+    assert bool(R._CATCHUP_NOUN.search(title) and R._CATCHUP_DEAL.search(title)) is keep
+
+
+def _file(stamp):
+    return f"https://sitemapfiles.haraj.com.sa/{stamp[:10]}/sitemap-{stamp}.txt"
+
+
+def test_catchup_walks_older_files_newest_first_and_moves_the_cursor(monkeypatch):
+    locs = [_file(f"2026-10-1{d}-0{h}") for d in (5, 6) for h in (1, 2, 3)]       # oldest first
+    read = []
+    monkeypatch.setattr(R, "ids_in", lambda u, pre, tight=False: (read.append((u, tight)) or [u[-6:-4]]))
+    def fake_crawl(files, skip, limit=0, today=None, only=None, licensed_only=False, meta=None):
+        assert licensed_only and only
+        return [{"ad_number": "HRJ" + only[0]}], [], R.Counter(fetched=1), R.Counter(), meta
+    monkeypatch.setattr(R, "crawl", fake_crawl)
+    # first run: no cursor → everything older than the live window, newest first
+    res, _, c, _, head = R.catchup(locs, locs[-2:], 3600, None)
+    assert [u for u, _ in read] == locs[:-2][::-1] and all(t for _, t in read)
+    assert head == {"catchup_before": "2026-10-15-01", "catchup_files_left": 0, "catchup_stored": 4}
+    # next run resumes below the cursor; nothing left → nothing read
+    read.clear()
+    assert R.catchup(locs, locs[-2:], 3600, "2026-10-15-01")[4]["catchup_stored"] == 0 and not read
+
+
+def test_catchup_budget_stops_and_keeps_the_cursor_at_the_last_finished_file(monkeypatch):
+    locs = [_file(f"2026-10-16-0{h}") for h in range(1, 7)]
+    monkeypatch.setattr(R, "ids_in", lambda u, pre, tight=False: ["1"])
+    monkeypatch.setattr(R, "crawl", lambda *a, **k: ([], [], R.Counter(), R.Counter(), None))
+    head = R.catchup(locs, locs[-1:], 0, None)[4]          # budget 0: the first file runs, then it stops
+    assert head["catchup_before"] == "2026-10-16-05" and head["catchup_files_left"] == 4
+    assert R._CURSOR.search(R._notes(R.Counter(fetched=3), R.Counter(), head)).group(1) == "2026-10-16-05"

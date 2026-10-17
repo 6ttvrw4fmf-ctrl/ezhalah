@@ -31,6 +31,7 @@ import html as _html
 import json
 import re
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
@@ -392,35 +393,59 @@ def read_post(pid: str) -> tuple[int, str]:
     return fetch(f"{BASE}/{pid}/")
 
 
-def candidate_ids(files: int, skip_hours: int) -> tuple[list[str], dict]:
-    """Post ids of the last `files` COMPLETE hourly sitemap files (the newest file, still filling, is
-    skipped), property-titled, newest first; titles the classifier already rejects are not fetched."""
+# The catch-up's sharper title gate (census 2026-10-17, 780 property-titled posts): a property noun AND a
+# deal word keeps 11% of the reads and 11 of the 12 live licensed offers.
+_CATCHUP_NOUN = re.compile(r"(ارض|أرض|شق[ةه]|شقق|فل[ةه]|فيلا|دور|عمار[ةه]|استراح[ةه]|محل|مستودع|مزرع[ةه]|بيت|"
+                           r"منزل|روف|دبلكس|دوبلكس|مكتب|قطع[ةه]|مخطط|ملحق|غرف[ةه]|شاليه|قصر|تاون)")
+_CATCHUP_DEAL = re.compile(r"(لل?بيع|للإ?ي?جار|للاجار|ايجار|إيجار|تقبيل|للتقبيل)")
+
+
+def hour_files() -> list[str]:
+    """Every hourly sitemap file Haraj lists (oldest first, ~3 months); the newest is still filling."""
     st, sm = fetch(f"{BASE}/sitemap.xml")
     if st != 200:
         raise RuntimeError(f"sitemap.xml answered {st}")
-    locs = re.findall(r"<loc>([^<]+)</loc>", sm)
+    return re.findall(r"<loc>([^<]+)</loc>", sm)
+
+
+def ids_in(u: str, pre: Counter, tight: bool = False) -> list[str]:
+    st, t = fetch(u)
+    if st != 200:
+        raise RuntimeError(f"sitemap file {u} answered {st}")
+    titles = {m.group(1): unquote(m.group(2)).replace("_", " ") for m in _POST_RE.finditer(t)}
+    out = []
+    for i in property_slug_ids(t):
+        title = titles.get(i) or ""
+        if tight and not (_CATCHUP_NOUN.search(title) and _CATCHUP_DEAL.search(title)):
+            pre["title_catchup_gate"] += 1
+            continue
+        v, _ = classify(titles.get(i), None)
+        if v in ("request", "other"):
+            pre[f"title_{v}"] += 1
+            continue
+        out.append(i)
+    return out
+
+
+def candidate_ids(files: int, skip_hours: int) -> tuple[list[str], dict]:
+    """Post ids of the last `files` COMPLETE hourly sitemap files (the newest file, still filling, is
+    skipped), property-titled, newest first; titles the classifier already rejects are not fetched."""
+    locs = hour_files()
     end = len(locs) - 1 - skip_hours
     picked = locs[max(0, end - files):end]
     ids: list[str] = []
     pre = Counter()
     for u in picked[::-1]:
-        st2, t = fetch(u)
-        if st2 != 200:
-            raise RuntimeError(f"sitemap file {u} answered {st2}")
-        titles = {m.group(1): unquote(m.group(2)).replace("_", " ") for m in _POST_RE.finditer(t)}
-        for i in property_slug_ids(t):
-            if i in ids:
-                continue
-            v, _ = classify(titles.get(i), None)
-            if v in ("request", "other"):
-                pre[f"title_{v}"] += 1
-                continue
-            ids.append(i)
-    return ids, {"files": picked, "prefiltered": dict(pre)}
+        ids += [i for i in ids_in(u, pre) if i not in ids]
+    return ids, {"files": picked, "prefiltered": dict(pre), "locs": locs}
 
 
-def crawl(files: int, skip_hours: int, limit: int = 0, today: Any = None, only: Optional[list[str]] = None):
-    ids, meta = (only, {"files": ["--ids"], "prefiltered": {}}) if only else candidate_ids(files, skip_hours)
+def crawl(files: int, skip_hours: int, limit: int = 0, today: Any = None, only: Optional[list[str]] = None,
+          licensed_only: bool = False, meta: Optional[dict] = None):
+    if meta is None:
+        ids, meta = (only, {"files": ["--ids"], "prefiltered": {}}) if only else candidate_ids(files, skip_hours)
+    else:
+        ids = only or []
     if limit:
         ids = ids[:limit]
     print(f"{SOURCE}: {len(ids)} candidate post(s) from {len(meta['files'])} hourly file(s) "
@@ -435,8 +460,11 @@ def crawl(files: int, skip_hours: int, limit: int = 0, today: Any = None, only: 
         if st != 200:
             c[f"http_{st}"] += 1
             continue
-        if DELETED_MARK in h and "RealEstateListing" not in h:
+        if DELETED_MARK in h:               # gone, even when the page still carries its JSON-LD (below)
             c["deleted_at_source"] += 1
+            continue
+        if licensed_only and P.LICENCE_HEAD not in h:
+            c["skip_unlicensed_catchup"] += 1
             continue
         if not _has_tag(h):
             continue
@@ -470,7 +498,7 @@ def crawl(files: int, skip_hours: int, limit: int = 0, today: Any = None, only: 
             c["with_pin"] += 1
         (com if cat == "commercial" else res).append(row)
     c["stored"] = len(res) + len(com)
-    return res, com, c, unresolved
+    return res, com, c, unresolved, meta
 
 
 # ── removal: own-page proof only (fleet_liveness reads this daily) ─────────────────────────────
@@ -479,8 +507,11 @@ def _signal(status, body, moved):
         return "gone"
     if status != 200 or not body:
         return None
-    if DELETED_MARK in body and "RealEstateListing" not in body:
-        return "gone"                       # the post's own page: «العرض محذوف او قديم»
+    # The post's own page: «العرض محذوف او قديم». Census 2026-10-17: 93 of 565 gone pages still carry the
+    # RealEstateListing JSON-LD (the old «and no JSON-LD» test kept them live forever); a live page never
+    # prints the banner (3 of 3 stored live ads re-read 10-17).
+    if DELETED_MARK in body:
+        return "gone"
     ld = P.ld_listing(body)
     if not ld:
         return None
@@ -512,9 +543,65 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
                          url_for=lambda _ad: f"{BASE}/{pid}/").verify_gone(ad_number)
 
 
-def _notes(c: Counter, unresolved: Counter) -> str:
+def _notes(c: Counter, unresolved: Counter, head: Optional[dict] = None) -> str:
     top = ", ".join(f"{k}×{v}" for k, v in unresolved.most_common(10))
-    return json.dumps({**dict(c), "district_unresolved_top": top}, ensure_ascii=False)[:1900]
+    return json.dumps({**(head or {}), **dict(c), "district_unresolved_top": top}, ensure_ascii=False)[:1900]
+
+
+# ── licensed catch-up (owner 2026-10-17: «start with the ones with a licence») ───────────────────
+# Every scheduled run, after the live hours, walks the OLDER hourly files Haraj still lists (~3 months),
+# newest first, for a time budget: sharper title gate, licensed offers only, the same map_post and own-page
+# gone banner. The cursor is the oldest finished file, kept in the run's own notes («catchup_before»); a
+# failed run never advances it, so the next one redoes those files (upserts are idempotent).
+_STAMP = re.compile(r"sitemap-(\d{4}-\d{2}-\d{2}-\d{2})\.txt")
+_CURSOR = re.compile(r'"catchup_before": "(\d{4}-\d{2}-\d{2}-\d{2})"')
+
+
+def _stamp(u: str) -> str:
+    m = _STAMP.search(u)
+    return m.group(1) if m else ""
+
+
+def last_catchup_cursor() -> Optional[str]:
+    q = (db.sb().table("scrape_runs").select("notes").eq("platform", SLUG).eq("ok", True)
+         .order("started_at", desc=True).limit(30))
+    for r in db._execute(q, what="haraj catch-up cursor").data or []:
+        m = _CURSOR.search(r.get("notes") or "")
+        if m:
+            return m.group(1)
+    return None
+
+
+def catchup(locs: list[str], live_files: list[str], budget_s: float, cursor: Optional[str], today: Any = None):
+    """(res, com, counts, unresolved, head) for the hour files older than `cursor` (or than the live window)."""
+    floor = cursor or (_stamp(live_files[0]) if live_files else "")
+    older = [u for u in locs if _stamp(u) and _stamp(u) < floor]
+    res: list[dict] = []
+    com: list[dict] = []
+    c, unresolved = Counter(), Counter()
+    done, t0 = floor, time.time()
+    for u in reversed(older):
+        if time.time() - t0 > budget_s:
+            break
+        pre = Counter()
+        try:
+            ids = ids_in(u, pre, tight=True)
+        except RuntimeError as e:          # a file Haraj does not serve: stop here, the cursor stays put
+            c["catchup_file_error"] += 1
+            print(f"  catch-up stopped: {e}", flush=True)
+            break
+        r, m, cc_, un, _ = crawl(0, 0, today=today, only=ids, licensed_only=True,
+                                 meta={"files": [u], "prefiltered": dict(pre)})
+        res += r
+        com += m
+        c.update(cc_)
+        c.update(pre)
+        unresolved.update(un)
+        c["catchup_files"] += 1
+        done = _stamp(u)
+    left = sum(1 for u in older if _stamp(u) < done)
+    return res, com, c, unresolved, {"catchup_before": done, "catchup_files_left": left,
+                                     "catchup_stored": len(res) + len(com)}
 
 
 def main() -> int:
@@ -523,13 +610,23 @@ def main() -> int:
     ap.add_argument("--skip-hours", type=int, default=0, help="skip the newest N complete hours")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--ids", default="", help="re-read exactly these post ids (comma list) instead of the sitemap — a parser repair")
+    ap.add_argument("--catchup-minutes", type=float, default=0,
+                    help="after the live hours, walk older hour files for licensed offers this long (0 = off)")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     run_id = None if a.dry_run else db.begin_run(SLUG)
     try:
         only = [i.strip().removeprefix(PREFIX) for i in a.ids.split(",") if i.strip()]
-        res, com, c, unresolved = crawl(a.files, a.skip_hours, a.limit, only=only or None)
-        print(f"  counts: {_notes(c, unresolved)}", flush=True)
+        res, com, c, unresolved, meta = crawl(a.files, a.skip_hours, a.limit, only=only or None)
+        head: dict = {}
+        if a.catchup_minutes > 0 and not only and not a.limit:
+            cres, ccom, cc_, cun, head = catchup(meta["locs"], meta["files"], a.catchup_minutes * 60,
+                                                 None if a.dry_run else last_catchup_cursor())
+            res, com = res + cres, com + ccom
+            c.update({f"catchup_{k}" if not k.startswith(("catchup", "title_")) else k: v for k, v in cc_.items()})
+            unresolved.update(cun)
+            print(f"  catch-up: {head}", flush=True)
+        print(f"  counts: {_notes(c, unresolved, head)}", flush=True)
         if a.dry_run:
             for row in (res + com)[:20]:
                 print("   ", json.dumps({k: row.get(k) for k in (
@@ -550,7 +647,7 @@ def main() -> int:
             for tbl in (RES_TABLE, COM_TABLE):
                 db.strike_read_gone(tbl, seen, SOURCE, verify_gone=_verify_gone, max_reads=30)
         healthy = db.end_run(run_id, ok=True, rows_seen=c["fetched"], rows_upserted=len(res) + len(com),
-                             notes=_notes(c, unresolved),
+                             notes=_notes(c, unresolved, head),
                              check_tables=["haraj_residential_listings", "haraj_commercial_listings"])
         print(f"✓ {SOURCE}: {len(res)} residential + {len(com)} commercial licensed offers upserted", flush=True)
         return 0 if healthy else 1
