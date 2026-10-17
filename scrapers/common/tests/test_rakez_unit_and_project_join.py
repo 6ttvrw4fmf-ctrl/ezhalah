@@ -459,3 +459,19 @@ def test_verify_gone_says_live_while_the_unit_is_still_available(monkeypatch):
     monkeypatch.setattr(R.cc, "get", lambda *a, **k: _R())
     assert R._verify_gone("RKZ1", {66800: _project()}, {66800: _project(66825)})[0] == "live", \
         "the capital-A variant must not read as dead"
+
+
+# ── prose amenities: the unit's own description, YES-only (2026-10-17) ──────────────────────────────
+@pytest.mark.parametrize("desc,want", [
+    ("4غرف نوم +صالة +مجلس +حديقة +غرفة خادمة +2مطبخ+2موقف", {"kitchen", "parking", "maid_room"}),  # 17542523
+    ("شقة ١ / ٢ يسار المصعد ٣ غرف أمامية", {"elevator"}),                                            # 11747807
+    ("مجلس • دورة مياه", set()),
+])
+def test_amenities_the_description_states_are_captured(desc, want):
+    row, _ = _map(_unit(desc=desc))
+    assert {c for c in R._PROSE_COLS if row.get(c) is True} == want
+
+
+def test_a_denied_amenity_is_never_stored_as_no():
+    row, _ = _map(_unit(desc="لا يوجد مصعد"))
+    assert "elevator" not in row
