@@ -43,8 +43,9 @@ const PROVEN_HOSTS = [
   // 2026-10-17, owner budget 10 s: proven to frame on 10-16 and measured 2.0–9.2 s from the runner.
   'amaall.com', 'jurash.sa', 'awaalun.com', 'ego-aqar.com', 'rawaf.ai', 'rawasi-dark.com',
   'mobasher.sa', 'villas-sa.com', 'vm-ksa.com', 'eaqartabuk.com', '24.com.sa', 'livingcompound.com',
-  'tamyaz-sa.com', 'wahadat.sa', 'dallali.com', 'remalre.com', 'safainv.sa', 'remax.sa',
+  'wahadat.sa', 'dallali.com', 'remalre.com', 'safainv.sa', 'remax.sa',
   'ibaax.sa', 'qmra.sa',
+  'aqaralmuhaysini.com', // 9.96 s on the runner; owner keeps it on (2026-10-17)
 ].join(',');
 check('allowlist is exactly the proven sites', IN_APP_VIEWER_HOSTS.join(',') === PROVEN_HOSTS);
 
@@ -74,7 +75,8 @@ for (const u of [
   'https://other.inblaj.net/x',
   'https://satel.sa/x',               // listings.satel.sa was proven, not the bare domain
   'https://www.aqarcity.net/property/28633',   // refuses framing (2026-10-16)
-  'https://aqaralmuhaysini.com/x',    // frames, but 9.96 s on phone 4G: too close to the 10 s budget (2026-10-17)
+  'https://www.muktamel.com/property/1',   // frames, but ~37 s on phone 4G (2026-10-17)
+  'https://www.tamyaz-sa.com/#property-1', // was on; site timing out 2026-10-17, off until re-proven
   'https://albukaeri.sa/property/1',  // was on; site timing out 2026-10-17, off until re-proven
   'https://sodasyat.sa/single/1',     // SAMEORIGIN for phones (2026-10-17)
   'https://ashab.sa/properties/1/unit/1',      // bot check inside a frame (2026-10-16)
@@ -296,8 +298,8 @@ const sloppySuffix = (url: string) => IN_APP_VIEWER_HOSTS.find((h) => new URL(ur
 mustCatch('a host match without the dot boundary', sloppySuffix('https://notdealapp.sa/x') !== null);
 // A third host slipped into the list without an embed proof.
 mustCatch('an allowlist grown without proof', [...IN_APP_VIEWER_HOSTS, 'sa.aqar.fm'].join(',') !== PROVEN_HOSTS);
-// A host that failed the 2026-10-16 proof (too slow on phone 4G) slipped back in.
-mustCatch('a host that failed the proof re-added', [...IN_APP_VIEWER_HOSTS, 'aqaralmuhaysini.com'].join(',') !== PROVEN_HOSTS);
+// A host that failed the proof (muktamel: ~37 s on phone 4G) slipped back in.
+mustCatch('a host that failed the proof re-added', [...IN_APP_VIEWER_HOSTS, 'muktamel.com'].join(',') !== PROVEN_HOSTS);
 // A parent domain added where only a subdomain was proven (inblaj.net hosts many unrelated sites).
 mustCatch('a parent domain instead of the proven subdomain', [...IN_APP_VIEWER_HOSTS.filter((h) => h !== 'gudai.inblaj.net'), 'inblaj.net'].join(',') !== PROVEN_HOSTS);
 // The wiring regexes against mutated sources.
