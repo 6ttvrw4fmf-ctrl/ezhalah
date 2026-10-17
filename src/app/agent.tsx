@@ -94,7 +94,7 @@ import { pickNoResultsSentence } from '@/data/noResultsRotation';
 import { pickName } from '@/lib/nameSync';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
-import { screenKeyboardInset } from '@/lib/visualViewportFrame';
+import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
 import { useI18n, detectLocale, resolveReplyLocale, getLocale, translate, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { listingLocationAr, listingPrice } from '@/lib/listingDisplay';
@@ -749,6 +749,9 @@ export default function Agent() {
     [selectedSources, pickerRegionCounts],
   );
   const [loaderBottomInset, setLoaderBottomInset] = useState<number>();
+  // Where the logo grid's top will sit once the thread has glided down to it (window px) — the grid is sized for THAT, so every logo gets its full page (owner 2026-10-17).
+  const [loaderSettleTop, setLoaderSettleTop] = useState<number>();
+  const loaderNodeRef = useRef<any>(null);
   // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): a search that arrived via Normal Filter's
   // «بحث» (the `?filter=` param — see the effect below, the ONE place this flips true) shows its
   // results with no composer at all; free-text follow-up chat exists ONLY on a conversation that
@@ -1575,6 +1578,79 @@ export default function Agent() {
     if (pinModeRef.current === 'top') toTop();
     else if (pinModeRef.current === 'bottom') toBottom();
   };
+
+  // A SLOW, FRIENDLY SCROLL THE USER CAN INTERRUPT (owner 2026-10-17: «take the user slowly down»). The browser's own
+  // smooth scroll is a quick flick; this eases over about a second and stops the instant a finger, wheel or key moves.
+  const glideRef = useRef<number | null>(null);
+  const glideTo = (target: number, ms = 1100) => {
+    const node = (scrollRef.current as any)?.getScrollableNode?.();
+    if (glideRef.current != null) { cancelAnimationFrame(glideRef.current); glideRef.current = null; }
+    if (!node) { scrollRef.current?.scrollTo({ y: target, animated: true }); return; }
+    const from = node.scrollTop;
+    const dist = Math.min(target, node.scrollHeight - node.clientHeight) - from;
+    if (Math.abs(dist) < 4) return;
+    const calm = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (calm) { node.scrollTop = from + dist; return; }
+    let stopped = false;
+    const stop = () => { stopped = true; };
+    const kinds = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
+    kinds.forEach((k) => node.addEventListener(k, stop, { passive: true, once: true }));
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const p = Math.min(1, (now - t0) / ms);
+      if (stopped || p >= 1) {
+        kinds.forEach((k) => node.removeEventListener(k, stop));
+        glideRef.current = null;
+        if (!stopped) node.scrollTop = from + dist;
+        return;
+      }
+      node.scrollTop = from + dist * (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2);
+      glideRef.current = requestAnimationFrame(step);
+    };
+    glideRef.current = requestAnimationFrame(step);
+  };
+
+  // A SEARCH STARTS → THE LOADER GETS THE WHOLE SCREEN (owner 2026-10-17: «when you start the animation for the
+  // logos and search, make sure you show all animations and logos, no matter what, and take him down»). The thread
+  // glides down until the loader's top sits just under the header, and the logo grid is sized for that spot, so a
+  // long conversation can no longer squeeze the roster into two rows above the box.
+  const loaderId = msgs.find((m) => m.role === 'status' && m.phase === 'searching' && !m.afRound)?.id;
+  useEffect(() => {
+    if (!IS_WEB || !loaderId) { setLoaderSettleTop(undefined); return; }
+    const scNode = (scrollRef.current as any)?.getScrollableNode?.();
+    // The roster mounts and grows a moment AFTER the loader does (its site list loads first), so one glide would stop
+    // short of the room the grid later makes. Measure and glide again as it settles — until the user takes over.
+    let tookOver = false;
+    const take = () => { tookOver = true; };
+    const kinds = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
+    kinds.forEach((k) => scNode?.addEventListener(k, take, { passive: true, once: true }));
+    const settle = (ms: number) => {
+      const wrap = loaderNodeRef.current;
+      if (tookOver || !wrap?.getBoundingClientRect || !scNode?.getBoundingClientRect) return;
+      const GAP = 8;
+      const sc = scNode.getBoundingClientRect();
+      const box = wrap.getBoundingClientRect();
+      const grid = wrap.querySelector?.('[data-testid="loader-roster"]')?.getBoundingClientRect();
+      const headlineH = grid ? Math.max(0, grid.top - box.top) : 48;
+      setLoaderSettleTop(Math.round(sc.top + GAP + headlineH));
+      glideTo(Math.max(0, box.top - sc.top + scNode.scrollTop - GAP), ms);
+    };
+    const timers = [280, 1200, 2400, 3800, 5500].map((at, n) => setTimeout(() => settle(n === 0 ? 1100 : 650), at));
+    return () => { timers.forEach(clearTimeout); kinds.forEach((k) => scNode?.removeEventListener(k, take)); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaderId]);
+
+  // THE KEYBOARD OPENS → THE CHAT GOES DOWN (owner 2026-10-17, screenshot: «when I click on it must take me down,
+  // not up, and I can't see anything»). The pinned root shrinks to the space above the keyboard and the thread
+  // stays where it was, so the newest answer sat behind the box. Settle at the newest message as the box takes
+  // focus and again as the visible window finishes resizing (iOS reports the keyboard late, in steps).
+  useEffect(() => {
+    if (!IS_WEB || !composerFocused) return;
+    const down = () => { if (!searchingVisibleRef.current) scrollRef.current?.scrollToEnd({ animated: true }); };
+    const ids = [0, 160, 380, 700].map((ms) => setTimeout(down, ms));
+    const off = onVisibleWindowResize(down);
+    return () => { ids.forEach(clearTimeout); off(); };
+  }, [composerFocused]);
 
   // OPEN A SAVED CHAT AT ITS LATEST CONTENT (owner 2026-08-29, supersedes the open-at-top rule):
   // tapping a sidebar conversation must land the viewport on the newest message, like every chat
@@ -4336,7 +4412,7 @@ export default function Agent() {
                 // handled inside SearchLoader (the message column is LTR-pinned).
                 // An Advanced Filter round: one sentence of the user's picks, each landing in turn (owner 2026-10-11).
                 if (m.afRound) return <AfRoundLoader key={m.id} items={m.afRound.items} pools={m.afRound.pools} exiting={m.exiting} fontFamily={CHAT_FONT} />;
-                return <SearchLoader key={m.id} bottomInset={loaderBottomInset} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} />;
+                return <View key={m.id} ref={m.id === loaderId ? loaderNodeRef : undefined} collapsable={false}><SearchLoader bottomInset={loaderBottomInset} settleTop={loaderSettleTop} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} /></View>;
               }
               if (m.role === 'agent') {
                 if (m.greeting) {
@@ -4873,7 +4949,7 @@ export default function Agent() {
                 finished search keeps the box, and the next message simply starts the next search (send() clears
                 `completed`). ☰ still starts a clean chat. */}
             {!filterOrigin || completed ? (
-            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>
+            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused, modeSearched && s.composerNoModel]} ref={composerRef}>
               {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
                   recording row is an absolute overlay on the same surface), so the composer's size
                   never jumps during the morph — one physical object changing state, not a component
@@ -4891,8 +4967,10 @@ export default function Agent() {
               {/* ONE ROW (owner 2026-10-05: «this box is still big» → «One row»): «بحث» at the far left,
                   the text in the middle, mic + Send on the right. The chip is a flex SIBLING of the input,
                   never laid over it, so English text starting at the left can't run into it.
-                  ALWAYS there, also while Ezhalah searches (owner 2026-10-10: «it goes away» — the row
-                  must not rearrange mid-turn; ChatGPT keeps its tools in place and only Send turns to Stop). */}
+                  SHOWS ONLY AT THE START (owner 2026-10-17: «when a user sends a message, remove this search
+                  button, it just shows at the start» — supersedes 2026-10-10). While a search runs it is already
+                  gone, so nothing in the row moves mid-turn; the mic and Send/Stop keep their places. */}
+                {!modeSearched ? (
                 <Pressable
                   testID="initial-chat-search"
                   accessibilityRole="button"
@@ -4940,6 +5018,7 @@ export default function Agent() {
                   )}
                   <Ionicons name="chevron-down" size={13} color={colors.muted} />
                 </Pressable>
+                ) : null}
               <View style={s.composerInputColumn}>
               <View style={[s.inputGrow, INPUT_EASE, { height: composerH }]}>
               <TextInput
@@ -5121,9 +5200,11 @@ export default function Agent() {
                   the microphone and send all in the same line — the model only below»). A zero-width anchor
                   centred on the mic (the row is LTR-pinned, so the same offset holds in both locales); the box's
                   bottom padding makes the room, so the one-line row above it never moves. */}
+              {!modeSearched ? (
               <View pointerEvents="box-none" style={s.composerModelAnchor}>
                 <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />
               </View>
+              ) : null}
             </View>
             ) : null}
             {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY (owner, 2026-09-12, second tightening:
@@ -5460,6 +5541,8 @@ const s = StyleSheet.create({
   // Focus glow target — COMPOSER_EASE (web) glides border-color and box-shadow between these two.
   // Carries the FULL shadow set: RNW compiles box-shadow per-style, so a partial override here
   // would win wholesale and drop the green tint + offset (observed live).
+  // «شاهين 2.2» is gone after the first message (owner 2026-10-17): the 24 px that made room for it go with it.
+  composerNoModel: { paddingBottom: 6 },
   composerFocused: { borderColor: colors.primary, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.2, shadowRadius: 18, shadowOffset: { width: 0, height: 6 } },
   // The wrapper owns the glide (INPUT_EASE) and the row position; marginVertical 6 =
   // (34 send-button − 22 line) / 2, the single-line centering trick above.

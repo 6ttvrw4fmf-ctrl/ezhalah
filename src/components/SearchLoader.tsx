@@ -289,10 +289,11 @@ function PhaseTitle({
 }
 
 export default function SearchLoader({
-  phase, query, resultSources, exiting = false, onPresented, bottomInset,
+  phase, query, resultSources, exiting = false, onPresented, bottomInset, settleTop,
 }: {
   phase: 'thinking' | 'searching';
   bottomInset?: number;
+  settleTop?: number; // window y the grid will sit at once the thread has glided down to it (host-measured)
   query?: SearchQuery | null;
   resultSources?: string[];
   onPresented?: (complete: boolean) => void;
@@ -374,7 +375,7 @@ export default function SearchLoader({
           box (owner 2026-09-12: "remove those boxes... put the name also" — supersedes the same-day
           logo-only mobile compact tile; the name always renders now, on every viewport). */}
       {phase === 'searching' && platforms.length > 0 ? (
-        <PlatformRosterPager bottomInset={bottomInset} items={platforms} rtl={rtl} onPresented={onPresented ?? (() => {})}
+        <PlatformRosterPager bottomInset={bottomInset} settleTop={settleTop} items={platforms} rtl={rtl} onPresented={onPresented ?? (() => {})}
           renderItem={p => <PlatformPill item={p} index={0} total={1} rtl={rtl} reduced={reduced} name={t(p.i18nKey)} />} />
       ) : null}
     </Animated.View>
