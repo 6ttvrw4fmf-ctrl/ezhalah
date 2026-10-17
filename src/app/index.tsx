@@ -32,6 +32,8 @@ import { runAfterAnimation } from '@/lib/afterAnimation';
 import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
+import { useFilterWelcome } from '@/lib/useFilterWelcome';
+import { pickName } from '@/lib/nameSync';
 import { useI18n, tDetailOption, tPriceTab, isLatinOnlyInput, ARABIC_ONLY_MSG, CITY_REQUIRED_MSG, DISTRICT_UNCONFIRMED_MSG } from '@/i18n';
 
 const MAX_W = 560; // desktop-web: keep the mobile-first column centered
@@ -132,7 +134,19 @@ export default function Home() {
   const cityLabel = (o: { cityId: number; cityAr: string }) => (locale === 'en' ? cityNameEn(o.cityId, o.cityAr) : o.cityAr);
   const regionLabel = (o: { regionId: number | null; regionAr: string | null }) => (locale === 'en' ? regionNameEn(o.regionId, o.regionAr) : o.regionAr);
   const districtLabel = (cityId: number, ar: string) => (locale === 'en' ? districtNameEn(cityId, ar) : ar);
-  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard } = useApp();
+  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history } = useApp();
+  // ROTATING WELCOME (owner 2026-10-17): a signed-in user sometimes sees a personal line with a live
+  // fact instead of the subtitle below the headline. lib/filterWelcome.ts holds the approved lines
+  // and the truth rules; null keeps the normal subtitle.
+  const lastSearchedLocation = useMemo(() => {
+    let best: { ts: number; loc: string } | null = null;
+    for (const h of history ?? []) {
+      const loc = h?.query?.location;
+      if (loc && (!best || h.ts > best.ts)) best = { ts: h.ts, loc };
+    }
+    return best?.loc ?? null;
+  }, [history]);
+  const welcomeLine = useFilterWelcome(!!user, pickName(user, locale), locale, lastSearchedLocation);
   // THE ONE QUERY THIS SCREEN DERIVES EVERYTHING FROM (owner P0 2026-09-01).
   //
   // The store may now carry Advanced Filter answers committed in the chat — that is the whole fix:
@@ -1290,7 +1304,7 @@ export default function Home() {
           <HomeWebsiteStrip />
           <View style={s.hero}>
             <RNAnimated.Text style={[s.heroTitle, x.heroTitle, heroWide && x.heroTitleWide, reveal(titleAnim, 20)]}>{t(HERO_TAGLINE_KEYS[heroTagline])}</RNAnimated.Text>
-            <RNAnimated.Text style={[s.heroSub, x.heroSub, reveal(subAnim, 14)]}>{t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>
+            <RNAnimated.Text style={[s.heroSub, x.heroSub, reveal(subAnim, 14)]}>{welcomeLine ?? t('Ezhalah An AI-powered platform that searches real estate listings across Saudi Arabia.')}</RNAnimated.Text>
           </View>
 
           {/* Filter / AI Agent — the hero's focal choice: centered between the headline and the search
