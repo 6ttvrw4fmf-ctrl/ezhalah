@@ -486,6 +486,11 @@ def _signal(status, body, moved):
     # OWN licence has ended still is.
     if N.ad_expiry_state(P.licence_expiry(desc)) == "expired":
         return "gone"                       # its own licence has ended
+    # (2026-10-17) a stored post whose OWN page now reads as a request or not-property was never an offer
+    # (HRJ11190645357 «طلب شقه للايجار مستعجل» was stored before the classifier knew «طلب»): positive own-page
+    # evidence, removed through the same strike path, never a private deactivation.
+    if classify(ld.get("name"), P.strip_person_lines(desc))[0] in ("request", "other"):
+        return "gone"
     return "live"
 
 
