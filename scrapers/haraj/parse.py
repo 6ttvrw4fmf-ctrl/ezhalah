@@ -111,6 +111,8 @@ SERVICE_COLUMNS = {
     "waters": "water_supply", "water": "water_supply", "مياه": "water_supply", "ماء": "water_supply",
     "sanitation": "sanitation", "صرف صحي": "sanitation",
     "fibreopt": "optical_fibers", "fiberopt": "optical_fibers", "fibreoptic": "optical_fibers",
+    # REGA's English enum is «FibreOptics» (11190692491, first production crawl 2026-10-17)
+    "fibreoptics": "optical_fibers", "fiberoptics": "optical_fibers",
     "ألياف ضوئية": "optical_fibers", "الياف ضوئية": "optical_fibers", "ألياف بصرية": "optical_fibers",
 }
 
