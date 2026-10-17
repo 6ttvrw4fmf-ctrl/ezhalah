@@ -114,7 +114,11 @@ export function ResultCard({
   // confetti play, but ONLY when this listing opens inside Ezhalah (web, IN_APP_VIEWER_HOSTS). A card
   // that opens a new tab or the native preview page opens exactly as before, with no party.
   const [burst, setBurst] = useState(0);
-  const partyHere = IS_WEB && !!inAppViewerHost(listingOpenUrl(listing));
+  // GOLD = OPENS INSIDE EZHALAH (owner 2026-10-17: «the golden frame only with the 76 … the rest silver»):
+  // the ring and the «اضغط هنا» strip are gold for a listing on the in-app viewer list, silver otherwise.
+  const inside = !!inAppViewerHost(listingOpenUrl(listing));
+  const tone: 'gold' | 'silver' = inside ? 'gold' : 'silver';
+  const partyHere = IS_WEB && inside;
   // PRESS = OPEN. The ad opens first, synchronously inside the click (a delayed window.open would be
   // popup-blocked); the buzzer is bumped second and is pure decoration.
   const fire = () => { onOpen(); if (partyHere) { setBurst((b) => b + 1); partyConfetti(); } };
@@ -247,7 +251,7 @@ export function ResultCard({
     return (
       // THE GOLD FRAME (owner 2026-10-17, «make the frame … golden shining like a buzzer … for all»): a
       // thin shining gold ring around EVERY card, painted like the gold button; the card sits inside it.
-      <GoldSurface style={card.goldRing} testID="card-gold-frame">
+      <GoldSurface tone={tone} style={card.goldRing} testID="card-gold-frame">
       <View testID={`card-listing-${listing.id}`} style={[card.wrap, card.lpWrap, { direction: wDir }]}>
         <Pressable onPress={fire} accessibilityRole="link" accessibilityLabel={t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })} style={card.lpPhoto}>
           <ListingPhoto photos={photos} style={card.photo} t={t} />
@@ -258,7 +262,7 @@ export function ResultCard({
             </View>
           ) : null}
           {/* THE GOLD STRIP on the laptop photo-first card too (owner 2026-10-17: «for all»). */}
-          <GoldSurface style={card.lpPhotoFoot} pointerEvents="none" testID="card-gold-strip">
+          <GoldSurface tone={tone} style={card.lpPhotoFoot} pointerEvents="none" testID="card-gold-strip">
             <Text style={card.lpPhotoFootTx}>{typeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
             {listing.source_url ? <Text style={[card.lpPhotoFootTx, card.lpHost]} numberOfLines={1}>{sourceHost(listing.source)}</Text> : null}
           </GoldSurface>
@@ -383,7 +387,7 @@ export function ResultCard({
     // checkable if a rendered card can be identified in the DOM; matching strips to rows by position
     // is unsound, because a row that earns no chip renders no strip and silently shifts the rest.
     // Rendering-only: no style, no behaviour, and web-only `testID` becomes `data-testid`.
-    <GoldSurface style={card.goldRing} testID="card-gold-frame">
+    <GoldSurface tone={tone} style={card.goldRing} testID="card-gold-frame">
     <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow, { direction: wDir }]}>
       {/* The whole photo keeps the existing source-listing action. */}
       <Pressable onPress={fire} accessibilityRole="link" accessibilityLabel={t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })} style={[card.photoCol, row ? [card.photoColRow, tight && card.photoColTight] : horizontal ? card.photoColWide : card.photoColMobile]}>
@@ -397,7 +401,7 @@ export function ResultCard({
             Source attribution appears in the photo strip and the compact source row. */}
         {/* THE GOLD STRIP (owner 2026-10-17): the «اضغط هنا» strip shines gold like the buzzer, on every card. */}
         {listing.source_url ? (
-          <GoldSurface style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none" testID="card-gold-strip">
+          <GoldSurface tone={tone} style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none" testID="card-gold-strip">
             <Text style={[card.photoAction, row && card.photoActionRow]}>{t('Click here 👆')}</Text>
             <Text style={[card.sourceText, row && card.sourceTextRow]} numberOfLines={row ? 1 : undefined}>{sourceHost(listing.source)}</Text>
           </GoldSurface>

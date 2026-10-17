@@ -59,8 +59,13 @@ const rules = (card: string, buzz: string, grid: string, agent: string, i18n: st
     'press = open FIRST, synchronously: const fire = () => { onOpen(); if (partyHere) { setBurst(…); partyConfetti() } } — no timer, no animation':
       /const fire = \(\) => \{ onOpen\(\); if \(partyHere\) \{ setBurst\(\(b\) => b \+ 1\); partyConfetti\(\); \} \};/.test(card),
     // Owner 2026-10-17: the party is for the sites that open INSIDE Ezhalah (the in-app viewer list), not every card.
-    'the party plays only for a listing that opens inside Ezhalah: partyHere = IS_WEB && inAppViewerHost(listingOpenUrl(listing))':
-      /const partyHere = IS_WEB && !!inAppViewerHost\(listingOpenUrl\(listing\)\);/.test(card) && /import \{ inAppViewerHost \} from '@\/lib\/inAppViewer';/.test(card),
+    'the party plays only for a listing that opens inside Ezhalah: inside = inAppViewerHost(listingOpenUrl(listing)); partyHere = IS_WEB && inside':
+      /const inside = !!inAppViewerHost\(listingOpenUrl\(listing\)\);/.test(card) && /const partyHere = IS_WEB && inside;/.test(card) && /import \{ inAppViewerHost \} from '@\/lib\/inAppViewer';/.test(card),
+    // Owner 2026-10-17: «the golden frame only with the 76 … the rest silver».
+    'GOLD = opens inside Ezhalah, SILVER = everything else: tone = inside ? gold : silver, passed to the ring AND both strips; GoldSurface paints silver stops for it':
+      /const tone: 'gold' \| 'silver' = inside \? 'gold' : 'silver';/.test(card)
+      && (card.match(/<GoldSurface tone=\{tone\} /g) || []).length === 4 && !/<GoldSurface style=/.test(card)
+      && /tone === 'silver' \? \[pal\.silverLight, pal\.silverDeep\] : \[pal\.goldLight, pal\.goldDeep\]/.test(reveal),
     // The screen-level party: above the ad sheet/pane, which covers the card\'s own layer on a phone.
     'the ConfettiOverlay is the LAST child of the agent screen (above the AdViewer), and it never takes a tap':
       /<\/AdViewer>|\/>\n    \)\}\n[\s\S]{0,300}<ConfettiOverlay \/>\n    <\/View>\n  \);\n\}/.test(agent) && /pointerEvents="none" style=\{\[StyleSheet\.absoluteFill, s\.top\]\} testID="confetti-overlay"/.test(overlay)
@@ -79,9 +84,9 @@ const rules = (card: string, buzz: string, grid: string, agent: string, i18n: st
       /<BuzzLayer burst=\{burst\} \/>/.test(lp) && /\n      <BuzzLayer burst=\{burst\} \/>\n    <\/View>\n    <\/GoldSurface>\n  \);\n\}/.test(card) && !/\{row \? <BuzzLayer/.test(card),
     // Owner 2026-10-17: «make the frame and this golden shining like a buzzer … for all».
     'EVERY card sits in a shining gold ring and its «اضغط هنا» strip is a shining gold surface (GoldSurface = the gold button\'s gradient + CSS glint)':
-      (card.match(/<GoldSurface style=\{card\.goldRing\} testID="card-gold-frame">/g) || []).length === 2
-      && /<GoldSurface style=\{\[card\.sourceStrip, row && card\.sourceStripRow\]\} pointerEvents="none" testID="card-gold-strip">/.test(card)
-      && /<GoldSurface style=\{card\.lpPhotoFoot\} pointerEvents="none" testID="card-gold-strip">/.test(lp) && /lpPhotoFootTx: \{ color: colors\.goldOnFill/.test(card)
+      (card.match(/<GoldSurface tone=\{tone\} style=\{card\.goldRing\} testID="card-gold-frame">/g) || []).length === 2
+      && /<GoldSurface tone=\{tone\} style=\{\[card\.sourceStrip, row && card\.sourceStripRow\]\} pointerEvents="none" testID="card-gold-strip">/.test(card)
+      && /<GoldSurface tone=\{tone\} style=\{card\.lpPhotoFoot\} pointerEvents="none" testID="card-gold-strip">/.test(lp) && /lpPhotoFootTx: \{ color: colors\.goldOnFill/.test(card)
       // GoldSurface must let the caller's `position: absolute` win (the strip sits at the photo's foot): clip first, style second
       && /<View style=\{\[s\.goldClip, style\]\} pointerEvents=\{pointerEvents\} testID=\{testID\}>/.test(reveal)
       && /export function GoldSurface\(/.test(reveal) && /<CssShine \/>/.test(reveal.slice(reveal.indexOf('export function GoldSurface(')))
@@ -127,8 +132,16 @@ mustCatch('a card press that forgets the screen-level party', R_OPEN,
   rules(CARD.replace(FIRE, 'const fire = () => { onOpen(); if (partyHere) { setBurst((b) => b + 1); } };'), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('the party playing for every card again (new-tab and preview sites included)', R_OPEN,
   rules(CARD.replace(FIRE, 'const fire = () => { onOpen(); setBurst((b) => b + 1); partyConfetti(); };'), BUZZ, GRID, AGENT, I18N, RESP));
-mustCatch('the in-app gate replaced by a constant', 'the party plays only for a listing that opens inside Ezhalah: partyHere = IS_WEB && inAppViewerHost(listingOpenUrl(listing))',
-  rules(CARD.replace('const partyHere = IS_WEB && !!inAppViewerHost(listingOpenUrl(listing));', 'const partyHere = true;'), BUZZ, GRID, AGENT, I18N, RESP));
+const R_INSIDE = 'the party plays only for a listing that opens inside Ezhalah: inside = inAppViewerHost(listingOpenUrl(listing)); partyHere = IS_WEB && inside';
+mustCatch('the in-app gate replaced by a constant', R_INSIDE,
+  rules(CARD.replace('const partyHere = IS_WEB && inside;', 'const partyHere = true;'), BUZZ, GRID, AGENT, I18N, RESP));
+const R_TONE = 'GOLD = opens inside Ezhalah, SILVER = everything else: tone = inside ? gold : silver, passed to the ring AND both strips; GoldSurface paints silver stops for it';
+mustCatch('every card gold again (tone pinned to gold)', R_TONE,
+  rules(CARD.replace("const tone: 'gold' | 'silver' = inside ? 'gold' : 'silver';", "const tone: 'gold' | 'silver' = 'gold';"), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('a ring that ignores the tone', R_TONE,
+  rules(CARD.replace('<GoldSurface tone={tone} style={card.goldRing} testID="card-gold-frame">\n    <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow', '<GoldSurface style={card.goldRing} testID="card-gold-frame">\n    <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('GoldSurface painting gold for the silver tone', R_TONE,
+  rules(CARD, BUZZ, GRID, AGENT, I18N, RESP, OVERLAY, REVEAL.replace("tone === 'silver' ? [pal.silverLight, pal.silverDeep] : [pal.goldLight, pal.goldDeep]", '[pal.goldLight, pal.goldDeep]')));
 mustCatch('the overlay unmounted from the agent screen', 'the ConfettiOverlay is the LAST child of the agent screen (above the AdViewer), and it never takes a tap',
   rules(CARD, BUZZ, GRID, AGENT.replace('    <ConfettiOverlay />\n    </View>\n  );\n}', '    </View>\n  );\n}'), I18N, RESP));
 mustCatch('the overlay catching taps (it would block the sheet under it)', 'the ConfettiOverlay is the LAST child of the agent screen (above the AdViewer), and it never takes a tap',
@@ -141,13 +154,13 @@ mustCatch('the buzzer layer gated back to laptop rows only', 'the buzzer layer m
   rules(CARD.replace('\n      <BuzzLayer burst={burst} />\n    </View>\n    </GoldSurface>\n  );\n}', '\n      {row ? <BuzzLayer burst={burst} /> : null}\n    </View>\n    </GoldSurface>\n  );\n}'), BUZZ, GRID, AGENT, I18N, RESP));
 const R_GOLD = 'EVERY card sits in a shining gold ring and its «اضغط هنا» strip is a shining gold surface (GoldSurface = the gold button\'s gradient + CSS glint)';
 mustCatch('the phone/compact card losing its gold ring', R_GOLD,
-  rules(CARD.replace('    <GoldSurface style={card.goldRing} testID="card-gold-frame">\n    <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow', '    <View style={card.goldRing} testID="card-gold-frame">\n    <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow'), BUZZ, GRID, AGENT, I18N, RESP));
+  rules(CARD.replace('    <GoldSurface tone={tone} style={card.goldRing} testID="card-gold-frame">\n    <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow', '    <View style={card.goldRing} testID="card-gold-frame">\n    <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow'), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('the strip back to the flat dark-green View', R_GOLD,
-  rules(CARD.replace('<GoldSurface style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none" testID="card-gold-strip">', '<View style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none">'), BUZZ, GRID, AGENT, I18N, RESP));
+  rules(CARD.replace('<GoldSurface tone={tone} style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none" testID="card-gold-strip">', '<View style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none">'), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('a gold surface that does not shine', R_GOLD,
   rules(CARD, BUZZ, GRID, AGENT, I18N, RESP, OVERLAY, REVEAL.replace(/(export function GoldSurface\([\s\S]*?)<CssShine \/>/, '$1')));
 mustCatch('the laptop photo-first strip left dark green', R_GOLD,
-  rules(CARD.replace('<GoldSurface style={card.lpPhotoFoot} pointerEvents="none" testID="card-gold-strip">', '<View style={card.lpPhotoFoot} pointerEvents="none">'), BUZZ, GRID, AGENT, I18N, RESP));
+  rules(CARD.replace('<GoldSurface tone={tone} style={card.lpPhotoFoot} pointerEvents="none" testID="card-gold-strip">', '<View style={card.lpPhotoFoot} pointerEvents="none">'), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('GoldSurface overriding the strip\'s absolute position (the strip would fall out of the photo)', R_GOLD,
   rules(CARD, BUZZ, GRID, AGENT, I18N, RESP, OVERLAY, REVEAL.replace('<View style={[s.goldClip, style]} pointerEvents={pointerEvents} testID={testID}>', '<View style={[style, s.goldClip]} pointerEvents={pointerEvents} testID={testID}>')));
 mustCatch('white text on the gold strip', R_GOLD,

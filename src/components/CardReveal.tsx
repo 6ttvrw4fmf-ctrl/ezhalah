@@ -201,13 +201,16 @@ export function GoldShineButton({ children, style, onPress, disabled, testID, sh
 // card's «اضغط هنا» photo strip and the thin ring around every card are painted with it. `style` owns
 // layout (position/padding/radius); this adds the clip so the gradient and the sweep respect the
 // corners. Web: one compositor keyframe per surface, no JS per frame. Reduced motion: a still gold.
-export function GoldSurface({ children, style, pointerEvents, testID }: {
-  children?: React.ReactNode; style?: StyleProp<ViewStyle>; pointerEvents?: 'none' | 'auto' | 'box-none'; testID?: string;
+// `tone` (owner 2026-10-17: «the golden frame only with the 76 … the rest silver»): 'gold' for a listing
+// that opens inside Ezhalah, 'silver' for every other card — same gradient shape, same glint.
+export function GoldSurface({ children, style, pointerEvents, testID, tone = 'gold' }: {
+  children?: React.ReactNode; style?: StyleProp<ViewStyle>; pointerEvents?: 'none' | 'auto' | 'box-none'; testID?: string; tone?: 'gold' | 'silver';
 }) {
   const pal = useThemePalette();
+  const stops: [string, string] = tone === 'silver' ? [pal.silverLight, pal.silverDeep] : [pal.goldLight, pal.goldDeep];
   return (
     <View style={[s.goldClip, style]} pointerEvents={pointerEvents} testID={testID}>
-      <LinearGradient colors={[pal.goldLight, pal.goldDeep]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={stops} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
       <CssShine />
       {children}
     </View>
