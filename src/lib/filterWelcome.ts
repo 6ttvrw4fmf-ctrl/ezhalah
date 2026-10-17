@@ -21,10 +21,14 @@ export type WelcomeFacts = {
   regionCounts?: Record<string, number>; // region_ar → listings
   city?: { ar: string; en?: string; count: number };       // the user's last-searched city (or the top city)
   topDistrict?: { ar: string; en?: string; count: number }; // that city's district with the most listings
+  topDistricts?: Array<{ ar: string; en?: string; count: number }>; // that city's top districts, most listings first
+  cityRank?: number;     // the city's position among all cities by listing count (1 = most)
+  topCities?: Array<{ ar: string; en?: string; count: number }>; // the cities with the most listings, first first
 };
 
 type When = 'morning' | 'evening' | 'friday' | 'weekend' | 'any';
 type Need = 'sites' | 'listings' | 'cities' | 'districts' | 'allRegions' | 'city' | 'district'
+  | 'district3' | 'rank' | 'riyadhShare' | 'top2'
   | 'riyadh' | 'makkah' | 'eastern' | 'qassim';
 
 export type WelcomeLine = { id: number; when: When; needs: Need[]; ar: string; en: string };
@@ -61,6 +65,19 @@ export const WELCOME_LINES: readonly WelcomeLine[] = [
   { id: 28, when: 'any', needs: ['districts', 'cities'], ar: 'رجعت يا {n}؟ أكثر من {districtsMore} حي و{cities} مدينة، بحث واحد في إزهله.', en: 'Back again, {n}? More than {districtsMore} districts and {cities} cities, one search on Ezhalah.' },
   { id: 29, when: 'any', needs: ['qassim'], ar: 'حياك {n}، القصيم وحدها فيها أكثر من {qassimMore} إعلان في إزهله.', en: 'Welcome {n}, Al-Qassim alone has more than {qassimMore} listings on Ezhalah.' },
   { id: 30, when: 'any', needs: [], ar: 'هلا {n}، السوق كله في شاشة واحدة، وفر وقتك مع إزهله.', en: 'Hi {n}, the whole market on one screen. Save your time with Ezhalah.' },
+  // INSIGHT LINES (owner 2026-10-17: «include insights from Ezhalah's database … trending places»).
+  // "Busiest" = most listings right now — the same measure the app's Trending lists use. Never a claim
+  // about what people search, and never a deal tip («نشط», not «نار»).
+  { id: 31, when: 'any', needs: ['city', 'district'], ar: '{n}، أكثر حي إعلانات في {city} الحين: {district}. إزهله.', en: '{n}, the district with the most listings in {city} right now: {district}. Ezhalah.' },
+  { id: 32, when: 'any', needs: ['city', 'district'], ar: '{n}، {district} يتصدر {city} بأكثر من {districtCountMore} إعلان. إزهله.', en: '{n}, {district} leads {city} with more than {districtCountMore} listings. Ezhalah.' },
+  { id: 33, when: 'any', needs: ['city', 'district3'], ar: '{n}، أقوى ثلاثة أحياء في {city} الحين: {d1}، {d2}، {d3}. إزهله.', en: '{n}, the top three districts in {city} right now: {d1}, {d2}, {d3}. Ezhalah.' },
+  { id: 34, when: 'any', needs: ['city', 'district'], ar: '{n}، {district} نشط في {city} الحين، شوف إعلاناته في إزهله.', en: '{n}, {district} is active in {city} right now. See its listings on Ezhalah.' },
+  { id: 35, when: 'any', needs: ['city', 'rank'], ar: '{n}، {city} رقم {rank} في المملكة بعدد الإعلانات. إزهله.', en: '{n}, {city} is number {rank} in the Kingdom by listings. Ezhalah.' },
+  { id: 36, when: 'any', needs: ['riyadhShare'], ar: '{n}، منطقة الرياض فيها أكثر من {riyadhShare}% من إعلانات المملكة. إزهله.', en: "{n}, the Riyadh region holds more than {riyadhShare}% of the Kingdom's listings. Ezhalah." },
+  { id: 37, when: 'any', needs: [], ar: '{n}، كل يوم السوق يتحرك، ويتابعه لك إزهله.', en: '{n}, the market moves every day. Follow it with Ezhalah.' },
+  { id: 38, when: 'any', needs: ['city', 'district3'], ar: '{n}، من {d1} إلى {d3}، أنشط أحياء {city} في مكان واحد. إزهله.', en: "{n}, from {d1} to {d3}, {city}'s most active districts in one place. Ezhalah." },
+  { id: 39, when: 'any', needs: ['city', 'district'], ar: '{n}، {city} فيها أكثر من {cityMore} إعلان، و{district} لحاله أكثر من {districtCountMore}. إزهله.', en: '{n}, {city} has more than {cityMore} listings, and {district} alone more than {districtCountMore}. Ezhalah.' },
+  { id: 40, when: 'any', needs: ['top2'], ar: '{n}، أنشط مدينتين في المملكة الحين: {c1} و{c2}. إزهله.', en: "{n}, the Kingdom's two most active cities right now: {c1} and {c2}. Ezhalah." },
 ];
 
 /** Saudi Arabia has 13 administrative regions; «كل المناطق» is said only when every one has listings. */
@@ -138,6 +155,37 @@ export function renderWelcome(line: WelcomeLine, name: string, f: WelcomeFacts, 
         if (locale === 'ar') v.district = /^حي\s/.test(d.ar) ? d.ar : `حي ${d.ar}`;
         else if (d.en && !/[؀-ۿ]/.test(d.en)) v.district = d.en; // never Arabic mid-English
         else return null;
+        const m = moreThan(d.count, locale);
+        if (m) v.districtCountMore = m;
+        else if (line.ar.includes('{districtCountMore}')) return null;
+        break;
+      }
+      case 'district3': {
+        const ds = (f.topDistricts ?? []).slice(0, 3);
+        if (ds.length < 3 || !ds.every((d) => positive(d.count))) return null;
+        const names = ds.map((d) => (locale === 'ar' ? d.ar.replace(/^حي\s+/, '') : d.en));
+        if (names.some((x) => !x || (locale === 'en' && /[؀-ۿ]/.test(x)))) return null;
+        [v.d1, v.d2, v.d3] = names as string[];
+        break;
+      }
+      case 'rank': if (!positive(f.cityRank)) return null; v.rank = fmt(f.cityRank); break;
+      case 'riyadhShare': {
+        // A share of the SAME pool (sum of region counts), floored strictly below the true percentage.
+        const counts = Object.values(f.regionCounts ?? {});
+        const total = counts.reduce((a, b) => a + b, 0);
+        const r = f.regionCounts?.[REGION_AR.riyadh];
+        if (!positive(total) || !positive(r)) return null;
+        const pct = Math.ceil((r / total) * 100) - 1;
+        if (pct < 1) return null;
+        v.riyadhShare = String(pct);
+        break;
+      }
+      case 'top2': {
+        const cs = (f.topCities ?? []).slice(0, 2);
+        if (cs.length < 2) return null;
+        const names = cs.map((c) => (locale === 'ar' ? c.ar : c.en));
+        if (names.some((x) => !x || (locale === 'en' && /[؀-ۿ]/.test(x)))) return null;
+        [v.c1, v.c2] = names as string[];
         break;
       }
       default: {

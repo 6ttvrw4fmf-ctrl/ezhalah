@@ -30,11 +30,18 @@ const FACTS: WelcomeFacts = {
   regionCounts: { 'منطقة الرياض': 170_363, 'منطقة مكة المكرمة': 104_681, 'المنطقة الشرقية': 48_662, 'منطقة القصيم': 16_235 },
   city: { ar: 'الرياض', en: 'Riyadh', count: 162_312 },
   topDistrict: { ar: 'حي المهدية', en: 'Al Mahdiyah', count: 11_994 },
+  topDistricts: [
+    { ar: 'حي المهدية', en: 'Al Mahdiyah', count: 11_994 },
+    { ar: 'حي النرجس', en: 'An Narjis', count: 11_385 },
+    { ar: 'حي الرمال', en: 'Ar Rimal', count: 10_000 },
+  ],
+  cityRank: 1,
+  topCities: [{ ar: 'الرياض', en: 'Riyadh', count: 162_312 }, { ar: 'جدة', en: 'Jeddah', count: 88_241 }],
 };
 
 // ── 6. shape ───────────────────────────────────────────────────────────────────────────────────
 const ids = WELCOME_LINES.map((l) => l.id);
-check('exactly the 30 approved lines, ids 1..30', ids.length === 30 && ids.every((id, i) => id === i + 1));
+check('exactly the 40 approved lines (30 + 10 insight lines), ids 1..40', ids.length === 40 && ids.every((id, i) => id === i + 1));
 check('every Arabic line ends with «إزهله»', WELCOME_LINES.every((l) => /إزهله[.؟!]?$/.test(l.ar)));
 check('every English line ends with "Ezhalah" (the brand is never translated)', WELCOME_LINES.every((l) => /Ezhalah[.?!]?$/.test(l.en)));
 check('Arabic lines carry no diacritics (owner: «remove alharakat»)', WELCOME_LINES.every((l) => !/[ً-ْ]/.test(l.ar)));
@@ -92,6 +99,25 @@ const arabicLeak = WELCOME_LINES.some((l) => {
   return en !== null && /[؀-ۿ]/.test(en);
 });
 check('an English line is never shown with an Arabic city/district name in it', !arabicLeak);
+
+// ── 8. insight lines (owner 2026-10-17) ───────────────────────────────────────────────────────
+const line = (id: number) => WELCOME_LINES.find((l) => l.id === id)!;
+const share = (f: WelcomeFacts) => renderWelcome(line(36), 'يوسف', f, 'ar');
+const sharePct = (s: string | null) => Number(/(\d+)%/.exec(s ?? '')?.[1] ?? NaN);
+const regionTotal = Object.values(FACTS.regionCounts!).reduce((a, b) => a + b, 0);
+check('the Riyadh share is strictly below its true percentage of the same pool',
+  sharePct(share(FACTS)) < (100 * 170_363) / regionTotal && sharePct(share(FACTS)) >= Math.floor((100 * 170_363) / regionTotal) - 1);
+check('an exact share (50.0%) still reads "more than 49%", never "more than 50%"',
+  sharePct(share({ ...FACTS, regionCounts: { 'منطقة الرياض': 50, 'منطقة مكة المكرمة': 50 } })) === 49);
+check('the top-three line needs three real districts (two known → hidden)',
+  renderWelcome(line(33), 'يوسف', { ...FACTS, topDistricts: FACTS.topDistricts!.slice(0, 2) }, 'ar') === null);
+check('the rank line needs a live rank', renderWelcome(line(35), 'يوسف', { ...FACTS, cityRank: undefined }, 'ar') === null);
+check('the two-cities line needs two live cities', renderWelcome(line(40), 'يوسف', { ...FACTS, topCities: FACTS.topCities!.slice(0, 1) }, 'ar') === null);
+check('insight lines never say people are searching there, and never «نار»',
+  WELCOME_LINES.filter((l) => l.id > 30).every((l) => !/الكل يدور|نار/.test(l.ar)));
+console.log('  e.g. ' + renderWelcome(line(33), 'يوسف', FACTS, 'ar'));
+console.log('  e.g. ' + renderWelcome(line(36), 'يوسف', FACTS, 'ar'));
+console.log('  e.g. ' + renderWelcome(line(32), 'Yusuf', FACTS, 'en'));
 
 // ── 7. rotation ─────────────────────────────────────────────────────────────────────────────────
 const at = (iso: string) => new Date(iso);
