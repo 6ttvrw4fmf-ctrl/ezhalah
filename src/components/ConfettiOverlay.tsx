@@ -4,16 +4,18 @@ import { colors } from '@/theme/tokens';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 
 const IS_WEB = Platform.OS === 'web';
-const BURST_MS = 1900;
-const PER_CANNON = 42; // two party poppers, one in each bottom corner → 84 pieces
+const BURST_MS = 2200;
+const PER_CANNON = 56; // two party poppers, one in each bottom corner
+const CENTRE = 40;     // plus a burst from the middle of the screen → 152 pieces
 
 // THE SCREEN-LEVEL PARTY (owner 2026-10-17: «whenever a user clicks on a listing I want this party
 // confetti to appear … on everything», «make it attractive … my goal is sending traffic to those
 // sites»). The card's own BuzzLayer flashes the card gold, but on a phone the ad sheet slides up over
 // the card within the first frames, and on a laptop the pane can cover it. This layer sits ABOVE
 // everything — the sheet, the pane, the results — so the party is always seen: two party poppers, one
-// in each bottom corner, fire a fan of gold / green / white ribbons and dots up across the screen,
-// which tumble and fall away. Nothing is drawn at random: the same fan every press.
+// in each bottom corner, fan big gold / green / white ribbons and dots up across the screen, a burst
+// erupts from the middle, and everything tumbles, flutters and falls away. Nothing is drawn at random:
+// the same party every press.
 //
 // Wiring is a one-line bus, not a prop chain: ResultCard's press handler calls `partyConfetti()` right
 // after it opens the ad; the single overlay mounted at the screen root listens. DECORATION ONLY:
@@ -22,12 +24,14 @@ const PER_CANNON = 42; // two party poppers, one in each bottom corner → 84 pi
 let listeners: Array<() => void> = [];
 export function partyConfetti(): void { for (const l of listeners) { try { l(); } catch { /* decoration */ } } }
 
-type Piece = { side: -1 | 1; ux: number; uy: number; v: number; rot: number; w: number; h: number; color: string; round: boolean; delay: number };
+// side: -1 left popper, 1 right popper, 0 the centre burst.
+type Piece = { side: -1 | 0 | 1; ux: number; uy: number; v: number; rot: number; w: number; h: number; color: string; round: boolean; delay: number };
 
-// A fixed fan per popper (computed from the index): angles sweep from straight up to ~70° inward,
-// speeds vary in a repeating pattern, every 4th piece a dot, every piece its own tumble.
+const PALETTE = [colors.goldLight, colors.goldDeep, colors.primary, colors.goldLightHover, colors.onFill, colors.selFill, colors.goldLight, colors.primary, colors.goldLightHover];
+
+// Fixed fans (computed from the index): the poppers sweep from straight up to ~75° inward with varied
+// speeds; the centre burst radiates all around. Every 4th piece a dot, every piece its own tumble.
 function makePieces(): Piece[] {
-  const palette = [colors.goldLight, colors.goldDeep, colors.primary, colors.goldLightHover, colors.onFill, colors.selFill, colors.goldLight, colors.primary];
   const out: Piece[] = [];
   for (const side of [-1, 1] as const) {
     for (let i = 0; i < PER_CANNON; i++) {
@@ -36,15 +40,30 @@ function makePieces(): Piece[] {
         side,
         ux: Math.cos(a) * side * -1, // pointing toward the screen's middle
         uy: -Math.sin(a),
-        v: 0.55 + ((i * 37) % 100) / 100 * 0.55, // 0.55–1.1 × the screen's height
-        rot: ((i * 131) % 1080) - 540,
-        w: 7 + (i % 4) * 2,
-        h: 11 + (i % 5) * 3,
-        color: palette[(i + (side > 0 ? 3 : 0)) % palette.length],
+        v: 0.5 + ((i * 37) % 100) / 100 * 0.65, // 0.5–1.15 × the screen's height
+        rot: ((i * 131) % 1440) - 720,
+        w: 8 + (i % 4) * 3,
+        h: 14 + (i % 5) * 4,
+        color: PALETTE[(i + (side > 0 ? 4 : 0)) % PALETTE.length],
         round: i % 4 === 0,
         delay: (i % 7) * 0.012,
       });
     }
+  }
+  for (let i = 0; i < CENTRE; i++) {
+    const a = (i / CENTRE) * Math.PI * 2 + (i % 3) * 0.17;
+    out.push({
+      side: 0,
+      ux: Math.cos(a),
+      uy: Math.sin(a) - 0.35, // a touch upward, so it blooms before it falls
+      v: 0.22 + ((i * 53) % 100) / 100 * 0.3,
+      rot: ((i * 97) % 1080) - 540,
+      w: 9 + (i % 3) * 3,
+      h: 12 + (i % 4) * 4,
+      color: PALETTE[(i + 2) % PALETTE.length],
+      round: i % 3 === 0,
+      delay: 0.03 + (i % 5) * 0.01,
+    });
   }
   return out;
 }
@@ -77,36 +96,35 @@ export function ConfettiOverlay() {
   return (
     <View pointerEvents="none" style={[StyleSheet.absoluteFill, s.top]} testID="confetti-overlay">
       {pieces.map((p, i) => {
-        const dx = p.ux * p.v * reach * 0.95;
+        const dx = p.ux * p.v * reach * (p.side === 0 ? 1 : 0.95);
         const peakY = p.uy * p.v * reach; // negative = up
         const start = p.delay, mid = start + (1 - start) * 0.42;
+        const anchor = p.side === 0
+          ? { left: width / 2, top: height * 0.45 }
+          : { bottom: -20, left: p.side < 0 ? -10 : undefined, right: p.side > 0 ? -10 : undefined };
         return (
           <Animated.View
             key={i}
             style={{
               position: 'absolute',
-              bottom: -20,
-              left: p.side < 0 ? -10 : undefined,
-              right: p.side > 0 ? -10 : undefined,
+              ...anchor,
               width: p.w,
               height: p.h,
               borderRadius: p.round ? p.w : 2,
               backgroundColor: p.color,
-              opacity: t.interpolate({ inputRange: [0, start, 0.7, 1], outputRange: [0, 1, 1, 0] }),
+              opacity: t.interpolate({ inputRange: [0, start, 0.72, 1], outputRange: [0, 1, 1, 0] }),
               transform: [
                 // the throw: fast out of the popper, then gravity takes over
                 { translateX: t.interpolate({ inputRange: [0, start, mid, 1], outputRange: [0, 0, dx * 0.8, dx * (1.05 + (i % 3) * 0.06)] }) },
-                { translateY: t.interpolate({ inputRange: [0, start, mid, 1], outputRange: [0, 0, peakY, peakY * 0.25 + 40] }) },
+                { translateY: t.interpolate({ inputRange: [0, start, mid, 1], outputRange: [0, 0, peakY, peakY * 0.25 + 60] }) },
                 { rotate: t.interpolate({ inputRange: [0, 1], outputRange: ['0deg', `${p.rot}deg`] }) },
                 // a ribbon flutters: it narrows and widens as it tumbles
-                { scaleX: t.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: [1, 0.3, 1, 0.3, 1] }) },
+                { scaleX: t.interpolate({ inputRange: [0, 0.2, 0.4, 0.6, 0.8, 1], outputRange: [1, 0.25, 1, 0.25, 1, 0.4] }) },
               ],
             }}
           />
         );
       })}
-      {/* keeps `width` in the render so a rotation re-lays out the fan */}
-      <View style={{ width: 0, height: 0, left: width }} />
     </View>
   );
 }
