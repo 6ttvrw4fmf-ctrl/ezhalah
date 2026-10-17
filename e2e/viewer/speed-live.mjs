@@ -24,7 +24,6 @@ const SITES = [
   { host: 'dealapp.sa', table: 'dealapp_residential_listings' },
   { host: 'sadiq-eltajer.sa', table: 'sadiqeltajer_residential_listings' },
   { host: 'rakez.sa', table: 'rakez_residential_listings' },
-  { host: 'wahadat.sa', table: 'wahadat_residential_listings' },
   { host: 'tuba.com.sa', table: 'tuba_residential_listings' },
   { host: 'amlakalahsa.com', table: 'amlakalahsa_residential_listings' },
   { host: 'listings.satel.sa', table: 'satel_residential_listings' },

@@ -8,7 +8,7 @@
 // A host earns its place here ONLY after its real ad page was proven to render inside a plain
 // <iframe> with the site's own headers — no X-Frame-Options, no CSP frame-ancestors, no
 // frame-busting script. Deal App and Gathern were proven 2026-10-03 with Playwright against a local
-// page (dealapp.sa/ar/ad-details/530440, gathern.co/view/193264/unit/270328). The other 48 were
+// page (dealapp.sa/ar/ad-details/530440, gathern.co/view/193264/unit/270328). The other 47 were
 // proven 2026-10-16 the same way: two live ads each, framed like AdViewer (same allow=, no sandbox),
 // each checked against a top-level control load; the test was calibrated first (aqar + wasalt
 // refused, dealapp + gathern opened). Every one also showed its ad in about 2 s or less on a phone
@@ -17,14 +17,14 @@
 // or blank inside a frame (ashab.sa, dwelleo.sa 404, masaraqarat.com), login wall (nawait.sa), site
 // down (almuteb.sa 503), and too slow on phone 4G (aqaralmuhaysini.com, muktamel.com, eaqartabuk.com
 // and 19 small sites). ryadah.com.sa was added, then taken off the same day: the live speed guard's
-// first production run saw it answer SAMEORIGIN to a phone user agent. We never proxy or strip a
-// site's headers to force an embed; the preview allowlist below uses already-loaded listing data.
+// first production run saw it answer SAMEORIGIN to a phone user agent. wahadat.sa came off the same
+// way: from the US runner its cold loads took ~6.1 s (budget 3 s). We never proxy or strip a site's
+// headers to force an embed; the preview allowlist below uses already-loaded listing data.
 export const IN_APP_VIEWER_HOSTS = [
   'dealapp.sa',
   'gathern.co',
   'sadiq-eltajer.sa',
   'rakez.sa',
-  'wahadat.sa',
   'tuba.com.sa',
   'amlakalahsa.com',
   'listings.satel.sa',
