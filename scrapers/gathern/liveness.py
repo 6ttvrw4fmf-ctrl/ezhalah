@@ -270,9 +270,34 @@ def probe(s, url: str, retries: int = 3, home_status: int = 0) -> int:
             # its home page serves 200 (2026-10-05, cleanup lesson). That 200 is the home page, not
             # this unit: no verdict. It matters most to --recheck-dead, whose only write is a
             # restore on a 200, now that it runs every day (2026-10-06).
-            return home_status
+            # It also answers LIVE units that way on /view/ to a desktop browser while /ar/view/
+            # opens them (2026-10-17, gathern-api-probe 39029117183: 8 of 8 «home» units opened
+            # named on /ar/view/, phone and laptop): 919 served units read no verdict every hour.
+            # Their own /ar/ page may only ever say ALIVE here; anything else stays no verdict.
+            return 200 if _opens_at_ar_view(s, url) else home_status
         return r.status_code
     return 0
+
+
+_VIEW = re.compile(r"^(https://gathern\.co)/view/(\d+)/unit/(\d+)/?$")
+_NOT_FOUND = ("الصفحة غير موجودة", "page not found")
+
+
+def _opens_at_ar_view(s, url: str) -> bool:
+    """True only when the unit's /ar/view/ address answers 200 ON that address, with a body that
+    names the unit and is not gathern's not-found page. Never a death: False is no verdict."""
+    m = _VIEW.match(url or "")
+    if not m:
+        return False
+    alt = f"{m.group(1)}/ar/view/{m.group(2)}/unit/{m.group(3)}"
+    _throttle()
+    try:
+        r = s.get(alt, timeout=25, allow_redirects=True)
+    except Exception:  # noqa: BLE001 — no answer is no verdict
+        return False
+    body = getattr(r, "text", "") or ""
+    return (r.status_code == 200 and not _landed_on_home(alt, str(getattr(r, "url", "") or ""))
+            and m.group(3) in body and not any(n in body for n in _NOT_FOUND))
 
 
 def proxied_session(use_proxy: bool):
