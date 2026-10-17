@@ -317,6 +317,11 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
     area = int(round(area_f)) if area_f is not None else None
 
     bedrooms, bathrooms, master = rooms(rec, category, property_type)
+    if bathrooms is None and _int(rec.get("bathroom")) == 0:
+        # The form's 0 is the source SETTLING the field as blank, not a failed read. A plain None is
+        # dropped by db._unknown_must_not_overwrite_known, so every row stored before 2026-10-16 kept
+        # its 0 (17943237 re-crawled 10-17 04:24: still 0). AUTHORITATIVE_NULL writes the NULL.
+        bathrooms = db.AUTHORITATIVE_NULL
 
     # No magnitude gate (removed 2026-08-09): a source-published price is stored at ANY magnitude
     # per the standing PRICE = SOURCE rule. Nulling "implausibly low" prices is a judgement call
