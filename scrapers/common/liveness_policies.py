@@ -1434,6 +1434,10 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     # 1,119-card list. A second read (lifecycle-spot-check 37943565545, controls 5/5) read 22 of 22
     # sampled ones gone. Its oracle became callable by the daily check on 10-08 (#6438).
     "aqalemhajer",
+    # 2026-10-17: Haraj. Shadow read locally with its own-hour controls (CONTROL_POOLS, 5/5 live):
+    # 680 probed, 408 live, 272 gone, 0 unknown; gone = «العرض محذوف او قديم», re-read gone by a second
+    # client (curl) 4/4 + the 2 first-run controls. 0 of 680 had ever been removed before this.
+    "haraj",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],
