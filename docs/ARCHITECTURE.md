@@ -175,6 +175,18 @@ chat, which renders results inline. (Deliberate; single search engine — see §
 
 ## 5. Frontend — the Property Card (`src/components/ResultCard.tsx`) — SOURCE OF TRUTH
 
+**A press on a card whose listing opens INSIDE Ezhalah plays the golden buzzer + a screen-level
+confetti party (owner 2026-10-17: «whenever a user clicks on a listing I want this party confetti …
+on everything», then «your job is doing it for the 76 sites … the ones after I'll do it later»; «make
+it attractive … my goal is sending traffic to those sites»).** Photo, body or gold button, on the laptop
+photo-first card, the laptop compact row and the phone card alike: one shared `fire()` opens the ad
+first, synchronously, then — only when `IS_WEB && inAppViewerHost(listingOpenUrl(listing))` — bumps the
+card's `BuzzLayer` (`src/components/CardBuzzer.tsx`) and the screen-level `ConfettiOverlay`
+(`src/components/ConfettiOverlay.tsx`, last child of the agent screen, above the ad sheet/pane, never
+takes a tap). Cards that open a new tab or the native preview page open exactly as before, with no
+party. Decoration only — reduced motion draws nothing and the ad opens even if nothing paints.
+Guard: `scripts/verify-laptop-photo-card.ts`.
+
 **Card data is locked. Display scraped values verbatim; change presentation only with owner approval.** Fix data
 problems via backend mapping only (see §16), never by editing the card.
 
