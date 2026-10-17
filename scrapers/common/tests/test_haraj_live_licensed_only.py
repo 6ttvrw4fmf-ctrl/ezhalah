@@ -251,3 +251,19 @@ def test_catchup_budget_stops_and_keeps_the_cursor_at_the_last_finished_file(mon
     head = R.catchup(locs, locs[-1:], 0, None)[4]          # budget 0: the first file runs, then it stops
     assert head["catchup_before"] == "2026-10-16-05" and head["catchup_files_left"] == 4
     assert R._CURSOR.search(R._notes(R.Counter(fetched=3), R.Counter(), head)).group(1) == "2026-10-16-05"
+
+
+# ── fleet_liveness controls from Haraj's own newest hour (2026-10-17) ─────────────────────────────
+def test_liveness_controls_are_fresh_posts_that_read_live_and_fail_closed(monkeypatch):
+    monkeypatch.setattr(R, "hour_files", lambda: ["old", "newest-complete", "filling"])
+    seen = []
+    monkeypatch.setattr(R, "ids_in", lambda u, pre, tight=False: (seen.append((u, tight)) or [str(i) for i in range(30)]))
+    live = {"1", "3", "4", "7", "9", "12"}
+    monkeypatch.setattr(R, "_verify_gone", lambda ad: ("live" if ad[3:] in live else "gone", ""))
+    got = R.liveness_controls(5)
+    assert seen == [("newest-complete", True)]                       # the newest COMPLETE hour, tight titles
+    assert [r["ad_number"] for r in got] == ["HRJ1", "HRJ3", "HRJ4", "HRJ7", "HRJ9"]
+    assert got[0]["listing_url"].endswith("/1/")
+    # a block / redesign: nothing reads live → fewer than n → fleet_liveness quarantines
+    monkeypatch.setattr(R, "_verify_gone", lambda ad: ("unknown", "challenge"))
+    assert R.liveness_controls(5) == []

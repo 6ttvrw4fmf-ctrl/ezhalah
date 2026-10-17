@@ -351,3 +351,15 @@ def test_the_recheck_is_scheduled_clear_of_the_daily_run_and_shares_its_lock():
     assert "--struck-only" in recheck
     group = re.search(r"concurrency:\n  group: (\S+)", (wf / "fleet-liveness.yml").read_text()).group(1)
     assert f"group: {group}" in recheck, "the daily run and the recheck must never write at once"
+
+
+def test_a_control_pool_site_takes_its_controls_from_its_own_source(monkeypatch):
+    import types
+    from scrapers.common import fleet_liveness as F
+    mod = types.ModuleType("fake_pool")
+    mod.pool = lambda n: [{"ad_number": f"X{i}"} for i in range(n + 3)]
+    monkeypatch.setitem(__import__("sys").modules, "fake_pool", mod)
+    monkeypatch.setitem(F.CONTROL_POOLS, "fakesite", "fake_pool:pool")
+    monkeypatch.setattr(F, "controls", lambda *a, **k: (_ for _ in ()).throw(AssertionError("crawl pool used")))
+    assert [r["ad_number"] for r in F.controls_for(None, "fakesite", {})] == [f"X{i}" for i in range(F.MIN_CANARIES)]
+    assert F.CONTROL_POOLS["haraj"] == "scrapers.haraj.run:liveness_controls"
