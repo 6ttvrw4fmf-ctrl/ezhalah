@@ -34,7 +34,6 @@ const SITES = [
   { host: 'eaqartabuk.com', table: 'eaqartabuk_residential_listings' },
   { host: '24.com.sa', table: 'souq24_commercial_listings' },
   { host: 'livingcompound.com', table: 'livingcompound_residential_listings' },
-  { host: 'tamyaz-sa.com', table: 'tamyaz_residential_listings' },
   { host: 'wahadat.sa', table: 'wahadat_residential_listings' },
   { host: 'dallali.com', table: 'dallali_commercial_listings' },
   { host: 'remalre.com', table: 'remal_residential_listings' },

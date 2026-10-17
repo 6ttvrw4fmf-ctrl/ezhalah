@@ -43,7 +43,7 @@ const PROVEN_HOSTS = [
   // 2026-10-17, owner budget 10 s: proven to frame on 10-16 and measured 2.0–9.2 s from the runner.
   'amaall.com', 'jurash.sa', 'awaalun.com', 'ego-aqar.com', 'rawaf.ai', 'rawasi-dark.com',
   'mobasher.sa', 'villas-sa.com', 'vm-ksa.com', 'eaqartabuk.com', '24.com.sa', 'livingcompound.com',
-  'tamyaz-sa.com', 'wahadat.sa', 'dallali.com', 'remalre.com', 'safainv.sa', 'remax.sa',
+  'wahadat.sa', 'dallali.com', 'remalre.com', 'safainv.sa', 'remax.sa',
   'ibaax.sa', 'qmra.sa',
   'aqaralmuhaysini.com', // 9.96 s on the runner; owner keeps it on (2026-10-17)
 ].join(',');
@@ -76,6 +76,7 @@ for (const u of [
   'https://satel.sa/x',               // listings.satel.sa was proven, not the bare domain
   'https://www.aqarcity.net/property/28633',   // refuses framing (2026-10-16)
   'https://www.muktamel.com/property/1',   // frames, but ~37 s on phone 4G (2026-10-17)
+  'https://www.tamyaz-sa.com/#property-1', // was on; site timing out 2026-10-17, off until re-proven
   'https://albukaeri.sa/property/1',  // was on; site timing out 2026-10-17, off until re-proven
   'https://sodasyat.sa/single/1',     // SAMEORIGIN for phones (2026-10-17)
   'https://ashab.sa/properties/1/unit/1',      // bot check inside a frame (2026-10-16)
