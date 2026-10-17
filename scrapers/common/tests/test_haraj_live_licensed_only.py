@@ -195,3 +195,9 @@ def test_rega_arabic_studio_enum_with_tashkeel():
     assert R.type_of("Apartment", None, "") == "Apartment" and R.type_of("Land", "سكني", "") == "Residential Land"
     assert R.type_of("أرض", None, "ارض للبيع") == "أرض"                     # no usage stated: no guess
     assert R.type_of("عمارة", "تجاري", "") == "Commercial Building"
+
+
+def test_first_crawl_enums_fibreoptics_and_warehouses():
+    assert P.services_of("Electricity, Waters, Sanitation, FixedPhone, FibreOptics, FloodDrainage") == {
+        "electricity": True, "water_supply": True, "sanitation": True, "optical_fibers": True}
+    assert R.type_of("Warehouses", None, "") == "Warehouse"
