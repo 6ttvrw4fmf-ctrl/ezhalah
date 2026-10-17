@@ -39,7 +39,12 @@ const PROVEN_HOSTS = [
   'aqaralriyadh.com', 'fkralemar.com', 'fahadalshahri.com', 'eastabha.sa', 'suwar.sa', 'sqcc.sa',
   'aalbarrak.com', 'abeea.com.sa', 'wajaf.sa', 'alsidra.com.sa', 'squares.com.sa',
   'muajarh.com', 'compoundin.com', 'gomenassat.com', 'almotmkenah.com', 'gudai.inblaj.net',
-  'eilmalriyada.com', 'aoujestates.com', 'aqarnajran.com', 'albukaeri.sa', 'mar-ksa.com',
+  'eilmalriyada.com', 'aoujestates.com', 'aqarnajran.com', 'mar-ksa.com',
+  // 2026-10-17, owner budget 10 s: proven to frame on 10-16 and measured 2.0–9.2 s from the runner.
+  'amaall.com', 'jurash.sa', 'awaalun.com', 'ego-aqar.com', 'rawaf.ai', 'rawasi-dark.com',
+  'mobasher.sa', 'villas-sa.com', 'vm-ksa.com', 'eaqartabuk.com', '24.com.sa', 'livingcompound.com',
+  'tamyaz-sa.com', 'wahadat.sa', 'dallali.com', 'remalre.com', 'safainv.sa', 'remax.sa',
+  'ibaax.sa', 'qmra.sa',
 ].join(',');
 check('allowlist is exactly the proven sites', IN_APP_VIEWER_HOSTS.join(',') === PROVEN_HOSTS);
 
@@ -69,7 +74,9 @@ for (const u of [
   'https://other.inblaj.net/x',
   'https://satel.sa/x',               // listings.satel.sa was proven, not the bare domain
   'https://www.aqarcity.net/property/28633',   // refuses framing (2026-10-16)
-  'https://aqaralmuhaysini.com/x',    // frames, but too slow on phone 4G (2026-10-16)
+  'https://aqaralmuhaysini.com/x',    // frames, but 9.96 s on phone 4G: too close to the 10 s budget (2026-10-17)
+  'https://albukaeri.sa/property/1',  // was on; site timing out 2026-10-17, off until re-proven
+  'https://sodasyat.sa/single/1',     // SAMEORIGIN for phones (2026-10-17)
   'https://ashab.sa/properties/1/unit/1',      // bot check inside a frame (2026-10-16)
   '', null, undefined, 'not a url',
 ]) check(`${JSON.stringify(u)} → new tab (unchanged)`, inAppViewerHost(u) === null);

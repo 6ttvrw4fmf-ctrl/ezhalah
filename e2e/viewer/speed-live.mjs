@@ -18,10 +18,30 @@ const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';
 const SB = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const SAMPLES = 3;
-const BUDGET_MS = 3000;
+const BUDGET_MS = 10000; // owner 2026-10-17: «if it's below 10 seconds no problem» (was 3000)
 const SITES = [
   { host: 'gathern.co', table: 'gathern_residential_listings' },
   { host: 'dealapp.sa', table: 'dealapp_residential_listings' },
+  { host: 'amaall.com', table: 'amaall_commercial_listings' },
+  { host: 'jurash.sa', table: 'jurash_residential_listings' },
+  { host: 'awaalun.com', table: 'awal_commercial_listings' },
+  { host: 'ego-aqar.com', table: 'ego_residential_listings' },
+  { host: 'rawaf.ai', table: 'rawaf_residential_listings' },
+  { host: 'rawasi-dark.com', table: 'rawasidark_commercial_listings' },
+  { host: 'mobasher.sa', table: 'mobasher_commercial_listings' },
+  { host: 'villas-sa.com', table: 'villassa_residential_listings' },
+  { host: 'vm-ksa.com', table: 'vmksa_commercial_listings' },
+  { host: 'eaqartabuk.com', table: 'eaqartabuk_residential_listings' },
+  { host: '24.com.sa', table: 'souq24_commercial_listings' },
+  { host: 'livingcompound.com', table: 'livingcompound_residential_listings' },
+  { host: 'tamyaz-sa.com', table: 'tamyaz_residential_listings' },
+  { host: 'wahadat.sa', table: 'wahadat_residential_listings' },
+  { host: 'dallali.com', table: 'dallali_commercial_listings' },
+  { host: 'remalre.com', table: 'remal_residential_listings' },
+  { host: 'safainv.sa', table: 'safa_residential_listings' },
+  { host: 'remax.sa', table: 'remaxsa_residential_listings' },
+  { host: 'ibaax.sa', table: 'ibaax_commercial_listings' },
+  { host: 'qmra.sa', table: 'qmra_residential_listings' },
   { host: 'sadiq-eltajer.sa', table: 'sadiqeltajer_residential_listings' },
   { host: 'rakez.sa', table: 'rakez_residential_listings' },
   { host: 'tuba.com.sa', table: 'tuba_residential_listings' },
@@ -66,7 +86,6 @@ const SITES = [
   { host: 'eilmalriyada.com', table: 'eilmalriyada_commercial_listings' },
   { host: 'aoujestates.com', table: 'aouj_residential_listings' },
   { host: 'aqarnajran.com', table: 'aqarnajran_residential_listings' },
-  { host: 'albukaeri.sa', table: 'albukaeri_commercial_listings' },
   { host: 'mar-ksa.com', table: 'marksa_residential_listings' },
 ];
 let failed = 0;
