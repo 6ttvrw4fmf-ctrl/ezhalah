@@ -1126,6 +1126,16 @@ or rewrite another engineer's work, and never start a big change in another engi
   Struck rows now get at most a quarter of the budget (`_plan_worklist`). A sweep whose alive count
   falls to 0 with healthy canaries is reading the wrong rows, not a dead site.
 
+- **2026-10-17 (♻️):** a second reader that cannot say WHY it got no answer cannot unstick anything.
+  `mon_served_after_source_gone` sat at ~21 tables for days because every re-read printed «unknown 5».
+  The spot check now lists the oracle's reason per ad (`unknown_examples`): suwar's 5 were «REST 401»
+  (unpublished WordPress post → its own page decides, as daryusuf/rakez), gathern's 919 «transient»
+  units were home-page landings, and ashab's «live» units were rented/sold on their own badge (its
+  crawl skipped them from the building card, so `note_read_gone` never fired). Read the reason first.
+- **2026-10-17 (♻️):** never dispatch a diagnostic workflow on your PR's branch head and then merge:
+  its red run attaches to the head commit and the merge gate refuses ANY non-success check. Push the
+  next commit (the lesson line) after the diagnostics, or dispatch them on a scratch branch.
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
