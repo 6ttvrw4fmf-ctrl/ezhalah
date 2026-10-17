@@ -6,9 +6,10 @@ import { useReducedMotion } from '@/lib/useReducedMotion';
 const IS_WEB = Platform.OS === 'web';
 
 // THE GOLDEN BUZZER (owner 2026-10-11, extended to EVERY card 2026-10-17: «whenever a user clicks on a
-// listing I want this party confetti … on everything»): pressing a card's photo, body or gold «اضغط هنا»
-// button — laptop roomy, laptop tight, phone, native alike — flashes the whole card gold, like a
-// talent-show buzzer, and throws a short burst of confetti. It is
+// listing I want this party confetti … on everything», then «your job is doing it for the 76 sites»):
+// pressing the photo, body or gold «اضغط هنا» button of a card whose listing opens INSIDE Ezhalah —
+// laptop roomy, laptop tight, phone alike — flashes the whole card gold, like a talent-show buzzer,
+// and throws a short burst of confetti (the screen-level party in ConfettiOverlay plays with it). It is
 // DECORATION ONLY — the press handler opens the ad first and bumps `burst` second, so the ad opens
 // even if this layer never paints (backgrounded tab, reduced motion, a throw here).
 //

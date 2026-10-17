@@ -19,6 +19,8 @@ import { typeImg } from '@/theme/propertyIcons';
 import { GoldShineButton } from './CardReveal';
 import { BuzzLayer } from './CardBuzzer';
 import { partyConfetti } from './ConfettiOverlay';
+import { inAppViewerHost } from '@/lib/inAppViewer';
+import { listingOpenUrl } from '@/lib/openListing';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -105,13 +107,17 @@ export function ResultCard({
   const tight = row === 'tight';
   // 'tight' only: the two truncated secondary lines, unfolded by a tap on them.
   const [unfolded, setUnfolded] = useState(false);
-  // EVERY card, every layout (owner 2026-10-17: «whenever a user clicks on a listing I want this party
-  // confetti to appear … on everything»): a press on the photo, the body or the gold button bumps
-  // `burst`, and the golden buzzer + confetti play over the card — laptop roomy, laptop tight, phone.
+  // THE PARTY IS FOR THE SITES THAT OPEN INSIDE EZHALAH (owner 2026-10-17: «whenever a user clicks on a
+  // listing I want this party confetti … on everything», then «your job is doing it for the 76 sites …
+  // the ones after I'll do it later»): on every layout — laptop roomy, laptop tight, phone — a press on
+  // the photo, the body or the gold button bumps `burst` and the golden buzzer + the screen-level
+  // confetti play, but ONLY when this listing opens inside Ezhalah (web, IN_APP_VIEWER_HOSTS). A card
+  // that opens a new tab or the native preview page opens exactly as before, with no party.
   const [burst, setBurst] = useState(0);
+  const partyHere = IS_WEB && !!inAppViewerHost(listingOpenUrl(listing));
   // PRESS = OPEN. The ad opens first, synchronously inside the click (a delayed window.open would be
   // popup-blocked); the buzzer is bumped second and is pure decoration.
-  const fire = () => { onOpen(); setBurst((b) => b + 1); partyConfetti(); };
+  const fire = () => { onOpen(); if (partyHere) { setBurst((b) => b + 1); partyConfetti(); } };
   // Evidence for the «مطابق لطلبك» strip: NEVER read from listing.features / listing.bathrooms (raw,
   // NULL-coerced) — only from listing.canon, the canonical row the predicate actually passed on.
   const evidence = useMemo(() => afEvidence(activeAf ?? [], listing.canon, t), [activeAf, listing.canon, t]);

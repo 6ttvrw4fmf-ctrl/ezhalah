@@ -55,8 +55,11 @@ const rules = (card: string, buzz: string, grid: string, agent: string, i18n: st
   return {
     'the photo-first layout is ONLY behind `if (row === \'roomy\')`; the old compact row and the phone card are still below it':
       lp.length > 500 && card.indexOf("  if (row === 'roomy') {") < card.indexOf('photoColMobile') && /row \? \[card\.photoColRow/.test(card),
-    'press = open FIRST, synchronously: const fire = () => { onOpen(); setBurst(…); partyConfetti() } — no timer, no animation':
-      /const fire = \(\) => \{ onOpen\(\); setBurst\(\(b\) => b \+ 1\); partyConfetti\(\); \};/.test(card),
+    'press = open FIRST, synchronously: const fire = () => { onOpen(); if (partyHere) { setBurst(…); partyConfetti() } } — no timer, no animation':
+      /const fire = \(\) => \{ onOpen\(\); if \(partyHere\) \{ setBurst\(\(b\) => b \+ 1\); partyConfetti\(\); \} \};/.test(card),
+    // Owner 2026-10-17: the party is for the sites that open INSIDE Ezhalah (the in-app viewer list), not every card.
+    'the party plays only for a listing that opens inside Ezhalah: partyHere = IS_WEB && inAppViewerHost(listingOpenUrl(listing))':
+      /const partyHere = IS_WEB && !!inAppViewerHost\(listingOpenUrl\(listing\)\);/.test(card) && /import \{ inAppViewerHost \} from '@\/lib\/inAppViewer';/.test(card),
     // The screen-level party: above the ad sheet/pane, which covers the card\'s own layer on a phone.
     'the ConfettiOverlay is the LAST child of the agent screen (above the AdViewer), and it never takes a tap':
       /<\/AdViewer>|\/>\n    \)\}\n[\s\S]{0,300}<ConfettiOverlay \/>\n    <\/View>\n  \);\n\}/.test(agent) && /pointerEvents="none" style=\{\[StyleSheet\.absoluteFill, s\.top\]\} testID="confetti-overlay"/.test(overlay)
@@ -106,11 +109,16 @@ const mustCatch = (what: string, rule: string, broken: Record<string, boolean>) 
   if (!caught) failed++;
   console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
 };
-const R_OPEN = 'press = open FIRST, synchronously: const fire = () => { onOpen(); setBurst(…); partyConfetti() } — no timer, no animation';
+const R_OPEN = 'press = open FIRST, synchronously: const fire = () => { onOpen(); if (partyHere) { setBurst(…); partyConfetti() } } — no timer, no animation';
+const FIRE = 'const fire = () => { onOpen(); if (partyHere) { setBurst((b) => b + 1); partyConfetti(); } };';
 mustCatch('opening the ad behind a timer (popup-blocked window.open)', R_OPEN,
-  rules(CARD.replace('const fire = () => { onOpen(); setBurst((b) => b + 1); partyConfetti(); };', 'const fire = () => { setBurst((b) => b + 1); partyConfetti(); setTimeout(onOpen, 400); };'), BUZZ, GRID, AGENT, I18N, RESP));
-mustCatch('a card press that forgets the screen-level party', 'press = open FIRST, synchronously: const fire = () => { onOpen(); setBurst(…); partyConfetti() } — no timer, no animation',
-  rules(CARD.replace('const fire = () => { onOpen(); setBurst((b) => b + 1); partyConfetti(); };', 'const fire = () => { onOpen(); setBurst((b) => b + 1); };'), BUZZ, GRID, AGENT, I18N, RESP));
+  rules(CARD.replace(FIRE, 'const fire = () => { if (partyHere) { setBurst((b) => b + 1); partyConfetti(); } setTimeout(onOpen, 400); };'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('a card press that forgets the screen-level party', R_OPEN,
+  rules(CARD.replace(FIRE, 'const fire = () => { onOpen(); if (partyHere) { setBurst((b) => b + 1); } };'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('the party playing for every card again (new-tab and preview sites included)', R_OPEN,
+  rules(CARD.replace(FIRE, 'const fire = () => { onOpen(); setBurst((b) => b + 1); partyConfetti(); };'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('the in-app gate replaced by a constant', 'the party plays only for a listing that opens inside Ezhalah: partyHere = IS_WEB && inAppViewerHost(listingOpenUrl(listing))',
+  rules(CARD.replace('const partyHere = IS_WEB && !!inAppViewerHost(listingOpenUrl(listing));', 'const partyHere = true;'), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('the overlay unmounted from the agent screen', 'the ConfettiOverlay is the LAST child of the agent screen (above the AdViewer), and it never takes a tap',
   rules(CARD, BUZZ, GRID, AGENT.replace('    <ConfettiOverlay />\n    </View>\n  );\n}', '    </View>\n  );\n}'), I18N, RESP));
 mustCatch('the overlay catching taps (it would block the sheet under it)', 'the ConfettiOverlay is the LAST child of the agent screen (above the AdViewer), and it never takes a tap',
