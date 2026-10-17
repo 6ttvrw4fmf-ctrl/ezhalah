@@ -46,6 +46,7 @@ const PROVEN_HOSTS = [
   'wahadat.sa', 'dallali.com', 'remalre.com', 'safainv.sa', 'remax.sa',
   'ibaax.sa', 'qmra.sa',
   'aqaralmuhaysini.com', // 9.96 s on the runner; owner keeps it on (2026-10-17)
+  'albukaeri.sa', 'tamyaz-sa.com', 'ashab.sa', 'macsaib.sa', 'sanadak.sa', 'masaraqarat.com', // 0.7–2.7 s, run 39026362475
 ].join(',');
 check('allowlist is exactly the proven sites', IN_APP_VIEWER_HOSTS.join(',') === PROVEN_HOSTS);
 
@@ -76,10 +77,9 @@ for (const u of [
   'https://satel.sa/x',               // listings.satel.sa was proven, not the bare domain
   'https://www.aqarcity.net/property/28633',   // refuses framing (2026-10-16)
   'https://www.muktamel.com/property/1',   // frames, but ~37 s on phone 4G (2026-10-17)
-  'https://www.tamyaz-sa.com/#property-1', // was on; site timing out 2026-10-17, off until re-proven
-  'https://albukaeri.sa/property/1',  // was on; site timing out 2026-10-17, off until re-proven
+  'https://haraj.com.sa/1',           // SAMEORIGIN (2026-10-17)
+  'https://ialqarawi.com/index.php?router=card&id=1', // ads removed at source + 11 s (2026-10-17)
   'https://sodasyat.sa/single/1',     // SAMEORIGIN for phones (2026-10-17)
-  'https://ashab.sa/properties/1/unit/1',      // bot check inside a frame (2026-10-16)
   '', null, undefined, 'not a url',
 ]) check(`${JSON.stringify(u)} → new tab (unchanged)`, inAppViewerHost(u) === null);
 

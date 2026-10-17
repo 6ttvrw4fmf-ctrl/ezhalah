@@ -14,12 +14,16 @@
 // dealapp + gathern opened). Every host must also show its ad within the speed budget on a phone over
 // throttled 4G, measured from the GitHub runner by e2e/viewer/speed-live.mjs: 3 s until 2026-10-17,
 // when the owner set it to 10 s («if it's below 10 seconds no problem»), which let 20 slower sites in.
-// Left off: frames refused (aqarcity.net, nawafethalwatan.com, nafithh.sa, ryadah.com.sa and
-// sodasyat.sa for phones), bot check or blank inside a frame (ashab.sa, dwelleo.sa 404,
-// masaraqarat.com), login wall (nawait.sa), site down when tested (almuteb.sa 503, tamyaz-sa.com and albukaeri.sa
-// timing out 2026-10-17 — re-prove and re-add when it is back), removed-at-source ads (just.sa),
-// and over budget (muktamel.com ~37 s). aqaralmuhaysini.com measured 9.96 s, right on the line; the owner
-// chose to keep it on anyway (2026-10-17: «put almuhaysini its fine»), so a red run on it is expected noise.
+// Left off (re-checked 2026-10-17 against every platform Ezhalah searches): frames refused for
+// every client (haraj.com.sa, aqarcity.net, albdah.sa, 8floor.sa, nawafethalwatan.com, aqaralsaudia.com,
+// eydah.com, hazim.sa, alhoshan.sa, fursaghyr.com, manzo.com.sa, 1october.com.sa, wadod.sa,
+// nafithh.sa) or for phones (sodasyat.sa; ryadah.com.sa does it on some pages, so it would flap), blank
+// or error inside a frame (dwelleo.sa 404, alnowaisiry.com 403, sadin.com.sa 410), login wall
+// (nawait.sa), site down (almuteb.sa 503), removed-at-source ads (just.sa, ialqarawi.com), and over
+// budget (muktamel.com ~37 s — the owner said to leave it). aqaralmuhaysini.com measured 9.96 s, right
+// on the line; the owner chose to keep it on anyway (2026-10-17: «put almuhaysini its fine»), so a red
+// run on it alone is expected noise. albukaeri.sa and tamyaz-sa.com were off for a few hours while
+// their sites were down and came back once re-proven.
 // We never proxy or strip a site's headers to force an embed; the preview allowlist uses already-
 // loaded data.
 export const IN_APP_VIEWER_HOSTS = [
@@ -90,6 +94,12 @@ export const IN_APP_VIEWER_HOSTS = [
   'ibaax.sa',
   'qmra.sa',
   'aqaralmuhaysini.com',
+  'albukaeri.sa',
+  'tamyaz-sa.com',
+  'ashab.sa',
+  'macsaib.sa',
+  'sanadak.sa',
+  'masaraqarat.com',
 ] as const;
 
 /** The allowlisted host a listing URL belongs to, or null when it must open the old way. */
