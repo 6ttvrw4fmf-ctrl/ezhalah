@@ -13,7 +13,7 @@ import { useAtLeast } from '@/lib/useAtLeast';
 import { PICKER_SHEET_BREAKPOINT } from '@/lib/responsive';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SourceBadge, FEATURE_META, arAttrValue } from '@/components/ResultCard';
-import { dearerSplit, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojFacts } from '@/data/adPageData';
+import { MOJ_SOURCE_URL, PRICE_MAX, PRICE_MIN, dearerSplit, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojDeals, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojDeal, type MojFacts } from '@/data/adPageData';
 import { listingOpenUrl } from '@/lib/openListing';
 import type { Listing } from '@/data/listings';
 
@@ -43,6 +43,7 @@ const MAP_MIN = 150;
 // Marker on the history entry the expanded map pushes (same approach as AdViewer's HISTORY_MARK): the
 // browser's Back closes the map and lands on the viewer's own marked entry, which it treats as «show».
 const SHEET_MARK = 'ezAdMap';
+const DEALS_MARK = 'ezAdDeals';
 // THE TAP MOMENT (owner 2026-10-10): the open happens OPEN_DELAY_MS after the tap — inside the browser's
 // user-activation window, so Safari lets the new tab through — while confetti marks the hand-off. Keep
 // it under ~1s or the tab is blocked.
@@ -194,9 +195,10 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
   // prices around it (each house once), the ministry's actual sales, the same ad on other sites.
   // stats = this ad's OWN type (card 3); group = the whole macro group, the split card's right half — the
   // same group the ministry's left half is built on (owner update 24).
-  type Prices = { stats: AskingPrices | null; group: AskingPrices | null; moj: MojFacts | null; same: Listing[]; price: number | null; area: number | null; typeAr: string };
-  const [prices, setPrices] = useState<Prices>({ stats: null, group: null, moj: null, same: [], price: null, area: null, typeAr: '' });
+  type Prices = { stats: AskingPrices | null; group: AskingPrices | null; moj: MojFacts | null; deals: MojDeal[]; same: Listing[]; price: number | null; area: number | null; typeAr: string };
+  const [prices, setPrices] = useState<Prices>({ stats: null, group: null, moj: null, deals: [], same: [], price: null, area: null, typeAr: '' });
   const commercial = l.macro === 'Commercial';
+  const [explainOpen, setExplainOpen] = useState(false);
   useEffect(() => {
     if (!IS_WEB) return;
     let alive = true;
@@ -206,8 +208,8 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
       // Aqar sale ads only for now (owner update 22): nothing is even fetched for the rest.
       if (!pricesBlockEligible(row)) return;
       const price = Number(row?.price_total), area = Number(row?.area_m2);
-      void Promise.all([fetchAskingPrices(row), fetchGroupPrices(row, commercial ? 'Commercial' : 'Residential'), fetchMojSales(row, commercial ? 'تجاري' : 'سكني'), fetchSameAd(row)]).then(([stats, group, moj, same]) => {
-        if (alive) setPrices({ stats, group, moj, same, price: Number.isFinite(price) && price > 0 ? price : null, area: Number.isFinite(area) && area > 0 ? area : null, typeAr: String(row?.type_ar ?? '') });
+      void Promise.all([fetchAskingPrices(row), fetchGroupPrices(row, commercial ? 'Commercial' : 'Residential'), fetchMojSales(row, commercial ? 'تجاري' : 'سكني'), fetchSameAd(row), fetchMojDeals(row, commercial ? 'تجاري' : 'سكني')]).then(([stats, group, moj, same, deals]) => {
+        if (alive) setPrices({ stats, group, moj, deals, same, price: Number.isFinite(price) && price > 0 ? price : null, area: Number.isFinite(area) && area > 0 ? area : null, typeAr: String(row?.type_ar ?? '') });
       });
     });
     return () => { alive = false; };
@@ -237,14 +239,36 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
       if (st?.[SHEET_MARK]) { const { [SHEET_MARK]: _drop, ...rest } = st; window.history.replaceState(rest, ''); }
     } catch { /* history unavailable: closing still works */ }
   };
+  // ── the ministry's deals: a second in-page sheet over this page, the same history mark pattern as the map ──
+  const [dealsOpen, setDealsOpen] = useState(false);
+  const dealsOpenRef = useRef(dealsOpen); dealsOpenRef.current = dealsOpen;
+  const openDeals = () => {
+    setDealsOpen(true);
+    if (!IS_WEB) return;
+    try {
+      const st = window.history.state;
+      if (!st?.[DEALS_MARK]) window.history.pushState({ ...(st ?? {}), [DEALS_MARK]: true }, '');
+    } catch { /* history unavailable: the sheet still opens */ }
+  };
+  const closeDeals = () => {
+    setDealsOpen(false);
+    if (!IS_WEB) return;
+    try {
+      const st = window.history.state;
+      if (st?.[DEALS_MARK]) { const { [DEALS_MARK]: _drop, ...rest } = st; window.history.replaceState(rest, ''); }
+    } catch { /* history unavailable: closing still works */ }
+  };
   useEffect(() => {
     if (!IS_WEB) return;
-    const onPop = () => { if (mapOpenRef.current && !window.history.state?.[SHEET_MARK]) setMapOpen(false); };
+    const onPop = () => {
+      if (mapOpenRef.current && !window.history.state?.[SHEET_MARK]) setMapOpen(false);
+      if (dealsOpenRef.current && !window.history.state?.[DEALS_MARK]) setDealsOpen(false);
+    };
     // Capture phase: this runs before AdViewer's own Escape (which would hide the whole pane).
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || !mapOpenRef.current) return;
+      if (e.key !== 'Escape' || !(mapOpenRef.current || dealsOpenRef.current)) return;
       e.stopImmediatePropagation();
-      closeMap();
+      if (dealsOpenRef.current) closeDeals(); else closeMap();
     };
     window.addEventListener('popstate', onPop);
     window.addEventListener('keydown', onKey, true);
@@ -342,13 +366,24 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
   // «1.95» (millions, two decimals at most, trailing zeros dropped) · «6,500» · «1,293,000».
   const fmtM = (v: number) => String(Math.round(v / 1e4) / 100);
   const fmtInt = (v: number) => Math.round(v).toLocaleString('en-US');
+  // a deal's m² as the ministry wrote it (172.28 stays 172.28; a whole number stays whole)
+  const fmtArea = (v: number) => v.toLocaleString('en-US', { maximumFractionDigits: 2 });
   // The ministry's period, from the row's own two dates (Gregorian, Western digits): «أكتوبر 2025».
   const monthLabel = (iso: string) => {
     try { return new Intl.DateTimeFormat(locale === 'ar' ? 'ar-u-nu-latn-ca-gregory' : 'en-u-ca-gregory', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`)); }
     catch { return iso.slice(0, 7); }
   };
+  // A specific day, Gregorian, Western digits: «10 أكتوبر 2026».
+  const dayLabel = (iso: string) => {
+    try { return new Intl.DateTimeFormat(locale === 'ar' ? 'ar-u-nu-latn-ca-gregory' : 'en-u-ca-gregory', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`)); }
+    catch { return iso; }
+  };
   // The type's plural for card 3's sentence («من كل 10 فلل»), in Arabic and in English.
   const typePlural = () => (locale === 'ar' ? typePluralAr(prices.typeAr || typeLabel) : (/s$/i.test(typeLabel) ? typeLabel : `${typeLabel}s`));
+  // The property types «Listed now» is built from — the SAME list the query uses (RESIDENTIAL_GROUP_AR), spelled out.
+  const typesList = t(commercial
+    ? 'shops, offices, showrooms, warehouses, commercial land and the other commercial types'
+    : 'villas, apartments, floors, residential land, buildings, townhouses and rooftop annexes');
   const bullet = (text: string, key?: string) => (
     <View key={key ?? text} style={s.bullet}>
       <View style={s.bulletDot} />
@@ -566,12 +601,17 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                 const ours = st ? {
                   key: 'ours', title: t('Listed now'), sub: t(commercial ? 'commercial property' : 'residential property'), tag: t('Ezhalah'), gov: false,
                   rows: [fmtInt(st.houses), `${fmtM(st.mean)} ${t('million')}`, st.meanPpm != null ? fmtInt(st.meanPpm) : null, `${fmtM(st.p10)} – ${fmtM(st.p90)} ${t('million')}`],
-                  foot: `${district || city} · ${t('now')} · ${t(commercial ? 'shops, offices and land' : 'villas, apartments, floors and land')}`,
+                  foot: `${district || city} · ${t('now')}`,
+                  note: `${t(commercial ? 'All commercial types listed for sale: {types}' : 'All residential types listed for sale: {types}', { types: typesList })}`,
+                  cadence: '',
                 } : null;
                 const gov = mj ? {
                   key: 'moj', title: t('Actual sales'), sub: t(commercial ? 'commercial property' : 'residential property'), tag: t('Ministry of Justice'), gov: true,
                   rows: [fmtInt(mj.deals), `${fmtM(mj.avgDeal)} ${t('million')}`, fmtInt(mj.avgPpm), mj.p10 != null && mj.p90 != null ? `${fmtM(mj.p10)} – ${fmtM(mj.p90)} ${t('million')}` : null],
-                  foot: `${district || city} · ${monthLabel(mj.from)} – ${monthLabel(mj.to)} · ${t(commercial ? 'shops, offices and land' : 'villas, apartments and land')}`,
+                  foot: `${district || city} · ${monthLabel(mj.from)} – ${monthLabel(mj.to)}`,
+                  note: t(commercial ? 'Classified commercial by the Ministry, which does not record the property type.' : 'Classified residential by the Ministry, which does not record the property type.'),
+                  // owner 2026-10-16: say on the card that it is refreshed weekly, with the day of the last refresh (the job's own stamp)
+                  cadence: mj.updatedAt ? t('Updated weekly from the Ministry’s data · last update {date}', { date: dayLabel(mj.updatedAt) }) : t('Updated weekly from the Ministry’s data'),
                 } : null;
                 const halves = [ours, gov].filter((h): h is NonNullable<typeof h> => !!h);
                 const labels = [t('Count'), t('Average price'), t('Average price per m²'), t('8 of every 10 between')];
@@ -585,13 +625,72 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                           <View style={[s.tag, h.gov && s.tagGov, s.halfTag]}><Text style={[s.tagTx, h.gov && s.tagGovTx]}>{h.tag}</Text></View>
                           {labels.map((label, i) => cell(label, h.rows[i], `${h.key}-${i}`))}
                           <Text style={[s.halfFoot, tx]}>{h.foot}</Text>
-                          {h.gov ? <Text style={[s.halfFoot, tx]}>{t('Source: Ministry of Justice')}</Text> : null}
+                          <Text style={[s.halfFoot, tx]}>{h.note}</Text>
+                          {h.cadence ? <Text style={[s.halfFoot, tx]}>{h.cadence}</Text> : null}
+                          {h.gov ? (
+                            <Pressable
+                              testID="listing-preview-moj-source"
+                              onPress={() => open(MOJ_SOURCE_URL)}
+                              accessibilityRole="link"
+                              accessibilityLabel={t('Open the Ministry of Justice page in a new tab')}
+                              style={s.srcLink}
+                            >
+                              <Text style={[s.halfFoot, s.srcLinkTx, tx]}>{t('Source: Ministry of Justice')}</Text>
+                              <Ionicons name="open-outline" size={12} color={colors.primary} />
+                            </Pressable>
+                          ) : null}
+                          {h.gov && prices.deals.length > 0 ? (
+                            <Pressable
+                              testID="listing-preview-moj-deals"
+                              onPress={openDeals}
+                              accessibilityRole="button"
+                              accessibilityLabel={t('Show the deals ({n})', { n: fmtInt(prices.deals.length) })}
+                              style={({ hovered }: any) => [s.dealsBtn, hovered && s.hover]}
+                            >
+                              <Ionicons name="list-outline" size={14} color={colors.primary} />
+                              <Text style={s.dealsBtnTx}>{t('Show the deals ({n})', { n: fmtInt(prices.deals.length) })}</Text>
+                            </Pressable>
+                          ) : null}
                         </View>
                       ))}
                     </View>
                   </View>
                 );
               })()}
+
+              {/* HOW THESE NUMBERS ARE MADE (owner 2026-10-16): the types, the area, the ads and the filters behind
+                  «Listed now», and what the ministry's figures do and do not say. Every figure in a line is read from
+                  the same stats object the card above prints — never typed. */}
+              {prices.group ? (
+                <View testID="listing-preview-prices-explain" style={s.pcard}>
+                  <Pressable
+                    onPress={() => setExplainOpen((o) => !o)}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: explainOpen }}
+                    style={s.pcardHead}
+                  >
+                    <Text style={[s.pcardTitle, tx]}>{t('How we calculate these numbers')}</Text>
+                    <Ionicons name={explainOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.muted} />
+                  </Pressable>
+                  {explainOpen ? (
+                    <View style={{ gap: 6 }}>
+                      {bullet(t('Listed now: the average of the sale ads listed today in {district}, {city}, from every website Ezhalah shows, not from one website.', { district: district || city, city }))}
+                      {bullet(t('Property types included: {types}.', { types: typesList }))}
+                      {bullet(t('Each property counts once, even when several websites list it: {ads} ads from {sites} websites became {houses} properties.', { ads: fmtInt(prices.group.ads), sites: fmtInt(prices.group.sites), houses: fmtInt(prices.group.houses) }))}
+                      {bullet(t('Prices below {min} or above {max} SAR are left out as likely typing errors.', { min: fmtInt(PRICE_MIN), max: fmtInt(PRICE_MAX) }))}
+                      {bullet(t('The average per m² is the average of each property’s price divided by its own area (a mean, not a median).'))}
+                      {bullet(t('Other websites can show different numbers because each one calculates in its own way (property types, the area covered, mean or median). We show our method in full so you can compare.'))}
+                      {prices.moj ? bullet(t(commercial
+                        ? 'Actual sales: the deals recorded by the Ministry of Justice in the period shown, with its numbers unchanged. The Ministry classifies each deal as residential or commercial and does not record the property type, so the figures cover every deal it classified commercial in this district.'
+                        : 'Actual sales: the deals recorded by the Ministry of Justice in the period shown, with its numbers unchanged. The Ministry classifies each deal as residential or commercial and does not record the property type, so the figures cover every deal it classified residential in this district; villa, apartment and land deals are not separated.')) : null}
+                      {prices.deals.length > 0 ? bullet(t('Tap «Show the deals» under the ministry’s half to see those deals one by one, as the ministry recorded them.')) : null}
+                      {prices.moj?.path ? bullet(t('To see the same sales in the ministry’s report: open «Source: Ministry of Justice», then choose in its filters Region / City / District: {path}, property class: {cls}, and the period {from} to {to}. The report cannot open already filtered.', { path: prices.moj.path, cls: commercial ? 'تجاري' : 'سكني', from: prices.moj.from, to: prices.moj.to })) : null}
+                      {prices.moj ? bullet(t('We refresh the Ministry’s numbers and deals automatically every week{last}. The Ministry’s own records can lag, so we print the exact period of the deals.', { last: prices.moj.updatedAt ? t(' (last update {date})', { date: dayLabel(prices.moj.updatedAt) }) : '' })) : null}
+                      {bullet(t('These are neighbourhood numbers. They are not a valuation of this property and not the sale price of a similar one.'))}
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
 
               {prices.same.length > 0 && (
                 <View testID="listing-preview-same-ad" style={[s.pcard, s.same]}>
@@ -635,7 +734,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                     ))}
                   </View>
                   {bullet(t('Of {n} {type} listed in the district: {dearer} cost more per m² than this ad, and {cheaper} less', { n: fmtInt(split.n), type: typePlural(), dearer: fmtInt(split.dearer), cheaper: fmtInt(split.cheaper) }))}
-                  <Text style={[s.pcardSub, tx]}>{t('The same property ({area} m²) priced at the district average:', { area: fmtInt(prices.area) })}</Text>
+                  <Text style={[s.pcardSub, tx]}>{t('This property’s area ({area} m²) at the average listed price per m² in the district ({type}):', { area: fmtInt(prices.area), type: typePlural() })}</Text>
                   <View style={s.tiles}>
                     <View style={[s.tile, s.tileMe]}>
                       <Text style={s.tileK}>{t('Price in the ad')}</Text>
@@ -646,13 +745,6 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                         <Text style={s.tileK}>{t('At the listed average ≈')}</Text>
                         <Text style={s.tileV}>{fmtInt(tileFromShown(prices.stats.meanPpm, prices.area))}</Text>
                         <Text style={s.tileSmall}>{`${fmtInt(prices.stats.meanPpm)} × ${fmtInt(prices.area)}`}</Text>
-                      </View>
-                    )}
-                    {prices.moj && (
-                      <View style={s.tile}>
-                        <Text style={s.tileK}>{t('At the sold average ≈')}</Text>
-                        <Text style={s.tileV}>{fmtInt(tileFromShown(prices.moj.avgPpm, prices.area))}</Text>
-                        <Text style={s.tileSmall}>{`${fmtInt(prices.moj.avgPpm)} × ${fmtInt(prices.area)} · ${t(commercial ? 'all commercial types' : 'all residential types')}`}</Text>
                       </View>
                     )}
                   </View>
@@ -718,6 +810,55 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
           <Pressable
             testID="listing-preview-map-close"
             onPress={closeMap}
+            accessibilityRole="button"
+            accessibilityLabel={t('Close')}
+            style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
+            // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
+            dataSet={{ ...TAP44 }}
+          >
+            <Ionicons name="close" size={22} color={colors.ink} />
+          </Pressable>
+        </View>
+      ) : null}
+
+      {/* the ministry's deals, one row each — our own list of the stored rows, never the ministry's page in a frame
+          (it forbids framing); the source link opens it in a new tab */}
+      {dealsOpen && IS_WEB && prices.moj && prices.deals.length > 0 ? (
+        <View testID="listing-preview-moj-deals-sheet" style={s.mapSheet}>
+          <View style={s.dealsHead}>
+            <Text style={[s.dealsTitle, tx]}>{t('Deals recorded by the Ministry of Justice')}</Text>
+            <Text style={[s.dealsSub, tx]}>{`${district || city} · ${t(commercial ? 'commercial property' : 'residential property')} · ${monthLabel(prices.moj.from)} – ${monthLabel(prices.moj.to)} · ${t('{n} deals', { n: fmtInt(prices.deals.length) })} · ${t('Updated weekly')}`}</Text>
+            <Text style={[s.dealsSub, tx]}>{t('As the Ministry recorded them, unaltered. The Ministry does not record the property type.')}</Text>
+            <Pressable
+              testID="listing-preview-moj-deals-source"
+              onPress={() => open(MOJ_SOURCE_URL)}
+              accessibilityRole="link"
+              accessibilityLabel={t('Open the Ministry of Justice page in a new tab')}
+              style={s.srcLink}
+            >
+              <Text style={[s.halfFoot, s.srcLinkTx, tx]}>{t('Source: Ministry of Justice')}</Text>
+              <Ionicons name="open-outline" size={12} color={colors.primary} />
+            </Pressable>
+          </View>
+          <View style={[s.dealRow, s.dealHeadRow]}>
+            {[t('Deal date'), t('Area m²'), t('Deal price'), t('m² price'), t('Deal reference')].map((h) => (
+              <Text key={h} numberOfLines={1} style={[s.dealCell, s.dealCellHead]}>{h}</Text>
+            ))}
+          </View>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
+            {prices.deals.map((d) => (
+              <View key={d.ref} style={s.dealRow}>
+                <Text numberOfLines={1} style={s.dealCell}>{d.date}</Text>
+                <Text numberOfLines={1} style={s.dealCell}>{fmtArea(d.area)}</Text>
+                <Text numberOfLines={1} style={s.dealCell}>{fmtInt(d.price)}</Text>
+                <Text numberOfLines={1} style={s.dealCell}>{fmtInt(d.ppm)}</Text>
+                <Text numberOfLines={1} style={[s.dealCell, s.dealRef]}>{d.ref}</Text>
+              </View>
+            ))}
+          </ScrollView>
+          <Pressable
+            testID="listing-preview-moj-deals-close"
+            onPress={closeDeals}
             accessibilityRole="button"
             accessibilityLabel={t('Close')}
             style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
@@ -803,6 +944,17 @@ const s = StyleSheet.create({
   },
   mapChipTx: { fontSize: 13, fontWeight: '700', color: lightColors.ink },
   mapSheet: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.surface },
+  // the ministry's deals sheet: a head, a sticky header row, then one row per deal
+  dealsBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 6, marginTop: 6, borderWidth: 1, borderColor: colors.tintLine, backgroundColor: colors.tint, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 5 },
+  dealsBtnTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
+  dealsHead: { paddingTop: 60, paddingHorizontal: 16, gap: 4 },
+  dealsTitle: { fontSize: 16, fontWeight: '700', color: colors.ink },
+  dealsSub: { fontSize: 12, lineHeight: 17, color: colors.muted },
+  dealRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.line },
+  dealHeadRow: { marginTop: 10, backgroundColor: colors.surface2 },
+  dealCell: { flex: 1, minWidth: 0, fontSize: 12.5, color: colors.dark, textAlign: 'center', fontVariant: ['tabular-nums'] },
+  dealCellHead: { fontSize: 11, fontWeight: '600', color: colors.muted },
+  dealRef: { color: colors.muted },
   mapClose: {
     position: 'absolute', top: 12, width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, boxShadow: '0 2px 10px rgba(20,40,30,0.18)',
@@ -834,6 +986,9 @@ const s = StyleSheet.create({
   // The value does NOT stretch (alignSelf start): it sits under its label at the RTL start, numerals LTR inside.
   cellV2: { alignSelf: 'flex-start', fontSize: 14.5, fontWeight: '700', color: colors.dark, fontVariant: ['tabular-nums'] },
   halfFoot: { fontSize: 11, lineHeight: 15, color: colors.muted, marginTop: 2 },
+  // the ministry source: a real link (new tab), underlined and in the brand colour so it reads as one
+  srcLink: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 4, marginTop: 2 },
+  srcLinkTx: { color: colors.primary, textDecorationLine: 'underline', marginTop: 0 },
   same: { gap: 6 },
   sameH: { fontSize: 13.5, color: colors.ink },
   // Two columns that wrap into rows — a third site goes to the next row, nothing scrolls sideways.

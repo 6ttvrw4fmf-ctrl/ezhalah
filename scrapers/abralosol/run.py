@@ -421,7 +421,19 @@ def _city(district: Optional[str], text: Optional[str] = None) -> tuple[Optional
         return MUBARRAZ_CITY, MUBARRAZ_REGION, "ad_text"
     if d and _DISTRICT_SUFFIX.sub("", d).removeprefix("حي ").strip() in MUBARRAZ_DISTRICTS:
         return MUBARRAZ_CITY, MUBARRAZ_REGION, "district_mubarraz"
+    if _OTHER_REGION.search(d + " " + t):
+        # The ad places itself outside Al-Ahsa: the office default would file it in the WRONG city.
+        return None, None, "names_other_region"
     return OFFICE_CITY, N.region_for_city(OFFICE_CITY), "office_default"
+
+
+# The office also sells outside Al-Ahsa. 17994690 (2026-10-16) «أرض للبيع في مدينة الروضة – حائل … بمنطقة حائل»
+# took office_default and was served to customers searching الهفوف. An ad that names a place in another
+# REGION never takes the office's city: unknown is honest, a Hofuf filing is wrong (🆕 backlog #588).
+# الرياض / مكة / المدينة are absent for the reason OTHER_CITY_TOKENS gives: here they are Al-Ahsa street
+# and district names; «المدينة المنورة» is the unambiguous form.
+_OTHER_REGION = re.compile(r"(حائل|القصيم|بريدة|عنيزة|تبوك|جازان|نجران|الباحة|الجوف|عسير|أبها|ابها|"
+                           r"المدينة المنورة|جدة|الطائف|خميس مشيط|ينبع)")
 
 
 # The ad body's own explicit per-metre statement, e.g. «... وسعر المتر 1,600 ريال». It overrides a

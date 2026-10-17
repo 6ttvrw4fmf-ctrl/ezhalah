@@ -581,3 +581,12 @@ def test_sanadak_structured_area_beats_its_approximate_prose():
          "description": "الموقع : الرياض حي قرطبة\nالمساحة : 120م تقريبا"}
     p = sanadak_page("https://sanadak.sa/property-details/x", fetch=lambda url: (o, "", url))
     assert compare_listing({"area_m2": 105, "bedrooms": 2}, p)["area"] == MATCH
+
+def test_three_to_ten_written_as_words_on_the_keyword_line():
+    # aljassim 17947950 (2026-10-16): the structured room cell «أربع غرف», stored 4, scored MISMATCH because the
+    # description's dual «غرفتين نوم» was the only figure the scorer could read.
+    p = page("فيلا جاهز للايجار في الخالدية أربع غرف", "(غرفة نوم رئيسية ماستر مع دورة مياة-صالة غرفتين نوم مع دورة مياة)")
+    assert compare_listing({"bedrooms": 4}, p)["bedrooms"] == MATCH
+    assert compare_listing({"bedrooms": 5}, page("أربع غرف"))["bedrooms"] == MISMATCH
+    # A word that only CONTAINS a number word is not one («مستودع» holds «ست»).
+    assert compare_listing({"bedrooms": 6}, page("غرف مستودع"))["bedrooms"] != MATCH

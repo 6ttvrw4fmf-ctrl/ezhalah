@@ -172,6 +172,20 @@ def test_a_price_the_source_does_not_state_is_silence_not_a_defect():
         assert R.parse_money(raw) == (None, None, "")
 
 
+def test_a_zero_bid_beside_an_open_floor_is_no_price_not_zero_riyals():
+    """Live ids 556 / 557 (🦅 Falcon 2026-10-16): «سعر السوم 0» + «سعر الحد: على السوم» was served at «0 ر.س».
+    A 0 bid is no bid: the row clears its stored total (AUTHORITATIVE_NULL), never 0. Mutation: without
+    the zero-bid guard price_total is 0."""
+    row, _, why = mapped(som="0", limit="على السوم")
+    assert row is not None, why
+    assert row["price_total"] is R.db.AUTHORITATIVE_NULL
+    # a real bid, and a real floor under a 0 bid, are still the source's figures
+    row, _, _ = mapped(som="350.000", limit="على السوم")
+    assert row["price_total"] == 350000
+    row, _, _ = mapped(som="0", limit="420.000")
+    assert row["price_total"] == 420000
+
+
 def test_a_per_metre_rate_is_stored_as_a_rate_and_never_multiplied_here():
     """«1500 للمتر» on 526 m². Owner rule 2026-09-03 derives ppm × area in the SEARCH/DISPLAY layer
     only (shown as ≈, sale-only); a scraper writing it into price_total claims the advertiser

@@ -143,13 +143,19 @@ for (const f of pyFiles) {
 // scraping engineer hoisted session()'s headers into a shared _HEADERS dict (for the
 // retry_smarter_session() profile/proxy probe); re-verified: still the file's ONLY
 // _extract_price(desc_raw) call, tenth shift, same exception.
-const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:663']);
+// SECOND DECLARED EXCEPTION — an OWNER DECISION, not a pending one (2026-10-17: «Haraj = ALL real-estate offers …
+// read the facts from the seller's own words … price only when a number is tied to a price word»). An
+// unlicensed Haraj post has no price field at all; scrapers/haraj/prose.py:asking_price() is the narrow,
+// tested reader the owner specified (a price word + one figure; a bid, a range, two figures, a deposit,
+// a phone or a count → NULL; pinned by scrapers/common/tests/test_haraj_prose_offers.py). Line-anchored like
+// sadin's: re-verify it is still the file's ONLY asking_price(title, description) call before re-pinning.
+const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:663', 'scrapers/haraj/run.py:317']);
 const proseUnapproved = proseOffenders.filter(o => !PROSE_ALLOWLIST.has(o.split(': ')[0]));
 check('no scraper assigns a listing price from prose (outside the declared, dated exception)',
   proseUnapproved.length === 0);
 for (const o of proseUnapproved) console.error('  PROSE-PRICE  ' + o);
-check('the sadin exception is still the ONLY one, and still present (so it cannot be forgotten)',
-  proseOffenders.length === 1 && PROSE_ALLOWLIST.has(proseOffenders[0]?.split(': ')[0]));
+check('the declared exceptions (sadin, haraj) are the ONLY ones, and both still present (so neither is forgotten)',
+  proseOffenders.length === PROSE_ALLOWLIST.size && proseOffenders.every(o => PROSE_ALLOWLIST.has(o.split(': ')[0])));
 
 // LAYER 3 — a per-square-metre rate may never be stored AS the total. Found live in wasalt (7
 // land rows held averageSalePricePerSqm in price_total) and aqar (20 rows held «سعر المتر»).

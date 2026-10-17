@@ -16,12 +16,9 @@ on:
       skip_hours:
         description: "Skip the newest N hourly files (use a window no earlier hand-check used)"
         default: "18"
-  # A PUSH that changes the Haraj crawler (push path filters read the pushed commits only, so an
-  # unrelated push on the same PR does not re-crawl Haraj — a pull_request filter reads the whole PR).
-  push:
-    branches-ignore: [main]
-    paths:
-      - "scrapers/haraj/**"
+  # The push trigger was removed 2026-10-17: Haraj is LIVE (haraj-sync.yml), and a shadow crawl on every
+  # branch push would read haraj.com.sa IN PARALLEL with the live crawl — two readers break the owner's
+  # ≤ 1 request/second rule. The classifier tests run in haraj-sync.yml and the scraper test suite.
 
 concurrency:
   group: haraj-shadow

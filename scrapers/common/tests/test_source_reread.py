@@ -79,3 +79,11 @@ def test_slow_host_is_read_the_way_its_scraper_reads_it(monkeypatch):
     assert SR.read_page("https://www.muktamel.com/real-estates/34463") == (200, "<html>ok</html>")
     assert seen == {"impersonate": "chrome124", "timeout": 45}
     assert SR.read_page("https://sa.aqar.fm/ad/1") == (599, "probe")
+
+
+def test_a_price_label_keeps_its_bare_value():
+    # abaad 17954821 (2026-10-16): «إجمالي السعر» / «290720» with the riyal sign as an <img>.
+    body = ('<div class="detail-item"><span class="k">سعر المتر</span><div class="v"><span>460</span>'
+            '<img alt="sar"></div></div><div class="detail-item"><span class="k">إجمالي السعر</span>'
+            '<div class="v price-value"><span>290720</span><img alt="sar"></div></div>')
+    assert any("إجمالي السعر 290720" in x for x in page_evidence(body)["evidence_lines"])

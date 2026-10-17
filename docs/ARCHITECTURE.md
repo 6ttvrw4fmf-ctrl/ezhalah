@@ -387,8 +387,14 @@ operating on the restored turns' own embedded queries and paging state.
 ### 7.5 Listing viewer (`src/components/AdViewer.tsx`)
 
 Owner-approved web behaviour (2026-10-03): Deal App and Gathern open their real pages in plain
-iframes, with their own headers unchanged. The allowlist in `src/lib/inAppViewer.ts` is exactly
-`dealapp.sa,gathern.co`. No proxy, header stripping, or framing bypass is permitted.
+iframes, with their own headers unchanged. No proxy, header stripping, or framing bypass is permitted.
+Owner 2026-10-16: more sites open the same way, with no new design. On 2026-10-16, 47 more hosts were
+added to `IN_APP_VIEWER_HOSTS` (49 in all). ryadah.com.sa and wahadat.sa were added and then removed after
+the live guard caught them (ryadah refuses framing for phones, and wahadat took ~6 s from the US runner). A host joins only after a live frame proof, which means
+two live ads framed like AdViewer, a top-level control load, and a calibration where Aqar and Wasalt
+must fail. It must also show its ad within about 2 s on phone 4G, so `e2e/viewer/speed-live.mjs`
+(which must list every host) stays green. A host that later refuses framing or turns slow comes off
+the list.
 
 Aqar, Aqar Monthly and the 50 owner-approved non-embeddable platforms (2026-10-04, exact hosts in
 `IN_APP_PREVIEW_HOSTS`) use the same panel with a native `ListingPreview` of the

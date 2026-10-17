@@ -534,8 +534,9 @@ def test_partially_furnished_is_not_furnished():
     assert "حالة التأثيث" not in page
     page = page.replace('<span class="fxs fxs--gray">ماستر</span>',
                         '<span class="fxs fxs--gray">مفروشة جزئي</span>')
-    assert R.normalize.amenities_from_text("مفروشة جزئي").get("furnished") is True, \
-        "the shared map would say yes — which is why the chip is dropped here"
+    # The shared map used to say yes here, which is why sakan drops the chip; since 2026-10-16 it says
+    # nothing itself (partly furnished is neither yes nor no), and the sakan row must still carry no answer.
+    assert R.normalize.amenities_from_text("مفروشة جزئي").get("furnished") is None
     row, _, _ = _row(BUY_URL, page)
     assert "furnished" not in row, "«partially furnished» is neither a yes nor a no"
 

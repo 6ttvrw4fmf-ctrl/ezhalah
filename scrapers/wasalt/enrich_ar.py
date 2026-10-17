@@ -113,6 +113,112 @@ def _extract(pdv: dict) -> tuple[dict, Optional[str], Optional[str]]:
     return d, pi.get("city"), pi.get("district")
 
 
+# ── amenities the ad's OWN description states (🦅 Falcon, 2026-10-16) ─────────────────────────────
+# wasalt publishes NO structured field for these three anywhere in propertyDetailsV3: measured over the
+# 62,491 active residential rows whose payload we keep in ar_data, neither `attributes`,
+# `additionalAttributes` nor `propertyInfo` carries an elevator, air-conditioning or private-entrance key,
+# and run.py deliberately maps none of them (scripts/verify-wasalt-amenity-vocabulary.ts). So the column
+# was NULL on 100% of rows while 3,222 descriptions say «مصعد», 2,817 «مكيف/تكييف» and 547 «مدخل خاص» —
+# and a customer asking the Advanced Filter for an elevator could never find one wasalt ad
+# (ops_af_score 10-16: wasalt 0 of 5 findable).
+#
+# ADVANCED_FILTER_SOURCE_TRUTH §2 allows prose for exactly this case (no structured counterpart anywhere on
+# the platform), and only ever YES or nothing: «لا يوجد مصعد», «تأسيس مصعد», «قريب من …» and a contradiction
+# all stay NULL — never False. The fields wasalt DOES publish structurally (furnishingType, the
+# featureAmenities vocabulary run.py reads: parking, kitchen, maid, driver, laundry, balcony) are never
+# read from prose here: PROSE_ONLY is the whole list.
+PROSE_ONLY = ("elevator", "air_conditioner", "private_entrance")
+
+
+# Two shapes measured on the first backfill (2,849 elevator YES, 4 wrong, 2026-10-16):
+#  · some descriptions carry the two CHARACTERS «\\n» instead of a line break, so html_block_lines() saw one long
+#    line and a «تأسيس مصعد» bullet shared a clause with the next bullet (442940, 526753);
+#  · a LABELLED line, «المصعد: لا يوجد مصعد» / «المصعد: غير راكب، ويوجد تأسيس للمصعد», let the label word itself vote
+#    YES (9313822, 11923578). When the value after a short label says no / not installed / prepared, the label is
+#    not a statement: only the value is read, so the line resolves to NULL.
+_LITERAL_NL = "\\n"
+_LABEL_LINE = re.compile(r"^\s*([^:\n]{1,24}):\s*(.+)$")
+_NO_WORDS = re.compile(r"(?<![ء-ي\w])(?:و?غير|لا|بدون|تأسيس|مؤسس)(?![ء-ي])")
+
+
+_NOT_INSTALLED = {
+    "elevator": re.compile(r"(?:تأسيس|مؤسس|مهيأ|غير\s+راكب)\S*\s*(?:ل|لل|ال)?مصعد|مصعد\s*(?:مؤسس|غير\s+راكب)"),
+    "air_conditioner": re.compile(r"(?:تأسيس|مؤسس)\S*\s*(?:ل|لل|ال)?(?:مكيف|تكييف)|(?:مكيفات|تكييف)\s*(?:مؤسس|غير\s+راكب)"),
+}
+
+
+def _statement_lines(text: str) -> str:
+    out = []
+    for line in text.split("\n"):
+        m = _LABEL_LINE.match(line)
+        out.append(m.group(2) if m and _NO_WORDS.search(m.group(2)) else line)
+    return "\n".join(out)
+
+
+def prose_amenities(d: Any) -> dict[str, bool]:
+    """{column: True} for the PROSE_ONLY amenities this ad's own description states; {} otherwise."""
+    if not isinstance(d, dict) or "_err" in d:
+        return {}
+    desc = (d.get("propertyInfo") or {}).get("description")
+    if not isinstance(desc, str) or not desc.strip():
+        return {}
+    # Imported here, not at module top: the enrich barriers stub `scrapers.common` with only `db`.
+    from scrapers.common import normalize
+    lines = _statement_lines(normalize.html_block_lines(desc.replace(_LITERAL_NL, "\n")))
+    found = normalize.prose_amenities_yes(lines)
+    # An ad that ANYWHERE calls the fixture prepared-only or not installed has not stated YES, whatever another
+    # line implies («مدخل مرورا بالمصعد» beside «مؤسس مصعد», 526753): unknown, never YES.
+    for col, rx in _NOT_INSTALLED.items():
+        if found.get(col) and rx.search(lines):
+            found.pop(col)
+    return {k: True for k in PROSE_ONLY if found.get(k) is True}
+
+
+# The rows enriched BEFORE prose_amenities existed are never fetched again (ar_fetched stays true), so
+# every run first sweeps them from the payload we already hold: no proxy, no page fetch, the ad's own
+# stored words. Only rows whose column is still NULL and whose description carries the word are read,
+# so after the first pass each run re-reads only the few the matcher declined (a negation, «تأسيس»).
+_PROSE_SCAN = {"elevator": ("مصعد",), "air_conditioner": ("مكيف", "تكييف"), "private_entrance": ("مدخل",)}
+_DESC = "ar_data->propertyInfo->>description"
+
+
+def prose_backfill(c: Any, table: str, page: int = 500, cap: int = 20000) -> dict[str, int]:
+    """Write the YES answers the stored descriptions state into still-NULL columns. Returns per-column counts."""
+    out: dict[str, int] = {}
+    for col, words in _PROSE_SCAN.items():
+        written, last, read = 0, 0, 0
+        while read < cap:
+            q = (c.table(table).select(f"id,desc:{_DESC}").eq("active", True).is_(col, "null")
+                 .or_(",".join(f"{_DESC}.ilike.*{w}*" for w in words)).gt("id", last).order("id").limit(page))
+            rows = q.execute().data or []
+            if not rows:
+                break
+            read += len(rows)
+            last = rows[-1]["id"]
+            for r in rows:
+                if prose_amenities({"propertyInfo": {"description": r.get("desc")}}).get(col):
+                    # .is_(col, null) again: never overwrite a value another writer set meanwhile.
+                    c.table(table).update({col: True}).eq("id", r["id"]).is_(col, "null").execute()
+                    written += 1
+        out[col] = written
+        # RE-CHECK what an earlier reader wrote: a YES whose own description no longer reads YES under the
+        # current reader goes back to unknown. Only this module writes these three wasalt columns (run.py maps
+        # none of them), so a YES here is always one of ours to re-judge.
+        unset, last = 0, 0
+        while True:
+            rows = (c.table(table).select(f"id,desc:{_DESC}").eq("active", True).eq(col, True)
+                    .gt("id", last).order("id").limit(page).execute().data or [])
+            if not rows:
+                break
+            last = rows[-1]["id"]
+            for r in rows:
+                if not prose_amenities({"propertyInfo": {"description": r.get("desc")}}).get(col):
+                    c.table(table).update({col: None}).eq("id", r["id"]).eq(col, True).execute()
+                    unset += 1
+        out[f"{col}_unset"] = unset
+    return out
+
+
 _local = threading.local()
 
 
@@ -481,6 +587,7 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
         if "_err" in d:
             d = bump_err(d, row.get("ar_data"))
         upd: dict[str, Any] = {"ar_fetched": True, "ar_fetched_at": _now_iso(), "ar_data": d}
+        upd.update(prose_amenities(d))   # YES-only: a silent description writes nothing, never False
         if city_ar:
             upd["city_ar"] = city_ar
         if dist_ar:
@@ -597,6 +704,11 @@ def main() -> int:
     platform = f"wasalt_enrich_ar_{suffix}"
     run_id = db.begin_run(platform)
     try:
+        try:
+            prose = prose_backfill(db.sb(), args.table)
+            print(f"  prose amenities written from stored descriptions: {prose}", flush=True)
+        except Exception as e:  # noqa: BLE001 — the backfill never blocks the enrich run itself
+            print(f"  ✗ prose backfill skipped: {str(e)[:120]}", flush=True)
         stats = enrich_table(args.table, args.limit, args.workers, args.shard, args.shards,
                              args.max_pending, args.allow_backfill,
                              args.retry_errs, args.err_backoff_hours, args.max_seconds)

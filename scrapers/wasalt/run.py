@@ -725,7 +725,12 @@ def upsert(row: dict, main_type: str) -> None:
 _STOPS: list[str] = []
 _EMPTY_PAGE_RETRY_PAUSE_S = float(os.environ.get("WASALT_EMPTY_PAGE_RETRY_PAUSE_S", "8"))
 # Re-asks of a valid empty mid-walk page, each on a fresh proxy exit (2026-10-16, backlog 532).
-_EMPTY_PAGE_RETRIES = int(os.environ.get("WASALT_EMPTY_PAGE_RETRIES", "3"))
+_EMPTY_PAGE_RETRIES = int(os.environ.get("WASALT_EMPTY_PAGE_RETRIES", "1"))
+# Consecutive pages the source serves empty before the walk gives up on the slice. The empty
+# pages come in CLUSTERS and the catalogue answers again after them: the 10-16 third proof sweep
+# read villa-townhouse/rent's pages 20-25 after empty 16, 18, 19 (30 -> 630 rows), while three
+# slices gave up at 3 in a row (apartment/rent 8-10, villa/sale 7-9, floor/sale 3-5).
+_MAX_EMPTY_PAGES_IN_A_ROW = int(os.environ.get("WASALT_MAX_EMPTY_PAGES_IN_A_ROW", "10"))
 # Pages a cache-busted re-ask answered after the plain URL served them empty, printed in the
 # run's notes: the evidence for (or against) the stored-empty-render explanation.
 _ROUTE_ROTATIONS_RECOVERED: list[str] = []
@@ -776,6 +781,8 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[
     upserter = db.upsert_wasalt_commercial_batch if is_commercial else db.upsert_wasalt_residential_batch
     upserted = 0
     truncated = False
+    skipped: list[int] = []
+    empty_run = 0
     for page in range(1, pages + 1):
         pg_count, pg_total, props, valid = fetch_page(s, deal, cat, slug, page)
         if not props and valid and page < pages and upserted < count:
@@ -786,12 +793,17 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[
             # once more after a pause; a second empty answer is an INCOMPLETE slice, named with what
             # the empty page itself reported so the run's notes say where and how the source stopped.
             #
-            # 2026-10-16 (fourth night, backlog 532/569): the stop is not a cap (shards stop at page
-            # 2..23) and not a throttled exit: a sweep that re-asked on 3 FRESH exits (new browser,
-            # new sticky port, no cookies) got the same empty page within ~3 s each, on 5 of 5 slices.
-            # One URL answering empty to every client is a stored render of that URL; on 10-15 even
-            # floor/sale's page 1 answered «0 listings», and it answered 6,376 the next day. So each
-            # re-ask now carries a cache-busting parameter AND goes out on a fresh exit.
+            # 2026-10-16 (fourth night, backlog 532/569). Measured on two proof sweeps (runs
+            # 38919794892 and the one after #7185): re-asking on 3 FRESH exits recovered 0 pages,
+            # and re-asking with a cache-busting parameter recovered 0 too. The stop is
+            # DETERMINISTIC per page: floor/rent, villa/sale and villa/rent stopped on the same page
+            # (2, 6, 2) twenty minutes apart, and floor/sale (2 → 3) and apartment/rent (7 → 8) moved
+            # down by exactly one page as new ads arrived at the top. That is one listing whose page
+            # the source cannot render (the whole searchResult comes back empty), sliding down the
+            # catalogue. So one re-ask (transient blips still recover), then SKIP that page and keep
+            # walking, instead of throwing the whole tail of the slice away. Skipped pages keep the
+            # slice TRUNCATED (ok=false), so the enum roll-up, which counts only ok shards, still
+            # refuses to strike anything off an incomplete enumeration.
             for _ask in range(_EMPTY_PAGE_RETRIES):
                 time.sleep(_EMPTY_PAGE_RETRY_PAUSE_S)
                 rotate_route(s)
@@ -801,13 +813,22 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[
                     break
             if props:
                 _ROUTE_ROTATIONS_RECOVERED.append(f"{slug}/{deal} p{page}")
-            if not props and valid:
-                _STOPS.append(f"{slug}/{deal}: source served an empty page {page} of {pages} "
-                              f"(page 1 count={count}; empty page reported count={pg_count} "
-                              f"totalPages={pg_total}) after {upserted} rows")
-                print(f"   ✗ {_STOPS[-1]} — slice is INCOMPLETE")
+                empty_run = 0
+            elif valid:
                 truncated = True
-                break
+                skipped.append(page)
+                empty_run += 1
+                if empty_run >= _MAX_EMPTY_PAGES_IN_A_ROW:
+                    _STOPS.append(f"{slug}/{deal}: source served {empty_run} empty pages in a row, the "
+                                  f"last {page} of {pages} (page 1 count={count}; empty page reported "
+                                  f"count={pg_count} totalPages={pg_total}) after {upserted} rows")
+                    print(f"   ✗ {_STOPS[-1]} — slice is INCOMPLETE")
+                    break
+                print(f"   ↷ {slug}/{deal}: source served an empty page {page} of {pages} — skipped, "
+                      f"walk continues (slice stays INCOMPLETE)")
+                continue
+        else:
+            empty_run = 0
         if not props:
             if not valid:
                 # A failed fetch mid-crawl, not a genuine end of results. Stop taking new pages
@@ -834,6 +855,9 @@ def scrape_slice(s, deal: str, cat: str, slug: str, *, max_pages: int) -> tuple[
                 print(f"   ✗ batch upsert failed (page {page}): {str(e)[:90]}")
         if page % 20 == 0:
             print(f"   [{page}/{pages}] upserted so far: {upserted}")
+    if skipped:
+        _STOPS.append(f"{slug}/{deal}: skipped {len(skipped)} empty page(s) the source could not "
+                      f"render: {','.join(map(str, skipped[:20]))}")
     print(f"   ✓ {slug}/{deal}: {upserted} upserted" + (" (TRUNCATED)" if truncated else ""))
     return upserted, count, page1_valid, truncated
 

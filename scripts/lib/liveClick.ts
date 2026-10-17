@@ -71,6 +71,30 @@ export async function clickWitnessed(page: any, box: { x: number; y: number }, w
   return { landed: false, hit: hit ? (hit.tid || hit.txt || '(unlabelled)') : '(no click event seen)' };
 }
 
+/**
+ * A STRAY TAP OPENS A LISTING, AND THE LISTING THEN TAKES EVERY LATER TAP (🔬 2026-10-16).
+ * A missed click usually lands on a listing card, and a card's job is to open the ad viewer — a
+ * sheet over the whole chat on a phone. Every retry after that hits the sheet, never the CTA, so
+ * six attempts are spent on one miss. Measured on production (جدة · فيلا · 390x844): 2 of 4 runs
+ * of verify-af-card-evidence-live.ts ended «intercepted», the screenshot showing the ad viewer open
+ * and the CTA under it. A person closes the sheet (✕ or Escape) and taps again; so does this.
+ */
+export const STRAY_OVERLAY_SRC = () => {
+  const v = document.querySelector('[data-testid="ad-viewer"]') as any;
+  if (!v) return false;
+  const r = v.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 && getComputedStyle(v).display !== 'none';
+};
+
+/** Close the ad viewer a stray tap opened, the way a person does. True when one was closed. */
+export async function dismissStrayOverlay(page: any): Promise<boolean> {
+  const open = await page.evaluate(STRAY_OVERLAY_SRC).catch(() => false);
+  if (!open) return false;
+  try { await page.keyboard.press('Escape'); } catch { /* a page without a keyboard keeps its sheet */ }
+  await page.waitForTimeout(600);
+  return true;
+}
+
 /** Two measurements this close together mean the control has stopped moving. */
 export const STABLE_PX = 2;
 

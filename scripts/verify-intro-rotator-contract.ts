@@ -121,7 +121,7 @@ check(
   '9c. the placeholder swap keeps the Arabic static placeholder for the interacted state, and the a11y label has an Arabic dictionary entry',
   // The outer `completed ?` branch (2026-09-05, the locked composer) is gone since 2026-10-13 (the chat never locks). The contract
   // THIS check protects is unchanged: in a live chat, the interacted state falls back to the familiar Arabic static placeholder.
-  /placeholder=\{showIntroExamples \? '' : t\("Type the property you're looking for in Saudi Arabia\.\.\."\)\}/.test(agent) &&
+  /placeholder=\{showIntroExamples \? '' : \(modeSearched \? t\("Type your property and Ezhalah\.\.\."\) : t\("Type the property you're looking for in Saudi Arabia\.\.\."\)\)\}/.test(agent) &&
     /'Describe the property you are looking for': 'اكتب وصف العقار اللي تبحث عنه'/.test(i18n),
 );
 

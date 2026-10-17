@@ -27,7 +27,7 @@ def _setup(monkeypatch, pages):
 
     def _fp(s, deal, cat, slug, page, bust=None):
         calls.append(page if bust is None else (page, "bust"))
-        v = pages[page]
+        v = pages.get(page, (0, 0, [], True))   # pages not listed answer empty
         return v.pop(0) if isinstance(v, list) else v
 
     monkeypatch.setattr(R, "fetch_page", _fp)
@@ -41,19 +41,37 @@ def _setup(monkeypatch, pages):
 
 
 def test_the_10_13_shape_is_truncated_and_named(monkeypatch):
-    """page 1 announces 33,814 listings over 1,053 pages; page 3 is a valid empty page, twice."""
+    """page 1 announces 33,814 listings over 1,053 pages; from page 3 on every page is empty."""
     row = [{"id": i} for i in range(30)]
     calls = _setup(monkeypatch, {
         1: (33814, 1053, row, True),
         2: (33814, 1053, row, True),
-        3: (0, 0, [], True),
     })
     up, count, page1_valid, truncated = R.scrape_slice(None, "sale", "residential", "apartment", max_pages=2000)
-    assert truncated is True, "an empty page 3 of 1,053 is an incomplete slice, not the end"
+    assert truncated is True, "an empty tail before the announced end is an incomplete slice, not the end"
     assert up == 60 and count == 33814 and page1_valid is True
     assert calls.count(3) == 1 and calls.count((3, "bust")) == R._EMPTY_PAGE_RETRIES, \
-        "the empty page is re-asked, cache-busted, before giving up"
-    assert R._STOPS and "empty page 3 of 1053" in R._STOPS[0]
+        "the empty page is re-asked, cache-busted, before it is skipped"
+    n = R._MAX_EMPTY_PAGES_IN_A_ROW
+    last = 2 + n
+    assert last + 1 not in calls, f"{n} empty pages in a row end the walk"
+    assert R._STOPS and f"{n} empty pages in a row, the last {last} of 1053" in R._STOPS[0]
+
+
+def test_one_page_the_source_cannot_render_is_skipped_not_the_end(monkeypatch):
+    """2026-10-16 proof sweeps: the stop is deterministic per page and slides down as new ads arrive
+    (floor/sale 2 -> 3, apartment/rent 7 -> 8), so it is one unrenderable page. The walk must skip it
+    and keep reading, and the slice must stay TRUNCATED so the enum roll-up strikes nothing."""
+    row = [{"id": i} for i in range(30)]
+    calls = _setup(monkeypatch, {
+        1: (150, 5, row, True), 2: (150, 5, row, True),
+        4: (150, 5, row, True), 5: (150, 5, row, True),
+    })
+    up, _c, _v, truncated = R.scrape_slice(None, "sale", "residential", "apartment", max_pages=10)
+    assert up == 120, "pages 4 and 5 are read after the unrenderable page 3"
+    assert truncated is True
+    assert 5 in calls
+    assert any("skipped 1 empty page(s) the source could not render: 3" in x for x in R._STOPS), R._STOPS
 
 
 def test_a_transient_empty_page_recovers_on_the_second_ask(monkeypatch):
@@ -96,14 +114,14 @@ def test_every_re_ask_is_cache_busted_on_a_fresh_exit(monkeypatch):
     row = [{"id": i} for i in range(30)]
     calls = _setup(monkeypatch, {
         1: (120, 4, row, True),
-        2: [(0, 0, [], True), (0, 0, [], True), (120, 4, row, True)],
+        2: [(0, 0, [], True), (120, 4, row, True)],
         3: (120, 4, row, True),
         4: (120, 4, row, True),
     })
     up, _c, _v, truncated = R.scrape_slice(None, "sale", "residential", "apartment", max_pages=10)
-    assert truncated is False and up == 120, "a fresh exit answered page 2; the slice is whole"
+    assert truncated is False and up == 120, "the re-ask answered page 2; the slice is whole"
     i = calls.index(2)
-    assert calls[i:i + 5] == [2, "rotate", (2, "bust"), "rotate", (2, "bust")], calls
+    assert calls[i:i + 4] == [2, "rotate", (2, "bust"), 3], calls
     assert R._ROUTE_ROTATIONS_RECOVERED == ["apartment/sale p2"]
 
 
@@ -130,3 +148,14 @@ def test_fetch_page_puts_the_bust_on_the_url(monkeypatch):
     R.fetch_page(None, "sale", "residential", "floor", 2)
     R.fetch_page(None, "sale", "residential", "floor", 2, bust="17")
     assert "_ezh" not in seen[0] and seen[1].endswith("&page=2&_ezh=17")
+
+
+def test_a_cluster_shorter_than_the_limit_is_walked_through(monkeypatch):
+    """10-16 third sweep: villa-townhouse/rent answered again after empty 16, 18, 19; a cluster of
+    empties shorter than the limit must not end the slice."""
+    row = [{"id": i} for i in range(30)]
+    pages = {p: (300, 10, row, True) for p in (1, 2, 7, 8, 9, 10)}   # 3-6 empty: a cluster of 4
+    _setup(monkeypatch, pages)
+    up, _c, _v, truncated = R.scrape_slice(None, "rent", "residential", "villa-townhouse", max_pages=10)
+    assert R._MAX_EMPTY_PAGES_IN_A_ROW > 4
+    assert up == 180 and truncated is True

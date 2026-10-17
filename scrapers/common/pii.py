@@ -79,6 +79,12 @@ _PHONE_SHAPES_RE = re.compile(
     + r"|\+[\s.\-]*[1-9١-٩](?:" + _SEP + _D + r"){7,14}"
     + r"|" + _NOT_A_DECIMAL + r"(?:00|٠٠)[1-9١-٩]" + _D + r"{0,2}" + _SEP + _D + r"{8,11}"
     + r"|[0٠]" + _SEP + r"[5٥](?:" + _SEP + _D + r"){8}"
+    # A mobile WITHOUT its trunk zero, written in its spoken groups «5X XXX XXXX» / «5X-XXX-XX-XX» (🦅 Falcon
+    # 2026-10-16: 54 live aqar + 1 rightcompound descriptions, every one behind «للتواصل» / «للحجز
+    # والاستفسار», often wrapped in invisible direction marks; one ad showed «[redacted]» beside a second,
+    # spaced number). Only that grouping — 2, then 3, then 4 (or 2 + 2) — so a price grouped in threes or
+    # a list of sizes never matches; the unbroken «5XXXXXXXX» is already the legacy rule's.
+    + r"|[5٥]" + _D + r"[\s\-]" + _D + r"{3}[\s\-]?" + _D + r"{2}[\s\-]?" + _D + r"{2}"
     + r"|(?:00|٠٠)[\s.\-]" + _D + r"{2}[\s.\-]" + _D + r"{2}[\s.\-][0٠][5٥]" + _D + r"{2}"
     + r"|٥[٠-٩]{8}"
     + r"|[0٠]" + _SEP + r"[1١][1-7١-٧](?:" + _SEP + _D + r"){7}"

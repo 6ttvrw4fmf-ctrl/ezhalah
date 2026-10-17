@@ -48,19 +48,20 @@ their exception text; `select date_trunc('day',started_at), sum(rows_seen) from 
 'wasalt_enum%' group by 1`.
 
 **Owed → first thing next run:**
-- **wasalt enumeration (532/569, P1, 4th night).** Every shard stops on a VALID empty page (count=0 totalPages=0) at
-  a different depth (10-15: page 2..23), so it is not a cap. **10-16, measured: it is not a throttled exit either.**
-  PR #7184 re-asked the empty page on 3 FRESH exits (new browser, new sticky port, no cookies); the proof sweep (run
-  38919794892, `pages=25`) recovered 0 pages on the first 5 slices, each re-ask empty within ~3 s. On 10-15 even
-  floor/sale's PAGE 1 said «0 listings» and said 6,376 on 10-16. One URL that is empty for every client looks like a
-  stored render of that URL, so the second PR adds a cache-busting parameter (`&_ezh=<n>`) to every re-ask, and the
-  notes say «cache-busted re-ask recovered N empty page(s)». Read: (1) the proof sweep after that merge
-  (`wasalt-residential-sweep.yml`, `pages=25`): per-slice `rows_upserted` vs 750 and the «recovered» notes; (2) the
-  10-17 21:00 UTC enum: sum ≥ 100,000 = fixed (proof row). **If cache-busting ALSO recovers nothing, stop re-asking
-  and change source:** capture the XHR/fetch the search page makes when a user presses «next page» (wasalt's own
-  client-side search API) and walk that instead of `?page=N` server renders.
-  Side finding: every COMMERCIAL slug reports the same count (rent 1,893 / sale 329), so the type filter looks
-  ignored for commercial. Compare 3 commercial slices' first ids before trusting their counts.
+- **wasalt enumeration (532/569, P1, 4th night) — ROOT CAUSE MEASURED 10-16.** Every slice stops on a VALID empty
+  page (count=0 totalPages=0) that is NOT a cap (stops at page 2..23), NOT a throttled exit (3 fresh exits: 0 of 10
+  stops recovered, run 38919794892) and NOT a stored render (cache-busted re-ask: 0 recovered, second sweep). It is
+  DETERMINISTIC per page: floor/rent, villa/sale and villa/rent stopped on the same page (2, 6, 2) twenty minutes
+  apart, and floor/sale (2 → 3) and apartment/rent (7 → 8) moved down by exactly one page as new ads arrived at the
+  top: one listing whose page the source cannot render, sliding down the catalogue. The third PR (10-16) re-asks once,
+  then SKIPS that page and keeps walking (stops after 3 empty pages in a row); a slice with skipped pages stays
+  TRUNCATED (ok=false), so the roll-up (ok shards only) still strikes nothing. Notes say «skipped N empty page(s) the
+  source could not render: …». Read: (1) the third proof sweep (`wasalt-residential-sweep.yml`, `pages=25`):
+  per-slice `rows_upserted` should approach 750; (2) the 10-17 21:00 UTC enum: rows read (sum of ALL shards' rows_seen,
+  ok or not) ≥ 100,000 = intake fixed (proof row + a new wasalt ad found in the Filter). The roll-up will still REFUSE
+  while any page is skipped: deciding whether a shard missing ≤ 1% of its pages may count as complete is the next
+  step (it feeds strikes, so prove it with ♻️ first). Commercial side finding: every commercial slug reports the same
+  count (rent 1,893 / sale 329), so the type filter looks ignored for commercial. Compare 3 slices' first ids.
 - **576 dangling-run remediation (class bug, backlog 584).** Detector raises at 3 h, remediation only closes > 12 h, so
   every dangling row escalates to a P0. The tested patch is `docs/ops/pending/2026-10-16-dangling-remediation-at-
   detector-threshold.sql.txt` (its self-test fails on the live function). It was NOT applied: `apply_migration` waits
@@ -280,6 +281,17 @@ These cost your first runs a lot of time. Use them instead of working them out a
   dispatch `source-reread.yml` with `ids: table:id,…` and read its job log with `get_job_logs` (the
   artifact's download host is blocked from the cloud; the log prints the same comparison). It shows
   what the page itself says next to what we store.
+
+## Lesson from 2026-10-16 (🦅 Falcon: «the site has no field for it» is where prose starts, not where capture ends)
+- wasalt publishes NO structured elevator, air-conditioning or private-entrance field (62,491 stored payloads:
+  not in `attributes`, `additionalAttributes` or `propertyInfo`), so those columns were NULL on every wasalt row
+  while 3,222 / 2,817 / 547 of its own descriptions state them, and the Advanced Filter could not find one wasalt
+  ad by elevator. The law (ADVANCED_FILTER_SOURCE_TRUTH §2) allows prose for exactly this case, YES-only:
+  `normalize.prose_amenities_yes(normalize.html_block_lines(desc))`. Now in `scrapers/wasalt/enrich_ar.py`
+  (`PROSE_ONLY`), with a proxy-free backfill from the stored `ar_data` at the start of every enrich run.
+- The same gap is open on 23 more sites whose amenity columns are 0% captured for homes (rakez, arkaan, razre,
+  aqargate, vmksa, aouj, souq24, holoul, azure, awal, …). Before calling a site «it doesn't publish amenities»,
+  check its ad text: if the words are there and no structured field exists, wire `prose_amenities_yes`.
 
 ## Lessons from 2026-10-13
 - **«CertificateVerifyError» on every route is the SITE's certificate, not our network.** abralosol.com served an expired
@@ -617,3 +629,6 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   pushes cancelled `npm test`, the merge window slipped past 06:45, and six fixes ended the night as «fixed, proof
   pending» (fix rate 3/8 → 2/8, 40% → 38% → 25% over three nights). A fix that misses the 06:22 sync has no customer
   proof in your slot; a proof row is what the owner counts.
+
+## Lesson from 2026-10-16 (copied by 🔧 — you wrote no lesson line: you did not run)
+- **2026-10-16 (🔧 QA):** no run on 10-15 or 10-16 (last start 10-14 05:08 UTC), and the wasalt enumeration collapse (your 532/537) entered its third night unfixed: 10-16 02:47–02:50 UTC shards upserted 90/90/90/90/87/13/5 rows against 177,017 enumerated on 10-11. The same blocker three nights running means the approach changes, not the effort: capture the raw list-API body of the first page that answers `count=0` and diff it against a 10-11 body before touching the walker again. A night lost to the usage limit still owes the next night its proofs first.

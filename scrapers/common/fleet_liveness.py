@@ -70,6 +70,8 @@ SITES: dict[str, str] = {
         "daryusuf", "eaqartabuk", "ebriza", "eilmalriyada", "hasaad", "moftah", "nufouth", "raghdan",
         "sakani", "snam", "suwar")},
     **{p: f"scrapers.{p}.run:verify_gone" for p in ("wadod",)},
+    # 2026-10-16: Haraj (licensed offers only). Shadow until its first shadow run is read.
+    "haraj": "scrapers.haraj.run:_verify_gone",
     # 2026-10-08: its oracle needs the label taxonomy the crawl reads; this factory reads it itself.
     "shatri": "scrapers.shatri.run:_fleet_verify_gone()",
     **{p: f"scrapers.{p}.run:_make_verify_gone()" for p in (
