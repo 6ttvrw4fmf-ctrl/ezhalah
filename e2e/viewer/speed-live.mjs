@@ -42,6 +42,7 @@ const SITES = [
   { host: 'remax.sa', table: 'remaxsa_residential_listings' },
   { host: 'ibaax.sa', table: 'ibaax_commercial_listings' },
   { host: 'qmra.sa', table: 'qmra_residential_listings' },
+  { host: 'aqaralmuhaysini.com', table: 'muhaysini_commercial_listings' },
   { host: 'sadiq-eltajer.sa', table: 'sadiqeltajer_residential_listings' },
   { host: 'rakez.sa', table: 'rakez_residential_listings' },
   { host: 'tuba.com.sa', table: 'tuba_residential_listings' },

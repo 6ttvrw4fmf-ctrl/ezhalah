@@ -394,7 +394,7 @@ where Aqar and Wasalt must fail. It must also show its ad within the speed budge
 from the GitHub runner by `e2e/viewer/speed-live.mjs` (which must list every host): 3 s until
 2026-10-17, then **10 s** by owner decision («if it's below 10 seconds no problem»). A host that later
 refuses framing, goes down, or goes over budget comes off the list; the guard runs every 6 hours and
-after every deploy. 2026-10-17: 67 hosts on the list.
+after every deploy. 2026-10-17: 68 hosts on the list (aqaralmuhaysini.com measured 9.96 s and the owner chose to keep it on).
 
 Aqar, Aqar Monthly and the 50 owner-approved non-embeddable platforms (2026-10-04, exact hosts in
 `IN_APP_PREVIEW_HOSTS`) use the same panel with a native `ListingPreview` of the

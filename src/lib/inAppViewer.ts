@@ -18,7 +18,8 @@
 // sodasyat.sa for phones), bot check or blank inside a frame (ashab.sa, dwelleo.sa 404,
 // masaraqarat.com), login wall (nawait.sa), site down when tested (almuteb.sa 503, albukaeri.sa
 // timing out 2026-10-17 — re-prove and re-add when it is back), removed-at-source ads (just.sa),
-// and over budget (muktamel.com ~37 s, aqaralmuhaysini.com 9.96 s — too close to 10 s to stay green).
+// and over budget (muktamel.com ~37 s). aqaralmuhaysini.com measured 9.96 s, right on the line; the owner
+// chose to keep it on anyway (2026-10-17: «put almuhaysini its fine»), so a red run on it is expected noise.
 // We never proxy or strip a site's headers to force an embed; the preview allowlist uses already-
 // loaded data.
 export const IN_APP_VIEWER_HOSTS = [
@@ -89,6 +90,7 @@ export const IN_APP_VIEWER_HOSTS = [
   'remax.sa',
   'ibaax.sa',
   'qmra.sa',
+  'aqaralmuhaysini.com',
 ] as const;
 
 /** The allowlisted host a listing URL belongs to, or null when it must open the old way. */
