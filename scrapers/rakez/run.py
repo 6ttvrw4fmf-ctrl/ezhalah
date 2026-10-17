@@ -155,6 +155,26 @@ def _clean(s: Optional[str]) -> Optional[str]:
     return t or None
 
 
+def _to_num(v: Any) -> Optional[float]:
+    if v is None or v is False or v is True:
+        return None
+    s = re.sub(r"[,\s]", "", str(v).translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")))
+    return float(s) if re.match(r"^\d+(?:\.\d+)?$", s) else None
+
+
+def unit_area(acf: dict) -> Optional[int]:
+    """The unit's size as its project page prints it: `area` + `private_area` (owner ruling 2026-10-16,
+    backlog #541). The unit API splits the built area from the private courtyard/roof; the page's unit
+    table shows their SUM (unit 14631: 144 + 32 = «176 م²»; unit 68221: 169.42 + 102.15). Storing the
+    built part alone put every unit with a private area under a smaller size than its page states.
+    Nearest whole metre (area_m2 is an integer column, #123); a unit with no private area is unchanged."""
+    built = _to_num(acf.get("area"))
+    if not built or built <= 0:
+        return None
+    private = _to_num(acf.get("private_area")) or 0.0
+    return int(built + (private if private > 0 else 0.0) + 0.5)
+
+
 def _to_int(v: Any) -> Optional[int]:
     if v is None or v is False or v is True:
         return None
@@ -461,7 +481,7 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
     city_ar, city_id, region_id, district_ar = resolve_location(city_term_ids, tree, ar_title)
 
     price = _to_int(acf.get("price"))
-    area = _to_int(acf.get("area"))
+    area = unit_area(acf)
     bedrooms = _to_int(acf.get("rooms_count"))
     floor_number = _floor_number(acf.get("floor"))
 
