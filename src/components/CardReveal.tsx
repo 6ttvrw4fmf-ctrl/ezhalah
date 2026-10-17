@@ -206,7 +206,7 @@ export function GoldSurface({ children, style, pointerEvents, testID }: {
 }) {
   const pal = useThemePalette();
   return (
-    <View style={[style, s.goldClip]} pointerEvents={pointerEvents} testID={testID}>
+    <View style={[s.goldClip, style]} pointerEvents={pointerEvents} testID={testID}>
       <LinearGradient colors={[pal.goldLight, pal.goldDeep]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
       <CssShine />
       {children}

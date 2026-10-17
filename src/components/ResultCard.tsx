@@ -257,10 +257,11 @@ export function ResultCard({
               <Text style={card.rankText}>#{rank}</Text>
             </View>
           ) : null}
-          <View style={card.lpPhotoFoot} pointerEvents="none">
+          {/* THE GOLD STRIP on the laptop photo-first card too (owner 2026-10-17: «for all»). */}
+          <GoldSurface style={card.lpPhotoFoot} pointerEvents="none" testID="card-gold-strip">
             <Text style={card.lpPhotoFootTx}>{typeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
             {listing.source_url ? <Text style={[card.lpPhotoFootTx, card.lpHost]} numberOfLines={1}>{sourceHost(listing.source)}</Text> : null}
-          </View>
+          </GoldSurface>
         </Pressable>
 
         <View style={card.lpBody}>
@@ -1502,9 +1503,10 @@ const card = StyleSheet.create({
   lpFade: { position: 'absolute', top: 0, left: 0, right: 0, height: 64, backgroundColor: 'rgba(14,32,22,0.28)' },
   lpPhotoFoot: {
     position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 12, paddingVertical: 8,
-    backgroundColor: 'rgba(14,32,22,0.55)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8,
   },
-  lpPhotoFootTx: { color: colors.onFill, fontSize: 12, fontWeight: '500' },
+  // Dark text ON the gold strip (goldOnFill), like the gold button.
+  lpPhotoFootTx: { color: colors.goldOnFill, fontSize: 12, fontWeight: '700' },
   lpHost: { writingDirection: 'ltr', flexShrink: 1 },
   lpBody: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10, gap: 5, minWidth: 0 },
   lpPriceRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },

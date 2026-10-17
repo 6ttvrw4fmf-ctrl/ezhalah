@@ -81,6 +81,9 @@ const rules = (card: string, buzz: string, grid: string, agent: string, i18n: st
     'EVERY card sits in a shining gold ring and its «اضغط هنا» strip is a shining gold surface (GoldSurface = the gold button\'s gradient + CSS glint)':
       (card.match(/<GoldSurface style=\{card\.goldRing\} testID="card-gold-frame">/g) || []).length === 2
       && /<GoldSurface style=\{\[card\.sourceStrip, row && card\.sourceStripRow\]\} pointerEvents="none" testID="card-gold-strip">/.test(card)
+      && /<GoldSurface style=\{card\.lpPhotoFoot\} pointerEvents="none" testID="card-gold-strip">/.test(lp) && /lpPhotoFootTx: \{ color: colors\.goldOnFill/.test(card)
+      // GoldSurface must let the caller's `position: absolute` win (the strip sits at the photo's foot): clip first, style second
+      && /<View style=\{\[s\.goldClip, style\]\} pointerEvents=\{pointerEvents\} testID=\{testID\}>/.test(reveal)
       && /export function GoldSurface\(/.test(reveal) && /<CssShine \/>/.test(reveal.slice(reveal.indexOf('export function GoldSurface(')))
       && /sourceText: \{ color: colors\.goldOnFill/.test(card) && /photoAction: \{ color: colors\.goldOnFill/.test(card),
     'the TYPE (with its Filter icon) comes before the rooms in the main line':
@@ -143,6 +146,10 @@ mustCatch('the strip back to the flat dark-green View', R_GOLD,
   rules(CARD.replace('<GoldSurface style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none" testID="card-gold-strip">', '<View style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none">'), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('a gold surface that does not shine', R_GOLD,
   rules(CARD, BUZZ, GRID, AGENT, I18N, RESP, OVERLAY, REVEAL.replace(/(export function GoldSurface\([\s\S]*?)<CssShine \/>/, '$1')));
+mustCatch('the laptop photo-first strip left dark green', R_GOLD,
+  rules(CARD.replace('<GoldSurface style={card.lpPhotoFoot} pointerEvents="none" testID="card-gold-strip">', '<View style={card.lpPhotoFoot} pointerEvents="none">'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('GoldSurface overriding the strip\'s absolute position (the strip would fall out of the photo)', R_GOLD,
+  rules(CARD, BUZZ, GRID, AGENT, I18N, RESP, OVERLAY, REVEAL.replace('<View style={[s.goldClip, style]} pointerEvents={pointerEvents} testID={testID}>', '<View style={[style, s.goldClip]} pointerEvents={pointerEvents} testID={testID}>')));
 mustCatch('white text on the gold strip', R_GOLD,
   rules(CARD.replace("photoAction: { color: colors.goldOnFill", "photoAction: { color: '#fff'"), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('a still (non-shining) gold button', 'the gold button SHINES on every card, by a CSS keyframe (no worklet per card)',
