@@ -18,6 +18,7 @@ import { afEvidence, AMENITY_COL, type ActiveAf } from '@/lib/afEvidence';
 import { typeImg } from '@/theme/propertyIcons';
 import { GoldShineButton } from './CardReveal';
 import { BuzzLayer } from './CardBuzzer';
+import { partyConfetti } from './ConfettiOverlay';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -110,7 +111,7 @@ export function ResultCard({
   const [burst, setBurst] = useState(0);
   // PRESS = OPEN. The ad opens first, synchronously inside the click (a delayed window.open would be
   // popup-blocked); the buzzer is bumped second and is pure decoration.
-  const fire = () => { onOpen(); setBurst((b) => b + 1); };
+  const fire = () => { onOpen(); setBurst((b) => b + 1); partyConfetti(); };
   // Evidence for the «مطابق لطلبك» strip: NEVER read from listing.features / listing.bathrooms (raw,
   // NULL-coerced) — only from listing.canon, the canonical row the predicate actually passed on.
   const evidence = useMemo(() => afEvidence(activeAf ?? [], listing.canon, t), [activeAf, listing.canon, t]);

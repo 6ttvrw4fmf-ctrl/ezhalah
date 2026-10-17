@@ -77,6 +77,7 @@ import {
 import { PICKER_SHEET_BREAKPOINT, VIEWER_SPLIT_BREAKPOINT, CARDS_THREE_ACROSS_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import AdViewer from '@/components/AdViewer';
+import { ConfettiOverlay } from '@/components/ConfettiOverlay';
 import { buildAfSummaryItems, buildAfBeatSteps } from '@/lib/afSummary';
 import { filterToChat, searchSummary, guidedSearchSummary, buildAfSummary, buildAfRoundLog, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, NO_RESULTS_GENERIC_FALLBACK_EN, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
@@ -5346,6 +5347,9 @@ export default function Agent() {
         onShow={() => commitAdPane(showAdPane(adPaneRef.current))}
       />
     )}
+    {/* The party confetti over EVERYTHING — the ad sheet/pane included (owner 2026-10-17). Last child, so
+        it paints above the viewer; pointerEvents none, so it never intercepts a tap. */}
+    <ConfettiOverlay />
     </View>
   );
 }

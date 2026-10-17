@@ -21,7 +21,7 @@ const FLASH_MS = 900;
 type Bit = { dx: number; dy: number; rot: number; w: number; h: number; color: string; round: boolean };
 
 // A fixed spread (computed from the index, nothing drawn at random): the same burst every press.
-function makeBits(): Bit[] {
+export function makeBits(): Bit[] {
   const palette = [colors.goldLight, colors.goldDeep, colors.primary, colors.goldLightHover, colors.onFill, colors.selFill];
   return Array.from({ length: PARTICLES }, (_, i) => {
     const a = (i / PARTICLES) * Math.PI * 2 + (i % 3) * 0.21;
