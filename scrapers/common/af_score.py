@@ -24,6 +24,7 @@ Evidence is "source_table:id" keys only (PDPL).
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import random
@@ -96,7 +97,17 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # _FEATURE_COLS). Its 10-13 misses (13602723, 13602726, CI re-read 38384423613) were description prose
     # («يوجد مصعد في العمارة», «غرفة خادمة مع دورة مياة») on ads whose chip list names neither (🔬, backlog 515).
     "squares": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room"),
+    # eastabha (WordPress «WP Residence») prints its WHOLE feature taxonomy as a checklist: a ticked item is
+    # `<div class="listing_detail col-md-4 …"><i class="fas fa-check"></i>مطبخ مجهز</div>`, an unticked one the
+    # same with `not_present` and an ✗ (CI source-reread 39020724177, 595393 and 595406). The scraper reads
+    # the ticked set from the REST `property_features` taxonomy (scrapers/eastabha/run.py FEATURE_COL). Its
+    # 2026-10-17 «misses» (kitchen, elevator, AC 5 of 5, 0 of 4 findable) were the ✗ items and description prose
+    # («🍳 مطبخ عملي») on ads whose ticked list names none of them: our NULL is the source's answer (🔬, law §2).
+    # Read by wpresidence_props().
+    "eastabha": ("elevator", "kitchen", "parking", "air_conditioner", "private_entrance"),
 }
+# WordPress «WP Residence» sites: the ticked checklist is the structured statement (wpresidence_props).
+WP_RESIDENCE_SITES = {"eastabha"}
 COL = {n: c for n, _, c, _ in FIELDS}
 _YES = {"true", "1", "نعم", "يوجد", "متوفر"}
 _NO = {"false", "0", "لا", "لا يوجد", "لايوجد", "غير متوفر"}
@@ -410,6 +421,16 @@ def gathern_props(body: str) -> list[dict]:
     return [{"name": SANADAK_NAMES[f], "value": "نعم"} for f, lab in GATHERN_LABELS.items() if lab in labels]
 
 
+# A WP Residence checklist item, ticked or not (`not_present`). Only a ticked one is a statement; an unticked
+# item is the theme printing its whole taxonomy, which is silence, never «no» (law §1).
+_WPR_ITEM = re.compile(r'<div class="listing_detail( not_present)? col-md-\d[^"]*">\s*(?:<i[^>]*>\s*</i>)?\s*([^<]{1,60}?)\s*</div>')
+
+
+def wpresidence_props(body: str) -> list[dict]:
+    return [{"name": html.unescape(label), "value": "نعم"}
+            for absent, label in _WPR_ITEM.findall(body or "") if not absent]
+
+
 def is_gathern(url: str) -> bool:
     return "gathern.co" in url
 
@@ -524,6 +545,8 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
             page = page_evidence(body) if status == 200 and body else None
             if page is not None and platform in NAV_LINK_SITES:
                 page = strip_nav(page, body)
+            if page is not None and platform in WP_RESIDENCE_SITES:
+                page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": wpresidence_props(body)}]}
             if page is not None and is_gathern(url):
                 page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": gathern_props(body)}]}
         if page is None:
