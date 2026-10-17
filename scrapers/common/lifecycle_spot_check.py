@@ -80,6 +80,10 @@ def summarize(platform: str, method: str, canary: dict, results: list[dict]) -> 
             "wrong": sum(r["judged"] == "wrong" for r in rows),
             "unknown": sum(r["judged"] == "unknown" for r in rows),
             "wrong_examples": [f"{r['table']}:{r['id']} {r['url']}" for r in rows if r["judged"] == "wrong"][:20],
+            # WHY each ad got no answer (2026-10-17): without it a second reader of a struck-but-shown
+            # ad reads "unknown 5" and nobody can tell a 401 unpublished post from a block.
+            "unknown_examples": [f"{r['table']}:{r['id']} {r.get('evidence') or 'no evidence'}"
+                                 for r in rows if r["judged"] == "unknown"][:20],
         }
     if not canary["ok"]:
         out["verdict"] = "void: known-live controls did not come back alive, so nothing here may be believed"
@@ -217,7 +221,14 @@ def _oracle_reader_for(platform: str, control: dict | None):
     if spec is None:
         return None
     oracle = FL.oracle_for(spec, control)
-    return lambda row: FL.read(oracle, row["ad_number"])[0] if row.get("ad_number") else UNKNOWN
+
+    def read_by_oracle(row: dict) -> str:
+        if not row.get("ad_number"):
+            row["evidence"] = "no ad_number"
+            return UNKNOWN
+        verdict, row["evidence"] = FL.read(oracle, row["ad_number"])
+        return verdict
+    return read_by_oracle
 
 
 def pick_reader(platform: str, dead_marker, control: dict | None):
@@ -269,7 +280,7 @@ def main() -> int:
                     continue
                 v = read(r)
                 results.append({"side": "live", "table": table, "id": rid, "url": r["listing_url"],
-                                "verdict": v, "judged": judge("live", v)})
+                                "verdict": v, "judged": judge("live", v), "evidence": r.get("evidence")})
     elif canary["ok"]:
         per_table = max(1, a.n // len(tables))
         for side, active, win in (("hidden", False, since), ("live", True, None)):
@@ -283,7 +294,7 @@ def main() -> int:
             for r in picked[: a.n]:
                 v = read(r)
                 results.append({"side": side, "table": r["table"], "id": r["id"], "url": r["listing_url"],
-                                "verdict": v, "judged": judge(side, v)})
+                                "verdict": v, "judged": judge(side, v), "evidence": r.get("evidence")})
 
     out = summarize(a.platform, method, canary, results)
     text = json.dumps(out, ensure_ascii=False, indent=2)
