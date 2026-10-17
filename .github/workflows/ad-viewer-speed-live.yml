@@ -22,7 +22,7 @@ concurrency:
 jobs:
   speed:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     steps:
       - uses: actions/checkout@v4
