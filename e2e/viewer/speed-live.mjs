@@ -11,7 +11,9 @@
 //   3. THE LIVE BUNDLE — production must still ship the instant-show tab (thin progress bar), never the
 //      old full-page «loading» cover that hid ready ads for seconds.
 // Deal App rate-limits guest sessions (HTTP 429 on api.dealapp.sa/…/user/skip); a sample that hit that
-// wall is reported and excluded — the site throttled the robot, Ezhalah did nothing wrong.
+// wall is reported and excluded — the site throttled the robot, Ezhalah did nothing wrong. A Cloudflare
+// challenge (403 + cf-mitigated: challenge, served to datacenter IPs, never to a phone in Saudi) is
+// handled the same way: its own SAMEORIGIN header is not the ad page's, and a frame it blocks is excluded.
 import { chromium, devices } from '@playwright/test';
 
 const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';
@@ -124,6 +126,11 @@ try {
     // 1. framing headers
     for (const u of urls) {
       const res = await fetch(u, { headers: { 'User-Agent': devices['iPhone 13'].userAgent }, redirect: 'follow' }).catch(() => null);
+      // A Cloudflare challenge page (403 + cf-mitigated: challenge) is served to THIS robot's datacenter
+      // IP, not to a phone in Saudi, and it carries its own X-Frame-Options: SAMEORIGIN that says nothing
+      // about the real ad page. Measured 2026-10-17 on sodasyat.sa (run 39032767927): 3/3 samples
+      // challenged, the ad page itself frames fine. Same class as the Deal App 429: excluded, reported.
+      if (res?.headers.get('cf-mitigated') === 'challenge') { console.log(`· ${site.host}: ${u} — Cloudflare challenged the robot (${res.status} cf-mitigated: challenge), header check skipped`); continue; }
       const xfo = res?.headers.get('x-frame-options') ?? '';
       const fa = /frame-ancestors[^;]*/i.exec(res?.headers.get('content-security-policy') ?? '')?.[0] ?? '';
       if (xfo || (fa && !/frame-ancestors\s+\*/.test(fa))) fail(`${site.host}: ${u} now REFUSES framing (${xfo || fa}) — take it off IN_APP_VIEWER_HOSTS`);
@@ -133,8 +140,8 @@ try {
     for (const u of urls) {
       const ctx = await browser.newContext({ ...devices['iPhone 13'], locale: 'ar' });
       const p = await ctx.newPage();
-      let rateLimited = false;
-      p.on('response', (r) => { if (r.status() === 429) rateLimited = true; });
+      let rateLimited = false, challenged = false;
+      p.on('response', (r) => { if (r.status() === 429) rateLimited = true; if (r.headers()['cf-mitigated'] === 'challenge') challenged = true; });
       const cdp = await ctx.newCDPSession(p);
       await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 150, downloadThroughput: 800_000, uploadThroughput: 93_750 });
       const t0 = Date.now(); let seen = null;
@@ -148,6 +155,7 @@ try {
       }
       await ctx.close();
       if (seen === null && rateLimited) { console.log(`· ${site.host}: ${u} — rate-limited by the site (429), excluded`); continue; }
+      if (seen === null && challenged) { console.log(`· ${site.host}: ${u} — Cloudflare challenged the robot (cf-mitigated: challenge), excluded`); continue; }
       times.push(seen ?? 99_999);
       console.log(`· ${site.host}: ${u} → ${seen === null ? 'NO CONTENT in 12s' : seen + ' ms'}`);
     }
