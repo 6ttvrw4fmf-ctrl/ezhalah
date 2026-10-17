@@ -1,6 +1,6 @@
 // THE FILTER HOME'S ROTATING WELCOME (owner 2026-10-17).
 //
-// The line under the Filter home headline («إزهله محرك بحث عقاري…») sometimes becomes a short,
+// The Filter home's BIG HEADLINE («موقع واحد للبحث…») sometimes becomes a short,
 // personal marketing line for a SIGNED-IN user: a greeting, their name, a live fact, and the brand
 // «إزهله» / "Ezhalah" at the end. The owner approved these 30 lines word for word (Arabic), with an
 // English translation in which the brand name is never translated.
