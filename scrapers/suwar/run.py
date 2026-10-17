@@ -64,6 +64,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 SITE = "https://suwar.sa"
 REST = f"{SITE}/wp-json/wp/v2"
@@ -455,6 +456,8 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
             return "gone", "REST 404 rest_post_invalid_id — the post was deleted at source"
         code = body.get("code") if isinstance(body, dict) else None
         return "unknown", f"404 without rest_post_invalid_id (code={code!r})"
+    if r.status_code == 401 and isinstance(body, dict) and body.get("code") == "rest_forbidden":
+        return _own_page_after_401(ad_number)
     if r.status_code == 200 and isinstance(body, dict):
         if str(body.get("id")) != str(pid):
             return "unknown", f"id mismatch: asked {pid}, got {body.get('id')}"
@@ -465,6 +468,32 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
             return "live", "REST 200 status=publish — still published"
         return "unknown", f"unrecognised status={status!r}"
     return "unknown", f"REST {r.status_code}"
+
+
+def _page_signal(status, body, moved):
+    """The ad's OWN web page: a 404/410 is gone, anything else is no opinion. Never a "live"."""
+    if moved:
+        return None
+    return "gone" if status in (404, 410) else None
+
+
+_stored_url = stored_listing_url(("suwar_residential_listings", "suwar_commercial_listings"))
+
+
+def _own_page_after_401(ad_number: str) -> tuple[str, str]:
+    """REST 401 rest_forbidden = the post is no longer public, and the law reads a 401 as "about our
+    access" (UNKNOWN), correctly. Measured 2026-10-17 (spot-check 39028234068): SWR19940 and four
+    more sat at 7 strikes, shown, every one read «REST 401» on every run since 10-10. The 401 stays
+    UNKNOWN; the listing's own stored URL decides, where only a 404/410 is a removal (the fleet's
+    default own-page rule, daryusuf 2026-10-12, rakez 2026-09-28)."""
+    url = _stored_url(ad_number)
+    if not url:
+        return "unknown", "REST 401 rest_forbidden and the listing's own URL could not be read back"
+    page = LivenessProbe(platform="suwar", signal=_page_signal, session=session,
+                         url_for=lambda _a: url).verify_gone(ad_number)
+    if page[0] == "gone":
+        return "gone", f"REST 401 rest_forbidden (post not public); its own page: {page[1]}"
+    return "unknown", f"REST 401 rest_forbidden; its own page: {page[1]}"
 
 
 def main() -> int:

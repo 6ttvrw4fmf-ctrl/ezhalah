@@ -369,6 +369,17 @@ def run_site(site: str, *, shadow: bool, struck_only: bool = False) -> dict:
         raise
 
 
+def plan_sites(spec: str) -> list[str]:
+    """'' → every site; 'a,b' → exactly those, in order, each a registered site, else SystemExit."""
+    if not spec.strip():
+        return sorted(SITES)
+    names = list(dict.fromkeys(x.strip() for x in spec.split(",") if x.strip()))
+    unknown = [n for n in names if n not in SITES]
+    if unknown:
+        raise SystemExit(f"unknown site(s) {unknown}: not in fleet_liveness.SITES")
+    return names
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Daily DIRECT liveness for every site with a measured oracle")
     ap.add_argument("--site", action="append", choices=sorted(SITES), help="default: every site")
@@ -381,7 +392,10 @@ def main() -> int:
     if a.plan is not None:
         import json
         import os
-        sites = [a.plan] if a.plan else sorted(SITES)
+        # A comma list plans several sites in ONE dispatch (2026-10-17): the workflow's single
+        # concurrency group keeps only one pending run, so two one-site dispatches made while the
+        # daily run is busy silently drop the first. An unknown name is refused, never guessed.
+        sites = plan_sites(a.plan)
         with open(os.environ.get("GITHUB_OUTPUT", "/dev/stdout"), "a", encoding="utf-8") as f:
             f.write(f"sites={json.dumps(sites)}\n")
         return 0
