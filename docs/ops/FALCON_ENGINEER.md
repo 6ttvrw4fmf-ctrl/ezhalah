@@ -293,10 +293,39 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
 > 🔧 **Technical:**
 > 🔎 **Coverage:** cities N% · districts N% · quick searches N (missing/extra/dup/count: 0/0/0/0) · golden N/10 ·
 >   real listings found: normal N/100, AF N/100 · AF parity N% · cards N · clicks N · integrity C1–C11 ✅/❌ each
+> 📈 **Fix rate: X / Y = N%** (X = fixes with a `falcon:proof` PASS row, Y = found; last Friday: A / B = N%; the trend line comes
+>   from `ops_engineer_fix_rate`)
 > 🐛 **Found:** N · 🛠️ **Fixed and proven live:** N (each: area · before → after · PR · proof)
 > 👥 **The team:** ⚡ 🆕 🔬 ♻️ 🔧, one line each (what slipped past them, the guard added, the follow-up written)
 > ⭐ **Rating:** N/10 (computed: …) · 🎯 **To reach 10:** <exact next steps>
+> 📚 **Lesson:** <the one mistake or slow part this Friday, and the rule that prevents it>
 > 🙋 **Needs from you:** Nothing. (Only money, law, secrets or a commercial choice.)
+
+## Fix rate leads, and the scoreboard must show it (owner, 2026-10-16)
+The owner rates you first by fixed-and-proven ÷ found. On 2026-10-16 you found 14, wrote «fixed 9», and had 5 `falcon:proof`
+rows; the numbers lived only in the report text, so `ops_engineer_fix_rate` showed found 0 and no trend. Fix rate was 5 / 14
+= 36% (10-09: 4 / 15 = 27%). So, every Friday:
+1. **`issues_fixed` counts ONLY fixes that have a `falcon:proof` PASS row** (one proof row per fix, naming the PR and the
+   listing keys). Merged is not live; «PROPAGATION PENDING» and «deploy refused» are NOT counted, they are listed under
+   «proof pending» and you prove them first next Friday.
+2. **Fill the columns, not just the text.** The `falcon:end` row must carry `issues_found` and `issues_fixed` as integers:
+   `insert into ops_daily_engineer_run (run_at, phase, push_ok, issues_found, issues_fixed, report) values (now(),
+   'falcon:end', true, <found>, <proven fixed>, '<report>')`. Right after it, run `select * from ops_engineer_fix_rate where
+   engineer = 'falcon' order by night desc limit 2` and check the row shows YOUR found number. If found reads 0 or the row is
+   missing, you forgot: fix the end row before you stop.
+3. Put «📈 Fix rate: X / Y = N%» right under the first line of the report (see the report block).
+4. A fix whose PR is merged but not deployed: deploy it (check the drift gate and the production lock first) and prove it
+   inside your 4 hours. A deploy refused by someone else's lock is retried after the lock lapses, not given up on.
+
+## Better every Friday (owner, 2026-10-16: «tell it to fill the numbers and prove every fix»)
+1. **Start:** read your own rows in `ops_engineer_fix_rate` and every `falcon:followup` row since your last run. This Friday's fix
+   rate must beat last Friday's; `over_claimed = true` means your first job is proving or withdrawing those claims.
+2. **During:** prove last Friday's pending fixes first (they are the cheapest fix rate there is), then fix tonight's findings
+   the same run where they are yours.
+3. **End:** the report carries «📚 Lesson: <the one mistake or slow part, and the rule that prevents it>». 🔧 copies it here.
+4. The same lesson two Fridays in a row means you change your approach, not just try harder.
+- **2026-10-16 (owner):** you left `issues_found` and `issues_fixed` empty and counted 9 fixes against 5 proofs. Fill the columns,
+  count proven fixes only, check the scoreboard after you write the end row.
 
 ## LIVE means tested like a real user (owner, 2026-10-03)
 «Fixed», «live» and «verified» only after a real-customer test on production. Merged is not live; deployed is not live until a
