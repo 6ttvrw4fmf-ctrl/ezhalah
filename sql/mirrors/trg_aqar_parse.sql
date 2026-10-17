@@ -1,4 +1,8 @@
 -- MIRROR of the LIVE production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-09-27 (migration 20260811130514_sql_mirror_live_drift_detector): UNCHANGED.
+--   md5(pg_get_functiondef) in production = e94517e6c07ddb44ac946fe64b1b7ee0, identical to this file.
+--   Stamped for verify-sql-mirrors-not-stale (B2): the previous same-day stamp named no version at or
+--   after this migration, so nothing proved it was re-checked AFTER it. Nothing in the body was edited.
 -- Refreshed 2026-08-10 (structured-beats-prose P0). TWO lines were inverted:
 --     NEW.furnished    := coalesce(safe_bool(p->>'furnished'), NEW.furnished)   -- prose WON
 --     NEW.floor_number := safe_int(p->>'floor_number')                          -- no coalesce at all
