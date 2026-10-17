@@ -208,10 +208,14 @@ def asking_price(title: str, body: str) -> dict:
 
 # ── area ──────────────────────────────────────────────────────────────────────────────────────
 _AREA_WORD = r"(?:مساحه|المساحه|مساحتها|مساحته|بمساحه|المساحه الاجماليه|مساحه الارض|مساحتها الاجماليه)"
+# «مساحه 96 الف» is 96,000 m² in the seller's own words (Haraj 18263173 was stored as 96 m², 2026-10-17).
+_AREA_SCALE = r"(?:\s*(الف|الاف)" + _E + r")?"
 _UNIT = r"(?:م2|م²|م٢|متر\s*مربع|مترمربع|مترا\s*مربعا|متر|م)"
 _AREA1 = re.compile(_B + _AREA_WORD + r"(?:\s*[:：\-]\s*|\s+)(?:(?:الارض|تقريبا|حوالي|كامله|الاجماليه|تبلغ|تقدر ب)\s*[:\-]?\s*){0,2}"
-                    + _NUM + r"(?:\s*" + _UNIT + r")?(?![\d])")
-_AREA2 = re.compile(r"(?<![\d.,])" + _NUM + r"\s*(?:م2|م²|م٢|متر\s*مربع|مترمربع|مترا\s*مربعا)" + _E)
+                    + _NUM + _AREA_SCALE + r"(?:\s*" + _UNIT + r")?(?![\d])")
+_AREA2 = re.compile(r"(?<![\d.,])" + _NUM + _AREA_SCALE + r"\s*(?:م2|م²|م٢|متر\s*مربع|مترمربع|مترا\s*مربعا)" + _E)
+# «10 في 8», «20×30»: two sides of a plot, never its area (and never multiplied: source is truth).
+_DIMS_AFTER = re.compile(r"\s*(?:في|x|X|×|\*)\s*\d")
 _STREET_BEFORE = re.compile(r"(?:شارع|عرض|عرضه|بعرض|عرضها|الشارع)\s*[:\-]?\s*$")
 
 
@@ -223,10 +227,14 @@ def area_of(title: str, body: str) -> dict:
             if _STREET_BEFORE.search(t[max(0, m.start() - 12):m.start()]):
                 continue
             num = m.group(1)
+            if _DIMS_AFTER.match(t, m.end(1)):
+                continue                                         # «10 في 8» (Haraj 18263149, 2026-10-17)
             try:
                 v = float(num.replace(",", ""))
             except ValueError:
                 continue
+            if m.group(2):
+                v *= 1000
             if 10 <= v <= 10_000_000:
                 vals.setdefault(v, t[m.start():m.end()].strip())
     if len(vals) != 1:

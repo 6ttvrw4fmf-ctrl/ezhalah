@@ -188,6 +188,9 @@ def test_page_licence_number_and_data_key():
     (200, '<script type="application/ld+json">' + json.dumps(ld("x", FLAT_AR), ensure_ascii=False) + "</script>", "live"),
     (503, "", None),
     (200, "<html>challenge</html>", None),
+    # a stored post whose own page reads as a REQUEST was never an offer (HRJ11190645357, 2026-10-17)
+    (200, '<script type="application/ld+json">' + json.dumps(ld("طلب شقه للايجار مستعجل لا ام وولدها", ""),
+     ensure_ascii=False) + "</script>", "gone"),
 ])
 def test_own_page_removal_signal(status, body, want):
     assert R._signal(status, body, False) == want

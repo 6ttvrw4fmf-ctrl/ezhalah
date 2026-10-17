@@ -31,11 +31,11 @@ const check = (name: string, ok: boolean) => {
 // proof table is in src/lib/inAppViewer.ts and the PR that added them). A host joins only with one.
 const PROVEN_HOSTS = [
   'dealapp.sa', 'gathern.co',
-  'sadiq-eltajer.sa', 'rakez.sa', 'wahadat.sa', 'tuba.com.sa', 'amlakalahsa.com', 'listings.satel.sa',
+  'sadiq-eltajer.sa', 'rakez.sa', 'tuba.com.sa', 'amlakalahsa.com', 'listings.satel.sa',
   'snam.sa', 'alqasem.com.sa', 'moftah-aleaqar.com', 'safera.inblaj.net', 'tawia.sa', 'daryusuf.com',
   'hajerhouses.com', 'wslnaa.com', 'alrifai.com.sa', 'shmoua-alshmal.com', 'alkhaas.net',
   'ramzalqasim.com', 'alajlan-re.com', 'alta.com.sa', 'ebriza.com.sa', 'expattrustedhousingriyadh.com',
-  'ryadah.com.sa', 'daraa.sa', 'razre.sa', 'shatrirealestate.com', 'azdadalaqaria.com',
+  'daraa.sa', 'razre.sa', 'shatrirealestate.com', 'azdadalaqaria.com',
   'aqaralriyadh.com', 'fkralemar.com', 'fahadalshahri.com', 'eastabha.sa', 'suwar.sa', 'sqcc.sa',
   'aalbarrak.com', 'abeea.com.sa', 'just.sa', 'wajaf.sa', 'alsidra.com.sa', 'squares.com.sa',
   'muajarh.com', 'compoundin.com', 'gomenassat.com', 'almotmkenah.com', 'gudai.inblaj.net',
