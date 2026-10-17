@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AMENITY_TOKEN_COL } from './lib/afOracleFilter.ts';
 import { STRAY_OVERLAY_SRC } from './lib/liveClick.ts';
+import { windowBetween } from './lib/sourceWindow.ts';
 import { AMEN_UNKNOWN_COLUMNS, NOT_APPLICABLE, classifySkip, runFails, unknownColumnFilter } from './lib/afLiveSkipLedger.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -47,8 +48,8 @@ check('keys no question owns → null (the caller SKIPs, inconclusive)', unknown
 const amen = unknownColumnFilter(['kitchen'], AMEN)!;
 const inQs = new Set([...amen.qs.matchAll(/([a-z_]+)\.is\.null/g)].map((m) => m[1]));
 const mig = readFileSync(join(ROOT, 'supabase/migrations/20261003184909_af_guided_counts_unknown_count_for_every_question.sql'), 'utf8');
-const block = mig.slice(0, mig.indexOf('as cnt_amen_unknown'));
-const rpcCols = new Set([...block.slice(block.lastIndexOf('count(*) filter')).matchAll(/([a-z_]+) is null/g)].map((m) => m[1]));
+const block = windowBetween(mig, 'as cnt_rnpl_unknown', 'as cnt_amen_unknown', 'the cnt_amen_unknown filter');
+const rpcCols = new Set([...block.matchAll(/([a-z_]+) is null/g)].map((m) => m[1]));
 check('the amenity conjunction == the RPC\'s cnt_amen_unknown columns', rpcCols.size > 0 && [...rpcCols].every((c) => inQs.has(c)) && inQs.size === rpcCols.size,
   `qs=${[...inQs].sort().join(',')} rpc=${[...rpcCols].sort().join(',')}`);
 
