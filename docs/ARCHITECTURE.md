@@ -69,6 +69,8 @@ STOP → restore → fix → continue. Checklist: `ezhalah-app/docs/DEPLOY_REGRE
 
 ---
 
+**Browser tab logo (owner, 2026-10-16):** use the existing transparent eagle artwork from `assets/images/ezhalah-logo.png` for the PNG favicon and ICO payload, without a white tile. Version tab-icon URLs when artwork changes so browser icon caches refresh. The separate iOS home-screen icon remains opaque for platform compositing.
+
 ## 3. Frontend — navigation & screens
 
 **Chat language (owner, 2026-10-07):** reply in the latest user message’s language without changing the interface language, sidebar, controls, or page layout. Assistant messages stay on the assistant side; text keeps its own reading direction. Save original messages/replies verbatim. Automatic saved titles follow the latest user message and its language, including when search results arrive; manually renamed titles remain unchanged.
