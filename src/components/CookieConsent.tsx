@@ -13,7 +13,9 @@
 //              (2) "Only necessary" → 'necessary', same exit animation
 //              (3) ANY tap outside the card (city dropdown, filter button, «بحث», sidebar…) → 'all'
 //                  (owner 2026-09-13: "when he taps on the button in the filter it goes away, and
-//                   when it goes away, it means that he agrees").
+//                   when it goes away, it means that he agrees"). EXCEPT the ☰ menu button and the
+//                  language switch (owner 2026-10-17: the card must not disappear when the page is
+//                  translated to English) — both carry data-consent-keep and leave the card up.
 //   never     for signed-in users, on native. The tap-outside listener is gated on `visible`, which
 //             is itself gated on `user == null` — a signed-in user's app is completely untouched.
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -144,6 +146,11 @@ export default function CookieConsent() {
       const card = document.querySelector('[data-testid="cookie-consent"]');
       // A click on the card itself is handled by its own onPress — never treat it as an outside tap.
       if (card && e.target instanceof Node && card.contains(e.target)) return;
+      // LANGUAGE AND THE MENU THAT HOLDS IT ARE NOT AGREEMENT (owner 2026-10-17: «we don't want it to disappear when it's
+      // translated into English»). Opening the ☰ menu and switching language leave the card up (it re-renders in the new
+      // language); the Filter, «بحث», the city field and every other tap still count as before. The controls opt in with
+      // data-consent-keep, so a new control can never exempt itself by accident.
+      if (e.target instanceof Element && e.target.closest('[data-consent-keep]')) return;
       if (visible) choose('all');
       else setTappedEarly(true);
     };
