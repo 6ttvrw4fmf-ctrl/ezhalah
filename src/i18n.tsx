@@ -807,9 +807,10 @@ const AR: Record<string, string> = {
   'I can get you something more precise.': 'أقدر أجيب لك نتائج أدق.',
   // Composer placeholder (owner wording 2026-08-16) — names the domain and the country, in the
   // conversational register the rest of the agent speaks.
-  // The box's hint (owner 2026-10-17: «it should be like: type what you're looking for and Ezhalah…»). One line holds about 33
-  // characters once the «بحث» chip is gone, so «what you're looking for» is «what you want»; the name comes last, before the dots.
-  "Type what you want and Ezhalah...": 'اكتب اللي تبغاه وإزهله...',
+  // The box's hint (owner 2026-10-17: «type … and Ezhalah», with the word property in it). The name comes last, before the dots.
+  // The ARABIC must show WHOLE even at the start, beside the «بحث» chip (about 25 Arabic characters fit); the English is longer
+  // and is cut there, but shows whole once the chip is gone after the first message.
+  "Type your property and Ezhalah...": 'اكتب عقارك وإزهله...',
   // Stable composer accessibility label (owner brief 2026-08-23 §11) — the ONE sentence a screen
   // reader hears for the AI input; the rotating examples are aria-hidden decoration.
   'Describe the property you are looking for': 'اكتب وصف العقار اللي تبحث عنه',
