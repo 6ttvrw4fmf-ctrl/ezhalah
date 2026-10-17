@@ -37,7 +37,7 @@ const PROVEN_HOSTS = [
   'ramzalqasim.com', 'alajlan-re.com', 'alta.com.sa', 'ebriza.com.sa', 'expattrustedhousingriyadh.com',
   'daraa.sa', 'razre.sa', 'shatrirealestate.com', 'azdadalaqaria.com',
   'aqaralriyadh.com', 'fkralemar.com', 'fahadalshahri.com', 'eastabha.sa', 'suwar.sa', 'sqcc.sa',
-  'aalbarrak.com', 'abeea.com.sa', 'just.sa', 'wajaf.sa', 'alsidra.com.sa', 'squares.com.sa',
+  'aalbarrak.com', 'abeea.com.sa', 'wajaf.sa', 'alsidra.com.sa', 'squares.com.sa',
   'muajarh.com', 'compoundin.com', 'gomenassat.com', 'almotmkenah.com', 'gudai.inblaj.net',
   'eilmalriyada.com', 'aoujestates.com', 'aqarnajran.com', 'albukaeri.sa', 'mar-ksa.com',
 ].join(',');
