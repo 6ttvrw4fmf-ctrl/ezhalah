@@ -168,6 +168,19 @@ mustCatch('a corrupt stored value is treated as no-choice, not as consent',
     excludesCard,
     'Expected: if (card && card.contains(e.target)) return; using [data-testid="cookie-consent"].');
 
+  // OWNER 2026-10-17: the menu button and the language switch must NOT count as agreement.
+  const keepsMarked = /closest\(\s*['"]\[data-consent-keep\]['"]\s*\)\s*\)\s*return/.test(stripped);
+  check('the click listener ignores anything inside [data-consent-keep] (menu button, language switch)', keepsMarked,
+    'Expected: if (e.target instanceof Element && e.target.closest("[data-consent-keep]")) return;');
+  const marked = (f: string, re: RegExp) => re.test(fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8'));
+  check('the chat menu button, the home menu button and the sidebar language toggle all carry consentKeep',
+    marked('src/app/agent.tsx', /consentKeep:\s*'1'[\s\S]{0,120}setSidebarOpen\(true\)/)
+    && marked('src/app/index.tsx', /consentKeep:\s*'1'[\s\S]{0,120}setSidebarOpen\(true\)/)
+    && marked('src/components/Sidebar.tsx', /sidebar-language-toggle[\s\S]{0,420}consentKeep:\s*'1'/)
+    && marked('src/components/Sidebar.tsx', /s\.backdrop,\s*backdropStyle\][\s\S]{0,260}consentKeep:\s*'1'/));
+  mustCatch('a listener without the keep rule is caught',
+    !/closest\(\s*['"]\[data-consent-keep\]['"]\s*\)\s*\)\s*return/.test('document.addEventListener("click", () => { choose("all") })'));
+
   // Mutation: a version that forgot to exclude the card would dismiss on the user's own click on
   // "Allow all" too (harmless there, but on "Only necessary" it would OVERWRITE their choice to 'all').
   const withoutExclude = 'document.addEventListener("click", () => choose("all"))';
