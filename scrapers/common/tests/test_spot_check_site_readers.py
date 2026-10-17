@@ -76,3 +76,18 @@ def test_dead_visible_score_reads_a_reason_giving_site_reader_as_a_plain_verdict
     monkeypatch.setattr(DV, "_reader_for", lambda p: (lambda url: (ALIVE, "HTTP 200")))
     method, read = DV.reader_for("gathern", None)
     assert method == "site-reader" and read({"listing_url": "u"}) == ALIVE
+
+
+def test_ashab_is_read_by_its_own_status_badge(monkeypatch):
+    from scrapers.ashab import run as ash
+    pages = {"a": ["للإيجار", ash.AVAILABLE], "b": ["للإيجار", "مؤجر"], "c": ["للبيع", "مباع بالكامل"],
+             "d": ["للإيجار", "محجوز"], "e": ["للإيجار"]}
+    monkeypatch.setattr(ash, "get", lambda s, url: url)
+    monkeypatch.setattr(ash, "parse_page", lambda page: {"badges": pages[page]})
+    read = SC._reader_for("ashab")
+    assert [read(u)[0] for u in "abcde"] == [ALIVE, DEAD, DEAD, UNKNOWN, UNKNOWN]
+
+    def boom(s, url):
+        raise RuntimeError("403")
+    monkeypatch.setattr(ash, "get", boom)
+    assert read("a")[0] == UNKNOWN

@@ -190,6 +190,27 @@ def _reader_for(platform: str):
         # hollow). Read it the way its crawl and oracle do.
         from scrapers.muktamel import run as mk
         return mk.page_verdict
+    if platform == "ashab":
+        # 2026-10-17: a rented/sold ashab unit keeps a 200 page and says so only in its own status
+        # badge, so a status read called 11 of 12 struck-but-shown units "live". Read the badge the
+        # way its crawl does (scrapers/ashab/run.py::map_page).
+        from curl_cffi import requests as _cc
+        from scrapers.ashab import run as ash
+        from scrapers.common.db import _SOLD_OR_RENTED
+        session = _cc.Session(impersonate="chrome124")
+
+        def read_ashab(url: str):
+            try:
+                badges = ash.parse_page(ash.get(session, url))["badges"]
+            except Exception as e:  # noqa: BLE001 — an unread page is no answer, never a death
+                return UNKNOWN, f"unread: {type(e).__name__}: {str(e)[:80]}"
+            status = badges[1] if len(badges) > 1 else ""
+            if status == ash.AVAILABLE:
+                return ALIVE, f"own badge «{status}»"
+            if any(w in status for w in _SOLD_OR_RENTED):
+                return DEAD, f"own badge «{status}»"
+            return UNKNOWN, f"own badge «{status or 'none'}»"
+        return read_ashab
     if platform == "abralosol":
         # 2026-10-12: the shared status reader got no live answer from any of 5 known-live abralosol
         # pages (dead-visible void at 09:05 and on a re-run, spot-check 38245017303) while its crawl
