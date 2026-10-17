@@ -82,6 +82,7 @@ def test_ashab_is_read_by_its_own_status_badge(monkeypatch):
     from scrapers.ashab import run as ash
     pages = {"a": ["للإيجار", ash.AVAILABLE], "b": ["للإيجار", "مؤجر"], "c": ["للبيع", "مباع بالكامل"],
              "d": ["للإيجار", "محجوز"], "e": ["للإيجار"]}
+    monkeypatch.setattr(SC, "_ashab_session", lambda: object())
     monkeypatch.setattr(ash, "get", lambda s, url: url)
     monkeypatch.setattr(ash, "parse_page", lambda page: {"badges": pages[page]})
     read = SC._reader_for("ashab")

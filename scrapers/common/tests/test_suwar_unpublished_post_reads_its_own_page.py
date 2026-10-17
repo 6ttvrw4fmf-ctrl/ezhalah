@@ -2,6 +2,8 @@
 
 Measured 2026-10-17 (spot-check 39028234068): five shown suwar ads at 7 strikes read «REST 401» on every
 run since 10-10, so they could never be hidden. Only the listing's own 404/410 removes one."""
+import types
+
 import pytest
 
 from scrapers.common import http_liveness as HL
@@ -18,7 +20,7 @@ class _R:
 
 @pytest.fixture
 def rest_401(monkeypatch):
-    monkeypatch.setattr(S.cc, "get", lambda *a, **k: _R(401, {"code": "rest_forbidden"}))
+    monkeypatch.setattr(S, "cc", types.SimpleNamespace(get=lambda *a, **k: _R(401, {"code": "rest_forbidden"})))
     monkeypatch.setattr(S, "_stored_url", lambda ad: "https://suwar.sa/property/x/")
     monkeypatch.setattr(HL.time, "sleep", lambda s: None)
 
@@ -45,5 +47,5 @@ def test_a_401_with_no_stored_url_stays_unknown(rest_401, monkeypatch):
 
 
 def test_a_published_post_is_still_live(monkeypatch):
-    monkeypatch.setattr(S.cc, "get", lambda *a, **k: _R(200, {"id": 19940, "status": "publish"}))
+    monkeypatch.setattr(S, "cc", types.SimpleNamespace(get=lambda *a, **k: _R(200, {"id": 19940, "status": "publish"})))
     assert S._verify_gone("SWR19940")[0] == "live"

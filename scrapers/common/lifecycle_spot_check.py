@@ -159,6 +159,11 @@ def open_ad(url: str, dead_marker) -> str:
     return classify_response(status, body or "", dead_marker=dead_marker)
 
 
+def _ashab_session():
+    from curl_cffi import requests as _cc
+    return _cc.Session(impersonate="chrome124")
+
+
 def _reader_for(platform: str):
     """The site's OWN reader where the generic status judge cannot tell dead from live, else None.
 
@@ -194,10 +199,9 @@ def _reader_for(platform: str):
         # 2026-10-17: a rented/sold ashab unit keeps a 200 page and says so only in its own status
         # badge, so a status read called 11 of 12 struck-but-shown units "live". Read the badge the
         # way its crawl does (scrapers/ashab/run.py::map_page).
-        from curl_cffi import requests as _cc
         from scrapers.ashab import run as ash
         from scrapers.common.db import _SOLD_OR_RENTED
-        session = _cc.Session(impersonate="chrome124")
+        session = _ashab_session()
 
         def read_ashab(url: str):
             try:
