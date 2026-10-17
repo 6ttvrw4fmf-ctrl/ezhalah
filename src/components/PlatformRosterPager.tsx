@@ -5,8 +5,8 @@ import { PLATFORM_LOGO_BREAKPOINT } from '@/lib/responsive';
 import { loaderPageLayout, loaderStepDelay, loaderSlotIndices } from '@/lib/loaderPages';
 
 /** No vertical scrolling. Resizing starts a fresh complete pass at the new page size. */
-export default function PlatformRosterPager<T>({ items, renderItem, rtl, onPresented, bottomInset }: {
-  items: T[]; renderItem: (item: T) => ReactNode; rtl: boolean; onPresented: (complete: boolean) => void; bottomInset?: number;
+export default function PlatformRosterPager<T>({ items, renderItem, rtl, onPresented, bottomInset, settleTop }: {
+  items: T[]; renderItem: (item: T) => ReactNode; rtl: boolean; onPresented: (complete: boolean) => void; bottomInset?: number; settleTop?: number;
 }) {
   const { height, width: windowWidth } = useWindowDimensions();
   const container = useRef<View>(null);
@@ -20,7 +20,8 @@ export default function PlatformRosterPager<T>({ items, renderItem, rtl, onPrese
   }, [height, windowWidth, measureSpace]);
   const wide = useAtLeast(PLATFORM_LOGO_BREAKPOINT);
   const [width, setWidth] = useState(0);
-  const layout = loaderPageLayout(width, height, wide, top, bottomInset);
+  // Sized for where the grid WILL be after the thread glides down to it (settleTop), never for where a long thread parked it.
+  const layout = loaderPageLayout(width, height, wide, settleTop != null ? Math.min(top, settleTop) : top, bottomInset);
   return <View testID="loader-roster" ref={container} onLayout={e => { setWidth(e.nativeEvent.layout.width); measureSpace(); }} style={styles.container}>
     {width > 0 && <Slots key={`${layout.pageSize}:${layout.rowHeight}`} items={items} renderItem={renderItem}
       rtl={rtl} onPresented={onPresented} layout={layout} />}
