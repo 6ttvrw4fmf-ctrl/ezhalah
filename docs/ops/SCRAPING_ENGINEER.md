@@ -56,7 +56,7 @@ rental without a period. A fix whose only carriers are unprovable stays UNKNOWN 
   on an untouched one. Hand-check reached 85 unlicensed offers (5 bad); finish to 100 on fresh posts.
 - **awal (617):** #7261 merged 06:31; the awal crawl was dispatched behind the nightly → kitchen true in search → AF journey.
 - **584 dangling-run remediation:** `apply_migration` timed out twice on 10-17 (function body with an UPDATE on
-  scrape_runs; nothing reached the database, nothing was blocked). Patch: `docs/ops/pending/2026-10-16-dangling-remediation-at-detector-threshold.sql.txt`.
+  scrape_runs; nothing reached the database, nothing was blocked). Patch: the 10-16 dangling-remediation file in `docs/ops/pending/`.
   NEEDS A HUMAN CLICK. Do not retry the tool.
 - **575/612 photo floors:** aqar's 91.6% is mostly source truth (7/8 photo-less ads serve aqar's own
   `villa-default.png`); one ad got its photo AFTER our capture and re-sweeps never refresh photos. Next: count the
