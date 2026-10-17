@@ -176,11 +176,13 @@ def _reader_for(platform: str):
         from scrapers.gathern import liveness as gl
         session = gl.proxied_session(False)
 
-        def read(url: str) -> str:
-            status = gl.probe(session, url)
+        def read(url: str):
+            status = gl.probe(session, url, home_status=gl.HOME_LANDED)
             if status == 200:
-                return ALIVE
-            return DEAD if gl.looks_dead(status) else UNKNOWN
+                return ALIVE, "HTTP 200 on the unit's own page"
+            if status == gl.HOME_LANDED:
+                return UNKNOWN, "landed on gathern's home page (no verdict)"
+            return (DEAD if gl.looks_dead(status) else UNKNOWN), f"HTTP {status or 'none after retries'}"
         return read
     if platform == "muktamel":
         # A withdrawn ad is a 200 hollow shell and a removed one 302s to a 200 /404 page, so a status
@@ -235,7 +237,11 @@ def pick_reader(platform: str, dead_marker, control: dict | None):
     """(method, read(row) -> ALIVE/DEAD/UNKNOWN): the way the site's hiding job reads it, first."""
     site_reader = _reader_for(platform)
     if site_reader:
-        return "site-reader", lambda row: site_reader(row["listing_url"])
+        def read_by_site(row: dict) -> str:
+            out = site_reader(row["listing_url"])
+            verdict, row["evidence"] = out if isinstance(out, tuple) else (out, None)
+            return verdict
+        return "site-reader", read_by_site
     oracle_reader = _oracle_reader_for(platform, control)
     if oracle_reader:
         return "site-oracle", oracle_reader
