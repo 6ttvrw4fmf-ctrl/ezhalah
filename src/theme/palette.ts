@@ -58,6 +58,11 @@ export const lightColors = {
   goldLightHover: '#f0c94a', // both stops deepen slightly on hover/press
   goldDeepHover: '#a86f08',
   goldOnFill: '#2a1d06',
+  // SILVER (owner 2026-10-17): the card ring + «اضغط هنا» strip of a listing that does NOT open inside
+  // Ezhalah; gold is reserved for the sites that do. Same metallic read as the gold pair.
+  silverLight: '#f4f6f8',
+  silverDeep: '#9aa6b2',
+  silverOnFill: '#1f2a33',
   danger: '#c0392b', // destructive text/icons
   dangerBg: '#fbe8e6', // destructive tinted fill
   dangerLine: '#f3cfca', // destructive tinted border
@@ -120,6 +125,9 @@ export const darkColors: Record<PaletteKey, string> = {
   goldLightHover: '#f0c94a',
   goldDeepHover: '#a86f08',
   goldOnFill: '#2a1d06',
+  silverLight: '#e6eaef',
+  silverDeep: '#7f8a96',
+  silverOnFill: '#161d24',
   danger: '#e46a5e',
   dangerBg: '#3a1e19',
   dangerLine: '#562a23',
