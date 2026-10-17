@@ -48,6 +48,10 @@ _REQUEST = re.compile(
     r")" + _E
 )
 
+# A title that OPENS with «طلب» is a request («طلب شقه للايجار مستعجل», Haraj 18263109 was stored as an offer,
+# 2026-10-17). Title start only: «السعر عند الطلب» / «حسب الطلب» inside an offer stay offers.
+_REQUEST_TITLE_START = re.compile(r"^(?:ال)?طلب" + _E)
+
 # A title offering a choice of neighbourhoods («في حي الملقا او حطين او العارض») describes what a
 # seeker will accept, never one unit's address (gate #3 2026-10-12, 11190353094). Title only.
 _ALTERNATIVES_TITLE = re.compile(_B + r"حي\s+[^\s]+(?:\s+[^\s]+)?\s+او\s+(?:حي\s+)?[^\s]+")
@@ -122,7 +126,7 @@ def classify(title: Optional[str], body: Optional[str]) -> tuple[str, str]:
     """(verdict, reason). verdict ∈ offer | request | other | doubt. Only 'offer' may be stored."""
     t, b = _norm(title), _norm(body)
     both = f"{t} \n {b}"
-    m = _REQUEST.search(both) or _ALTERNATIVES_TITLE.search(t)
+    m = _REQUEST.search(both) or _REQUEST_TITLE_START.search(t) or _ALTERNATIVES_TITLE.search(t)
     if m:
         return "request", f"request word «{m.group(0)}»"
     m = _OTHER.search(both) or _OTHER_TITLE.search(t) or _CATALOGUE_TITLE.search(t)
