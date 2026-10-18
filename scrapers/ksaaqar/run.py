@@ -47,7 +47,9 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize, sold_pin  # noqa: E402
-from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.arabic_location import (  # noqa: E402
+    find_district_in_text, known_district_keys, title_hayy_district, to_catalog,
+)
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://ksaaqar.com"
@@ -732,6 +734,12 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
     if city_id:
         cand_hit = find_district_in_text(cand, city_id) if cand else None
         district_ar = cand_hit or find_district_in_text(f"{title} {body}", city_id)
+    # The ad's own TITLE names the district («شقق تمليك للبيع بحي المروة», «للبيع فيلا مساحة 338 حي العارض»): its
+    # «حي X» in the title's spelling when it is exactly a district the catalogue or the served index knows for this
+    # city (2026-10-18: 17 of the 44 titled rows with no district). Never fuzzy.
+    title_hayy = title_hayy_district(title, known_district_keys(city_id)) if (city_id and not district_ar) else None
+    if title_hayy:
+        district_ar, district_source = title_hayy, "title"
 
     price = own_price(page_html, link)
     rent_period, price_annual = (None, None)
@@ -750,7 +758,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         "city_id": city_id,
         "region_id": region_id,
         "district_ar": district_ar,
-        "neighborhood": neighborhood_word(cand, field, cand_hit),
+        "neighborhood": neighborhood_word(cand, field, cand_hit) or title_hayy,
         "area_m2": parse_area(page_text),
         "bedrooms": spec_int(page_text, "عدد الغرف", 0, 50),
         "bathrooms": spec_int(page_text, "دورة المياه", 0, 50)
