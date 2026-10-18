@@ -368,12 +368,23 @@ _CITY_FALLBACK_RE = re.compile(
     "(?:" + "|".join(re.escape(c) for c in sorted(_CITIES, key=len, reverse=True)) + ")(?![ء-ي])")
 
 
-def parse_city(text: str, title: str = "") -> Optional[str]:
+# The category link itself: «<strong>الدولة: </strong><a … class="ctg-tag" …>عقارات جدة</a>».
+_COUNTRY_TAG_RE = re.compile(r"الدولة\s*:\s*</strong>\s*<a\b[^>]*>\s*عقارات\s+([^<]{2,40}?)\s*</a>")
+
+
+def parse_city(text: str, title: str = "", page_html: str = "") -> Optional[str]:
     """The city the source stated, or None. Never guessed — the fallback RECOGNISES a name from the
     closed Saudi city set; it does not infer one from a district or a landmark."""
     m = _CITY_RE.search(text)
     if m:
-        return m.group(1).strip()
+        v = m.group(1).strip()
+        # A SHORT pin label prints with no «...», so «الدولة: عقارات جدة» runs straight into «جدة حي المروه انظر
+        # الخريطة» and the capture swallowed the label: «جدة جدة حي المروه», «الرياض حي المهدية» (52 live rows with no
+        # city_id, so no district either; 2026-10-18). The category link ends where the city does.
+        tag = _COUNTRY_TAG_RE.search(page_html or "")
+        if tag and len(v) > len(_clean(tag.group(1))) and v.startswith(_clean(tag.group(1))):
+            v = _clean(tag.group(1))
+        return v
     m = _CITY_FALLBACK_RE.search(f"{title} {text[:600]}")
     return m.group(0) if m else None
 
@@ -402,6 +413,9 @@ _PLUS_CODE_ANY = re.compile(r"(?<![A-Z0-9])[23456789CFGHJMPQRVWX]{4,8}\+[2345678
 # A map line that names ITSELF a district: «حي » + Arabic words only (no digits, latin, or a second clause).
 _HAYY_SELF = re.compile(r"حي\s+[\u0621-\u064A][\u0621-\u064A\s]{1,30}")
 _HAYY_TAIL = re.compile(r"(?<![\u0621-\u064A])حي\s+[\u0621-\u064A][\u0621-\u064A\s]{1,30}$")
+# «… خميس مشيط», «… شمال الرياض», «… بالرياض»: the city (with its direction or «ب») a label appends to a district
+_CITY_TAIL = re.compile(r"(?<=\S)\s+(?:(?:شمال|جنوب|شرق|غرب|وسط)\s+)?ب?(?:"
+                        + "|".join(re.escape(c) for c in sorted(_CITIES, key=len, reverse=True)) + r")$")
 
 
 def location_field_district(text: str) -> Optional[str]:
@@ -427,14 +441,40 @@ def location_field_district(text: str) -> Optional[str]:
     return None
 
 
-def district_candidate(text: str) -> Optional[str]:
+# The «الموقع:» box under the gallery holds the pin label IN FULL; the map line above it is the theme's copy of that
+# label — CUT when long («خميس مشيط حي دره المو... انظر الخريطة» for «خميس مشيط حي دره الموسي»), and printed with no
+# «...» when short («حي التسامح انظر الخريطة»), which _MAP_RE never matched. Rendered 2026-10-18: the cut words «حي دره
+# المو», «حي العزيز», «حي الصحاف» were live, and short labels gave no district at all.
+_BOX_RE = re.compile(r"<h4>\s*الموقع\s*:?\s*</h4>\s*<p>(.*?)</p>", re.S)
+
+
+def location_box_label(page_html: str) -> Optional[str]:
+    m = _BOX_RE.search(page_html or "")
+    return (_clean(m.group(1)) or None) if m else None
+
+
+# A label that names ANOTHER Saudi city is that city's place: «خميس مشيط حي الاسكان» on an ad filed under «عقارات أبها»,
+# «امارة منطقة الرياض» under جدة, «الخبر العزيزية حي الشراع» under الهفوف. Its district is not this city's district.
+# «حي الرياض» (a district of جدة) and «طريق الدمام» (a road in الرياض) name a district and a road, not a city.
+_NOT_A_CITY_MENTION = re.compile(r"(?:حي|طريق|شارع)\s+\S+")
+
+
+def names_other_city(label: Optional[str], city: Optional[str]) -> bool:
+    rest = _NOT_A_CITY_MENTION.sub(" ", label or "")
+    return any(normalize.map_city(c) != city for c in _CITY_FALLBACK_RE.findall(rest))
+
+
+def district_candidate(text: str, box: Optional[str] = None) -> Optional[str]:
     field = location_field_district(text)
     if field:
         return field
     m = _MAP_RE.search(text)
-    if not m:
+    if box:
+        v = box             # the label whole; the map line is its copy, cut («…المو...») or, when short, unmatched
+    elif m:
+        v = _STATUS_LEAD.sub("", m.group(1).strip())
+    else:
         return None
-    v = _STATUS_LEAD.sub("", m.group(1).strip())
     v = v.split("،")[0].split(",")[0].strip()
     # an agent reference code is latin/digits, and a plus code a grid cell — never a Saudi district name
     if not v or re.fullmatch(r"[A-Za-z0-9\s\-_]+", v) or _PLUS_CODE_RE.match(v) or _PLUS_CODE_ANY.search(v):
@@ -451,13 +491,22 @@ def neighborhood_word(cand: Optional[str], field: Optional[str], cand_hit: Optio
     city's catalog recognised it or it names itself «حي X». Anything else stays in additional_info.map_line."""
     if field:
         return field
-    if cand and (cand_hit or _HAYY_SELF.fullmatch(cand)):
+    if cand and cand_hit:
         return cand
+    if cand and _HAYY_SELF.fullmatch(cand):
+        return _without_city_tail(cand)
     # «الرياض حي النضيم», «خميس مشيط حي الاسكان»: the line ENDS in a district it names — that segment, as written.
     tail = _HAYY_TAIL.search(cand or "")
     if tail and _HAYY_SELF.fullmatch(tail.group(0).strip()):
-        return tail.group(0).strip()
+        return _without_city_tail(tail.group(0).strip())
     return None
+
+
+def _without_city_tail(word: str) -> str:
+    """«حي طيب الاسم خميس مشيط» → «حي طيب الاسم»: the district, without the city the label appends to it.
+    «حي الرياض» stays whole — there the city's name IS the district's."""
+    v = _CITY_TAIL.sub("", word).strip()
+    return v if _HAYY_SELF.fullmatch(v) else word
 
 
 # TYPE comes from the breadcrumb the theme prints above the title: «شقق سكنية > شقق سكنية للإيجار»,
@@ -718,7 +767,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         field = spec(page_text, "النوع")
         return None, category, f"deal_field:{field[:12]}" if field else "no_deal_stated"
 
-    city_ar = parse_city(page_text, title_early)
+    city_ar = parse_city(page_text, title_early, page_html)
     if not city_ar:
         return None, category, "no_city"               # unlocatable rows cannot be searched honestly
     city = normalize.map_city(city_ar)
@@ -726,18 +775,25 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
 
     # The district is PROPOSED from the page and kept only if this city's curated catalog knows it.
     field = location_field_district(page_text)
-    cand = district_candidate(page_text)
+    box = location_box_label(page_html)
+    cand = district_candidate(page_text, box)
     district_source = ("location_field" if field else "map_line") if cand else None
     title = _clean((post.get("title") or {}).get("rendered", ""))
     body = _clean((post.get("content") or {}).get("rendered", ""))
     district_ar = cand_hit = None
-    if city_id:
+    # The page itself places the pin in another city: no district of THIS city comes from it, its title or its body,
+    # and the stored one clears (the source settled it — AUTHORITATIVE_NULL, not a dropped None).
+    elsewhere = bool(cand) and not field and names_other_city(box or cand, city)
+    if elsewhere:
+        district_ar, district_source = db.AUTHORITATIVE_NULL, "label_names_another_city"
+    elif city_id:
         cand_hit = find_district_in_text(cand, city_id) if cand else None
         district_ar = cand_hit or find_district_in_text(f"{title} {body}", city_id)
     # The ad's own TITLE names the district («شقق تمليك للبيع بحي المروة», «للبيع فيلا مساحة 338 حي العارض»): its
     # «حي X» in the title's spelling when it is exactly a district the catalogue or the served index knows for this
     # city (2026-10-18: 17 of the 44 titled rows with no district). Never fuzzy.
-    title_hayy = title_hayy_district(title, known_district_keys(city_id)) if (city_id and not district_ar) else None
+    title_hayy = (title_hayy_district(title, known_district_keys(city_id))
+                  if (city_id and not district_ar and not elsewhere) else None)
     if title_hayy:
         district_ar, district_source = title_hayy, "title"
 
@@ -758,7 +814,8 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         "city_id": city_id,
         "region_id": region_id,
         "district_ar": district_ar,
-        "neighborhood": neighborhood_word(cand, field, cand_hit) or title_hayy,
+        "neighborhood": (db.AUTHORITATIVE_NULL if elsewhere
+                         else neighborhood_word(cand, field, cand_hit) or title_hayy),
         "area_m2": parse_area(page_text),
         "bedrooms": spec_int(page_text, "عدد الغرف", 0, 50),
         "bathrooms": spec_int(page_text, "دورة المياه", 0, 50)
