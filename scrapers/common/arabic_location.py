@@ -565,6 +565,13 @@ def catalog_district(city_id: Optional[int], district_ar: Optional[str]) -> Opti
     return _DISTRICT_AR_BY_CITY.get((city_id, n)) if n in _DISTRICT_BY_CITY.get(city_id, ()) else None
 
 
+def catalog_district_keys(city_id: Optional[int]) -> frozenset[str]:
+    """Every district_norm key the catalogue attests for `city_id`; empty when the city is unknown. For a
+    caller that must test MANY candidate spans against one town (abralosol's title fallback)."""
+    _load()
+    return frozenset(_DISTRICT_BY_CITY.get(city_id, ())) if city_id else frozenset()
+
+
 def find_district_in_text(text: Optional[str], city_id: Optional[int]) -> Optional[str]:
     """Recognizes a REAL district of `city_id` mentioned in free text (a title, a description) — for
     sources that publish no separate district field/taxonomy at all (remal: class_list gives only an
