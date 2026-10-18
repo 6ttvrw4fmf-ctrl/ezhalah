@@ -141,6 +141,17 @@ _DISTRICT_EN_AR = {
     ("riyadh", "ghoroub"): "حي الغروب", ("riyadh", "qayrawan"): "حي القيروان",
     ("riyadh", "ishbilia"): "حي اشبيلية", ("riyadh", "rafiah"): "حي الرفيعة",
     ("jeddah", "rabwah"): "حي الربوة", ("jeddah", "bawadi"): "حي البوادي",
+    # 2026-10-18 (unexplained-district residue): spellings live rows print, each catalogued for that city. Still NOT
+    # mapped: «Rakah»/«Rakaa» under khobar (الراكة الشمالية AND الجنوبية), «Aziziyah»/«Khaldiya»/«Fanateer» (not in
+    # الخبر's / الجبيل's catalogue), «Al Qashlah»/«Al Douha» (الظهران's), «Dana Bay», compound and landmark names.
+    ("riyadh", "rahmaniah"): "حي الرحمانية", ("riyadh", "monisya"): "حي المونسية",
+    ("riyadh", "monsyah"): "حي المونسية", ("riyadh", "qirawan"): "حي القيروان",
+    ("riyadh", "yasameen"): "حي الياسمين", ("riyadh", "safarat"): "حي السفارات",
+    ("riyadh", "nafel"): "حي النفل", ("riyadh", "masif"): "حي المصيف",
+    ("riyadh", "sulaimaniya"): "حي السليمانية", ("riyadh", "hada"): "حي الهدا",
+    ("riyadh", "olya"): "حي العليا", ("riyadh", "second industrial zone"): "المدينة الصناعية الثانية",
+    ("khobar", "qutuba"): "حي قرطبة", ("khobar", "olya"): "حي العليا", ("khobar", "cornish"): "حي الكورنيش",
+    ("jeddah", "shatieh"): "حي الشاطئ",
 }
 
 
@@ -194,7 +205,9 @@ def _norm_dist(name: Optional[str]) -> Optional[str]:
         return None
     n = re.sub(r"\b(?:district|dist)\b\.?", " ", name.strip().lower())   # the bridge writes «… Dist.»
     n = re.sub(r"[^a-z\s-]", " ", n)
-    n = re.sub(r"^\s*(?:al|an|ar|as|ad|ash|at)[\s-]+", "", n)
+    n = re.sub(r"^\s*(?:the\s+)?(?:al|an|ar|as|ad|ash|at)[\s-]+", "", n)
+    n = re.sub(r"^\s*the\s+", "", n)                       # «The Olya»
+    n = re.sub(r"^\s*al(?=[a-z]{4})", "", n)                # «Almonisya», «Alsulaimaniya», «AlNafel»: the article glued on
     n = re.sub(r"\s+", " ", n).strip()
     return n or None
 
