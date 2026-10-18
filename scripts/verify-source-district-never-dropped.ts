@@ -104,6 +104,8 @@ function problems2(s: string): string[] {
 
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : ` — ${why}`}`); };
+// Mutation proof: the SAME verdict function, run on a deliberately loosened copy of the committed SQL, must go red.
+const mustCatch = (label: string, caught: boolean, why = '') => check(`mutant caught: ${label}`, caught, why);
 
 const live = problems(sql);
 check(`committed migration ${file} holds every pin`, live.length === 0, live.join('; '));
@@ -122,7 +124,7 @@ const mutants: Array<[string, (s: string) => string]> = [
 ];
 for (const [label, mutate] of mutants) {
   const m = mutate(sql);
-  check(`mutant caught: ${label}`, m !== sql && problems(m).length > 0, m === sql ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+  mustCatch(label, m !== sql && problems(m).length > 0, m === sql ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
 }
 
 const live2 = problems2(sql2);
@@ -139,7 +141,7 @@ const mutants2: Array<[string, (s: string) => string]> = [
 ];
 for (const [label, mutate] of mutants2) {
   const m = mutate(sql2);
-  check(`fleet-wide mutant caught: ${label}`, m !== sql2 && problems2(m).length > 0, m === sql2 ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+  mustCatch(`fleet-wide: ${label}`, m !== sql2 && problems2(m).length > 0, m === sql2 ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
 }
 
 console.log(failed === 0 ? 'OK: a source district can never be dropped silently again' : `${failed} check(s) failed`);
