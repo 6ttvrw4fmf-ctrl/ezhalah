@@ -6,7 +6,7 @@
 // domain needs no change here.
 //
 // An 8-character code is a SAVED CHAT (public.shared_chat): its card facts come from the anon-readable
-// shared_chat_card RPC, bounded at 2.5 s. A failed read still answers — the plain Ezhalah card, still
+// shared_chat_card RPC, bounded at 6 s (owner 2026-10-18: a busy database took 2.8 s and the card fell back to plain «إزهله»). A failed read still answers — the plain Ezhalah card, still
 // sending the person to Home + ?share=<code>, where the app reads the chat itself.
 import { shareCardHtml, isShareCode, sharedChatCardFrom, type SharedChatCard } from '../src/lib/shareSearch';
 
@@ -20,7 +20,7 @@ async function chatCard(code: string): Promise<SharedChatCard | null> {
       method: 'POST',
       headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ p_code: code }),
-      signal: AbortSignal.timeout(2500),
+      signal: AbortSignal.timeout(6000),
     });
     if (!r.ok) return null;
     const rows = await r.json();
@@ -37,6 +37,8 @@ export default async function handler(req: { headers: Record<string, string | st
   const card = isShareCode(payload) ? await chatCard(payload!) : null;
   res.statusCode = 200;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.setHeader('Cache-Control', card || !isShareCode(payload) ? 'public, max-age=300' : 'no-store');
+  // A shared chat's card never changes, so a card that loaded is kept at Vercel's edge for a day
+  // (s-maxage): WhatsApp's later fetches never wait on the database. A failed read is never cached.
+  res.setHeader('Cache-Control', card ? 'public, max-age=300, s-maxage=86400' : !isShareCode(payload) ? 'public, max-age=300' : 'no-store');
   res.end(shareCardHtml(host ? `${proto}://${host}` : '', payload ?? null, card));
 }
