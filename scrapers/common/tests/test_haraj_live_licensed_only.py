@@ -110,7 +110,8 @@ def test_arabic_flat_rent_rooms_baths_services():
 
 
 def test_english_monthly_rent_and_age_words():
-    row, *_ = mapped("للايجار شقق عزاب مؤثثة في حي البيان", FLAT_EN_MONTHLY, city="الرياض")
+    # title singular since 2026-10-17: a plural title («شقق عزاب») is a catalogue, never stored
+    row, *_ = mapped("للايجار شقة عزاب مؤثثة في حي البيان", FLAT_EN_MONTHLY, city="الرياض")
     assert (row["rent_period"], row["price_annual"]) == ("monthly", 2800 * 12)
     assert (row["property_age"], row["direction"], row["furnished"]) == (7, "شمال", True)
     assert row["water_supply"] is True and row["electricity"] is True
@@ -267,3 +268,23 @@ def test_liveness_controls_are_fresh_posts_that_read_live_and_fail_closed(monkey
     # a block / redesign: nothing reads live → fewer than n → fleet_liveness quarantines
     monkeypatch.setattr(R, "_verify_gone", lambda ad: ("unknown", "challenge"))
     assert R.liveness_controls(5) == []
+
+
+# ── several units in one licensed post = a catalogue (owner real-user check 2026-10-17) ─────────────
+@pytest.mark.parametrize("title,cat", [
+    ("شقق تمليك فاخرة للسكن والا ستثمار ابحر الشمالية 3و4و 5غرف", True),   # HRJ11190739649, 1,161 m²
+    ("شقق استثمارية للبيع غرفتين ابحر الجنوبية", True),                    # HRJ11190629474, 2,484 m²
+    ("فلل للبيع حي الرحمانيه", True), ("محلات تجارية للايجار", True),
+    ("للبيع عمار 4 شقق", False), ("عماره 6 شقق للبيع", False),             # one building, its flats counted
+    ("شقة سكنية الايجار 5 غرف في حي التيسير", False), ("شقة للبيع", False), ("دور علوي 3 غرف", False),
+])
+def test_licensed_catalogue_title(title, cat):
+    assert R.is_catalogue_title(title) is cat
+
+
+def test_licensed_catalogue_is_never_stored_and_reads_gone():
+    name = "شقق تمليك فاخرة للسكن 3و4و 5غرف"
+    row, _, skip, _ = R.map_post("1", ld(name, FLAT_AR), "", "offer", "x", TODAY)
+    assert row is None and skip == "catalogue"
+    assert R._signal(200, '<script type="application/ld+json">' + json.dumps(ld(name, FLAT_AR), ensure_ascii=False)
+                     + "</script>", False) == "gone"
