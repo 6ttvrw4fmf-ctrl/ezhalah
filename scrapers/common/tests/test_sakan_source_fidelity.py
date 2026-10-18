@@ -514,13 +514,14 @@ def test_a_404_is_not_retried():
 # ══ THE PLATFORM'S OWN CHIP VOCABULARY ══════════════════════════════════════════════════════════
 
 def test_the_lift_chip_reaches_the_elevator_column():
-    """sakan prints «اصنصير - مصاعد»; the shared map knows «مصعد» and shares no substring with it.
-    Measured: 14 of 117 live listings stated a lift that no column saw before this rewrite."""
+    """sakan prints «اصنصير - مصاعد»; the shared map knew only «مصعد», which shares no substring with it.
+    Measured: 14 of 117 live listings stated a lift that no column saw before this rewrite. Since 🔬 2026-10-18
+    the shared map knows the plural «مصاعد» too (rakez «مصاعد إيطالية»), so every prose site reads it."""
     page = BUY.replace('<span class="fxs fxs--gray">ماستر</span>',
                        '<span class="fxs fxs--gray">اصنصير - مصاعد</span>')
     p = R.parse_page(BUY_URL, page)
     assert "اصنصير - مصاعد" in p["features"]
-    assert not R.normalize.amenities_from_text("اصنصير - مصاعد"), "the shared map cannot read it"
+    assert R.normalize.amenities_from_text("اصنصير - مصاعد") == {"elevator": True}, "the shared map reads the plural"
     row, _, _ = _row(BUY_URL, page)
     assert row.get("elevator") is True
     assert row["additional_info"]["features"] == p["features"], "the chip is stored as printed"
