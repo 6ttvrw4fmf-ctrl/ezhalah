@@ -305,6 +305,12 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
     # Native Arabic R/C/D (ADDITIVE — live city/neighborhood above untouched). The API already carries
     # city.name_ar / district.name_ar; we just stopped discarding them. No region signal from Aldarim,
     # so same-name twins (rare here — mostly Riyadh) stay region_id-null rather than guessing.
+    # A figure the ad's own description states per metre is a RATE (owner 2026-10-18): ad 39641 publishes
+    # selling_price 1100 on 1,020 m² and says «سعر المتر 1100». It was served as a 1,100 SAR total. A stated rate
+    # writes AUTHORITATIVE_NULL as the total so a stored total clears; no marker keeps the figure as published.
+    sale = _int(L.get("selling_price")) if not is_rent else None
+    rate = sale if sale and normalize.stated_per_metre(L.get("description_ar"), sale) else None
+
     cityd = L.get("city") if isinstance(L.get("city"), dict) else {}
     distd = L.get("district") if isinstance(L.get("district"), dict) else {}
     city_ar = (cityd.get("name_ar") or "").strip() or None
@@ -322,7 +328,8 @@ def map_listing(L: dict) -> tuple[Optional[dict], str]:
         "bathrooms": _int(L.get("bathrooms")),
         "halls": _int(L.get("living_rooms")),
         "reception_rooms_majlis": _int(L.get("majlis_rooms")),
-        "price_total": _int(L.get("selling_price")) if not is_rent else None,
+        "price_total": db.AUTHORITATIVE_NULL if rate else sale,
+        "price_per_meter": rate,
         "price_annual": price_annual if is_rent else None,
         "rent_period": rent_period if is_rent else None,
         "city": _city(L.get("city")),

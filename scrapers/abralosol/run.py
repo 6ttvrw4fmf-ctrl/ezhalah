@@ -249,7 +249,10 @@ def _price(cell_html: str) -> dict:
             txt = txt[len(label):]
             break
     amount = N.to_int(txt)
-    # «على السوم» with no figure (~10% of the catalog) → NULL, never 0.
+    # «على السوم» with no figure (~10% of the catalog) → NULL, never 0. A NEGATIVE figure is the same placeholder:
+    # nid 7132 prints «على السوم | -2 ريال» and to_int drops the sign, so it was served as a 2 SAR plot (2026-10-18).
+    if re.match(r"\s*[-−–]\s*\d", txt):
+        amount = None
     if amount is not None and amount > 0:
         out["amount"] = amount
     return out
@@ -528,6 +531,9 @@ def _per_metre_in_body(amount: Optional[int], blocks: list[str]) -> bool:
         for m in _PER_METRE_PROSE.finditer(block):
             if N.to_int(m.group(1)) == amount:
                 return True
+        # the marker AFTER the figure too: nid 7472 «الحد 1,650 ريال» and its body «بسعر 1,650 ريال للمتر» (2026-10-18)
+        if N.stated_per_metre(block, amount):
+            return True
     return False
 
 
@@ -620,6 +626,8 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
     if amount is not None and basis == "per_sqm":
         # PRICE = SOURCE: a per-m² rate is not a total, and area is never used to make one.
         price_per_meter = amount
+        if transaction_type == "Buy":
+            price_total = db.AUTHORITATIVE_NULL     # the source settled «a rate, no total»: clears a stored total
     elif transaction_type == "Rent":
         # PERIOD = SOURCE — only an explicit token the source states ABOUT THIS FIGURE, from the
         # price label or the adjacent body text (see _period_text). Nothing is read from magnitude,
@@ -630,6 +638,8 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
         price_annual = annual if rent_period and basis == "total" else None
     elif amount is not None and basis == "total":
         price_total = amount
+    elif amount is None and p.get("label") == "على السوم":
+        price_total = db.AUTHORITATIVE_NULL         # «على السوم», open to offers: the source states no price
     # amount with NO basis label anywhere (2/100 sampled) stays NULL in BOTH price columns: the
     # source published a number but not what it means, and a total is a different fact from a rate.
     # rent_period is still recorded when the body states it — the period is a fact about the LEASE,
