@@ -453,6 +453,24 @@ def pending_count(c, table: str, flag: str, sel: str) -> int:
     return int(res.count)
 
 
+def _no_district_rows(c, table: str, base, limit: int) -> list[dict]:
+    """Un-fetched rows of `table` that the search index serves with NO district (production_ready).
+    Best effort: a failed read answers [] and the run keeps its normal order — never a crashed crawl."""
+    try:
+        idx = (c.table("search_listings_ar").select("listing_id").eq("source_table", table)
+               .eq("production_ready", True).is_("district_ar", "null").limit(5000).execute().data or [])
+        ids = [r["listing_id"] for r in idx if r.get("listing_id") is not None]
+        out: list[dict] = []
+        for i in range(0, len(ids), 200):
+            if len(out) >= limit:
+                break
+            out += base().in_("id", ids[i:i + 200]).execute().data or []
+        return out[:limit]
+    except Exception as e:  # noqa: BLE001
+        print(f"   ⚠ no-district priority read failed ({str(e)[:120]}) — normal order", flush=True)
+        return []
+
+
 def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: int = 1,
                  max_pending: int = MAX_PENDING_DEFAULT, allow_backfill: bool = False,
                  retry_errs: int = 100, err_backoff_hours: float = 24.0,
@@ -532,6 +550,15 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
         if len(rows) < limit:
             older = (_base().order("id", desc=True).limit(limit).execute().data or [])
             rows += [r for r in older if r["id"] not in seen][: limit - len(rows)]
+    # NO-DISTRICT FIRST (2026-10-18, owner «fix everything»). A live row whose English zone the
+    # source-attested EN→AR bridge cannot place is served with NO district until its Arabic page is read —
+    # 312 such rows sat up to 23,861 deep in a newest-first queue. Their Arabic page is the source's own
+    # word (it beats any transliteration), so they go to the FRONT of this run, inside the same `limit`.
+    nd = _no_district_rows(c, table, _base, limit)
+    if nd:
+        ids = {r["id"] for r in nd}
+        rows = (nd + [r for r in rows if r["id"] not in ids])[:limit]
+        print(f"   ⓘ {len(nd)} live rows served with no district go first", flush=True)
     print(f"── {table} shard {shard}/{shards}: {len(rows)} un-fetched rows (cap {limit})", flush=True)
     stats = {"ok": 0, "empty": 0, "fail": 0, "skipped": 0}
     lock = threading.Lock()
