@@ -1,5 +1,5 @@
 # Owner decision 2026-10-18 («yes turn it on», «on for all engineers»): a night engineer's fix (branches
-# claude/ nle/ lifecycle/ af/ scraping/ qa/ kit/ — every engineer's naming) that touches ONLY the scraping robots
+# claude/ nle/ lifecycle/ af/ scraping/ qa/ kit/ fix/ — every engineer's naming) that touches ONLY the scraping robots
 # (every changed file under scrapers/) lands the same night without waiting for a person. It goes through
 # THE sanctioned merge gate (scripts/safe-pr-merge.ts — verify-merge-gate-transport.ts keeps it the only
 # door): the gate re-reads the PR right before merging and refuses unless every required check on main is
@@ -46,7 +46,7 @@ jobs:
           set -uo pipefail
           prs=$(gh pr list --repo "$REPO" --state open --limit 50 \
                   --json number,headRefName,isDraft,isCrossRepository \
-                  -q '.[] | select((.headRefName|test("^(claude|nle|lifecycle|af|scraping|qa|kit)[/-]")) and (.isDraft|not) and (.isCrossRepository|not)) | .number')
+                  -q '.[] | select((.headRefName|test("^(claude|nle|lifecycle|af|scraping|qa|kit|fix)[/-]")) and (.isDraft|not) and (.isCrossRepository|not)) | .number')
           for pr in $prs; do
             files=$(gh pr view "$pr" --repo "$REPO" --json files -q '.files[].path')
             outside=$(printf '%s\n' "$files" | grep -v '^scrapers/' || true)
