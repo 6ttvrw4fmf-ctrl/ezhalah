@@ -67,6 +67,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.district_bridge import bridge_rows, bridge_unique  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
 
@@ -175,32 +176,15 @@ def district_en_candidates(street: str, city_en: Optional[str] = None) -> list[s
     return out
 
 
-def _bridge_unique(rows: list[dict]) -> dict[str, str]:
-    """English bridge rows of ONE city → {_norm_dist(en): district_ar} for keys with exactly one Arabic
-    answer. «Al Malaz» → حي الملز AND حي الضباط in the same city is two answers = no answer (never a guess)."""
-    seen: dict[str, set[str]] = {}
-    for r in rows:
-        en, ar = str(r.get("district_en") or ""), str(r.get("district_ar") or "")
-        if not en or not ar or re.search(r"[ء-ي]", en):
-            continue
-        k = _norm_dist(en)
-        if k:
-            seen.setdefault(k, set()).add(ar)
-    return {k: next(iter(v)) for k, v in seen.items() if len(v) == 1}
+def _bridge_unique(rows) -> dict[str, str]:
+    """This site's view of the shared bridge: keys normalised with _norm_dist, unique answers only."""
+    return bridge_unique(rows, _norm_dist)
 
 
 @lru_cache(maxsize=None)
 def _bridge_en_ar(city_en: str) -> dict[str, str]:
-    """The source-attested EN→AR district bridge (dealapp's bilingual pairs) for one city, unique keys
-    only. One read per city per run; a failed read logs and answers {} — the dictionary still works —
-    never a crashed crawl."""
-    try:
-        rows = db._execute(db.sb().table("district_name_bridge").select("district_en,district_ar")
-                           .eq("city_en", city_en).range(0, 1999), what="district_name_bridge.read").data or []
-        return _bridge_unique(rows)
-    except Exception as e:  # noqa: BLE001 — degrade to the dictionary alone
-        print(f"⚠ district bridge unreadable for {city_en}: {str(e)[:140]} — dictionary only", flush=True)
-        return {}
+    """The source-attested EN→AR district bridge for one city, unique keys only (scrapers/common/district_bridge)."""
+    return _bridge_unique(bridge_rows(city_en))
 
 
 def _norm_dist(name: Optional[str]) -> Optional[str]:
