@@ -120,6 +120,37 @@ const TEMPLATE_ERA_BASELINE = '20260816000000';
 // recording it, and the mutation suite explicitly proves it turns this file red.
 type Divergence = { why: string; reconciledBy: string | null };
 const KNOWN_DIVERGENCES: Record<string, Divergence> = {
+  // ── Found 2026-10-16 (🦅 Falcon) by closing the `execute replace(def, …)` blind spot ────────────
+  // Three 09-04/05 needle edits used the one-step form and were invisible to this file for six weeks.
+  // All three were re-rendered from the template by 20260905183033, which owns all six surfaces.
+  '20260904143656_trending_city_chip_uses_the_canonical_clause_again.sql': {
+    why: 'live 2026-09-04; one-step `execute replace(def, …)` needle edit on the Trending city chip, '
+      + 'invisible to the `execute <var>;` match until 2026-10-16. Re-rendered from the template the next day.',
+    reconciledBy: '20260905183033_every_surface_that_inlines_the_af_clause_is_owned_by_the_rebuild.sql',
+  },
+  '20260904154154_district_panel_uses_the_canonical_clause_and_the_detector_stops_guessing.sql': {
+    why: 'live 2026-09-04; one-step `execute replace(def, …)` needle edit on the district panel, invisible '
+      + 'to the `execute <var>;` match until 2026-10-16. Re-rendered from the template the next day.',
+    reconciledBy: '20260905183033_every_surface_that_inlines_the_af_clause_is_owned_by_the_rebuild.sql',
+  },
+  '20260905112036_trending_city_chip_category_gate_returns_to_the_canonical_clause.sql': {
+    why: 'live 2026-09-05; one-step `execute replace(def, …)` needle edit on the Trending city chip, '
+      + 'invisible to the `execute <var>;` match until 2026-10-16. Re-rendered from the template that day.',
+    reconciledBy: '20260905183033_every_surface_that_inlines_the_af_clause_is_owned_by_the_rebuild.sql',
+  },
+  '20261016203502_district_list_folds_space_and_hamza_spellings.sql': {
+    why: 'live 2026-10-16; the option fold widened to spaces / hamza / ى / ة with ONE needle applied to the '
+      + 'live body AND af_rpc_templates in the same migration, no rebuild (a rebuild drops every overload and '
+      + 'reloads the schema cache under load). af_rebuild_would_revert() returned no rows at 20:5x UTC: the '
+      + 'template reproduces the live body, so a later rebuild is a no-op for this edit.',
+    reconciledBy: null,
+  },
+  '20261016203639_mon_detect_district_option_split_by_spelling.sql': {
+    why: 'live 2026-10-16; adds a detector. Its apply-time PROOF executes the OLD fold on district_options_ar '
+      + 'inside a sub-transaction that always raises and rolls back, to show the detector fires; nothing it '
+      + 'executes on district_options_ar survives the migration.',
+    reconciledBy: null,
+  },
   // ── The four 2026-09-26 performance edits on the two Trending count surfaces ────────────────
   // All four are output-preserving and all four STAY. What none of them did was update the
   // generator, which is why af_parity_empirical / af_rebuild_would_revert / af_count_surfaces_carry_af
@@ -255,6 +286,11 @@ export function executesAPatchedDefinition(src: string): string[] {
   for (const m of src.matchAll(/\bexecute\s+(\w+)\s*;/gi)) {
     if (fromDef.has(m[1].toLowerCase())) executed.push(m[1].toLowerCase());
   }
+  // …and the one-step form, `execute replace(def, needle, new)`: the patched definition is never
+  // assigned to a variable, so the `execute <var>;` match above cannot see it (20261016203502 used it).
+  for (const m of src.matchAll(/\bexecute\s+replace\s*\(\s*(\w+)/gi)) {
+    if (fromDef.has(m[1].toLowerCase())) executed.push(m[1].toLowerCase());
+  }
   return [...new Set(executed)];
 }
 
@@ -291,8 +327,8 @@ for (const file of files) {
 // ── §2 — the allowlist is exactly what this file says it is ─────────────────────────────────────
 {
   const expected = Object.keys(KNOWN_DIVERGENCES).sort();
-  check('§2 the known-divergence allowlist holds exactly the 13 reviewed entries',
-    expected.length === 13, `allowlist has ${expected.length} entr(ies) — growing it is a deliberate, reviewed act`);
+  check('§2 the known-divergence allowlist holds exactly the 18 reviewed entries',
+    expected.length === 18, `allowlist has ${expected.length} entr(ies) — growing it is a deliberate, reviewed act`);
   check('§2 every allowlist entry carries a stated reason',
     expected.every((k) => (KNOWN_DIVERGENCES[k]?.why ?? '').trim().length > 20),
     'an entry with no reason is cover, not a record');

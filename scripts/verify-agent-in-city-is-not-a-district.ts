@@ -37,6 +37,20 @@ function problems(fn: Fn): string[] {
   expect("house in Malqa neighbourhood", "Riyadh", ["Al Malqa"]);
   // Arabic «حي X» is unchanged.
   expect("شقة للبيع حي النرجس في الرياض", "Riyadh", ["النرجس"]);
+  // A budget / deal word or «بالرياض» right after the name is not part of it (live 2026-10-13: «النرجس بحدود»).
+  expect("ابي شقة ٣ غرف للايجار في الرياض حي النرجس بحدود ٦٠ ألف", "الرياض", ["النرجس"]);
+  // A bathroom / room / feature count after the name is not part of it (ops_zero_result_log 2026-10-13 07:42: «الرجس حمامين»).
+  expect("فيلا للإيجار في الرياض حي النرجس حمامين", "الرياض", ["النرجس"]);
+  expect("شقة حي الملقا مجلس وصالة", "الرياض", ["الملقا"]);
+  expect("بيت حي الياسمين دورين", "الرياض", ["الياسمين"]);
+  expect("فيلا حي الملقا بالرياض", "الرياض", ["الملقا"]);
+  expect("شقة حي الياسمين للايجار", "الرياض", ["الياسمين"]);
+  // Two-word district names still keep both words.
+  expect("شقة في حي الدار البيضاء", "الرياض", ["الدار البيضاء"]);
+  expect("فيلا في حي ظهرة لبن", "الرياض", ["ظهرة لبن"]);
+  // «حي» used as a plain word, followed by «في / من», names no district (live 2026-10-13: «في الرياض؟» became one).
+  expect("وش أفضل حي في الرياض؟", "الرياض", []);
+  expect("أي حي من أحياء جدة أحسن", "جدة", []);
   return out;
 }
 
@@ -60,4 +74,12 @@ const mustCatch = (label: string, caught: boolean) => {
   if (!caught) { console.error(`✗ mutation proof failed: ${label} was not caught`); process.exit(1); }
 };
 mustCatch("the 2026-10-08 «in X» regex (a city read as a district)", problems(mutant).length > 0);
-console.log("✓ an English city is never a district filter (7 cases; old regex caught)");
+// …and the 2026-10-13 Arabic regex (any second word kept: «النرجس بحدود»).
+const AR_OLD = "  const arHiRe = /حي\\s+([؀-ۿ]+(?:\\s+(?!في|و|أو|منطقة|مدينة)[؀-ۿ]+)?)/g;";
+const arLine = src.split("\n").find((l) => l.trimStart().startsWith("const arHiRe = "));
+if (!arLine) { console.error("✗ arHiRe not found in " + FILE); process.exit(1); }
+const arFile = join(dir, "agent-ar.ts");
+writeFileSync(arFile, src.replace(arLine, AR_OLD));
+const arMutant = (await liftSymbols(arFile, SYMBOLS, ["resolveDistrictsFromText"])).resolveDistrictsFromText as Fn;
+mustCatch("the 2026-10-13 «حي X <any word>» regex (a budget word read into the district)", problems(arMutant).length > 0);
+console.log("✓ an English city is never a district filter, and a budget word is never part of a district (14 cases; both old regexes caught)");

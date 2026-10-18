@@ -180,10 +180,10 @@ const wiringProblems = (raCode: string, rowCode: string, deviceKey: string): str
     || /state === 'paused' && playToken === tokenAtPause && !window\.speechSynthesis\.paused/.test(raCode))
     p.push('the pause watchdog re-inlines its three conditions instead of calling the shared predicate');
   if (!(/readAloudRefusalVerdict\(\{/.test(raCode)
-    && /voiceConfirmed: !!bestArabicVoice/.test(raCode)
+    && /voiceConfirmed: !!\(locale === 'en' \? bestEnglishVoice : bestArabicVoice\)/.test(raCode)
     && /checkExhausted: voiceCheckExhausted/.test(raCode)))
     p.push('readAloud.ts does not compose its real module state through the shared verdict');
-  if (!/readAloudRefusal\(\)/.test(rowCode)) p.push('FeedbackRow does not ask readAloud WHY the tap was refused');
+  if (!/readAloudRefusal\(locale\)/.test(rowCode)) p.push('FeedbackRow does not ask readAloud WHY the tap was refused');
   if (!/readAloudRefusalMessageKey\(/.test(rowCode)) p.push('FeedbackRow does not render the sentence the shared mapping chose');
   // Plain substring on the unescaped source — the component must not name the device verdict itself,
   // because naming it is how it gets rendered for a state it is not true in. This is the literal
@@ -393,7 +393,7 @@ mustCatch('the pause watchdog re-inlining its three conditions instead of callin
 mustCatch('readAloud.ts stopping feeding its REAL module state to the verdict (an argument quietly renamed)',
   wiringProblems(readAloudCode.replace(/checkExhausted: voiceCheckExhausted/, 'checkExhausted: false'), rowCode, DEVICE_SENTENCE).length > 0);
 mustCatch('FeedbackRow going back to guessing instead of asking readAloud WHY the tap was refused',
-  wiringProblems(readAloudCode, rowCode.replace(/readAloudRefusal\(\)/g, 'somethingElse()'), DEVICE_SENTENCE).length > 0);
+  wiringProblems(readAloudCode, rowCode.replace(/readAloudRefusal\(locale\)/g, 'somethingElse()'), DEVICE_SENTENCE).length > 0);
 mustCatch('FeedbackRow rendering its own sentence instead of the shared mapping',
   wiringProblems(readAloudCode, rowCode.replace(/readAloudRefusalMessageKey\(/g, 'pickMessage('), DEVICE_SENTENCE).length > 0);
 mustCatch('THE ORIGINAL SHAPE: FeedbackRow hardcoding the device verdict again',

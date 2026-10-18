@@ -337,6 +337,18 @@ def walk(s: cc.Session) -> list[str]:
     return ids
 
 
+def _known_active() -> set[str]:
+    """ad_numbers we show today. A failed read is an empty set: nothing extra is read, never a guess."""
+    out: set[str] = set()
+    for tbl in ("ashab_residential_listings", "ashab_commercial_listings"):
+        try:
+            rows = db.sb().table(tbl).select("ad_number").eq("active", True).range(0, 4999).execute().data
+        except Exception:  # noqa: BLE001
+            return set()
+        out.update(r["ad_number"] for r in rows or [] if r.get("ad_number"))
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", default="all")
@@ -355,6 +367,12 @@ def main() -> int:
     com: list[dict] = []
     skipped: dict[str, int] = {}
     unreadable = seen = 0
+
+    # A unit we show whose building card now says rented/sold (or whose building closed) is read on
+    # its OWN page, so its own badge is recorded (map_page → db.note_read_gone) and the prune's
+    # own-page oracle can retire it. Skipped from the card alone, its page was never read and the
+    # oracle saw only a 200: 6 of 12 such units were on screen rented/sold (spot-check 39028760960).
+    known = set() if dry else _known_active()
 
     def skip(why: str, n: int = 1) -> None:
         skipped[why] = skipped.get(why, 0) + n
@@ -380,12 +398,27 @@ def main() -> int:
                 continue
             # a building: one listing per AVAILABLE unit, from the unit's own page — never the building
             b_status = d["badges"][1] if len(d["badges"]) > 1 else ""
-            if b_status not in _BUILDING_OPEN:
+            open_building = b_status in _BUILDING_OPEN
+            if not open_building:
                 skip(f"building_{b_status or 'missing'}")
-                continue
             for status, unit_url, unit_id in d["units"]:
-                if status != AVAILABLE:
-                    skip(f"unit_{status}")
+                if not open_building or status != AVAILABLE:
+                    if open_building:
+                        skip(f"unit_{status}")
+                    if f"{PREFIX}{ad_id}-U{unit_id}" not in known:
+                        continue
+                    try:     # a unit we show: its own page states its status (read, never assumed)
+                        u = parse_page(get(s, unit_url))
+                    except Exception:  # noqa: BLE001
+                        unreadable += 1
+                        continue
+                    time.sleep(SLEEP)
+                    seen += 1
+                    got = map_page(u, f"{ad_id}-U{unit_id}", unit_url, unit_of=ad_id,
+                                   building_licence=d["spec"].get("ترخيص الاعلان") or "")
+                    if open_building:
+                        take(got)            # its own page outranks its card
+                    # a closed building is still never trusted for a row: only the reading is kept
                     continue
                 try:
                     u = parse_page(get(s, unit_url))
@@ -424,6 +457,11 @@ def main() -> int:
                     print(f"  pruned {n} from {tbl}", flush=True)
         if not complete:
             print(f"  NOT pruning: {unreadable} unreadable page(s)", flush=True)
+            # A short walk refuses the absence prune, but a page read this run as rented/sold is
+            # still a reading: strike only those (the muktamel/opensooq lesson). Default oracle.
+            for tbl, rr in (("ashab_residential_listings", res), ("ashab_commercial_listings", com)):
+                if rr:
+                    db.strike_read_gone(tbl, {r["ad_number"] for r in rr}, SOURCE)
         healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=len(res) + len(com),
                              check_tables=["ashab_residential_listings", "ashab_commercial_listings"])
         if not healthy:

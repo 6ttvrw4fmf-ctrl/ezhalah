@@ -38,7 +38,9 @@ def _norm(s: Optional[str]) -> str:
 _REQUEST = re.compile(
     # «نبينا» (our Prophet, in a seller's opening blessing) is not «نبي» + «نا» (shadow 2026-10-12,
     # 11190371478 «للبيع شقة تمليك … اللهم صل وسلم على نبينا محمد» read as a request).
-    _B + r"(?!نبينا" + _E + r")(?:"
+    # «و/ف» glued in front is still the word: «بنت وابحث عن استديو للإيجار» (HRJ11190725389 stored as an
+    # offer, owner check 2026-10-17). The «نبينا» look-ahead sits AFTER the prefix so «ونبينا» stays a blessing.
+    _B + r"(?:[وف])?(?!نبينا" + _E + r")(?:"
     r"(?:بحث|مطلوب|نبي|ابغي|ابغا|ابي|ابحث|نبحث|يبحث|تبحث|احتاج|نحتاج|تحتاج|يحتاج|محتاج|بحاجه|ودي|"
     r"ارغب|نرغب|يرغب|ترغب|ادور|ندور|يدور|تدور)(?:ه|ها|ين|ون|هم|نا|ي)?|"
     r"تكفون|تكفي|من عنده|مين عنده|من لديه|احد عنده|ممكن احد|اللي عنده|الي عنده|اللي يعرف|الي يعرف|"
@@ -47,6 +49,10 @@ _REQUEST = re.compile(
     r"يكون في|يكون ب|تكون في|تكون ب"
     r")" + _E
 )
+
+# A title that OPENS with «طلب» is a request («طلب شقه للايجار مستعجل», Haraj 18263109 was stored as an offer,
+# 2026-10-17). Title start only: «السعر عند الطلب» / «حسب الطلب» inside an offer stay offers.
+_REQUEST_TITLE_START = re.compile(r"^(?:ال)?طلب" + _E)
 
 # A title offering a choice of neighbourhoods («في حي الملقا او حطين او العارض») describes what a
 # seeker will accept, never one unit's address (gate #3 2026-10-12, 11190353094). Title only.
@@ -122,7 +128,7 @@ def classify(title: Optional[str], body: Optional[str]) -> tuple[str, str]:
     """(verdict, reason). verdict ∈ offer | request | other | doubt. Only 'offer' may be stored."""
     t, b = _norm(title), _norm(body)
     both = f"{t} \n {b}"
-    m = _REQUEST.search(both) or _ALTERNATIVES_TITLE.search(t)
+    m = _REQUEST.search(both) or _REQUEST_TITLE_START.search(t) or _ALTERNATIVES_TITLE.search(t)
     if m:
         return "request", f"request word «{m.group(0)}»"
     m = _OTHER.search(both) or _OTHER_TITLE.search(t) or _CATALOGUE_TITLE.search(t)

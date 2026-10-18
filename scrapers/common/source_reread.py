@@ -39,14 +39,25 @@ STORED = ("platform,source_table,listing_id,region_ar,city_ar,district_ar,deal_a
           "floor_number,license_number,first_seen_at,production_ready,has_photo")
 
 # Lines of visible text worth a human's eye: money, size, rooms, and the Advanced Filter words.
+# «السعر» is a label in its own right: abaad prints «إجمالي السعر» / «290720» with the currency as an IMAGE,
+# so neither line matched and the score read the description's «السوم 300,000» as the price (17954821,
+# 2026-10-16, re-read run 38916643786) — while «سعر المتر» survived only because it says «متر».
 EVIDENCE = re.compile(
-    r"(ريال|ر\.س|SAR|م²|م2|m²|متر|مساحة|غرف|غرفة|حمام|دورات? مياه|مفروش|مؤثث|مصعد|موقف|مطبخ|مكيف|تكييف|"
+    r"(ريال|ر\.س|SAR|السعر|م²|م2|m²|متر|مساحة|غرف|غرفة|حمام|دورات? مياه|مفروش|مؤثث|مصعد|موقف|مطبخ|مكيف|تكييف|"
     r"غرفة (?:خادمة|سائق)|مدخل خاص|عمر العقار|سنوي|شهري|للبيع|للإيجار|حي\s)")
 TAG = re.compile(r"<[^>]+>")
 DROP = re.compile(r"<(script|style|noscript|svg)[^>]*>.*?</\1>", re.S | re.I)
 JSONLD = re.compile(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', re.S | re.I)
 META = re.compile(r'<meta\s+[^>]*(?:property|name)=["\']([^"\']+)["\'][^>]*content=["\']([^"\']*)["\']', re.I)
 TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I)
+# An UNTICKED checklist item a theme prints with an ✗ (WordPress «WP Residence»: `<div class="listing_detail
+# not_present …"><i class="fas fa-times"></i>مصعد</div>`) is the theme listing its whole taxonomy, not the ad
+# saying anything. Read as a line it became «the page says مصعد» (eastabha 2026-10-17, re-read 39020724177).
+NOT_PRESENT = re.compile(r'<div[^>]*class="[^"]*\bnot_present\b[^"]*"[^>]*>.*?</div>', re.S | re.I)
+# ANOTHER listing's card is not this ad. ksaaqar ends every page with related ads, each an `<a href=
+# "https://ksaaqar.com/ad/…"><h5>title</h5></a>`; 12226090 (a Makkah sale) scored «kitchen» from a Jeddah
+# rental's card title «… غرفتين وصالة ومطبخ …» (CI re-read 39021296467, 🔬 2026-10-17, backlog 628).
+RELATED_CARD = re.compile(r'<a href="https://ksaaqar\.com/ad/[^"]*">\s*<h5>.*?</h5>\s*</a>', re.S | re.I)
 
 
 # A spec table renders its label and its value as two elements («عدد غرف النوم» / «1»): split on tags they
@@ -114,6 +125,45 @@ def _payload_area_lines(body: str) -> list[str]:
     return out
 
 
+# The same for the ad's PLACE: a page whose app payload carries the district as a structured field
+# (`"neighborhoodNameAr":"حي …"`, `"districtNameAr"`, `"district_ar"`) gets it as one evidence line, so the score
+# does not fall back on the seller's description. (Written for mobasher 17693081 on 2026-10-14; a later re-read
+# showed mobasher's served HTML does NOT carry the field at all — that site is handled by PROSE_ONLY_DISTRICT in
+# new_listings_score.py. This reader rule stays for any page that does.)
+_PAYLOAD_PLACE = re.compile(r'"(?:neighborhoodNameAr|districtNameAr|district_ar)":"([^"]{2,60})"')
+
+
+def _payload_place_lines(body: str) -> list[str]:
+    flat = (body or "").replace('\\', "")
+    out = []
+    for name in dict.fromkeys(_PAYLOAD_PLACE.findall(flat)):
+        name = name.strip()
+        out.append(name if name.startswith("حي ") else f"حي {name}")
+    return out
+
+
+# A spec table whose label and value sit in SIBLING elements, so the visible-text split puts them on different
+# lines and drops the bare value. hajer (WordPress «Real Estate Manager»: «<strong class="rem-single-field-title">
+# عدد غرف النوم</strong> … <span class="rem-single-field-value">3</span>») kept only the label line; the score
+# then read the description's «غرفتين نوم» / «غرفتين ماستر» as the count and called 17663701 (6) and 17663672
+# (3) wrong (2026-10-14). The pair is rejoined as one line «LABEL VALUE», read without our parser.
+_REM_PAIR = re.compile(r'rem-single-field-title"[^>]*>([^<]{1,40})</strong>(.*?)(?=rem-single-field-title"|$)', re.S)
+_REM_VALUE = re.compile(r'rem-single-field-value[^>]*>(.*)', re.S)
+
+
+def _label_value_lines(body: str) -> list[str]:
+    out = []
+    for m in _REM_PAIR.finditer(body or ""):
+        v = _REM_VALUE.search(m.group(2)[:2000])
+        if not v:
+            continue
+        value = re.sub(r"\s+", " ", html.unescape(TAG.sub(" ", v.group(1)))).strip()[:60]
+        label = re.sub(r"\s+", " ", html.unescape(m.group(1))).strip()
+        if label and value:
+            out.append(f"{label} {value}")
+    return out
+
+
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
     jsonld = []
@@ -125,7 +175,7 @@ def page_evidence(body: str) -> dict:
     meta = {k: html.unescape(v) for k, v in META.findall(body or "")
             if k.startswith(("og:", "twitter:", "description", "product:"))}
     title = TITLE.search(body or "")
-    text = TAG.sub("\n", DROP.sub(" ", body or ""))
+    text = TAG.sub("\n", DROP.sub(" ", RELATED_CARD.sub(" ", NOT_PRESENT.sub(" ", body or ""))))
     lines = [re.sub(r"\s+", " ", html.unescape(x)).strip() for x in text.split("\n")]
     lines = [x for x in lines if x]
     return {
@@ -136,7 +186,8 @@ def page_evidence(body: str) -> dict:
         # project 34830 (17539724, 890,000 / 161 m², re-read run 38361960175) sits past line 60, so the
         # score only saw the OTHER units and called our exact values wrong (backlog #124). The job log
         # still prints only the first n_evidence lines.
-        "evidence_lines": (_payload_area_lines(body) + _with_values(lines))[:400],
+        "evidence_lines": (_payload_area_lines(body) + _payload_place_lines(body) + _label_value_lines(body)
+                           + _with_values(lines))[:400],
         "text_head": " | ".join(lines)[:1500],
     }
 
@@ -268,7 +319,7 @@ def parse_ids(spec: str) -> list[tuple[str, int]]:
 
 # Which KEY of wasalt's page JSON states a fact (trap 1: «the site doesn't publish it» must be proven from the
 # raw payload). The score flattens propertyDetailsV3 into text lines and loses the key; this prints the path.
-_WASALT_FACT = re.compile(r"elevat|lift|مصعد|kitchen|مطبخ|bath|حمام|دورات|amenit|feature|facing|direction|واجهة", re.I)
+_WASALT_FACT = re.compile(r"elevat|lift|مصعد|kitchen|مطبخ|bath|حمام|دورات|amenit|feature|facing|direction|واجهة|builtUpArea|plotArea|landArea|unitArea|propertyArea|مساحة|م²|bedroom|غرف", re.I)
 
 
 def wasalt_fact_paths(data, limit: int = 60) -> list[str]:
@@ -356,8 +407,11 @@ def main() -> int:
                                                 dead_marker=PLATFORMS.get(platform, {}).get("dead_marker"))
             item["page"] = page_evidence(body or "")
             if a.around and body:
-                for m in list(re.finditer(re.escape(a.around), body))[:3]:
-                    snip = body[max(0, m.start() - 400):m.end() + 200]
+                # Searched in the DECODED markup: alsaedan and arkaan write their Arabic as HTML entities, so a raw
+                # search for «موقف» or «ثلاث دورات» found nothing on pages that print it (🔬 2026-10-17).
+                hay = html.unescape(body)
+                for m in list(re.finditer(re.escape(a.around), hay))[:3]:
+                    snip = hay[max(0, m.start() - 400):m.end() + 200]
                     snip = re.sub(r"(?:\+?966|0)?5\d{8}|\d{9,}", "<num>", snip)   # PDPL: no phone ever printed
                     print(f"   around «{a.around}»: {snip!r}", flush=True)
             if "wasalt" in table:

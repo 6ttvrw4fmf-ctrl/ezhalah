@@ -123,3 +123,30 @@ def test_missing_table_is_reported_and_other_write_failures_raise():
     assert S.write_rows(_Missing(), [_row()]).startswith(S.TABLE + " does not exist yet")
     with pytest.raises(RuntimeError):
         S.write_rows(_Down(), [_row()])
+
+
+# ── a re-run for named websites (2026-10-18) ─────────────────────────────────────────────────────
+def test_sites_input_comma_list_is_split():
+    from scrapers.common import dead_visible_score as D
+    assert D.site_list(["almuteb,razre,senan"]) == ["almuteb", "razre", "senan"]
+    assert D.site_list(["almuteb", "razre"]) == ["almuteb", "razre"] and D.site_list(None) == []
+
+
+def test_nothing_measured_writes_nothing_instead_of_crashing():
+    from scrapers.common import dead_visible_score as D
+
+    class _C:
+        def table(self, _t):
+            raise AssertionError("an empty run must not reach PostgREST")
+    assert "nothing written" in D.write_rows(_C(), [])
+
+
+def test_a_control_that_did_not_read_live_says_what_its_page_answered(monkeypatch):
+    """almuteb and senan were void four nights running (10-15..10-18) with nothing saying why."""
+    from scrapers.common import lifecycle_spot_check as L
+    monkeypatch.setattr(L, "_probe", lambda url: (403, "<html>blocked</html>"))
+    ctl = [{"listing_url": "https://almuteb.sa/property/x/"}, {"listing_url": "https://almuteb.sa/property/y/"}]
+    verdicts = [L.open_ad(r["listing_url"], None) for r in ctl]
+    misses = L.control_misses(ctl, verdicts)
+    assert len(misses) == 2 and "HTTP 403, 20 bytes" in misses[0] and misses[0].startswith("https://almuteb.sa/property/x/")
+    assert L.control_misses(ctl, [L.ALIVE, L.ALIVE]) == []

@@ -590,6 +590,18 @@ def _all_images(body: str) -> list[str]:
     return out
 
 
+# «امارة منطقة الرياض - الدرعيه» (6696714, 12586935): the emirate's name, then the city it governs. The
+# city is the part after the dash; the whole label resolves to nothing, so both ads sat with no city and
+# no customer could find them in a city search (owner 10-17, 24 sanadak ads with no city). The other 22
+# name villages and farms the catalog does not hold («قريه ديراب», «مزارع وادى العماريه»): honest unknown.
+_EMIRATE = re.compile(r"^\s*[اإأ]مار[ةه]\s+منطق[ةه]\s+\S+(?:\s+\S+)?\s*[-–]\s*(.+?)\s*$")
+
+
+def _emirate_city(raw: str) -> str:
+    m = _EMIRATE.match(raw)
+    return m.group(1) if m else raw
+
+
 def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
     if not o.get("isPublished", True):
         return None, "residential"
@@ -605,7 +617,7 @@ def map_listing(o: dict, body: str, url: str) -> tuple[Optional[dict], str]:
     category = "commercial" if property_type in COMMERCIAL_TYPES else "residential"
     is_rent = (o.get("listingType") or "").strip().lower() == "rent" or "إيجار" in (o.get("listingTypeText") or "")
 
-    raw_city = (o.get("city") or "").strip()
+    raw_city = _emirate_city((o.get("city") or "").strip())
     # Forward-fix (2026-07-10 location-data-quality audit): an honest None beats the literal "Other"
     # sentinel on this legacy column — the additive city_ar/city_id columns below already resolve
     # most rows independently; this just closes the remaining leak on the raw-column read path.

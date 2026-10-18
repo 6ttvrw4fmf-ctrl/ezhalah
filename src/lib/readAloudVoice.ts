@@ -65,6 +65,14 @@ export function pickBestArabicVoice<T extends ArabicVoiceCandidate>(voices: read
   return [...arabic].sort((a, b) => scoreArabicVoice(b) - scoreArabicVoice(a))[0];
 }
 
+/** Match English explicitly; never substitute a different language's default voice. */
+export function pickBestEnglishVoice<T extends ArabicVoiceCandidate>(voices: readonly T[]): T | null {
+  const english = voices.filter(v => /^en(?:-|$)/.test(norm(v.language)));
+  const score = (v: T) => (norm(v.language) === 'en-us' ? 4 : 0)
+    + (v.localService !== false ? 2 : 0) + (v.quality === QUALITY_ENHANCED ? 1 : 0);
+  return [...english].sort((a, b) => score(b) - score(a))[0] ?? null;
+}
+
 /**
  * Did the engine actually honour `speechSynthesis.pause()`, or silently ignore it?
  *

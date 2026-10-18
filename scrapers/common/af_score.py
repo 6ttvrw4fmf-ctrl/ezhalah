@@ -24,6 +24,7 @@ Evidence is "source_table:id" keys only (PDPL).
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import random
@@ -74,7 +75,11 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # gathern's unit page heads its appliance list «مرافق المطبخ» («ثلاجه غلايه», «فريزر مايكرويف …»):
     # the header word is a label, and an appliance list is not the site saying «kitchen» (🔬 decision
     # 2026-10-07, backlog 132, law §6). All 4 gathern «misses» of 2026-10-07 were exactly this.
-    "gathern": ("kitchen",),
+    # elevator / parking: gathern's «المرافق» list (serverData.data.extraDescription, the labels the scraper maps:
+    # «مصعد», «موقف سيارة») is the structured statement. Its 10-14 «misses» (11837661: «بلكونة … مطلة على
+    # المواقف», a balcony overlooking the car park) were prose on units whose list names neither (🔬, CI
+    # source-reread 38543385427). Read by gathern_props().
+    "gathern": ("kitchen", "elevator", "parking"),
     # sanadak's listing object (the RSC payload its page renders) carries kitchenStatusText, acTypeText,
     # numberElevators / numberMaidRooms / numberParkingAreas, isDriverRoomAvailable and isFurnished. Its
     # 2026-10-08 «misses» (5 of 8) were all prose («مطبخ راكب», «موقف خاص» in the description) on ads whose
@@ -88,7 +93,26 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # eaqartabuk's candles-map «features» checklist is structured since 2026-10-12 (feature_answers); prose is
     # never read for the four fields it can express.
     "eaqartabuk": ("elevator", "kitchen", "private_entrance", "parking"),
+    # squares' «مميزات العقار» chip list is its structured statement for these six (scrapers/squares/run.py
+    # _FEATURE_COLS). Its 10-13 misses (13602723, 13602726, CI re-read 38384423613) were description prose
+    # («يوجد مصعد في العمارة», «غرفة خادمة مع دورة مياة») on ads whose chip list names neither (🔬, backlog 515).
+    "squares": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room"),
+    # eastabha (WordPress «WP Residence») prints its WHOLE feature taxonomy as a checklist: a ticked item is
+    # `<div class="listing_detail col-md-4 …"><i class="fas fa-check"></i>مطبخ مجهز</div>`, an unticked one the
+    # same with `not_present` and an ✗ (CI source-reread 39020724177, 595393 and 595406). The scraper reads
+    # the ticked set from the REST `property_features` taxonomy (scrapers/eastabha/run.py FEATURE_COL). Its
+    # 2026-10-17 «misses» (kitchen, elevator, AC 5 of 5, 0 of 4 findable) were the ✗ items and description prose
+    # («🍳 مطبخ عملي») on ads whose ticked list names none of them: our NULL is the source's answer (🔬, law §2).
+    # Read by wpresidence_props().
+    "eastabha": ("elevator", "kitchen", "parking", "air_conditioner", "private_entrance"),
+    # amaall publishes these through its WordPress `property_feature` taxonomy (scrapers/amaall/run.py FEATURE_MAP).
+    # 19 of its 28 live ads leave the taxonomy empty and type «⚫مصعد ⚫مطبخ» into the free description instead; its
+    # 10-18 «misses» (0 of 4, CI re-read 39115342028, 10729207 and 10729184) were exactly that prose. A structured
+    # null outranks any prose hit (law §2), so our NULL is the source's answer and the score must not ask from it.
+    "amaall": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "private_entrance"),
 }
+# WordPress «WP Residence» sites: the ticked checklist is the structured statement (wpresidence_props).
+WP_RESIDENCE_SITES = {"eastabha"}
 COL = {n: c for n, _, c, _ in FIELDS}
 _YES = {"true", "1", "نعم", "يوجد", "متوفر"}
 _NO = {"false", "0", "لا", "لا يوجد", "لايوجد", "غير متوفر"}
@@ -243,8 +267,22 @@ def findable(rows: list[dict] | None, source_table: str, listing_id: int) -> boo
 
 
 # Keys under propertyDetailsV3 that can hold a person or a contact: never read (PDPL).
-_WASALT_SKIP = re.compile(r"agent|broker|owner|advertiser|user|phone|mobile|whats|email|contact|licen|\bid$|_id$|uuid",
+# «classification» = wasalt's PHOTO classifier («classificationName»: «kitchen», «bathroom» per image): a model's guess
+# about a picture, not the advertiser's statement, so it never counts as the page saying the ad has one (🆕 2026-10-16).
+_WASALT_SKIP = re.compile(r"agent|broker|owner|advertiser|user|phone|mobile|whats|email|contact|licen|classification|\bid$|_id$|uuid",
                           re.I)
+# The REGA deed's border rows (regaVerifiedInfo … {"key": "borders.southLimitDescription", "value": «ممرات ودرج
+# ومصعد ثم ارتداد 2 ثم قطعة رقم 29»}) say what the unit's boundary TOUCHES: a corridor, a neighbour's plot, the
+# building's lift shaft. That is a legal boundary, not the ad stating what the unit has; all 4 wasalt misses on
+# 2026-10-18 asked «elevator» from it while the seller's own description never names one (re-read 39114420405).
+_WASALT_BORDER = re.compile(r"^borders\.", re.I)
+
+
+# wasalt's structured attribute keys → the Arabic label the comparison's keywords read («م²», «غرف», «دورات المياه»).
+WASALT_FIELD_LABELS = {
+    "builtUpArea": "مساحة البناء م²", "propertyArea": "مساحة العقار م²", "plotArea": "مساحة الأرض م²",
+    "noOfBedrooms": "عدد غرف النوم", "noOfBathrooms": "عدد دورات المياه",
+}
 
 
 def wasalt_page(url: str, fetch=None) -> dict | None:
@@ -272,6 +310,14 @@ def wasalt_page(url: str, fetch=None) -> dict | None:
         if key and _WASALT_SKIP.search(key):
             return
         if isinstance(node, dict):
+            if _WASALT_BORDER.search(str(node.get("key") or "")):
+                return
+            label = WASALT_FIELD_LABELS.get(str(node.get("key")))
+            if label and isinstance(node.get("value"), (str, int, float)) and str(node["value"]).strip():
+                # wasalt's own {key, value} row as ONE labelled line: split into loose leaves, «96» never sat next
+                # to a size word while the REGA deed text («… من الأرض 51.52 متر») did, and 17926766's structured
+                # builtUpArea 96 (= ours) scored a mismatch (🆕 2026-10-16, re-read run 38925580390).
+                texts.append(f"{label} {node['value']}")
             for k, v in node.items():
                 walk(v, str(k))
         elif isinstance(node, list):
@@ -341,8 +387,64 @@ def sanadak_page(url: str, fetch=None) -> dict | None:
     texts = [str(o.get(x)).strip() for x in ("title", "city", "district", "description", "propertyTypeText",
                                                "listingTypeText") if o.get(x)]
     lines = [y.strip() for t in texts for y in t.splitlines() if y.strip()]
+    # The listing object's own structured counts, labelled the way its page prints them («مساحة العقار 105.6 م²»).
+    # Without them only the description was read, and 17944027's «المساحة : 120م تقريبا» scored our structured
+    # 105 (lotSize 105.6) wrong (🆕 2026-10-16, re-read run 38927458882).
+    for label, key in (("مساحة العقار م²", "lotSize"), ("عدد غرف النوم", "numberBedrooms"),
+                       ("عدد دورات المياه", "numberBathrooms")):
+        v = o.get(key)
+        if isinstance(v, (int, float, str)) and not isinstance(v, bool) and str(v).strip():
+            lines.insert(0, f"{label} {v}")
     return {"title": o.get("title"), "meta": {}, "jsonld": [{"additionalProperty": props}],
             "evidence_lines": lines[:200], "text_head": " | ".join(lines)[:1500]}
+
+
+# A website whose every page carries a category MENU of internal links («أجهزة مطبخ», «مكيفات هواء» on opensooq):
+# the menu is not the ad, and the reader's line cut-off truncates it differently per page, so template_lines()
+# cannot see it as shared (CI source-reread 38543714404: every «مطبخ» on 13605230 / 13605245 was a menu link;
+# opensooq scored 0 of 5 with kitchen and AC «missed» 5 of 5 — backlog 76 / 129). On these sites the text of an
+# internal link is dropped before the page is read.
+NAV_LINK_SITES = {"opensooq"}
+_NAV_LINK = re.compile(r'<a\b[^>]*href="/[^"]*"[^>]*>([^<]{1,60})</a>')
+
+
+def strip_nav(page: dict, body: str) -> dict:
+    nav = {norm(t) for t in _NAV_LINK.findall(body or "") if t.strip()}
+    if not nav:
+        return page
+    keep = [x for x in (page.get("evidence_lines") or []) if norm(x) not in nav]
+    head = " | ".join(x for x in (page.get("text_head") or "").split(" | ") if norm(x) not in nav)
+    return {**page, "evidence_lines": keep, "text_head": head}
+
+
+# gathern's own amenity list, from the page's __NEXT_DATA__ (serverData.data.extraDescription[*].content): a listed
+# label is a yes, an unlisted one is silence (scrapers/gathern/run.py _amenity_flags, never «no»).
+GATHERN_LABELS = {"elevator": "مصعد", "parking": "موقف سيارة"}
+
+
+def gathern_props(body: str) -> list[dict]:
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', body or "", re.S)
+    try:
+        data = json.loads(m.group(1))["props"]["pageProps"]["serverData"]["data"] if m else {}
+    except (ValueError, KeyError, TypeError):
+        return []
+    labels = {str(c).strip() for blk in (data.get("extraDescription") or []) if isinstance(blk, dict)
+              for c in (blk.get("content") or [])}
+    return [{"name": SANADAK_NAMES[f], "value": "نعم"} for f, lab in GATHERN_LABELS.items() if lab in labels]
+
+
+# A WP Residence checklist item, ticked or not (`not_present`). Only a ticked one is a statement; an unticked
+# item is the theme printing its whole taxonomy, which is silence, never «no» (law §1).
+_WPR_ITEM = re.compile(r'<div class="listing_detail( not_present)? col-md-\d[^"]*">\s*(?:<i[^>]*>\s*</i>)?\s*([^<]{1,60}?)\s*</div>')
+
+
+def wpresidence_props(body: str) -> list[dict]:
+    return [{"name": html.unescape(label), "value": "نعم"}
+            for absent, label in _WPR_ITEM.findall(body or "") if not absent]
+
+
+def is_gathern(url: str) -> bool:
+    return "gathern.co" in url
 
 
 def is_sanadak(url: str) -> bool:
@@ -453,6 +555,12 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
             except Exception:  # noqa: BLE001
                 status, body = None, ""
             page = page_evidence(body) if status == 200 and body else None
+            if page is not None and platform in NAV_LINK_SITES:
+                page = strip_nav(page, body)
+            if page is not None and platform in WP_RESIDENCE_SITES:
+                page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": wpresidence_props(body)}]}
+            if page is not None and is_gathern(url):
+                page = {**page, "jsonld": list(page.get("jsonld") or []) + [{"additionalProperty": gathern_props(body)}]}
         if page is None:
             row["sampled"] += 1
             row["unreadable_pages"] += 1
@@ -476,6 +584,8 @@ def score_site(client, anon, platform: str, picks: list[tuple[str, int]], *, nig
                     row["find_found"] += 1
                 else:
                     row["find_missed_ids"].append(key)
+                    # What the customer asked for, so a miss names its field in the run log (keys only, no PII).
+                    print(f"  miss {key} asked {answers}", flush=True)
             same = parity(anon, params)
             if same is not None:
                 row["parity_tried"] += 1

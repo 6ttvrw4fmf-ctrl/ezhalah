@@ -17,7 +17,7 @@ export const SHELF_FLOOR = 5;
 // find nothing in a place that has listings, so the shelf cannot speak for it.
 export const NARROWING = [
   'type', 'types', 'typeGroups', 'detail', 'priceInput', 'priceBand', 'priceMin', 'priceMax',
-  'priceMinRent', 'priceMaxRent', 'keywords', 'proximity', 'sources', 'contextBeds', 'contextBedsList',
+  'priceMinRent', 'priceMaxRent', 'keywords', 'proximity', 'sources', 'excludedSources', 'contextBeds', 'contextBedsList',
   'contextSize', 'areaMin', 'areaMax', 'ageMin', 'ageMax', 'isNewConstruction', 'amenities', 'bathMin',
   'ratingMin', 'reviewsMin', 'unitSubtypes', 'furnishedPref', 'streetWidthMin', 'ageBuckets',
   'ratingBuckets', 'furnishedIn', 'directions',

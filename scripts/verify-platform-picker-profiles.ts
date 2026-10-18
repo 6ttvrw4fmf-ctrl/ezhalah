@@ -56,8 +56,8 @@ function verify(text: string, helperText = helper) {
     fingerprint.update(file);
     fingerprint.update(readFileSync(new URL(`../src/data/${file}`, import.meta.url)));
   }
-  assert.equal(files.size, 142, 'all matching ZIP logos used');
-  assert.equal(fingerprint.digest('hex'), '90fc1c9e8fe521ad60ca551081142bdd7d63f693001ea77ed02afd1e7cf10c79');
+  assert.equal(files.size, 143, 'all matching ZIP logos plus the official Haraj header are used');
+  assert.equal(fingerprint.digest('hex'), 'c1209285e5b9b8fe11702eae579ab2f5fafaf8d91218d324a61b1982879e9e83');
 }
 verify(source);
 function mustCatch(mutant: string) {
@@ -247,9 +247,10 @@ assert.notEqual(retainsOldScope,source);
 assert.throws(() => assert.deepEqual(load(retainsOldScope,'applyPickerSources')({sources:['aqar']},[],true).sources, []), assert.AssertionError);
 
 const homepageCatalog = load(source, 'PLATFORM_PICKER_PROFILES');
-assert.equal(Object.keys(homepageCatalog).length, 149);
+// 150 = 149 + Haraj (official header artwork added 2026-10-17).
+assert.equal(Object.keys(homepageCatalog).length, 150);
 assert.ok(Object.keys(homepageCatalog).includes('Deal App'));
-console.log('PASS: the complete website catalog includes all 149 original logo profiles, including Dealapp.');
+console.log('PASS: the complete website catalog includes all 150 logo profiles, including Dealapp.');
 
 const chooseMatch = agent.match(/const choosePlatform = \(source: string \| null\) => \{([\s\S]*?)\n  \};/);
 assert.ok(chooseMatch);

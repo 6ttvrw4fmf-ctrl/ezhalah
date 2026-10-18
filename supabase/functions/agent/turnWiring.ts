@@ -142,6 +142,7 @@ export function buildTurnDecision(input: TurnWiringInput): TurnWiringResult {
   const afGroundingHint = AF_GROUNDING_RE.test(text);
 
   const establishedState: EstablishedState = {
+    validatedNationwide: out.validatedNationwide === true,
     location: location || (typeof prevQuery?.location === "string" ? prevQuery.location : null),
     type: (typeof out.type === "string" && out.type && saidTypeWord ? out.type : null)
       || (typeof prevQuery?.type === "string" ? prevQuery.type : null),

@@ -233,7 +233,20 @@ def map_listing(x: dict) -> tuple[Optional[tuple[dict, str]], str]:
     row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v not in (None, "", [])})
     cap = {k: v for k, v in x.items() if k not in _NEVER_STORE}
     row["source_capture"] = strip_pii_fields({"schema": "opensooq.serp.v1", "item": cap})
+    row.update(prose_answers(f"{title}\n{desc}"))
     return (row, category), ""
+
+
+# Amenities have NO structured field on opensooq: the card chips carry rooms, baths, furnished, area, floor, age and
+# period only, and the ad page prints no amenity list (CI source-reread 38544519028: 13605230's own text says
+# «مطبخ مجهز بالأجهزة الكهربائية … مصعد خاص من داخل الشقة», stored NULL; 0 of 62 active ads had any amenity
+# answer). So the ad's own words are the statement (law §2), yes-or-nothing (🔬 AF engineer, 2026-10-14).
+# furnished stays chip-only.
+_PROSE_COLS = ("kitchen", "parking", "elevator", "maid_room", "driver_room", "air_conditioner", "private_entrance")
+
+
+def prose_answers(text: Optional[str]) -> dict[str, bool]:
+    return {c: v for c, v in normalize.prose_amenities_yes(text, skip=("furnished",)).items() if c in _PROSE_COLS}
 
 
 RES_TABLE, COM_TABLE = "opensooq_residential_listings", "opensooq_commercial_listings"

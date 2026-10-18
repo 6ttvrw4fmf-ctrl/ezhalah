@@ -527,6 +527,25 @@ def count_flag(v) -> Optional[bool]:
         return None
 
 
+_AR_DIGIT_MAP = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+_RATE_AFTER = r"(?:للمتر|بالمتر|لل?متر\s*المربع|/\s*م[²2]|/\s*متر)"
+_RATE_BEFORE = r"(?:للمتر|لل?متر\s*المربع|سعر\s*المتر|المتر)"
+
+
+def stated_per_metre(text: Optional[str], n: int) -> bool:
+    """The ad's OWN text states THIS figure per square metre — «550 ريال للمتر», «السوم للمتر 1100»,
+    «سعر المتر: 750» (owner 2026-10-18: a rate needs the source's own marker on that ad; no marker = the
+    figure stays a total, PRICE = SOURCE). The marker must sit right before or right after the same figure;
+    a per-metre phrase about another number, or a number that only contains this one, never counts. A bare
+    «متر» after a figure is an area, not a rate."""
+    if not text or not n:
+        return False
+    flat = re.sub(r"(?<=\d),(?=\d)", "", text.translate(_AR_DIGIT_MAP))
+    fig = rf"(?<![\d.]){int(n)}(?![\d.])"
+    return bool(re.search(rf"{fig}\s*(?:ريال(?:\s*سعودي)?|ر\.س|﷼)?\s*\(?\s*{_RATE_AFTER}", flat)
+                or re.search(rf"{_RATE_BEFORE}\s*(?:ب|:|=)?\s*{fig}", flat))
+
+
 def annualize_rent(price: Optional[int], period: Optional[str]) -> Optional[int]:
     """Make sure rent is stored ANNUAL. Daily/weekly/monthly/quarterly → ×N. Annual or
     unknown → leave as-is (assume the scraper already got an annual figure).
@@ -885,7 +904,9 @@ def ad_licence_from_prose(text) -> Optional[str]:
 # is never turned into a "no" (that would publish a claim the source never made). An explicit
 # negation («غير مؤثثة», «بدون مصعد», «لا يوجد مصعد») is itself a source statement, so it sets False.
 _AMENITY_TOKENS: dict[str, tuple[str, ...]] = {
-    "elevator":         ("مصعد", "المصعد", "elevator", "lift"),
+    # «مصاعد» is the plural, and «مصعد» is not a substring of it: rakez's own spec list says «مصاعد» /
+    # «مصاعد إيطالية» on 209 floor units that read elevator = NULL (🔬 2026-10-18, ops_af_score rakez 0 of 7).
+    "elevator":         ("مصعد", "المصعد", "مصاعد", "elevator", "lift"),
     "kitchen":          ("مطبخ", "المطبخ", "kitchen"),
     "air_conditioner":  ("مكيف", "مكيفات", "تكييف", "مكيفة", "air conditioning", "air conditioner", "a/c"),
     "parking":          ("موقف", "مواقف", "مواقف سيارات", "كراج", "جراج", "parking", "car park"),
@@ -914,6 +935,14 @@ _PREPARED_ONLY = ("مؤسس", "مؤسسة", "مهيأ", "مهيا", "تأسيس"
 # would read «قريب من مواقف» as "this unit has parking", which is a claim about someone else's
 # building. A proximity phrase before the token suppresses it: the source has told us about the
 # street, not about the unit, so the column stays NULL.
+# …and two more that are neither yes nor no, for «furnished» (🔬 2026-10-16, backlog 593). «مفروشه جزئيا» /
+# «نصف مفروشة» is PARTLY furnished, which the yes/no furnished answer cannot state (wasalt's structured
+# «نصف مفروشة» already reads NULL), and «سطح مفروش نجيلة» / «مفروش بالرخام» is a FLOOR COVERING, not
+# furniture (eaqartabuk 598600, a turf roof, read furnished = yes). Both suppress the token: NULL.
+_PARTIAL_ONLY = ("جزئي", "جزئيا", "جزئيه", "جزئية", "partially", "partly", "semi")
+_PARTIAL_BEFORE = ("نصف", "شبه", "semi")
+_FLOOR_COVERING = ("نجيل", "عشب", "بلاط", "رخام", "سيراميك", "موكيت", "باركيه", "بورسلان", "انترلوك")
+
 _PROXIMITY = ("قريب من", "قريبة من", "بالقرب من", "مقابل", "بجوار", "بجانب", "أمام",
               "close to", "near ", "next to", "opposite")
 
@@ -937,7 +966,10 @@ def amenities_from_text(raw: Optional[str]) -> dict[str, bool]:
         for col, val in _amenities_in_clause(clause).items():
             seen.setdefault(col, set()).add(val)
     # Two clauses that disagree («مصعد، بدون مصعد») have not stated the fact: NULL, not line order.
-    return {col: vals.pop() for col, vals in seen.items() if len(vals) == 1}
+    out = {col: vals.pop() for col, vals in seen.items() if len(vals) == 1}
+    if _says_partly_furnished(raw):
+        out.pop("furnished", None)
+    return out
 
 
 # «المطابخ: 1» — a labelled kitchen COUNT, printed per floor in the «تفاصيل الدور …» block of one broker
@@ -965,7 +997,25 @@ def amenities_from_lines(raw: Optional[str]) -> dict[str, bool]:
     for line in re.split(r"[\n\r]+", str(raw)):
         for col, val in amenities_from_text(line).items():
             seen.setdefault(col, set()).add(val)
-    return {col: next(iter(vals)) for col, vals in seen.items() if len(vals) == 1}
+    out = {col: next(iter(vals)) for col, vals in seen.items() if len(vals) == 1}
+    if _says_partly_furnished(raw):
+        out.pop("furnished", None)
+    return out
+
+
+def _says_partly_furnished(raw: Optional[str]) -> bool:
+    """«فيلا مفروشه … الفيلا مفروشه جزئيا» (eaqartabuk 598379): a PARTLY-furnished statement anywhere is the
+    more specific one, so it outranks a plain «مفروشة» elsewhere in the ad and the yes/no answer is unknown."""
+    t = _norm_ar(str(raw or "")).lower()
+    for tok in _AMENITY_TOKENS["furnished"]:
+        k = _norm_ar(tok).lower()
+        for m in re.finditer(re.escape(k), t):
+            after = t[m.end():m.end() + 14]
+            before = t[max(0, m.start() - 6):m.start()]
+            if any(_norm_ar(q).lower() in after for q in _PARTIAL_ONLY) or \
+               any(_norm_ar(q).lower() in before for q in _PARTIAL_BEFORE):
+                return True
+    return False
 
 
 def prose_amenities_yes(raw: Optional[str], skip: tuple[str, ...] = ()) -> dict[str, bool]:
@@ -992,7 +1042,8 @@ _CLAUSE_BREAK_RE = re.compile(r"[\n\r،,.;؛|•▫▪+]+|\s-\s")
 # token («unfurnished», «غيرمؤثث»), so the right edge is a non-word char OR the end of the window.
 # An Arabic negator also stands as its own word with the conjunction «و» attached: «فيلا … ، وغير مؤثثة» is
 # «and NOT furnished», and without the optional «و» it read furnished = YES (dealapp 16155289, 🔬 2026-10-12).
-_NEGATOR_RES = tuple(re.compile(rf"(?<!\w){'و?' if re.match(r'[ء-ي]', n) else ''}{re.escape(n.strip())}(?=\W|$)")
+# «الغير مفروش» is «غير» with the article attached (eaqartabuk 598341 read furnished = YES, 🔬 2026-10-16).
+_NEGATOR_RES = tuple(re.compile(rf"(?<!\w){'(?:و|ال|وال)?' if re.match(r'[ء-ي]', n) else ''}{re.escape(n.strip())}(?=\W|$)")
                      for n in _NEGATORS)
 
 
@@ -1012,6 +1063,10 @@ def _amenities_in_clause(raw: str) -> dict[str, bool]:
                 # «* تأسيس مصعد» was served as elevator = yes). Same 12-char window as the negators.
                 if any(_norm_ar(q).lower() in before for q in _PREPARED_ONLY):
                     break
+                if col == "furnished" and (
+                        any(_norm_ar(q).lower() in after for q in _PARTIAL_ONLY + _FLOOR_COVERING)
+                        or any(_norm_ar(q).lower() in before[-6:] for q in _PARTIAL_BEFORE)):
+                    break          # partly furnished, or a floor covering — neither yes nor no: NULL
                 near = t[max(0, m.start() - 22):m.start()]
                 if any(_norm_ar(q) in near for q in _PROXIMITY):
                     break          # the NEIGHBOURHOOD has it, not this property — stay NULL

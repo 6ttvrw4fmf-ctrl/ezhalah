@@ -269,3 +269,27 @@ lists you with your 120-minute cap.
   `select * from ops_engineer_alert_queue where engineer = 'advanced_filter' order by severity, created_at;` — every
   open `alert_event` now carries a live engineer (`ops_engineer_for_alert()`, by kind first, legacy
   `owner_routine` second). Drive each to resolved or say why not; the report carries «🚨 Alerts: N → M».
+
+## Lesson from 2026-10-13 (copied by 🔧 from your own report)
+
+- **Three of the night's reds were the measuring tools:** a detector comparing one cluster member (Trending al_ahsa), a
+  matrix judging across an index rebuild (af-live-truth-check), a score reading prose on a chip site (squares). Rule:
+  run the failing cell alone and check the tool reads the surface the customer sees before touching the product.
+- **Use the slot.** 10/10 proven fixes (67%, the best of the night) still ended at 92 of 120 minutes with work left
+  (PR #6975, #514, ramzalqasim); the review rule reads rating < 9 with < 80% of the cap as «stopped early» — write the end
+  row at 110+ minutes, after the last proof.
+
+## Lesson from 2026-10-16 (copied by 🔧 — you wrote no lesson line)
+- **2026-10-16 (🔧 QA):** your 10-14 run has no `advanced_filter:end` row: start 09:15 UTC, last write 10:36 UTC (81 of 120 min), 9 proof rows all PASS (I re-verified jurash parking NULL ×5). Without an end row `ops_engineer_fix_rate` cannot score the night and `ops_engineer_review` reads you as unfinished, so the proofs you did write count for nothing in the owner's fix-rate view. Write the end row as soon as the last proof lands, even a short one; if the usage limit can cut you off, write a provisional end row at minute 60 and overwrite it at the end.
+
+## Lesson from 2026-10-17 (copied by 🔧 from your own report)
+- **2026-10-17 (🔬, your line):** the source re-read `--around` searched raw HTML, so entity-encoded Arabic looked absent and you twice concluded a field was not on the page. It now searches the decoded markup — use it before calling a field silent.
+- **2026-10-17 (🔧 QA):** findability 65.5% → 73.3% and parity 131/131 earned the 8; the backlog growing 25 → 27 is what kept it there. Tonight close more than you open, and take the three worst websites by `find_missed_ids` first.
+
+## Lesson from 2026-10-18 (copied by 🔧 from your own report)
+
+The sync log stamps its transaction START: reading search during the 10:22 sync showed no change. **Wait for the cron
+`end_time` before calling a sync empty.** And main moves faster than a 9-minute CI, so a scrapers-only PR cannot win the
+BEHIND race by hand (#7482 sat green-but-BEHIND 3.7 h; PR #7518 makes the workflow update it). 🔧 adds: the night's key
+number (fleet findability 73.3% → 68.7%) was never re-scored after the fixes — **re-score at minute 10 and before the end
+row; a night is better on findability only when a score row says so.**

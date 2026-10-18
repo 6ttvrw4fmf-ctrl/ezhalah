@@ -35,9 +35,9 @@ export type AdRow = {
   source_table?: string; listing_id?: number | string;
   latitude?: unknown; longitude?: unknown;
   type_ar?: string | null; deal_ar?: string | null; city_ar?: string | null; district_ar?: string | null;
-  price_total?: unknown; area_m2?: unknown; license_number?: string | null; platform?: string | null;
+  price_total?: unknown; area_m2?: unknown; license_number?: string | null; platform?: string | null; bedrooms?: unknown;
 };
-const AD_ROW_SELECT = 'latitude,longitude,type_ar,deal_ar,city_ar,district_ar,price_total,area_m2,license_number,platform,source_table,listing_id';
+const AD_ROW_SELECT = 'latitude,longitude,type_ar,deal_ar,city_ar,district_ar,price_total,area_m2,license_number,platform,source_table,listing_id,bedrooms';
 
 const num = (v: unknown): number =>
   typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
@@ -85,6 +85,56 @@ const TYPE_PLURAL_AR: Record<string, string> = {
 export const typePluralAr = (typeAr: string): string => TYPE_PLURAL_AR[typeAr.trim()] ?? typeAr.trim();
 export const typeWordAr = (n: number, typeAr: string): string => (n >= 3 && n <= 10 ? typePluralAr(typeAr) : typeAr.trim());
 
+// THE DISTRICT BORDER (owner 2026-10-17: «use the same Google map and … show the entire district
+// exactly, all around the boundaries», then, shown both, «I like the one with the boundaries»). When the
+// source published NO pin for an ad (both coordinates missing), the ad page asks the SAME free Google
+// embed for the district by NAME — «حي X، City» — and Google itself fits the view to the district and
+// draws its own dashed border around it. Free (the keyless embed, or the Embed API place mode with the
+// owner's key — both $0, unlimited). Never a pin: Ezhalah's label reads «الموقع التقريبي» and the note
+// says the site published no exact location. Where Google holds no border for a name it still centres
+// on that district. Nothing here touches the pin path: mapPoint() is unchanged and a pin still needs
+// BOTH published coordinates.
+export type DistrictPlace = { query: string; district: string; city: string };
+export const DISTRICT_MAP_PLATFORMS: readonly string[] = ['aqar', 'aqarmonthly'];
+/** The place an Aqar ad's own link names, e.g. sa.aqar.fm/شارع-الصليحى-212-الفرعاء-منطقة-عسير-6836489 →
+ *  «شارع الصليحى 212 الفرعاء منطقة عسير، السعودية». Only sa.aqar.fm; the trailing ad number is dropped; a
+ *  link that names nothing but the country («المملكة-العربية-السعودية-…») names no place → null. */
+export function aqarTownFromUrl(adUrl: string | null | undefined): string | null {
+  let u: URL;
+  try { u = new URL(String(adUrl ?? '')); } catch { return null; }
+  if (u.hostname.replace(/^www\./, '').toLowerCase() !== 'sa.aqar.fm') return null;
+  let seg = '';
+  try { seg = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() ?? ''); } catch { return null; }
+  const words = seg.replace(/-\d+$/, '').split('-').map((w) => w.trim()).filter(Boolean);
+  const text = words.join(' ').replace(/\s*المملكة العربية السعودية\s*/g, ' ').trim();
+  if (!text || !/[؀-ۿ]/.test(text)) return null;
+  return `${text}، السعودية`;
+}
+/** The district to show for an ad with no pin, from the ad's own row. Pure, exported for the barrier. */
+export function districtPlace(row: AdRow | null | undefined, adUrl?: string | null): DistrictPlace | null {
+  // Aqar (buy + rent) and Aqar Monthly only for now (owner 2026-10-17: «just do aqar now», then «do the
+  // location thing for Aqar Monthly and rent, same style, just don't include the Ministry of Justice»);
+  // other sites keep no map without a pin. The ministry block stays Aqar-sale-only (pricesBlockEligible).
+  if (!DISTRICT_MAP_PLATFORMS.includes(String(row?.platform ?? '').trim().toLowerCase())) return null;
+  const district = String(row?.district_ar ?? '').trim(), city = String(row?.city_ar ?? '').trim();
+  // No city in our index (a small town outside the city list, owner 2026-10-17: «town fallback … if we have
+  // the pin perfect, if not we do this boundaries»): the town as the SOURCE wrote it in the ad's own
+  // address — the last segment of its sa.aqar.fm link — never a guess of ours.
+  if (!city || city === 'غير معروف') { const town = aqarTownFromUrl(adUrl); return town ? { query: town, district: '', city: town } : null; }
+  // No district written (owner 2026-10-17: «those with no district, we show the city»): the whole city,
+  // Google's own city border around it — still labelled approximate, never a pin.
+  if (!district || district === 'غير معروف') return { query: city, district: '', city };
+  const named = /^حي\s/.test(district) ? district : `حي ${district}`;
+  return { query: `${named}، ${city}`, district: named, city };
+}
+export const districtEmbedUrl = (d: DistrictPlace, hl: string = 'ar'): string => {
+  const key = process.env.EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY;
+  const q = encodeURIComponent(d.query);
+  return key
+    ? `https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(key)}&q=${q}&maptype=satellite&language=${hl}`
+    : `https://maps.google.com/maps?q=${q}&t=h&hl=${hl}&output=embed`;
+};
+
 export type AdPage = { geo: GeoPoint | null; row: AdRow | null };
 const EMPTY_PAGE: AdPage = { geo: null, row: null };
 const pageCache = new Map<string, Promise<AdPage>>();
@@ -113,10 +163,14 @@ export type PriceRow = { platform?: string | null; license_number?: string | nul
 export type House = { price: number; area: number };
 // mean / meanPpm are what the split card prints (owner update 23: like for like with the ministry's
 // means); median / medianPpm stay for any surface that wants them. meanPpm = mean of per-house price ÷ area.
-export type AskingPrices = { houses: number; p10: number; median: number; p90: number; mean: number; medianPpm: number | null; meanPpm: number | null; each: House[] };
+export type AskingPrices = { houses: number; ads: number; sites: number; p10: number; median: number; p90: number; mean: number; medianPpm: number | null; meanPpm: number | null; each: House[] };
 // A sale price under 100k or over 500M SAR is a typo or a per-metre figure in the wrong column, not a house.
-const PRICE_MIN = 100_000;
-const PRICE_MAX = 500_000_000;
+// The ministry page the sold numbers come from: it embeds the public Power BI report «البورصة العقارية» (resource key in
+// scrapers/moj/sales.py). Its response headers (X-Frame-Options SAMEORIGIN + CSP frame-ancestors: itself and Microsoft domains only)
+// forbid showing it inside another site, so the link opens a NEW TAB — never an iframe (verified 2026-10-16).
+export const MOJ_SOURCE_URL = 'https://moj.gov.sa/ar/OpenData/PowerBIReport/Pages/BIReportRealestate.aspx';
+export const PRICE_MIN = 100_000;
+export const PRICE_MAX = 500_000_000;
 const MIN_HOUSES = 10;
 
 const percentile = (sorted: number[], q: number): number => {
@@ -128,11 +182,17 @@ const percentile = (sorted: number[], q: number): number => {
  *  is listed at), down sites out, junk prices out; null under MIN_HOUSES. Pure, so the barrier executes it. */
 export function askingPriceStats(rows: PriceRow[], downSlugs: Set<string>): AskingPrices | null {
   const best = new Map<string, { price: number; area: number }>();
+  // What the numbers are made of, shown to the reader: the ADS that passed the filters (live site, sane price), the
+  // distinct WEBSITES they came from, and — after the dedupe below — the houses. «1,433 ads from 38 sites → 1,160 houses».
+  let ads = 0;
+  const sites = new Set<string>();
   for (const r of rows) {
     const platform = String(r.platform ?? '').trim().toLowerCase();
     if (!platform || downSlugs.has(platform)) continue;
     const price = num(r.price_total);
     if (!Number.isFinite(price) || price < PRICE_MIN || price > PRICE_MAX) continue;
+    ads++;
+    sites.add(platform);
     const area = num(r.area_m2);
     const lic = String(r.license_number ?? '').trim();
     const type = String(r.type_ar ?? '').trim();
@@ -145,7 +205,7 @@ export function askingPriceStats(rows: PriceRow[], downSlugs: Set<string>): Aski
   const ppm = [...best.values()].filter((h) => h.area > 0).map((h) => h.price / h.area).sort((a, b) => a - b);
   const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
   return {
-    houses: best.size,
+    houses: best.size, ads, sites: sites.size,
     p10: percentile(prices, 0.1), median: percentile(prices, 0.5), p90: percentile(prices, 0.9), mean: mean(prices),
     medianPpm: ppm.length ? percentile(ppm, 0.5) : null, meanPpm: ppm.length ? mean(ppm) : null,
     each: [...best.values()],
@@ -187,8 +247,8 @@ export function isSameAd(own: AdRow, other: AdRow): boolean {
 }
 
 // ── the ministry's actual sales ──────────────────────────────────────────────────────────────────
-export type MojRow = { deals?: unknown; avg_deal?: unknown; avg_ppm?: unknown; p10_deal?: unknown; p90_deal?: unknown; window_from?: string | null; window_to?: string | null; source_refreshed_at?: string | null };
-export type MojFacts = { deals: number; avgDeal: number; avgPpm: number; p10: number | null; p90: number | null; from: string; to: string };
+export type MojRow = { moj_region?: string | null; moj_area?: string | null; fetched_at?: string | null; deals?: unknown; avg_deal?: unknown; avg_ppm?: unknown; p10_deal?: unknown; p90_deal?: unknown; window_from?: string | null; window_to?: string | null; source_refreshed_at?: string | null };
+export type MojFacts = { path: string | null; updatedAt: string | null; deals: number; avgDeal: number; avgPpm: number; p10: number | null; p90: number | null; from: string; to: string };
 const MOJ_MIN_DEALS = 10;
 
 /** The ministry's numbers as the card shows them — unaltered; the period from the ROW's own two dates. Null under 10 deals. */
@@ -201,7 +261,16 @@ export function mojFacts(row: MojRow | null | undefined): MojFacts | null {
   // The ministry's own per-deal spread, when the job has filled it; a half-filled pair is no spread.
   const p10 = num(row.p10_deal), p90 = num(row.p90_deal);
   const spread = Number.isFinite(p10) && Number.isFinite(p90) && p10 > 0 && p90 >= p10;
-  return { deals, avgDeal, avgPpm, p10: spread ? p10 : null, p90: spread ? p90 : null, from, to };
+  // Where to find these sales in the ministry's own report: its hierarchical filter is Region / City / District, and the
+  // ministry's area value reads «city/district» (الرياض/الملقا). The public report cannot be opened pre-filtered (Power BI
+  // «publish to web» ignores URL filters — tested 2026-10-16), so the reader is told the exact picks instead.
+  const region = String(row.moj_region ?? '').trim();
+  const [city, district] = String(row.moj_area ?? '').split('/').map((x) => x.trim());
+  const path = region && city && district ? `${region} / ${city} / ${district}` : null;
+  // When WE last re-read the ministry (the weekly job's fetched_at) — the card says «updated weekly · last update …»
+  // from this stored stamp, never from the clock.
+  const updatedAt = /^\d{4}-\d{2}-\d{2}/.test(String(row.fetched_at ?? '')) ? String(row.fetched_at).slice(0, 10) : null;
+  return { path, updatedAt, deals, avgDeal, avgPpm, p10: spread ? p10 : null, p90: spread ? p90 : null, from, to };
 }
 
 const mojCache = new Map<string, Promise<MojFacts | null>>();
@@ -213,13 +282,51 @@ export function fetchMojSales(row: AdRow | null, cls: MojClass = 'سكني'): Pr
   let p = mojCache.get(key);
   if (!p) {
     p = boundedRpc<MojRow[]>(
-      supabase.from('moj_district_sales').select('deals,avg_deal,avg_ppm,p10_deal,p90_deal,window_from,window_to,source_refreshed_at')
+      supabase.from('moj_district_sales').select('moj_region,moj_area,fetched_at,deals,avg_deal,avg_ppm,p10_deal,p90_deal,window_from,window_to,source_refreshed_at')
         .eq('city_ar', row.city_ar).eq('district_ar', row.district_ar).eq('property_class', cls).limit(1),
     ).then(({ data, error }) => {
       if (error) { mojCache.delete(key); return null; }
       return mojFacts(data?.[0]);
     });
     mojCache.set(key, p);
+  }
+  return p;
+}
+
+// ── the ministry's deals, one row each (owner 2026-10-16: «the exact same transactions») ────────────────────────────
+// The public report cannot be opened pre-filtered, so the page lists the deals themselves from public.moj_district_deals
+// (filled by the same weekly job as the aggregates): the ministry's own date, m², price and per-deal m² price, unaltered.
+export type MojDeal = { ref: string; date: string; area: number; price: number; ppm: number };
+const MOJ_DEALS_LIMIT = 500;
+/** The stored deals as the sheet lists them: newest first, and ONLY rows whose every value is present — the m² price is
+ *  the ministry's own column, never price ÷ area recomputed here. Pure, so the barrier executes it. */
+export function mojDealRows(data: unknown): MojDeal[] {
+  if (!Array.isArray(data)) return [];
+  const out: MojDeal[] = [];
+  for (const r of data as Record<string, unknown>[]) {
+    const date = String(r?.deal_date ?? '').slice(0, 10), ref = String(r?.deal_ref ?? '').trim();
+    const area = num(r?.area_m2), price = num(r?.price), ppm = num(r?.ppm);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !ref || !Number.isFinite(area) || !(area > 0) || !Number.isFinite(price) || !Number.isFinite(ppm)) continue;
+    out.push({ ref, date, area, price, ppm });
+  }
+  return out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.ref < b.ref ? 1 : a.ref > b.ref ? -1 : 0));
+}
+const dealsCache = new Map<string, Promise<MojDeal[]>>();
+/** One bounded read of moj_district_deals for this ad's city · district · class; a failed read is [] and forgotten. */
+export function fetchMojDeals(row: AdRow | null, cls: MojClass = 'سكني'): Promise<MojDeal[]> {
+  if (!supabase || !row?.city_ar || !row.district_ar) return Promise.resolve([]);
+  const key = `${row.city_ar}|${row.district_ar}|${cls}`;
+  let p = dealsCache.get(key);
+  if (!p) {
+    p = boundedRpc<Record<string, unknown>[]>(
+      supabase.from('moj_district_deals').select('deal_ref,deal_date,area_m2,price,ppm')
+        .eq('city_ar', row.city_ar).eq('district_ar', row.district_ar).eq('property_class', cls)
+        .order('deal_date', { ascending: false }).limit(MOJ_DEALS_LIMIT),
+    ).then(({ data, error }) => {
+      if (error) { dealsCache.delete(key); return []; }
+      return mojDealRows(data);
+    });
+    dealsCache.set(key, p);
   }
   return p;
 }
@@ -265,6 +372,73 @@ export function fetchSameAd(row: AdRow | null): Promise<Listing[]> {
       return cards.flat();
     })();
     sameCache.set(key, p);
+  }
+  return p;
+}
+
+// ── the closely similar listings (owner 2026-10-16: «not all of them, just the ones very closely alike») ───────────
+// The «Listed now» half gets its own sheet: the SALE ads in this district that are close to this one — the same
+// property type, the area within ±20%, the same bedroom count when both ads state one — each property once, nearest
+// first, every row a real ad on its own site at its own published price. Numbers only; no ranking by anything but closeness.
+export type SimilarRow = { source_table?: string; listing_id?: number | string; platform?: string | null; license_number?: string | null; type_ar?: string | null; area_m2?: unknown; price_total?: unknown; bedrooms?: unknown };
+export type SimilarCard = { card: Listing; price: number; area: number; ppm: number; beds: number | null };
+export const SIMILAR_AREA_BAND = 0.2;
+export const SIMILAR_LIMIT = 30;
+export function similarRows(rows: SimilarRow[], ad: AdRow, downSlugs: Set<string>): (SimilarRow & { price: number; area: number; ppm: number; beds: number | null })[] {
+  const adArea = num(ad.area_m2), adPrice = num(ad.price_total);
+  const adType = String(ad.type_ar ?? '').trim();
+  if (!(adArea > 0) || !adType) return [];
+  const adBeds = num(ad.bedrooms);
+  const adPpm = adPrice > 0 ? adPrice / adArea : NaN;
+  const lo = adArea * (1 - SIMILAR_AREA_BAND), hi = adArea * (1 + SIMILAR_AREA_BAND);
+  const best = new Map<string, SimilarRow & { price: number; area: number; ppm: number; beds: number | null }>();
+  for (const r of rows) {
+    const platform = String(r.platform ?? '').trim().toLowerCase();
+    if (!platform || downSlugs.has(platform) || !r.source_table) continue;
+    if (String(r.source_table) === String(ad.source_table ?? '') && String(r.listing_id) === String(ad.listing_id ?? '')) continue;   // never itself
+    if (String(r.type_ar ?? '').trim() !== adType) continue;
+    const area = num(r.area_m2), price = num(r.price_total);
+    if (!(area >= lo && area <= hi) || !Number.isFinite(price) || price < PRICE_MIN || price > PRICE_MAX) continue;
+    const beds = num(r.bedrooms);
+    const bedsKnown = Number.isFinite(beds) && beds > 0, adBedsKnown = Number.isFinite(adBeds) && adBeds > 0;
+    if (bedsKnown && adBedsKnown && beds !== adBeds) continue;
+    const lic = String(r.license_number ?? '').trim();
+    const key = lic ? `${lic}|${adType}|${area}` : `${platform}|${adType}|${price}|${area}`;
+    const cur = best.get(key);
+    if (!cur || price < cur.price) best.set(key, { ...r, price, area, ppm: price / area, beds: bedsKnown ? beds : null });
+  }
+  const closeness = (x: { area: number; ppm: number }) => [Math.abs(x.area - adArea), Number.isFinite(adPpm) ? Math.abs(x.ppm - adPpm) : 0] as const;
+  return [...best.values()]
+    .sort((a, b) => { const [a1, a2] = closeness(a), [b1, b2] = closeness(b); return a1 - b1 || a2 - b2; })
+    .slice(0, SIMILAR_LIMIT);
+}
+const similarCache = new Map<string, Promise<SimilarCard[]>>();
+/** The real cards of the closely similar listings, nearest first; a failed read is [] and forgotten. */
+export function fetchSimilarListings(row: AdRow | null): Promise<SimilarCard[]> {
+  const area = num(row?.area_m2);
+  if (!supabase || !row || row.deal_ar !== 'بيع' || !row.type_ar || !row.city_ar || !row.district_ar || !(area > 0)) return Promise.resolve([]);
+  const key = `${row.source_table}|${row.listing_id}`;
+  let p = similarCache.get(key);
+  if (!p) {
+    const ad = row;
+    p = (async () => {
+      await loadHiddenPlatformNames();
+      const { data, error } = await boundedRpc<SimilarRow[]>(
+        supabase!.from('search_listings_ar').select('source_table,listing_id,platform,license_number,type_ar,area_m2,price_total,bedrooms')
+          .eq('city_ar', ad.city_ar as string).eq('district_ar', ad.district_ar as string).eq('deal_ar', 'بيع').eq('type_ar', String(ad.type_ar).trim())
+          .eq('production_ready', true).gte('area_m2', Math.floor(area * (1 - SIMILAR_AREA_BAND))).lte('area_m2', Math.ceil(area * (1 + SIMILAR_AREA_BAND)))
+          .not('price_total', 'is', null).limit(600),
+      );
+      if (error) { similarCache.delete(key); return []; }
+      const picked = similarRows(data ?? [], ad, downPlatformSlugs());
+      const byTable = new Map<string, number[]>();
+      for (const r of picked) byTable.set(r.source_table as string, [...(byTable.get(r.source_table as string) ?? []), Number(r.listing_id)]);
+      const cards = (await Promise.all([...byTable].map(([t, ids]) => fetchListingCards(t, ids)))).flat();
+      const byKey = new Map(cards.map((c) => [`${(c as Listing & { sourceTable?: string }).sourceTable}|${c.id}`, c]));
+      // the sheet keeps the closeness order and prints the INDEX row's own figures beside the card
+      return picked.flatMap((r) => { const c = byKey.get(`${r.source_table}|${r.listing_id}`); return c ? [{ card: c, price: r.price, area: r.area, ppm: r.ppm, beds: r.beds }] : []; });
+    })();
+    similarCache.set(key, p);
   }
   return p;
 }

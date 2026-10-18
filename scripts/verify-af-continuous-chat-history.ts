@@ -152,7 +152,7 @@ check('the receipt is the ELSE branch of the actions row (the two can never rend
 }
 check('the receipt is written for the ORIGIN turn, from THIS round\'s ask order and facets',
   /\[carry\.msgId\]: roundLog/.test(agent)
-  && /const roundLog = buildAfRoundLog\(askedThisRound, ageFlowFacetsRef\.current\)/.test(agent),
+  && /const roundLog = buildAfRoundLog\(askedThisRound, ageFlowFacetsRef\.current, locale\)/.test(agent),
   'agent.tsx (finishGuided): keyed on carry.msgId = the turn the round was opened FROM; answers still come from the facets, which skips never enter');
 check('only a round that committed something leaves a receipt at all',
   /if \(carry && roundCommitted\) setAfReceipt/.test(agent),

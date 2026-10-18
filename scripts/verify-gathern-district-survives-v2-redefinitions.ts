@@ -36,7 +36,14 @@ const mustCatch = (label: string, bad: string[]) => { if (!bad.length) failed++;
 
 check('the latest listing_native_location_v2 redefinition keeps the Gathern district resolver', problems(all));
 // Mutation: without the 2026-10-04 fix the latest redefinition is the stale 0927 copy, which must go RED.
-mustCatch('a stale full redefinition (the 2026-10-04 fix removed)', problems(all.filter((m) => !m.f.startsWith('20261004073216'))));
+// Every v2 (re)definition from the fix on is dropped, so the latest left is the stale 0927 copy (2026-10-18: a later
+// patch-in-place migration would otherwise stay "latest" and keep this proof green for the wrong reason).
+const isV2Redef = (m: Mig) => /listing_native_location_v2/.test(m.sql) && /create or replace view/i.test(m.sql);
+mustCatch('a stale full redefinition (the 2026-10-04 fix removed)', problems(all.filter((m) => !(isV2Redef(m) && m.f >= '20261004073216'))));
+// The REAL latest redefinition, with the resolver stripped, must go red too.
+const latestRedef = all.filter(isV2Redef).at(-1);
+if (latestRedef) mustCatch(`the latest redefinition (${latestRedef.f}) without resolve_district_ar`,
+  problems(all.map((m) => (m === latestRedef ? { f: m.f, sql: m.sql.replaceAll('resolve_district_ar', 'resolve_x') } : m))));
 // Mutation: a NEW redefinition from a stale copy, added after the fix, must go RED too.
 mustCatch('a future stale redefinition', problems([...all, { f: '99999999999999_stale_copy.sql', sql: 'create or replace view public.listing_native_location_v2 as select NULL::text AS district_ar' }]));
 console.log(failed ? `\n${failed} FAILED` : '\nAll Gathern-district-survival assertions passed');

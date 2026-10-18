@@ -261,6 +261,21 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
 16. `--sample N` in `customer-journey.mjs` is capped at 8 and `--listings` at 12 per run: 100 journeys are nine
    batches from your own per-platform sample, three per website, sequentially.
 
+17. Your own last fix can regress the next morning (10-16): the 10-09 bossbih «0 SAR» fix assumed «no total block»,
+   but the live pages print «الإجمالي 0» (the site's calculator), and the 04:42 crawl put all six back at 0. Re-read
+   the live pages of every ad you «fixed» last Friday before trusting its proof row; build the test from the page.
+18. A robot red for days is usually two bugs, one in the robot (10-16 journey-sweep, 19 days red): the expired-token
+   watch stopped looking at 4 s while the product opens at 8-15 s; the tap-target one was a real product overlap.
+   Reproduce ONE journey by hand the same day instead of reading its summary.
+19. Prose capture must be read back against the ad text before you call it done (10-16 wasalt): 2,845 of 2,849
+   elevator YES were right; the 4 wrong were a literal «\n» in the text and a labelled «المصعد: لا يوجد مصعد».
+   Ship the reader with a re-check pass so the next run corrects what the last one got wrong.
+20. A fold in a list that is also the search key must keep label == key (10-16): district_options_ar sends the
+   folded LABEL back as the search value, so relabelling «(حي رقم (» alone would have emptied a district.
+   Dry-run every list change against the search it feeds (count == results), rolled back, before applying.
+21. Before a heavy scan, explain it or bound it: a per-row _redact_pii_sql over 170k descriptions ran past 60 s
+   on production (10-16) and had to be cancelled with pg_cancel_backend. Use one regex pass, gated to the daily slot.
+
 ## Rating (computed, must be earned)
 - **10/10** only when: every map line A–E is covered 100% (or its minimum), the sweep is green, all 10 golden searches pass,
   the quick searches show 0 missing / extra / duplicates / count mismatches, ≥ 99 of 100 real listings were found in each
@@ -278,10 +293,39 @@ Missing one box means «PROPAGATION PENDING» or «not fixed yet», never «fixe
 > 🔧 **Technical:**
 > 🔎 **Coverage:** cities N% · districts N% · quick searches N (missing/extra/dup/count: 0/0/0/0) · golden N/10 ·
 >   real listings found: normal N/100, AF N/100 · AF parity N% · cards N · clicks N · integrity C1–C11 ✅/❌ each
+> 📈 **Fix rate: X / Y = N%** (X = fixes with a `falcon:proof` PASS row, Y = found; last Friday: A / B = N%; the trend line comes
+>   from `ops_engineer_fix_rate`)
 > 🐛 **Found:** N · 🛠️ **Fixed and proven live:** N (each: area · before → after · PR · proof)
 > 👥 **The team:** ⚡ 🆕 🔬 ♻️ 🔧, one line each (what slipped past them, the guard added, the follow-up written)
 > ⭐ **Rating:** N/10 (computed: …) · 🎯 **To reach 10:** <exact next steps>
+> 📚 **Lesson:** <the one mistake or slow part this Friday, and the rule that prevents it>
 > 🙋 **Needs from you:** Nothing. (Only money, law, secrets or a commercial choice.)
+
+## Fix rate leads, and the scoreboard must show it (owner, 2026-10-16)
+The owner rates you first by fixed-and-proven ÷ found. On 2026-10-16 you found 14, wrote «fixed 9», and had 5 `falcon:proof`
+rows; the numbers lived only in the report text, so `ops_engineer_fix_rate` showed found 0 and no trend. Fix rate was 5 / 14
+= 36% (10-09: 4 / 15 = 27%). So, every Friday:
+1. **`issues_fixed` counts ONLY fixes that have a `falcon:proof` PASS row** (one proof row per fix, naming the PR and the
+   listing keys). Merged is not live; «PROPAGATION PENDING» and «deploy refused» are NOT counted, they are listed under
+   «proof pending» and you prove them first next Friday.
+2. **Fill the columns, not just the text.** The `falcon:end` row must carry `issues_found` and `issues_fixed` as integers:
+   `insert into ops_daily_engineer_run (run_at, phase, push_ok, issues_found, issues_fixed, report) values (now(),
+   'falcon:end', true, <found>, <proven fixed>, '<report>')`. Right after it, run `select * from ops_engineer_fix_rate where
+   engineer = 'falcon' order by night desc limit 2` and check the row shows YOUR found number. If found reads 0 or the row is
+   missing, you forgot: fix the end row before you stop.
+3. Put «📈 Fix rate: X / Y = N%» right under the first line of the report (see the report block).
+4. A fix whose PR is merged but not deployed: deploy it (check the drift gate and the production lock first) and prove it
+   inside your 4 hours. A deploy refused by someone else's lock is retried after the lock lapses, not given up on.
+
+## Better every Friday (owner, 2026-10-16: «tell it to fill the numbers and prove every fix»)
+1. **Start:** read your own rows in `ops_engineer_fix_rate` and every `falcon:followup` row since your last run. This Friday's fix
+   rate must beat last Friday's; `over_claimed = true` means your first job is proving or withdrawing those claims.
+2. **During:** prove last Friday's pending fixes first (they are the cheapest fix rate there is), then fix tonight's findings
+   the same run where they are yours.
+3. **End:** the report carries «📚 Lesson: <the one mistake or slow part, and the rule that prevents it>». 🔧 copies it here.
+4. The same lesson two Fridays in a row means you change your approach, not just try harder.
+- **2026-10-16 (owner):** you left `issues_found` and `issues_fixed` empty and counted 9 fixes against 5 proofs. Fill the columns,
+  count proven fixes only, check the scoreboard after you write the end row.
 
 ## LIVE means tested like a real user (owner, 2026-10-03)
 «Fixed», «live» and «verified» only after a real-customer test on production. Merged is not live; deployed is not live until a

@@ -56,6 +56,8 @@ import {
 import { typeArForTypes } from '../src/data/propertyTypes.ts';
 import { certifiedAmenityKeys } from '../src/lib/afCohorts.ts';
 import type { SearchQuery } from '../src/data/search.ts';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { judgeCellOnOneIndex, UNREADABLE_STAMP } from './lib/afSurfaceJudge.ts';
 
 const ROOT = join(import.meta.dirname, '..');
 const { url: REST, key: KEY } = resolvePublicSupabase(process.env);
@@ -71,11 +73,34 @@ const failed: string[] = [];
 // Cells the SCHEMA CACHE was reloading through. Not `failures`, because they are not a statement
 // about the product — but counted, printed, and gated below, because unmeasured is never green.
 const unmeasured: string[] = [];
-const check = (label: string, ok: boolean, detail = '') => {
-  if (ok) { passes++; return; }
+// A cell's checks are first collected in its own buffer and only committed once the cell has been
+// judged on ONE index state (judgeCellOnOneIndex, scripts/lib/afSurfaceJudge.ts — 2026-10-13: two runs
+// that day failed 81 and 28 checks on DIFFERENT cells, and every one passed in full when re-run alone).
+type CellRun = { fails: { label: string; detail: string }[]; passes: number };
+const cellRun = new AsyncLocalStorage<CellRun>();
+const undecidedCells: string[] = [];
+let reconciledCells = 0;
+const commitFail = (label: string, detail: string) => {
   failures++; failed.push(label);
   console.log(`FAIL  ${label}${detail ? `\n      ${detail}` : ''}`);
 };
+const check = (label: string, ok: boolean, detail = '') => {
+  const run = cellRun.getStore();
+  if (run) { if (ok) run.passes++; else run.fails.push({ label, detail }); return; }
+  if (ok) { passes++; return; }
+  commitFail(label, detail);
+};
+
+/** An exact fingerprint of the searchable index (row count @ newest write), as the differential uses. */
+async function indexStamp(): Promise<string> {
+  const [count, newest] = await Promise.all([
+    fetch(`${REST}/rest/v1/search_listings_ar?select=listing_id`, { headers: { ...H, Prefer: 'count=exact', Range: '0-0' } })
+      .then((r) => (r.headers.get('content-range') || '').split('/')[1] || '?').catch(() => '?'),
+    fetch(`${REST}/rest/v1/search_listings_ar?select=last_updated&order=last_updated.desc.nullslast&limit=1`, { headers: H })
+      .then((r) => r.json()).then((r: any) => r?.[0]?.last_updated ?? '?').catch(() => '?'),
+  ]);
+  return count === '?' && newest === '?' ? UNREADABLE_STAMP : `${count}@${newest}`;
+}
 const same = (a: unknown, b: unknown) => sortedJson(a) === sortedJson(b);
 
 // ── HTTP, with retries (a production hiccup is not a predicate defect) ───────────────────────────
@@ -365,7 +390,28 @@ async function verifyCell(cell: Cell) {
 const queue = [...cells];
 await Promise.all(Array.from({ length: CONCURRENCY }, async () => {
   for (let c = queue.shift(); c; c = queue.shift()) {
-    try { await verifyCell(c); }
+    try {
+      const tag = `${c.scope.label}/${c.mode.mode}`;
+      let last: CellRun = { fails: [], passes: 0 };
+      const attempt = async () => {
+        const run: CellRun = { fails: [], passes: 0 };
+        await cellRun.run(run, () => verifyCell(c));
+        last = run;
+        return run.fails.map((f) => f.label);
+      };
+      const v = await judgeCellOnOneIndex(indexStamp, attempt);
+      if (v.verdict === 'undecided') {
+        undecidedCells.push(`${tag} (${v.firstFailures.length} check(s) disagreed; index ${v.stamp})`);
+        console.log(`UNDECIDED  ${tag} — the searchable index was rebuilt under both reads, no verdict in either direction`);
+        continue;
+      }
+      if (v.verdict === 'pass' && v.reconciled) {
+        reconciledCells++;
+        console.log(`RECONCILED  ${tag} — disagreed on the first read, agreed on a re-read proven to span no index rebuild`);
+      }
+      passes += last.passes;
+      for (const f of last.fails) commitFail(f.label, f.detail);
+    }
     catch (e: any) {
       // A schema-cache reload that outlasted the measured budget is the INSTRUMENT being
       // unavailable, so it must not wear this label: «cell completed without a harness error» both
@@ -394,6 +440,18 @@ if (unmeasured.length) {
   if (unmeasured.length > floor) {
     check(`schema cache availability: ${unmeasured.length} of ${cells.length} cell(s) went unmeasured (floor ${floor})`, false,
       'the schema cache did not settle within the measured budget for a meaningful share of the sweep, so this run did not certify the matrix — this is NOT a finding about any cohort named above');
+  }
+}
+// UNDECIDED IS NOT A PASS either: a cell whose re-read still straddled a rebuild certified nothing.
+// One or two in a ~40-minute sweep that spans the :22 sync is ordinary; more means this run did not
+// certify the matrix. The message stays about the INSTRUMENT, never about a cohort.
+console.log(`\nRECONCILED ACROSS AN INDEX REBUILD: ${reconciledCells} cell(s)   UNDECIDED (index moved, no verdict): ${undecidedCells.length}`);
+if (undecidedCells.length) {
+  console.log(undecidedCells.map((l) => `  • ${l}`).join('\n'));
+  const floor = Math.max(3, Math.round(cells.length * 0.05));
+  if (undecidedCells.length > floor) {
+    check(`index stability: ${undecidedCells.length} of ${cells.length} cell(s) undecided (floor ${floor})`, false,
+      'the searchable index kept moving under the re-reads, so this run did not certify the matrix — NOT a finding about any cohort named above');
   }
 }
 console.log(failures === 0

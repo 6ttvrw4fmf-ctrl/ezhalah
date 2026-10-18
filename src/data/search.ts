@@ -22,6 +22,7 @@ import { translitPlace } from '@/lib/translitPlace';
 import { CITY_TO_REGION, isCountryWideQuery, interleave } from './regions';
 import { groupMembers, CLEAN_MACRO, SUBGROUPS } from './propertyTypes';
 import { pickFilterGreetingOpening } from './filterGreetingRotation';
+import { pickEnglishFilterGreetingOpening } from './filterGreetingRotation';
 import { primeFilterGreetings } from './loaderFilterGreetings';
 
 // A parsed search. Every field optional — empty fields broaden, never dead-end. (PRD §6.1)
@@ -82,6 +83,7 @@ export type SearchQuery = {
   // the engine scopes `location` to THIS region only and must NOT treat it as ambiguous (the user
   // already chose). Absent on a normal single-city search. (2026-06-26 twin-city false-zero fix.)
   regionPin?: string;
+  geographicScope?: "CITY" | "REGION" | "NATIONWIDE";
   // The user's ORIGINAL foreign-currency budget, e.g. "USD 100,000" — shown alongside the SAR figure
   // in the Budget line for transparency ("USD 100,000 (≈ SAR 375,000)"). Empty when SAR. (user request.)
   priceOriginal?: string;
@@ -89,7 +91,7 @@ export type SearchQuery = {
   // Absent → default freshness ranking. Strictly factual sorts only — never "best"/"popular" (that
   // would breach non-advisory neutrality). (user training decision.)
   sort?: SortKey;
-  // How many listings the user explicitly asked to see (1–25). Absent → the default grid.
+  // How many listings the user explicitly asked to see (up to the existing 500-card ceiling). Absent → the default grid.
   // Drives how many cards the chat reveals up front. (user training decision.)
   count?: number;
   // Specific district / neighborhood filter — populated when the user named one explicitly ("حي
@@ -125,6 +127,8 @@ export type SearchQuery = {
   // bypassed so the user sees that platform's listings in full. Empty/undefined → all platforms.
   // (user: "if I say show me gathern only, show me gathern only".)
   sources?: string[];
+  excludedSources?: string[];
+  sourceSelectionChanged?: boolean;
   // Subcategory GROUP selected in the filter (e.g. "Vacation & Rural") — a SOFT/broad intent: match
   // any clean type in that group. `type` (a single CLEAN property type, e.g. "Chalet") is the HARD
   // exact filter. Both feed the one engine; the filter sets these, the agent resolves to them.
@@ -247,11 +251,12 @@ export const locationPhrase = (q: SearchQuery) => q.location.trim() || 'Saudi Ar
 const placeText = (q: SearchQuery) => {
   const city = q.location.trim();
   if (!city) return t('Saudi Arabia');
-  const cityText = arabicOrUnresolved(tPlace(city));
+  const displayPlace = (name: string) => getLocale() === 'en' ? translitPlace(name) : arabicOrUnresolved(tPlace(name));
+  const cityText = displayPlace(city);
   // When the user picked a district in the filter, show it in front of the city so the summary
   // reflects exactly what was selected: "حي X، جدة". (owner UI request 2026-07-18.)
   const dist = q.districtLabel?.trim();
-  return dist ? t('{district}, {city}', { district: arabicOrUnresolved(tPlace(dist)), city: cityText }) : cityText;
+  return dist ? t('{district}, {city}', { district: displayPlace(dist), city: cityText }) : cityText;
 };
 const verbText = (q: SearchQuery) => {
   if (q.bothDeals || q.dealCombined) return t('to rent or buy');
@@ -435,7 +440,7 @@ export function filterToChat(q: SearchQuery): { bubble: string; sub: string } {
     ? t("I couldn't find anything at {amount}, but here are some similar to what you're looking for:", { amount: tooLowAmount })
     : t('{calc}Here are {what} {verb} {place} that match what you’re looking for.', { calc: calcNote, what: subWhat, verb, place: subPlace });
 
-  return { bubble, sub };
+  return { bubble: getLocale() === 'en' ? pickEnglishFilterGreetingOpening() + bubble : bubble, sub };
 }
 
 export const grouped = (n: number) => n.toLocaleString('en-US');
@@ -567,6 +572,8 @@ function arabicOrTypeUnresolved(s: string): string {
 function locationLines(q: SearchQuery, loc: Locale = getLocale()): string[] {
   const { t, tPlace, getLocale, arabicOrUnresolved } = summaryLanguage(loc);
   const lm = q.locationMatch;
+  if (q.geographicScope === 'REGION') return [`${getLocale() === 'ar' ? 'المنطقة' : 'Region'}: ${q.regionPin}`];
+  if (q.geographicScope === 'NATIONWIDE') return [getLocale() === 'ar' ? 'النطاق: كل السعودية' : 'Scope: Nationwide (Saudi Arabia)'];
   if (!lm || lm.kind === 'none') {
     return q.location.trim() ? [`${t('City')}: ${arabicOrUnresolved(tPlace(q.location.trim()))}`] : [];
   }
@@ -651,6 +658,8 @@ export function searchSummary(q: SearchQuery, loc: Locale = getLocale()): string
   // If the user didn't pick a SPECIFIC type, fall back to the CATEGORY they have selected (Residential/
   // Commercial — always one or the other), so a default-button "Search" still shows what they chose.
   // (user request: "if user just clicks search by default, it shows what the button clicked at.")
+  if (q.excludedSources?.length) lines.push(`• ${getLocale() === 'ar' ? 'المواقع المستبعدة' : 'Excluded websites'}: ${[...new Set(q.excludedSources.map(source => t(sourceName(source))))].join(getLocale() === 'ar' ? '، ' : ', ')}`);
+  if (q.count) lines.push(`• ${getLocale() === 'ar' ? 'عدد النتائج المطلوب' : 'Requested results'}: ${q.count}`);
   const summaryTypes = effectiveTypes(q);
   if (summaryTypes.length) lines.push(`• ${t('Property Type')}: ${summaryTypes.map((x) => getLocale() === 'ar' ? arabicOrTypeUnresolved(tWord(x)) : x).join('، ')}`);
   else if (effectiveGroups(q).length) lines.push(`• ${t('Property Type')}: ${effectiveGroups(q).map((g) => arabicOrTypeUnresolved(t(g))).join('، ')}`);
@@ -674,6 +683,13 @@ export function searchSummary(q: SearchQuery, loc: Locale = getLocale()): string
   // Filter path: the District field's pick is carried in districtLabel (the location match here is the
   // CITY), so add an explicit District line so the summary reflects the chosen neighborhood. (owner UI request.)
   if (q.districtLabel?.trim()) lines.push(`• ${t('District')}: ${arabicOrUnresolved(tPlace(q.districtLabel.trim()))}`);
+  // The AI chat carries its district in `q.districts`, not districtLabel: «شقة في الرياض حي النرجس» searched حي النرجس and the summary never
+  // said so (live 2026-10-13). Any district the location lines above did not already name gets its line.
+  else {
+    const shown = locLines.join(' ');
+    const unshown = (q.districts ?? []).filter((d) => d.trim() && !shown.includes(d.trim().replace(/^حي\s+/, '')));
+    if (unshown.length) lines.push(`• ${t(unshown.length > 1 ? 'Districts' : 'District')}: ${unshown.map((d) => arabicOrUnresolved(tPlace(d.trim()))).join(getLocale() === 'ar' ? '، ' : ', ')}`);
+  }
   for (const b of budgetLines(q, loc)) lines.push(`• ${b}`);
   // Category/group-level refinements (filter UI). Each has its own field, so the labels are unambiguous.
   const summaryBeds = effectiveBeds(q);
@@ -1581,7 +1597,7 @@ export function runSearch(q: SearchQuery, pools: Pools, opts?: { fetchFailed?: b
   // Return up to 25 matches (display cap): the chat shows the first `count` the user explicitly
   // asked for, or up to 25 by default. Fewer than 25 available → show whatever exists; never pad
   // to 25 by inventing rows.
-  const count = q.count && q.count >= 1 ? Math.min(q.count, 25) : undefined;
+  const count = q.count && q.count >= 1 ? Math.min(q.count, 500) : undefined;
   // 0-results case → a friendly, ACTIONABLE recommendation. Three situations:
   //  (a) the server fetch FAILED (network/backend error) → tell the user to retry, not that nothing
   //      matched. (opts.fetchFailed is set by runQuery when fetchListingsForQuery returned null.)

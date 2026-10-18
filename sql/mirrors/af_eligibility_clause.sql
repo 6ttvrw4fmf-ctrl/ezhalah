@@ -1,4 +1,7 @@
 -- MIRROR of the production object. NOT a migration — see the full-body-replace rule.
+-- Re-verified 2026-10-17 (migration 20261017103017_af_rail_catches_up_to_district_fold): UNCHANGED.
+--   That migration only CALLS af_eligibility_clause() inside rebuild_af_filter_rpcs(); production's
+--   md5(pg_get_functiondef) read 0e7153e98f68fa6aa26b7a00fb6e4334 after it, the md5 recorded below.
 -- Re-verified 2026-10-09 (migration 20261009235607_raw_land_type_token_in_af_clause):
 --   CHANGED — two edits, rebuilt twice by rebuild_af_filter_rpcs() in one migration.
 --   (1) The category block is the 20261003222926 semi-join (`s.type_ar in (select k.type_ar from

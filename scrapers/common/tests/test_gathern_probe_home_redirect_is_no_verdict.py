@@ -107,3 +107,40 @@ def test_sweep_controls_a_404_block_still_fails(monkeypatch):
     answers = {f"https://gathern.co/view/1/unit/{i}": 404 for i in range(40)}
     ok, _alive, probed, _ = gl._run_canary(_canary_world(monkeypatch, answers), None, 10)
     assert not ok and probed == 10
+
+
+# ── 2026-10-17: a LIVE unit gathern sends home on /view/ opens on /ar/view/ ──────────────────────
+class _Route:
+    """Answers per requested URL: {url: (status, final_url, body)}."""
+    def __init__(self, table):
+        self.table = table
+
+    def get(self, url, *_a, **_k):
+        st, final, body = self.table[url]
+        r = _R(st, final)
+        r.text = body
+        return r
+
+
+AR = "https://gathern.co/ar/view/146283/unit/276709"
+
+
+def test_home_on_view_but_named_on_ar_view_is_alive(monkeypatch):
+    _no_wait(monkeypatch)
+    s = _Route({UNIT: (200, HOME, "home"), AR: (200, AR, "<h1>شاليه</h1> unit 276709")})
+    assert gl.probe(s, UNIT) == 200
+
+
+def test_ar_view_that_is_not_found_or_home_or_unnamed_stays_no_verdict(monkeypatch):
+    _no_wait(monkeypatch)
+    for alt in ((404, AR, "الصفحة غير موجودة 276709"), (200, AR, "الصفحة غير موجودة 276709"),
+                (200, HOME, "home 276709"), (200, AR, "a page that names nothing")):
+        assert gl.probe(_Route({UNIT: (200, HOME, "home"), AR: alt}), UNIT) == 0
+        assert gl.probe(_Route({UNIT: (200, HOME, "home"), AR: alt}), UNIT,
+                        home_status=gl.HOME_LANDED) == gl.HOME_LANDED
+
+
+def test_ar_view_can_never_turn_a_unit_dead(monkeypatch):
+    _no_wait(monkeypatch)
+    s = _Route({UNIT: (200, HOME, "home"), AR: (404, AR, "")})
+    assert not gl.looks_dead(gl.probe(s, UNIT))

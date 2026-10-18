@@ -47,7 +47,7 @@ const staticWelcome = (src: string) => {
 check('1b. complete static welcome only renders on the empty chat', staticWelcome(agent));
 // English UI (owner 2026-10-10: «it didn't just say ezhalah»): the English greeting is the Arabic's
 // meaning, not the bare brand name, and reads left-to-right.
-const GREETING_EN = 'What property are you after?\nDescribe it, and leave it to Ezhalah.';
+const GREETING_EN = 'What property are you after?\nDescribe it and Ezhalah';
 const greetingEnOk = (src: string) => src.includes(JSON.stringify(GREETING_EN).slice(1, -1)) &&
   /<Text style=\{\[s\.greetingText, locale === 'en' && s\.greetingEn\]\}>\{title\}<\/Text>/.test(src) &&
   /greetingEn: \{ writingDirection: 'ltr'/.test(src);
@@ -119,10 +119,9 @@ check('9a. every shipped example is Arabic-only (no Latin letters)', list.length
 check('9b. the greeting is Arabic-only', !/[A-Za-z]/.test(GREETING));
 check(
   '9c. the placeholder swap keeps the Arabic static placeholder for the interacted state, and the a11y label has an Arabic dictionary entry',
-  // The expression gained an outer `completed ?` branch on 2026-09-05 (the locked composer explains
-  // itself via the placeholder). The contract THIS check protects is unchanged and still asserted:
-  // in a live chat, the interacted state must fall back to the familiar Arabic static placeholder.
-  /\(showIntroExamples \? '' : t\("Type the property you're looking for in Saudi Arabia\.\.\."\)\)/.test(agent) &&
+  // The outer `completed ?` branch (2026-09-05, the locked composer) is gone since 2026-10-13 (the chat never locks). The contract
+  // THIS check protects is unchanged: in a live chat, the interacted state falls back to the familiar Arabic static placeholder.
+  /placeholder=\{showIntroExamples \? '' : \(modeSearched \? t\("Type your property and Ezhalah\.\.\."\) : t\("Type the property you're looking for in Saudi Arabia\.\.\."\)\)\}/.test(agent) &&
     /'Describe the property you are looking for': 'اكتب وصف العقار اللي تبحث عنه'/.test(i18n),
 );
 

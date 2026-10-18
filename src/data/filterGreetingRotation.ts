@@ -81,3 +81,18 @@ export function pickFilterGreetingOpening(): string {
 
 // Test-only export: the baked list itself, so a barrier can assert its exact size and shape.
 export const __testing = { BAKED };
+
+// One natural English translation for each approved Arabic row, with its original emoji.
+const ENGLISH_GREETINGS = [
+  'Hi', 'Hello', 'Welcome', 'A warm welcome', 'Welcome', 'Welcome',
+  'Peace be upon you', 'Hello there', 'Hello', 'You’re welcome here', 'Welcome aboard',
+] as const;
+const ENGLISH_OPENINGS = BAKED.map(({ emoji }, i) => `${ENGLISH_GREETINGS[i]} Ezhalah ${emoji}, `);
+export const __englishTesting = { ENGLISH_OPENINGS };
+let lastEnglishIndex = -1;
+export function pickEnglishFilterGreetingOpening(): string {
+  let index = Math.floor(Math.random() * ENGLISH_OPENINGS.length);
+  if (index === lastEnglishIndex) index = (index + 1) % ENGLISH_OPENINGS.length;
+  lastEnglishIndex = index;
+  return ENGLISH_OPENINGS[index];
+}

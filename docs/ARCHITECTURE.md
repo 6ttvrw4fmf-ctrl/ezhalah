@@ -24,6 +24,10 @@ These rules are set by the product owner and are **permanent**:
 
 ---
 
+## Agent search controls (owner, 2026-10-15)
+
+[AGENT_SEARCH_CONTROLS.md](ops/AGENT_SEARCH_CONTROLS.md) is the approved contract for explicit city/region/nationwide scope, source inclusion/exclusion, requested result quantities and continuation. It supersedes the Chapter 1 city-only restriction for explicit wider searches. Implementation status is recorded there; approval alone is not production verification.
+
 ## 1. What Ezhalah is
 
 An **AI-powered, neutral property-search aggregator for Saudi Arabia**. It searches real-estate listings
@@ -69,9 +73,15 @@ STOP → restore → fix → continue. Checklist: `ezhalah-app/docs/DEPLOY_REGRE
 
 **Chat language (owner, 2026-10-07):** reply in the latest user message’s language without changing the interface language, sidebar, controls, or page layout. Assistant messages stay on the assistant side; text keeps its own reading direction. Save original messages/replies verbatim. Automatic saved titles follow the latest user message and its language, including when search results arrive; manually renamed titles remain unchanged.
 
+The empty English chat subtitle is “Describe it and Ezhalah” without punctuation; English model descriptions use ordinary sentence punctuation rather than long dashes (owner, 2026-10-14).
+
 The header and sidebar Ezhalah name uses dark green. Assistant replies and result slogans keep the same green sparkle stars as the thinking state (owner, 2026-10-07).
 
-The AI Agent’s empty composer hint aligns left in English and right in Arabic (owner, 2026-10-07). Typed messages keep their own language direction.
+The AI Agent’s empty composer hint aligns left in English and right in Arabic (owner, 2026-10-07). Typed messages keep their own language direction. The entire user bubble sits on the left for English and on the right for Arabic, determined per message (owner clarification, 2026-10-13).
+
+English property cards localize platform attribution, property-type labels and finite attribute values using the existing bilingual catalog (owner, 2026-10-13). Source reference IDs, including Arabic letters in plan numbers, remain verbatim; source images and logos remain original. Arabic card display is preserved.
+
+English Filter submissions localize city/district display and rotate short English greetings with emojis before the request, matching the Arabic treatment. The eleven approved Arabic Filter greetings each have a natural English translation with the same emoji (owner, 2026-10-14); English must not use a smaller substitute pool. Advanced Filter selection messages also open with nine translated English courtesy/request phrases, using the same emojis and independent non-repeating rotation as Arabic (owner, 2026-10-14). Advanced Filter round receipts localize committed items and skip labels in ask order; English selections join with commas. The following searching status keeps its translated rotating lines and sparkle mark (owner, 2026-10-13).
 
 
 **Shell (`src/app/_layout.tsx`):** a single expo-router `Stack`. Provider tree: `GestureHandlerRootView`
@@ -91,6 +101,8 @@ in-memory only).
 | `browser` | In-app listing viewer | modal, slide-up | §7. |
 | `about` | About Us | modal, slide-up | Neutrality + REGA/PDPL copy. §7. |
 | `support` | Support | modal, slide-up | Contact + response time. §7. |
+
+Support headings, fields, descriptions and response-time bullets follow the selected reading direction. Terms of Use and Privacy Policy provide complete English translations section-for-section alongside the unchanged Arabic originals; dates, contact tokens, retention and cross-border disclosures stay equivalent (owner, 2026-10-14).
 
 Root overlays: `<InfoModal/>` (Support/About popups) and `<IntroVideo/>` (first-run intro, logged-out
 only, shown once).
@@ -162,6 +174,26 @@ chat, which renders results inline. (Deliberate; single search engine — see §
 ---
 
 ## 5. Frontend — the Property Card (`src/components/ResultCard.tsx`) — SOURCE OF TRUTH
+
+**A press on a card whose listing opens INSIDE Ezhalah plays the golden buzzer + a screen-level
+confetti party (owner 2026-10-17: «whenever a user clicks on a listing I want this party confetti …
+on everything», then «your job is doing it for the 76 sites … the ones after I'll do it later»; «make
+it attractive … my goal is sending traffic to those sites»).** Photo, body or gold button, on the laptop
+photo-first card, the laptop compact row and the phone card alike: one shared `fire()` opens the ad
+first, synchronously, then — only when `IS_WEB && inAppViewerHost(listingOpenUrl(listing))` — bumps the
+card's `BuzzLayer` (`src/components/CardBuzzer.tsx`) and the screen-level `ConfettiOverlay`
+(`src/components/ConfettiOverlay.tsx`, last child of the agent screen, above the ad sheet/pane, never
+takes a tap). Cards that open a new tab or the native preview page open exactly as before, with no
+party. Decoration only — reduced motion draws nothing and the ad opens even if nothing paints.
+Guard: `scripts/verify-laptop-photo-card.ts`.
+
+**Gold = opens inside Ezhalah, silver = everything else (owner 2026-10-17: «make the frame and this
+golden shining like a buzzer», then «the golden frame only with the 76 … the rest silver»):** every
+card wears a 3 px shining metallic ring and a shining metallic «اضغط هنا» photo strip, both
+`GoldSurface` (`src/components/CardReveal.tsx`) — the gold button's own gradient shape plus its CSS
+glint, one compositor keyframe per surface. `tone` is `gold` when `inAppViewerHost(listingOpenUrl(l))`
+matches (the site opens instantly inside Ezhalah) and `silver` otherwise, so gold reads as "instant".
+Dark text on the strip. Reduced motion: a still metal. Same guard.
 
 **Card data is locked. Display scraped values verbatim; change presentation only with owner approval.** Fix data
 problems via backend mapping only (see §16), never by editing the card.
@@ -244,11 +276,11 @@ listing (§7 browser) and fires `trackOpen` (CPC click tracking). All registered
   replay predicate gates the animated wrapper synchronously so it cannot flash before effects run.
   On a fresh chat and during live search, existing mode-pill behavior is unchanged. The Ezhalah
   header title is 22px bold on the agent screen.
-- **Filter results have no chat composer (owner, 2026-09-11).** Filter and the AI Agent share this one
+- **Completed Filter searches show the composer below the final message (owner, 2026-10-13),** superseding the no-composer rule for completed searches. Sending a typed follow-up switches to AI chat so the composer remains available for clarification. Filter and the AI Agent share this one
   screen; a Filter search arrives via the `?filter=` route param. The `filterOrigin` state flag is set
   `true` only in that arrival branch (reset to `false` by `startFresh()`, same lifecycle as every other
-  per-conversation flag here) and gates the composer's `<View>` — `{(!filterOrigin || busy || revealing)
-  && (...)}`. **Only the free-text input row (input box, mic, send arrow) disappears** — refine chips and
+  per-conversation flag here) and gates the composer's `<View>` with `!filterOrigin || completed`.
+  **The free-text input row is hidden only on unfinished Filter searches** — refine chips and
   «تحديد أكثر» (Advanced Filter) stay fully available, and so does the composer's own Stop control while
   `busy`/`revealing` (an in-flight Filter search must stay cancellable —
   `verify-filter-stop-cancels-and-restores.ts` is a separate, older owner rule this must never break;
@@ -375,16 +407,41 @@ operating on the restored turns' own embedded queries and paging state.
 ### 7.5 Listing viewer (`src/components/AdViewer.tsx`)
 
 Owner-approved web behaviour (2026-10-03): Deal App and Gathern open their real pages in plain
-iframes, with their own headers unchanged. The allowlist in `src/lib/inAppViewer.ts` is exactly
-`dealapp.sa,gathern.co`. No proxy, header stripping, or framing bypass is permitted.
+iframes, with their own headers unchanged. No proxy, header stripping, or framing bypass is permitted.
+Owner 2026-10-16: more sites open the same way, with no new design. A host joins only after a live
+frame proof, which means two live ads framed like AdViewer, a top-level control load, and a calibration
+where Aqar and Wasalt must fail. It must also show its ad within the speed budget on phone 4G, measured
+from the GitHub runner by `e2e/viewer/speed-live.mjs` (which must list every host): 3 s until
+2026-10-17, then **10 s** by owner decision («if it's below 10 seconds no problem»). A host that later
+refuses framing, goes down, or goes over budget comes off the list; the guard runs every 6 hours and
+after every deploy. 2026-10-17: 76 hosts on the list after every platform Ezhalah searches was re-checked (aqaralmuhaysini.com measured 9.96 s and the owner chose to keep it on; muktamel.com ~37 s stays off by owner choice).
 
-Aqar, Aqar Monthly and the 50 owner-approved non-embeddable platforms (2026-10-04, exact hosts in
+Aqar, Aqar Monthly and the 49 owner-approved non-embeddable platforms (2026-10-04, re-checked
+2026-10-17 when Abaad moved to the iframe list; exact hosts in
 `IN_APP_PREVIEW_HOSTS`) use the same panel with a native `ListingPreview` of the
 card's existing `Listing`, with no additional listing-data fetch. Source-ordered photos, the shared
 `listingPrice` (including the stay-length note), source-stated facts and redacted description lead
 to an explicit external contact link to the original ad. Both the contact label and attribution
 use `t(sourceName(listing.source))`, matching the result card. Arabic prose is hidden in English
 like ResultCard. No photos means no gallery box. The preview and iframe host lists are disjoint.
+
+**The map:** the source's own pin when it published both coordinates («الموقع كما نشره {site}»).
+When an **Aqar (buy or rent) or Aqar Monthly** ad published none (owner 2026-10-17: «show the entire
+district … all around the boundaries», «just do aqar now», then «Aqar Monthly and rent, same style,
+just don't include the Ministry of Justice» — other sites still show no map without a pin; the
+ministry block stays Aqar-sale-only),
+the page asks the same free Google embed for the district by name («حي X، City») so Google fits the
+view and draws its own dashed border around the district; labelled «الموقع التقريبي» with «{site}
+لم ينشر موقعاً دقيقاً», never a pin. Free either way (keyless embed / Embed API place mode). The owner
+chose Google's border as Google draws it (no colour boost). Guard:
+`scripts/verify-ad-map-needs-both-coordinates.ts`.
+The order, decided automatically per ad (owner 2026-10-18): **pin → district border → city border
+(no district) → town border** (no city in our index: the place the ad's own sa.aqar.fm link names,
+`aqarTownFromUrl()`; a link naming only the country names no place, so no map). Every day
+`.github/workflows/aqar-map-coverage-live.yml` runs `scripts/check-aqar-map-coverage-live.ts`, which
+lifts the same functions and sorts every Aqar / Aqar Monthly ad first seen in the last 26 h into
+those four paths; any new ad left with no map turns it red and raises an alert. Measured 2026-10-18:
+175,619 ads all-time, 5 with no map (their links name only «المملكة العربية السعودية»).
 
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
 up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.
@@ -428,7 +485,7 @@ save, Escape cancels and restores. A rename writes ONLY the three title keys —
 overwrite it (`canAutoRetitle`). Title is deliberately NOT coupled to `sameQuery()`. Barrier:
 `scripts/verify-chat-title.ts` (mutation-proven).
 
-**i18n (`src/i18n.tsx`):** EN-key → AR dictionary. Arabic is the default; the user can select English. The saved interface preference controls page direction and controls. Chat reply language is explicit per turn and does not change that preference. Assistant replies align right with the sparkle on the right for Arabic, and left with the sparkle on the left for English (owner, 2026-10-07); each existing reply keeps its own placement when the conversation switches languages. Value-localizers accept an explicit locale for chat summaries and otherwise use the interface locale; Western digits stay unchanged. The Filter's Arabic catalog input guard remains separate from bilingual chat input.
+**i18n (`src/i18n.tsx`):** EN-key → AR dictionary. Arabic is the default; the user can select English. The saved interface preference controls page direction and controls. **Permanent owner rule (2026-10-14):** a new chat reply follows the user’s message: English → English, Arabic → Arabic, mixed → whichever has more Arabic/Latin words (not characters; numbers and emoji do not vote). A mixed tie keeps the established conversation language; a letterless follow-up uses the most recent language-bearing turn, then the UI language if no conversation exists. Typing never changes the saved UI preference. The language button changes interface text, settings and the displayed account name only; it never rewrites user messages, translates existing assistant replies, reruns a search or adds paid translation calls. A signed-in user’s UI choice is saved on the device and restored on refresh/return; guests remain Arabic-first on a fresh load. Assistant replies align right with the sparkle on the right for Arabic, and left with the sparkle on the left for English (owner, 2026-10-07); each existing reply keeps its own placement when the conversation switches languages. Value-localizers accept an explicit locale for chat summaries and otherwise use the interface locale; Western digits stay unchanged. The Filter's Arabic catalog input guard remains separate from bilingual chat input.
 
 
 **Design tokens (`src/theme/tokens.ts`) — never hard-code hex/sizes in components:**
@@ -923,6 +980,8 @@ migration-drift-guard rule in `AGENTS.md`).
 
 **Share preview (owner, 2026-10-11):** use the existing green eagle and rooftops on white, identical to `public/icon-512.png`, for both the in-app share preview and external link artwork. Keep the owner’s original conversational Arabic message and approved English translation in `src/lib/share.ts`, without an AI sentence or dashes; every share target uses the constants for the selected language. Version the image URL when artwork changes.
 
+- **Share a search (owner 2026-10-17):** a signed-in user's «مشاركة» under a result sends THAT search; a guest's Share stays the plain homepage link. One personal title is used everywhere — message (+ 👇), WhatsApp card and landing card: «{type plural} {للإيجار/للبيع} في {place} من {first name} على إزهله» (e.g. «شقق للإيجار في حي النرجس من يوسف على إزهله»; 2–3 districts named, 4+ as «النرجس و3 أحياء ثانية»; no type → «عقارات»; no place → omitted). Card line: «كل مواقع العقار في مكان واحد · اضغط وشوف»; image = the Ezhalah logo; no eagle emoji; the wording never says "sign in". Language = the SENDER's app language setting. The link is `/s/<payload>` (`api/share-card.ts` serves the Open Graph card from the request's own domain, then redirects to `/?share=`); it never opens `/agent` (appSession gate). Home shows the title + «اضغط وشوف العقارات»; the tap opens the search through the Filter's normal path, saved to the recipient's list. Owner decision: opening a shared search requires signing in with Google/Apple; ordinary «بحث» stays free (`verify-search-is-free.ts`). **Whole chat (owner 2026-10-17, «sharing it means I share the chat history»):** pressing Share saves a COPY of the conversation in `public.shared_chat` (migration `20261018031834`; RLS on, no policies — only `create_shared_chat` [authenticated, 3 MB cap, 60/h], `get_shared_chat` [authenticated], `shared_chat_card` [anon: name/locale/query]) and shares `/s/<8-char code>`. The recipient signs in, the chat is copied into THEIR history (`importSharedChat`, synced like any chat) and opens there; they can keep typing; nothing is live-synced between the two. The same link reopens the same copy on that device. If the save fails the search link above is shared instead; if the copy cannot be read the shared search opens. Client: `src/lib/sharedChat.ts`. Guard: `scripts/verify-share-search-link.ts`.
+- **Read Aloud language (owner 2026-10-14):** English responses and visible card facts are read in English using an explicitly matched English device voice; Arabic retains its Saudi-preferred Arabic voice. Speak the displayed summary/closing note unchanged, keep the same visible card order and free device-only speech, and refuse gracefully if the matching voice is unavailable.
 - **Response feedback (owner 2026-10-01):** selecting either thumb moves both visible thumbs together until they touch, then fades the unselected thumb, leaving one selected thumb; tapping it again restores both choices. Keep share/read-aloud stationary, mirror the layout for Arabic/English, and skip motion when reduced motion is enabled. Keep the existing top-of-chat confirmation popup. Feedback storage and response scope remain unchanged.
 
 **Website picker profiles (owner, 2026-10-08, clarified):** Arabic-first website selection supports one or more searchable websites. A brief single sentence describes the site's listing locations and residential/commercial focus from measured inventory; never infer location from its office address or invent a specialty. `src/data/platformPickerCoverage.json` records the public production cohort measurements and observed source examples; `scripts/generate-platform-picker-coverage.ts` refreshes bounded, paced reads and refuses to overwrite evidence on failure. `src/lib/platformCoverageSentence.ts` derives the copy. Use a compact bottom sheet with a full-width scrollable list, nationwide first then regional headers. Choices apply immediately and slide the sheet down; reopen to add more websites, with no «تم» confirmation button. Use the collected original logos with uniform 96×48 slots with visible artwork fitting 88×40, and measured positioning (`platformPickerLogoLayout.json`); original brand colors remain unchanged; pale/white artwork uses a small dark green backing for contrast, and Deal uses the original yellow listing-card asset; selected rows stay plain, with only a dark green checkmark; no filled highlight, border or logo recoloring (owner clarification, 2026-10-08). The control displays selected logos, reopening retains checked choices, and the all-sites mark is the eagle magnifier. `pickerSourceSlugs()` maps display names to canonical source slugs, including Aqar's monthly vertical; the selected sources constrain every actual search/refinement. Closing has smooth motion with reduced-motion support. An explicit all-sites choice clears inherited source restrictions before parsing and refinement; untouched picker state accepts free-text source requests. The complete selection resets with a new conversation.
@@ -950,6 +1009,11 @@ migration-drift-guard rule in `AGENTS.md`).
    code. New scrapers capture Arabic natively.
 6. **Location:** DB is sole truth; strict Region→City→District; exact-location-only (honest zero); never
    invent/substitute a place.
+   **AI Agent Chapter 1 (owner-approved 2026-10-14):** one validated Saudi city per search,
+   multiple districts within it as OR; preserve confirmed location on unrelated turns, explicitly
+   add/replace/remove/clear districts, and block unresolved or unsupported location requirements.
+   The model proposes intent; catalog validation authorizes it. See `docs/ops/AGENT_LOCATION_CHAPTER_ONE.md`
+   for integration, activation, rollback, and verification status. Filter region searches remain unchanged.
 7. **Type mapping:** raw → existing clean filter, backend-only and invisible; never remove/redesign
    filter UI.
 8. **Gathern = rent-only monthly.** Never in Buy results; price already annualized.
@@ -1296,3 +1360,6 @@ KSA region; recommendation delivered was "don't migrate," awaiting owner call).
 5. Backend change? Preserve work, verify before+after, deploy only to `ezhalah-app`, `NOTIFY pgrst` after
    RPC/DDL.
 6. Update **this document** in the same PR when a fact here changes.
+
+### Platform logo visibility (owner, 2026-10-17)
+Haraj uses its official header wordmark across the loader, website picker, and cards. Haraj, Maskan United, and The Address must have transparent backgrounds without boxed panels (owner correction, 2026-10-17). Their white-only artwork uses dark ink in light mode and light ink in dark mode, preserving its silhouette. Other logos keep their existing presentation.

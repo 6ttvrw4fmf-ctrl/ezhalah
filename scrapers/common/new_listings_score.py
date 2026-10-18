@@ -57,6 +57,12 @@ FLOOR_CAP = 5                      # …at this
 
 # Owner 2026-10-02: Gathern + Aqar Monthly stays are priced by length; never compare their price.
 SKIP_PRICE = {"gathern", "aqarmonthly"}
+# Websites whose served page names the district ONLY in the seller's free text, while the platform's own
+# structured neighbourhood (which we serve) lives in an API the page HTML does not carry. mobasher 17693081
+# (2026-10-14): API neighborhoodNameAr «حي الثقبة» (stored), page HTML contains «الثقبة» nowhere (re-read run
+# 38527021238, around=الثقبة: 0 hits), description «مدينة الخبر، حي الحمراء». Prose is never the source field
+# (rule 3), so on these pages the district is page-silent, never a mismatch.
+PROSE_ONLY_DISTRICT = {"mobasher"}
 
 MATCH, MISMATCH, WE_MISS, PAGE_SILENT, UNREADABLE = "match", "mismatch", "we_miss", "page_silent", "unreadable"
 
@@ -160,7 +166,8 @@ def _num_pattern(v) -> re.Pattern:
     return re.compile(r"(?<![\d.,])" + body + r"(?![\d])")
 
 
-def compare_listing(stored: dict, page: dict, *, skip_price: bool = False) -> dict[str, str]:
+def compare_listing(stored: dict, page: dict, *, skip_price: bool = False,
+                    prose_only_district: bool = False) -> dict[str, str]:
     """Every field we serve vs what the page itself says. Pure; no client, no network."""
     # Line-scoped checks (a small number near its keyword, negation) need real page lines.
     # text_head is page lines joined with " | " (source_reread), so splitting recovers them;
@@ -188,12 +195,21 @@ def compare_listing(stored: dict, page: dict, *, skip_price: bool = False) -> di
                 if stored_v == int(stored_v):
                     stored_v = int(stored_v)
             out[name] = _cmp_number(stored_v, lines, whole, kw)
+            # Rule 5: a per-m² rate × size is the total the card SHOWS. A page that prints only that total
+            # states our price, not another one. muktamel 17584328 (2026-10-14, re-read run 38530789154):
+            # land rate 420 (the API's offer.price) × 690 m² = «289,800», the only figure on the page.
+            ppm, area = stored.get("price_per_meter"), stored.get("area_m2")
+            if (out[name] != MATCH and not stored.get("price_total") and not stored.get("price_annual")
+                    and ppm and area):
+                total = float(ppm) * float(area)
+                if total == int(total) and _cmp_number(int(total), lines, whole, kw) == MATCH:
+                    out[name] = MATCH
         elif kind == "number":
             out[name] = _cmp_number(stored.get(col), lines, whole, kw)
         elif kind == "bool":
             out[name] = _cmp_bool(stored.get(col), lines, kw)
         elif kind == "district":
-            out[name] = _cmp_district(stored.get(col), whole_loc)
+            out[name] = PAGE_SILENT if prose_only_district else _cmp_district(stored.get(col), whole_loc)
         elif kind == "deal":
             out[name] = _cmp_valued(stored.get(col), whole, DEAL_KW)
         else:
@@ -221,6 +237,15 @@ ONE_WORD = re.compile(r"(?<!\S)(?:واحد|واحده)(?!\S)")
 DUAL_WORD = re.compile(r"(?<![\u0621-\u064A])(?:غرفتين|غرفتان|حمامين|حمامان|دورتين|دورتان|صالتين|صالتان|مجلسين|مجلسان)(?![\u0621-\u064A])")
 
 
+# Three to ten are written as words too, on a source's own structured cell: aljassim's room cell reads «أربع غرف»
+# (17947950, 2026-10-16: stored 4 from that cell, scored MISMATCH against the description's «غرفتين نوم»). A
+# number word ON THE KEYWORD'S LINE states that figure, exactly like a digit there (norm() folds أ→ا, ة→ه).
+WORD_NUMBERS = {"ثلاث": 3, "ثلاثه": 3, "اربع": 4, "اربعه": 4, "خمس": 5, "خمسه": 5, "ست": 6, "سته": 6,
+                "سبع": 7, "سبعه": 7, "ثمان": 8, "ثماني": 8, "ثمانيه": 8, "تسع": 9, "تسعه": 9, "عشر": 10, "عشره": 10}
+WORD_NUMBER = re.compile(r"(?<![\u0621-\u064A])(" + "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))
+                         + r")(?![\u0621-\u064A])")
+
+
 def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
     kw_hits = [i for i, x in enumerate(lines) if re.search(kw, x) and not CONTROL_PROMPT.match(x)]
     if not AREA_UNIT.search(kw):
@@ -241,6 +266,14 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
                 return MATCH
             if any(0 <= j < len(lines) and bare.match(lines[j]) for j in (i - 1, i + 1)):
                 return MATCH
+        # area_m2 is an integer column (backlog #123), so a page «232.8 م²» is stored as its nearest whole
+        # number, 233. tuba 18258569 (2026-10-17): «المساحة:» / «232.8 م²» read as a contradiction of any
+        # whole number. Half rounds up; a truncated 232 still scores wrong.
+        if "مساحه" in kw and float(stored) == int(float(stored)):
+            near = " | ".join(lines[j] for i in kw_hits for j in (i - 1, i, i + 1) if 0 <= j < len(lines))
+            if any(int(float(m.group(1).replace(",", ".")) + 0.5) == int(float(stored))
+                   for m in re.finditer(r"(?<![\d.,])(\d+[.,]\d+)(?![\d])", near)):
+                return MATCH
         # «عمر العقار جديد» is how aqar (and others) publish a new building; we store it as 0. Read as
         # the figure 0 both ways: stored 0 + «جديد» is a MATCH, stored 5 + «جديد» stays a MISMATCH
         # (aqar 15415047, 2026-10-05: spec block «عمر العقار جديد», stored 0, was scored wrong).
@@ -249,6 +282,9 @@ def _cmp_number(stored, lines: list[str], whole: str, kw: str) -> str:
         # because the previous row's bare «220 م²» read as a stated age).
         # «دورة مياه واحدة» is gathern's way of printing ONE bathroom: the word, not the digit (af_score
         # 2026-10-07: gathern 12857258 / 13191014 / 13971729 stored 1, scored «mismatch» 3/3).
+        worded = {WORD_NUMBERS[m.group(1)] for i in kw_hits for m in WORD_NUMBER.finditer(lines[i])}
+        if worded:
+            return MATCH if float(stored) in worded else MISMATCH
         if any(ONE_WORD.search(lines[i]) for i in kw_hits):
             return MATCH if float(stored) == 1 else MISMATCH
         if any(DUAL_WORD.search(lines[i]) for i in kw_hits):
@@ -339,6 +375,23 @@ def _cmp_district(stored, whole: str) -> str:
 # login banner and a featured ad «جدة - حي الزهراء» / «الغرف 1», and scored our الخرج / العيون villa (6 rooms)
 # as 3 mismatches. Such a page has said nothing about the ad: unreadable, never wrong.
 SHELL_PAGE_PLATFORMS = frozenset({"ebriza"})
+
+
+# A share link that names its ad by CODE in the query («/latest-offers?ads-N5470=1», nufouth) opens the ad in a JS
+# modal: if the served HTML never contains that code, the page is the table of OTHER units and has said nothing
+# about this ad. nufouth 17667724 (2026-10-14, re-read run 38527525460): «5470» appears nowhere in the body, one
+# of the table's units is also in حي العارض (so is_other_ads_page saw «ours» and stood down), and «6 غرف» /
+# «3 غرف» / «4 غرف» from other units scored our 2 bedrooms a MISMATCH.
+_AD_CODE_IN_URL = re.compile(r"[?&]ads-([A-Za-z]*\d+)=")
+
+
+def page_lacks_its_ad(url: str | None, body: str) -> bool:
+    m = _AD_CODE_IN_URL.search(url or "")
+    if not m:
+        return False
+    code = m.group(1)
+    digits = re.sub(r"\D", "", code)
+    return code not in (body or "") and not re.search(r"(?<!\d)" + digits + r"(?!\d)", body or "")
 
 
 def is_other_ads_page(stored: dict, page: dict) -> bool:
@@ -533,12 +586,80 @@ def no_district_backlog(client) -> dict:
     return out
 
 
+def muktamel_room_lines(url: str, fetch=None) -> list[str]:
+    """muktamel's own room counts, from the offer record its page renders (backlog #547, 2026-10-16).
+
+    The page is client-rendered: its «غرف النوم» / «دورات المياه» exist only inside a minified Nuxt payload the
+    reader cannot see (re-read run 38918001860), so the score compared our structured bedRoomsCount /
+    bathroomsCount with the description's prose and called 17886543 / 17886575 wrong. These lines restate the
+    offer's own fields; [] when the record cannot be read (unknown, never wrong)."""
+    m = re.search(r"/real-estates/(\d+)", url or "")
+    if not m:
+        return []
+    if fetch is None:
+        from scrapers.muktamel.run import fetch_one as fetch
+    try:
+        got = fetch(int(m.group(1)))
+    except Exception:  # noqa: BLE001
+        return []
+    offer = ((got[1] if got else None) or {}).get("offer") or {}
+    out = []
+    for label, key in (("عدد غرف النوم", "bedRoomsCount"), ("عدد دورات المياه", "bathroomsCount")):
+        v = offer.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            out.append(f"{label} {int(v)}")
+    return out
+
+
+_TUBA_RECORDS: "dict | None" = None
+
+
+def tuba_rega_lines(url: str, fetch=None) -> list[str]:
+    """tuba's own REGA licence values for the ad, from the catalogue feed its grid is served from (#621, 2026-10-18).
+
+    The page shows no structured street width; its description prose says «شارع 20 متر» while the REGA licence
+    the platform stores says streetWidth 25 — and we store the licence (scrapers/tuba/run.py), because a
+    structured field beats prose (ADVANCED_FILTER_SOURCE_TRUTH). The score read only the prose and called
+    18258569 wrong, capping the 10-17 night on one ad. These lines restate the licence's own field; [] when
+    the record cannot be read (unknown, never wrong). The catalogue is walked once per run."""
+    global _TUBA_RECORDS
+    from urllib.parse import unquote
+    m = re.search(r"/property/([^/?#]+)", url or "")
+    if not m:
+        return []
+    slug = unquote(m.group(1))
+    try:
+        from scrapers.tuba import run as tuba
+        if _TUBA_RECORDS is None:
+            items = fetch() if fetch is not None else tuba.fetch_catalogue(tuba.session())[0]
+            _TUBA_RECORDS = {unquote(str(r.get("slug") or "")): r for r in items if isinstance(r, dict)}
+        rec = _TUBA_RECORDS.get(slug)
+        ar = tuba.rega(rec) if rec else {}
+    except Exception:  # noqa: BLE001
+        return []
+    v = ar.get("streetWidth")
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+        return [f"عرض الشارع {int(v) if float(v).is_integer() else v}"]
+    if isinstance(v, str) and re.fullmatch(r"\d+(?:\.\d+)?", v.strip()):
+        return [f"عرض الشارع {v.strip()}"]
+    return []
+
+
 def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: str,
-               pace: float = PACE_S, probe=None) -> dict:
+               pace: float = PACE_S, probe=None, wasalt=None, sanadak=None, muktamel=None, tuba=None) -> dict:
     if probe is None:
         # Imported here, not at module level: af_score and its hermetic check load this module with
         # source_reread stubbed, and they always pass their own probe.
         from scrapers.common.source_reread import read_page as probe
+    # wasalt and sanadak are read the way af_score reads them (backlog #540 / #546, 2026-10-16). The shared
+    # probe answers a live wasalt page with an empty body (liveness needs only the status), so wasalt scored
+    # 0 decided ads every night (10-15: 5/5, 10-16: 10/10 unreadable). sanadak's page appends OTHER listings
+    # («شقة للإيجار في جدة النهضة 3 غرفة 183.56 متر 2»), so 17944083 (228 m²) and 17662112 scored area
+    # mismatches the ad never made; its own listing object is the ad. Lazy import: af_score imports this module.
+    if wasalt is None or sanadak is None:
+        from scrapers.common import af_score
+        wasalt = wasalt or af_score.wasalt_page
+        sanadak = sanadak or af_score.sanadak_page
     row = empty_row(night, platform)
     last = 0.0
     for table, rid in picks:
@@ -553,6 +674,16 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             continue
         time.sleep(max(0.0, last + pace - time.monotonic()))
         last = time.monotonic()
+        own = wasalt if ("wasalt.sa" in url or "wasalt.com" in url) else sanadak if "sanadak.sa" in url else None
+        if own is not None:
+            page = own(url)                 # the ad's own record; None = unreadable, never wrong
+            if page is None:
+                row["sampled"] += 1
+                row["unreadable_pages"] += 1
+                continue
+            fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
+                                           prose_only_district=platform in PROSE_ONLY_DISTRICT), stored)
+            continue
         try:
             status, body = probe(url)
         except Exception:  # noqa: BLE001 — a transport failure has said nothing about the ad
@@ -562,11 +693,19 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             row["unreadable_pages"] += 1
             continue
         page = page_evidence(body)
-        if platform in SHELL_PAGE_PLATFORMS or is_other_ads_page(stored, page):
+        if (platform in SHELL_PAGE_PLATFORMS or is_other_ads_page(stored, page)
+                or page_lacks_its_ad(url, body)):
             row["sampled"] += 1
             row["unreadable_pages"] += 1
             continue
-        fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE), stored)
+        if "muktamel.com" in url:
+            extra = (muktamel or muktamel_room_lines)(url)
+            page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
+        if "tuba.com.sa" in url:
+            extra = (tuba or tuba_rega_lines)(url)
+            page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
+        fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
+                                       prose_only_district=platform in PROSE_ONLY_DISTRICT), stored)
     if row["unreadable_pages"]:
         row["note"] = f"{row['unreadable_pages']} page(s) unreadable (never counted as wrong)"
     return row
@@ -604,7 +743,13 @@ def _line(r: dict) -> str:
     return (f"{r['platform']}: sampled={r['sampled']} decided_ads={r['decided_ads']} "
             f"normal={_pct(normal_accuracy(r))} af_precision={_pct(af_precision(r))} "
             f"af_recall={_pct(af_recall(r))} mismatches={len(r['mismatch_ids'])}"
-            + (f" | {r['note']}" if r["note"] else ""))
+            + (f" | {r['note']}" if r["note"] else "")
+            # Which field and which ad: without these the log names a cap but not its cause, and every
+            # mismatch had to be re-derived by hand (10-16: wasalt 92.9% with 6 mismatches, no ids printed).
+            + "".join(f"\n    {name}: " + " ".join(f"{k}={v}" for k, v in c.items() if v and k != MATCH)
+                      for name, c in sorted((r.get("fields") or {}).items())
+                      if c.get(MISMATCH) or c.get(WE_MISS))
+            + (f"\n    ids: {' '.join(r['mismatch_ids'])}" if r["mismatch_ids"] else ""))
 
 
 def main() -> int:

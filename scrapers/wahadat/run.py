@@ -227,6 +227,56 @@ def off_market_oracle(off_market: dict[str, str]):
     return verify_gone
 
 
+def read_unlisted_projects(sess, read_urls: set[str], struck: list[dict]) -> dict[str, str]:
+    """Off-market statuses for struck units whose project page the sitemap no longer lists (2026-10-13).
+
+    14 active units of two projects (دام-101, هيو فلورز تنال) sat at 5-8 strikes on screen: their
+    project left the 100-project sitemap, so no crawl read their own record again and the off-market
+    oracle could only say «not read this run» (unknown) every night. Each such project page still
+    answers 200 (lifecycle-spot-check 38392426679), so it is read here, once per page, and a unit its
+    own record marks sold/reserved in a project whose is_active is true is off market exactly as in
+    the main walk. Anything else stays unknown."""
+    out: dict[str, str] = {}
+    for url in sorted({r.get("listing_url") for r in struck if r.get("listing_url")} - read_urls):
+        try:
+            r = sess.get(url, impersonate=IMPERSONATE, timeout=TIMEOUT)
+            if r.status_code != 200:
+                continue
+            proj, units = parse_project(r.text, url)
+        except Exception:                               # noqa: BLE001 — unread is unknown
+            continue
+        if proj is None or proj.get("is_active") is not True:
+            continue
+        for unit in units:
+            st = (unit.get("status") or "").strip().lower()
+            if st in OFF_MARKET_STATUSES and unit_uid(unit):
+                out[f"{PREFIX}{unit_uid(unit)}"] = st
+    return out
+
+
+def struck_unlisted_projects(sitemap_urls: list[str]) -> list[str]:
+    """Project pages of active, struck units that the sitemap no longer lists (2026-10-16, ♻️).
+
+    read_unlisted_projects (10-13) read those pages only for a «sold/reserved» answer, so a unit
+    its own record still states `available` stayed UNKNOWN for ever: 57 such units at 4-11 strikes
+    on 10-16, all six projects is_active=true, and unit 504dc5f5 (دام 101) read «available» on its
+    own page from CI (source-reread 38893210922). Live ads were never re-seen and never stamped.
+    These pages now join the main walk, so each unit is decided exactly as a sitemap unit is:
+    available → upserted (seen, strikes cleared), sold/reserved → off market, anything else → held
+    by the walk's own rules. An unread page stays unknown. Nothing here can hide a unit."""
+    listed = set(sitemap_urls)
+    out: set[str] = set()
+    for tbl in ("wahadat_residential_listings", "wahadat_commercial_listings"):
+        try:
+            rows = (db.sb().table(tbl).select("listing_url").eq("source", SOURCE).eq("active", True)
+                    .gt("missing_count", 0).limit(2000).execute().data or [])
+        except Exception:                               # noqa: BLE001 — unread stays unknown
+            continue
+        out |= {r["listing_url"] for r in rows
+                if isinstance(r.get("listing_url"), str) and "/project/" in r["listing_url"]}
+    return sorted(out - listed)
+
+
 def map_unit(proj: dict[str, Any], u: dict[str, Any], ptype: str) -> tuple[dict[str, Any], str]:
     """(row, category) for ONE unit already proven `status == available` and type-resolved."""
     category = normalize.category_for_type(ptype).lower()
@@ -330,6 +380,12 @@ def main() -> int:
     if a.limit:
         urls = urls[: a.limit]
     print(f"{SOURCE}: {len(urls)} project(s) in sitemap", flush=True)
+    if not a.limit:
+        extra = struck_unlisted_projects(urls)
+        if extra:
+            print(f"  + {len(extra)} unlisted project page(s) of struck units, read like the sitemap's",
+                  flush=True)
+            urls = urls + extra
 
     run_id = None if dry else db.begin_run(SLUG)
     res: list[dict] = []
@@ -407,6 +463,15 @@ def main() -> int:
         for tbl, rows in (("wahadat_residential_listings", res),
                           ("wahadat_commercial_listings", com)):
             if rows:
+                seen_ads = {r["ad_number"] for r in rows} | held
+                try:
+                    struck = [r for r in (db.sb().table(tbl).select("ad_number,listing_url")
+                                          .eq("source", SOURCE).eq("active", True).gt("missing_count", 0)
+                                          .limit(1000).execute().data or [])
+                              if r.get("ad_number") not in seen_ads]
+                except Exception:                       # noqa: BLE001 — unread stays unknown
+                    struck = []
+                off_market.update(read_unlisted_projects(sess, set(urls), struck))
                 n = db.prune_unseen(tbl, {r["ad_number"] for r in rows} | held, source=SOURCE,
                                     verify_gone=off_market_oracle(off_market))
                 if n < 0:

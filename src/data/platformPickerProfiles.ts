@@ -172,6 +172,8 @@ LOGOS["Maqam Al Wisam"] = require("../../assets/images/platform-clean/maqam.png"
 LOGOS["راز العقارية"] = require("../../assets/images/platform-clean/raz.png");
 LOGOS["الرفاعي للعقار"] = require("../../assets/images/platform-clean/alrifai-small.png");
 LOGOS["MAQRAT"] = require("../../assets/images/platform-clean/maqrat.png");
+// Haraj: official header artwork, collected 2026-10-18 UTC.
+LOGOS["حراج"] = require("../../assets/images/platform-logos/haraj.png");
 const coverage = coverageSnapshot.platforms as Record<string, PickerCoverage>;
 export const PLATFORM_PICKER_PROFILES: Record<string, PlatformPickerProfile> = Object.fromEntries(
   Object.entries(LOGOS).map(([name, logo]) => [name, {

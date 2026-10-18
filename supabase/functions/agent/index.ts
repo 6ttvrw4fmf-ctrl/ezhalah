@@ -1,3 +1,5 @@
+import searchSources from "./searchSources.json" with { type: "json" };
+import { readLandmarkAliases } from "./landmarkAliases.ts";
 // ──────────────────────────────────────────────────────────────────────────────
 // agent — Ezhalah real AI Agent (PRD §7, §13) — DeepSeek
 //
@@ -22,6 +24,8 @@
 // Auth: soft-gated (verify_jwt disabled at deploy). The client invokes with the
 // public project key; this endpoint does no privileged work and writes nothing.
 // ─────────────────────────────────────────────────────────────────────────────
+
+import { LOCATION_CHAPTER_MARKER, LOCATION_PLAN_SCHEMA, validateLocationPlan, startsNewLocationSearch } from "./locationPlan.ts";
 
 const DEEPSEEK_API_KEY = Deno.env.get("DEEPSEEK_API_KEY") ?? "";
 // "flash" = DeepSeek's fast/non-reasoning tier, the fit for a short classification task; override
@@ -62,10 +66,10 @@ import { wantsGuidedInterview, hasUsableLocation, hasEnoughToSearch, established
 import { buildTurnDecision } from "./turnWiring.ts";
 // The three location-ambiguity cases restored from the deleted client-side locationClarification()
 // (round 2 fix, "lost location-ambiguity cases") — see its own header.
-import { plainRegionQuestion, emptyLocationQuestion, severalCitiesQuestion, residentialCommercialQuestion, proximityNotMeasuredText } from "./locationAmbiguity.ts";
+import { plainRegionQuestion, emptyLocationQuestion, severalCitiesQuestion, residentialCommercialQuestion, proximityNotMeasuredText, namesAProperty, isFreshRequest } from "./locationAmbiguity.ts";
 import { cityQuestionAr, cityQuestionEn, noIntentReplyText, searchLineText, districtNotInCityQuestion, listCities, anyCityText, ANY_CITY_RE, socialKind, socialReplyText, unsearchableText, searchingNowText, twinRegionQuestion, twinDistrictQuestion } from "./questionExamples.ts";
 import { botMessage } from "./botMessage.ts";
-import { situationKind, situationReplyText } from "./situations.ts";
+import { situationKind, situationReplyText, pureSocialKind } from "./situations.ts";
 
 // ── LIVE BEHAVIOR NOTES (DB-driven) ──────────────────────────────────────────
 // AI behavior notes live in the `agent_notes` table so they can be edited WITHOUT redeploying this
@@ -514,7 +518,7 @@ OUTPUT — return ONLY a JSON object: { kind, reply, deal, location, type, detai
   "" if no price mentioned at all.
 - pricing_basis: the exact period/basis of the price — "daily_rent","weekly_rent","monthly_rent","quarterly_rent","annual_rent","full_price","price_per_sqm", or "none". Capture the period EXACTLY as the user said it (the app converts any rent period to an annual figure).
 - rent_period: "monthly" | "annual" | "none" — the RENTAL-POOL filter, set ONLY when the user explicitly states the rental period itself: «للإيجار الشهري» / «إيجار شهري» / «بالشهر» → "monthly"; «الإيجار السنوي» / «بالسنة» → "annual". This is SEPARATE from pricing_basis (which describes the BUDGET number's period) — a period-only request with no budget («شقق للإيجار الشهري في الرياض») MUST still set rent_period. A budget stated per month implies rent_period "monthly" too. Leave "none" when the user never states a period.
-- count: how many listings the user asked to see, as a number 1–15; "0" if they didn't say. "show me 10"→"10", "just one"/"give me an apartment"→"1", "top 3"→"3", "20"/"50"→"15" (the cap). Never fabricate listings to reach it.
+- count: how many listings the user asked to see, as a number 1–500; "0" if they didn't say. "show me 10"→"10", "just one listing"→"1", "top 3"→"3", "20"/"50"→"20"/"50" (respect the request). Never fabricate listings to reach it.
 - platforms: an ARRAY of the EXACT platform names (from RECOGNIZED PLATFORM NAMES) the user restricted their search to. Empty array [] when they didn't name one. CRITICAL — CARRY IT ACROSS TURNS: once the user picks a platform (or confirms one you asked about, e.g. you ask "did you mean Deal App?" and they reply "yes"), set platforms:["Deal App"] on the SEARCH turn even though the confirming message itself ("yes") doesn't repeat the name. Keep it set on follow-up searches in the same chat until they change/clear it. Use the canonical English name exactly as in the list (e.g. "Deal App", "Aqar", "Gathern", "Al Khaas"). This is how the app limits results to that platform.
 - sort: the OBJECTIVE order the user asked for, else "none" (default = newest first). "newest"/"oldest" (most/least recent), "price_asc"/"price_desc" (cheapest/most expensive, e.g. "from lowest price", "الأرخص"), "area_asc"/"area_desc" (smallest/largest, e.g. "biggest first", "الأكبر مساحة"), "ppm_asc"/"ppm_desc" (lowest/highest price per m²), "beds_desc" (most bedrooms first). Subjective requests ("best", "most popular", "recommended") are NOT a sort — use "none" and never imply a quality ranking. Map "cheap/أرخص/أرخص أول" → price_asc, "biggest/أكبر" → area_desc, "newest/أحدث/الأجدد" → newest.
 
@@ -663,6 +667,13 @@ const AR_CURRENCY: Array<[RegExp, number]> = [
 // counts (live 2026-10-13: that budget searched «≤ 500 ريال», the first figure, because the range was not seen).
 const RANGE_RE = /(?<![\p{L}\p{N}])من(?![\p{L}\p{N}])[\s\S]{0,40}?(?<![\p{L}\p{N}])(?:الى|إلى)(?!\p{L})|(?<![\p{L}\p{N}])بين(?![\p{L}\p{N}])[\s\S]{0,60}?(?<![\p{L}\p{N}])و(?!\p{L})|\bfrom\b[\s\S]{0,40}?\bto\b|\bbetween\b[\s\S]{0,60}?\band\b|\d\s*-\s*\d/imu;
 
+// A SIZE RANGE IS NOT A BUDGET (owner 2026-10-13): «أرض في الرياض مساحتها بين 1000 متر إلى 1500» read 1500 as money (only the first number
+// carries «متر»), and the app then showed a land «سعر المتر». A bare number joined by «إلى / و / -» to a sized number is that size's other end.
+const SIZE_UNIT = "(?:bed|bedroom|br\\b|sqm|sq\\.?\\s*m|m2|m²|meter|metre|square|sqft|sq\\.?\\s*ft|ft2|ft²|foot|feet|متر|م٢|م2|غرف|غرفة|غرفه)";
+const SIZE_JOIN = "(?:الى|إلى|الي|لين|حتى|حتي|-|–|to|و)";
+const SIZE_RANGE_AFTER = new RegExp(`^\\s*${SIZE_JOIN}\\s*\\d[\\d,.]*\\s*${SIZE_UNIT}`, "i");
+const SIZE_RANGE_BEFORE = new RegExp(`${SIZE_UNIT}\\s*${SIZE_JOIN}\\s*$`, "i");
+
 function extractPrice(input: string): string {
   // Arabic numerals FIRST — JS \d is ASCII-only, so «٧٠ الف» was invisible here until 2026-08-29.
   // See toWesternDigits() in ./postModel.ts for why this was a silent Arabic-first product bug.
@@ -676,6 +687,9 @@ function extractPrice(input: string): string {
   const candidates: Array<{ n: number; index: number }> = [];
   for (const mm of t.matchAll(NUM_RE)) {
     const after = t.slice(mm.index! + mm[0].length, mm.index! + mm[0].length + 24);
+    // Explicit result quantities are not money; retain scaled/currency-marked budgets.
+    if (!mm[2] && !mm[3] && (/^\s*(?:شقق|شقة|شقه|فلل|فيلا|عقارات|عقار|نتائج|نتيجة|apartments?\b|villas?\b|listings?\b|results?\b|properties\b)/i.test(after)
+      || /(?:show(?: me)?|display|ورني|اعرض)\s*$/i.test(t.slice(0,mm.index)))) continue;
     // A number followed by a SIZE/area unit is a SIZE, not money — skip it. We tolerate up to ~16
     // NON-DIGIT chars before the unit so a typo'd adjective ("1500 quare feet") or "square feet" still
     // counts as a size; a digit in between stops the match (so "5000 for 200 sqm" keeps 5000 as money).
@@ -693,6 +707,9 @@ function extractPrice(input: string): string {
     const cur = (mm[3] || "").toLowerCase();
     if (cur) rate = CURRENCY_RATES[cur] ?? 0;
     if (!rate) { for (const [re, r] of AR_CURRENCY) { if (re.test(after)) { rate = r; break; } } }
+    // …the other end of a SIZE range («1000 متر إلى 1500», «من 1000 الى 1500 متر») is a size too — unless it says it is money.
+    const scaled = !!scale || /^\s*(?:ألف|الف|آلاف|مليون|ملايين|مليار)/.test(after);
+    if (!scaled && !rate && (SIZE_RANGE_AFTER.test(t.slice(mm.index! + mm[0].length)) || SIZE_RANGE_BEFORE.test(t.slice(Math.max(0, mm.index! - 24), mm.index!)))) continue;
     if (rate && rate !== 1) n = Math.round(n * rate);
     if (n >= 100) candidates.push({ n: Math.round(n), index: mm.index! });
   }
@@ -800,15 +817,38 @@ function originalCurrency(input: string): string {
 // more Latin words → "en". A tie or a letter-less message (digits/punctuation only, e.g. "4000")
 // returns null so the caller can fall back to the conversation's language. Counting words (not
 // letters) means a single foreign name — "ابحث عن فيلا في Riyadh" — doesn't flip the whole reply.
-function detectLang(s: string): "ar" | "en" | null {
-  const words = s.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+// A model reply is one JSON object. json_object mode's documented defect answers a run of blank lines,
+// and the text-mode re-ask below may wrap the object in ```json fences or a sentence. Cut the object out
+// of whatever came back — the first "{" to the last "}" — and hand anything with no object through
+// untouched, so the parse below still decides and the 502 names what really arrived.
+function jsonObjectFromReply(content: unknown): string {
+  const s = String(content ?? "").trim();
+  if (!s || (s.startsWith("{") && s.endsWith("}"))) return s;
+  const a = s.indexOf("{"), b = s.lastIndexOf("}");
+  return a >= 0 && b > a ? s.slice(a, b + 1) : s;
+}
+
+function detectLang(text: string): "ar" | "en" | null {
+  const words = text.match(/[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu) ?? [];
   let ar = 0, en = 0;
-  for (const w of words) {
-    if (/[؀-ۿ]/.test(w)) ar++;
-    else if (/[A-Za-z]/.test(w)) en++;
+  for (const word of words) {
+    if (/\p{Script=Arabic}/u.test(word)) ar++;
+    else if (/\p{Script=Latin}/u.test(word)) en++;
   }
   if (ar === en) return null;
-  return ar > en ? "ar" : "en";
+  return ar > en ? 'ar' : 'en';
+}
+
+function resolveReplyLanguage(text: string, history: readonly { text?: string }[], fallback: "ar" | "en"): "ar" | "en" {
+  const detected = detectLang(text);
+  if (detected) return detected;
+  const mixedTie = /\p{Script=Arabic}/u.test(text) && /\p{Script=Latin}/u.test(text);
+  const turns = mixedTie ? history : [...history].reverse();
+  for (const turn of turns) {
+    const previous = detectLang(turn.text ?? '');
+    if (previous) return previous;
+  }
+  return fallback;
 }
 
 // The model occasionally ignores the "no generic chatbot filler" rule, so strip the
@@ -837,7 +877,7 @@ function stripFiller(s: string): string {
 // endpoint). Appended to the SYSTEM message as a belt-and-braces restatement of the shape and enum
 // values the SYSTEM prompt above already documents in prose — same list, machine-readable form, so
 // the model gets the contract from two directions.
-const JSON_SHAPE_HINT = `\n\nREPLY FORMAT (STRICT, owner 2026-10-11 — many users have ADHD): the "reply" is AT MOST TWO short sentences (about 20 words in all). Never write a price, a budget or a currency conversion in the reply — the app shows the budget and its calculation itself. Answer first, then at most ONE question. Arabic replies use natural Saudi dialect. End the reply with exactly ONE emoji attached to its last word, and put no other emoji anywhere in it (a comma goes AFTER an emoji, never before it). Never open with «أبشر». Never use a dash or a hyphen in the reply: no «—», no «–», no « - » and no «-» inside words or numbers (write «4 bedroom», «من ٣٠٠ إلى ٤٠٠»; use a comma or start a new sentence).\n\nSTYLE: talk like a smart broker who knows the inventory, not a form. Adapt to obvious cues — if the user is brief or says «ورني»/«بس ورني»/"just show me", drop to ONE short critical question or simply search; if they are chatty, be a little more natural. Do not claim to read their emotions. NEVER say you have found or have options («لقيت لك», «عندي خيارات») — you write this reply BEFORE the search runs, so you cannot know; describe what you are about to search for instead. Never promise to widen or relax the search. Never claim in the reply that you are including, applying, or searching for a feature/amenity/filter unless that exact concept also appears in the structured fields below THIS SAME TURN (amenities, af, furnished, etc.) — if something the user asked for is outside your allowed vocabulary (not one of the amenities/af/other structured fields above), name it back in one short clause quoting their own word or phrase, say Ezhalah's data does not track that, and never claim to filter for it or guess whether listings have it. Word this as UNVERIFIABLE, never as an absence — never say listings "don't have" or "lack" it; that would claim something the database never recorded. This is different from a search that ran and found zero matches (which you never claim in this reply — you write it BEFORE the search runs).\n\nCONVERSATION: when the user describes their SITUATION rather than a property («عندي عائلة من ٤ أشخاص», «أدور شي يناسبني أنا وزوجتي وطفلين», «مكان مناسب للعائلة», «مكان هادي»), that is CONTEXT, not filters. Never turn household size, lifestyle or a mood word into a bedroom count, an area, or any other value. If a real place/type/budget is ALSO in the message, search on that and treat the situation as flavor only, never as a reason to ask. If genuinely nothing searchable is in the message at all, use kind="message" and ask the one location question ONLY if the city is what's missing — exactly ONE short question per turn — one question mark, never two questions stacked in a single reply, never a checklist. If the city is not what's missing, say plainly, in one short line, what Ezhalah needs instead — never a question chain. Once you have enough to search, search and stop asking.\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none), "ask_about" (array of the things the user expressed VAGUELY that you must NOT turn into a number — use "size" when they said big/large/wide/spacious/small («كبير»/«واسع»/«صغير») without any area figure, and "rating" when they praised the rating («تقييم عالي»/«ممتاز») without naming a number. Leave [] when nothing is vague. NEVER invent a bedroom count, an area, or a rating from a vague word), "furnished" (one of "yes"|"no"|"none" — "yes" only if the user asks for a FURNISHED place («مفروشة»), "no" only if they ask for an UNFURNISHED one («غير مفروشة»), "none" when they do not mention furnishing at all; never infer it from anything else), "af" (object of Advanced-Filter intents the user STATED; omit any key they did not state — never infer one. Keys and their ONLY allowed values: "property_age": "new"|"1_2"|"3_5"|"6_9"|"10p" (an EXACT named bucket ONLY when the user's own wording matches one) OR a plain number of years as a string (e.g. "5") for "less than/under/up to N years" whenever N does not exactly match one named bucket's own span — send the NUMBER so Ezhalah covers every age truthfully under it; NEVER guess the closest-sounding named bucket instead (e.g. "less than 5 years" is NOT "1_2" and NOT "3_5" alone — send "5" so new+1_2+3_5 are all truthfully included); "street_width": a number in metres they asked for (e.g. "20"); "direction": array of "شمال"|"جنوب"|"شرق"|"غرب"|"شمال شرق"|"شمال غرب"|"جنوب شرق"|"جنوب غرب"; "bathrooms": the number of bathrooms they asked for — recognize the Arabic DUAL «حمامين»/«حمامان» (= 2, with NO digit written anywhere), «دورتين مياه» (the same dual on the دورة مياه synonym), a counted plural like «٣ حمامات»/«ثلاث حمامات»/"3 bathrooms", and English "two bathrooms"/"2 bathrooms"/"two baths" — including a message that mixes Arabic and English together; OMIT this key entirely if bathrooms are not mentioned at all, never invent a count; "rating": "9.5"|"9.0"|"9.0_rc10" ONLY if they named a NUMBER on the 0-10 scale — a stated 9 or ٩ (including «٩ فما فوق») is "9.0", a stated 9.5 or ٩.٥ is "9.5", and «مع ١٠ تقييمات» or more alongside 9 is "9.0_rc10". If they only praised it («تقييم عالي», «ممتاز») with NO number, OMIT it and put "rating" in ask_about instead; "rnpl": "rnpl" if they want instalments/تقسيط; "unit_subtype": "استديو"|"شقق مخدومة"|"شقة"), "amenities" (array; ONLY these exact tokens, [] if none: "kitchen"|"parking"|"elevator"|"ac"|"private_entrance"|"maid_room"|"driver_room"|"car_entrance"|"sanitation"|"electricity"|"water_supply"|"gym"|"pool"|"garden"|"balcony"|"laundry_room"|"optical_fibers"|"separate_electricity_meter"|"separate_water_meter" — emit a token ONLY when the user actually asks for that feature; never invent one, never map a word you are unsure of, and leave it out rather than guessing).`;
+const JSON_SHAPE_HINT = `SOURCE RESTRICTION: If a user asks for an unsupported website, include its exact name in platforms (or excludedPlatforms), set sourceSelectionChanged=true, and let backend validation refuse it. NEVER omit an unknown website and search all sites instead.\n\nSUPPORTED WEBSITE CATALOG (overrides older names): ${JSON.stringify(Object.keys(searchSources))}. Use these exact names for platforms/excludedPlatforms.\nSEARCH CONTROL OVERRIDE (owner 2026-10-15): count is the user-requested result quantity, up to the existing 500-card display ceiling, not 15. Do not interpret it as bedrooms, budget or area. Return excludedPlatforms:string[] alongside platforms:string[]. Both are complete intended source selections; preserve them on unrelated follow-ups; all websites clears both. Never include an excluded source in platforms. Use only recognized canonical platform names. Unsupported websites require a brief limitation message, not an all-source search. Never change an explicit transaction or rent period merely because a source was selected.\n\n\nREPLY FORMAT (STRICT, owner 2026-10-11 — many users have ADHD): the "reply" is AT MOST TWO short sentences (about 20 words in all). Never write a price, a budget or a currency conversion in the reply — the app shows the budget and its calculation itself. Answer first, then at most ONE question. Arabic replies use natural Saudi dialect. End the reply with exactly ONE emoji attached to its last word, and put no other emoji anywhere in it (a comma goes AFTER an emoji, never before it). Never open with «أبشر». Never use a dash or a hyphen in the reply: no «—», no «–», no « - » and no «-» inside words or numbers (write «4 bedroom», «من ٣٠٠ إلى ٤٠٠»; use a comma or start a new sentence).\n\nSTYLE: talk like a smart broker who knows the inventory, not a form. Adapt to obvious cues — if the user is brief or says «ورني»/«بس ورني»/"just show me", drop to ONE short critical question or simply search; if they are chatty, be a little more natural. Do not claim to read their emotions. NEVER say you have found or have options («لقيت لك», «عندي خيارات») — you write this reply BEFORE the search runs, so you cannot know; describe what you are about to search for instead. Never promise to widen or relax the search. Never claim in the reply that you are including, applying, or searching for a feature/amenity/filter unless that exact concept also appears in the structured fields below THIS SAME TURN (amenities, af, furnished, etc.) — if something the user asked for is outside your allowed vocabulary (not one of the amenities/af/other structured fields above), name it back in one short clause quoting their own word or phrase, say Ezhalah's data does not track that, and never claim to filter for it or guess whether listings have it. Word this as UNVERIFIABLE, never as an absence — never say listings "don't have" or "lack" it; that would claim something the database never recorded. This is different from a search that ran and found zero matches (which you never claim in this reply — you write it BEFORE the search runs).\n\nCONVERSATION: when the user describes their SITUATION rather than a property («عندي عائلة من ٤ أشخاص», «أدور شي يناسبني أنا وزوجتي وطفلين», «مكان مناسب للعائلة», «مكان هادي»), that is CONTEXT, not filters. Never turn household size, lifestyle or a mood word into a bedroom count, an area, or any other value. If a real place/type/budget is ALSO in the message, search on that and treat the situation as flavor only, never as a reason to ask. If genuinely nothing searchable is in the message at all, use kind="message" and ask the one location question ONLY if the city is what's missing — exactly ONE short question per turn — one question mark, never two questions stacked in a single reply, never a checklist. If the city is not what's missing, say plainly, in one short line, what Ezhalah needs instead — never a question chain. Once you have enough to search, search and stop asking.\n\nRespond with a single JSON object with EXACTLY these keys and no others — no markdown fences, no prose before or after it: "kind" (one of "listings"|"message"|"interview"), "reply" (string), "deal" (one of "Rent"|"Buy"|"Both"), "location" (string), "type" (string), "detail" (string), "price" (string of digits only, "" if none), "pricing_basis" (one of "daily_rent"|"weekly_rent"|"monthly_rent"|"quarterly_rent"|"annual_rent"|"full_price"|"price_per_sqm"|"none"), "rent_period" (one of "none"|"monthly"|"annual"), "sort" (one of "none"|"newest"|"oldest"|"price_asc"|"price_desc"|"area_asc"|"area_desc"|"ppm_asc"|"ppm_desc"|"beds_desc"), "count" (string of digits, "0" if unstated), "platforms" (array of strings, [] if none), "excludedPlatforms" (array of excluded recognized platform names, [] if none), "sourceSelectionChanged" (boolean, true ONLY when this current message explicitly changes or clears selected/excluded websites), "ask_about" (array of the things the user expressed VAGUELY that you must NOT turn into a number — use "size" when they said big/large/wide/spacious/small («كبير»/«واسع»/«صغير») without any area figure, and "rating" when they praised the rating («تقييم عالي»/«ممتاز») without naming a number. Leave [] when nothing is vague. NEVER invent a bedroom count, an area, or a rating from a vague word), "furnished" (one of "yes"|"no"|"none" — "yes" only if the user asks for a FURNISHED place («مفروشة»), "no" only if they ask for an UNFURNISHED one («غير مفروشة»), "none" when they do not mention furnishing at all; never infer it from anything else), "af" (object of Advanced-Filter intents the user STATED; omit any key they did not state — never infer one. Keys and their ONLY allowed values: "property_age": "new"|"1_2"|"3_5"|"6_9"|"10p" (an EXACT named bucket ONLY when the user's own wording matches one) OR a plain number of years as a string (e.g. "5") for "less than/under/up to N years" whenever N does not exactly match one named bucket's own span — send the NUMBER so Ezhalah covers every age truthfully under it; NEVER guess the closest-sounding named bucket instead (e.g. "less than 5 years" is NOT "1_2" and NOT "3_5" alone — send "5" so new+1_2+3_5 are all truthfully included); "street_width": a number in metres they asked for (e.g. "20"); "direction": array of "شمال"|"جنوب"|"شرق"|"غرب"|"شمال شرق"|"شمال غرب"|"جنوب شرق"|"جنوب غرب"; "bathrooms": the number of bathrooms they asked for — recognize the Arabic DUAL «حمامين»/«حمامان» (= 2, with NO digit written anywhere), «دورتين مياه» (the same dual on the دورة مياه synonym), a counted plural like «٣ حمامات»/«ثلاث حمامات»/"3 bathrooms", and English "two bathrooms"/"2 bathrooms"/"two baths" — including a message that mixes Arabic and English together; OMIT this key entirely if bathrooms are not mentioned at all, never invent a count; "rating": "9.5"|"9.0"|"9.0_rc10" ONLY if they named a NUMBER on the 0-10 scale — a stated 9 or ٩ (including «٩ فما فوق») is "9.0", a stated 9.5 or ٩.٥ is "9.5", and «مع ١٠ تقييمات» or more alongside 9 is "9.0_rc10". If they only praised it («تقييم عالي», «ممتاز») with NO number, OMIT it and put "rating" in ask_about instead; "rnpl": "rnpl" if they want instalments/تقسيط; "unit_subtype": "استديو"|"شقق مخدومة"|"شقة"), "amenities" (array; ONLY these exact tokens, [] if none: "kitchen"|"parking"|"elevator"|"ac"|"private_entrance"|"maid_room"|"driver_room"|"car_entrance"|"sanitation"|"electricity"|"water_supply"|"gym"|"pool"|"garden"|"balcony"|"laundry_room"|"optical_fibers"|"separate_electricity_meter"|"separate_water_meter" — emit a token ONLY when the user actually asks for that feature; never invent one, never map a word you are unsure of, and leave it out rather than guessing).`;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -918,29 +958,7 @@ Deno.serve(async (req: Request) => {
   // REPLY LANGUAGE = the language of the user's LATEST message, never the app's UI locale.
   // If this message is letters-free (e.g. just "4000"), keep the conversation going in the
   // language of the most recent message that HAD letters; only then fall back to the UI locale.
-  const appLocale = locale;
-  let replyLang = detectLang(text);
-  if (!replyLang) {
-    // detectLang returned null for one of two reasons:
-    //  (a) the message MIXES Arabic and Latin words evenly — a true tie. Per the
-    //      training rule, a tie follows the conversation's STARTING language, so we
-    //      scan history oldest→newest and take the first message that had letters.
-    //  (b) the message has NO letters at all (e.g. "4000") — keep the conversation in
-    //      the language of the most RECENT message that had letters.
-    const tie = /[؀-ۿ]/.test(text) && /[A-Za-z]/.test(text);
-    if (tie) {
-      for (let i = 0; i < history.length; i++) {
-        const d = detectLang(String(history[i]?.text ?? ""));
-        if (d) { replyLang = d; break; }
-      }
-    } else {
-      for (let i = history.length - 1; i >= 0; i--) {
-        const d = detectLang(String(history[i]?.text ?? ""));
-        if (d) { replyLang = d; break; }
-      }
-    }
-  }
-  locale = replyLang ?? appLocale;
+  locale = resolveReplyLanguage(text, history, locale);
 
   try {
     // Deterministic question-budget hint: the user gets ONE clarifying question, ever, before the
@@ -949,7 +967,9 @@ Deno.serve(async (req: Request) => {
     // decideAgentTurn() in ./decide.ts is what actually enforces the ceiling afterward, reading
     // the structured askCount the client sent, never by regex-scanning history text (the old
     // `priorQuestions` scan this replaces).
-    const budgetDirective = askCount >= 1
+    const notes = await liveNotes();
+    const chapterOne = notes.includes(LOCATION_CHAPTER_MARKER);
+    const budgetDirective = askCount >= 1 && !chapterOne
       ? ` IMPORTANT: you have ALREADY asked your one clarifying question in this chat — do NOT ask another, about location or anything else. IF the user's latest message is continuing a PROPERTY SEARCH (an answer to your question, or more search detail), then SEARCH NOW (kind="listings") with whatever you have: infer the city from any landmark/geography/lifestyle clue, else leave location "" (the platform will state plainly that it needs a city and point to the Filter — never propose searching all of Saudi Arabia), and deal="Both" if rent vs buy is unknown. BUT if the latest message is NOT a property search — a utility/explanation/currency-or-unit-conversion/brand/support/general-Ezhalah question, or small talk — just ANSWER it directly (kind="message"); do NOT force a search.`
       : "";
     // Build a multi-turn conversation: prior turns (memory) + the current wrapped message. Contents
@@ -957,7 +977,9 @@ Deno.serve(async (req: Request) => {
     // (an assistant-first messages[] rejects with 400). The client already recognized any landmark
     // from the full catalog — feed it in as a known-place signal so the model infers the CITY and
     // searches it, never asking "which city?" for a landmark.
-    const lmLine = lmHint
+    const lmLine = lmHint && chapterOne
+      ? ` RECOGNIZED PLACE ALIASES (recognition only, not a validated geographic scope): ${lmHint}. Administrative city/district aliases may be proposed for catalog validation; a landmark does not authorize searching its whole city.`
+      : lmHint
       ? ` RECOGNIZED LANDMARKS (from Ezhalah's landmark database — treat each as a KNOWN place, infer its CITY and search that city; NEVER ask which city when a landmark is recognized): ${lmHint}.`
       : "";
     // ALREADY ESTABLISHED — the single most effective way to stop the agent re-asking something the
@@ -1023,7 +1045,7 @@ Deno.serve(async (req: Request) => {
         // Anything per-request (a timestamp, a user id, a counter) placed before or inside SYSTEM
         // breaks every cache entry. Per-turn text belongs in sysExtra, AFTER SYSTEM.
         // Pinned by scripts/verify-ai-spend-safety.ts.
-        { role: "system", content: SYSTEM + sysExtra + JSON_SHAPE_HINT },
+        { role: "system", content: SYSTEM + sysExtra + JSON_SHAPE_HINT + (chapterOne ? LOCATION_PLAN_SCHEMA : "") },
         ...cts.map((c) => ({ role: c.role === "model" ? "assistant" : "user", content: c.parts.map((p) => p.text).join("\n") })),
       ];
       const payload = JSON.stringify({
@@ -1038,7 +1060,27 @@ Deno.serve(async (req: Request) => {
         // Guarantees the reply parses as JSON; does NOT constrain keys/values (see JSON_SHAPE_HINT).
         response_format: { type: "json_object" },
       });
+      // DeepSeek's json_object mode occasionally answers a run of blank lines — completion_tokens > 0,
+      // finish_reason "stop", content whitespace — which its docs list as a known issue. Measured
+      // 2026-10-17 (backlog 643): the audit's broad-search-after-budget probe answered empty 3/3 (37
+      // completion tokens, model deepseek-flash) and the customer got a 502. An empty reply is re-asked
+      // ONCE with an output rule appended AFTER the cached SYSTEM prefix — through the same fetch site,
+      // the same spend gate and the same 2-attempt bound as an HTTP retry, so nothing routes around
+      // the guards and spend stays bounded.
+      const EMPTY_REPLY_NUDGE = "\nOUTPUT RULE: the previous attempt returned an empty reply. Output the complete JSON object now — never an empty or whitespace-only reply.";
+      // The re-ask LEAVES json_object mode. The blank-line reply is that mode's documented defect, and
+      // measured 2026-10-18 (backlog 643, 2/2 on the deployed #7310 code) the nudged re-ask in the same
+      // mode answered the same 39 blank characters (43 completion tokens, finish_reason stop). Text mode
+      // answers; jsonObjectFromReply() cuts the object out of fences or a sentence, and JSON.parse below
+      // still decides. The FIRST attempt keeps json_object mode — the cheap, usually-right path.
+      const { response_format: _jsonMode, ...textModePayload } = JSON.parse(payload);
+      const nudgedPayload = JSON.stringify({
+        ...textModePayload,
+        messages: [{ ...messages[0], content: String(messages[0].content) + EMPTY_REPLY_NUDGE }, ...messages.slice(1)],
+      });
       let res: Response | null = null;
+      let data: any = null;
+      let emptyRetried = false;
       const t0 = Date.now();
       for (let attempt = 0; attempt < 2; attempt++) {
         // RE-CHECK PER ATTEMPT, not once per runModel. The retry below re-sends the identical ~18k
@@ -1050,8 +1092,25 @@ Deno.serve(async (req: Request) => {
           recordHealth("spend_gate_blocked", Date.now() - t0, { reason: g.reason, state: g.state, attempt });
           return { __err: json({ error: "ai spend guard", reason: g.reason, state: g.state }, 503) };
         }
-        const r = await fetch(DEEPSEEK_URL, { method: "POST", headers, body: payload });
-        if (r.ok) { res = r; break; }
+        const r = await fetch(DEEPSEEK_URL, { method: "POST", headers, body: emptyRetried ? nudgedPayload : payload });
+        if (r.ok) {
+          res = r;
+          data = await r.json();
+          const content = String(data?.choices?.[0]?.message?.content ?? "").trim();
+          // break on a real reply, after the one re-ask, or when no attempt is left to re-ask with (an
+          // empty reply on the HTTP-retry attempt answers 502 below with empty_retried: false).
+          if (content || emptyRetried || attempt === 1) break;
+          // EMPTY REPLY: count the paid attempt (it was billed), then re-ask once with the output rule.
+          emptyRetried = true;
+          logUsage({
+            source: clientSource, requested_model: DEEPSEEK_MODEL, model: data?.model ?? null, kind: null,
+            locale, call_seq: seq, attempt: attempt + 1, http_status: 200,
+            completion_tokens: data?.usage?.completion_tokens ?? null,
+            finish_reason: `empty_${data?.choices?.[0]?.finish_reason ?? "none"}`, history_turns: history.length,
+            latency_ms: Date.now() - t0, user_message_id: userMessageId, call_reason: "http_retry",   // ai_call_reason enum has no empty value; finish_reason carries empty_<reason>
+          });
+          continue;
+        }
         res = r;
         // COUNT THE FAILED ATTEMPT. It was transmitted and may well have been billed; without this
         // row ai_usage undercounts precisely when calls are failing — and the circuit breaker counts
@@ -1071,9 +1130,9 @@ Deno.serve(async (req: Request) => {
         recordHealth("model_http_error", Date.now() - t0, { status: res?.status ?? 0 });
         return { __err: json({ error: `deepseek ${res?.status ?? 0}`, detail }, 502) };
       }
-      const data = await res.json();
+      // `data` was parsed inside the loop (the body is consumed there so an empty reply can be re-asked).
       const choice = data?.choices?.[0];
-      const raw = String(choice?.message?.content ?? "").trim();
+      const raw = jsonObjectFromReply(choice?.message?.content);
       // finish_reason "length" means the ceiling was hit — the single most likely cause of both the
       // empty and the unparseable case, and invisible without this. Carry it (plus the reasoning-token
       // count, which is what silently ate the budget in the 2026-08-28 incident) into the error so the
@@ -1130,8 +1189,9 @@ Deno.serve(async (req: Request) => {
         call_reason: callReason,
       });
       if (!raw) {
-        recordHealth("empty_output", Date.now() - t0, why);
-        return { __err: json({ error: "empty model output", ...why }, 502) };
+        const shape = { message_keys: Object.keys(choice?.message ?? {}), content_len: String(choice?.message?.content ?? "").length, empty_retried: emptyRetried };
+        recordHealth("empty_output", Date.now() - t0, { ...why, ...shape });
+        return { __err: json({ error: "empty model output", ...why, ...shape }, 502) };
       }
       try {
         const parsed = JSON.parse(raw);
@@ -1152,7 +1212,6 @@ Deno.serve(async (req: Request) => {
     const langLine = `\n\nREPLY LANGUAGE FOR THIS TURN: ${langName} ONLY. The "reply" field MUST be written 100% in ${langName} — every single word, no exceptions, even if the user's message contains a word in the other language.`;
     // DB-driven behavior notes (editable in the agent_notes table, no redeploy) — appended last so
     // they're authoritative on any conflict with the baked-in prompt above.
-    const notes = await liveNotes();
     const notesBlock = notes
       ? `\n\n═══ LIVE BEHAVIOR NOTES (authoritative — override anything above on conflict) ═══\n${notes}`
       : "";
@@ -1228,7 +1287,7 @@ Deno.serve(async (req: Request) => {
       // `price`, so it shows as both Size and Budget. If we found no real money figure and the model's
       // "price" is just the SIZE repeated, drop it. (user-reported double-count of "200000 cm".)
       const detailDigits = String(out.detail ?? "").replace(/[^\d]/g, "");
-      if (!detPrice && modelPrice && modelPrice === detailDigits) modelPrice = "";
+      if (!detPrice && modelPrice && (modelPrice === detailDigits || modelPrice === String(out.count))) modelPrice = "";
       // The price BASIS disambiguates rent vs sale better than the bare number: a recurring
       // basis is always Rent; a sale/per-meter basis is always Buy. Trust it over the model's
       // own "deal" only when it's an unambiguous signal (the model occasionally sets deal wrong
@@ -1333,6 +1392,11 @@ Deno.serve(async (req: Request) => {
           [text, ...history.filter((h) => h?.role !== "model").map((h) => String(h?.text ?? ""))])
         : [];
 
+      let validatedDistricts: string[] | undefined;
+      let locationStateValidated = false;
+      out.validatedNationwide = false; // Never trust this authorization flag from model JSON.
+      let chapterLocationReply: string | null = null;
+      let chapterNotice: string | undefined;
       const understoodState = () => ({
         deal,
         bothDeals,
@@ -1341,6 +1405,10 @@ Deno.serve(async (req: Request) => {
         location,
         regionPin,
         districtPin,
+        districts: validatedDistricts,
+        locationStateValidated,
+        geographicScope: out.geographicScope ?? prevQuery?.geographicScope,
+        excludedPlatforms: Array.isArray(out.excludedPlatforms) ? out.excludedPlatforms : [],
         type: typeof out.type === "string" && out.type ? out.type : null,
         detail: typeof out.detail === "string" && out.detail ? out.detail : null,
         price,
@@ -1382,6 +1450,7 @@ Deno.serve(async (req: Request) => {
         || /📍\s*$/.test(String(lastModel).trim());   // every place question the code writes ends with 📍, however it is worded (owner 2026-10-11: they now rotate)
       // «مو مهم / أي مدينة» answers the question we just asked and carries no place of its own: classify the place we asked about
       // (the previous turn's), so the «any city» branch below can start with the biggest city (owner 2026-10-11).
+      if (!chapterOne || out.location_plan?.status === "none") {
       if (!location && alreadyAsked && ANY_CITY_RE.test(text) && typeof prevQuery?.location === "string" && prevQuery.location.trim()) {
         location = prevQuery.location.trim();
       }
@@ -1547,6 +1616,32 @@ Deno.serve(async (req: Request) => {
         ambiguityReply = emptyLocationQuestion(text, lastBotReply, locale === "en");
       }
 
+      }
+
+      if (chapterOne) {
+        const plan = await validateLocationPlan(out.location_plan, async (name) => {
+          const result = await locClassify(name);
+          return result === LOC_CLASSIFY_FAILED ? null : result;
+        }, locale === "en", String(out.reply ?? ""), 20000, { text, previous: prevQuery, pendingQuestion: lastBotReply, landmarkHint: lmHint, landmarkAliases: name => readLandmarkAliases(SUPABASE_URL, SERVICE_KEY, name) });
+        if (plan.status === "ready") {
+          location = plan.location; regionPin = plan.regionPin;
+          out.geographicScope = plan.scope ?? "CITY";
+          out.validatedNationwide = plan.scope === "NATIONWIDE";
+          districtPin = undefined; validatedDistricts = plan.districts;
+          locationStateValidated = true; ambiguityReply = null;
+          chapterNotice = plan.notice;
+        } else if (plan.status === "blocked") {
+          const confirmed = startsNewLocationSearch(text) ? null : prevQuery;
+          location = typeof confirmed?.location === "string" ? confirmed.location : "";
+          regionPin = typeof confirmed?.regionPin === "string" ? confirmed.regionPin : undefined;
+          districtPin = typeof confirmed?.districtPin === "string" ? confirmed.districtPin : undefined;
+          validatedDistricts = Array.isArray(confirmed?.districts) ? confirmed.districts.filter((d): d is string => typeof d === "string") : (districtPin ? [districtPin] : []);
+          locationStateValidated = true; // authoritative unchanged state; this turn does not search
+          ambiguityReply = plan.reply;
+          chapterLocationReply = plan.reply; // preserve the specific reason even after the question budget is exhausted
+        }
+      }
+
       // The model's own reply SENTENCE is free-form and inconsistently mentions a SIZE the user gave —
       // it always lands in query.detail and therefore always shows in the deterministic "Search Summary"
       // block, but the sentence itself sometimes omits it (found live 2026-07-27: "فيلا 500 متر" showed
@@ -1580,7 +1675,7 @@ Deno.serve(async (req: Request) => {
       // A reply that states a price, asks about the property type, or asks for bedrooms already given is replaced by a line the code
       // writes from the parsed search (owner 2026-10-11; found by the live battery: scripts/agent-live-battery.mjs).
       // A distance / «near a landmark» wish is not measured yet: the reply says the whole city is searched (rulebook Draft 2).
-      const notMeasured = !districtPin && !regionPin ? proximityNotMeasuredText(text, location, locale === "en", lastBotReply) : null;
+      const notMeasured = !chapterOne && !districtPin && !regionPin ? proximityNotMeasuredText(text, location, locale === "en", lastBotReply) : null;
       if (anyCityReply) replyOut = anyCityReply;
       else if (notMeasured) replyOut = notMeasured;
       else if (replyBreaksSearchRules(replyOut, text)) {
@@ -1613,6 +1708,18 @@ Deno.serve(async (req: Request) => {
       // end-to-end with a mocked model response and assert the resulting kind — round 1 proved the
       // mandatory case (c)'s real protection lived in one line of untested inline wiring, guarded
       // only by a source-regex a plausible mutation could pass while reintroducing the bug.
+      const supportedNames = new Set([...Object.keys(searchSources), ...Object.values(searchSources).flat()].map(name => name.toLowerCase()));
+      const requestedSources = [...(Array.isArray(out.platforms) ? out.platforms : []), ...(Array.isArray(out.excludedPlatforms) ? out.excludedPlatforms : [])];
+      // A model may acknowledge an unsupported source in prose but omit it from platforms.
+      // Never execute the resulting unrestricted search while that restriction is unresolved.
+      const unsupportedSourceReply = /(?:website|platform|source).{0,100}(?:not supported|isn't supported|not one of|isn't one of|do not support|don't support)|(?:cannot|can't).{0,50}(?:search|limit).{0,50}(?:website|platform)|(?:not|isn't) one of.{0,60}(?:platforms|websites|sources)|(?:الموقع|المنصة|المواقع|المنصات).{0,60}(?:غير مدعوم|ما ندعم|لا ندعم|مو من)/iu.test(String(out.reply ?? ""));
+      const explicitWebsiteRestriction = /\b(?:from|on)\s+.{1,120}?\s+only\b|من\s+(?:موقع\s+)?[^،.!؟]{1,80}\s+(?:فقط|بس)(?:$|[،.!؟])/iu.test(text);
+      const clearWebsiteRestrictions = /\b(?:all|any|every)\s+(?:(?:supported|available|active)\s+)?(?:websites?|sites?|platforms?|sources?)\b|\b(?:clear|remove|reset)\b.{0,35}\b(?:website|platform|source|restriction)|(?:كل|جميع)\s*(?:المواقع|المنصات)|(?:امسح|احذف|شيل)\s*قيود\s*(?:المواقع|المنصات)/iu.test(text);
+      const droppedWebsiteRestriction = !requestedSources.length && !clearWebsiteRestrictions && (out.sourceSelectionChanged === true || explicitWebsiteRestriction);
+      if (droppedWebsiteRestriction || unsupportedSourceReply || requestedSources.some(name => typeof name !== "string" || !supportedNames.has(name.trim().toLowerCase()))) {
+        const reply = locale === "en" ? "That website isn't supported. Which supported website would you like to search?" : "الموقع غير مدعوم. أي موقع من المواقع المتاحة تبي نبحث فيه؟";
+        return json({ kind: "message", reply, locationQuestion: false, keepState: true, askCount });
+      }
       const wired = buildTurnDecision({
         text, out, prevQuery, location, regionPin, districtPin, ambiguityReply, askCount,
         price, detPrice, detailStr,
@@ -1630,6 +1737,20 @@ Deno.serve(async (req: Request) => {
         return json({ kind: "message", reply: situationReplyText("danger", locale === "en", text, lastBotReply), locationQuestion: false, query: understoodState(), askCount: decision.askCount });
       }
 
+      // NOT A SEARCH, EVEN IN THE MIDDLE OF ONE (live 2026-10-13, the owner watching): with an old search in memory, «شكراً» and «وش أفضل
+      // حي في الرياض؟» each RE-RAN «فيلا، ٣ مليون، ٤ غرف، مسبح», because the carried state alone was "enough to search". A pure thanks /
+      // goodbye / hello, advice, a complaint, a place abroad, a wish to sell, a link, a phone number or sadness is answered for what it is,
+      // and nothing is searched. It sends NO query on purpose (keepState): the app then keeps the search exactly as it was, where a query
+      // read from «وش أفضل حي في الرياض؟» would have planted a district «في الرياض؟» into it (live 2026-10-13). A nationality wish next to a real property («شقة للسعوديين بس») still searches,
+      // as it always did; a financial word can be a purpose («شقة للاستثمار»), so it never interrupts.
+      const aside = situationKind(text);
+      const asideNow = aside && aside !== "financial" && !(aside === "protected" && namesAProperty(text)) ? aside : null;
+      const courtesy = pureSocialKind(text);
+      if (asideNow || courtesy) {
+        const reply = asideNow ? situationReplyText(asideNow, locale === "en", text, lastBotReply) : socialReplyText(courtesy!, locale === "en", text, lastBotReply);
+        return json({ kind: "message", reply, locationQuestion: false, keepState: true, askCount });
+      }
+
       if (decision.kind === "message") {
         // UNSEARCHABLE — THE ONE QUESTION WAS ALREADY ASKED (owner, 2026-09-11). Checked FIRST: an
         // unresolved ambiguity or a still-missing place produces EXACTLY the same establishedState
@@ -1639,7 +1760,7 @@ Deno.serve(async (req: Request) => {
         // which is precisely the ask-loop the new ceiling exists to end. This is a STATEMENT, not a
         // question — never re-ask, for location or anything else, and never fall back to a
         // nationwide search to escape it (2026-09-04: the product does not run those).
-        const unsearchableReply = decision.unsearchable ? unsearchableText(locale === "en", text, lastBotReply) : null;
+        const unsearchableReply = chapterLocationReply ?? (decision.unsearchable ? unsearchableText(locale === "en", text, lastBotReply) : null);
         // A NO-PLACE REFUSAL MUST ASK FOR THE CITY (owner, 2026-09-04). Same shape as ambiguityReply
         // directly below: when the PLATFORM is the reason this turn is a clarification, the platform
         // supplies the question — the model does not know it was refused and writes as if it were
@@ -1702,9 +1823,11 @@ Deno.serve(async (req: Request) => {
       }
 
       // decision.kind === "listings"
+      const freshRequest = isFreshRequest(text, location);
       return json({
         kind: "listings",
         reply: groundReply(replyOut, locale, outAmenities, text, lastBotReply),
+        notice: chapterNotice,
         askCount: decision.askCount,
         query: {
           deal,
@@ -1714,18 +1837,26 @@ Deno.serve(async (req: Request) => {
           location,
           regionPin,
           districtPin,
+          districts: validatedDistricts,
+          locationStateValidated,
           type: typeof out.type === "string" && out.type ? out.type : null,
           detail: typeof out.detail === "string" && out.detail ? out.detail : null,
-          price,
-          priceOriginal: priceOriginal || undefined,
+          // A complete new request starts fresh: the app keeps nothing from the previous search, and a budget read from an EARLIER
+          // message is not this one's (see isFreshRequest, live 2026-10-13).
+          fresh: freshRequest || undefined,
+          price: freshRequest && !priceCameFromCurrentTurn ? "" : price,
+          priceOriginal: (freshRequest && !priceCameFromCurrentTurn ? "" : priceOriginal) || undefined,
           // RULE 2 (owner 2026-08-29) — the reply must not promise an ordering the query does not
           // apply. Live N1 replied «أرخص القصور» with sort unset. Fills an ABSENT sort only; an
           // explicit model sort is never overridden. See ./postModel.ts.
           sort: enforceSortMatchesReply(replyOut, typeof out.sort === "string" ? out.sort : undefined),
           count: (() => {
             const n = parseInt(String(out.count ?? "").replace(/[^\d]/g, ""), 10);
-            return isFinite(n) && n >= 1 ? Math.min(n, 15) : undefined;
+            return isFinite(n) && n >= 1 ? Math.min(n, 500) : undefined;
           })(),
+          geographicScope: out.geographicScope,
+          sourceSelectionChanged: out.sourceSelectionChanged === true,
+          excludedPlatforms: Array.isArray(out.excludedPlatforms) ? out.excludedPlatforms.filter((p: unknown) => typeof p === "string" && p) : [],
           platforms: Array.isArray(out.platforms) ? out.platforms.filter((p: unknown) => typeof p === "string" && p) : [],
           // AMENITIES (owner ruling 2026-08-29). The model PROPOSES tokens from the closed vocabulary
           // in JSON_SHAPE_HINT; it does NOT decide whether they may be applied. Certification is

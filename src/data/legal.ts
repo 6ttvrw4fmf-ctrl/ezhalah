@@ -1,3 +1,5 @@
+import { LEGAL_DOCS_EN } from './legalEnglish';
+
 // «الشروط والخصوصية» — drafted 2026-09-04 on the owner's explicit instruction ("create terms and
 // privacy page for us... do that for me... make us safe in terms of Saudi data authority and real
 // estate license"), superseding the earlier "do NOT invent" freeze from 2026-09-03 (that freeze was
@@ -63,3 +65,8 @@ export const LEGAL_DOCS: { terms: string[]; privacy: string[] } = {
 };
 
 export const hasLegalDocs = (): boolean => LEGAL_DOCS.terms.length > 0 && LEGAL_DOCS.privacy.length > 0;
+
+/** Display translation only: keep the Arabic policy and all section meanings unchanged. */
+export function getLegalDocs(locale: 'ar' | 'en'): typeof LEGAL_DOCS {
+  return locale === 'en' ? LEGAL_DOCS_EN : LEGAL_DOCS;
+}

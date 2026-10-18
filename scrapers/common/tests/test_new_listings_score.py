@@ -460,3 +460,152 @@ def test_area_the_page_labels_in_its_own_payload_is_the_page_value():
 def test_hajer_suburb_spellings_are_one_place(stored, text, want):
     # arkaan 17543658 … 17544564 (2026-10-13): served the catalog's «الضاحية X» for «حي X بضاحية هجر».
     assert compare_listing({"district_ar": stored}, page(text, title=text))["district"] == want
+
+
+def test_the_district_the_page_states_in_its_own_payload_beats_the_sellers_prose():
+    # mobasher 17693081 (2026-10-14, re-read run 38527021238): the payload carries
+    # "neighborhoodNameAr":"حي الثقبة" (= what we store); the description says «مدينة الخبر، حي الحمراء».
+    from scrapers.common.source_reread import page_evidence
+    body = ('<html><head><meta name="description" content="الموقع: المنطقة الشرقية، مدينة الخبر، حي الحمراء.">'
+            '</head><body><script>self.__next_f.push([1,"{\\"cityNameAr\\":\\"الخبر\\",'
+            '\\"neighborhoodNameAr\\":\\"حي الثقبة\\",\\"rooms\\":2}"])</script></body></html>')
+    pe = page_evidence(body)
+    assert compare_listing({"district_ar": "حي الثقبة"}, pe)["district"] == MATCH
+    assert compare_listing({"district_ar": "حي العقربية"}, pe)["district"] == MISMATCH
+    # without the payload field, the prose is all the page says
+    no_payload = page_evidence(body.replace("neighborhoodNameAr", "x"))
+    assert compare_listing({"district_ar": "حي الثقبة"}, no_payload)["district"] == MISMATCH
+
+
+def test_a_spec_value_in_a_sibling_element_beats_the_descriptions_dual_word():
+    # hajer 17663701 (2026-10-14): REM spec «عدد غرف النوم» / «6» in sibling spans; the description lists
+    # «غرفتين نوم» / «غرفتين ماستر» / «غرفتين نوم». The spec is the field; the prose dual is not the count.
+    from scrapers.common.source_reread import page_evidence
+
+    def body(n):
+        return ('<html><body><ul><li>•غرفتين نوم +دورة مياه</li><li>•غرفتين ماستر</li></ul>'
+                '<div class="detail rem-field-value"><strong class="rem-single-field-title">عدد غرف النوم</strong>'
+                '<span class="rem-single-field-sep"> : </span>'
+                f'<span class="rem-single-field-value">{n}</span></div></body></html>')
+    assert compare_listing({"bedrooms": 6}, page_evidence(body(6)))["bedrooms"] == MATCH
+    assert compare_listing({"bedrooms": 6}, page_evidence(body(3)))["bedrooms"] == MISMATCH
+
+
+def test_a_share_link_whose_page_never_carries_the_ad_code_is_unreadable():
+    # nufouth 17667724 (2026-10-14): /latest-offers?ads-N5470=1 serves the vacancy table without «5470».
+    from scrapers.common.new_listings_score import page_lacks_its_ad
+    table = "<html><body>جدول الشواغر | 6 غرف | حي المحمدية | 3 غرف | حي العارض</body></html>"
+    assert page_lacks_its_ad("https://nufouth.com/latest-offers?ads-N5470=1", table)
+    assert not page_lacks_its_ad("https://nufouth.com/latest-offers?ads-N5470=1", table + '<div id="N5470">2 غرف</div>')
+    assert not page_lacks_its_ad("https://nufouth.com/latest-offers?ads-N5470=1", table.replace("6 غرف", "إعلان 5470"))
+    assert not page_lacks_its_ad("https://aqar.fm/ad/5470", table)        # no code in the query: not this rule
+
+
+def test_a_district_the_page_names_only_in_seller_prose_is_silence_on_prose_only_sites():
+    # mobasher 17693081 (2026-10-14): we serve the API's «حي الثقبة»; the page HTML has only the seller's
+    # «مدينة الخبر، حي الحمراء». On a prose-only site that is silence; elsewhere it still contradicts.
+    from scrapers.common.new_listings_score import PROSE_ONLY_DISTRICT
+    page = {"title": "شقة سكني في المنطقة الشرقية الخبر للبيع",
+            "meta": {"description": "الموقع: المنطقة الشرقية، مدينة الخبر، حي الحمراء."}}
+    stored = {"district_ar": "حي الثقبة"}
+    assert "mobasher" in PROSE_ONLY_DISTRICT
+    assert compare_listing(stored, page, prose_only_district=True)["district"] == PAGE_SILENT
+    assert compare_listing(stored, page)["district"] == MISMATCH
+
+
+def test_a_per_meter_rate_matches_the_total_the_page_prints_for_it():
+    # muktamel 17584328 (2026-10-14): stored rate 420 × 690 m²; the page prints only «690 م² 289,800».
+    page = {"title": "أرض سكني للبيع في حي الجامعة في ثادق", "evidence_lines": ["690 م² 289,800", "للبيع 289,800"]}
+    assert compare_listing({"price_per_meter": 420, "area_m2": 690}, page)["price"] == MATCH
+    assert compare_listing({"price_per_meter": 400, "area_m2": 690}, page)["price"] != MATCH
+
+
+def test_wasalt_and_sanadak_are_read_from_their_own_record_not_the_shell():
+    # #540: the shared probe answers a live wasalt page with an empty body → 10/10 «unreadable» every night.
+    # #546: sanadak's page lists OTHER ads' areas; its own listing object is the ad.
+    stored = {"source_table": "wasalt_residential_listings", "listing_id": 9, "platform": "wasalt",
+              "district_ar": "حي النرجس", "deal_ar": "إيجار", "type_ar": "شقة"}
+    client = FakeClient({
+        "search_listings_ar": [stored],
+        "wasalt_residential_listings": [{"id": 9, "listing_url": "https://wasalt.sa/en/property/x-9"}],
+    })
+    own = {"title": "شقة للإيجار في حي النرجس", "meta": {}, "jsonld": [],
+           "evidence_lines": ["شقة للإيجار في حي النرجس"], "text_head": "شقة للإيجار في حي النرجس"}
+    shell = lambda url: (200, "<html><body></body></html>")          # what the probe really returns
+    row = score_site(client, "wasalt", [("wasalt_residential_listings", 9)], night="2026-10-16", pace=0,
+                     probe=shell, wasalt=lambda url: own, sanadak=lambda url: None)
+    assert row["decided_ads"] == 1 and row["fields"]["district"][MATCH] == 1
+    row = score_site(client, "wasalt", [("wasalt_residential_listings", 9)], night="2026-10-16", pace=0,
+                     probe=shell, wasalt=lambda url: None, sanadak=lambda url: None)
+    assert row["unreadable_pages"] == 1 and row["normal_mismatch"] == 0
+
+
+def test_muktamel_rooms_come_from_its_offer_record():
+    from scrapers.common.new_listings_score import muktamel_room_lines
+    got = (34519, {"offer": {"bedRoomsCount": 4, "bathroomsCount": 4}}, True)
+    lines = muktamel_room_lines("https://www.muktamel.com/real-estates/34519", fetch=lambda i: got)
+    assert lines == ["عدد غرف النوم 4", "عدد دورات المياه 4"]
+    # 17886575 (2026-10-16): stored 4/4, the description's prose says otherwise; the offer is the ad.
+    p = page(*lines, "شقة 3 غرف نوم و 2 حمام")
+    out = compare_listing({"bedrooms": 4, "bathrooms": 4}, p)
+    assert out["bedrooms"] == MATCH and out["bathrooms"] == MATCH
+    assert muktamel_room_lines("https://www.muktamel.com/real-estates/1", fetch=lambda i: None) == []
+    assert muktamel_room_lines("https://example.test/x", fetch=lambda i: got) == []
+
+
+def test_wasalt_structured_rows_are_read_as_labelled_lines():
+    # 17926766 (2026-10-16, re-read 38925580390): builtUpArea «96» = ours, while the REGA deed text names a land share.
+    from scrapers.common.af_score import wasalt_page
+    data = {"props": {"pageProps": {"propertyDetailsV3": {
+        "regaMojDesc": "حي قرطبة بمدينة الرياض  مساحة الوحدة من الأرض 51.52 متر",
+        "attributes": [{"key": "noOfBedrooms", "name": "Bedrooms", "value": 3},
+                       {"key": "builtUpArea", "name": "Built-Up Area", "value": "96", "unit": "SQM"}]}}}}
+    p = wasalt_page("https://wasalt.sa/en/property/x", fetch=lambda url: (data, 200, 0))
+    out = compare_listing({"area_m2": 96, "bedrooms": 3}, p)
+    assert out["area"] == MATCH and out["bedrooms"] == MATCH
+    assert compare_listing({"area_m2": 120}, p)["area"] == MISMATCH
+
+
+def test_wasalt_photo_classifier_labels_are_not_the_ads_statement():
+    from scrapers.common.af_score import wasalt_page
+    data = {"props": {"pageProps": {"propertyDetailsV3": {"classificationData": [
+        {"classificationScore": 0.99, "classificationName": "kitchen", "name": "a.jpg"}]}}}}
+    p = wasalt_page("https://wasalt.sa/en/property/x", fetch=lambda url: (data, 200, 0))
+    assert not any("kitchen" in x for x in p["evidence_lines"])
+
+
+def test_sanadak_structured_area_beats_its_approximate_prose():
+    # 17944027 (2026-10-16): lotSize 105.6 (page «مساحة العقار 105.6 م²»), description «المساحة : 120م تقريبا».
+    from scrapers.common.af_score import sanadak_page
+    o = {"title": "شقة للإيجار في الرياض قرطبة 2 غرفة", "lotSize": 105.6, "numberBedrooms": 2,
+         "description": "الموقع : الرياض حي قرطبة\nالمساحة : 120م تقريبا"}
+    p = sanadak_page("https://sanadak.sa/property-details/x", fetch=lambda url: (o, "", url))
+    assert compare_listing({"area_m2": 105, "bedrooms": 2}, p)["area"] == MATCH
+
+def test_three_to_ten_written_as_words_on_the_keyword_line():
+    # aljassim 17947950 (2026-10-16): the structured room cell «أربع غرف», stored 4, scored MISMATCH because the
+    # description's dual «غرفتين نوم» was the only figure the scorer could read.
+    p = page("فيلا جاهز للايجار في الخالدية أربع غرف", "(غرفة نوم رئيسية ماستر مع دورة مياة-صالة غرفتين نوم مع دورة مياة)")
+    assert compare_listing({"bedrooms": 4}, p)["bedrooms"] == MATCH
+    assert compare_listing({"bedrooms": 5}, page("أربع غرف"))["bedrooms"] == MISMATCH
+    # A word that only CONTAINS a number word is not one («مستودع» holds «ست»).
+    assert compare_listing({"bedrooms": 6}, page("غرف مستودع"))["bedrooms"] != MATCH
+
+
+def test_tuba_street_width_comes_from_its_rega_record():
+    """#621 (2026-10-18): tuba 18258569 stores the REGA licence streetWidth 25; the page prose says «شارع 20».
+    The score must read the licence (structured beats prose), and an unreadable record adds nothing."""
+    import json
+    from scrapers.common import new_listings_score as nls
+    rec = {"slug": "villa-for-sale-in-riyadh-61",
+           "advalidatorinfo": {"response_data": json.dumps({"streetWidth": 25})}}
+    nls._TUBA_RECORDS = None
+    assert nls.tuba_rega_lines("https://tuba.com.sa/property/villa-for-sale-in-riyadh-61",
+                               fetch=lambda: [rec]) == ["عرض الشارع 25"]
+    assert nls.tuba_rega_lines("https://tuba.com.sa/property/other-slug", fetch=lambda: [rec]) == []
+    nls._TUBA_RECORDS = None
+    assert nls.tuba_rega_lines("https://tuba.com.sa/property/x", fetch=lambda: 1 / 0) == []
+    nls._TUBA_RECORDS = None
+    lines = nls.tuba_rega_lines("https://tuba.com.sa/property/villa-for-sale-in-riyadh-61", fetch=lambda: [rec])
+    assert nls._cmp_number(25, lines + ["شارع 20 متر"], " ".join(lines), r"عرض الشارع") == nls.MATCH
+    nls._TUBA_RECORDS = None

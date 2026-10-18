@@ -210,3 +210,32 @@ export async function settleOnOneIndex<T>(stamp: () => Promise<string>, take: ()
   if (before !== after || before === UNREADABLE_STAMP) return { state: 'moved', stamp: `${before} → ${after}` };
   return { state: 'stable', result };
 }
+
+/**
+ * A whole CELL of checks, judged on ONE index state (AF engineer, 2026-10-13).
+ *
+ * verify-af-matrix-truth-live.ts reads one certified cell for minutes — base, per-option counts,
+ * walks, intersections — and compares totals taken at different moments. On 10-13 its 05:49 run
+ * failed 81 checks (Villa/Buy sums, Residential Building directions) and its 07:57 run failed 28
+ * DIFFERENT ones (Rest House/Buy, Villa/bothDeals); every one of those cells passed in full when re-run
+ * alone minutes later (217, 230 and 138 checks). A cell whose «answered + not-matching + unknown ==
+ * base» fails on every option at once is a base that moved, not a predicate defect.
+ *
+ * `attempt` runs the cell and returns its failed check labels. A clean first attempt passes. A failing
+ * one is re-taken inside settleOnOneIndex: failures that survive a read proven to span no rebuild are
+ * the product's; a re-read that still straddles one is UNDECIDED — never a pass.
+ */
+export type CellVerdict =
+  | { verdict: 'pass'; reconciled: boolean }
+  | { verdict: 'fail'; failures: string[] }
+  | { verdict: 'undecided'; stamp: string; firstFailures: string[] };
+
+export async function judgeCellOnOneIndex(
+  stamp: () => Promise<string>, attempt: () => Promise<string[]>,
+): Promise<CellVerdict> {
+  const first = await attempt();
+  if (first.length === 0) return { verdict: 'pass', reconciled: false };
+  const again = await settleOnOneIndex(stamp, attempt);
+  if (again.state === 'moved') return { verdict: 'undecided', stamp: again.stamp, firstFailures: first };
+  return again.result.length === 0 ? { verdict: 'pass', reconciled: true } : { verdict: 'fail', failures: again.result };
+}

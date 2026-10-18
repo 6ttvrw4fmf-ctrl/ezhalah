@@ -6,7 +6,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, radius } from '@/theme/tokens';
 import type { Listing } from '@/data/listings';
 import { derivedTotalEquation } from '@/data/listings';
-import { useI18n, t as tr, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
+import { useI18n, englishCatalogText, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, ATTRIBUTE_UNRESOLVED_AR } from '@/i18n';
 import { translitPlace, regionFromUrl } from '@/lib/translitPlace';
 import { arabicOrPlaceholder, arabicOrPlaceholderForFreeText, hideArabicProseInEnglish, attrDisplayLabel, translateTrailingPeriodWord } from '@/lib/arabicText';
 import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
@@ -16,8 +16,11 @@ import { sourceName } from '@/lib/listingDisplay';
 import { isStayLengthPriced, listingPrice } from '@/lib/listingDisplay';
 import { afEvidence, AMENITY_COL, type ActiveAf } from '@/lib/afEvidence';
 import { typeImg } from '@/theme/propertyIcons';
-import { GoldShineButton } from './CardReveal';
+import { GoldShineButton, GoldSurface } from './CardReveal';
 import { BuzzLayer } from './CardBuzzer';
+import { partyConfetti } from './ConfettiOverlay';
+import { inAppViewerHost } from '@/lib/inAppViewer';
+import { listingOpenUrl } from '@/lib/openListing';
 
 const IS_WEB = Platform.OS === 'web';
 
@@ -104,8 +107,21 @@ export function ResultCard({
   const tight = row === 'tight';
   // 'tight' only: the two truncated secondary lines, unfolded by a tap on them.
   const [unfolded, setUnfolded] = useState(false);
-  // Laptop photo-first card: bumped by a press on the photo or the gold button — plays the golden buzzer.
+  // THE PARTY IS FOR THE SITES THAT OPEN INSIDE EZHALAH (owner 2026-10-17: «whenever a user clicks on a
+  // listing I want this party confetti … on everything», then «your job is doing it for the 76 sites …
+  // the ones after I'll do it later»): on every layout — laptop roomy, laptop tight, phone — a press on
+  // the photo, the body or the gold button bumps `burst` and the golden buzzer + the screen-level
+  // confetti play, but ONLY when this listing opens inside Ezhalah (web, IN_APP_VIEWER_HOSTS). A card
+  // that opens a new tab or the native preview page opens exactly as before, with no party.
   const [burst, setBurst] = useState(0);
+  // GOLD = OPENS INSIDE EZHALAH (owner 2026-10-17: «the golden frame only with the 76 … the rest silver»):
+  // the ring and the «اضغط هنا» strip are gold for a listing on the in-app viewer list, silver otherwise.
+  const inside = !!inAppViewerHost(listingOpenUrl(listing));
+  const tone: 'gold' | 'silver' = inside ? 'gold' : 'silver';
+  const partyHere = IS_WEB && inside;
+  // PRESS = OPEN. The ad opens first, synchronously inside the click (a delayed window.open would be
+  // popup-blocked); the buzzer is bumped second and is pure decoration.
+  const fire = () => { onOpen(); if (partyHere) { setBurst((b) => b + 1); partyConfetti(); } };
   // Evidence for the «مطابق لطلبك» strip: NEVER read from listing.features / listing.bathrooms (raw,
   // NULL-coerced) — only from listing.canon, the canonical row the predicate actually passed on.
   const evidence = useMemo(() => afEvidence(activeAf ?? [], listing.canon, t), [activeAf, listing.canon, t]);
@@ -166,7 +182,7 @@ export function ResultCard({
   // (dealapp "تاون هاوس", "ملحق علوي"…); for English-raw sources (aqar stores "Apartment") show the
   // source-matching Arabic via the clean mapping — never English on the card. Mapping stays filter-only.
   const typeLabel = arabicOrPlaceholder(
-    /[ء-ي]/.test(listing.type || '') ? listing.type : t(listing.cleanType ?? listing.type),
+    locale === 'en' ? englishCatalogText(listing.type || listing.cleanType || '') : /[ء-ي]/.test(listing.type || '') ? listing.type : t(listing.cleanType ?? listing.type),
     locale,
     TYPE_UNRESOLVED_AR,
   );
@@ -215,9 +231,6 @@ export function ResultCard({
   if (row === 'roomy') {
     const photos = listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []);
     const stay = isStayLengthPriced(listing.source);
-    // PRESS = OPEN. The ad opens first, synchronously inside the click (a delayed window.open would be
-    // popup-blocked); the buzzer is bumped second and is pure decoration.
-    const fire = () => { onOpen(); setBurst((b) => b + 1); };
     const typeIcon = typeImg(listing.cleanType ?? '');
     // PLAIN + SAME SIZE (owner 2026-10-11): every laptop card has the same fixed rows — one title line, one
     // main line, ONE row of at most 3 chips (the Advanced-Filter picks come first) with a plain «+N».
@@ -229,13 +242,16 @@ export function ResultCard({
     const lpFacts: Array<{ k: string; label: string; value: string }> = [];
     for (const re of FACT_ORDER) {
       const r = factRows.find((x) => re.test(`${x.key} ${x.label}`) && !lpFacts.some((f) => f.k === x.key));
-      if (r && lpFacts.length < 3) lpFacts.push({ k: r.key, label: attrDisplayLabel(t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), value: arAttrValue(r.label, r.value, locale) });
+      if (r && lpFacts.length < 3) lpFacts.push({ k: r.key, label: attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR), value: arAttrValue(r.label, r.value, locale) });
     }
     if (listedClean && lpFacts.length < 3) lpFacts.push({ k: 'listed', label: t('Added'), value: listedClean });
     const CHIP_CAP = 3;
     const shownFeats = visible.slice(0, CHIP_CAP);
     const moreFeats = visible.length - shownFeats.length;
     return (
+      // THE GOLD FRAME (owner 2026-10-17, «make the frame … golden shining like a buzzer … for all»): a
+      // thin shining gold ring around EVERY card, painted like the gold button; the card sits inside it.
+      <GoldSurface tone={tone} style={card.goldRing} testID="card-gold-frame">
       <View testID={`card-listing-${listing.id}`} style={[card.wrap, card.lpWrap, { direction: wDir }]}>
         <Pressable onPress={fire} accessibilityRole="link" accessibilityLabel={t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })} style={card.lpPhoto}>
           <ListingPhoto photos={photos} style={card.photo} t={t} />
@@ -245,10 +261,11 @@ export function ResultCard({
               <Text style={card.rankText}>#{rank}</Text>
             </View>
           ) : null}
-          <View style={card.lpPhotoFoot} pointerEvents="none">
+          {/* THE GOLD STRIP on the laptop photo-first card too (owner 2026-10-17: «for all»). */}
+          <GoldSurface tone={tone} style={card.lpPhotoFoot} pointerEvents="none" testID="card-gold-strip">
             <Text style={card.lpPhotoFootTx}>{typeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
             {listing.source_url ? <Text style={[card.lpPhotoFootTx, card.lpHost]} numberOfLines={1}>{sourceHost(listing.source)}</Text> : null}
-          </View>
+          </GoldSurface>
         </Pressable>
 
         <View style={card.lpBody}>
@@ -305,7 +322,7 @@ export function ResultCard({
             </View>
             {listing.beds > 0 ? <Stat icon="bed-outline" big={String(listing.beds)} small={t(listing.beds === 1 ? 'Bed' : 'Beds')} /> : null}
             {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} picked={bathPicked} /> : null}
-            {listing.area > 0 ? <Stat icon="resize-outline" big={`${listing.area} ${tr('m²')}`} small={t('Area')} /> : null}
+            {listing.area > 0 ? <Stat icon="resize-outline" big={`${listing.area} ${t('m²')}`} small={t('Area')} /> : null}
           </View>
 
           {evidence.length > 0 ? (
@@ -351,12 +368,13 @@ export function ResultCard({
           <View style={card.lpFoot}>
             <View style={card.hostHead}>
               <View style={[card.hostBadge, card.lpBadge]}><SourceBadge source={listing.source} /></View>
-              <Text style={card.hostedOn}>{t('Hosted on {name}', { name: t(sourceName(listing.source)) })}</Text>
+              <Text style={card.hostedOn}>{t('Hosted on {name}', { name: locale === 'en' ? englishCatalogText(sourceName(listing.source)) : t(sourceName(listing.source)) })}</Text>
             </View>
           </View>
         </View>
         <BuzzLayer burst={burst} />
       </View>
+      </GoldSurface>
     );
   }
 
@@ -369,9 +387,10 @@ export function ResultCard({
     // checkable if a rendered card can be identified in the DOM; matching strips to rows by position
     // is unsound, because a row that earns no chip renders no strip and silently shifts the rest.
     // Rendering-only: no style, no behaviour, and web-only `testID` becomes `data-testid`.
+    <GoldSurface tone={tone} style={card.goldRing} testID="card-gold-frame">
     <View testID={`card-listing-${listing.id}`} style={[card.wrap, row && card.wrapRow, { direction: wDir }]}>
       {/* The whole photo keeps the existing source-listing action. */}
-      <Pressable onPress={onOpen} accessibilityRole="link" accessibilityLabel={t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })} style={[card.photoCol, row ? [card.photoColRow, tight && card.photoColTight] : horizontal ? card.photoColWide : card.photoColMobile]}>
+      <Pressable onPress={fire} accessibilityRole="link" accessibilityLabel={t('Clicking this property will take you to {host}', { host: sourceHost(listing.source) })} style={[card.photoCol, row ? [card.photoColRow, tight && card.photoColTight] : horizontal ? card.photoColWide : card.photoColMobile]}>
         <ListingPhoto photos={(listing.photos && listing.photos.length ? listing.photos : (listing.photo ? [listing.photo] : []))} style={card.photo} t={t} />
         {rank ? (
           <View style={[card.rankBadge, row && card.rankBadgeRow]} pointerEvents="none">
@@ -380,21 +399,22 @@ export function ResultCard({
         ) : null}
         {/* user request: removed the white "AQAR" pill that floated over the photo's top-right.
             Source attribution appears in the photo strip and the compact source row. */}
+        {/* THE GOLD STRIP (owner 2026-10-17): the «اضغط هنا» strip shines gold like the buzzer, on every card. */}
         {listing.source_url ? (
-          <View style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none">
+          <GoldSurface tone={tone} style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none" testID="card-gold-strip">
             <Text style={[card.photoAction, row && card.photoActionRow]}>{t('Click here 👆')}</Text>
             <Text style={[card.sourceText, row && card.sourceTextRow]} numberOfLines={row ? 1 : undefined}>{sourceHost(listing.source)}</Text>
-          </View>
+          </GoldSurface>
         ) : null}
       </Pressable>
 
       <View style={row ? card.bodyRow : card.body}>
       {/* ─── property info ───────────────────────── */}
-      <Pressable onPress={onOpen} style={[card.midCol, row && card.midColRow]}>
+      <Pressable onPress={fire} style={[card.midCol, row && card.midColRow]}>
         <View style={card.sourceRow}>
           <View style={card.hostHead}>
             <View style={card.hostBadge}><SourceBadge source={listing.source} /></View>
-            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: t(sourceName(listing.source)) })}</Text>
+            <Text style={card.hostedOn}>{t('Hosted on {name}', { name: locale === 'en' ? englishCatalogText(sourceName(listing.source)) : t(sourceName(listing.source)) })}</Text>
           </View>
           <Text style={card.typeLabel}>{typeLabel} {t(listing.deal === 'Rent' ? 'for Rent' : 'for Sale')}</Text>
         </View>
@@ -498,7 +518,7 @@ export function ResultCard({
         <View style={card.statsRow}>
           {listing.beds > 0 ? <Stat icon="bed-outline" big={String(listing.beds)} small={t(listing.beds === 1 ? 'Bed' : 'Beds')} /> : null}
           {(listing.bathrooms ?? 0) > 0 ? <Stat icon="water-outline" big={String(listing.bathrooms)} small={t(listing.bathrooms === 1 ? 'Bath' : 'Baths')} picked={bathPicked} /> : null}
-          {listing.area > 0 ? <Stat icon="resize-outline" big={`${listing.area} ${tr('m²')}`} small={t('Area')} /> : null}
+          {listing.area > 0 ? <Stat icon="resize-outline" big={`${listing.area} ${t('m²')}`} small={t('Area')} /> : null}
           <Stat icon="business-outline" big={typeLabel} small={t('Property Type')} />
           {listedClean ? <Stat icon="calendar-outline" big={t('Added')} small={listedClean} /> : null}
         </View>
@@ -576,9 +596,10 @@ export function ResultCard({
       </View>
       )}
       </View>
-      {/* keeps the golden-buzzer party playing while this card re-flows into the compact row */}
-      {row ? <BuzzLayer burst={burst} /> : null}
+      {/* the golden-buzzer party on EVERY card — laptop tight row and phone alike (owner 2026-10-17) */}
+      <BuzzLayer burst={burst} />
     </View>
+    </GoldSurface>
   );
 }
 
@@ -652,6 +673,34 @@ export function arAttrValue(label: string, value: string, locale: string): strin
   if (!v) return value;
   const ll = String(label ?? '').trim().toLowerCase();
   const lv = v.toLowerCase();
+  if (locale === 'en') {
+    // Translate finite source enums in either direction without changing the stored fact.
+    const known = Object.entries(AR_ENUM[ll] ?? {}).find(([, ar]) => ar === v);
+    if (known) return known[0].replace(/-/g, ' ');
+    if (v === 'نعم') return 'Yes';
+    if (v === 'لا') return 'No';
+    if (ll === 'facade') {
+      const directions: Record<string, string> = { شرق: 'East', شرقية: 'East', غرب: 'West', غربية: 'West', شمال: 'North', شمالية: 'North', جنوب: 'South', جنوبية: 'South' };
+      const parts = v.split(/[\s-]+/);
+      if (parts.every(part => directions[part])) return parts.map(part => directions[part]).join(' ');
+    }
+    if (/street.*width|عرض الشارع/i.test(ll)) return v.replace(/^(\d+(?:\.\d+)?)\s*(?:متر|م)$/u, '$1 m');
+    if (ll === 'age' || ll === 'building age (years)') {
+      if (v === 'جديد') return 'New';
+      if (v === 'أقل من سنة') return 'Less than 1 year';
+      if (v === 'سنة واحدة' || v === 'سنة' || v === 'سنه') return '1 year';
+      if (/^اكثر من عشر سنوات$/.test(v)) return 'Over 10 years';
+      if (v === 'سنتان') return '2 years';
+      const years = /^(أكثر من )?(\d+) (?:سنوات|سنة)$/.exec(v);
+      if (years) return `${years[1] ? 'Over ' : ''}${years[2]} years`;
+    }
+    if (ll === 'amenities' || ll === 'property services') {
+      const aliases: Record<string, string> = { موقف: 'Parking', الكهرباء: 'Electricity', المياه: 'Water Supply', الماء: 'Water Supply', 'الصرف الصحي': 'Sanitation' };
+      return v.split(/[،,]/).map(item => aliases[item.trim()] ?? englishCatalogText(item.trim())).join(', ');
+    }
+    if (['street', 'address', 'city', 'district', 'deed location'].includes(ll)) return translitPlace(v);
+    return englishCatalogText(v);
+  }
   if (AR_YESNO[lv]) return AR_YESNO[lv];                                   // Electricity/Water/booleans
   if (ll === 'age') {
     if (lv === 'new') return 'جديد';
@@ -701,7 +750,7 @@ function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
       <Text numberOfLines={unfolded ? undefined : 1} style={[card.oneLine, locale === 'ar' ? card.oneLineRtl : card.oneLineLtr]}>
         {visible.map((r) => (
           <Text key={r.key}>
-            <Text style={card.addlLabel}>{attrDisplayLabel(t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR)} </Text>
+            <Text style={card.addlLabel}>{attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR)} </Text>
             <Text style={card.addlValue}>{arAttrValue(r.label, r.value, locale)}</Text>
             {'\u2003'}
           </Text>
@@ -715,7 +764,7 @@ function AdditionalInformationPanel({ listing, t, locale, oneLine, unfolded }: {
         {visible.map((r) => (
           <View key={r.key} style={card.addlCell}>
             {/* The source's own Arabic `key` outranks the placeholder — see attrDisplayLabel. */}
-            <Text style={card.addlLabel}>{attrDisplayLabel(t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR)}</Text>
+            <Text style={card.addlLabel}>{attrDisplayLabel(locale === 'en' ? englishCatalogText(r.label) : t(r.label), r.key, locale, ATTRIBUTE_UNRESOLVED_AR)}</Text>
             <Text style={card.addlValue}>{arAttrValue(r.label, r.value, locale)}</Text>
           </View>
         ))}
@@ -854,6 +903,8 @@ const EILMALRIYADA_LOGO = require('../../assets/images/eilmalriyada.png');
 const GOLDENDEAL_LOGO = require('../../assets/images/platform-logos/goldendeal-sa.png');
 const EBRIZA_LOGO = require('../../assets/images/platform-logos/ebriza-com-sa.png');
 const SHOMOU_LOGO = require('../../assets/images/platform-logos/shomoalaqar-com-sa.png');
+// Haraj: official header artwork, collected 2026-10-18 UTC.
+const HARAJ_LOGO = require('../../assets/images/platform-logos/haraj.png');
 const VMKSA_LOGO = require('../../assets/images/platform-logos/vm-ksa-com.png');
 const IBAAX_LOGO = require('../../assets/images/platform-logos/ibaax-sa.png');
 const THOUSAND_LOGO = require('../../assets/images/platform-logos/1000-com-sa.png');
@@ -1111,6 +1162,7 @@ export function SourceBadge({ source }: { source: string }) {
   if (raw === 'arsh' || s.includes('عرش العقارية') || s.includes('arshglobal')) return <PlatformLogo source={ARSHGLOBAL_LOGO} />;
   if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return <PlatformLogo source={SUPEROFFICE_LOGO} />;
   if (s.includes('شموع العقار') || s.includes('shomou')) return <PlatformLogo source={SHOMOU_LOGO} />;
+  if (s.includes('حراج') || s.includes('haraj')) return <PlatformLogo source={HARAJ_LOGO} />;
   if (s.includes('منصة مكتب') || s.includes('maktab')) return <PlatformLogo source={MAKTAB_LOGO} />;
   if (s.includes('سرداب') || s.includes('sirdab')) return <PlatformLogo source={SIRDAB_LOGO} />;
   if (raw === 'ashab' || s.includes('عشاب العقارية') || s.includes('ashab.sa')) return <PlatformLogo source={ASHAB_LOGO} />;
@@ -1300,6 +1352,7 @@ function sourceHost(source: string): string {
   if (s.includes('عرش العقارية') || s.includes('arshglobal')) return 'arshglobal.com.sa';
   if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return 'superoffice.sa';
   if (s.includes('شموع العقار') || s.includes('shomou')) return 'shomoalaqar.com.sa';
+  if (s.includes('حراج') || s.includes('haraj')) return 'haraj.com.sa';
   if (s.includes('منصة مكتب') || s.includes('maktab')) return 'maktab.sa';
   if (s.includes('سرداب') || s.includes('sirdab')) return 'marketplace.sirdab.co';
   if (s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'ashab.sa';
@@ -1438,10 +1491,13 @@ const card = StyleSheet.create({
   platformText: { color: colors.primary, fontSize: 10.5, fontWeight: '700' },
   sourceStrip: {
     position: 'absolute', bottom: 0, left: 0, right: 0, paddingVertical: 9, paddingHorizontal: 10,
-    backgroundColor: 'rgba(22,52,35,0.93)', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 5,
+    flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 5,
   },
-  sourceText: { color: '#fff', fontSize: 10, fontWeight: '500', writingDirection: 'ltr' },
-  photoAction: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  // Dark text ON the gold strip (goldOnFill), the same pairing as the gold button.
+  sourceText: { color: colors.goldOnFill, fontSize: 10, fontWeight: '700', writingDirection: 'ltr' },
+  photoAction: { color: colors.goldOnFill, fontSize: 12, fontWeight: '800' },
+  // The shining gold ring around every card: 3px of gradient showing around the card's own corners.
+  goldRing: { borderRadius: 13, padding: 3 },
 
 
   // ─── LAPTOP PHOTO-FIRST CARD (owner 2026-10-11) ───
@@ -1451,9 +1507,10 @@ const card = StyleSheet.create({
   lpFade: { position: 'absolute', top: 0, left: 0, right: 0, height: 64, backgroundColor: 'rgba(14,32,22,0.28)' },
   lpPhotoFoot: {
     position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 12, paddingVertical: 8,
-    backgroundColor: 'rgba(14,32,22,0.55)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8,
   },
-  lpPhotoFootTx: { color: colors.onFill, fontSize: 12, fontWeight: '500' },
+  // Dark text ON the gold strip (goldOnFill), like the gold button.
+  lpPhotoFootTx: { color: colors.goldOnFill, fontSize: 12, fontWeight: '700' },
   lpHost: { writingDirection: 'ltr', flexShrink: 1 },
   lpBody: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10, gap: 5, minWidth: 0 },
   lpPriceRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },

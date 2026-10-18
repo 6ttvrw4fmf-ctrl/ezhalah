@@ -21,11 +21,17 @@ def test_dealapp_is_read_by_its_liveness_oracle(monkeypatch):
 
 def test_gathern_is_read_by_its_checker_session(monkeypatch):
     from scrapers.gathern import liveness as gl
-    statuses = {"a": 200, "b": 404, "c": 410, "d": 0, "e": 403}
+    statuses = {"a": 200, "b": 404, "c": 410, "d": 0, "e": 403, "f": gl.HOME_LANDED}
     monkeypatch.setattr(gl, "proxied_session", lambda use_proxy: object())
-    monkeypatch.setattr(gl, "probe", lambda s, url, retries=3: statuses[url])
+    monkeypatch.setattr(gl, "probe", lambda s, url, retries=3, home_status=0: (
+        home_status if statuses[url] == gl.HOME_LANDED else statuses[url]))
     read = SC._reader_for("gathern")
-    assert [read(u) for u in "abcde"] == [ALIVE, DEAD, DEAD, UNKNOWN, UNKNOWN]
+    assert [read(u)[0] for u in "abcdef"] == [ALIVE, DEAD, DEAD, UNKNOWN, UNKNOWN, UNKNOWN]
+    # 2026-10-17: 919 served units read "transient" every hour; the double-check must say whether
+    # that is a home-page landing or no answer at all, or nobody can tell which fix they need.
+    assert "home page" in read("f")[1] and "home page" not in read("d")[1]
+    row = {"listing_url": "f"}
+    assert SC.pick_reader("gathern", None, None)[1](row) == UNKNOWN and "home page" in row["evidence"]
 
 
 def test_other_sites_keep_the_generic_judge():
@@ -63,3 +69,26 @@ def test_reader_order_site_reader_then_oracle_then_marker(monkeypatch):
     monkeypatch.delitem(FL.SITES, "tuba")
     assert SC.pick_reader("tuba", "marker", None)[0] == "registered-marker"
     assert SC.pick_reader("aqar", None, None)[0] == "status-only"
+
+
+def test_dead_visible_score_reads_a_reason_giving_site_reader_as_a_plain_verdict(monkeypatch):
+    from scrapers.common import dead_visible_score as DV
+    monkeypatch.setattr(DV, "_reader_for", lambda p: (lambda url: (ALIVE, "HTTP 200")))
+    method, read = DV.reader_for("gathern", None)
+    assert method == "site-reader" and read({"listing_url": "u"}) == ALIVE
+
+
+def test_ashab_is_read_by_its_own_status_badge(monkeypatch):
+    from scrapers.ashab import run as ash
+    pages = {"a": ["للإيجار", ash.AVAILABLE], "b": ["للإيجار", "مؤجر"], "c": ["للبيع", "مباع بالكامل"],
+             "d": ["للإيجار", "محجوز"], "e": ["للإيجار"]}
+    monkeypatch.setattr(SC, "_ashab_session", lambda: object())
+    monkeypatch.setattr(ash, "get", lambda s, url: url)
+    monkeypatch.setattr(ash, "parse_page", lambda page: {"badges": pages[page]})
+    read = SC._reader_for("ashab")
+    assert [read(u)[0] for u in "abcde"] == [ALIVE, DEAD, DEAD, UNKNOWN, UNKNOWN]
+
+    def boom(s, url):
+        raise RuntimeError("403")
+    monkeypatch.setattr(ash, "get", boom)
+    assert read("a")[0] == UNKNOWN

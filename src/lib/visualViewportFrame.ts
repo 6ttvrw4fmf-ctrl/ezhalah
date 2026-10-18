@@ -80,6 +80,11 @@ export function useVisualViewportRoot(): void {
     };
     // resize fires as the keyboard animates; scroll fires as Safari moves the layout viewport under
     // it. Both are needed — with only resize the root lands at the right SIZE in the wrong PLACE.
+    // GLIDE, DON'T SNAP (owner 2026-10-17: «clicking on the box doesn't feel smooth»). iOS reports the keyboard in
+    // one or two steps, so the root used to jump to its new height. Only the HEIGHT eases (the top must follow
+    // Safari's scroll instantly or a strip of bare page shows), and the composer, anchored to the bottom, rises
+    // with it instead of snapping.
+    root.style.transition = 'height 200ms ease-out';
     vv.addEventListener('resize', apply);
     vv.addEventListener('scroll', apply);
     apply();
@@ -88,7 +93,19 @@ export function useVisualViewportRoot(): void {
       vv.removeEventListener('scroll', apply);
       // Restore, so a hot reload or an unmount cannot strand the app at a stale height.
       root.style.position = ''; root.style.left = ''; root.style.right = '';
-      root.style.top = ''; root.style.height = '';
+      root.style.top = ''; root.style.height = ''; root.style.transition = '';
     };
   }, []);
+}
+
+/**
+ * Run `cb` each time the visible window resizes (the keyboard opening or closing). Returns the
+ * unsubscribe. The chat uses it to settle at the newest message once the keyboard has taken its
+ * space; the pinning above stays this module's only business with the viewport geometry.
+ */
+export function onVisibleWindowResize(cb: () => void): () => void {
+  if (typeof window === 'undefined' || !window.visualViewport) return () => {};
+  const vv = window.visualViewport;
+  vv.addEventListener('resize', cb);
+  return () => vv.removeEventListener('resize', cb);
 }

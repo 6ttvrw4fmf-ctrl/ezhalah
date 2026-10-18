@@ -58,6 +58,11 @@ export const lightColors = {
   goldLightHover: '#f0c94a', // both stops deepen slightly on hover/press
   goldDeepHover: '#a86f08',
   goldOnFill: '#2a1d06',
+  // SILVER (owner 2026-10-17): the card ring + «اضغط هنا» strip of a listing that does NOT open inside
+  // Ezhalah; gold is reserved for the sites that do. Same metallic read as the gold pair.
+  silverLight: '#f4f6f8',
+  silverDeep: '#9aa6b2',
+  silverOnFill: '#1f2a33',
   danger: '#c0392b', // destructive text/icons
   dangerBg: '#fbe8e6', // destructive tinted fill
   dangerLine: '#f3cfca', // destructive tinted border
@@ -120,6 +125,9 @@ export const darkColors: Record<PaletteKey, string> = {
   goldLightHover: '#f0c94a',
   goldDeepHover: '#a86f08',
   goldOnFill: '#2a1d06',
+  silverLight: '#e6eaef',
+  silverDeep: '#7f8a96',
+  silverOnFill: '#161d24',
   danger: '#e46a5e',
   dangerBg: '#3a1e19',
   dangerLine: '#562a23',
@@ -157,6 +165,7 @@ export function buildThemeCss(): string {
     // subtree root beats every :root block above for everything inside it — both dark paths.
     `[data-ez-light]{${decl(lightColors)}color-scheme:light;}`,
     TAP_TARGET_CSS,
+    TAP44_DOWN_CSS,
     COMPOSER_PLACEHOLDER_CSS,
   ].join('\n');
 }
@@ -209,6 +218,18 @@ export const TAP_TARGET_CSS =
   + `transform:translate(-50%,-50%);width:100%;height:100%;`
   + `min-width:${TAP_TARGET_MIN}px;min-height:${TAP_TARGET_MIN}px;z-index:-1;}`;
 
+/** A SECOND, DIRECTIONAL marker (🦅 Falcon 2026-10-16): the floor grows DOWN from the control's top edge
+ *  instead of out from its centre. For a short control parked just under another one, a centred 44px
+ *  box reaches UP into its neighbour's own visual area. Measured on production at 375px: the agent
+ *  composer's «شاهين 2.2» line (24px tall, 3px under the 34px mic) grew 10px up and took the mic's
+ *  bottom edge — a press on the mic opened the model menu (journey-sweep tap-targets-meet-44, red
+ *  daily). Stacking the row above it only moved the theft onto the model line's top edge (the mic's
+ *  own floor grows 5px down); growing the model line downward fixes both: all five probe points then
+ *  resolve to their own control, and the extra area lands on the disclaimer text, not a control.
+ *  Used WITH TAP44 (it only re-anchors the same overlay); a separate rule so TAP_TARGET_CSS stays one. */
+export const TAP44_DOWN = { tap44Down: '1' } as const;
+export const TAP44_DOWN_CSS = '[data-tap44-down]::after{top:0;transform:translate(-50%,0);}';
+
 /** The opt-in marker, spread into a control's `dataSet`. It lives beside the rule that implements
  *  it so the attribute and the CSS can never drift apart, and so a barrier can import both.
  *  Opt-in rather than a blanket `[role="button"]` rule: which controls grow stays a reviewed
@@ -218,8 +239,8 @@ export const TAP_TARGET_CSS =
 export const TAP44 = { tap44: '1' } as const;
 
 /** The AI-chat composer's empty-box hint stays on ONE line and ends in an ellipsis (owner 2026-10-05).
- *  With the typed text sharing a line with the mic and Send, the long hint «اكتب العقار اللي تبحث عنه في
- *  السعودية...» wrapped to two lines on a phone, which made the box taller and lifted typed text above
+ *  With the typed text sharing a line with the mic and Send, the old long hint «اكتب العقار اللي تبحث عنه في
+ *  السعودية...» wrapped to two lines on a phone (since 2026-10-17 the hint is the short «اكتب عقارك وإزهله...»), which made the box taller and lifted typed text above
  *  the buttons. `text-overflow` trails at the END of the line in the field's own direction, so in Arabic
  *  the dots sit on the left, after the words. Opt-in by marker, like TAP44. */
 export const COMPOSER_INPUT = { composerInput: '1' } as const;

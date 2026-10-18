@@ -1,3 +1,4 @@
+import searchSources from '../../supabase/functions/agent/searchSources.json';
 // The Ezhalah AI Agent. Turns a free-text message into either a neutral listing search or a
 // plain reply. It is deliberately NON-ADVISORY (PRD §7): it never recommends a property, never
 // says "best/better/good deal", and never gives buying or financial advice — it only acknowledges
@@ -13,7 +14,7 @@ import { toLatinDigits } from '@/lib/inputHygiene';
 import { vagueOrdering } from '@/lib/vagueOrdering';
 import { parseProximity, proximityKeywords, type ProximityIntent } from './proximity';
 import { type Category } from './taxonomy';
-import { getLocale, detectLocale, translate, type Locale } from '@/i18n';
+import { getLocale, detectLocale, resolveReplyLocale, translate, type Locale } from '@/i18n';
 import { supabase } from '@/lib/supabase';
 import { partitionRequestedAmenities, cohortAllows } from '@/lib/afCohorts';
 import { certifyAfOnMergedState as certifyAf, type CertifiableBackendQuery } from '@/lib/afCertify';
@@ -233,6 +234,11 @@ const AR_REALESTATE = new RegExp(
 // the same {kind, reply, query} contract. Build a full SearchQuery from the flat
 // fields it sends, deriving the category from the type (the engine needs both).
 type BackendQuery = {
+  sourceSelectionChanged?: boolean;
+  excludedPlatforms?: string[];
+  geographicScope?: "CITY" | "REGION" | "NATIONWIDE";
+  locationStateValidated?: boolean;
+  districts?: string[];
   deal?: string;
   location?: string;
   type?: string | null;
@@ -357,7 +363,11 @@ function resolveDistrictsFromText(userText: string, city: string): string[] {
   // Q33: «حي الملقا أو حي حطين أو حي الياسمين»). Each match is ≤2 Arabic tokens, stopping on
   // scope/conjunction tokens (في/و/أو/منطقة/مدينة) so «حي العزيزية في الرياض» captures «العزيزية», not
   // «العزيزية في الرياض». (audit #6: was a single .match() — only the first حي was kept.)
-  const arHiRe = /حي\s+([؀-ۿ]+(?:\s+(?!في|و|أو|منطقة|مدينة)[؀-ۿ]+)?)/g;
+  // …and never on a budget / deal / feature word or a «بالرياض» place: «حي النرجس بحدود ٦٠ ألف» searched a district «النرجس بحدود»
+  // that no listing has (live 2026-10-13, seen once the summary started naming the chat's districts).
+  // A district NAME never starts with «في / من / على»: «وش أفضل حي في الرياض؟» became a district «في الرياض؟» that the next turn searched.
+  // …nor swallows a room / bathroom / feature count: «حي النرجس حمامين» searched a district «النرجس حمامين» (ops_zero_result_log 2026-10-13 07:42).
+  const arHiRe = /حي\s+(?!(?:في|من|على|عند|بال|قريب|قريبة|جنب|يكون|فيه|فيها)(?![؀-ۿ]))([؀-ۿ]+(?:\s+(?!في|و|أو|منطقة|مدينة|بال|لل|(?:بحدود|حدود|تحت|فوق|اقل|أقل|اكثر|أكثر|بسعر|سعر|ايجار|إيجار|شهري|سنوي|مفروش|مفروشة|غرف|غرفة|غرفتين|حمام|حمامين|حمامات|دور|دورين|صالة|صالتين|مجلس|مطبخ|مسبح|مصعد|موقف|مواقف|حوش|مع|قريب|قريبة|جنب|ميزانية|ميزانيتي|الحد)(?![؀-ۿ]))[؀-ۿ]+)?)/g;
   for (const m of ar.matchAll(arHiRe)) out.push(m[1].trim());
   // English needs the WORD «district»/«neighborhood»: a bare «in X» names a CITY far more often
   // («apartment for sale in Riyadh»), and treating it as a district turned the city into a district
@@ -406,13 +416,15 @@ const PLATFORM_PATTERNS: Array<[RegExp, string]> = [
   [/1\s*october|october|اكتوبر|أكتوبر/i, 'october'],
 ];
 function resolveSourcesFromText(text: string): string[] {
+  const exact = Object.entries(searchSources).find(([name, slugs]) => name.toLowerCase() === text.trim().toLowerCase() || slugs.includes(text.trim().toLowerCase()));
+  if (exact) return exact[1];
   const out = new Set<string>();
   for (const [re, prefix] of PLATFORM_PATTERNS) if (re.test(text)) out.add(prefix);
   // Bare "Aqar" only when no aqar-compound already matched (so "Aqar Gate" → aqargate, not both).
   if (!out.has('aqargate') && !out.has('aqarcity') && !out.has('aqaratikom') && /\baqar\b|aqar\.fm/i.test(text)) {
     out.add('aqar');
   }
-  return Array.from(out);
+  return [...new Set(Array.from(out).flatMap(slug => Object.values(searchSources).find(slugs => slugs.includes(slug)) ?? [slug]))];
 }
 // Apply a platform filter (and Gathern's monthly implication) onto a query built from any path.
 // When the edge already gave its own platform-restriction judgment (edgePlatforms is a real array,
@@ -539,6 +551,9 @@ function certifyAfOnMergedState(merged: SearchQuery, b: BackendQuery): SearchQue
 }
 export function statedKeys(b: BackendQuery): string[] {
   const said: string[] = [];
+  if (Array.isArray(b.platforms)) said.push("sources");
+  if (Array.isArray(b.excludedPlatforms)) said.push("excludedSources");
+  if (b.locationStateValidated === true) said.push("location", "regionPin", "districtPin", "districts", "geographicScope");
   // RENT OR BUY IS ONE DECISION (found live 2026-10-11, owner's real-user test): «ابغى شقة» leaves it open
   // (bothDeals:true), then «الرياض ٢ غرف إيجار سنوي» says RENT — the edge answered deal:Rent, bothDeals:false, but
   // `bothDeals` was not counted as stated, so the merge rescued the old «open» flag and the search ran as
@@ -697,7 +712,7 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
     }
   }
   if (typeof b.sort === 'string' && b.sort.trim() && b.sort !== 'none') q.sort = b.sort.trim() as SearchQuery['sort'];
-  if (typeof b.count === 'number' && b.count >= 1) q.count = Math.min(Math.floor(b.count), 25);
+  if (typeof b.count === 'number' && b.count >= 1) q.count = Math.min(Math.floor(b.count), 500);
   // Layer on the explicit district resolution from the raw user text — area phrases ("North
   // Riyadh") expand to known district lists; literal district mentions ("حي الرمال") pass through.
   const districts = resolveDistrictsFromText(userText, q.location);
@@ -708,9 +723,18 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   if (typeof b.regionPin === 'string' && b.regionPin.trim()) q.regionPin = b.regionPin.trim();
   if (typeof b.districtPin === 'string' && b.districtPin.trim()) {
     const d = b.districtPin.trim();
-    q.districts = Array.from(new Set([...(q.districts ?? []), d]));
+    // One district, one entry: «النرجس» (read from the text) and «حي النرجس» (the edge's pin) are the same place, and the summary
+    // listed both («الأحياء: النرجس، حي النرجس», live 2026-10-13).
+    const bare = (x: string) => x.replace(/^حي\s+/, '').trim();
+    q.districts = [...(q.districts ?? []).filter((x) => bare(x) !== bare(d)), d];
   }
+  q.sourceSelectionChanged = b.sourceSelectionChanged === true;
   applySourceFilter(q, userText, b.platforms);
+  // Explicit transaction/period wins over a selected source's legacy defaults.
+  if (b.deal === 'Buy' || b.deal === 'Rent') { q.deal = b.deal; q.bothDeals = b.bothDeals === true; }
+  if (b.rentPeriod === 'monthly' || b.rentPeriod === 'annual' || b.rentPeriod === 'both') q.rentPeriod = b.rentPeriod;
+  if (Array.isArray(b.platforms) && !b.platforms.length) q.sources = [];
+  if (Array.isArray(b.excludedPlatforms)) q.excludedSources = [...new Set(b.excludedPlatforms.flatMap(resolveSourcesFromText))];
   // Street / "near a mosque|school|park" terms from the raw message (Q3) — matched against the
   // listing's own street/title/description in runSearch; empty for an ordinary search.
   // Location-RELATIONSHIP layer (2026-06-26): parse «قريب من مستشفى الحبيب» → {near, hospital,
@@ -801,6 +825,16 @@ export function queryFromBackend(b: BackendQuery, userText: string = '', proximi
   // rule — match first, then diversify the platforms — aside (owner 2026-10-11).
   if (ordering && !q.sort && !(ordering === 'area_desc' && q.areaNote === 'big')) q.sort = ordering;
 
+  // A complete catalog-validated state replaces local extraction, including an intentional empty district set.
+  if (b.locationStateValidated === true && typeof b.location === 'string' && Array.isArray(b.districts)) {
+    q.geographicScope = b.geographicScope;
+    q.location = b.location;
+    q.locationMatch = undefined;
+    q.regionPin = b.regionPin;
+    Object.assign(q, { districtPin: undefined });
+    q.districts = b.districts.filter((d): d is string => typeof d === 'string');
+  }
+
   return q;
 }
 
@@ -873,6 +907,7 @@ async function callAgentBackend(
       return {
         kind: 'listings',
         reply: String(d.reply ?? ''),
+        notice: typeof d.notice === 'string' ? d.notice : undefined,
         askCount: askCountOut,
         // CLARIFICATION MUST NOT RESET THE CONVERSATION (owner-reported bug 2026-08-29).
         // queryFromBackend builds a FRESH query from this turn's model output, so anything the model
@@ -887,7 +922,9 @@ async function callAgentBackend(
         // So we tell the merge exactly what this turn stated.
         query: certifyAfOnMergedState(
           mergeConversationState(
-            ctx.prevQuery ?? null,
+            // A complete new request («فيلا للبيع في جدة فيها مسبح») starts fresh: the edge says so, and nothing from the previous search
+            // rides along (live 2026-10-13: it kept «٤ غرف» from a Riyadh apartment search and found nothing).
+            d.query?.fresh === true ? null : (ctx.prevQuery ?? null),
             queryFromBackend(d.query ?? {}, text, ctx.attemptTexts ?? [text]),
             statedKeys(d.query ?? {}),
           ),
@@ -1166,7 +1203,7 @@ export async function respond(text: string, opts?: {
   askCount?: number; userMessageId?: string; historyTurnsRaw?: number;
 }): Promise<AgentTurn> {
   const v = text.trim();
-  const replyLocale = detectLocale(v) ?? opts?.locale ?? getLocale();
+  const replyLocale = resolveReplyLocale(v, opts?.history ?? [], opts?.locale ?? getLocale());
   const t = (key: string) => translate(replyLocale, key);
   const loggedIn = !!opts?.loggedIn;
   if (!v) return { kind: 'message', reply: t("Tell me what you're looking for and I'll search for it.") };
@@ -1224,7 +1261,7 @@ export async function respond(text: string, opts?: {
       // ALSO a structured field (2026-09-11 fix), not just appended to `.reply`: the listings-turn
       // UI never renders `.reply` (see the AgentTurn comment above) — without this, the notice was
       // computed, consumed one-time from announcedRejections, and then shown to nobody.
-      backend.notice = notice;
+      backend.notice = [backend.notice, notice].filter(Boolean).join('\n');
     }
     return backend;
   }

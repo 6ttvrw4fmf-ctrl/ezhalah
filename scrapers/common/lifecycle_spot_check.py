@@ -80,6 +80,10 @@ def summarize(platform: str, method: str, canary: dict, results: list[dict]) -> 
             "wrong": sum(r["judged"] == "wrong" for r in rows),
             "unknown": sum(r["judged"] == "unknown" for r in rows),
             "wrong_examples": [f"{r['table']}:{r['id']} {r['url']}" for r in rows if r["judged"] == "wrong"][:20],
+            # WHY each ad got no answer (2026-10-17): without it a second reader of a struck-but-shown
+            # ad reads "unknown 5" and nobody can tell a 401 unpublished post from a block.
+            "unknown_examples": [f"{r['table']}:{r['id']} {r.get('evidence') or 'no evidence'}"
+                                 for r in rows if r["judged"] == "unknown"][:20],
         }
     if not canary["ok"]:
         out["verdict"] = "void: known-live controls did not come back alive, so nothing here may be believed"
@@ -152,7 +156,24 @@ def open_ad(url: str, dead_marker) -> str:
     # The deletion tier's own transport: it keeps the real status (a 404 vs a block) and reaches
     # wasalt only through the browser (WASALT_BROWSER), which curl_cffi can no longer do.
     status, body = _probe(url)
+    _LAST_READ[url] = f"HTTP {status if status is not None else 'none (network error)'}, {len(body or '')} bytes"
     return classify_response(status, body or "", dead_marker=dead_marker)
+
+
+# What open_ad last saw per URL, so a control that did not read live says WHY (2026-10-18: almuteb and
+# senan read «controls 0/5» four nights running with nothing to say what their pages answered).
+_LAST_READ: dict[str, str] = {}
+
+
+def control_misses(ctl: list[dict], verdicts: list[str]) -> list[str]:
+    """One line per control that did not read live: its URL and what its own page answered."""
+    return [f"{r.get('listing_url')}: {v}" + (f" ({_LAST_READ[r['listing_url']]})" if r.get("listing_url") in _LAST_READ else "")
+            for r, v in zip(ctl, verdicts) if v != ALIVE][:5]
+
+
+def _ashab_session():
+    from curl_cffi import requests as _cc
+    return _cc.Session(impersonate="chrome124")
 
 
 def _reader_for(platform: str):
@@ -172,11 +193,13 @@ def _reader_for(platform: str):
         from scrapers.gathern import liveness as gl
         session = gl.proxied_session(False)
 
-        def read(url: str) -> str:
-            status = gl.probe(session, url)
+        def read(url: str):
+            status = gl.probe(session, url, home_status=gl.HOME_LANDED)
             if status == 200:
-                return ALIVE
-            return DEAD if gl.looks_dead(status) else UNKNOWN
+                return ALIVE, "HTTP 200 on the unit's own page"
+            if status == gl.HOME_LANDED:
+                return UNKNOWN, "landed on gathern's home page (no verdict)"
+            return (DEAD if gl.looks_dead(status) else UNKNOWN), f"HTTP {status or 'none after retries'}"
         return read
     if platform == "muktamel":
         # A withdrawn ad is a 200 hollow shell and a removed one 302s to a 200 /404 page, so a status
@@ -184,6 +207,48 @@ def _reader_for(platform: str):
         # hollow). Read it the way its crawl and oracle do.
         from scrapers.muktamel import run as mk
         return mk.page_verdict
+    if platform == "almuteb":
+        # 2026-10-18: its HTML pages answer HTTP 503 (a 4 KB stub) to every CI read, so the status
+        # reader voided the dead-visible score four nights running (10-15..10-18), while its crawl reads
+        # all 10 ads through WordPress REST. Read it as its crawl's oracle does: the post's own REST
+        # record (publish = live, expired / closed status / rest_post_invalid_id = gone).
+        from scrapers.almuteb import run as mt
+        from scrapers.common.db import sb as _sb
+        oracle = mt._verify_gone_with(mt.fetch_taxonomies(mt.session()))
+        client = _sb()
+
+        def read_almuteb(url: str):
+            ad = None
+            for t in ("almuteb_residential_listings", "almuteb_commercial_listings"):
+                rows = client.table(t).select("ad_number").eq("listing_url", url).limit(1).execute().data or []
+                if rows:
+                    ad = rows[0]["ad_number"]
+                    break
+            if not ad:
+                return UNKNOWN, "no ad_number on file for this url"
+            v, why = oracle(ad)
+            return {"live": ALIVE, "gone": DEAD}.get(v, UNKNOWN), why
+        return read_almuteb
+    if platform == "ashab":
+        # 2026-10-17: a rented/sold ashab unit keeps a 200 page and says so only in its own status
+        # badge, so a status read called 11 of 12 struck-but-shown units "live". Read the badge the
+        # way its crawl does (scrapers/ashab/run.py::map_page).
+        from scrapers.ashab import run as ash
+        from scrapers.common.db import _SOLD_OR_RENTED
+        session = _ashab_session()
+
+        def read_ashab(url: str):
+            try:
+                badges = ash.parse_page(ash.get(session, url))["badges"]
+            except Exception as e:  # noqa: BLE001 — an unread page is no answer, never a death
+                return UNKNOWN, f"unread: {type(e).__name__}: {str(e)[:80]}"
+            status = badges[1] if len(badges) > 1 else ""
+            if status == ash.AVAILABLE:
+                return ALIVE, f"own badge «{status}»"
+            if any(w in status for w in _SOLD_OR_RENTED):
+                return DEAD, f"own badge «{status}»"
+            return UNKNOWN, f"own badge «{status or 'none'}»"
+        return read_ashab
     if platform == "abralosol":
         # 2026-10-12: the shared status reader got no live answer from any of 5 known-live abralosol
         # pages (dead-visible void at 09:05 and on a re-run, spot-check 38245017303) while its crawl
@@ -217,14 +282,25 @@ def _oracle_reader_for(platform: str, control: dict | None):
     if spec is None:
         return None
     oracle = FL.oracle_for(spec, control)
-    return lambda row: FL.read(oracle, row["ad_number"])[0] if row.get("ad_number") else UNKNOWN
+
+    def read_by_oracle(row: dict) -> str:
+        if not row.get("ad_number"):
+            row["evidence"] = "no ad_number"
+            return UNKNOWN
+        verdict, row["evidence"] = FL.read(oracle, row["ad_number"])
+        return verdict
+    return read_by_oracle
 
 
 def pick_reader(platform: str, dead_marker, control: dict | None):
     """(method, read(row) -> ALIVE/DEAD/UNKNOWN): the way the site's hiding job reads it, first."""
     site_reader = _reader_for(platform)
     if site_reader:
-        return "site-reader", lambda row: site_reader(row["listing_url"])
+        def read_by_site(row: dict) -> str:
+            out = site_reader(row["listing_url"])
+            verdict, row["evidence"] = out if isinstance(out, tuple) else (out, None)
+            return verdict
+        return "site-reader", read_by_site
     oracle_reader = _oracle_reader_for(platform, control)
     if oracle_reader:
         return "site-oracle", oracle_reader
@@ -256,8 +332,10 @@ def main() -> int:
     # environment (a block, a proxy failure) is lying and the run is void.
     ctl = pick_controls(client, tables, rng)
     method, read = pick_reader(a.platform, dead_marker, ctl[0] if ctl else None)
-    ctl_alive = sum(read(r) == ALIVE for r in ctl)
-    canary = {"probed": len(ctl), "alive": ctl_alive, "ok": canary_environment_ok(ctl_alive, len(ctl))}
+    ctl_verdicts = [read(r) for r in ctl]
+    ctl_alive = sum(v == ALIVE for v in ctl_verdicts)
+    canary = {"probed": len(ctl), "alive": ctl_alive, "ok": canary_environment_ok(ctl_alive, len(ctl)),
+              "misses": control_misses(ctl, ctl_verdicts)}
 
     since = (datetime.now(timezone.utc) - timedelta(days=a.hidden_days)).isoformat()
     results = []
@@ -269,7 +347,7 @@ def main() -> int:
                     continue
                 v = read(r)
                 results.append({"side": "live", "table": table, "id": rid, "url": r["listing_url"],
-                                "verdict": v, "judged": judge("live", v)})
+                                "verdict": v, "judged": judge("live", v), "evidence": r.get("evidence")})
     elif canary["ok"]:
         per_table = max(1, a.n // len(tables))
         for side, active, win in (("hidden", False, since), ("live", True, None)):
@@ -283,7 +361,7 @@ def main() -> int:
             for r in picked[: a.n]:
                 v = read(r)
                 results.append({"side": side, "table": r["table"], "id": r["id"], "url": r["listing_url"],
-                                "verdict": v, "judged": judge(side, v)})
+                                "verdict": v, "judged": judge(side, v), "evidence": r.get("evidence")})
 
     out = summarize(a.platform, method, canary, results)
     text = json.dumps(out, ensure_ascii=False, indent=2)

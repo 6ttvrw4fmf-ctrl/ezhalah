@@ -283,3 +283,22 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   (280 open on 10-11: located_row_unreachable 80, rows_collapse 19, field_integrity 18, card_link_identity 16,
   aqar_proven_wrong_resolution 16, district_contradicts_source 15, …). Read it right after Sentry. The roster
   rewrite stays item 159, for a human-merged PR.
+- **2026-10-13:** a per-DAY dedup key is a detector that can never close yesterday: `aqar_proven_wrong_resolution:<date>`
+  raised a new key every morning and resolved only today's, so 17 «open» P1s sat in my queue for ONE real row (seven
+  detectors share the shape; one fixed, 20261013133115, the class is backlog 521). And a single mis-resolved listing
+  poisoned an English city name: `city_name_bridge` carried «Khobar» → الخبر 16,340 / جدة 1 and the RPCs accept an English
+  token only when it maps to exactly one Arabic city, so «Khobar», «Riyadh», «Dammam», «Mecca», «Medina» … (37 names)
+  answered 0 to any English-named search (20261013133128: a member below 5% share is dropped). Read the bridge, not the
+  RPC, when an English place answers 0. Also: `apply_migration` holds a batch whose text carries `update`/`delete`/`do`
+  before its DDL (timed out, nothing landed); insert-first with the DDL last landed in 2 s.
+- **2026-10-16:** when only one engineer ran, the review is short and the night is repair — plan it that way from minute 25. Tonight's repair reached customers only through what needs no merge (a closed bug that no longer reproduces, 2/2 journeys), because the one Track A candidate with evidence (dealapp «حي مشرفة» = «حي مشرف», 17 ads, pins 4.3 km) has no alias mechanism: `loc_canonical_district` is TRUNCATED and rebuilt hourly from catalog ∪ live, keyed by `norm_district_tok`, so a hand-inserted row dies at :10 and a second catalog row creates the split pair item 230 forbids. Read the refresh function before planning a catalog repair, not after. And `pg_stat_statements` means are cumulative since the last reset (09-27): a 6.7 s mean on `location_search_candidates_ar` is history, the same call measured 251 ms tonight — time it now before calling it slow.
+- **2026-10-17:** the four engineers ran again, so the night was review + repair, and two things decided it. First, a migration body with only DDL, `mon_raise()` calls and an INSERT placed FIRST applies in seconds (20261017131952, 20261017132102); a data repair of one row goes through `do $$ … $$` (the aqar shadow row). Second, two finds that looked like mine were not: the agent «شقة → Apartment» drift (577) no longer reproduces (2/2 OK), and the red `audit-invariants` is a different bug — the agent answers the broad-search-after-budget probe with 502 «empty model output» (DeepSeek json_object, 37 tokens, empty content, 3/3). Re-run the failing step yourself before inheriting yesterday's diagnosis. And the per-day `detector_crash:<fn>:<date>` key is closed by hand after the clean run — nothing else closes it (class 521). Tools: `e2e/engineers/card-layout.mjs` is the owner's card check (laptop 1440×900 / phone 390×844, `DEAL=rent-monthly` for Gathern cards). And the 10-16 clock lesson repeated itself (I typed 14:xx for work the database stamped 13:xx, and had to rewrite 17 rows), so the approach changes: never type a time into a row — write `to_char(now() at time zone 'utc','HH24:MI')||' UTC'` in the INSERT and let the database say when.
+- **2026-10-18:** a retry is not a fix until you know WHAT the failing reply was. #7310 re-asked DeepSeek on an empty
+  reply in the same `json_object` mode and the deployed code answered the identical 39 blank characters 2/2 (content_len
+  39, 43 tokens, finish_reason stop): the mode produces the blank reply, so the re-ask must leave the mode (PR #7517). And
+  a robot that is green is not a robot that ran: `engineer-automerge.yml` reported «success» three times while a green
+  scrapers-only PR sat BEHIND for 3.7 h, then its schedule stopped firing for 70 min (last pass 12:38, none at :53/:08/:23/
+  :38) — read the run LIST, not the last conclusion, and dispatch by hand when a schedule is silent (PR #7518 makes the
+  workflow update a BEHIND branch itself). Third: the phone keyboard is part of E1 — typing «المرموثة» at 600 ms/char kept
+  «ال» because the Google One Tap sheet took focus ~1 s after load (PR #7520); the 10-17 proof used `fill()`, which no
+  customer does. Type like a person when you test typing.

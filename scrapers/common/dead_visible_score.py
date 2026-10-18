@@ -42,7 +42,7 @@ from scrapers.common.cleanup import PLATFORMS
 from scrapers.common.db import sb
 from scrapers.common.fleet_liveness import SITES, oracle_for
 from scrapers.common.fleet_liveness import read as oracle_read
-from scrapers.common.lifecycle_spot_check import CANARIES, _reader_for, open_ad, pick_controls
+from scrapers.common.lifecycle_spot_check import CANARIES, _reader_for, control_misses, open_ad, pick_controls
 from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN
 from scrapers.common.liveness_trust import canary_environment_ok
 
@@ -151,7 +151,10 @@ def reader_for(platform: str, control: dict | None):
     """(method, read(row) -> ALIVE / DEAD / UNKNOWN): the website's own hiding check, strongest first."""
     site = _reader_for(platform)
     if site is not None:
-        return "site-reader", lambda r: site(r["listing_url"])
+        def read_site(r: dict) -> str:
+            out = site(r["listing_url"])            # a reader may also say why: (verdict, evidence)
+            return out[0] if isinstance(out, tuple) else out
+        return "site-reader", read_site
     if platform in SITES:
         oracle = oracle_for(SITES[platform], control)
         return "site-oracle", lambda r: oracle_read(oracle, r["ad_number"])[0]
@@ -189,9 +192,12 @@ def score_site(client, platform: str, shown: int, *, n: int, rng: random.Random,
 
     if len(ctl) >= CANARIES:
         row["gated"] = True
-        alive = sum(opened(r) == ALIVE for r in ctl)
+        verdicts = [opened(r) for r in ctl]
+        alive = sum(v == ALIVE for v in verdicts)
         if not canary_environment_ok(alive, len(ctl)):
-            row["note"] = f"void: known-live controls {alive}/{len(ctl)} alive, nothing decided"
+            why = "; ".join(control_misses(ctl, verdicts)[:2])
+            row["note"] = (f"void: known-live controls {alive}/{len(ctl)} alive, nothing decided"
+                           + (f" | {why}" if why else ""))[:300]
             return row
     else:
         row["note"] = f"no control gate: fewer than {CANARIES} known-live ads"
@@ -209,6 +215,10 @@ def score_site(client, platform: str, shown: int, *, n: int, rng: random.Random,
 def write_rows(client, rows: list[dict]) -> str:
     """One row per website per night. A missing table is reported, not raised: the migration lands on
     its own schedule and the measurement must not wait for it. Any other write failure is transport."""
+    if not rows:
+        # PostgREST answers an empty upsert with PGRST100 (2026-10-18: a re-run naming no shown website
+        # crashed and raised workflow_failed). Nothing measured is said, never written as an error.
+        return "no website measured: nothing written"
     try:
         client.table(TABLE).upsert(rows, on_conflict="night,platform").execute()
     except Exception as e:  # noqa: BLE001
@@ -244,6 +254,12 @@ def markdown(out: dict) -> str:
     return head + "\n".join(lines) + "\n\n**Gone (evidence, table:id):** " + (", ".join(gone_ids) or "none") + "\n"
 
 
+def site_list(args: list[str] | None) -> list[str]:
+    """The workflow's `sites` input says «comma-separated» and arrives as ONE word: «almuteb,razre,senan»
+    was read as one website that shows nothing (2026-10-18). Commas and spaces both separate."""
+    return [p for a in (args or []) for p in a.replace(",", " ").split()]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Dead ads a customer can see: a nightly random sample per website")
     ap.add_argument("--sites", nargs="*", help="only these websites (default: every registered one)")
@@ -261,7 +277,7 @@ def main() -> int:
     run_url = f"{run[0]}/{run[1]}/actions/runs/{run[2]}" if all(run) else None
     rows: list[dict] = []
     # ponytail: one website after another, ~1 h for 149 sites; a thread per site if the window gets tight.
-    for p in a.sites or registered_sites(client):
+    for p in site_list(a.sites) or registered_sites(client):
         shown = shown_count(client, p)
         if not shown:
             continue                            # nothing a customer can see
@@ -274,7 +290,7 @@ def main() -> int:
         rows.append(row)
         print(_line(row), flush=True)
 
-    out = {"night": night, "fleet": fleet(rows), "rating": rating_cap(rows, complete=not a.sites), "sites": rows}
+    out = {"night": night, "fleet": fleet(rows), "rating": rating_cap(rows, complete=not site_list(a.sites)), "sites": rows}
     out["written"] = "dry run: nothing written" if a.dry_run else write_rows(client, rows)
     text = json.dumps(out, ensure_ascii=False, indent=2)
     print(text)

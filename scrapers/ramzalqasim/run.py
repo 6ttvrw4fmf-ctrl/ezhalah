@@ -258,6 +258,36 @@ def fetch_markers(s: cc.Session, max_pages: int = 12) -> list[dict]:
     return out
 
 
+def rooms(rec: dict, category: str, property_type: Optional[str]) -> tuple[Optional[int], Optional[int], Optional[int]]:
+    """(bedrooms, bathrooms, master_bedrooms) from the marker record.
+
+    The API's `bedrooms` counts the bedrooms that are NOT master suites; `master_room` counts the
+    masters. The page's own description states the TOTAL, and it equals the sum on every row read
+    on 2026-10-16 (🆕, backlog #582): /x/268 bedrooms 1 + master 1 = «غرفة نوم ماستر … غرفة نوم
+    إضافية» (2); 9336255 2 + 1 = «3 غرف نوم (منها غرفة ماستر)»; 1033414 1 + 2 = «3 غرف نوم (٢ منها
+    ماستر)»; 10547051 2 + 3 = «5 غرف نوم، منها 3 غرف ماستر»; 1800149 0 + 5 = «خمس غرف نوم ماستر».
+    Storing `bedrooms` alone filed every villa with a master suite under too few bedrooms. Measured
+    over the 14 newest active non-land rows: the sum equals the description on 10, `bedrooms` alone
+    on 3; one advertiser (615907, «جناح رئيسي … ماستر … غرفتان نوم إضافية» = 4) typed the total into
+    `bedrooms` as well, so the sum overstates that one. The sum is the reading the source's form means.
+
+    `bathroom` is 0 on all 107 land rows and on villas whose page lists several «دورة مياه»
+    (/x/268: 0 stored, three on the page): 0 is the form's blank, not a published zero. Silent
+    means unknown, so 0 is NULL. Same for a 0 + 0 room count.
+    """
+    def cap(v: Optional[int]) -> Optional[int]:
+        return v if v is not None and 0 <= v <= 20 else None
+
+    plain, master = cap(_int(rec.get("bedrooms"))), cap(_int(rec.get("master_room")))
+    bathrooms = cap(_int(rec.get("bathroom"))) or None
+    if category == "commercial" or property_type in ("Residential Land",):
+        return None, bathrooms, master
+    if plain is None and master is None:
+        return None, bathrooms, master
+    total = (plain or 0) + (master or 0)
+    return (total if 0 < total <= 20 else None), bathrooms, master
+
+
 def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
     """Return (row, category, gone). Skips records lacking a workable price/type."""
     rid = rec.get("id")
@@ -286,19 +316,12 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
         area_f = None
     area = int(round(area_f)) if area_f is not None else None
 
-    bedrooms = _int(rec.get("bedrooms"))
-    if category == "commercial" or property_type in ("Residential Land",):
-        bedrooms = None
-    if bedrooms is not None and bedrooms > 20:
-        bedrooms = None
-
-    bathrooms = _int(rec.get("bathroom"))
-    if bathrooms is not None and bathrooms > 20:
-        bathrooms = None
-
-    master = _int(rec.get("master_room"))
-    if master is not None and master > 20:
-        master = None
+    bedrooms, bathrooms, master = rooms(rec, category, property_type)
+    if bathrooms is None and _int(rec.get("bathroom")) == 0:
+        # The form's 0 is the source SETTLING the field as blank, not a failed read. A plain None is
+        # dropped by db._unknown_must_not_overwrite_known, so every row stored before 2026-10-16 kept
+        # its 0 (17943237 re-crawled 10-17 04:24: still 0). AUTHORITATIVE_NULL writes the NULL.
+        bathrooms = db.AUTHORITATIVE_NULL
 
     # No magnitude gate (removed 2026-08-09): a source-published price is stored at ANY magnitude
     # per the standing PRICE = SOURCE rule. Nulling "implausibly low" prices is a judgement call
@@ -439,7 +462,35 @@ def map_marker(rec: dict) -> tuple[Optional[dict], str, bool]:
         "description": description,
         "additional_info": ai,
     }
+    labels = content_labels(rec.get("content"))
+    if labels:
+        ai["features_ar"] = labels
+    row.update(content_answers(labels))
     return row, category, gone
+
+
+# ── the marker's own «المحتويات» chip list (🔬 AF engineer, 2026-10-14, backlog 248) ─────────────────────────
+# Each marker carries `content`, a JSON list of letters, and the ad page renders each letter as one chip under
+# «المحتويات:». Measured on 3 live ads 10-14: /x/264 content M,N,K,L,J,G,H,I,F,E,A,C renders «توفير صرف صحي،
+# صالة، توفير الماء، توفير الكهرباء، غرفة خادمة، حوش، سطح، درج داخلي، مدخل سيارة، ملحق، مجلس رجال، مطبخ», /x/265
+# M,L,K,G and /x/263 A..N agree letter for letter. Kitchen was 0 of 153 stored. A listed chip → True; an unlisted
+# one is silence. «مدخل سيارة» (a car entrance) is not mapped to parking: it is not the same fact.
+CONTENT_LETTERS = {"A": "مجلس رجال", "B": "مجلس نساء", "C": "مطبخ", "D": "مقلط", "E": "ملحق", "F": "مدخل سيارة",
+                   "G": "حوش", "H": "سطح", "I": "درج داخلي", "J": "غرفة خادمة", "K": "توفير الماء",
+                   "L": "توفير الكهرباء", "M": "توفير صرف صحي", "N": "صالة"}
+_CONTENT_COLS = {"مطبخ": "kitchen", "غرفة خادمة": "maid_room"}
+
+
+def content_labels(raw: Any) -> list[str]:
+    try:
+        letters = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    except ValueError:
+        return []
+    return [CONTENT_LETTERS[x] for x in letters if isinstance(x, str) and x in CONTENT_LETTERS]
+
+
+def content_answers(labels: list[str]) -> dict[str, bool]:
+    return {_CONTENT_COLS[x]: True for x in labels if x in _CONTENT_COLS}
 
 
 def _pin_sold_inactive(table: str, ad_numbers: list[str],

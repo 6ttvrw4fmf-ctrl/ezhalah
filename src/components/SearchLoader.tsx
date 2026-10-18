@@ -37,7 +37,7 @@ import Animated, {
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors } from '@/theme/tokens';
 import { useResolvedTheme } from '@/lib/appearance';
-import { useI18n } from '@/i18n';
+import { useI18n, tWord } from '@/i18n';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import {
   bumpRotation,
@@ -48,9 +48,9 @@ import {
 import { hiddenPlatformNames, loadHiddenPlatformNames } from '@/data/loaderActivePlatforms';
 import { fetchLoaderScaleStats, type LoaderScaleStats } from '@/data/loaderScaleStats';
 import { PILL_STAGGER, highlightStepMs, waveDelayMs, PILL_GROUP, WAVE_RISE, WAVE_HOLD, WAVE_FALL } from '@/lib/searchLoaderTiming';
-import { buildSearchLoaderTitles, readingDurationMs } from '@/lib/searchLoaderTitles';
+import { buildSearchLoaderTitles, countWording, readingDurationMs } from '@/lib/searchLoaderTitles';
+import { funnelKey, loadSearchFunnelFacts, type FunnelFacts, type FunnelPlace } from '@/data/searchLoaderFacts';
 import type { SearchQuery } from '@/data/search';
-import { grouped } from '@/data/search';
 
 const IS_WEB = Platform.OS === 'web';
 // Which websites are down on their side — read once per session, started here at app load so it has
@@ -212,30 +212,55 @@ function PlatformPill({
 // cross-fade on every change and a continuous gentle shimmer-pulse so the text always reads as
 // actively working. Rotation freezes while exiting. Reduced-motion: static first title, plain fades.
 function PhaseTitle({
-  phase, rtl, reduced, exiting, platformCount, scaleStats,
+  phase, rtl, reduced, exiting, platformCount, scaleStats, query,
 }: {
   phase: 'thinking' | 'searching'; rtl: boolean; reduced: boolean; exiting: boolean;
   // The SAME count the pills on screen show — never an independent fetch that could disagree.
   platformCount: number;
-  // null until loader_scale_stats_ar() resolves (or forever, on failure) — the two lines that use
-  // it fall back to their original static wording, and the coverage line is simply omitted.
+  // null until loader_scale_stats_ar() resolves (or forever, on failure) — the Kingdom line then
+  // falls back to its original static wording.
   scaleStats: LoaderScaleStats | null;
+  // THIS search — its city and district drive the two personal lines (lib/searchLoaderTitles.ts).
+  query?: SearchQuery | null;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
   const [titleIdx, setTitleIdx] = useState(0);
-  const titles = useMemo(() => buildSearchLoaderTitles({
-    search: t(SEARCH_TITLES[0]),
-    checking: scaleStats ? t('Checking more than {count} properties…', { count: grouped(scaleStats.listingCount) }) : t(SEARCH_TITLES[1]),
-    matchFilters: t(SEARCH_TITLES[2]),
-    reviewing: platformCount > 0 ? t('Reviewing {count} real-estate platforms…', { count: platformCount }) : t(SEARCH_TITLES[3]),
-    // ONE combined number, not two (owner 2026-09-12: "make a combination of city and district...
-    // we cover almost this many places around Saudi Arabia... the number looks big"). cityCount +
-    // districtCount is still an honest count — every city and every district loader_scale_stats_ar()
-    // counted is a real distinct place a real search can land in; summing them just tells the story
-    // as one bigger number instead of two smaller ones.
-    coverage: scaleStats ? t('Covering more than {count} places across Saudi Arabia…', { count: grouped(scaleStats.cityCount + scaleStats.districtCount) }) : null,
-    preparing: t(SEARCH_TITLES[4]),
-  }), [t, scaleStats, platformCount]);
+  // The city/district counts of THIS search, from the once-per-session caches the headline already
+  // uses — no per-search round trip. Refetched only when the place the search names changes.
+  const placeKey = funnelKey(query);
+  const [funnel, setFunnel] = useState<FunnelFacts>({});
+  useEffect(() => {
+    let live = true;
+    setFunnel({});
+    loadSearchFunnelFacts(query).then((f) => { if (live) setFunnel(f); }).catch(() => {});
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the place, not the query object identity
+  }, [placeKey]);
+  const titles = useMemo(() => {
+    const arabic = /[؀-ۿ]/;
+    const placeLine = (p: FunnelPlace | undefined, moreKey: string, exactKey: string, slot: 'city' | 'district'): string | null => {
+      const w = countWording(p?.count, loc);
+      const name = p ? (loc === 'ar' ? p.ar : p.en) : '';
+      if (!w || !name || (loc === 'en' && arabic.test(name))) return null; // never Arabic mid-English
+      return t(w.kind === 'more' ? moreKey : exactKey, { count: w.text, [slot]: name });
+    };
+    const kingdom = countWording(scaleStats?.listingCount, loc);
+    // WHAT THEY ASKED FOR: the type (one picked type, else the category) + buy/rent. No type at all →
+    // the original «نطابق الفلاتر».
+    const types = (query as (SearchQuery & { types?: string[] }) | null | undefined)?.types;
+    const kind = query?.type ?? (types?.length === 1 ? types[0] : null) ?? query?.category ?? null;
+    const dealWord = query?.deal === 'Rent' ? t('for rent') : query?.deal === 'Buy' ? t('for sale') : '';
+    const what = kind ? [tWord(kind, loc), dealWord].filter(Boolean).join(' ') : '';
+    return buildSearchLoaderTitles({
+      search: platformCount > 0 ? t('Searching {count} real-estate platforms…', { count: platformCount }) : t(SEARCH_TITLES[0]),
+      checking: kingdom ? t('Checking {count} listings across the Kingdom…', { count: kingdom.text }) : t(SEARCH_TITLES[1]),
+      city: placeLine(funnel.city, 'Reviewing more than {count} listings in {city}…', 'Reviewing {count} listings in {city}…', 'city'),
+      district: placeLine(funnel.district, 'Going through more than {count} listings in {district}…', 'Going through {count} listings in {district}…', 'district'),
+      matching: what ? t('Matching your request: {what}…', { what }) : t(SEARCH_TITLES[2]),
+      preparing: t(SEARCH_TITLES[4]),
+    });
+  }, [t, loc, scaleStats, platformCount, funnel, query]);
   useEffect(() => {
     if (phase !== 'searching' || reduced || exiting) return;
     // Reading-pace rotation (owner 2026-09-12): each line stays up for readingDurationMs(that
@@ -289,10 +314,11 @@ function PhaseTitle({
 }
 
 export default function SearchLoader({
-  phase, query, resultSources, exiting = false, onPresented, bottomInset,
+  phase, query, resultSources, exiting = false, onPresented, bottomInset, settleTop,
 }: {
   phase: 'thinking' | 'searching';
   bottomInset?: number;
+  settleTop?: number; // window y the grid will sit at once the thread has glided down to it (host-measured)
   query?: SearchQuery | null;
   resultSources?: string[];
   onPresented?: (complete: boolean) => void;
@@ -366,7 +392,7 @@ export default function SearchLoader({
       {/* Headline: sparkle + rotating phase text (+ soft dots while thinking) */}
       <View style={[s.titleRow, { flexDirection: rtl ? 'row-reverse' : 'row' }]}>
         <Ionicons name="sparkles" size={15} color={colors.primary} />
-        <PhaseTitle phase={phase} rtl={rtl} reduced={reduced} exiting={exiting} platformCount={platforms.length} scaleStats={scaleStats} />
+        <PhaseTitle phase={phase} rtl={rtl} reduced={reduced} exiting={exiting} platformCount={platforms.length} scaleStats={scaleStats} query={query} />
         {phase === 'thinking' ? <Dots reduced={reduced} /> : null}
       </View>
 
@@ -374,7 +400,7 @@ export default function SearchLoader({
           box (owner 2026-09-12: "remove those boxes... put the name also" — supersedes the same-day
           logo-only mobile compact tile; the name always renders now, on every viewport). */}
       {phase === 'searching' && platforms.length > 0 ? (
-        <PlatformRosterPager bottomInset={bottomInset} items={platforms} rtl={rtl} onPresented={onPresented ?? (() => {})}
+        <PlatformRosterPager bottomInset={bottomInset} settleTop={settleTop} items={platforms} rtl={rtl} onPresented={onPresented ?? (() => {})}
           renderItem={p => <PlatformPill item={p} index={0} total={1} rtl={rtl} reduced={reduced} name={t(p.i18nKey)} />} />
       ) : null}
     </Animated.View>

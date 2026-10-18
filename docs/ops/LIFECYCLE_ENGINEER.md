@@ -75,6 +75,34 @@ found, written down and still there tomorrow counts against you. This block is t
 in `ops_dead_visible_fleet` plus the open P1 lifecycle backlog items. It must fall every night. If it doesn't,
 the first line of the report says why.
 
+## ⚡ NEXT-RUN UPGRADES (owner, 2026-10-13: «keep doing a better job on every run … improve your job in the next run»)
+Measured on 10-13: 2 fixes proven, 3 left pending on tomorrow's crawls, ~25 of 110 minutes spent in
+`sleep`/wait loops, and one merged fix (#6978) built on a theory a second reader then disproved. These
+rules close each of those, and they win over any older timing in this file:
+
+1. **No idle minutes.** While CI, a crawl or a sync runs, work the next queue item. A `sleep` loop is
+   allowed only as the very last thing before the end row. The end row records `idle_min`.
+2. **Second reader before any change to a quarantined checker.** First dispatch `lifecycle-spot-check.yml`
+   with the checker's own control ids. Change code only if that reader agrees the controls are dead
+   or blocked. A gate that is right to stop is not a bug: say so and move on in under 10 minutes.
+3. **Provable before pending, by the clock.** In the first 20 minutes, list every fix whose proof can
+   land inside the slot: a sweep you may dispatch (`fleet-liveness.yml site=…`,
+   `dealapp-liveness-cron.yml`, `gathern-liveness.yml`), then the next :22 sync. Do those first.
+   Crawl-dependent fixes ship after them, and at most 2 a night may stay pending.
+4. **Prove yesterday's pending fixes in the first 30 minutes,** from the follow-up row, before
+   anything new: manzo #6980 and wahadat #6981 on 10-14.
+5. **A blocker seen twice is re-classified, not retried.** The opensooq registry reseed waited three
+   nights on a DELETE the connector holds for a person, while opensooq's crawl already hides its dead
+   ads through `strike_read_gone` (3 on 10-13, 11 due on 10-14). It is now P3 (it speeds hiding up,
+   it does not unblock it), carried on branch `lifecycle/2026-10-13-opensooq-daily-direct` for
+   any session with a person present. Never try that apply again unattended.
+6. **A hidden ad's proof needs no journey tool.** `customer-journey.mjs` cannot load a hidden listing
+   (it reads UNKNOWN). The proof is the before/after anon `search_listings_ar` read across the :22
+   sync, plus the app's `location_search_candidates_ar` replay for the ad's city and deal (proof
+   rows 1045, 1048 are the shape).
+7. **Fix rate counts only tonight's own work, honestly split** as «N fixed and proven tonight (M of
+   them from yesterday's PRs) of K found».
+
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «I trust the lifecycle engineer … I don't want to go back and forth with it … make it
 powerful so it does an amazing job.» So this section is the whole plan, written to be followed without
@@ -1075,6 +1103,39 @@ or rewrite another engineer's work, and never start a big change in another engi
   the guarded branch (strike only own-page «gone», cap respected: `opensooq/run.py::_strike_read_gone`)
   before waiting on a person for a tier move.
 
+- **2026-10-13 (♻️):** a quarantine is not a bug until a SECOND reader disagrees with it. Gathern's sweep
+  read 7-8 of 10 controls 404 from 07:37 to 11:32 UTC (CI and the proxy alike); #6978 (no single
+  observation timestamp may be more than a third of the controls) was merged on the theory that one
+  quarantined run's stamps were the controls, and the next run still read 3/10. lifecycle-spot-check
+  38391222675 then read 10 of those 12 "404" controls LIVE at 11:35: gathern was flapping, the gate was
+  right, and #6978 is hardening, not the cure. Dispatch the spot-check on the control ids FIRST.
+- **2026-10-13 (♻️):** a crawl that maps nothing must still hand its walk to the own-page oracle. manzo read
+  29 listed records, mapped 0 (status «available»), so `strike_read_gone` got an empty seen set and a
+  404 ad stayed on screen for three nights (#6980). And a unit whose project leaves the sitemap is never
+  read again: wahadat now reads struck units' unlisted project pages (14 units, 5-8 strikes).
+- **2026-10-16 (♻️):** a reader that looks only for «gone» can never clear a strike. #6981 read the
+  unlisted wahadat project pages for sold/reserved alone, so units whose own record still says
+  `available` stayed UNKNOWN and climbed 14 → 57 at 4-11 strikes (all live: unit 504dc5f5 read
+  «available» from CI, source-reread 38893210922). Those pages now join the main walk
+  (`struck_unlisted_projects`), so every answer, live included, is recorded. When a struck cohort
+  grows after a fix, check which answers the new reader throws away.
+- **2026-10-16 (♻️):** «struck rows first» needs a ceiling. dealapp's sweep put every struck row ahead
+  of the rotation (10-12); once 959 struck rows outnumbered its 600-read budget, every run re-read
+  the same struck shells (all UNKNOWN) two hours apart and the 28,203 unstruck rows got no reading
+  for 8 days: alive 3,508/day → 0, checked in time 96% → 56.5%, while the canaries stayed 3/3.
+  Struck rows now get at most a quarter of the budget (`_plan_worklist`). A sweep whose alive count
+  falls to 0 with healthy canaries is reading the wrong rows, not a dead site.
+
+- **2026-10-17 (♻️):** a second reader that cannot say WHY it got no answer cannot unstick anything.
+  `mon_served_after_source_gone` sat at ~21 tables for days because every re-read printed «unknown 5».
+  The spot check now lists the oracle's reason per ad (`unknown_examples`): suwar's 5 were «REST 401»
+  (unpublished WordPress post → its own page decides, as daryusuf/rakez), gathern's 919 «transient»
+  units were home-page landings, and ashab's «live» units were rented/sold on their own badge (its
+  crawl skipped them from the building card, so `note_read_gone` never fired). Read the reason first.
+- **2026-10-17 (♻️):** never dispatch a diagnostic workflow on your PR's branch head and then merge:
+  its red run attaches to the head commit and the merge gate refuses ANY non-success check. Push the
+  next commit (the lesson line) after the diagnostics, or dispatch them on a scratch branch.
+
 ## Rating (must be earned)
 **Your job is to make every night a real 10/10** (owner, 2026-09-27). You get there by making the
 system actually perfect: fixing, checking, and closing gaps. **Never by grading softer, skipping a
@@ -1246,3 +1307,27 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   `select * from ops_engineer_alert_queue where engineer = 'lifecycle' order by severity, created_at;` — every
   open `alert_event` now carries a live engineer (`ops_engineer_for_alert()`, by kind first, legacy
   `owner_routine` second). Drive each to resolved or say why not; the report carries «🚨 Alerts: N → M».
+
+## Lesson from 2026-10-13 (copied by 🔧 from your own report)
+
+- **A quarantined sweep is a growing number.** Gathern > 24 h rose 87 → 95 while the sweep was quarantined for
+  flapping. From the cloud container 17 of 60 served Gathern units (28%) answered `307 → gathern.co/ar?error=500` on
+  three tries each, and all 17 carried `last_verified_alive_at` < 24 h (🔧 proof row 1054, backlog 519). A verdict from
+  one egress is UNKNOWN, never a kill (`LISTING_LIVENESS.md`): re-measure the same URLs from CI egress FIRST, and if it
+  reproduces, the oracle that stamps «alive» is not opening the customer's link.
+- **An apply held for a person three nights running goes on line 1 with the exact statement**, not in the body.
+
+## Lesson from 2026-10-16 (copied by 🔧 from your own report)
+- **2026-10-16 (🔧 QA, your lines kept above):** the only engineer who ran tonight, and every number matched the database (3/840 dead visible, 70.7% checked in time, manzo 13621247 gone, dealapp sweep 363 alive). Fix rate 1/5 (20%) after 2/3 and 3/5: two nights down, so the list shrinks to three — `mon_served_after_source_gone` (21 rows, 18 platforms at 13:35 UTC), the 57 wahadat units at 4–11 strikes (proof at the 10-17 crawl), and the gathern home-redirect units (577) — and the wasalt 70.7% is ⚡'s to fix, one line in your report, not your night.
+
+## Lesson from 2026-10-17 (copied by 🔧 from your own report)
+- **2026-10-17 (♻️, your line):** read the reason behind every UNKNOWN (suwar's «REST 401» was an unpublished post that only the ad's own page could judge; ashab's rented units kept a 200 page and said so only in their badge); and diagnostics left on the PR head block the merge gate.
+- **2026-10-17 (🔧 QA):** every number in your report matched the database (gone 3 of 840, estimate 8,980, checked in time 71.7% vs 71.8%), and 20 of 20 random live Gathern units opened. A 0/10 self-rating on an estimate whose mass is another engineer's platform (wasalt, 4th night of a dead enumeration) is honest but not informative: write the split — «8,980, of which wasalt ≈ N» — and score your own lane.
+
+## Lesson from 2026-10-18 (written by 🔧; your end row carried no 📚 line)
+
+Your numbers matched the database to the point (checked in time 72.0% → 90.9%, dead-visible 5/842 = `ops_dead_visible_fleet`),
+which is the standard. The miss: the 5 ads a second reader confirmed gone were left «in the hiding pipeline» (0–2 strikes)
+while the estimate rose 2 → 890 and four sites went over the line — **a confirmed-gone ad is hidden inside your slot and
+proven served = 0, never handed to tomorrow's strikes.** And `never_verified` rose 2,154 → 7,248 in a day (the wasalt
+enumeration intake): a number that jumps by 3x needs its own line in the end row, every night.

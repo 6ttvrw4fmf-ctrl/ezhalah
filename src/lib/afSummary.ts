@@ -35,13 +35,13 @@ export type AfFacet = { id: string; keys: string[]; labels: string[]; total?: nu
 // ONE committed facet → its finished, reader-facing item(s). Shared by the summary and the round
 // log, so an answer is worded identically wherever it appears; a multi-select facet explodes into
 // one item per key.
-function facetItems(f: AfFacet): string[] {
+function facetItems(f: AfFacet, locale: 'ar' | 'en' = 'ar'): string[] {
   const items: string[] = [];
   {
     switch (f.id) {
       // Every question takes several answers (owner 2026-10-03), so each pick is its own item.
       case 'property_age':
-        f.labels.forEach((l, i) => items.push(`عمر ${l} ${f.keys[i] === 'new' ? '✨' : '🏗️'}`));
+        f.labels.forEach((l, i) => items.push(`${locale === 'en' ? 'Age' : 'عمر'} ${l} ${f.keys[i] === 'new' ? '✨' : '🏗️'}`));
         break;
       case 'rnpl':
         items.push(`${f.labels[0]} 💳`);
@@ -59,13 +59,13 @@ function facetItems(f: AfFacet): string[] {
         for (const l of f.labels) items.push(`${l} 🏡`);
         break;
       case 'bathrooms':
-        for (const l of f.labels) items.push(`${l} حمامات 🚿`);
+        for (const l of f.labels) items.push(`${l} ${locale === 'en' ? 'bathrooms' : 'حمامات'} 🚿`);
         break;
       case 'furnished':
         f.labels.forEach((l, i) => items.push(`${l} ${f.keys[i] === 'yes' ? '🛋️' : '🏠'}`));
         break;
       case 'street_width':
-        for (const l of f.labels) items.push(`شارع ${l} 🛣️`);
+        for (const l of f.labels) items.push(`${locale === 'en' ? 'Street' : 'شارع'} ${l} 🛣️`);
         break;
       // «أو», not «و». p_directions is a membership filter — picking شمال and غرب returns listings
       // facing north OR west. «شمال وغرب» describes a DIFFERENT, buildable query: one corner listing
@@ -73,10 +73,10 @@ function facetItems(f: AfFacet): string[] {
       // read oddly, it names a real query we did not run. Every OTHER multi-select in this sentence is
       // genuinely conjunctive — amenities AND together in the RPC — which is why they stay on «و».
       case 'direction':
-        items.push(`${f.labels.join(' أو ')} 🧭`);
+        items.push(`${f.labels.join(locale === 'en' ? ' or ' : ' أو ')} 🧭`);
         break;
       case 'rating':
-        for (const l of f.labels) items.push(`تقييم ${l} ⭐`);
+        for (const l of f.labels) items.push(`${locale === 'en' ? 'Rating' : 'تقييم'} ${l} ⭐`);
         break;
       case 'unit_subtype':
         for (const l of f.labels) items.push(`${l} 🏢`);
@@ -98,8 +98,8 @@ function facetItems(f: AfFacet): string[] {
 // The committed answers as finished items (words + emoji), one per entry, in answer order — what each
 // read-only CHIP under the results summary shows (owner 2026-10-03). Same items, same wording and the
 // same dedupe as the sentence below, so a chip and the sentence can never name different answers.
-export function buildAfSummaryItems(facets: AfFacet[]): string[] {
-  return [...new Set(facets.flatMap(facetItems))];
+export function buildAfSummaryItems(facets: AfFacet[], locale: 'ar' | 'en' = 'ar'): string[] {
+  return [...new Set(facets.flatMap(f => facetItems(f, locale)))];
 }
 
 // THE ADVANCED FILTER ROUND'S SEARCH BEAT (owner 2026-10-11: «نفحص أكثر من 349,793 عقار…» is how a search should read —
@@ -210,14 +210,15 @@ const skipItem = (id: string): string | null => {
 // The trailing loop is not decoration: it guarantees that a committed facet whose question is
 // somehow absent from `askedIds` is still named. Rule 1 of the permanent summary rule — a facet in
 // the predicate MUST appear — is the half that must never fail quiet, so ordering yields to it.
-export function buildAfRoundLog(askedIds: string[], facets: AfFacet[]): string {
+export function buildAfRoundLog(askedIds: string[], facets: AfFacet[], locale: 'ar' | 'en' = 'ar'): string {
   const byId = new Map(facets.map((f) => [f.id, f]));
   const items: string[] = [];
   for (const id of askedIds) {
     const f = byId.get(id);
-    if (f) items.push(...facetItems(f));
-    else { const sk = skipItem(id); if (sk) items.push(sk); }
+    if (f) items.push(...facetItems(f, locale));
+    else { const sk = locale === 'en' ? (AF_LINE_LABEL[id] ? `Skipped ${AF_LINE_LABEL[id]} ${SKIP_MARK}` : null) : skipItem(id); if (sk) items.push(sk); }
   }
-  for (const f of facets) if (!askedIds.includes(f.id)) items.push(...facetItems(f));
+  for (const f of facets) if (!askedIds.includes(f.id)) items.push(...facetItems(f, locale));
+  if (locale === 'en') return [...new Set(items)].join(', ');
   return joinAr([...new Set(items)]);
 }

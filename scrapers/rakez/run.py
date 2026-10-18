@@ -78,6 +78,7 @@ HEADERS = {
 }
 
 INGESTIBLE_UNIT_STATUS = "available"
+AREA_PROBE_UNIT_IDS = {68221, 14631}     # backlog #507: RKZ68221 (project 67515), RKZ14631 (26260)
 
 
 def _unit_status(acf: dict) -> str:
@@ -152,6 +153,26 @@ def _clean(s: Optional[str]) -> Optional[str]:
     t = ihtml.unescape(re.sub(r"<[^>]+>", " ", str(s)))
     t = re.sub(r"\s+", " ", t).strip()
     return t or None
+
+
+def _to_num(v: Any) -> Optional[float]:
+    if v is None or v is False or v is True:
+        return None
+    s = re.sub(r"[,\s]", "", str(v).translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")))
+    return float(s) if re.match(r"^\d+(?:\.\d+)?$", s) else None
+
+
+def unit_area(acf: dict) -> Optional[int]:
+    """The unit's size as its project page prints it: `area` + `private_area` (owner ruling 2026-10-16,
+    backlog #541). The unit API splits the built area from the private courtyard/roof; the page's unit
+    table shows their SUM (unit 14631: 144 + 32 = «176 م²»; unit 68221: 169.42 + 102.15). Storing the
+    built part alone put every unit with a private area under a smaller size than its page states.
+    Nearest whole metre (area_m2 is an integer column, #123); a unit with no private area is unchanged."""
+    built = _to_num(acf.get("area"))
+    if not built or built <= 0:
+        return None
+    private = _to_num(acf.get("private_area")) or 0.0
+    return int(built + (private if private > 0 else 0.0) + 0.5)
 
 
 def _to_int(v: Any) -> Optional[int]:
@@ -319,7 +340,8 @@ def _city_or_region_homonym(name: str) -> tuple[Optional[int], Optional[int]]:
     return cid, rid
 
 
-def resolve_location(term_ids: list[int], tree: dict[int, dict]) -> tuple[Optional[str], Optional[int],
+def resolve_location(term_ids: list[int], tree: dict[int, dict], title: Optional[str] = None
+                     ) -> tuple[Optional[str], Optional[int],
                                                                          Optional[int], Optional[str]]:
     """(city_ar, city_id, region_id, district_ar) from the taxonomy TREE.
 
@@ -335,14 +357,13 @@ def resolve_location(term_ids: list[int], tree: dict[int, dict]) -> tuple[Option
         return d
 
     tagged = [t for t in term_ids if t in tree]
-    if not tagged:
-        return None, None, None, None
-    leaf = max(tagged, key=depth)
-
-    # ancestry, leaf first
-    chain, tid, seen = [], leaf, set()
-    while tid in tree and tid not in seen:
-        seen.add(tid); chain.append(tree[tid]["name"]); tid = tree[tid]["parent"]
+    chain: list[str] = []
+    if tagged:
+        leaf = max(tagged, key=depth)
+        # ancestry, leaf first
+        tid, seen = leaf, set()
+        while tid in tree and tid not in seen:
+            seen.add(tid); chain.append(tree[tid]["name"]); tid = tree[tid]["parent"]
 
     city_ar = city_id = region_id = None
     for name in chain[1:] or chain:            # a city is never the leaf unless the leaf is all we have
@@ -350,11 +371,95 @@ def resolve_location(term_ids: list[int], tree: dict[int, dict]) -> tuple[Option
         if cid:
             city_ar, city_id, region_id = name, cid, rid
             break
+
+    if not city_id and len(tagged) > 1:
+        # The district and its city tagged SIDE BY SIDE, both children of the region: /ar/project/1908/ prints
+        # «المدينة: الحمراء , الخبر» — الحمراء (734) → الشرقية, الخبر (1049) → الشرقية — so the leaf's own chain never
+        # reaches the city (7 live units with no city, 2026-10-18). Exactly one tagged city, in the chain's region.
+        regions = {r for r in (_bare_region_labels().get(norm_ar(n)) for n in chain) if r is not None}
+        cities = {}
+        for t in tagged:
+            cid, rid = _city_or_region_homonym(tree[t]["name"])
+            if cid and (not regions or rid in regions):
+                cities[cid] = (tree[t]["name"], cid, rid)
+        if len(cities) == 1:
+            city_ar, city_id, region_id = next(iter(cities.values()))
+            others = [tree[t]["name"] for t in sorted(tagged, key=depth, reverse=True) if tree[t]["name"] != city_ar]
+            chain = others[:1] + [city_ar]     # the district candidate first, as the tree walk leaves it
+
     if not city_id:
-        return None, None, None, None
+        # The tree skipped the city (البندرية → الشرقية, no الخبر): the project's OWN title states it.
+        # A region the tree did name must agree with the title's city, or nothing is placed.
+        regions = {r for r in (_bare_region_labels().get(norm_ar(n)) for n in chain) if r is not None}
+        city_ar, city_id, region_id, district_ar = location_from_title(title)
+        if not city_id or (regions and region_id not in regions):
+            return None, None, None, None
+        return city_ar, city_id, region_id, district_ar
 
     district_ar = find_district_in_text(chain[0], city_id) if chain else None
+    tree_named_a_district = bool(chain) and chain[0] != city_ar and not _ZONE.match(chain[0])
+    if not district_ar and title and not tree_named_a_district:
+        # The tree stopped at the city (or a zone): the title's own district words, catalog-scoped.
+        # A district the tree DID name but our catalog lacks stays NULL — the title never overrules it.
+        t_city, t_cid, _, t_dist = location_from_title(title)
+        if t_cid in (None, city_id):
+            district_ar = t_dist if t_cid else find_district_in_text(_title_tail(title), city_id)
     return city_ar, city_id, region_id, district_ar
+
+
+_ZONE = re.compile(r"(شمال|جنوب|شرق|غرب|وسط)\s")
+
+
+def tree_leaf_district(term_ids: list[int], tree: dict[int, dict], city_ar: Optional[str]) -> Optional[str]:
+    """The tree's OWN leaf term when it names a district — the source's word, as written. 255 live
+    units stayed without a district because the leaf («العنبرية» under المدينة المنورة, 56204) is not in
+    our catalogue and the old rule dropped it entirely (owner 2026-10-18: a source-named district is
+    shown, as written, attested or not). Never a district: the city itself, a zone («شمال الرياض»), a
+    root term (a city or a region)."""
+    tagged = [t for t in term_ids if t in tree]
+    if not tagged:
+        return None
+
+    def depth(tid: int) -> int:
+        d, seen = 0, set()
+        while tid in tree and tid not in seen and tree[tid]["parent"]:
+            seen.add(tid); tid = tree[tid]["parent"]; d += 1
+        return d
+
+    leaf = tree[max(tagged, key=depth)]
+    name = (leaf.get("name") or "").strip()
+    if not name or not leaf.get("parent") or name == (city_ar or "") or _ZONE.match(name):
+        return None
+    return name
+_DASH = re.compile(r"\s*[–—-]\s*")
+
+
+def _title_tail(title: Optional[str]) -> str:
+    """The location part of a rakez project title: everything after its first dash
+    («شقق ألين 152 – البندرية الخبر» → «البندرية الخبر», «شقق تلال فيلج – النسيم – مكة المكرمة» →
+    «النسيم مكة المكرمة»). A title with no dash states no location this way → ''."""
+    parts = _DASH.split(title or "", maxsplit=1)
+    return " ".join(_DASH.split(parts[1])) if len(parts) == 2 else ""
+
+
+def location_from_title(title: Optional[str]) -> tuple[Optional[str], Optional[int], Optional[int],
+                                                        Optional[str]]:
+    """(city_ar, city_id, region_id, district_ar) from the project title's tail «<district> <city>».
+
+    The city is the tail's LAST one or two words (two first, so «مكة المكرمة» is not «المكرمة»),
+    validated against our catalog with the same region-homonym guard as the tree walk («الشبيلي
+    الشرقية» stays NULL: الشرقية is the region, never the village of that name). The district is
+    only ever a catalog-attested district of THAT city named in the remaining words."""
+    words = re.findall(r"[\u0621-\u064A]+", _title_tail(title))
+    for n in (2, 1):
+        if len(words) < n:
+            continue
+        name = " ".join(words[-n:])
+        cid, rid = _city_or_region_homonym(name)
+        if cid:
+            rest = " ".join(words[:-n])
+            return name, cid, rid, (find_district_in_text(rest, cid) if rest else None)
+    return None, None, None, None
 
 
 def _floor_number(raw: Any) -> Optional[int]:
@@ -410,10 +515,15 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
         return None, ""                       # unmapped type → skipped, never assumed
 
     city_term_ids = [t["id"] for t in _terms_of(ar_project, "city") if isinstance(t.get("id"), int)]
-    city_ar, city_id, region_id, district_ar = resolve_location(city_term_ids, tree)
+    ar_title = _clean(((ar_project or {}).get("title") or {}).get("rendered"))
+    city_ar, city_id, region_id, district_ar = resolve_location(city_term_ids, tree, ar_title)
+    district_source = "catalogue" if district_ar else None
+    leaf = tree_leaf_district(city_term_ids, tree, city_ar) if city_id else None
+    if not district_ar and leaf:
+        district_ar, district_source = leaf, "tree_leaf"      # the source's own term, kept as written
 
     price = _to_int(acf.get("price"))
-    area = _to_int(acf.get("area"))
+    area = unit_area(acf)
     bedrooms = _to_int(acf.get("rooms_count"))
     floor_number = _floor_number(acf.get("floor"))
 
@@ -448,6 +558,7 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
         "city_id": city_id,
         "region_id": region_id,
         "additional_info": {k: v for k, v in {
+            "district_source": district_source,     # catalogue | tree_leaf (the taxonomy's own word, uncatalogued)
             "unit_code": _clean(acf.get("code")),
             "project_id": en_id,
             "project_title_ar": project_title,
@@ -456,7 +567,40 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
             "source_unit_status": acf.get("unit_status"),
         }.items() if v not in (None, "", [], {})},
     }
+    # rakez publishes NO structured amenity field per unit, but its own description lists them («مطبخ»,
+    # «موقف خاص», «يسار المصعد»): 1,660 / 385 / 85 of 3,535 active units on 2026-10-17 while every amenity
+    # column was NULL. Prose says YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2), never False.
+    row.update(prose_answers(acf.get("description_ar")))
+    for col, yes in project_answers(features).items():
+        row.setdefault(col, yes)
     return row, category.lower()
+
+
+# The amenity columns search reads (listing_extra_attrs); prose may answer only these, YES-only.
+_PROSE_COLS = ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "private_entrance")
+
+
+def prose_answers(description: Optional[str]) -> dict[str, bool]:
+    yes = normalize.prose_amenities_yes(normalize.html_block_lines(description))
+    return {c: True for c in _PROSE_COLS if yes.get(c)}
+
+
+# The project's `feature` terms are its build spec, shared by every unit (195 of 195 projects carry one list,
+# and no project mixes unit types: 2,235 apartments, 939 floors, 253 villas, 101 town houses, 2026-10-18).
+# A BUILDING trait the spec names holds for every unit in it: the lifts («مصاعد», «مصعد», «مصاعد إيطالية») and
+# the installed air conditioning («تكييف مخفي», «تكييف سبليت»). A UNIT trait does not: «غرفة خادمة», «غرفة سائق»,
+# «مواقف خاصة» and «مطبخ» describe some of the project's units, not each one (backlog 467), so they are never
+# read from this list. YES or nothing, through the shared matcher («تأسيس مصعد» stays NULL).
+_PROJECT_COLS = ("elevator", "air_conditioner")
+# A term about the building's COMMON areas is not the unit: «ممرات مكيفة» (air-conditioned corridors) said AC = yes
+# for 54 units whose spec names no unit air conditioning (🔬 2026-10-18, caught on the first crawl and reverted).
+_COMMON_AREA = re.compile(r"ممرات|ممر |لوبي|ردهة|ردهات|المدخل|مداخل")
+
+
+def project_answers(features: list[str]) -> dict[str, bool]:
+    unit_terms = [f for f in (features or []) if not _COMMON_AREA.search(f)]
+    yes = normalize.prose_amenities_yes("\n".join(unit_terms))
+    return {c: True for c in _PROJECT_COLS if yes.get(c)}
 
 
 def _page_gone(path: str) -> tuple[bool, str]:
@@ -600,6 +744,12 @@ def main() -> int:
             raise RuntimeError("fetched units but ZERO Arabic projects — nothing could be typed or "
                                f"located in Arabic. {LAST_FETCH_NOTE}")
         print(f"Rakez: {len(units)} units, {len(en_projects)} projects, {len(tree)} location terms")
+        # Backlog #507 (2026-10-14): the project page prints a larger area than acf.area for the same
+        # unit (#1 of project 26260: page 176 m², acf.area 144; #7 of 67515: 220.68 vs 169). Print
+        # the whole raw record of those units so the run log shows which field the page renders.
+        for u in units:
+            if u.get("id") in AREA_PROBE_UNIT_IDS:
+                print(f"  #507 probe unit {u['id']} acf={ {k: v for k, v in (u.get('acf') or {}).items() if k != 'description_ar'} }")
 
         if args.limit_test:
             units = units[: args.limit_test]

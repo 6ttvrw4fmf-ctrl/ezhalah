@@ -133,6 +133,14 @@ def parse_area(text: str) -> Optional[int]:
 _PER_METRE = re.compile(r"للمتر|لل?متر\s*المربع|/\s*م²|/\s*متر")
 
 
+def _stated_per_metre(text: str, n: int) -> bool:
+    """The ad's own description states THIS figure per metre: SDQ5562's header prints «550 ريال», its
+    description «الحد ( 550 ريال للمتر )» (2026-10-18). The marker must follow the same figure; a per-metre
+    phrase about another number never turns this one into a rate."""
+    flat = re.sub(r"(?<=\d),(?=\d)", "", text.translate(_AR_DIGITS))
+    return re.search(rf"(?<![\d.]){n}\s*(?:ريال|ر\.س)?\s*\(?\s*(?:{_PER_METRE.pattern})", flat) is not None
+
+
 def parse_price(text: str) -> tuple[Optional[int], Optional[int]]:
     """(price_total, price_per_meter). «على السوم» (by offer) is an ABSENCE — never a number, and
     never the «الدخل السنوي» rental income the description states further down."""
@@ -152,6 +160,8 @@ def parse_price(text: str) -> tuple[Optional[int], Optional[int]]:
     if n <= 0:
         return None, None
     if _PER_METRE.search(head):
+        return None, n
+    if _stated_per_metre(text, n):
         return None, n
     area = parse_area(text)
     if area and n < area:                 # a total under 1 SAR/m² cannot be a total
@@ -203,7 +213,17 @@ def resolve_district_words(text: str, city_id: Optional[int]) -> tuple[Optional[
             hit = find_district_in_text(cand, city_id)
             if hit and norm_district_tok(hit) == norm_district_tok(cand):
                 return hit, cand
-    return find_district_in_text(words[0], city_id), words[0]   # the one-word read, exactly as before
+    hit = find_district_in_text(words[0], city_id)
+    if hit is None:
+        # A spelling of a catalogued district (ops_district_name_decision 'variant', 20261018073107): mapped
+        # here, never added to the catalog. «الوسيطي» / «الوسيطى» is بريدة's «حي الوسيطا» (39 ads, 10-18).
+        alt = _DISTRICT_SPELLING.get((city_id, norm_district_tok(words[0])))
+        if alt:
+            hit = find_district_in_text(alt, city_id)
+    return hit, words[0]   # the one-word read, exactly as before
+
+
+_DISTRICT_SPELLING = {(11, norm_district_tok("الوسيطي")): "حي الوسيطا"}
 
 
 def resolve_district(text: str, city_id: Optional[int]) -> Optional[str]:
@@ -315,29 +335,60 @@ def parse_bedrooms(text: str) -> Optional[int]:
     return n if 0 < n <= 50 else None
 
 
-_STREET_RE = re.compile(r"شارع\s*[ء-ي]*\s*([\d٠-٩]{1,3})\s*م")
+# ONE street or nothing (the fleet rule, normalize.one_street_width / one_direction). This source
+# writes a corner plot as two streets in one frontage row — «الواجهة : شارع تجارى غربي 40م شارع
+# جنوبي 15م» (12217842, re-read 2026-10-13). The old reader allowed ONE word between «شارع» and the
+# number, so it skipped the 40 m commercial street and stored 15, and took «جنوبي» because it came
+# first in a word list: a confident value the ad never stated. Two streets or two bearings → NULL.
+_STREET_RE = re.compile(r"شارع((?:\s*[ء-ي]+){0,3})\s*:?\s*([\d٠-٩]{1,3})\s*(?:م|متر)(?![ء-ي])")
+# What follows the street(s) in the same row and is NOT a street: an alley («وممر جنوبي 8م», «ومر شرقي»),
+# the plot's side lengths («الاطــوال : شمالي 41م جنوبي 51م …», every bearing in it is a SIDE, not a
+# facade), the plan number, or a «قريبة من …» note. Measured on the 117 re-read rows (2026-10-13).
+_FACADE_TAIL = re.compile(r"(?:\s|^)(?:و\s*)?(?:ممر|مر(?=\s)|الا?[ـ]*ط[ـ]*و[ـ]*ا?[ـ]*ل|الأطوال|رقم المخطط|المخطط|قريب)")
+_MANY_STREETS = re.compile(r"شارعين|شوارع")
+
+
+def facade_row(text: str) -> Optional[str]:
+    """The listing's OWN frontage row, verbatim (kept in additional_info so it can be re-judged)."""
+    return desc(text, "الواجهة")
+
+
+def _street_part(text: str) -> Optional[str]:
+    """The frontage row up to the first thing that is not a street; None when it names two streets."""
+    v = facade_row(text)
+    if not v:
+        return None
+    v = _FACADE_TAIL.split(v, maxsplit=1)[0]
+    if _MANY_STREETS.search(v) or v.count("شارع") > 1:
+        return None
+    return v
 
 
 def parse_street_width(text: str) -> Optional[int]:
     """From «الواجهة : شارع شرقى 25م» — the listing's OWN frontage row, never the page at large."""
-    v = desc(text, "الواجهة")
+    v = _street_part(text)
     if not v:
         return None
-    m = _STREET_RE.search(v.translate(_AR_DIGITS))
-    if not m:
+    m = _STREET_RE.findall(v.translate(_AR_DIGITS))
+    if len(m) != 1:
         return None
-    n = int(m.group(1))
+    n = int(m[0][1])
     return n if 1 <= n <= 200 else None
 
 
 _DIRECTIONS = ("شمالى", "شمالي", "جنوبى", "جنوبي", "شرقى", "شرقي", "غربى", "غربي",
                "شمال", "جنوب", "شرق", "غرب")
+_ALEF_MAQSURA = str.maketrans("ى", "ي")
 
 
 def parse_direction(text: str) -> Optional[str]:
-    v = desc(text, "الواجهة")
+    v = _street_part(text)
     if not v:
         return None
+    # «شارع شرقي12م»: a bearing glued to its number is still that bearing.
+    v = re.sub(r"(?<=[ء-ي])(?=[\d٠-٩])|(?<=[\d٠-٩])(?=[ء-ي])", " ", v)
+    if normalize.one_direction(v.translate(_ALEF_MAQSURA)) is None:
+        return None                     # no bearing, or two (a corner plot) → unknown
     for d in sorted(_DIRECTIONS, key=len, reverse=True):
         if d in v:
             return d
@@ -468,6 +519,7 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
         district_raw = district_words      # the ad's own full words («القاع البارد», not «القاع»)
 
     price_total, price_per_meter = parse_price(text)
+    rate_stated = price_per_meter is not None
     rent_period, price_annual = (None, None)
     if deal == "Rent":
         rent_period, price_annual = normalize.rent_period_and_annual(price_total, text)
@@ -498,7 +550,10 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
         if rent_period:
             row["rent_period"] = rent_period
     else:
-        row["price_total"] = price_total
+        # A stated rate with no total is the source settling «no total»: AUTHORITATIVE_NULL clears a total an
+        # older read stored (SDQ5562 held 550 as a total), where a plain None would be dropped by the upsert.
+        no_total = db.AUTHORITATIVE_NULL if rate_stated else None
+        row["price_total"] = price_total if price_total is not None else no_total
     if price_per_meter is not None:
         row["price_per_meter"] = price_per_meter
 
@@ -507,6 +562,7 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
         "type_ar": type_ar,
         "region_ar": region_ar,
         "components": desc(text, "المكونات"),
+        "facade_raw": facade_row(text),
         "annual_income": annual_income(text),
         "price_is_per_metre": price_per_meter is not None,
         "price_published": (price_total is not None) or (price_per_meter is not None),
@@ -598,8 +654,15 @@ def fetch_catalogue(s: cc.Session, limit: int = 0) -> list[str]:
                 INCOMPLETE.append(f"{sub} answered HTTP {rs.status_code}")
         if seen:
             break
-    out = sorted(seen)
+    out = sorted(u for u in seen if not PLATFORM_TEST_AD.search(u))
     return out[:limit] if limit else out
+
+
+# The platform's own test ad sits in its sitemap: /ads/fake-1001-2 renders «fake - 1002» with no price, no
+# title, no description and the default «default-build.png» image, and was served as a 50 m² villa for sale
+# in مكة (17956334, 2026-10-16, re-read run 38916270732). It is not a property. It is withdrawn and
+# adjudicated by migration (🆕 backlog #589); this keeps the next crawl from re-ingesting it.
+PLATFORM_TEST_AD = re.compile(r"/ads/fake-\d")
 
 
 def main() -> int:

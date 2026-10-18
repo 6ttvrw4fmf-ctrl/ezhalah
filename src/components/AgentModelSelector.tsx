@@ -4,7 +4,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { useI18n } from '@/i18n';
 import { cardShadow, colors, radius } from '@/theme/tokens';
-import { TAP44 } from '@/theme/palette';
+import { TAP44, TAP44_DOWN } from '@/theme/palette';
 
 const MODELS = [
   { id: 'shaheen', ar: 'شاهين', en: 'Shaheen', version: '2.2',
@@ -14,13 +14,13 @@ const MODELS = [
     // Why the name, and what it does (owner 2026-10-10, approved wording). Describes the model only —
     // never «best», never a recommendation about a property.
     storyAr: 'الشاهين أسرع الطيور انقضاضاً، ومن هنا جاء اسمه. نموذجٌ يفهم طلبك من أول جملة، ويعرض لك الإعلانات المطابقة بسرعة ودقة.',
-    storyEn: 'The Shaheen (peregrine falcon) is the fastest bird when it dives — that is where the name comes from. A model that understands your request from the first sentence and shows you the matching listings quickly and accurately.' },
+    storyEn: 'The Shaheen (peregrine falcon) is the fastest bird when it dives. That is where the name comes from. A model that understands your request from the first sentence and shows you the matching listings quickly and accurately.' },
   { id: 'hurr', ar: 'حُر', en: 'Hurr', version: '4.4',
     mark: require('../../assets/models/hurr.png'),
     descriptionAr: 'قوة وتحمل فائق لأصعب المهام والمعالجات',
     descriptionEn: 'Unmatched endurance for your toughest challenges',
     storyAr: 'الحُرّ أقوى صقور الجزيرة العربية وأكثرها صبراً في الصيد، ومن هنا جاء اسمه. نموذجٌ يبحث بعمق في جميع المواقع، ويتعامل مع الطلبات المعقّدة متعددة الشروط.',
-    storyEn: 'The Hurr (saker falcon) is the strongest falcon in the Arabian Peninsula and the most patient hunter — that is where the name comes from. A model that searches deeply across all websites and handles complex requests with many conditions.' },
+    storyEn: 'The Hurr (saker falcon) is the strongest falcon in the Arabian Peninsula and the most patient hunter. That is where the name comes from. A model that searches deeply across all websites and handles complex requests with many conditions.' },
 ] as const;
 
 // Decorative: the adjacent model name already labels each control for assistive technology.
@@ -61,9 +61,10 @@ export default function AgentModelSelector({ disabled = false }: { disabled?: bo
         accessibilityRole="button" accessibilityState={{ expanded: !!anchor, disabled }}
         accessibilityLabel={`${arabic ? 'اختيار النموذج' : 'Select model'}: ${arabic ? model.ar : model.en} ${model.version}`}
         onPress={() => { setAbout(false); trigger.current?.measureInWindow((x, y, measuredWidth) => setAnchor({ x, y, width: measuredWidth })); }}
-        // Visually a 24px line; the 44px floor comes from TAP_TARGET_CSS via this marker.
+        // Visually a 24px line; the 44px floor comes from TAP_TARGET_CSS via this marker, grown DOWNWARD
+        // (TAP44_DOWN) so it never takes the bottom of the mic 3px above it.
         // @ts-expect-error web-only DOM props on the RNW host node
-        dataSet={{ ...TAP44 }}
+        dataSet={{ ...TAP44, ...TAP44_DOWN }}
         style={({ pressed }) => [styles.trigger, { direction: 'ltr', flexDirection: arabic ? 'row-reverse' : 'row', opacity: disabled ? 0.45 : 1 }, pressed && styles.pressed]}>
         {/* No ⌄ arrow (owner 2026-10-10: «for shaheen 2.2 don't include this drop menu thing») — keep the name and decorative mark compact. */}
         <ModelMark model={model} size={16} />

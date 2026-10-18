@@ -30,42 +30,41 @@ safety rules (deploy lock, `safe-pr-merge.ts`, source truth, migration rules) st
 > your report with the reason and the plan. Your report gets one line: «🛰️ Sentry: N open in my area · fixed N · resolved N».
 
 ## 🎯 NEXT RUN ORDERS — written by ⚡ for itself (owner, 2026-10-12: «give yourself instructions so you do a good job on the next run»)
+
 These win over THE PLAN's timeline below; THE PLAN's rules still hold. Replace this block at the end of every run.
 
-> **Owner, 2026-10-12:** «Your job is to get better on a daily basis, and I want everything fixed and good.» Bar for every
-> night: fix rate ≥ 6 of 10 found, every number proven like a customer, rating ≥ 9, no over-claim.
+> **Owner bar (10-13, still standing):** fix rate ≥ 6/10 proven like a customer · 0 sites broken on our side at the end ·
+> rating ≥ 9 · the owner never has to ask for a fix afterwards · no over-claim.
 
-**What 10-13 learned (do not repeat):**
-- **One push per PR cycle.** Each push cancelled `npm test` mid-run (3 cycles lost, ~25 min). Batch commits locally, run
-  `PATH=<dir with python3 -> /usr/bin/python3>:$PATH npm run test:all` (646 checks, ~11 min; /usr/local/bin/python3 lacks
-  curl_cffi), push once.
-- **A new `scripts/verify-*.ts` needs an executable `mutation(...)` proof** (verify-new-barriers-are-mutation-proven).
-- **Pick rotation listings a customer CAN find:** a rental with `rent_period_ar` NULL is never in a rent search (owner rule),
-  so filter `deal_ar='بيع' or rent_period_ar is not null`. That «false FAIL» found the akariyoun bug, though: when a site has
-  100% NULL periods, re-read one page around «سنو» before calling it source silence.
-- **The Haraj shadow is in concurrency group `haraj-shadow`:** a cancelled run blocks the dispatch until it clears.
+**Kept hard rules:** ONE PR early (`pytest scrapers/common/tests` + `npm run test:all` locally, then push once); read
+every failed site's exception TEXT in the first 15 min; a parser fix is fixed only when the RAW row changed;
+`issues_fixed` = PASS `:proof` rows for tonight's backlog items, counted by query.
 
-**Minute 0–15 (DB clock):** merge state of PR #6933 (merge on green with `safe-pr-merge.ts` if still open), then the proofs below.
+**NEW (10-17): pick the proof before the fix.** Before writing a fix, name the listing and the journey that will prove
+it, and check the tool can drive it: `customer-journey.mjs` cannot search type «أرض» (no box) and no rent search shows a
+rental without a period. A fix whose only carriers are unprovable stays UNKNOWN (10-17: two Haraj area fixes). Merge by
+~06:00 UTC so a ~15-min crawl lands before the 06:22 sync (rakez 10-17: merged 05:57, crawled 06:09–06:17, proven 06:27).
 
-**Proofs owed from 10-13 (each a `:proof` row, all need #6933 merged + the 04:22 nightly + the :22 sync):**
-- akariyoun: `select rent_period_ar, count(*) from search_listings_ar where platform='akariyoun' and deal_ar='إيجار' and
-  production_ready group by 1` → سنوي ≈ 190; customer journey on 17376257 (Riyadh إشبيلية شقة, rent سنوي, 87,000) PASS.
-- abralosol: tonight's run ok with ~2,800 rows (route line in the log); ryadah: a scrape_runs row exists (ok, 18 rows).
-- gomenassat 15709861 (offer 818): area_m2 = 1652; card shows 1,652 م².
-- wasalt enrich_ar: pending count (rows_seen of `wasalt_enrich_ar_residential`) below 25,750 and falling.
-- silent_partial_success: my queue's 17-18 standing P1s resolved by the 06:59 10-13 sweep or later; only real ones left.
-- dealapp: the 10-13 catch-up crawl (run dispatched 05:41 UTC) saw ~19k; if the 10-14 02:33 nightly again hits the
-  100-min budget on all 12 shards, raise shards (verify-dealapp-crawl-budget) the same night.
+**Owed → first thing next run (10-19):**
+- **Haraj catalogues leave by strikes (owner fix #7341 + my 615 body rule).** 200 stored plural-title posts and
+  HRJ11190705938 read «gone» from the 10-18 ~21:00 UTC `fleet_liveness:haraj` APPLY on; grace 3 → hidden after the
+  10-20 pass. Each night read their `missing_count`; on 10-21 replay the owner's Jeddah «شقة للبيع» search and show
+  HRJ11190739649 / HRJ11190629474 gone (proof row). 608 (HRJ11190645357 «طلب») is at 2 strikes → gone after 10-18 21:00.
+- **645/584 dangling threshold (applied 20261018052758).** Proof = no `dangling_scrape_run` alert for
+  `fleet_liveness:muhaysini` or `wasalt_enum_shard` while a healthy run passes 3 h (muhaysini liveness ~07–12 UTC,
+  wasalt enum 10-19 21:00). Read `alert_event` for those keys, then close 645 and 584.
+- **613 wasalt 13746442:** NOT ours — wasalt's own archived payload (ar_data) carries salePrice 3,346,875,000 and the
+  row is hidden by the price gate. Re-read once a week; close when the list API serves 8,925,000.
+- **610/616 Haraj areas:** the carriers are rentals with no period (no customer search shows them). Values are right
+  in raw and index; keep UNKNOWN, do not count them as fixed.
+- Kept: 575/612 photo floors · 564 gathern 577 units redirecting home · 565 almuteb 503 · 646 aqalemhajer rows_collapse.
 
-**Then, in order:** Haraj gate #4 result (run 38354212930, files 10-12 ≈13–18 KSA, untouched): hand-check every «offer»;
-100 clean → live build (THE PLAN item); any miss → fix the shape, re-classify every window, gate on 10-12 19+ KSA.
-Then backlog 494/496/478 leftovers (aqar farms area, aqarmonthly 13905878, wasalt 13746442 list-vs-detail price).
+**10-18 facts:** the wasalt enum is healthy again (34/34 shards, 181,789 rows; liveness in-time 3.6% → 92.6%). «حي X» in a
+Haraj district is NOT a bug: it is the catalogue's own spelling in many cities (Riyadh «حي المنار» = 288 other listings).
 
-**Proof timing facts:** search sync :22 (commits ~:24–:26); detector sweep :59 (~3.5 min); Wasalt rich attrs 06:46 UTC;
-muhaysini nightly ends ~07:10 UTC; `scraper-early-warning` 07:45 UTC. USED Haraj windows (never gate on them):
-10-10 01–03, 10-10 ~07–12, 10-10 13 → 10-11 05, 10-11 08 → 20, 10-11 20 → 10-12 11, plus whatever gate #4 reads.
-- **A cancelled check run on a PR head blocks `safe-pr-merge` forever** (the API returns it next to the newer run). If you
-  must cancel a push-triggered shadow, land one more commit that does not touch `scrapers/haraj/**` so the head is clean.
+**Proof timing facts:** search sync :22 (commits ~:24–:26); detector sweep :29/:59; Wasalt enum 21:00 UTC every 2 days
+(~7 h when healthy); muhaysini nightly ends ~07:10 UTC; small-sources-sync is ONE queue — a dispatch during the nightly
+waits for it (rakez 10-17 waited 12 min); a Haraj crawl upserts everything at its END (04:19 run → rows at 04:59).
 
 ## THE PLAN: the owner's standing orders (2026-10-03). Read this first; it wins over any older order of work below.
 The owner, 2026-10-03: «wire them so the next run turns out perfect … at the point where I don't need to check and agree on
@@ -274,6 +273,26 @@ These cost your first runs a lot of time. Use them instead of working them out a
   dispatch `source-reread.yml` with `ids: table:id,…` and read its job log with `get_job_logs` (the
   artifact's download host is blocked from the cloud; the log prints the same comparison). It shows
   what the page itself says next to what we store.
+
+## Lesson from 2026-10-16 (🦅 Falcon: «the site has no field for it» is where prose starts, not where capture ends)
+- wasalt publishes NO structured elevator, air-conditioning or private-entrance field (62,491 stored payloads:
+  not in `attributes`, `additionalAttributes` or `propertyInfo`), so those columns were NULL on every wasalt row
+  while 3,222 / 2,817 / 547 of its own descriptions state them, and the Advanced Filter could not find one wasalt
+  ad by elevator. The law (ADVANCED_FILTER_SOURCE_TRUTH §2) allows prose for exactly this case, YES-only:
+  `normalize.prose_amenities_yes(normalize.html_block_lines(desc))`. Now in `scrapers/wasalt/enrich_ar.py`
+  (`PROSE_ONLY`), with a proxy-free backfill from the stored `ar_data` at the start of every enrich run.
+- The same gap is open on 23 more sites whose amenity columns are 0% captured for homes (rakez, arkaan, razre,
+  aqargate, vmksa, aouj, souq24, holoul, azure, awal, …). Before calling a site «it doesn't publish amenities»,
+  check its ad text: if the words are there and no structured field exists, wire `prose_amenities_yes`.
+
+## Lessons from 2026-10-13
+- **«CertificateVerifyError» on every route is the SITE's certificate, not our network.** abralosol.com served an expired
+  certificate (curl 60 «certificate has expired») to 3 profiles direct AND 3 through the residential proxy; a customer
+  tapping its card hit a browser security warning. That is down on their side: dormant with dated evidence, auto-return
+  on the first crawl that reads it. Never turn TLS verification off to keep such a site in search.
+- **Name the failure in the run notes.** abralosol's notes said only «unreadable» until the crawler printed the exception
+  text; one extra read for the reason saved a night of guessing. A dispatch from a PR branch leaves its job as a check on
+  the PR head: a failing diagnostic job blocks `safe-pr-merge` until a new commit lands.
 
 ## Lessons from 2026-10-12
 - **A robot that judges «the nightly crawl» must run after it.** `scraper-early-warning` fired at 04:55 UTC, 33 min into a 143-job
@@ -595,3 +614,25 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   `select * from ops_engineer_alert_queue where engineer = 'scraping-engineer' order by severity, created_at;` — every
   open `alert_event` now carries a live engineer (`ops_engineer_for_alert()`, by kind first, legacy
   `owner_routine` second). Drive each to resolved or say why not; the report carries «🚨 Alerts: N → M».
+
+## Lesson from 2026-10-13 (copied by 🔧 from your own report)
+
+- **Merge inside the first 60 minutes, one push per PR cycle, `npm run test:all` locally first.** Your own line: three
+  pushes cancelled `npm test`, the merge window slipped past 06:45, and six fixes ended the night as «fixed, proof
+  pending» (fix rate 3/8 → 2/8, 40% → 38% → 25% over three nights). A fix that misses the 06:22 sync has no customer
+  proof in your slot; a proof row is what the owner counts.
+
+## Lesson from 2026-10-16 (copied by 🔧 — you wrote no lesson line: you did not run)
+- **2026-10-16 (🔧 QA):** no run on 10-15 or 10-16 (last start 10-14 05:08 UTC), and the wasalt enumeration collapse (your 532/537) entered its third night unfixed: 10-16 02:47–02:50 UTC shards upserted 90/90/90/90/87/13/5 rows against 177,017 enumerated on 10-11. The same blocker three nights running means the approach changes, not the effort: capture the raw list-API body of the first page that answers `count=0` and diff it against a 10-11 body before touching the walker again. A night lost to the usage limit still owes the next night its proofs first.
+
+## Lesson from 2026-10-17 (copied by 🔧 from your own report, with the correction it needs)
+- **2026-10-17 (⚡, your line):** «test the hypothesis on the first slice before building on it» — the fresh-exit fix was falsified by the first 5 slices of its own proof sweep.
+- **2026-10-17 (🔧 QA):** a «needs your OK» must describe a decision, not a tool timeout. Backlog 584's patch closes a platform's dangling `scrape_runs` row at the detector's 3 h threshold — but `fleet_liveness:muhaysini` legitimately runs 5 h 22 min (run 74269, ok=true, 18,735 probed), so the patch would mark a LIVE run «orphaned». The P0 `remediation_exhausted` on it is noise from a threshold shorter than the job, and the fix is a per-platform threshold (or the workflow's own 350-min ceiling), never a human click on an UPDATE. And the wasalt enumeration entered its 4th night with the plan «wait for the 21:00 enum»: a proof that only lands after your slot is not tonight's proof — dispatch it at the start of the run.
+
+## Lesson from 2026-10-18 (copied by 🔧 from your own report)
+
+Two of your three jobs could only be proven by a liveness pass at ~21:00 UTC, and the merge needed a human — so the
+night ended at 2/8 proven. **When choosing the 3 jobs, name for each the proof that lands inside 05:00–07:00 UTC** (a
+`--ref <branch>` workflow re-read of the exact ids, never a strike count hours later); a job without one is paired with one
+that has one. 🔧 adds: the Haraj hand-check found 3 of 50 fresh ads whose title says للإيجار while the stored REGA block
+says Sell (656's class, backlog 672) — a rule that decides a contradiction is worth more than a rule that stores one side.
