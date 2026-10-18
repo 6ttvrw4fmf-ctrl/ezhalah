@@ -590,3 +590,22 @@ def test_three_to_ten_written_as_words_on_the_keyword_line():
     assert compare_listing({"bedrooms": 5}, page("أربع غرف"))["bedrooms"] == MISMATCH
     # A word that only CONTAINS a number word is not one («مستودع» holds «ست»).
     assert compare_listing({"bedrooms": 6}, page("غرف مستودع"))["bedrooms"] != MATCH
+
+
+def test_tuba_street_width_comes_from_its_rega_record():
+    """#621 (2026-10-18): tuba 18258569 stores the REGA licence streetWidth 25; the page prose says «شارع 20».
+    The score must read the licence (structured beats prose), and an unreadable record adds nothing."""
+    import json
+    from scrapers.common import new_listings_score as nls
+    rec = {"slug": "villa-for-sale-in-riyadh-61",
+           "advalidatorinfo": {"response_data": json.dumps({"streetWidth": 25})}}
+    nls._TUBA_RECORDS = None
+    assert nls.tuba_rega_lines("https://tuba.com.sa/property/villa-for-sale-in-riyadh-61",
+                               fetch=lambda: [rec]) == ["عرض الشارع 25"]
+    assert nls.tuba_rega_lines("https://tuba.com.sa/property/other-slug", fetch=lambda: [rec]) == []
+    nls._TUBA_RECORDS = None
+    assert nls.tuba_rega_lines("https://tuba.com.sa/property/x", fetch=lambda: 1 / 0) == []
+    nls._TUBA_RECORDS = None
+    lines = nls.tuba_rega_lines("https://tuba.com.sa/property/villa-for-sale-in-riyadh-61", fetch=lambda: [rec])
+    assert nls._cmp_number(25, lines + ["شارع 20 متر"], " ".join(lines), r"عرض الشارع") == nls.MATCH
+    nls._TUBA_RECORDS = None
