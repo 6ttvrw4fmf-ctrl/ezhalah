@@ -52,6 +52,34 @@ function problems(s: string, rest: ReadonlyArray<readonly [string, string]>): st
   return fail;
 }
 
+// THE APP'S OWN CALLS (the 18:26 regression: create_shared_chat lost `authenticated` because the caller audit only looked at
+// anon-callable functions). Every function the web app or an edge function names in .rpc('…') that some migration defines
+// as SECURITY DEFINER must have an allowlist row — in the guard migration or a later one — or the app breaks on revoke.
+const root = join(import.meta.dirname, '..');
+function walk(d: string): string[] {
+  const out: string[] = [];
+  for (const e of readdirSync(d, { withFileTypes: true })) {
+    if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+    const f = join(d, e.name);
+    if (e.isDirectory()) out.push(...walk(f)); else if (/\.(ts|tsx|js|mjs)$/.test(e.name)) out.push(f);
+  }
+  return out;
+}
+const appRpcs = new Set<string>();
+for (const sub of ['src', join('supabase', 'functions')]) {
+  for (const f of walk(join(root, sub))) for (const m of readFileSync(f, 'utf8').matchAll(/\.rpc\(\s*['"`]([a-z0-9_]+)['"`]/g)) appRpcs.add(m[1]);
+}
+const definer = new Set<string>();
+for (const f of files) {
+  const body = readFileSync(join(dir, f), 'utf8');
+  for (const m of body.matchAll(/create\s+(?:or\s+replace\s+)?function\s+(?:public\.)?([a-z0-9_]+)\s*\(([\s\S]*?)\$(?:[a-z_]*)\$/gi)) if (/security\s+definer/i.test(m[2])) definer.add(m[1]);
+}
+function appProblems(allSql: string): string[] {
+  const rows = new Set([...allSql.matchAll(/\('([a-z0-9_]+)', '\{[a-z,]+\}', '/g)].map((m) => m[1]));
+  return [...appRpcs].filter((n) => definer.has(n) && !rows.has(n)).map((n) => `the app calls the definer function ${n} but it has no allowlist row (it would be revoked)`);
+}
+const allGuardSql = [sql, ...later.map(([, b]) => b)].join('\n');
+
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : ` — ${why}`}`); };
 const mustCatch = (label: string, caught: boolean, why = '') => check(`mutant caught: ${label}`, caught, why);
@@ -77,5 +105,8 @@ mustCatch('a later migration grants acquire_deploy_lock to anon',
   problems(sql, [...later, ['29991231000000_oops.sql', 'grant execute on function public.acquire_deploy_lock(text,text,integer,text) to anon;']]).length > 0);
 mustCatch('a later migration drops the guard trigger',
   problems(sql, [...later, ['29991231000001_oops.sql', 'drop event trigger if exists ops_secdef_born_revoked;']]).length > 0);
+const app = appProblems(allGuardSql);
+check(`every definer function the app calls (${[...appRpcs].filter((n) => definer.has(n)).length}) has an allowlist row`, app.length === 0, app.join('; '));
+mustCatch('create_shared_chat row removed (signed-in sharing breaks)', appProblems(allGuardSql.replace(/\('create_shared_chat', [^\n]+/, '')).length > 0);
 console.log(failed === 0 ? 'OK: no SECURITY DEFINER function is callable with the public key outside the reasoned allowlist' : `${failed} check(s) failed`);
 process.exit(failed === 0 ? 0 : 1);
