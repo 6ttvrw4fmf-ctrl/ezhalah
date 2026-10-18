@@ -245,6 +245,12 @@ def map_listing(post: dict, images: dict[int, list[str]]) -> tuple[Optional[dict
     # from a sentinel, so a leading '-' is rejected before parsing — never coerced into a real value.
     _ppm_raw = str(acf.get("pw-prc-mtr") or "").strip()
     price_per_meter = normalize.to_int(_ppm_raw) if _ppm_raw and not _ppm_raw.startswith("-") else None
+    # The headline IS the rate when the two fields carry the same figure: the page prints «السعر 1,650 سعر المتر»
+    # (AMH19284, AMH19455, AMH17111 rendered 2026-10-18) — the price box's own label says per metre. It is not a total;
+    # the stored one clears (the page settled it).
+    headline_is_rate = bool(price and price_per_meter and price == price_per_meter)
+    if headline_is_rate:
+        price = db.AUTHORITATIVE_NULL
 
     district_ar = (acf.get("pw-dis") or "").strip() or None
 
