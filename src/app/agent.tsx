@@ -700,7 +700,7 @@ export default function Agent() {
     // a COPY of this conversation (public.shared_chat) and shares its short /s/<code> link; the search
     // link above is only the fallback when that save fails. One copy per unchanged conversation.
     const prepareShare = async (): Promise<string | null> => {
-      const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow });
+      const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow: afCanNarrow }); // same fields as the capture below
       if (!t) return null;
       const j = JSON.stringify(t);
       if (sharedCopyRef.current?.j === j) return sharedCopyRef.current.url;
