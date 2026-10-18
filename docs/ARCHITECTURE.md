@@ -1353,3 +1353,6 @@ KSA region; recommendation delivered was "don't migrate," awaiting owner call).
 5. Backend change? Preserve work, verify before+after, deploy only to `ezhalah-app`, `NOTIFY pgrst` after
    RPC/DDL.
 6. Update **this document** in the same PR when a fact here changes.
+
+### Platform logo visibility (owner, 2026-10-17)
+Haraj uses its official header wordmark across the loader, website picker, and cards. Haraj, Maskan United, and The Address must have transparent backgrounds without boxed panels (owner correction, 2026-10-17). Their white-only artwork uses dark ink in light mode and light ink in dark mode, preserving its silhouette. Other logos keep their existing presentation.
