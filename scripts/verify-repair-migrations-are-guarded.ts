@@ -48,6 +48,12 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-10-18. Undoes 15 rows of a cancelled re-parse run, back to the exact district each served before it.
+  '20261018131709_dealapp_restore_numbered_districts_a_broad_plot_rule_moved.sql':
+    'restores 15 dealapp districts that the cancelled run 39129698696 rewrote under a too-broad plot-code rule, each to ' +
+    'the value search_listings_ar served before the run and only where the row still held the run\'s value; the rule ' +
+    'that caused it is pinned by test_dealapp_plot_code_district_2026_10_18.py (numbered districts stay, short codes go), ' +
+    'and the next re-parse writes the same page value, so there is no state left for a detector to watch',
   // 2026-10-18. ksaaqar `neighborhood` repair (data half of #7511), applied before its detector existed.
   '20261018125140_ksaaqar_neighborhood_holds_only_a_stated_district.sql':
     'watched by its companion 20261018131230_mon_detect_ksaaqar_neighborhood_unstated.sql, which creates ' +

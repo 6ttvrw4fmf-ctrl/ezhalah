@@ -34,7 +34,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from scrapers.common.db import sb, upsert_dealapp_commercial_batch, upsert_dealapp_residential_batch
-from scrapers.dealapp.run import _PLOT_CODE, _pin_sold_inactive, fetch_one, map_listing
+from scrapers.dealapp.run import _is_plot_code, _pin_sold_inactive, fetch_one, map_listing
 
 TABLES = {
     "dealapp_residential_listings": "residential",
@@ -75,7 +75,7 @@ def _candidates(table: str, plot_code_districts: bool = False) -> list[dict]:
     if plot_code_districts:
         # 2026-10-18: rows whose stored district is a plot/plan code («حي 1051 مخطط رقم», «حي 33ج») and serve none;
         # the current parser reads the title's district or the same-city deed block instead.
-        return [r for r in rows if _PLOT_CODE.search(r.get("neighborhood") or "")]
+        return [r for r in rows if r.get("neighborhood") and _is_plot_code(r["neighborhood"])]
     return [r for r in rows if is_candidate(r)]
 
 
