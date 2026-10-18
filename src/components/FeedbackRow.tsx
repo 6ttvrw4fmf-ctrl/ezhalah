@@ -125,7 +125,7 @@ export default function FeedbackRow({
               label={t(direction === 'up' ? 'Helpful' : 'Not helpful')} />
           ))}
         </View>
-        <FbButton icon={copied ? 'checkmark' : 'share-outline'} active={copied} onPress={onShare} label={t('Share')} />
+        <FbButton icon={copied ? 'checkmark' : 'share-social-outline'} active={copied} onPress={onShare} label={t('Share')} />
         {/* THE SAME PREDICATE speakReadAloud() USES, not a second one that agrees most of the time.
             `readAloudSegments?.length` counted SEGMENTS; speaking needs a speakable UNIT, and
             buildUnits() drops a segment whose text is blank. In the gap the control rendered and its
