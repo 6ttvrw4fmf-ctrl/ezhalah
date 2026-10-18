@@ -36,8 +36,8 @@ def _text(city, line, label):
             f"الموقع: {label} اكتب مراجعة معرض المراجعات: اختر ملف")
 
 
-def _row(city, line, label):
-    post = {"id": 1, "link": "https://ksaaqar.com/ad/x/", "title": {"rendered": "فلل > فلل للبيع"},
+def _row(city, line, label, title="فلل > فلل للبيع"):
+    post = {"id": 1, "link": "https://ksaaqar.com/ad/x/", "title": {"rendered": title},
             "content": {"rendered": ""}, "class_list": []}
     row, _cat, why = K.map_listing(post, _text(city, line, label), _box(label))
     assert row is not None, why
@@ -50,11 +50,17 @@ CUT = [
     (12226419, "الخبر", "الخبر حي العزيز", "الخبر حي العزيزية", "حي العزيزية"),
     (12226975, "الرياض", "الرياض حي الصحاف", "الرياض حي الصحافه, Riyadh, Riyadh, Saudi Arabia", "حي الصحافه"),
 ]
+# The ad's own label names ONE city that is not the category's bucket: filed under the label's city (owner 2026-10-18).
+REFILED = [
+    (12226411, "أبها", "خميس مشيط حي الاسكان", "خميس مشيط حي الاسكان", "خميس مشيط", "حي الاسكان"),
+    (12225953, "أبها", "خميس مشيط حي الراقي", "خميس مشيط حي الراقي", "خميس مشيط", "حي الراقي"),
+]
+# …but not when the title names a DIFFERENT city (12226684: a Riyadh postal address on an ad titled «… صبيا …»), nor
+# when the label names two cities: no district of the category city comes from it, and the stored one clears.
 ELSEWHERE = [
-    (12226411, "أبها", "خميس مشيط حي الاسكان", "خميس مشيط حي الاسكان"),
-    (12225953, "أبها", "خميس مشيط حي الراقي", "خميس مشيط حي الراقي"),
     (12226684, "جازان", "محطة كهرباء حي قرطبة، 3",
-     "محطة كهرباء حي قرطبة، 3712 طريق الدمام، 6480، قرطبة، الرياض 13245، السعودية"),
+     "محطة كهرباء حي قرطبة، 3712 طريق الدمام، 6480، قرطبة، الرياض 13245، السعودية", "ارض حجه صبيا مرفوعه في احكام"),
+    (0, "الدمام", "الخبر، الدمام السعودية", "الخبر، الدمام السعودية", "فلل > فلل للبيع"),
 ]
 
 
@@ -66,9 +72,17 @@ def test_the_cut_map_line_is_read_whole_from_the_box(ad, city, line, label, want
     assert row["additional_info"]["map_line"] == label.split(",")[0]
 
 
-@pytest.mark.parametrize("ad,city,line,label", ELSEWHERE)
-def test_a_label_in_another_city_gives_this_city_no_district_and_clears_the_stored_one(ad, city, line, label):
+@pytest.mark.parametrize("ad,city,line,label,new_city,district", REFILED)
+def test_the_ads_own_label_city_wins_over_the_category_bucket(ad, city, line, label, new_city, district):
     row = _row(city, line, label)
+    assert row["city_ar"] == new_city and row["neighborhood"] == district, ad
+    assert row["additional_info"]["category_city_ar"] == city
+
+
+@pytest.mark.parametrize("ad,city,line,label,title", ELSEWHERE)
+def test_a_label_in_another_city_gives_this_city_no_district_and_clears_the_stored_one(ad, city, line, label, title):
+    row = _row(city, line, label, title=title)
+    assert row["city_ar"] == city, ad
     assert row["neighborhood"] is db.AUTHORITATIVE_NULL, ad
     assert row["district_ar"] is db.AUTHORITATIVE_NULL, ad
     assert row["additional_info"]["district_source"] == "label_names_another_city"
