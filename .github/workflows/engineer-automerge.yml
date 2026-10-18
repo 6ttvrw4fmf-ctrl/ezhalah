@@ -1,47 +1,53 @@
 # Owner decision 2026-10-18 («yes turn it on»): a night engineer's fix that touches ONLY the scraping robots
-# (every changed file under scrapers/) is armed for GitHub auto-merge, so it lands the same night once the
-# four REQUIRED checks on main are green (branch protection: «Production-target lock + no-bypass», «Full
-# verification suite (npm test)», «Taxonomy + location index (npm run verify)», «AF predicates vs an
-# independent oracle (live)», up to date with main). The engineers' routines may not merge themselves; this
-# rule is the owner's. Anything else — app screens (src/), the database (supabase/), workflows (.github/),
-# the agent — still waits for a person. A draft PR is never armed.
+# (every changed file under scrapers/) lands the same night without waiting for a person. It goes through
+# THE sanctioned merge gate (scripts/safe-pr-merge.ts — verify-merge-gate-transport.ts keeps it the only
+# door): the gate re-reads the PR right before merging and refuses unless every required check on main is
+# exactly SUCCESS, the branch is up to date and mergeable, and the file list still matches. Anything else —
+# app screens (src/), the database (supabase/), workflows (.github/), docs, the agent — still waits for a
+# person. Drafts and forks are never considered. A BEHIND branch is the engineer's to update (its prompt).
 name: Engineer auto-merge (scrapers only)
 
 on:
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
   pull-requests: write
+  checks: read
+  statuses: read
 
 concurrency:
-  group: engineer-automerge-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: engineer-automerge
+  cancel-in-progress: false
 
 jobs:
-  arm:
-    # night-engineer routines push claude/* branches; a fork can never be armed
-    if: >-
-      startsWith(github.event.pull_request.head.ref, 'claude/') &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      !github.event.pull_request.draft
+  merge:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Only scrapers/ changed → arm auto-merge; anything else → leave it for a person
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Scrapers-only claude/* PRs → the sanctioned gate (it refuses anything not green)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          set -euo pipefail
-          files=$(gh pr view "$PR" --repo "$REPO" --json files -q '.files[].path')
-          echo "$files"
-          outside=$(printf '%s\n' "$files" | grep -v '^scrapers/' || true)
-          if [ -z "$files" ] || [ -n "$outside" ]; then
-            echo "::notice::Not armed — files outside scrapers/: ${outside:-<none listed>}"
-            gh pr merge "$PR" --repo "$REPO" --disable-auto 2>/dev/null || true
-            exit 0
-          fi
-          gh pr merge "$PR" --repo "$REPO" --auto --merge
-          echo "::notice::Armed: merges by itself once the required checks are green and the branch is up to date."
+          set -uo pipefail
+          prs=$(gh pr list --repo "$REPO" --state open --limit 50 \
+                  --json number,headRefName,isDraft,isCrossRepository \
+                  -q '.[] | select((.headRefName|startswith("claude/")) and (.isDraft|not) and (.isCrossRepository|not)) | .number')
+          for pr in $prs; do
+            files=$(gh pr view "$pr" --repo "$REPO" --json files -q '.files[].path')
+            outside=$(printf '%s\n' "$files" | grep -v '^scrapers/' || true)
+            if [ -z "$files" ] || [ -n "$outside" ]; then
+              echo "#$pr: not scrapers-only — left for a person"; continue
+            fi
+            echo "#$pr: scrapers-only → safe-pr-merge.ts"
+            node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/safe-pr-merge.ts "$pr" \
+              --expect-files "$(printf '%s\n' "$files" | paste -sd, -)" || echo "#$pr: gate refused (not green / behind / moved) — next pass"
+          done
