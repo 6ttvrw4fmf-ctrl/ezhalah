@@ -27,12 +27,13 @@ export type WelcomeFacts = {
   cityRank?: number;     // the city's position among all cities by listing count (1 = most)
   topCities?: Array<{ ar: string; en?: string; count: number }>; // the cities with the most listings, first first
   myDistrict?: { ar: string; en?: string; count: number; rank: number }; // the district the user last searched, in its city
+  newToday?: number;     // listings Ezhalah first saw since midnight Riyadh, searchable now (welcome_new_today_ar)
 };
 
 type When = 'morning' | 'evening' | 'friday' | 'weekend' | 'any';
 type Need = 'sites' | 'listings' | 'cities' | 'districts' | 'allRegions' | 'city' | 'district'
   | 'district3' | 'rank' | 'riyadhShare' | 'top2' | 'myDistrict' | 'myTop10'
-  | 'riyadh' | 'makkah' | 'eastern' | 'qassim';
+  | 'riyadh' | 'makkah' | 'eastern' | 'qassim' | 'newToday';
 
 export type WelcomeLine = { id: number; when: When; needs: Need[]; ar: string; en: string };
 
@@ -91,7 +92,13 @@ export const WELCOME_LINES: readonly WelcomeLine[] = [
   { id: 43, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، {myDistrict} رقم {myRank} في {city} بعدد الإعلانات. اكتشفه مع إزهله.', en: '{n}, {myDistrict} is number {myRank} in {city} by listings. Explore it with Ezhalah.' },
   { id: 44, when: 'any', needs: ['city', 'myDistrict'], ar: '{n}، كل إعلانات {myDistrict} من كل المواقع في مكان واحد. شوفها مع إزهله.', en: "{n}, all of {myDistrict}'s listings from every website in one place. See them with Ezhalah." },
   { id: 45, when: 'any', needs: ['city', 'myTop10'], ar: '{n}، {myDistrict} من أنشط أحياء {city} الحين. لا يفوتك مع إزهله.', en: "{n}, {myDistrict} is one of the most active districts in {city} right now. Don't miss it with Ezhalah." },
+  // NEW ON EZHALAH TODAY (owner 2026-10-18, option A). "New" = new to Ezhalah (first_seen_at, Ezhalah-owned),
+  // since midnight Riyadh; shown only from NEW_TODAY_MIN up, and a held copy never crosses midnight.
+  { id: 46, when: 'any', needs: ['newToday'], ar: '{n}، {newToday} إعلان جديد اليوم على إزهله.', en: '{n}, {newToday} new listings today on Ezhalah.' },
 ];
+export const NEW_TODAY_MIN = 100;
+// Riyadh is UTC+3 all year (no DST): the calendar day "today" means in the line above.
+export const riyadhDay = (t: number): number => Math.floor((t + 3 * 3600_000) / 86_400_000);
 
 /** Saudi Arabia has 13 administrative regions; «كل المناطق» is said only when every one has listings. */
 export const SAUDI_REGION_COUNT = 13;
@@ -231,6 +238,7 @@ export function renderWelcome(line: WelcomeLine, name: WelcomeNames, f: WelcomeF
         [v.c1, v.c2] = names as string[];
         break;
       }
+      case 'newToday': if (!positive(f.newToday) || f.newToday < NEW_TODAY_MIN) return null; v.newToday = fmt(f.newToday); break;
       case 'myDistrict': case 'myTop10': {
         const d = f.myDistrict;
         if (!d || !positive(d.count) || !positive(d.rank)) return null;
@@ -336,7 +344,8 @@ export function instantWelcome(a: { hasSession: boolean; cache: WelcomeCache | n
   if (c) {
     const line = WELCOME_LINES.find((l) => l.id === c.id);
     const age = a.now.getTime() - c.at;
-    if (line && age >= 0 && age < HOLD_MS && lineFitsTime(line, a.now) && cachedFits(c)) return { id: c.id, ar: c.ar, en: c.en, fromCache: true };
+    if (line && age >= 0 && age < HOLD_MS && lineFitsTime(line, a.now) && cachedFits(c)
+      && (!line.needs.includes('newToday') || riyadhDay(c.at) === riyadhDay(a.now.getTime()))) return { id: c.id, ar: c.ar, en: c.en, fromCache: true };
   }
   const line = fallbackLine(c?.id ?? null, a.rand);
   const ar = renderWelcome(line, a.name, {}, 'ar');

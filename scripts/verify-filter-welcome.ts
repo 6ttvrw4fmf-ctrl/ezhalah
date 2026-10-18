@@ -12,7 +12,7 @@
 //   7. rotation: one line held for 4 hours then a different one, always personal, time lines only at their time.
 import {
   WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, FACTLESS_ANYTIME_IDS,
-  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, type WelcomeFacts,
+  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, NEW_TODAY_MIN, riyadhDay, type WelcomeFacts,
 } from '../src/lib/filterWelcome.ts';
 
 let failed = 0;
@@ -27,7 +27,7 @@ const mustCatch = (label: string, caught: boolean) => {
 
 // Real production values on 2026-10-17, so the rendered examples read like the live site.
 const FACTS: WelcomeFacts = {
-  sites: 149, listings: 372_889, cities: 341, districts: 3_752, regions: 13,
+  sites: 149, newToday: 4_739, listings: 372_889, cities: 341, districts: 3_752, regions: 13,
   regionCounts: { 'منطقة الرياض': 170_363, 'منطقة مكة المكرمة': 104_681, 'المنطقة الشرقية': 48_662, 'منطقة القصيم': 16_235 },
   city: { ar: 'الرياض', en: 'Riyadh', count: 162_312 },
   topDistrict: { ar: 'حي المهدية', en: 'Al Mahdiyah', count: 11_994 },
@@ -43,7 +43,7 @@ const FACTS: WelcomeFacts = {
 
 // ── 6. shape ───────────────────────────────────────────────────────────────────────────────────
 const ids = WELCOME_LINES.map((l) => l.id);
-check('exactly the 45 approved lines (30 + 10 insight + 5 own-district), ids 1..45', ids.length === 45 && ids.every((id, i) => id === i + 1));
+check('exactly the 46 approved lines (30 + 10 insight + 5 own-district + 1 new-today), ids 1..46', ids.length === 46 && ids.every((id, i) => id === i + 1));
 check('every Arabic line ends with «إزهله»', WELCOME_LINES.every((l) => /إزهله[.؟!]?$/.test(l.ar)));
 check('every English line ends with "Ezhalah" (the brand is never translated)', WELCOME_LINES.every((l) => /Ezhalah[.?!]?$/.test(l.en)));
 check('Arabic lines carry no diacritics (owner: «remove alharakat»)', WELCOME_LINES.every((l) => !/[ً-ْ]/.test(l.ar)));
@@ -272,6 +272,26 @@ mustCatch('a picker that ignores the previous line', !neverRepeats((now, _last, 
   const pool = WELCOME_LINES.filter((l) => lineFitsTime(l, now));
   return pool[Math.min(pool.length - 1, Math.floor(rand() * pool.length))];
 }));
+
+// ── 12. NEW ON EZHALAH TODAY (owner 2026-10-18, option A) ─────────────────────────────────────────
+const nt = WELCOME_LINES.find((l) => l.id === 46)!;
+check('line A reads «يوسف، 4,739 إعلان جديد اليوم على إزهله.» / "Yusuf, 4,739 new listings today on Ezhalah."',
+  renderWelcome(nt, 'يوسف', FACTS, 'ar') === 'يوسف، 4,739 إعلان جديد اليوم على إزهله.'
+  && renderWelcome(nt, 'Yusuf', FACTS, 'en') === 'Yusuf, 4,739 new listings today on Ezhalah.');
+const ntOk = (min: number) => renderWelcome(nt, 'يوسف', { newToday: min - 1 }, 'ar') === null
+  && renderWelcome(nt, 'يوسف', {}, 'ar') === null && renderWelcome(nt, 'يوسف', { newToday: min }, 'ar') !== null;
+check(`a count under ${NEW_TODAY_MIN} or an unknown count shows no line (never «0 إعلان جديد», never a failed read as a number)`, ntOk(NEW_TODAY_MIN));
+mustCatch('a line that would show «1 إعلان جديد» just after midnight (a floor of 1)', !ntOk(1));
+const lateNight = new Date('2026-10-14T20:30:00Z'); // 23:30 Riyadh
+const nextDay = new Date('2026-10-14T21:30:00Z');   // 00:30 Riyadh, the next day
+const ntCache = { id: 46, at: lateNight.getTime(), ar: 'يوسف، 4,739 إعلان جديد اليوم على إزهله.', en: 'Yusuf, 4,739 new listings today on Ezhalah.' };
+check('a held «today» line is reused the same Riyadh day',
+  !!instantWelcome({ hasSession: true, cache: ntCache, now: new Date(lateNight.getTime() + 600_000), name: YN })?.fromCache);
+check('a held «today» line never crosses midnight Riyadh (yesterday\'s count is not «today»)',
+  riyadhDay(lateNight.getTime()) !== riyadhDay(nextDay.getTime())
+  && !instantWelcome({ hasSession: true, cache: ntCache, now: nextDay, name: YN, rand: () => 0 })?.fromCache);
+mustCatch('a cache rule that ignores the day for the «today» line',
+  riyadhDay(lateNight.getTime()) !== riyadhDay(nextDay.getTime()) && Math.floor(lateNight.getTime() / 86_400_000) === Math.floor(nextDay.getTime() / 86_400_000));
 
 console.log(`\nExample (ar): ${renderWelcome(WELCOME_LINES[3], 'يوسف', FACTS, 'ar')}`);
 console.log(`Example (en): ${renderWelcome(WELCOME_LINES[23], 'Yusuf', FACTS, 'en')}`);
