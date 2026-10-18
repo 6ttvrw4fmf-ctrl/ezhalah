@@ -128,11 +128,18 @@ def test_licence_location_arabic_fallback_and_corner_facade():
     assert row["license_number"] == "7201131815"
 
 
-def test_unresolved_district_is_null_with_raw_kept():
+def test_placeholder_district_is_null_and_an_unattested_word_is_kept():
+    # «حي غير معروف» is a non-answer → NULL (silence is never a district named «unknown»).
     desc = FLAT_AR.replace("الحي: الجنادرية", "الحي: حي غير معروف")
     row, _, skip, facts = mapped("للإيجار شقه", desc, city="الرياض")
     assert skip == "" and row["district_ar"] is None and row["neighborhood"] is None
-    assert row["additional_info"]["district_raw_ar"] == "حي غير معروف" and facts["district_resolved"] is False
+    assert "district_raw_ar" not in row["additional_info"] and facts["district_resolved"] is False
+    # Owner 2026-10-18 (reverses catalogue-or-NULL): a REAL deed word the catalogue does not attest is KEPT
+    # as the source wrote it, with its provenance; attestation is recorded, not required.
+    row, _, skip, facts = mapped("للإيجار شقه", FLAT_AR.replace("الحي: الجنادرية", "الحي: المصيف"), city="الرياض")
+    assert skip == "" and (row["district_ar"], row["neighborhood"]) == ("المصيف", "المصيف")
+    assert row["additional_info"]["district_source"] == "deed" and facts["district_resolved"] is False
+    assert "district_catalog_ar" not in row["additional_info"]
 
 
 def test_unlicensed_offer_is_stored_from_its_own_words_owner_2026_10_17():
