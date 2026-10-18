@@ -540,7 +540,8 @@ def stated_per_metre(text: Optional[str], n: int) -> bool:
     «متر» after a figure is an area, not a rate."""
     if not text or not n:
         return False
-    flat = re.sub(r"(?<=\d),(?=\d)", "", text.translate(_AR_DIGIT_MAP))
+    # tatweel is decoration («1060 ريـــال للمتر», sadiqeltajer 2026-10-18), never part of a word
+    flat = re.sub(r"(?<=\d),(?=\d)", "", text.translate(_AR_DIGIT_MAP).replace("\u0640", ""))
     fig = rf"(?<![\d.]){int(n)}(?![\d.])"
     return bool(re.search(rf"{fig}\s*(?:ريال|ر\.س|﷼)?\s*\(?\s*{_RATE_AFTER}", flat)
                 or re.search(rf"{_RATE_BEFORE}\s*(?:ب|:|=)?\s*{fig}", flat))
