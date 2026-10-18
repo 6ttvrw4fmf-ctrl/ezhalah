@@ -4,7 +4,11 @@
 # door): the gate re-reads the PR right before merging and refuses unless every required check on main is
 # exactly SUCCESS, the branch is up to date and mergeable, and the file list still matches. Anything else —
 # app screens (src/), the database (supabase/), workflows (.github/), docs, the agent — still waits for a
-# person. Drafts and forks are never considered. A BEHIND branch is the engineer's to update (its prompt).
+# person. Drafts and forks are never considered. A green scrapers-only PR that is merely BEHIND main is
+# brought up to date HERE (gh pr update-branch) and merged on a later pass: measured 2026-10-18 (backlog
+# 671), main merged every ~5-20 min, so AF's PR #7482 sat green-but-BEHIND from 10:45 to 13:10, was
+# updated by hand at 13:12 and was BEHIND again by 13:35 — a 9-minute CI cannot win that race by hand,
+# and the engineer whose prompt says «update it» is asleep after its 2-hour slot.
 name: Engineer auto-merge (scrapers only)
 
 on:
@@ -47,9 +51,17 @@ jobs:
             if [ -z "$files" ] || [ -n "$outside" ]; then
               echo "#$pr: not scrapers-only — left for a person"; continue
             fi
-            echo "#$pr: scrapers-only → safe-pr-merge.ts"
+            state=$(gh pr view "$pr" --repo "$REPO" --json mergeStateStatus -q .mergeStateStatus)
+            if [ "$state" = "BEHIND" ]; then
+              # Up to date first; CI re-runs on the merge commit and a later pass merges it. The gate below
+              # would only refuse a BEHIND branch (it never merges one), so this adds no new door.
+              echo "#$pr: scrapers-only but BEHIND main → gh pr update-branch (merge on a later pass)"
+              gh pr update-branch "$pr" --repo "$REPO" || echo "#$pr: update-branch refused — next pass"
+              continue
+            fi
+            echo "#$pr: scrapers-only ($state) → safe-pr-merge.ts"
             node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/safe-pr-merge.ts "$pr" \
-              --expect-files "$(printf '%s\n' "$files" | paste -sd, -)" || echo "#$pr: gate refused (not green / behind / moved) — next pass"
+              --expect-files "$(printf '%s\n' "$files" | paste -sd, -)" || echo "#$pr: gate refused (not green / moved) — next pass"
           done
 
       # ── Failure→alert bridge (issue #1349): this job runs unattended, so a red run must reach
