@@ -241,8 +241,11 @@ def test_the_title_fills_a_district_the_tree_did_not_name():
 
 def test_a_district_not_in_our_catalog_stays_null():
     row, _ = _map(proj=_project(city_terms=(9999,)))
-    assert row["city_ar"] == "الرياض" and row["city_id"] == _RIYADH
-    assert row["district_ar"] is None, "an unrecognised place is never invented"
+    # Owner 2026-10-18 (reverses «never invented» here): the tree's OWN leaf is the source naming a district;
+    # it is kept as written, marked tree_leaf, never a catalogue spelling it does not have.
+    assert row["city_id"] == _RIYADH
+    assert row["district_ar"] == "مكان مخترع" and row["neighborhood"] == "مكان مخترع"
+    assert row["additional_info"]["district_source"] == "tree_leaf"
 
 
 def test_no_location_terms_at_all_yields_nulls_not_a_default():
