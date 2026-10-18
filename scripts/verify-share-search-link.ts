@@ -69,7 +69,7 @@ const fullPayload = encodeSharePayload(Q, 'يوسف', 'ar')!;
 const html = shareCardHtml('https://new-domain.example', fullPayload);
 const meta = (prop: string) => new RegExp(`<meta (?:property|name)="${prop}" content="([^"]*)"`).exec(html)?.[1] ?? null;
 check('the card title names the type, the place, the sender and إزهله; the line is Ezhalah\'s promise',
-  meta('og:title') === 'شقق للإيجار في حي النرجس من يوسف على إزهله' && meta('og:description') === 'كل مواقع العقار في مكان واحد · اضغط وشوف');
+  meta('og:title') === 'شقق للإيجار في حي النرجس من يوسف على إزهله' && meta('og:description') === 'كل مواقع العقار في مكان واحد');
 check('every card URL follows the REQUEST\'S domain (a domain change needs no code change)',
   meta('og:image') === 'https://new-domain.example/icon-192.png' && meta('og:url') === `https://new-domain.example/s/${fullPayload}`
   && !/vercel\.app/.test(html));

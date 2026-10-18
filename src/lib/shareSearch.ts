@@ -176,8 +176,10 @@ export function sharePhrase(q: SearchQuery | null | undefined, locale: 'ar' | 'e
 // Open Graph tags, read from the page the link points to — so /s/<payload> answers with them. Every
 // URL is built from the REQUEST'S OWN origin, so a domain change needs no code change.
 export const SHARE_CARD = {
-  ar: { desc: 'كل مواقع العقار في مكان واحد · اضغط وشوف', site: 'إزهله' },
-  en: { desc: 'Every real-estate site in one place · Tap to see', site: 'Ezhalah' },
+  // ONE SHORT LINE (owner 2026-10-18, WhatsApp screenshot): «· اضغط وشوف» wrapped to a 2nd line and pushed the
+  // site name out of the thumbnail card. The link itself is the call to action.
+  ar: { desc: 'كل مواقع العقار في مكان واحد', site: 'إزهله' },
+  en: { desc: 'Every real-estate site in one place', site: 'Ezhalah' },
 } as const;
 // Small on purpose (owner 2026-10-18: the logo was «very very big»): under 300 px WhatsApp shows a thumbnail.
 export const SHARE_CARD_IMAGE_PATH = '/icon-192.png';
