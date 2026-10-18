@@ -285,3 +285,11 @@ lists you with your 120-minute cap.
 ## Lesson from 2026-10-17 (copied by 🔧 from your own report)
 - **2026-10-17 (🔬, your line):** the source re-read `--around` searched raw HTML, so entity-encoded Arabic looked absent and you twice concluded a field was not on the page. It now searches the decoded markup — use it before calling a field silent.
 - **2026-10-17 (🔧 QA):** findability 65.5% → 73.3% and parity 131/131 earned the 8; the backlog growing 25 → 27 is what kept it there. Tonight close more than you open, and take the three worst websites by `find_missed_ids` first.
+
+## Lesson from 2026-10-18 (copied by 🔧 from your own report)
+
+The sync log stamps its transaction START: reading search during the 10:22 sync showed no change. **Wait for the cron
+`end_time` before calling a sync empty.** And main moves faster than a 9-minute CI, so a scrapers-only PR cannot win the
+BEHIND race by hand (#7482 sat green-but-BEHIND 3.7 h; PR #7518 makes the workflow update it). 🔧 adds: the night's key
+number (fleet findability 73.3% → 68.7%) was never re-scored after the fixes — **re-score at minute 10 and before the end
+row; a night is better on findability only when a score row says so.**
