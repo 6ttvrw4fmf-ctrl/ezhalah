@@ -12,7 +12,7 @@
 //   7. rotation: one line held for 4 hours then a different one, always personal, time lines only at their time.
 import {
   WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, FACTLESS_ANYTIME_IDS,
-  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, type WelcomeFacts,
+  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, type WelcomeFacts,
 } from '../src/lib/filterWelcome.ts';
 
 let failed = 0;
@@ -178,9 +178,31 @@ mustCatch('a reducer that lets late facts replace an already-shown headline (the
 mustCatch('a reducer that never settles on timeout (the title would hold at opacity 0 forever)',
   !neverSwaps((s, ev) => (ev.type === 'timeout' ? s : headlineReduce(s, ev))));
 const homeSrc = (await import('node:fs')).readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
-check('the Filter home holds the title\'s entrance on welcomeSettled and passes authChecked to the hook',
-  /useFilterWelcome\(!!user, authChecked,/.test(homeSrc) && /if \(!welcomeSettled\) return;/.test(homeSrc)
+check('the Filter home holds the title\'s entrance on welcomeSettled',
+  /useFilterWelcome\(!!user, pickName\(user, locale\)/.test(homeSrc) && /if \(!welcomeSettled\) return;/.test(homeSrc)
   && !/RNAnimated\.parallel\(\[rise\(badgeAnim, 80\), rise\(titleAnim, 230\)/.test(homeSrc));
+
+// ── 11. instant: the headline comes from device memory, no network in the way (owner 2026-10-17) ──
+const nowWed = new Date('2026-10-14T13:00:00'); // Wednesday afternoon — only any-time lines fit
+const freshCache = { id: 25, at: nowWed.getTime() - 60_000, ar: 'هلا يوسف، AR-CACHED. إزهله.', en: 'Hi Yusuf, EN-CACHED. Ezhalah.' };
+const inst = instantWelcome({ hasSession: true, cache: freshCache, now: nowWed, name: 'يوسف' });
+check('a fresh cached line is shown as-is, instantly, in both languages', !!inst && inst.fromCache && inst.ar === freshCache.ar && inst.en === freshCache.en && inst.id === 25);
+check('no stored session → no personal line (guest keeps the normal headline)', instantWelcome({ hasSession: true && false, cache: freshCache, now: nowWed, name: 'يوسف' }) === null);
+const stale = instantWelcome({ hasSession: true, cache: { ...freshCache, at: nowWed.getTime() - HOLD_MS - 1 }, now: nowWed, name: 'يوسف', rand: () => 0 });
+check('a cache older than the 4-hour hold is NOT reused — an instant factless line stands in (never the previous id)',
+  !!stale && !stale.fromCache && stale.id !== 25 && !WELCOME_LINES.find((l) => l.id === stale.id)!.needs.length && stale.ar.includes('يوسف') && /إزهله\.$/.test(stale.ar) && /Ezhalah\.$/.test(stale.en));
+const morningCache = { ...freshCache, id: 6 }; // a morning line
+const night = instantWelcome({ hasSession: true, cache: morningCache, now: new Date('2026-10-14T21:00:00'), name: 'يوسف', rand: () => 0 });
+check('a cached MORNING line is not reused at night, even inside the hold', !!night && !night.fromCache && night.id !== 6);
+check('no cache + a session → an instant line that needs no numbers', (() => { const r = instantWelcome({ hasSession: true, cache: null, now: nowWed, name: 'يوسف', rand: () => 0.5 }); return !!r && !r.fromCache && !WELCOME_LINES.find((l) => l.id === r.id)!.needs.length; })());
+check('no name on the device → no personal line (never a line with a blank name)', instantWelcome({ hasSession: true, cache: null, now: nowWed, name: '  ' }) === null);
+mustCatch('an instant path that reuses a cache past the hold',
+  !!instantWelcome({ hasSession: true, cache: { ...freshCache, at: nowWed.getTime() - HOLD_MS - 1 }, now: nowWed, name: 'يوسف' })?.fromCache === false);
+const hookSrc = (await import('node:fs')).readFileSync(new URL('../src/lib/useFilterWelcome.ts', import.meta.url), 'utf8');
+check('the hook decides once per page load from device state and never re-decides (no second setShown after mount)',
+  (hookSrc.match(/setShown\(/g) ?? []).length === 1 && /instantWelcome\(\{ hasSession: session\.present, cache, now,/.test(hookSrc) && /\}, \[\]\);/.test(hookSrc));
+check('the background refresh writes the cache for the NEXT visit and never touches the screen',
+  /writeCache\(\{ id: line\.id, at, ar, en \}\)/.test(hookSrc) && !/setShown\([^)]*\)\s*;\s*\}\)\.catch/.test(hookSrc));
 
 // ── 7. rotation ─────────────────────────────────────────────────────────────────────────────────
 const at = (iso: string) => new Date(iso);
