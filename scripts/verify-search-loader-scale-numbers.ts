@@ -52,26 +52,24 @@ mustCatch('a builder that appends after preparing', (() => {
   return broken(base).at(-1) !== 'P';
 })());
 
-console.log('\n── 1b. countWording: «أكثر من» strictly below the truth, small counts exact, unknown → omitted ──');
-const asNum = (s: string) => (s.endsWith(' ألف') ? Number(s.replace(/[^\d]/g, '')) * 1000 : Number(s.replace(/,/g, '')));
-const honest = (w: typeof countWording) => {
-  for (const n of [1001, 1500, 11_385, 88_241, 162_312, 370_000, 372_889]) {
+console.log('\n── 1b. countWording: the EXACT count in digits (owner 2026-10-17), never word-form rounding, unknown → omitted ──');
+const asNum = (s: string) => Number(s.replace(/,/g, ''));
+const exactDigits = (w: typeof countWording) => {
+  for (const n of [1, 42, 300, 1000, 1001, 11_385, 88_241, 162_312, 372_889]) {
     for (const loc of ['ar', 'en'] as const) {
       const r = w(n, loc);
-      if (!r || r.kind !== 'more' || !(asNum(r.text) < n)) return false;
+      if (!r || r.kind !== 'exact' || asNum(r.text) !== n || /ألف|thousand|k$/i.test(r.text)) return false;
     }
   }
-  for (const n of [1, 42, 300, 1000]) { const r = w(n, 'ar'); if (!r || r.kind !== 'exact' || asNum(r.text) !== n) return false; }
   return w(0, 'ar') === null && w(undefined, 'ar') === null && w(null, 'en') === null && w(Number.NaN, 'ar') === null;
 };
-check('countWording is honest across real production counts', honest(countWording));
-check("today's numbers read as approved: 372,889 → «370 ألف» / 370,000; 162,312 → «160 ألف»; 11,385 → «11 ألف»",
-  countWording(372_889, 'ar')?.text === '370 ألف' && countWording(372_889, 'en')?.text === '370,000'
-  && countWording(162_312, 'ar')?.text === '160 ألف' && countWording(11_385, 'ar')?.text === '11 ألف');
-mustCatch('a wording that says "more than" the exact count (the old «أكثر من 372,889»)',
-  !honest((n, loc) => (typeof n === 'number' && n > 0 ? { kind: 'more', text: n.toLocaleString('en-US') } : null)));
+check('countWording is the exact count in digits across real production counts, and omits unknown/zero', exactDigits(countWording));
+check("today's numbers read as the owner asked: 372,889 · 162,312 · 11,385 (digits, thousands separators)",
+  countWording(372_889, 'ar')?.text === '372,889' && countWording(162_312, 'en')?.text === '162,312' && countWording(11_385, 'ar')?.text === '11,385');
+mustCatch('a wording that rounds into word form («370 ألف» — what the owner rejected)',
+  !exactDigits((n, loc) => (typeof n === 'number' && n > 0 ? { kind: 'exact', text: n >= 1000 ? `${Math.floor(n / 1000)} ألف` : String(n) } : null)));
 mustCatch('a wording that prints a zero for an unknown count',
-  !honest((n, loc) => countWording(typeof n === 'number' && Number.isFinite(n) ? n : 0, loc) ?? { kind: 'exact', text: '0' }));
+  !exactDigits((n, loc) => countWording(typeof n === 'number' && Number.isFinite(n) ? n : 0, loc) ?? { kind: 'exact', text: '0' }));
 
 console.log('\n── 2. fetchLoaderScaleStats fails CLOSED, never fabricates a number ──');
 const dataSrc = join(root, 'src/data/loaderScaleStats.ts');
@@ -200,7 +198,7 @@ console.log('\n── source shape: the funnel i18n keys exist with their placeh
 const i18n = readFileSync(join(root, 'src/i18n.tsx'), 'utf8');
 for (const [key, placeholders] of [
   ['Searching {count} real-estate platforms…', ['{count}']],
-  ['Checking more than {count} listings across the Kingdom…', ['{count}']],
+  ['Checking {count} listings across the Kingdom…', ['{count}']],
   ['Reviewing more than {count} listings in {city}…', ['{count}', '{city}']],
   ['Reviewing {count} listings in {city}…', ['{count}', '{city}']],
   ['Going through more than {count} listings in {district}…', ['{count}', '{district}']],
@@ -217,8 +215,8 @@ for (const [key, placeholders] of [
 // say «أكثر من» through countWording (the old line printed the EXACT total after "more than"); the
 // city/district lines go through placeLine, which omits an unknown place and never puts an Arabic
 // name inside an English sentence; and the loader adds no per-search round trip of its own.
-check('the Kingdom line is worded by countWording, never the exact total after «أكثر من»',
-  /checking: kingdom\?\.kind === 'more' \? t\('Checking more than \{count\} listings across the Kingdom…', \{ count: kingdom\.text \}\)/.test(loaderSrc)
+check('the Kingdom line is worded by countWording (exact digits), not formatted by hand',
+  /checking: kingdom \? t\('Checking \{count\} listings across the Kingdom…', \{ count: kingdom\.text \}\)/.test(loaderSrc)
   && !/grouped\(scaleStats\.listingCount\)/.test(loaderSrc));
 check('the city and district lines both go through placeLine (omit-when-unknown, no Arabic mid-English)',
   /city: placeLine\(funnel\.city,/.test(loaderSrc) && /district: placeLine\(funnel\.district,/.test(loaderSrc));
@@ -226,16 +224,18 @@ check('the old coverage line is gone from the loader (replaced by the city/distr
 check('the loader makes no supabase.rpc call of its own for the funnel (session caches only — the 2026-09-21 lesson)',
   !/supabase\.rpc\(/.test(loaderSrc) && /loadSearchFunnelFacts\(query\)/.test(loaderSrc));
 
-console.log('\n── 4. reading-pace rotation: every line gets time proportional to its length, not one fixed window ──');
-const { readingDurationMs } = await import('../src/lib/searchLoaderTitles.ts');
+console.log('\n── 4. reading-pace rotation: proportional to length, and the whole six-line funnel fits the 10 s cap ──');
+const { readingDurationMs, FUNNEL_BUDGET_MS } = await import('../src/lib/searchLoaderTitles.ts');
 
-check('a short line lands close to the old fixed 2400ms (no perceptible pace change for existing short copy)',
-  Math.abs(readingDurationMs('نطابق الفلاتر…') - 2400) < 700,
-  `got ${readingDurationMs('نطابق الفلاتر…')}ms`);
-check('a long live-number line gets MORE time than a short line — the whole point of this fix',
-  readingDurationMs('نغطي أكثر من 4,027 موقع في جميع أنحاء المملكة…') > readingDurationMs('نطابق الفلاتر…'));
-check('duration is floored — even an empty/near-empty string never flashes by instantly', readingDurationMs('') >= 1900);
-check('duration is ceilinged — an extreme length never stalls the rotation for many seconds', readingDurationMs('غ'.repeat(500)) <= 4200);
+// The six lines a Riyadh + district search really shows (live 2026-10-17 numbers). Owner 2026-10-17:
+// results are never held past ten seconds, so if these six do not fit, the personal lines are never seen.
+const FUNNEL_AR = ['نبحث في 148 منصة عقارية…', 'نفحص 372,889 إعلان في المملكة…', 'نراجع 162,312 إعلان في الرياض…', 'ندقق في 11,385 إعلان في حي النرجس…', 'نطابق طلبك: شقة للإيجار…', 'نجهز النتائج…'];
+const funnelTotal = FUNNEL_AR.reduce((a, l) => a + readingDurationMs(l), 0);
+check(`the six funnel lines fit inside the ${FUNNEL_BUDGET_MS}ms cap (sum ${funnelTotal}ms)`, funnelTotal <= FUNNEL_BUDGET_MS && FUNNEL_BUDGET_MS <= 10_000);
+check('a long live-number line still gets MORE time than a short line (reading pace, not a fixed window)',
+  readingDurationMs(FUNNEL_AR[3]) > readingDurationMs('نجهز النتائج…'));
+check('duration is floored — even an empty/near-empty string never flashes by instantly', readingDurationMs('') >= 1200);
+check('duration is ceilinged — no single line can hog the ten seconds', readingDurationMs('غ'.repeat(500)) <= 2500);
 
 mustCatch('a mutant that makes ALL lines the same duration regardless of length (the exact regression)',
   (() => {
