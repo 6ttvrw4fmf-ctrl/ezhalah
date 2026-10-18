@@ -598,3 +598,18 @@ def test_own_node_flag_agrees_with_the_validated_liveness_signal():
     for nid in ("1", "2"):
         flag = R.fetch_detail(_Sess(200, page), nid)["_own_node"]
         assert flag == (R._signal_for(nid)(200, page, False) == "live"), nid
+
+
+def test_a_page_that_labels_its_figure_a_total_clears_a_stale_stored_rate():
+    """BSB14657 (rendered 2026-10-18): «رقم الأرض 109 · المساحة 400 م · شارع 20 · السعر 350 ريال» — a TOTAL label, no
+    «المتر» anywhere on the ad, yet the row carried price_per_meter 350 beside price_total 350 from an older read (a None
+    is dropped by db). A detail page that labels its figure a total states no rate, so the rate clears. A failed
+    detail fetch is not the source speaking: the index card alone leaves the rate untouched (None, dropped)."""
+    row, _c, _w = mapped("أرض    للبيع في الفردوس (821/4)    ",
+                         fields=[("almsaha", "decimal", "المساحة 400 م"), ("als-r2", "list-string", "السعر")],
+                         price=350)
+    assert row["price_total"] == 350
+    assert row["price_per_meter"] is db.AUTHORITATIVE_NULL
+    ix = R.parse_index(card(title="أرض    للبيع في الفردوس (821/4)    ", price_text="السعر 350"))[0]
+    row2, _c2, _w2 = R.map_listing(ix, None)
+    assert row2["price_total"] == 350 and row2["price_per_meter"] is None
