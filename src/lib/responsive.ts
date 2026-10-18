@@ -61,9 +61,8 @@ export function atLeast({ mounted, isWeb, width, min }: ViewportGate): boolean {
 // in a component — so SSR (width 0) and the client agree through useAtLeast().
 export const ABOUT_ART_BREAKPOINT = 640;
 
-// Share pill label (owner 2026-09-05, PR #1893): at/above this width the «مشاركة» label renders
-// beside the icon; below it the button drops back to the 46px icon-only circle (keeping its
-// accessible name). #1893 originally compared useWindowDimensions().width inline — the renamed
+// Top-bar width gate (owner 2026-09-05, PR #1893; changed 2026-10-17): «مشاركة» now ALWAYS shows
+// beside the share icon; below this width the sign-in pill shortens to «تسجيل الدخول» instead. #1893 originally compared useWindowDimensions().width inline — the renamed
 // destructure (`shareBarWidth`) slipped past the fleet scan's `\bwidth` pattern, and the label's
 // Text node existed on every ≥380px client while the served HTML (width 0) had none: React #418 on
 // every deploy's post-deploy hydration gate from 2026-09-05 21:33Z onward. Routed through

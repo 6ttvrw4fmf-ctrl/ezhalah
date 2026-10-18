@@ -12,7 +12,7 @@
 //   7. rotation: one line held for 4 hours then a different one, always personal, time lines only at their time.
 import {
   WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, FACTLESS_ANYTIME_IDS,
-  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, type WelcomeFacts,
+  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, fillName, NAME_SLOT, type WelcomeFacts,
 } from '../src/lib/filterWelcome.ts';
 
 let failed = 0;
@@ -257,6 +257,24 @@ mustCatch('a picker that ignores the previous line', !neverRepeats((now, _last, 
   const pool = WELCOME_LINES.filter((l) => lineFitsTime(l, now));
   return pool[Math.min(pool.length - 1, Math.floor(rand() * pool.length))];
 }));
+
+// 8. THE NAME FOLLOWS THE LANGUAGE (owner 2026-10-17: «رجعت يا yusuf؟» on the Arabic headline).
+// Executed: a slotted line + the user's names → Arabic spelling in Arabic, Latin in English, and never
+// a Latin name inside an Arabic line. The hook must render and remember lines with the SLOT only.
+{
+  const slotted = renderWelcome(line(24), NAME_SLOT, FACTS, 'ar');
+  const ar = fillName(slotted, 'يوسف', 'ar');
+  check('Arabic line gets the Arabic spelling', !!ar && ar.includes('يوسف') && !/[A-Za-z]/.test(ar), String(ar));
+  check('a Latin name is never put into an Arabic line', fillName(slotted, 'yusuf', 'ar') === null);
+  check('English line gets the Latin name', fillName(renderWelcome(line(24), NAME_SLOT, { ...FACTS, city: { ar: 'الرياض', en: 'Riyadh', count: 162_312 } }, 'en'), 'yusuf', 'en')?.includes('yusuf') === true, String(renderWelcome(line(24), NAME_SLOT, FACTS, 'en')));
+  check('no name → no line', fillName(slotted, '  ', 'ar') === null);
+  check("the hook takes BOTH spellings from pickName (the menu's own rule)", /pickName\(names, 'ar'\)/.test(hookSrc) && /pickName\(names, 'en'\)/.test(hookSrc));
+  check('the hook remembers lines with the name SLOT and fills the name per language when shown',
+    /name: NAME_SLOT/.test(hookSrc) && /const nm = NAME_SLOT;/.test(hookSrc) && /fillName\(shown\.ar, shown\.nameAr, 'ar'\)/.test(hookSrc));
+  check('old remembered lines (name baked in) are ignored', /filterWelcome:shown:v2'/.test(hookSrc));
+  check('MUTATION: the pre-fix render (Latin name straight into the Arabic line) is what fillName refuses',
+    /[A-Za-z]/.test(renderWelcome(line(24), 'yusuf', FACTS, 'ar') ?? '') && fillName(slotted, 'yusuf', 'ar') === null);
+}
 
 console.log(`\nExample (ar): ${renderWelcome(WELCOME_LINES[3], 'يوسف', FACTS, 'ar')}`);
 console.log(`Example (en): ${renderWelcome(WELCOME_LINES[23], 'Yusuf', FACTS, 'en')}`);

@@ -1051,12 +1051,13 @@ export default function Home() {
     const shared = await shareNative();
     if (!shared) setShareOpen(true);
   };
-  // Below this the top bar carries the logo, a sign-in pill and this button; the label is the first
-  // thing that has to give, not the button. Through useAtLeast(), never an inline width compare:
+  // Below this the top bar is too narrow for the long sign-in label, so the SIGN-IN pill shortens to
+  // «تسجيل الدخول» and «مشاركة» always keeps its word (owner 2026-10-17: a bare icon isn't read as
+  // share, even on a small phone). Through useAtLeast(), never an inline width compare:
   // the inline read (`shareBarWidth >= 380`) rendered the label on every ≥380px client while the
   // served HTML (width 0) had none — React #418 on every desktop/tablet visit, and every production
   // deploy failed the post-deploy hydration gate from 2026-09-05 21:33Z until this line.
-  const shareLabelled = useAtLeast(SHARE_LABEL_BREAKPOINT);
+  const topBarRoomy = useAtLeast(SHARE_LABEL_BREAKPOINT);
 
   const detail = query.type ? detailFor(query.type) : null;
   // Context-level detail: shown at category/group level when no specific type is selected.
@@ -1292,7 +1293,7 @@ export default function Home() {
                   dataSet={{ ...TAP44 }}
                 >
                   <Ionicons name="person-outline" size={15} color="#fff" />
-                  <Text style={[s.topSignInText, x.topSignInText]}>{t('Sign up / Log in')}</Text>
+                  <Text style={[s.topSignInText, x.topSignInText]}>{t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')}</Text>
                 </Pressable>
               )}
               {/* Share — a labelled pill, not a bare glyph (owner 2026-09-05). An unlabelled icon in a
@@ -1303,7 +1304,7 @@ export default function Home() {
               <Pressable
                 style={({ pressed, hovered }: any) => [
                   s.shareBtn,
-                  shareLabelled && s.shareBtnWide,
+                  s.shareBtnWide,
                   hovered && s.shareBtnHover,
                   pressed && s.shareBtnPressed,
                 ]}
@@ -1316,7 +1317,7 @@ export default function Home() {
               >
                 <RNAnimated.View style={[s.shareInner, { transform: [{ scale: shareScale }] }]}>
                   <Ionicons name="share-social-outline" size={17} color={colors.primary} />
-                  {shareLabelled ? <Text style={s.shareBtnText}>{t('Share')}</Text> : null}
+                  <Text style={s.shareBtnText}>{t('Share')}</Text>
                 </RNAnimated.View>
               </Pressable>
             </View>

@@ -42,7 +42,10 @@ export default function HomeWebsiteStrip() {
         {names.map(name => {
           const profile = PLATFORM_PICKER_PROFILES[name];
           return <div key={name} data-website={name} style={{ flex: `0 0 ${STRIP_SLOT}px`, height: 48, display: 'flex', justifyContent: 'center' }}>
-            <div style={{ position: 'relative', width: 96, height: 48, backgroundColor: 'transparent', overflow: 'hidden' }}>
+            {/* clipPath + contain, not overflow alone: 17 logos are laid out LARGER than this frame and rely on
+                the clip. iOS Safari skips an overflow:hidden clip inside the animated (composited) track, so
+                those logos spilled across their neighbours — owner iPhone screenshot 2026-10-17. */}
+            <div style={{ position: 'relative', width: 96, height: 48, backgroundColor: 'transparent', overflow: 'hidden', clipPath: 'inset(0)', WebkitClipPath: 'inset(0)', contain: 'paint' } as any}>
               <Image source={profile.logo} tintColor={profile.layout.monochrome ? (theme === 'dark' ? '#F3F5F3' : '#253831') : undefined} loading="eager" priority={names.indexOf(name) < 5 ? 'high' : 'normal'} transition={0} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" accessible={false} />
             </div>
           </div>;
