@@ -22,8 +22,9 @@ check(`the 96×48 logo frame is found in HomeWebsiteStrip.web.tsx`, frame.length
 check(`oversize logos measured from the layout data (${oversize.length})`, Object.keys(layout).length > 0);
 const clips = (src: string) => /clipPath: 'inset\(0\)'/.test(src) && /overflow: 'hidden'/.test(src);
 check('the frame clips with clip-path as well as overflow (iOS Safari ignores overflow alone here)', oversize.length === 0 || clips(frame));
-// Mutation: the pre-fix frame (overflow only) must be refused while oversize logos exist.
-check('MUTATION: an overflow-only frame is caught', oversize.length === 0 || !clips(`<div style={{ position: 'relative', width: 96, height: 48, backgroundColor: 'transparent', overflow: 'hidden' }}>`));
+// Mutation proof: the pre-fix frame (overflow only) must be refused by the same predicate.
+const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
+mustCatch('an overflow-only frame (the pre-fix iPhone overlap)', !clips(`<div style={{ position: 'relative', width: 96, height: 48, backgroundColor: 'transparent', overflow: 'hidden' }}>`));
 
 console.log(failed === 0 ? '\n✓ strip logos are clipped to their frames' : `\n✗ ${failed} strip clip check(s) FAILED`);
 process.exit(failed === 0 ? 0 : 1);
