@@ -564,17 +564,25 @@ sourceMutant('the map opening a new tab from our UI', !wired(codeOnly(DATA_SRC),
 // coordinate, which would draw a marker the source never published), and the label says approximate.
 // mapPoint() is untouched by all of it.
 type DistrictFns = {
-  districtPlace: (r: Row | null) => { query: string; district: string; city: string } | null;
+  districtPlace: (r: Row | null, adUrl?: string | null) => { query: string; district: string; city: string } | null;
   districtEmbedUrl: (d: { query: string; district: string; city: string }, hl?: string) => string;
 };
 const liftDistrict = async (file: string): Promise<DistrictFns> => (await liftSymbols(file, [
   { header: 'export const DISTRICT_MAP_PLATFORMS: ', endsWith: /\];$/ },  // a one-line const: end on its own line
+  { header: 'export function aqarTownFromUrl(' },
   { header: 'export function districtPlace(' },
   { header: 'export const districtEmbedUrl = (' },
 ], ['districtPlace', 'districtEmbedUrl'])) as unknown as DistrictFns;
 const districtProblems = (f: DistrictFns): string[] => {
   const out: string[] = [];
   const sah = f.districtPlace({ platform: 'aqar', district_ar: 'حي الساحل', city_ar: 'جدة' });
+  // TOWN FALLBACK (owner 2026-10-17): no city in our index → the place the ad's own sa.aqar.fm link names.
+  const faraa = f.districtPlace({ platform: 'aqarmonthly', district_ar: null, city_ar: null }, 'https://sa.aqar.fm/%D8%A7%D9%84%D9%81%D8%B1%D8%B9%D8%A7%D8%A1-%D9%85%D9%86%D8%B7%D9%82%D8%A9-%D8%B9%D8%B3%D9%8A%D8%B1-6582310');
+  if (faraa?.query !== 'الفرعاء منطقة عسير، السعودية') out.push(`no city → the town the ad's link names (ad number dropped), got ${faraa?.query}`);
+  if (f.districtPlace({ platform: 'aqarmonthly', city_ar: null }, 'https://sa.aqar.fm/%D8%A7%D9%84%D9%85%D9%85%D9%84%D9%83%D8%A9-%D8%A7%D9%84%D8%B9%D8%B1%D8%A8%D9%8A%D8%A9-%D8%A7%D9%84%D8%B3%D8%B9%D9%88%D8%AF%D9%8A%D8%A9-6422938') !== null) out.push('a link naming only the country names no place → no map');
+  if (f.districtPlace({ platform: 'aqar', city_ar: null }, 'https://evil.example/%D8%A7%D9%84%D8%AF%D8%B1%D8%A8-1') !== null) out.push('only an sa.aqar.fm link may name the town');
+  if (f.districtPlace({ platform: 'aqar', city_ar: null }, null) !== null) out.push('no city and no link → no map');
+  if (f.districtPlace({ platform: 'aqar', district_ar: 'حي الساحل', city_ar: 'جدة' }, 'https://sa.aqar.fm/%D8%A7%D9%84%D8%AF%D8%B1%D8%A8-1')?.query !== 'حي الساحل، جدة') out.push('a known district + city always wins over the link');
   if (sah?.query !== 'حي الساحل، جدة') out.push(`a «حي …» district is named as is, got ${sah?.query}`);
   const bare = f.districtPlace({ platform: 'aqar', district_ar: 'النرجس', city_ar: 'الرياض' });
   if (bare?.query !== 'حي النرجس، الرياض') out.push(`a bare district name gets «حي », got ${bare?.query}`);
@@ -600,7 +608,7 @@ const districtProblems = (f: DistrictFns): string[] => {
   return out;
 };
 const districtReal = districtProblems(await liftDistrict(DATA));
-check('district border: Aqar + Aqar Monthly only, «حي X، City» by name, the city when no district, no map without a city, the free embed (keyless or place mode)', districtReal.length === 0, districtReal.join('\n      '));
+check('district border: Aqar + Aqar Monthly only, «حي X، City» by name, the city when no district, the town the ad link names when no city, the free embed (keyless or place mode)', districtReal.length === 0, districtReal.join('\n      '));
 const mustCatchDistrict = async (what: string, from: string, to: string) => {
   if (!DATA_SRC.includes(from)) { failed++; console.log(`FAIL  mutation anchor missing: ${what}`); return; }
   const file = join(mkdtempSync(join(tmpdir(), 'ad-district-')), 'adPageData.ts');
@@ -609,19 +617,21 @@ const mustCatchDistrict = async (what: string, from: string, to: string) => {
   if (!caught) failed++;
   console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
 };
-await mustCatchDistrict('a map from the district name alone (no city)', "if (!city || city === 'غير معروف') return null;", '');
+await mustCatchDistrict('the town fallback lost (no city → no map again)', "if (!city || city === 'غير معروف') { const town = aqarTownFromUrl(adUrl); return town ? { query: town, district: '', city: town } : null; }", "if (!city || city === 'غير معروف') return null;");
+await mustCatchDistrict('a country-only link accepted as a town', "const text = words.join(' ').replace(/\\s*المملكة العربية السعودية\\s*/g, ' ').trim();", "const text = words.join(' ').trim();");
+await mustCatchDistrict('any site\'s link accepted as the town source', "if (u.hostname.replace(/^www\\./, '').toLowerCase() !== 'sa.aqar.fm') return null;", '');
 await mustCatchDistrict('no district → nothing (the city fallback lost)', "if (!district || district === 'غير معروف') return { query: city, district: '', city };", "if (!district || district === 'غير معروف') return null;");
 await mustCatchDistrict('the district map spreading past Aqar', "if (!DISTRICT_MAP_PLATFORMS.includes(String(row?.platform ?? '').trim().toLowerCase())) return null;", '');
 await mustCatchDistrict('Aqar Monthly dropped from the district map', "export const DISTRICT_MAP_PLATFORMS: readonly string[] = ['aqar', 'aqarmonthly'];", "export const DISTRICT_MAP_PLATFORMS: readonly string[] = ['aqar'];");
 await mustCatchDistrict('the district embed losing the name', '`https://maps.google.com/maps?q=${q}&t=h&hl=${hl}&output=embed`', '`https://maps.google.com/maps?t=h&hl=${hl}&output=embed`');
 const districtWired = (dataSrc: string, previewSrc: string) =>
-  /if \(!pin\) setArea\(districtPlace\(row\)\);/.test(previewSrc)                     // only when the source published no pin
+  /if \(!pin\) setArea\(districtPlace\(row, listingOpenUrl\(l\)\)\);/.test(previewSrc)   // only when the source published no pin; the ad's own link feeds the town fallback
   && /\{!geo && area && IS_WEB \? \(/.test(previewSrc) && /\{mapOpen && !geo && area && IS_WEB \? \(/.test(previewSrc)
   && (previewSrc.match(/districtEmbedUrl\(area, locale\)/g) ?? []).length === 2
   && /t\('Approximate location'\)/.test(previewSrc) && /t\('\{name\} published no exact location', \{ name \}\)/.test(previewSrc)
   && /const geo = mapPoint\(own\);\s*return \{ geo, row: own \};/.test(dataSrc);        // the pin path is untouched
 check('district border wiring: only without a pin, the free embed by name in both views, approximate labels, pin path untouched', districtWired(codeOnly(DATA_SRC), PREVIEW));
-sourceMutant('the district map drawn even when the source published a pin', !districtWired(codeOnly(DATA_SRC), PREVIEW.replace('if (!pin) setArea(districtPlace(row));', 'setArea(districtPlace(row));')));
+sourceMutant('the district map drawn even when the source published a pin', !districtWired(codeOnly(DATA_SRC), PREVIEW.replace('if (!pin) setArea(districtPlace(row, listingOpenUrl(l)));', 'setArea(districtPlace(row, listingOpenUrl(l)));')));
 sourceMutant('the approximate label dropped', !districtWired(codeOnly(DATA_SRC), PREVIEW.replaceAll("t('Approximate location')", "t('Location')")));
 
 // ── the page counts only what search shows (owner 2026-10-10: a site the engineer marks dead/suspended

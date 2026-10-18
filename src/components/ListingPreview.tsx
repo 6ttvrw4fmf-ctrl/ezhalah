@@ -208,7 +208,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
     void fetchAdPage(l).then(({ geo: pin, row }) => {
       if (!alive) return;
       setGeo(pin);
-      if (!pin) setArea(districtPlace(row));
+      if (!pin) setArea(districtPlace(row, listingOpenUrl(l)));
       // Aqar sale ads only for now (owner update 22): nothing is even fetched for the rest.
       if (!pricesBlockEligible(row)) return;
       const price = Number(row?.price_total), area = Number(row?.area_m2);
