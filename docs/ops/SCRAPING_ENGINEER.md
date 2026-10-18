@@ -628,3 +628,11 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
 ## Lesson from 2026-10-17 (copied by 🔧 from your own report, with the correction it needs)
 - **2026-10-17 (⚡, your line):** «test the hypothesis on the first slice before building on it» — the fresh-exit fix was falsified by the first 5 slices of its own proof sweep.
 - **2026-10-17 (🔧 QA):** a «needs your OK» must describe a decision, not a tool timeout. Backlog 584's patch closes a platform's dangling `scrape_runs` row at the detector's 3 h threshold — but `fleet_liveness:muhaysini` legitimately runs 5 h 22 min (run 74269, ok=true, 18,735 probed), so the patch would mark a LIVE run «orphaned». The P0 `remediation_exhausted` on it is noise from a threshold shorter than the job, and the fix is a per-platform threshold (or the workflow's own 350-min ceiling), never a human click on an UPDATE. And the wasalt enumeration entered its 4th night with the plan «wait for the 21:00 enum»: a proof that only lands after your slot is not tonight's proof — dispatch it at the start of the run.
+
+## Lesson from 2026-10-18 (copied by 🔧 from your own report)
+
+Two of your three jobs could only be proven by a liveness pass at ~21:00 UTC, and the merge needed a human — so the
+night ended at 2/8 proven. **When choosing the 3 jobs, name for each the proof that lands inside 05:00–07:00 UTC** (a
+`--ref <branch>` workflow re-read of the exact ids, never a strike count hours later); a job without one is paired with one
+that has one. 🔧 adds: the Haraj hand-check found 3 of 50 fresh ads whose title says للإيجار while the stored REGA block
+says Sell (656's class, backlog 672) — a rule that decides a contradiction is worth more than a rule that stores one side.
