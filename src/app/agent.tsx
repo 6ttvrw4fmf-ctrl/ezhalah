@@ -94,7 +94,7 @@ import { pickResultsFoundSentence } from '@/data/resultsFoundRotation';
 import { pickNoResultsSentence } from '@/data/noResultsRotation';
 import { pickName } from '@/lib/nameSync';
 import { encodeSharePayload, shareLink, shareMessage } from '@/lib/shareSearch';
-import { SHARE_LINK } from '@/lib/share';
+import { SHARE_LINK, shareNative } from '@/lib/share';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
@@ -4229,8 +4229,11 @@ export default function Agent() {
             reads as one continuous control across both screens, not just within one. */}
         {/* The SAME labelled «مشاركة» pill as the Filter screen (owner 2026-10-17: the bare box-arrow
             glyph here was not read as "share"). Same icon, label, breakpoint and styles as index.tsx. */}
+        {/* The phone's OWN share menu first, exactly like the Filter screen (owner 2026-10-18: our drawn
+            WhatsApp/X/Telegram sheet looked «fake»). Our sheet stays only as the fallback where the
+            device has no usable share menu (desktop — see shareNative()). */}
         <Pressable
-          onPress={() => setShareOpen(true)}
+          onPress={async () => { if (!(await shareNative())) setShareOpen(true); }}
           style={({ pressed, hovered }: any) => [
             s.shareIcon,
             s.shareIconWide,
