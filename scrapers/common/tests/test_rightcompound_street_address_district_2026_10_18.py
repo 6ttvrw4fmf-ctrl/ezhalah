@@ -104,6 +104,8 @@ def test_bridge_unique_drops_ambiguous_keys_and_arabic_keyed_rows():
     ("Yasmeen Area - Near Prince Salman Road", "Riyadh", ["Yasmeen"]),
     ("Al Douha Neighborhood ", "Khobar", ["Al Douha"]),
     ("Amr Al Damri Street", "Riyadh", []),
+    ("KSA", "Riyadh", []),                                      # the country, 55 live rows showed it as a name
+    ("Al Malaz, Riyadh, KSA", "Riyadh", ["Al Malaz"]),
     ("Al Malaz, Al Olaya, Riyadh", "Riyadh", ["Al Malaz", "Al Olaya"]),
     ("", None, []),
 ])
