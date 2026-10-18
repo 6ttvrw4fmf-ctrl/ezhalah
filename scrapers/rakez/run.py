@@ -372,6 +372,21 @@ def resolve_location(term_ids: list[int], tree: dict[int, dict], title: Optional
             city_ar, city_id, region_id = name, cid, rid
             break
 
+    if not city_id and len(tagged) > 1:
+        # The district and its city tagged SIDE BY SIDE, both children of the region: /ar/project/1908/ prints
+        # «المدينة: الحمراء , الخبر» — الحمراء (734) → الشرقية, الخبر (1049) → الشرقية — so the leaf's own chain never
+        # reaches the city (7 live units with no city, 2026-10-18). Exactly one tagged city, in the chain's region.
+        regions = {r for r in (_bare_region_labels().get(norm_ar(n)) for n in chain) if r is not None}
+        cities = {}
+        for t in tagged:
+            cid, rid = _city_or_region_homonym(tree[t]["name"])
+            if cid and (not regions or rid in regions):
+                cities[cid] = (tree[t]["name"], cid, rid)
+        if len(cities) == 1:
+            city_ar, city_id, region_id = next(iter(cities.values()))
+            others = [tree[t]["name"] for t in sorted(tagged, key=depth, reverse=True) if tree[t]["name"] != city_ar]
+            chain = others[:1] + [city_ar]     # the district candidate first, as the tree walk leaves it
+
     if not city_id:
         # The tree skipped the city (البندرية → الشرقية, no الخبر): the project's OWN title states it.
         # A region the tree did name must agree with the title's city, or nothing is placed.
