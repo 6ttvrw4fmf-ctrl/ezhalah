@@ -52,7 +52,7 @@ function verify(cardSource = card, imageSource = renderer, theme = 'light') {
       assert.equal(node.type, 'View');
       assert.equal(node.props.style.width, 96);
       assert.equal(node.props.style.height, 48);
-      assert.equal(node.props.style.backgroundColor, platform.name === 'حراج' ? '#0473C0' : 'transparent');
+      assert.equal(node.props.style.backgroundColor, 'transparent');
       const image = node.props.children[0];
       assert.equal(image.props.source, profile.logo, `${source}: original colors reach the rendered image`);
       assert.equal(image.props.style.width, profile.layout.width);
@@ -66,7 +66,8 @@ function verify(cardSource = card, imageSource = renderer, theme = 'light') {
   for (const filename of ['maskanre','wetheaddress']) {
     const node = PlatformLogo({source:`../../assets/images/platform-logos/${filename}.png`});
     assert.equal(node.type,'View');
-    assert.equal(node.props.style.backgroundColor,'#253831',`${filename}: white artwork remains readable`);
+    assert.equal(node.props.style.backgroundColor,'transparent',`${filename}: no backing tile`);
+    assert.equal(node.props.children[0].props.tintColor,theme === 'dark' ? '#F3F5F3' : '#253831',`${filename}: readable theme-aware ink`);
     assert.equal(node.props.children[0].props.source,`../../assets/images/platform-logos/${filename}.png`);
   }
   assert.equal(profiles['حراج'].logo,'../../assets/images/platform-logos/haraj.png','Haraj uses its official wordmark');
@@ -86,8 +87,8 @@ function mustCatch(name: string, mutatedCard: string, mutatedRenderer: string) {
 for (const [name, mutatedCard, mutatedRenderer] of [
   ['generic placeholder', card.replace(/const WADOD_LOGO = require\('[^']+'\)/, "const WADOD_LOGO = require('../../assets/images/platform-placeholder.png')"), renderer],
   ['white Nufouth wordmark', card.replace(/const NUFOUTH_LOGO = require\('[^']+'\)/, "const NUFOUTH_LOGO = require('../../assets/images/platform-logos/nufouth-com.png')"), renderer],
-  ['opaque backing tile', card, renderer.replace("?? 'transparent'", "?? '#263D32'")],
-  ['missing contrast backing', card, renderer.replace("platformLogoBackgrounds.get(source) ?? 'transparent'", "'transparent'")],
+  ['opaque backing tile', card, renderer.replace("const backgroundColor = 'transparent'", "const backgroundColor = '#263D32'")],
+  ['missing white-mark contrast', card, renderer.replace('platformLogoMonochrome.has(source)', 'false')],
   ['Deal recoloring', card, renderer.replace('source={source}', "source={source === require('../../assets/images/dealapp.png') ? require('../../assets/images/platform-contrast/dealapp-light.png') : source}")],
 ] as const) {
   mustCatch(name, mutatedCard, mutatedRenderer);

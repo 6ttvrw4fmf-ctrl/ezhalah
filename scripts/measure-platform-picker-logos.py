@@ -15,10 +15,8 @@ for name, relative in assets.items():
     # Transparent/near-white padding is not visible artwork on a property card.
     # Measuring alpha alone made small wordmarks shrink inside their exported white canvas.
     monochrome = name in presentation['monochrome']
-    # Haraj's original white header mark uses a blue backing, not a tint.
-    white_artwork = monochrome or name == 'حراج'
     ink = Image.new('L', image.size)
-    ink.putdata([255 if a > 96 and (white_artwork or (255 - min(r, g, b)) * a / 255 > 48) else 0
+    ink.putdata([255 if a > 96 and (monochrome or (255 - min(r, g, b)) * a / 255 > 48) else 0
                  for r, g, b, a in image.get_flattened_data()])
     bounds = ink.getbbox()
     if not bounds:

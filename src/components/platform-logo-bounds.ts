@@ -175,9 +175,8 @@ export const platformLogoContrast = new Map<unknown, { light?: number; dark?: nu
   [require('../../assets/images/wslnaa.png'), { dark: require('../../assets/images/platform-contrast/wslnaa-dark.png') }],
 ]);
 
-// Original white artwork needs a contrasting surface, not recoloring. Reviewed exceptions only.
-export const platformLogoBackgrounds = new Map<unknown, string>([
-  [require('../../assets/images/platform-logos/haraj.png'), '#0473C0'],
-  [require('../../assets/images/platform-logos/maskanre.png'), '#253831'],
-  [require('../../assets/images/platform-logos/wetheaddress.png'), '#253831'],
+// White-only legacy marks adapt their ink while retaining transparent backgrounds.
+export const platformLogoMonochrome = new Set<unknown>([
+  require('../../assets/images/platform-logos/maskanre.png'),
+  require('../../assets/images/platform-logos/wetheaddress.png'),
 ]);
