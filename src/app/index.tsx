@@ -33,7 +33,7 @@ import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
 import { useFilterWelcome } from '@/lib/useFilterWelcome';
-import { decodeSharePayload, shareLandingTitle, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
+import { decodeSharePayload, shareLandingTitle, shareInviteNote, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
 import { fetchSharedChat, fetchSharedChatCard } from '@/lib/sharedChat';
 import { isProbeFailure } from '@/lib/afProbe';
 import { pickName } from '@/lib/nameSync';
@@ -137,7 +137,7 @@ export default function Home() {
   const cityLabel = (o: { cityId: number; cityAr: string }) => (locale === 'en' ? cityNameEn(o.cityId, o.cityAr) : o.cityAr);
   const regionLabel = (o: { regionId: number | null; regionAr: string | null }) => (locale === 'en' ? regionNameEn(o.regionId, o.regionAr) : o.regionAr);
   const districtLabel = (cityId: number, ar: string) => (locale === 'en' ? districtNameEn(cityId, ar) : ar);
-  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history, importSharedChat } = useApp();
+  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history, importSharedChat, authChecked } = useApp();
   // A SHARED SEARCH LANDS HERE (owner 2026-10-17). `/?share=<payload>` (src/lib/shareSearch.ts) shows a
   // card «عقارات من {name} لك على إزهله» with «اضغط وشوف العقارات». The TAP is what runs the search
   // (a pasted link never runs one by itself — appSession gate). Owner: the recipient signs in to open a
@@ -188,6 +188,25 @@ export default function Home() {
     }
     router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q) } });
   }, [router, history, importSharedChat]);
+  // OPENING A SHARED LINK (owner 2026-10-18: «the pop up should be the log in and sign up … with a message
+  // of what the user wants to send him … when user clicks sign up / log in the screen shows the history
+  // and it gets saved in the side»). Once the session is known: a visitor who is not signed in gets the
+  // normal sign-in popup with «يوسف شاركك: …» on top, and the chat opens — copied into their own list —
+  // the moment they are in (the pending record below survives the OAuth redirect). A signed-in person
+  // goes straight into the shared chat. Opening a saved copy runs no search (appSession gate holds).
+  const sharedHandledRef = useRef(false);
+  useEffect(() => {
+    if (!sharedSearch || !authChecked || sharedHandledRef.current) return;
+    sharedHandledRef.current = true;
+    if (!user) {
+      try {
+        localStorage.setItem(SHARED_PENDING_KEY, JSON.stringify({ q: sharedSearch.q, name: sharedSearch.name, code: sharedSearch.code, at: Date.now() }));
+      } catch { /* without storage the chat still opens if sign-in finishes in this page */ }
+      openAuth(shareInviteNote(sharedSearch.name, sharedSearch.q, locale === 'en' ? 'en' : 'ar') ?? undefined);
+      return;
+    }
+    if (sharedSearch.code) void openSharedSearch(sharedSearch);
+  }, [sharedSearch, authChecked, user, openAuth, openSharedSearch, locale]);
   const onSharedTap = () => {
     if (!sharedSearch) return;
     if (user) { void openSharedSearch(sharedSearch); return; }
@@ -2258,7 +2277,9 @@ export default function Home() {
       {/* Drawer overlays the home content (dimmed behind) instead of replacing it. */}
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
-      {sharedSearch && (
+      {/* Only an older search link (no chat code) opened while signed in still asks for a tap — a pasted
+          link never runs a SEARCH by itself. Shared chats and signed-out visitors never see this card. */}
+      {sharedSearch && user && !sharedSearch.code && (
         <View style={s.sharedBackdrop} accessibilityViewIsModal>
           <View style={s.sharedCard}>
             <Pressable onPress={() => setSharedSearch(null)} hitSlop={10} style={[s.sharedClose, isRTL ? { left: 12 } : { right: 12 }]} accessibilityRole="button" accessibilityLabel={t('Close')}>

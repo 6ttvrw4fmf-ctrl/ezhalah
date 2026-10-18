@@ -176,8 +176,11 @@ type AppState = {
   // closeModal above — never a route, so the screen underneath (the Filter page, wherever the user
   // actually is) is never navigated away from or unmounted. See src/components/AuthModal.tsx.
   authOpen: boolean;
-  openAuth: () => void;
+  // `note` (owner 2026-10-18): a line shown on top of the sign-in popup — a shared-chat link opens the
+  // popup with «يوسف شاركك: …» so the visitor knows what they will see once they are in.
+  openAuth: (note?: unknown) => void; // non-string (a press event when passed as onPress) = no note
   closeAuth: () => void;
+  authNote: string | null;
   // Read-only exposure for the popup's auto-show gate (shouldAutoShowAuthPopup, owner 2026-08-28):
   // null = the hasSeenIntro flag is still being read, false = the intro is pending/playing, true =
   // done. The popup may only auto-raise on `true`, so it never covers the intro film.
@@ -317,6 +320,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [modal, setModal] = useState<'support' | 'about' | 'legal' | 'privacy' | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
+  const [authNote, setAuthNote] = useState<string | null>(null);
   const [pendingMessage, setPendingMessageState] = useState<string | null>(null);
   // `null` while the saved flag is still being read from storage; the intro stays hidden until then.
   const [introSeen, setIntroSeen] = useState<boolean | null>(null);
@@ -1307,10 +1311,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       openModal: (m) => setModal(m),
       closeModal: () => setModal(null),
       authOpen,
-      openAuth: () => setAuthOpen(true),
+      openAuth: (note?: unknown) => { setAuthNote(typeof note === 'string' && note.trim() ? note.trim() : null); setAuthOpen(true); },
+      authNote,
       // Plain close again (2026-08-29): the centered modal no longer auto-raises, so a close
       // needs no memory — reopening is always an explicit control away.
-      closeAuth: () => setAuthOpen(false),
+      closeAuth: () => setAuthOpen(false), // the note is reset by the next openAuth (always sets or clears it)
       signInCardDismissed,
       dismissSignInCard: () => setSignInCardDismissed(true),
       introSeen,
@@ -1320,7 +1325,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!INTRO_DEMO_MODE) AsyncStorage.setItem('hasSeenIntro', '1').catch(() => {});
       },
     }),
-    [query, dataSource, user, searchCount, history, modal, authOpen, introSeen, signInCardDismissed, authChecked, pendingMessage, activeChatId, setActiveChatId],
+    [query, dataSource, user, searchCount, history, modal, authOpen, authNote, introSeen, signInCardDismissed, authChecked, pendingMessage, activeChatId, setActiveChatId],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
