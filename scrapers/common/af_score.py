@@ -105,6 +105,11 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # («🍳 مطبخ عملي») on ads whose ticked list names none of them: our NULL is the source's answer (🔬, law §2).
     # Read by wpresidence_props().
     "eastabha": ("elevator", "kitchen", "parking", "air_conditioner", "private_entrance"),
+    # amaall publishes these through its WordPress `property_feature` taxonomy (scrapers/amaall/run.py FEATURE_MAP).
+    # 19 of its 28 live ads leave the taxonomy empty and type «⚫مصعد ⚫مطبخ» into the free description instead; its
+    # 10-18 «misses» (0 of 4, CI re-read 39115342028, 10729207 and 10729184) were exactly that prose. A structured
+    # null outranks any prose hit (law §2), so our NULL is the source's answer and the score must not ask from it.
+    "amaall": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "private_entrance"),
 }
 # WordPress «WP Residence» sites: the ticked checklist is the structured statement (wpresidence_props).
 WP_RESIDENCE_SITES = {"eastabha"}

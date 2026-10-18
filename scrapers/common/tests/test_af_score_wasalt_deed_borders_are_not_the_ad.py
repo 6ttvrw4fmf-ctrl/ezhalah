@@ -25,3 +25,11 @@ def test_border_row_is_not_read():
 def test_a_non_border_field_is_still_read():
     pg = _page([{"key": "propertyArea", "label": "Area Size", "value": "311.53"}])
     assert any("311.53" in x for x in pg["evidence_lines"])
+
+
+def test_amaall_description_bullets_never_build_a_request():
+    # amaall's taxonomy is the structured field; «⚫مصعد» typed into the description is prose (law §2).
+    lines = ["⚫غرفة غسيل", "⚫مؤثثة", "⚫مصعد", "⚫مطبخ"]
+    assert S.says_yes(lines, "elevator", "amaall", {"jsonld": []}) is False
+    assert S.says_yes(lines, "kitchen", "amaall", {"jsonld": []}) is False
+    assert S.says_yes(lines, "elevator", "someprosesite", {"jsonld": []}) is True
