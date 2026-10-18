@@ -129,6 +129,16 @@ _DISTRICT_EN_AR = {
     ("dhahran", "doha"): "حي الدوحة", ("dammam", "doha"): "حي الدوحة",
     ("jubail", "fanateer"): "حي الفناتير", ("jubail", "deffi"): "حي الدفي",
     ("al-ahsaa", "salam"): "حي السلام",
+    # 2026-10-18 (New Listings, #658): the English names left NULL on live rows, each catalogued for that city.
+    # NOT mapped, on purpose: «King Abdullah Financial» (site template text), «Al Khobar» (the city), «Doha» /
+    # «Aziziyah» under khobar (not in الخبر's catalog), street names, «Exit 8», postcodes.
+    ("khobar", "jawhara"): "حي الجوهرة", ("khobar", "qurtoba"): "حي قرطبة",
+    ("khobar", "tahliyah"): "حي التحلية", ("khobar", "bustan"): "حي البستان",
+    ("khobar", "sadafah"): "حي الصدفة", ("riyadh", "sulaimaniah"): "حي السليمانية",
+    ("riyadh", "deplomatic quarter"): "حي السفارات", ("riyadh", "diplomatic quarter"): "حي السفارات",
+    ("riyadh", "ghoroub"): "حي الغروب", ("riyadh", "qayrawan"): "حي القيروان",
+    ("riyadh", "ishbilia"): "حي اشبيلية", ("riyadh", "rafiah"): "حي الرفيعة",
+    ("jeddah", "rabwah"): "حي الربوة", ("jeddah", "bawadi"): "حي البوادي",
 }
 
 
