@@ -105,6 +105,11 @@ STRUCTURED_ONLY: dict[str, tuple[str, ...]] = {
     # («🍳 مطبخ عملي») on ads whose ticked list names none of them: our NULL is the source's answer (🔬, law §2).
     # Read by wpresidence_props().
     "eastabha": ("elevator", "kitchen", "parking", "air_conditioner", "private_entrance"),
+    # amaall publishes these through its WordPress `property_feature` taxonomy (scrapers/amaall/run.py FEATURE_MAP).
+    # 19 of its 28 live ads leave the taxonomy empty and type «⚫مصعد ⚫مطبخ» into the free description instead; its
+    # 10-18 «misses» (0 of 4, CI re-read 39115342028, 10729207 and 10729184) were exactly that prose. A structured
+    # null outranks any prose hit (law §2), so our NULL is the source's answer and the score must not ask from it.
+    "amaall": ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "private_entrance"),
 }
 # WordPress «WP Residence» sites: the ticked checklist is the structured statement (wpresidence_props).
 WP_RESIDENCE_SITES = {"eastabha"}
@@ -266,6 +271,11 @@ def findable(rows: list[dict] | None, source_table: str, listing_id: int) -> boo
 # about a picture, not the advertiser's statement, so it never counts as the page saying the ad has one (🆕 2026-10-16).
 _WASALT_SKIP = re.compile(r"agent|broker|owner|advertiser|user|phone|mobile|whats|email|contact|licen|classification|\bid$|_id$|uuid",
                           re.I)
+# The REGA deed's border rows (regaVerifiedInfo … {"key": "borders.southLimitDescription", "value": «ممرات ودرج
+# ومصعد ثم ارتداد 2 ثم قطعة رقم 29»}) say what the unit's boundary TOUCHES: a corridor, a neighbour's plot, the
+# building's lift shaft. That is a legal boundary, not the ad stating what the unit has; all 4 wasalt misses on
+# 2026-10-18 asked «elevator» from it while the seller's own description never names one (re-read 39114420405).
+_WASALT_BORDER = re.compile(r"^borders\.", re.I)
 
 
 # wasalt's structured attribute keys → the Arabic label the comparison's keywords read («م²», «غرف», «دورات المياه»).
@@ -300,6 +310,8 @@ def wasalt_page(url: str, fetch=None) -> dict | None:
         if key and _WASALT_SKIP.search(key):
             return
         if isinstance(node, dict):
+            if _WASALT_BORDER.search(str(node.get("key") or "")):
+                return
             label = WASALT_FIELD_LABELS.get(str(node.get("key")))
             if label and isinstance(node.get("value"), (str, int, float)) and str(node["value"]).strip():
                 # wasalt's own {key, value} row as ONE labelled line: split into loose leaves, «96» never sat next

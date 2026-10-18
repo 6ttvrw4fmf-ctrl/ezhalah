@@ -33,6 +33,7 @@ a defaulted 'annual' (a monthly figure stored as yearly is a 12x error on the ca
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 import hashlib
 import html as ihtml
 import os
@@ -47,7 +48,9 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize, sold_pin  # noqa: E402
-from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.arabic_location import (  # noqa: E402
+    find_district_in_text, known_district_keys, title_hayy_district, to_catalog,
+)
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://ksaaqar.com"
@@ -136,8 +139,10 @@ _OWN_CARD_RE = re.compile(
     r'class="recent-ads-list-price"\s*>(.*?)</div>',
     re.S,
 )
-# The theme always prints 2 decimals, in SAR or ريال. «0.00» is the theme rendering nothing.
-_MONEY_RE = re.compile(r"([\d٠-٩][\d٠-٩,]*\.\d{2})\s*(?:SAR|ريال|ر\.س)")
+# The theme always prints 2 decimals, in SAR or ريال. «0.00» is the theme rendering nothing. The decimals are real
+# when the advertiser typed them: /ad/‏فيلا-بالهدا-المربع-الرابع-…/ prints «1.20ريال», which int() stored as 1 (2026-10-18).
+# Arabic digits and the Arabic separators («١٫٢٠», «٥٠٬٠٠٠») are the same figure.
+_MONEY_RE = re.compile(r"([\d٠-٩][\d٠-٩,٬]*[.٫][\d٠-٩]{2})\s*(?:SAR|ريال|ر\.س)")
 
 
 def _same_ad(href: str, link: str) -> bool:
@@ -145,8 +150,8 @@ def _same_ad(href: str, link: str) -> bool:
     return unquote(href or "").rstrip("/") == unquote(link or "").rstrip("/")
 
 
-def own_price(page_html: str, link: str) -> Optional[int]:
-    """This listing's published price, or None. Never another ad's, never a guess."""
+def own_price_figure(page_html: str, link: str) -> Optional[Decimal]:
+    """This listing's published figure EXACTLY («1.20» stays 1.20), or None. Never another ad's, never a guess."""
     for href, price_html in _OWN_CARD_RE.findall(page_html or ""):
         if not _same_ad(href, link):
             continue
@@ -154,11 +159,18 @@ def own_price(page_html: str, link: str) -> Optional[int]:
         if not m:
             return None
         try:
-            v = float(m.group(1).translate(_AR_DIGITS).replace(",", ""))
-        except ValueError:
+            v = Decimal(m.group(1).translate(_AR_DIGITS).replace(",", "").replace("٬", "").replace("٫", "."))
+        except InvalidOperation:
             return None
-        return int(v) if v > 0 else None
+        return v if v > 0 else None
     return None
+
+
+def own_price(page_html: str, link: str) -> Optional[int]:
+    """The published figure as whole riyals — only when it IS whole («6,400.00»). A fraction («1.20») is never cut to
+    1: the price columns hold whole riyals, so such a figure is not stored as a price at all (map_listing)."""
+    v = own_price_figure(page_html, link)
+    return int(v) if v is not None and v == v.to_integral_value() else None
 
 
 # PHOTOS — the ad's own gallery only. This theme puts the listing's own photos in `.img-box`
@@ -366,12 +378,23 @@ _CITY_FALLBACK_RE = re.compile(
     "(?:" + "|".join(re.escape(c) for c in sorted(_CITIES, key=len, reverse=True)) + ")(?![ء-ي])")
 
 
-def parse_city(text: str, title: str = "") -> Optional[str]:
+# The category link itself: «<strong>الدولة: </strong><a … class="ctg-tag" …>عقارات جدة</a>».
+_COUNTRY_TAG_RE = re.compile(r"الدولة\s*:\s*</strong>\s*<a\b[^>]*>\s*عقارات\s+([^<]{2,40}?)\s*</a>")
+
+
+def parse_city(text: str, title: str = "", page_html: str = "") -> Optional[str]:
     """The city the source stated, or None. Never guessed — the fallback RECOGNISES a name from the
     closed Saudi city set; it does not infer one from a district or a landmark."""
     m = _CITY_RE.search(text)
     if m:
-        return m.group(1).strip()
+        v = m.group(1).strip()
+        # A SHORT pin label prints with no «...», so «الدولة: عقارات جدة» runs straight into «جدة حي المروه انظر
+        # الخريطة» and the capture swallowed the label: «جدة جدة حي المروه», «الرياض حي المهدية» (52 live rows with no
+        # city_id, so no district either; 2026-10-18). The category link ends where the city does.
+        tag = _COUNTRY_TAG_RE.search(page_html or "")
+        if tag and len(v) > len(_clean(tag.group(1))) and v.startswith(_clean(tag.group(1))):
+            v = _clean(tag.group(1))
+        return v
     m = _CITY_FALLBACK_RE.search(f"{title} {text[:600]}")
     return m.group(0) if m else None
 
@@ -384,16 +407,116 @@ _MAP_RE = re.compile(r"([^:]{3,70}?)\s*\.{2,}\s*انظر\s*الخريطة")
 _STATUS_LEAD = re.compile(r"^(?:غير\s+مؤجرة|مؤجرة|جديدة|جديد|أخرى|مستعملة)\s+")
 
 
-def district_candidate(text: str) -> Optional[str]:
+# The page's OWN «الموقع:» field (2026-10-18). On many ads it holds a Google-formatted address —
+# «AHAA8868، 8868 خليفة ابن عبدالله ابن الحارث، 4816، حي الحيلة الغربي، محايل 63312, Saudi Arabia» —
+# whose «حي X» segment is the district the source states. The map line beneath it is TRUNCATED by the
+# theme («AHAA8868، 8868 ... انظر الخريطة»), so reading the map line gave a plus-code, a street, or
+# nothing (287 live rows with no district; rendered 2026-10-18). The field's prose («تقع خلف نادي …»)
+# is never a district; two «حي» segments are a conflict, not a choice.
+_LOC_FIELD_RE = re.compile(r"(?<![\u0600-\u06ff])الموقع\s*:\s*(.{3,300})", re.S)
+_ADDRESS_SIGNAL_RE = re.compile(r"\b\d{5}\b|Saudi Arabia|السعودية|المملكة العربية السعودية")
+_HAYY_SEG_RE = re.compile(r"^حي\s+\S")
+_PLUS_CODE_RE = re.compile(r"^[A-Z0-9]{4,8}\+[A-Z0-9]{2,3}\b")   # «QQWW+5XH», Google's plus code
+# A plus code ANYWHERE on the map line («عقارات الدمام 8Q9H+JHH», «6JJ6+25 ابو ال») marks it as the pin's label,
+# not an address: a short code with no locality resolves wherever Google guesses (8Q9H+JHH → Kirkuk, Iraq).
+_PLUS_CODE_ANY = re.compile(r"(?<![A-Z0-9])[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{0,3}(?![A-Z0-9])")
+# A map line that names ITSELF a district: «حي » + Arabic words only (no digits, latin, or a second clause).
+_HAYY_SELF = re.compile(r"حي\s+[\u0621-\u064A][\u0621-\u064A\s]{1,30}")
+_HAYY_TAIL = re.compile(r"(?<![\u0621-\u064A])حي\s+[\u0621-\u064A][\u0621-\u064A\s]{1,30}$")
+# «… خميس مشيط», «… شمال الرياض», «… بالرياض»: the city (with its direction or «ب») a label appends to a district
+_CITY_TAIL = re.compile(r"(?<=\S)\s+(?:(?:شمال|جنوب|شرق|غرب|وسط)\s+)?ب?(?:"
+                        + "|".join(re.escape(c) for c in sorted(_CITIES, key=len, reverse=True)) + r")$")
+
+
+def location_field_district(text: str) -> Optional[str]:
+    """The «حي X» segment of the page's «الموقع:» field, as written — only when that field is a
+    structured address (a postal code or the country among its comma segments) and holds exactly one
+    «حي …» segment. A prose field («تقع خلف نادي …») has no address signal and yields nothing."""
+    for m in _LOC_FIELD_RE.finditer(text or ""):
+        segs: list[str] = []
+        # «_» separates segments too: «حي النهضه _ صبيا _ جازان _ المملكة العربية السعودية» (2026-10-18) was read as ONE
+        # segment and stored 300 chars of page — the reviews box, the advertiser's handle — as the district.
+        for seg in re.split(r"[،,_]", m.group(1)):
+            seg = seg.strip()
+            if not seg:
+                continue
+            segs.append(seg)
+            if _ADDRESS_SIGNAL_RE.search(seg):            # the address ends at its postal code / country
+                break
+        else:
+            continue                                       # no address signal anywhere: not an address
+        hay = [x for x in segs if _HAYY_SEG_RE.match(x)]
+        if len(hay) == 1 and _HAYY_SELF.fullmatch(hay[0]):     # a district name, never a run of page text
+            return hay[0]
+    return None
+
+
+# The «الموقع:» box under the gallery holds the pin label IN FULL; the map line above it is the theme's copy of that
+# label — CUT when long («خميس مشيط حي دره المو... انظر الخريطة» for «خميس مشيط حي دره الموسي»), and printed with no
+# «...» when short («حي التسامح انظر الخريطة»), which _MAP_RE never matched. Rendered 2026-10-18: the cut words «حي دره
+# المو», «حي العزيز», «حي الصحاف» were live, and short labels gave no district at all.
+_BOX_RE = re.compile(r"<h4>\s*الموقع\s*:?\s*</h4>\s*<p>(.*?)</p>", re.S)
+
+
+def location_box_label(page_html: str) -> Optional[str]:
+    m = _BOX_RE.search(page_html or "")
+    return (_clean(m.group(1)) or None) if m else None
+
+
+# A label that names ANOTHER Saudi city is that city's place: «خميس مشيط حي الاسكان» on an ad filed under «عقارات أبها»,
+# «امارة منطقة الرياض» under جدة, «الخبر العزيزية حي الشراع» under الهفوف. Its district is not this city's district.
+# «حي الرياض» (a district of جدة) and «طريق الدمام» (a road in الرياض) name a district and a road, not a city.
+_NOT_A_CITY_MENTION = re.compile(r"(?:حي|طريق|شارع)\s+\S+")
+
+
+def names_other_city(label: Optional[str], city: Optional[str]) -> bool:
+    rest = _NOT_A_CITY_MENTION.sub(" ", label or "")
+    return any(normalize.map_city(c) != city for c in _CITY_FALLBACK_RE.findall(rest))
+
+
+def district_candidate(text: str, box: Optional[str] = None) -> Optional[str]:
+    field = location_field_district(text)
+    if field:
+        return field
     m = _MAP_RE.search(text)
-    if not m:
+    if box:
+        v = box             # the label whole; the map line is its copy, cut («…المو...») or, when short, unmatched
+    elif m:
+        v = _STATUS_LEAD.sub("", m.group(1).strip())
+    else:
         return None
-    v = _STATUS_LEAD.sub("", m.group(1).strip())
     v = v.split("،")[0].split(",")[0].strip()
-    # an agent reference code is latin/digits, never a Saudi district name
-    if not v or re.fullmatch(r"[A-Za-z0-9\s\-_]+", v):
+    # an agent reference code is latin/digits, and a plus code a grid cell — never a Saudi district name
+    if not v or re.fullmatch(r"[A-Za-z0-9\s\-_]+", v) or _PLUS_CODE_RE.match(v) or _PLUS_CODE_ANY.search(v):
         return None
     return v
+
+
+def neighborhood_word(cand: Optional[str], field: Optional[str], cand_hit: Optional[str]) -> Optional[str]:
+    """The SOURCE's own district word for `neighborhood`. When the catalog has no match, the index carries
+    this word to the card and to the Filter's district list exactly as written (district_recovery «carries
+    the source word», 2026-10-18), so it must be a district the page STATES. Only the «الموقع:» field states
+    one. The map line is the pin's label — the ad's title («فلل فاخرة للبيع بدون دفعه مق»), the site's
+    category («عقارات جدة JIJB»), the country («المملكة العربية السعودية») — so it counts only when this
+    city's catalog recognised it or it names itself «حي X». Anything else stays in additional_info.map_line."""
+    if field:
+        return field
+    if cand and cand_hit:
+        return cand
+    if cand and _HAYY_SELF.fullmatch(cand):
+        return _without_city_tail(cand)
+    # «الرياض حي النضيم», «خميس مشيط حي الاسكان»: the line ENDS in a district it names — that segment, as written.
+    tail = _HAYY_TAIL.search(cand or "")
+    if tail and _HAYY_SELF.fullmatch(tail.group(0).strip()):
+        return _without_city_tail(tail.group(0).strip())
+    return None
+
+
+def _without_city_tail(word: str) -> str:
+    """«حي طيب الاسم خميس مشيط» → «حي طيب الاسم»: the district, without the city the label appends to it.
+    «حي الرياض» stays whole — there the city's name IS the district's."""
+    v = _CITY_TAIL.sub("", word).strip()
+    return v if _HAYY_SELF.fullmatch(v) else word
 
 
 # TYPE comes from the breadcrumb the theme prints above the title: «شقق سكنية > شقق سكنية للإيجار»,
@@ -608,17 +731,27 @@ _DESC_P = re.compile(r"<p[^>]*>(.*?)</p>", re.S)
 _PROSE_SKIP = ("air_conditioner", "furnished")
 
 
-def parse_description_amenities(page_html: str) -> dict[str, bool]:
+def _description_text(page_html: str) -> Optional[str]:
     m = _DESC_BOX.search(page_html or "")
     if not m:
-        return {}
+        return None
     box = page_html[m.end():m.end() + 20000]
     first_p = box.find("<p")
     if first_p < 0:
-        return {}
+        return None
     end = box.find("</div>", first_p)
     paras = _DESC_P.findall(box[:end] if end >= 0 else box)
-    return normalize.prose_amenities_yes(normalize.html_block_lines("</p>".join(paras)), skip=_PROSE_SKIP)
+    return normalize.html_block_lines("</p>".join(paras))
+
+
+def stated_rate(page_html: str, price: Optional[int]) -> Optional[int]:
+    """The card's figure when the ad's own description states THAT figure per metre, else None."""
+    return price if price and normalize.stated_per_metre(_description_text(page_html), price) else None
+
+
+def parse_description_amenities(page_html: str) -> dict[str, bool]:
+    text = _description_text(page_html)
+    return normalize.prose_amenities_yes(text, skip=_PROSE_SKIP) if text is not None else {}
 
 
 def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Optional[dict], str, str]:
@@ -644,22 +777,39 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         field = spec(page_text, "النوع")
         return None, category, f"deal_field:{field[:12]}" if field else "no_deal_stated"
 
-    city_ar = parse_city(page_text, title_early)
+    city_ar = parse_city(page_text, title_early, page_html)
     if not city_ar:
         return None, category, "no_city"               # unlocatable rows cannot be searched honestly
     city = normalize.map_city(city_ar)
     city_id, region_id = to_catalog(city_ar)
 
     # The district is PROPOSED from the page and kept only if this city's curated catalog knows it.
-    cand = district_candidate(page_text)
+    field = location_field_district(page_text)
+    box = location_box_label(page_html)
+    cand = district_candidate(page_text, box)
+    district_source = ("location_field" if field else "map_line") if cand else None
     title = _clean((post.get("title") or {}).get("rendered", ""))
     body = _clean((post.get("content") or {}).get("rendered", ""))
-    district_ar = None
-    if city_id:
-        district_ar = (find_district_in_text(cand, city_id) if cand else None) \
-            or find_district_in_text(f"{title} {body}", city_id)
+    district_ar = cand_hit = None
+    # The page itself places the pin in another city: no district of THIS city comes from it, its title or its body,
+    # and the stored one clears (the source settled it — AUTHORITATIVE_NULL, not a dropped None).
+    elsewhere = bool(cand) and not field and names_other_city(box or cand, city)
+    if elsewhere:
+        district_ar, district_source = db.AUTHORITATIVE_NULL, "label_names_another_city"
+    elif city_id:
+        cand_hit = find_district_in_text(cand, city_id) if cand else None
+        district_ar = cand_hit or find_district_in_text(f"{title} {body}", city_id)
+    # The ad's own TITLE names the district («شقق تمليك للبيع بحي المروة», «للبيع فيلا مساحة 338 حي العارض»): its
+    # «حي X» in the title's spelling when it is exactly a district the catalogue or the served index knows for this
+    # city (2026-10-18: 17 of the 44 titled rows with no district). Never fuzzy.
+    title_hayy = (title_hayy_district(title, known_district_keys(city_id))
+                  if (city_id and not district_ar and not elsewhere) else None)
+    if title_hayy:
+        district_ar, district_source = title_hayy, "title"
 
+    figure = own_price_figure(page_html, link)
     price = own_price(page_html, link)
+    fractional = figure is not None and price is None      # «1.20ريال»: published, but not a whole-riyal amount
     rent_period, price_annual = (None, None)
     if deal == "Rent":
         rent_period, price_annual = rent_period_and_annual(price, f"{title} {body} {page_text}")
@@ -676,7 +826,8 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         "city_id": city_id,
         "region_id": region_id,
         "district_ar": district_ar,
-        "neighborhood": cand,
+        "neighborhood": (db.AUTHORITATIVE_NULL if elsewhere
+                         else neighborhood_word(cand, field, cand_hit) or title_hayy),
         "area_m2": parse_area(page_text),
         "bedrooms": spec_int(page_text, "عدد الغرف", 0, 50),
         "bathrooms": spec_int(page_text, "دورة المياه", 0, 50)
@@ -695,13 +846,21 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         "photo_urls": own_photos(page_html),
     }
     if deal == "Rent":
-        row["price_annual"] = price_annual
+        row["price_annual"] = db.AUTHORITATIVE_NULL if fractional else price_annual
         if rent_period:
             row["rent_period"] = rent_period
     else:
-        row["price_total"] = price
+        # The card's figure is a RATE when the ad's own description states it per metre (owner 2026-10-18): the
+        # card prints «6,400.00 ريال», the description «… 6400 ريال للمتر». No marker: the total as published.
+        # A stated rate writes AUTHORITATIVE_NULL as the total so the stored total clears.
+        rate = stated_rate(page_html, price)
+        row["price_total"] = db.AUTHORITATIVE_NULL if (rate or fractional) else price
+        if rate:
+            row["price_per_meter"] = rate
 
     extra: dict[str, Any] = {
+        "district_source": district_source,      # the page's «الموقع:» address field, or the map line
+        "map_line": cand if cand and not field else None,   # the pin label as read; a district only via neighborhood_word
         "wp_id": post.get("id"),
         "slug": post.get("slug") or None,
         "fal_licence": parse_licence(page_text),
@@ -713,7 +872,8 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         "ad_cats": _classes(post, "ad_cats-") or None,
         "ad_country": _classes(post, "ad_country-") or None,
         "ad_condition": _classes(post, "ad_condition-") or None,
-        "price_published": price is not None,
+        "price_published": figure is not None,
+        "price_published_text": f"{figure} ريال" if fractional else None,   # the card's figure, verbatim
     }
     row["additional_info"] = {k: v for k, v in extra.items() if v is not None}
     return row, category, ""

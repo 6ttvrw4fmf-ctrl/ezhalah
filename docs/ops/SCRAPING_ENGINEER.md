@@ -45,23 +45,22 @@ it, and check the tool can drive it: `customer-journey.mjs` cannot search type �
 rental without a period. A fix whose only carriers are unprovable stays UNKNOWN (10-17: two Haraj area fixes). Merge by
 ~06:00 UTC so a ~15-min crawl lands before the 06:22 sync (rakez 10-17: merged 05:57, crawled 06:09–06:17, proven 06:27).
 
-**Owed → first thing next run (10-18):**
-- **wasalt enumeration (532/537/569, P1, 5th night).** The 10-17 21:00 UTC enum is the first run on #7188/#7189.
-  Read: sum of ALL shards' rows_seen (≥ 100,000 = intake fixed), pages skipped and why, then a new wasalt ad in the
-  Filter (proof row) and ♻️'s wasalt in-time number off 3.6%. If the roll-up still refuses, say why; never weaken the guard.
-  Same run: wasalt 13746442 (613) — list now 8,925,000 → alert 6703 clears; still 3.35 bn → the list lags the detail.
-- **Haraj (608/610/616):** HRJ11190645357 (a «طلب» request, still searchable) must leave via the own-page strike path
-  (3 strikes); HRJ11190652057 area 10 → NULL after the 06:3x `--ids` re-read (#7261). Prove both in search.
-  615: a catalogue in the BODY (several «للبيع <type>») is stored as one offer — body rule, tuned on one window, gated
-  on an untouched one. Hand-check reached 85 unlicensed offers (5 bad); finish to 100 on fresh posts.
-- **awal (617):** #7261 merged 06:31; the awal crawl was dispatched behind the nightly → kitchen true in search → AF journey.
-- **584 dangling-run remediation:** `apply_migration` timed out twice on 10-17 (function body with an UPDATE on
-  scrape_runs; nothing reached the database, nothing was blocked). Patch: the 10-16 dangling-remediation file in `docs/ops/pending/`.
-  NEEDS A HUMAN CLICK. Do not retry the tool.
-- **575/612 photo floors:** aqar's 91.6% is mostly source truth (7/8 photo-less ads serve aqar's own
-  `villa-default.png`); one ad got its photo AFTER our capture and re-sweeps never refresh photos. Next: count the
-  placeholder as imageless-at-source in the coverage check, and refresh photo_urls on re-seen rows captured with 0 images.
-- 564 gathern 577 units redirecting home · 565 almuteb 503 (11 ads) — both need a browser+proxy read from CI.
+**Owed → first thing next run (10-19):**
+- **Haraj catalogues leave by strikes (owner fix #7341 + my 615 body rule).** 200 stored plural-title posts and
+  HRJ11190705938 read «gone» from the 10-18 ~21:00 UTC `fleet_liveness:haraj` APPLY on; grace 3 → hidden after the
+  10-20 pass. Each night read their `missing_count`; on 10-21 replay the owner's Jeddah «شقة للبيع» search and show
+  HRJ11190739649 / HRJ11190629474 gone (proof row). 608 (HRJ11190645357 «طلب») is at 2 strikes → gone after 10-18 21:00.
+- **645/584 dangling threshold (applied 20261018052758).** Proof = no `dangling_scrape_run` alert for
+  `fleet_liveness:muhaysini` or `wasalt_enum_shard` while a healthy run passes 3 h (muhaysini liveness ~07–12 UTC,
+  wasalt enum 10-19 21:00). Read `alert_event` for those keys, then close 645 and 584.
+- **613 wasalt 13746442:** NOT ours — wasalt's own archived payload (ar_data) carries salePrice 3,346,875,000 and the
+  row is hidden by the price gate. Re-read once a week; close when the list API serves 8,925,000.
+- **610/616 Haraj areas:** the carriers are rentals with no period (no customer search shows them). Values are right
+  in raw and index; keep UNKNOWN, do not count them as fixed.
+- Kept: 575/612 photo floors · 564 gathern 577 units redirecting home · 565 almuteb 503 · 646 aqalemhajer rows_collapse.
+
+**10-18 facts:** the wasalt enum is healthy again (34/34 shards, 181,789 rows; liveness in-time 3.6% → 92.6%). «حي X» in a
+Haraj district is NOT a bug: it is the catalogue's own spelling in many cities (Riyadh «حي المنار» = 288 other listings).
 
 **Proof timing facts:** search sync :22 (commits ~:24–:26); detector sweep :29/:59; Wasalt enum 21:00 UTC every 2 days
 (~7 h when healthy); muhaysini nightly ends ~07:10 UTC; small-sources-sync is ONE queue — a dispatch during the nightly
@@ -629,3 +628,11 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
 ## Lesson from 2026-10-17 (copied by 🔧 from your own report, with the correction it needs)
 - **2026-10-17 (⚡, your line):** «test the hypothesis on the first slice before building on it» — the fresh-exit fix was falsified by the first 5 slices of its own proof sweep.
 - **2026-10-17 (🔧 QA):** a «needs your OK» must describe a decision, not a tool timeout. Backlog 584's patch closes a platform's dangling `scrape_runs` row at the detector's 3 h threshold — but `fleet_liveness:muhaysini` legitimately runs 5 h 22 min (run 74269, ok=true, 18,735 probed), so the patch would mark a LIVE run «orphaned». The P0 `remediation_exhausted` on it is noise from a threshold shorter than the job, and the fix is a per-platform threshold (or the workflow's own 350-min ceiling), never a human click on an UPDATE. And the wasalt enumeration entered its 4th night with the plan «wait for the 21:00 enum»: a proof that only lands after your slot is not tonight's proof — dispatch it at the start of the run.
+
+## Lesson from 2026-10-18 (copied by 🔧 from your own report)
+
+Two of your three jobs could only be proven by a liveness pass at ~21:00 UTC, and the merge needed a human — so the
+night ended at 2/8 proven. **When choosing the 3 jobs, name for each the proof that lands inside 05:00–07:00 UTC** (a
+`--ref <branch>` workflow re-read of the exact ids, never a strike count hours later); a job without one is paired with one
+that has one. 🔧 adds: the Haraj hand-check found 3 of 50 fresh ads whose title says للإيجار while the stored REGA block
+says Sell (656's class, backlog 672) — a rule that decides a contradiction is worth more than a rule that stores one side.

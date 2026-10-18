@@ -710,7 +710,7 @@ export default function Agent() {
       sharedCopyRef.current = { j, url };
       return url;
     };
-    return { shareUrl: shareLink(origin, payload), shareText: text, prepareShare };
+    return { shareUrl: shareLink(origin, payload), prepareShare /* no text: the card shows the title — sending it too repeated it (owner 2026-10-18) */ };
   };
   // THE ONE STORE WRITER FOR THIS SCREEN. Every write into the shared query the Filter home binds to
   // goes through here, always sanitized — enforced by verify-af-state-never-leaks-into-filter.ts,

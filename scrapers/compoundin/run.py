@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import html as ihtml
 import re
+from functools import lru_cache
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -51,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.district_bridge import bridge_rows, bridge_unique  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://compoundin.com"
@@ -115,11 +117,49 @@ _DISTRICT_EN_AR = {
 }
 
 
+# ── THE DISTRICT THE PAGE STATES IN ITS JSON-LD ADDRESS (2026-10-18) ────────────────────────────
+# «living in X» / «X District» was the only district source, and on 127 live rows that line is the site's
+# template «King Abdullah Financial» while the JSON-LD streetAddress names the real place — often in
+# Arabic: «RRMA3815, 3815 Hajar Valley, 7410، حي الملقا، Riyadh 13524, Saudi Arabia» (rendered 2026-10-18,
+# al-malqa-compound). Every address segment is offered to the EXACT step: an Arabic «حي X» segment straight
+# to this city's catalogue; an English segment through the dictionary, else the source-attested bridge
+# (keys with ONE Arabic answer, scrapers/common/district_bridge), then the catalogue; the legacy line last.
+# A road, a province, the country, the city, the template line, two segments naming two districts → NULL.
+_SEG_SPLIT = re.compile(r"\s*(?:،|,|\s-\s|–|—)\s*")
+_HAYY_AR = re.compile(r"^حي\s+\S")
+_NOT_A_PLACE = re.compile(r"(?:\broad\b|\brd\.?$|\bstreet\b|\bst\.?$|\bhighway\b|\bprovince\b|saudi arabia|^\d[\d\s]*$|^[A-Z0-9]{4,8}\+?[A-Z0-9]*$)", re.I)
+_TEMPLATE_EN = frozenset({"king abdullah financial"})   # the site's placeholder line (10-06, #658)
+
+
+def address_segments(page_html: str) -> list[str]:
+    """The JSON-LD streetAddress split on commas/dashes, as written, minus roads, numbers, the country."""
+    m = re.search(r'"streetAddress":\s*"([^"]*)"', page_html or "")
+    out: list[str] = []
+    for seg in _SEG_SPLIT.split(m.group(1) if m else ""):
+        seg = seg.strip()
+        if seg and not _NOT_A_PLACE.search(seg) and seg not in out:
+            out.append(seg)
+    return out
+
+
+@lru_cache(maxsize=None)
+def _bridge_en_ar(city_en: str) -> dict[str, str]:
+    """The shared EN→AR bridge for one canonical English city, keys normalised with _norm_dist, unique only."""
+    return bridge_unique(bridge_rows(city_en), _norm_dist)
+
+
+def _dict_ar(ck: str, nd: str) -> Optional[str]:
+    cand = _DISTRICT_EN_AR.get((ck, nd))
+    if cand is None and nd.startswith("al") and " " not in nd:   # «AlRehab» written as one word
+        cand = _DISTRICT_EN_AR.get((ck, nd[2:]))
+    return cand
+
+
 def _norm_dist(name: Optional[str]) -> Optional[str]:
     """«Al Narjis District» / «An Narjis» / «Al-Arid» → «narjis» / «narjis» / «arid»."""
     if not name:
         return None
-    n = re.sub(r"\bdistrict\b", " ", name.strip().lower())
+    n = re.sub(r"\b(?:district|dist)\b\.?", " ", name.strip().lower())   # the bridge writes «… Dist.»
     n = re.sub(r"[^a-z\s-]", " ", n)
     n = re.sub(r"^\s*(?:well\s+)?located\s+in\s+", "", n)        # «Well located in AlRehab»
     n = re.sub(r"^\s*(?:al|an|ar|as|ad|ash)[\s-]+", "", n)
@@ -223,16 +263,26 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
     if not city_id:
         return [], "city_not_in_catalog"
 
-    district_ar = None
-    nd = _norm_dist(district_en)
-    if nd:
-        ck = city_en.strip().lower()
-        cand = _DISTRICT_EN_AR.get((ck, nd))
-        if cand is None and nd.startswith("al") and " " not in nd:   # «AlRehab» written as one word
-            cand = _DISTRICT_EN_AR.get((ck, nd[2:]))
-        # Only write a district our own catalog already attests for THIS city.
-        if cand:
-            district_ar = find_district_in_text(cand, city_id)
+    district_ar, district_source = None, None
+    ck = city_en.strip().lower()
+    city_canon = normalize.map_city(city_ar) or ""          # the bridge is keyed by the canonical English city
+    found: dict[str, str] = {}                              # catalogued district_ar → how it was found
+    for seg in address_segments(page_html) + ([district_en] if district_en else []):
+        legacy = seg == district_en and seg not in address_segments(page_html)
+        if _HAYY_AR.match(seg):                             # the source wrote the district in Arabic
+            got, how = find_district_in_text(seg, city_id), "address_ar"
+        else:
+            nd = _norm_dist(seg)
+            if not nd or nd in _TEMPLATE_EN or nd == _norm_dist(city_en):
+                continue
+            cand = _dict_ar(ck, nd)
+            how = "dictionary" if cand else "bridge"
+            cand = cand or _bridge_en_ar(city_canon).get(nd)
+            got = find_district_in_text(cand, city_id) if cand else None
+        if got:
+            found.setdefault(got, "legacy_line" if legacy else how)
+    if len(found) == 1:                                     # two segments naming two districts → no district
+        district_ar, district_source = next(iter(found.items()))
 
     compound_name = None
     cm = re.search(r'<h1[^>]*>(.*?)</h1>', page_html, re.S)
@@ -283,6 +333,7 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str]:
             "photo_urls": photos(page_html),
             "zip_code": postal,
             "additional_info": {k: v for k, v in {
+                "district_source": district_source,   # address_ar | dictionary | bridge | legacy_line
                 "type_en": plain(utype), "unit_subtitle": plain(subtitle) or None,
                 "compound": compound_name, "unit_id": uid,
                 "amenities_en": plain(chip) or None,

@@ -156,7 +156,19 @@ def open_ad(url: str, dead_marker) -> str:
     # The deletion tier's own transport: it keeps the real status (a 404 vs a block) and reaches
     # wasalt only through the browser (WASALT_BROWSER), which curl_cffi can no longer do.
     status, body = _probe(url)
+    _LAST_READ[url] = f"HTTP {status if status is not None else 'none (network error)'}, {len(body or '')} bytes"
     return classify_response(status, body or "", dead_marker=dead_marker)
+
+
+# What open_ad last saw per URL, so a control that did not read live says WHY (2026-10-18: almuteb and
+# senan read «controls 0/5» four nights running with nothing to say what their pages answered).
+_LAST_READ: dict[str, str] = {}
+
+
+def control_misses(ctl: list[dict], verdicts: list[str]) -> list[str]:
+    """One line per control that did not read live: its URL and what its own page answered."""
+    return [f"{r.get('listing_url')}: {v}" + (f" ({_LAST_READ[r['listing_url']]})" if r.get("listing_url") in _LAST_READ else "")
+            for r, v in zip(ctl, verdicts) if v != ALIVE][:5]
 
 
 def _ashab_session():
@@ -195,6 +207,28 @@ def _reader_for(platform: str):
         # hollow). Read it the way its crawl and oracle do.
         from scrapers.muktamel import run as mk
         return mk.page_verdict
+    if platform == "almuteb":
+        # 2026-10-18: its HTML pages answer HTTP 503 (a 4 KB stub) to every CI read, so the status
+        # reader voided the dead-visible score four nights running (10-15..10-18), while its crawl reads
+        # all 10 ads through WordPress REST. Read it as its crawl's oracle does: the post's own REST
+        # record (publish = live, expired / closed status / rest_post_invalid_id = gone).
+        from scrapers.almuteb import run as mt
+        from scrapers.common.db import sb as _sb
+        oracle = mt._verify_gone_with(mt.fetch_taxonomies(mt.session()))
+        client = _sb()
+
+        def read_almuteb(url: str):
+            ad = None
+            for t in ("almuteb_residential_listings", "almuteb_commercial_listings"):
+                rows = client.table(t).select("ad_number").eq("listing_url", url).limit(1).execute().data or []
+                if rows:
+                    ad = rows[0]["ad_number"]
+                    break
+            if not ad:
+                return UNKNOWN, "no ad_number on file for this url"
+            v, why = oracle(ad)
+            return {"live": ALIVE, "gone": DEAD}.get(v, UNKNOWN), why
+        return read_almuteb
     if platform == "ashab":
         # 2026-10-17: a rented/sold ashab unit keeps a 200 page and says so only in its own status
         # badge, so a status read called 11 of 12 struck-but-shown units "live". Read the badge the
@@ -298,8 +332,10 @@ def main() -> int:
     # environment (a block, a proxy failure) is lying and the run is void.
     ctl = pick_controls(client, tables, rng)
     method, read = pick_reader(a.platform, dead_marker, ctl[0] if ctl else None)
-    ctl_alive = sum(read(r) == ALIVE for r in ctl)
-    canary = {"probed": len(ctl), "alive": ctl_alive, "ok": canary_environment_ok(ctl_alive, len(ctl))}
+    ctl_verdicts = [read(r) for r in ctl]
+    ctl_alive = sum(v == ALIVE for v in ctl_verdicts)
+    canary = {"probed": len(ctl), "alive": ctl_alive, "ok": canary_environment_ok(ctl_alive, len(ctl)),
+              "misses": control_misses(ctl, ctl_verdicts)}
 
     since = (datetime.now(timezone.utc) - timedelta(days=a.hidden_days)).isoformat()
     results = []

@@ -910,3 +910,9 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
 ## Lesson from 2026-10-17 (copied by 🔧 from your own report)
 - **2026-10-17 (🆕, your line):** a fix that maps a settled value to None never reaches rows already stored, because the no-clobber guard drops None. Write AUTHORITATIVE_NULL, and prove on the STORED row after the next crawl, never on the parser test.
 - **2026-10-17 (🔧 QA):** both re-tests reproduced (حي النرجس ×5 served; muhaysini 18009561 under سنوي as a phone customer). What kept the score at 7: three «proof pending» fixes and no «no-district among today's arrivals» number in the report — the key number of your lane must be in every end row even when it did not move.
+
+## Lesson from 2026-10-18 (copied by 🔧 from your own report)
+
+main merges every ~5 min and `safe-pr-merge.ts` refuses BEHIND, so five small PRs cost five BEHIND races. 🔧 adds: the
+auto-merge takes ONLY `claude/*` scrapers-only branches — your `nle/*` PRs (#7448, #7449) will never land by themselves;
+push engineer work on `claude/*` branches, scrapers-only, docs separate, and the night's fixes merge while you sleep.

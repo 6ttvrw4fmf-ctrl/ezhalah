@@ -435,6 +435,13 @@ view and draws its own dashed border around the district; labelled «الموق�
 لم ينشر موقعاً دقيقاً», never a pin. Free either way (keyless embed / Embed API place mode). The owner
 chose Google's border as Google draws it (no colour boost). Guard:
 `scripts/verify-ad-map-needs-both-coordinates.ts`.
+The order, decided automatically per ad (owner 2026-10-18): **pin → district border → city border
+(no district) → town border** (no city in our index: the place the ad's own sa.aqar.fm link names,
+`aqarTownFromUrl()`; a link naming only the country names no place, so no map). Every day
+`.github/workflows/aqar-map-coverage-live.yml` runs `scripts/check-aqar-map-coverage-live.ts`, which
+lifts the same functions and sorts every Aqar / Aqar Monthly ad first seen in the last 26 h into
+those four paths; any new ad left with no map turns it red and raises an alert. Measured 2026-10-18:
+175,619 ads all-time, 5 with no map (their links name only «المملكة العربية السعودية»).
 
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
 up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.
@@ -1353,3 +1360,6 @@ KSA region; recommendation delivered was "don't migrate," awaiting owner call).
 5. Backend change? Preserve work, verify before+after, deploy only to `ezhalah-app`, `NOTIFY pgrst` after
    RPC/DDL.
 6. Update **this document** in the same PR when a fact here changes.
+
+### Platform logo visibility (owner, 2026-10-17)
+Haraj uses its official header wordmark across the loader, website picker, and cards. Haraj, Maskan United, and The Address must have transparent backgrounds without boxed panels (owner correction, 2026-10-17). Their white-only artwork uses dark ink in light mode and light ink in dark mode, preserving its silhouette. Other logos keep their existing presentation.

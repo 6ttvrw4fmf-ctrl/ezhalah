@@ -29,10 +29,12 @@ from __future__ import annotations
 
 import html as _html
 import json
+from urllib.parse import unquote
 import re
 from typing import Any, Optional
 
 from scrapers.common.pii import redact_pii
+from scrapers.common.placeholder_tokens import is_placeholder
 from scrapers.common.source_pin import sa_pin
 
 LICENCE_HEAD = "معلومات العقار حسب الرخصة"
@@ -214,6 +216,33 @@ def licence_location_ar(raw: Optional[str]) -> tuple[Optional[str], Optional[str
     return tuple(_clean(x) for x in parts)  # type: ignore[return-value]
 
 
+_NO_DISTRICT = frozenset({"غير معروف", "غير معروفه", "غير معروفة", "غير معرف", "مجهول", "بدون", "لا يوجد", "لايوجد"})
+
+
+def _district_word(v: Optional[str]) -> Optional[str]:
+    """A district field's value, or None when it is a NON-ANSWER («حي غير معروف», «غير محدد», «-»): silence is
+    NULL, never a district named «unknown» (test_unresolved_district… 2026-10-10; owner 2026-10-18)."""
+    v = _clean(v)
+    core = re.sub(r"^حي\s+", "", v or "").strip()
+    return None if not v or core in SILENT or core in _NO_DISTRICT or is_placeholder(core) else v
+
+
+def post_neighbourhood_ar(page_html: str) -> Optional[str]:
+    """Haraj's OWN neighbourhood field for the post: the «post-neighborhood» anchor whose href reads
+    «/tags/عقار حي X في CITY» (owner 2026-10-18, precedence 2). NOT the BreadcrumbList / category tag chain
+    («شقق للايجار في حي Y في CITY»): that names the listing category's place and disagreed with both the deed
+    and this field on 11189987502 (عين الخيف vs مذينب) and 11189932617 (حرة الوبرة vs شوران). None when absent."""
+    for tag in re.findall(r"<a\b[^>]*>", page_html or ""):
+        if 'data-testid="post-neighborhood"' not in tag:
+            continue
+        href = re.search(r'href="([^"]*)"', tag)
+        text = unquote(_html.unescape(href.group(1))).split("/tags/")[-1].strip() if href else ""
+        m = re.match(r"(?:عقار\s+)?حي\s+(.+?)\s+في\s+\S.*$", text)
+        if m:
+            return _district_word(m.group(1))
+    return None
+
+
 def strip_person_lines(desc: str) -> str:
     return _PERSON_LINE_RE.sub("", desc or "")
 
@@ -230,6 +259,15 @@ def parse_post(ld: dict[str, Any], page_html: str = "") -> dict[str, Any]:
         pin = [m.group(1), m.group(2)] if m else None
     lat, lng = sa_pin(*pin) if pin else (None, None)
     loc3 = licence_location_ar(get("وصف موقع العقار"))
+    # DISTRICT precedence (owner 2026-10-18): (1) the deed's «الحي:» — else the licence location's own
+    # district when the deed names no city — then (2) Haraj's OWN neighbourhood field, never (3) the
+    # seller's prose: 11189987502 says «حي البدراني» in its text, «حي عين الخيف» in its tag chain and
+    # «الحي: مذينب» in its deed. The word is kept as the source wrote it; `district_source` says which.
+    nb = post_neighbourhood_ar(page_html)
+    deed_hay = _district_word(deed.get("الحي"))
+    lic_hay = _district_word(loc3[2]) if (lic and not _clean(deed.get("المدينة"))) else None
+    district, district_source = next(((d, s) for d, s in ((deed_hay, "deed"), (lic_hay, "licence_location"),
+                                                          (nb, "post_neighbourhood")) if d), (None, None))
     images = ld.get("image") or []
     if isinstance(images, str):
         images = [images]
@@ -241,11 +279,13 @@ def parse_post(ld: dict[str, Any], page_html: str = "") -> dict[str, Any]:
         "date_posted": ld.get("datePosted"),
         "date_modified": ld.get("dateModified"),
         # DEED lines first (REGA's «وصف موقع العقار حسب الصك»), then the first «المدينة:» anywhere, then the
-        # post's own addressLocality. District: the deed's «الحي:» ONLY (owner: never a free-text guess).
+        # post's own addressLocality.
         "city_ar": _clean(deed.get("المدينة")) or loc3[1] or _field(desc, r"المدينة") or
                    ((ld.get("address") or {}).get("addressLocality")),
-        "district_ar": (_clean(deed.get("الحي")) or (loc3[2] if not _clean(deed.get("المدينة")) else None))
-                       if lic else _field(desc, r"الحي"),
+        "district_ar": district,                   # see the precedence note above
+        "district_source": district_source,        # "deed" | "licence_location" | "post_neighbourhood" | None
+        "haraj_neighbourhood_ar": nb,
+        # the seller's own «الحي:» line — captured, never a district (precedence 3)
         "post_text_district_ar": _field(desc[:desc.find(LICENCE_HEAD)] if LICENCE_HEAD in desc else desc, r"الحي"),
         "licence_location": get("وصف موقع العقار"),
         "deal": deal_of(deal_raw),
