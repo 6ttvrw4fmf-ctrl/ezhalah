@@ -226,8 +226,11 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
         "city_ar": p["city_ar"],
         "city_id": city_id,
         "region_id": region_id,
-        "district_ar": p["district_ar"] if district else None,
-        "neighborhood": p["district_ar"] if district else None,
+        # The source's own word, kept as written whether or not the catalogue attests it (owner 2026-10-18:
+        # «exact-match against the city's catalog or keep the source word as-is»); additional_info carries
+        # the catalogue spelling when it does and which field the word came from.
+        "district_ar": p["district_ar"],
+        "neighborhood": p["district_ar"],
         "area_m2": round(area) if area else None,
         # «عدد الغرف» is a TOTAL room count, never bedrooms (owner 2026-07-28, aqar + dealapp): bedrooms
         # come only from the ad's own «N غرف …» phrase; the licence count is kept in additional_info.
@@ -276,6 +279,9 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
         "city_raw_ar": p["city_ar"],
         "district_raw_ar": p["district_ar"],
         "post_text_district_ar": p["post_text_district_ar"],
+        "district_source": p["district_source"],
+        "district_catalog_ar": district,
+        "haraj_neighbourhood_ar": p["haraj_neighbourhood_ar"],
         "city_basis": "rega_deed_lines",
         "rega_facts": {k: v for k, v in p["licence_fields"].items() if P._clean(v)},
         "deed_facts": {k: v for k, v in p["deed_fields"].items() if P._clean(v)},
@@ -321,11 +327,11 @@ def map_unlicensed(pid: str, ld: dict, p: dict, verdict: str, why: str, facts: d
     facts["city_resolved"] = bool(city_id)
     if not city_id:
         return None, "", "city_not_in_catalog", facts
-    districts = {d for d in (catalog_district(city_id, c) for c in X.district_phrases(title, description)) if d}
-    stated = X.district_phrases(title, description)
-    facts["district_raw_ar"] = stated[0] if stated else None
-    district = districts.pop() if len(districts) == 1 else None      # two different districts → NULL
-    facts["district_resolved"] = bool(district)
+    # Haraj's OWN neighbourhood field, as written; the seller's prose («حي X» in the text) is never a district
+    # (owner 2026-10-18). Catalogue attestation is recorded, not required.
+    district = p["haraj_neighbourhood_ar"]
+    facts["district_raw_ar"] = district
+    facts["district_resolved"] = bool(catalog_district(city_id, district)) if district else False
     category = category_of(ptype, None)
     # PRICE from the seller's own words — owner decision 2026-10-17 (declared in verify-no-derived-price.ts):
     # only a figure tied to a price word; a bid («السوم»), a range or two figures → NULL.
@@ -384,7 +390,8 @@ def map_unlicensed(pid: str, ld: dict, p: dict, verdict: str, why: str, facts: d
         "post_id": pid, "licensed": False, "classifier": f"{verdict}: {why}", "type_basis": type_why,
         "price_phrase": prose_price["phrase"], "price_basis": prose_price["why"], "price_period_stated": prose_price["period"],
         "area_phrase": area["phrase"], "area_basis": area["why"], "city_raw_ar": city_raw,
-        "district_raw_ar": facts["district_raw_ar"], "photo_count": len(row["photo_urls"]),
+        "district_raw_ar": facts["district_raw_ar"],
+        "district_source": "post_neighbourhood" if district else None, "photo_count": len(row["photo_urls"]),
         "date_posted": ld.get("datePosted"), "city_basis": "post_address_locality",
     }
     row["additional_info"] = redact_capture({k: v for k, v in info.items() if v not in (None, "", [], {})})
