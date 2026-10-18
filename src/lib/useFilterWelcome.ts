@@ -2,68 +2,96 @@
 // 4 hours (HOLD_MS) on this device — «not every refresh … every now and then, hours» — then the next
 // one comes; a signed-in user always sees a personal line. Switching language re-renders the SAME line.
 //
-// NEVER A VISIBLE SWAP (owner 2026-10-17: «make sure it never happens, never ever»). `settled` tells
-// the screen when the headline may make its entrance: not before the session restore says who the
-// visitor is, and for a signed-in visitor not before the line's live numbers are in (or SETTLE_CAP_MS
-// passed). Once settled, the text is final for this page load — headlineReduce() ignores anything
-// that arrives later (lib/filterWelcome.ts). `line` is null for guests, or when the facts never came.
+// INSTANT AND NEVER A VISIBLE SWAP (owner 2026-10-17: «make sure it never happens, never ever» and
+// «could we make it built in, like it doesn't load?»). The decision is taken ONCE, synchronously, right
+// after mount, from what the device already has: is a Supabase session stored here, and what did this
+// device show last (lib/filterWelcome.ts instantWelcome). No network is in the way of the headline;
+// `settled` is true in the same tick, so the title rises at once. The line's live numbers are then
+// refreshed in the background and written back for the NEXT visit — the text on screen is final.
 //
 // Hydration: the first client render is always { line: null, settled: false }, matching the static
-// export's server HTML (React #418 — see lib/responsive.ts); the decision arrives after mount.
-import { useEffect, useMemo, useRef, useState } from 'react';
+// export's server HTML (React #418 — see lib/responsive.ts); the decision lands in the mount effect.
+import { useEffect, useMemo, useState } from 'react';
 import {
-  welcomeForNow, fallbackLine, renderWelcome, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS,
-  type HeadlineState, type HeldWelcome,
+  welcomeForNow, fallbackLine, renderWelcome, instantWelcome,
+  type HeldWelcome, type WelcomeCache, type WelcomeLine, type WelcomeFacts,
 } from '@/lib/filterWelcome';
 import { loadWelcomeFacts } from '@/data/welcomeFacts';
 
-const HELD_KEY = 'ezhalah:filterWelcome:held';
-const readHeld = (): HeldWelcome | null => {
+const CACHE_KEY = 'ezhalah:filterWelcome:shown';
+const readCache = (): WelcomeCache | null => {
   try {
-    const v = JSON.parse(globalThis.localStorage?.getItem(HELD_KEY) ?? 'null');
-    return v && Number.isFinite(v.id) && Number.isFinite(v.at) ? { id: Number(v.id), at: Number(v.at) } : null;
+    const v = JSON.parse(globalThis.localStorage?.getItem(CACHE_KEY) ?? 'null');
+    return v && Number.isFinite(v.id) && Number.isFinite(v.at) && typeof v.ar === 'string' && typeof v.en === 'string'
+      ? { id: Number(v.id), at: Number(v.at), ar: v.ar, en: v.en } : null;
   } catch { return null; }
 };
-const writeHeld = (h: HeldWelcome) => { try { globalThis.localStorage?.setItem(HELD_KEY, JSON.stringify(h)); } catch { /* per-device nicety only */ } };
+const writeCache = (c: WelcomeCache) => { try { globalThis.localStorage?.setItem(CACHE_KEY, JSON.stringify(c)); } catch { /* per-device nicety only */ } };
+
+// A stored Supabase session = this device is signed in (the restore only confirms it a moment later).
+// Same key shape src/lib/authStorageGuard.ts and src/i18n.tsx read: `sb-<ref>-auth-token`.
+function readStoredSession(): { present: boolean; name: string } {
+  try {
+    const ls = globalThis.localStorage;
+    if (!ls) return { present: false, name: '' };
+    for (let i = 0; i < ls.length; i++) {
+      const k = ls.key(i);
+      if (!k || !/^sb-.+-auth-token$/.test(k)) continue;
+      const raw = ls.getItem(k);
+      if (!raw) continue;
+      const u = JSON.parse(raw)?.user;
+      const m = u?.user_metadata ?? {};
+      const name = String(m.nameAr || m.full_name || m.name || m.nameEn || (u?.email ? String(u.email).split('@')[0] : '')).trim();
+      return { present: true, name };
+    }
+  } catch { /* fall through */ }
+  return { present: false, name: '' };
+}
+
+type Shown = { settled: boolean; id: number | null; ar: string | null; en: string | null };
+const UNSETTLED: Shown = { settled: false, id: null, ar: null, en: null };
 
 export function useFilterWelcome(
-  signedIn: boolean, authChecked: boolean, name: string, locale: 'ar' | 'en',
+  signedIn: boolean, name: string, locale: 'ar' | 'en',
   lastLocation: string | null | undefined, lastDistrict?: string | null,
 ): { line: string | null; settled: boolean } {
-  const [state, setState] = useState<HeadlineState>(HEADLINE_UNSETTLED);
-  const stateRef = useRef(state);
-  stateRef.current = state;
-  const dispatch = (ev: Parameters<typeof headlineReduce>[1]) => {
-    const next = headlineReduce(stateRef.current, ev);
-    if (next !== stateRef.current) { stateRef.current = next; setState(next); }
-  };
+  const [shown, setShown] = useState<Shown>(UNSETTLED);
 
+  // ONCE PER PAGE LOAD, synchronously from device state: settle the headline now.
   useEffect(() => {
-    if (!authChecked) return; // who is this? — the headline waits for the answer
-    if (!signedIn) { dispatch({ type: 'guest' }); return; }
-    let live = true;
     const now = new Date();
-    const held = readHeld();
+    const session = readStoredSession();
+    const cache = readCache();
+    const inst = instantWelcome({ hasSession: session.present, cache, now, name: session.name || name });
+    setShown(inst ? { settled: true, id: inst.id, ar: inst.ar, en: inst.en } : { settled: true, id: null, ar: null, en: null });
+    if (!session.present) return;
+    // BACKGROUND, for the NEXT visit: keep (or pick) the held line, load its live numbers, render both
+    // languages and remember them. Nothing here touches the screen.
+    let live = true;
+    const held: HeldWelcome | null = cache ? { id: cache.id, at: cache.at } : null;
     const choice = welcomeForNow(now, held, Math.random, !!lastDistrict);
-    if (!choice) { dispatch({ type: 'guest' }); return; }
-    // The cap: a slow network shows the normal headline — and then KEEPS it (late facts are ignored).
-    const cap = setTimeout(() => { if (live) dispatch({ type: 'timeout' }); }, SETTLE_CAP_MS);
-    loadWelcomeFacts(choice.line, lastLocation, lastDistrict).then((facts) => {
-      if (!live || stateRef.current.settled) return;
-      let line = choice.line;
-      // A line whose fact is unknown right now is never shown; a factless line stands in for this load.
-      if (renderWelcome(line, name || 'x', facts, locale) === null) line = fallbackLine(held?.id ?? null);
-      if (!choice.keep || line.id !== choice.line.id) writeHeld({ id: line.id, at: choice.keep && held ? held.at : now.getTime() });
-      dispatch({ type: 'facts', line, facts });
+    if (!choice) return;
+    loadWelcomeFacts(choice.line, lastLocation, lastDistrict).then((facts: WelcomeFacts) => {
+      if (!live) return;
+      const nm = session.name || name || 'x';
+      let line: WelcomeLine = choice.line;
+      if (renderWelcome(line, nm, facts, 'ar') === null || renderWelcome(line, nm, facts, 'en') === null) line = fallbackLine(held?.id ?? null);
+      const ar = renderWelcome(line, nm, facts, 'ar');
+      const en = renderWelcome(line, nm, facts, 'en');
+      if (!ar || !en) return;
+      const at = choice.keep && held && line.id === held.id ? held.at : now.getTime();
+      writeCache({ id: line.id, at, ar, en });
     }).catch(() => {});
-    return () => { live = false; clearTimeout(cap); };
-    // Once per (restore, sign-in) per page load — never per keystroke, per locale switch or per history change.
+    return () => { live = false; };
+    // Deliberately once: the headline is decided at mount and never re-decided in this page load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authChecked, signedIn]);
+  }, []);
 
-  const line = useMemo(
-    () => (signedIn && state.line && state.facts ? renderWelcome(state.line, name, state.facts, locale) : null),
-    [signedIn, state, name, locale],
-  );
-  return { line, settled: state.settled };
+  return useMemo(() => {
+    // The restore may finish after the instant decision; a signed-out restore still never swaps the
+    // text (owner rule) — the line simply stays for this load. Guests (no session stored) get null.
+    void signedIn;
+    const text = locale === 'ar' ? shown.ar : shown.en;
+    return { line: text, settled: shown.settled };
+  }, [shown, locale, signedIn]);
 }
