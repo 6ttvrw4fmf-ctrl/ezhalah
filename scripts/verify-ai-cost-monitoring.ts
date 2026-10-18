@@ -113,6 +113,21 @@ check('the self-test re-runs the detector afterwards so live state reflects real
   /perform public\.mon_detect_ai_cost_health\(\);\s*\n\s*results/.test(selftest)
   || selftest.lastIndexOf('perform public.mon_detect_ai_cost_health();') > selftest.lastIndexOf("delete from public.alert_event"));
 
+// ── 5b. GROQ (owner 2026-10-17): its own expected model, its own price, DeepSeek's guard untouched ──
+const groq = readAll((f) => f.includes('ai_cost_monitoring_knows_groq'));
+const groqOk = (sql: string) =>
+  /expected_groq_like\s+text\s*:=\s*'%gpt-oss%'/.test(sql)
+  && /model not ilike expected_model_like and model not ilike expected_groq_like/.test(sql)
+  && /not ilike expected_groq_like;\s+-- gpt-oss reasons by design/.test(sql)
+  && /raise exception 'mon_detect_ai_cost_health changed shape/.test(sql)
+  && /when tier = 'groq' then 0\.0375/.test(sql) && /when tier = 'groq' then 0\.075/.test(sql) && /when tier = 'groq' then 0\.30/.test(sql)
+  && !/expected_model_like text := '%(gpt|oss|groq)/.test(sql);
+check('Groq calls have their own expected model + price ($0.075 in, $0.30 out, cached 50%) and DeepSeek keeps %flash%', groqOk(groq));
+if (!groqOk(groq.replace(/when tier = 'groq' then 0\.30/, "when tier = 'groq' then 0.66"))) console.log('PASS  (mutation) catches Groq output billed at the DeepSeek rate');
+else { console.log('FAIL  (mutation) blind to Groq output billed at the DeepSeek rate'); failures++; }
+if (!groqOk(groq.replace("expected_model_like text := '%flash%';", "expected_model_like text := '%gpt-oss%';"))) console.log('PASS  (mutation) catches widening the DeepSeek expected model');
+else { console.log('FAIL  (mutation) blind to widening the DeepSeek expected model'); failures++; }
+
 // ── 6. the cost model itself stays out of the edge function ────────────────────
 const telemetry = readAll((f) => f.includes('ai_usage_cost_telemetry'));
 check('pricing lives in the ai_usage_costed VIEW, not in the agent',
