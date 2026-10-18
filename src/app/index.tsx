@@ -2323,8 +2323,8 @@ const s = StyleSheet.create({
     paddingTop: 28, paddingBottom: 22, paddingHorizontal: 22, alignItems: 'center', ...cardShadow,
   },
   sharedClose: { position: 'absolute', top: 12 },
-  sharedEagle: { width: 56, height: 56, marginBottom: 12 },
-  sharedTitle: { fontSize: 19, fontWeight: '700', color: colors.ink, textAlign: 'center', lineHeight: 28 },
+  sharedEagle: { width: 36, height: 36, marginBottom: 10 },
+  sharedTitle: { fontSize: 16, fontWeight: '700', color: colors.ink, textAlign: 'center', lineHeight: 24 },
   sharedButton: {
     marginTop: 20, alignSelf: 'stretch', backgroundColor: colors.primary, borderRadius: 14,
     paddingVertical: 14, alignItems: 'center',
