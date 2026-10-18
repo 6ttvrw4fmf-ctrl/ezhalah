@@ -51,3 +51,17 @@ jobs:
             node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/safe-pr-merge.ts "$pr" \
               --expect-files "$(printf '%s\n' "$files" | paste -sd, -)" || echo "#$pr: gate refused (not green / behind / moved) — next pass"
           done
+
+      # ── Failure→alert bridge (issue #1349): this job runs unattended, so a red run must reach
+      # alert_event to reach a human. One open alert per workflow file; the next green run resolves it.
+      - name: Bridge this run's result to alert_event
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind barrier_check_failed
+          --workflow engineer-automerge.yml
+          --status ${{ job.status }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
