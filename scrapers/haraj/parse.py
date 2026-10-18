@@ -127,10 +127,16 @@ def age_of(raw: Optional[str]) -> Optional[int]:
     v = _clean(raw)
     if not v:
         return None
+    if re.fullmatch(r"(?i)\s*less\s+than\s+(?:a\s+|one\s+)?year\s*", v):
+        return 0                    # REGA's English «Less Than Year» = Arabic «أقل من سنة» → 0 (2026-10-17: 14 ads)
     m = re.fullmatch(r"(?i)\s*(one|two|three|four|five|six|seven|eight|nine|ten)\s+years?\s*", v)
     if m:
         return _EN_NUM[m.group(1).lower()]
     return exact_age(v)
+
+
+FACADE_EN_DIAGONAL = {"northeast": "شمال شرق", "northwest": "شمال غرب", "southeast": "جنوب شرق",
+                      "southwest": "جنوب غرب"}
 
 
 def facade_of(raw: Optional[str]) -> Optional[str]:
@@ -139,11 +145,16 @@ def facade_of(raw: Optional[str]) -> Optional[str]:
     v = _clean(raw)
     if not v:
         return None
+    # REGA's facade is a single-choice cell of eight: a diagonal («شمالية شرقية», «Northeast», «South west»)
+    # is ONE facade (2026-10-17: 119 Haraj ads stored none). Two streets are joined by « - » → None, raw kept.
+    diag = FACADE_EN_DIAGONAL.get(re.sub(r"\s+", "", v.lower()))
+    if diag:
+        return diag
     words = [w for w in re.split(r"[^\w]+", v) if w]
     en = {FACADE_EN[w.lower()] for w in words if w.lower() in FACADE_EN}
     if en:
         return en.pop() if len(en) == 1 and len(words) == 1 else None
-    return one_direction(v)
+    return one_direction(v, diagonal=True)
 
 
 def services_of(raw: Optional[str]) -> dict[str, bool]:
