@@ -27,7 +27,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-sys.modules.setdefault("scrapers.common.db", types.ModuleType("scrapers.common.db"))
+# The real db module when it imports (it needs no credentials until a call): map_listing names db.AUTHORITATIVE_NULL,
+# and an empty stub made this file's zero-bid case — and any later file — fail whenever it ran first (2026-10-18).
+try:
+    import scrapers.common.db  # noqa: E402,F401
+except ImportError:
+    sys.modules.setdefault("scrapers.common.db", types.ModuleType("scrapers.common.db"))
 
 from scrapers.ialqarawi import run as R  # noqa: E402
 from scrapers.common.tests.test_scraper_rows_only_use_real_columns import (  # noqa: E402
