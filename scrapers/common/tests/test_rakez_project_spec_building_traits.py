@@ -53,3 +53,9 @@ def test_prepared_lift_in_the_spec_is_unknown():
 def test_empty_spec_answers_nothing():
     assert R.project_answers([]) == {}
     assert R.project_answers(None) == {}
+
+
+def test_air_conditioned_corridors_are_not_the_units_ac():
+    # 54 units on the first crawl, 2026-10-18: the only AC term was the common corridors.
+    assert R.project_answers(["مصاعد", "ممرات مكيفة", "غرفة خادمة"]) == {"elevator": True}
+    assert R.project_answers(["ممرات مكيفة", "تكييف مخفي"]) == {"air_conditioner": True}

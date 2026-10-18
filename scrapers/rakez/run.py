@@ -549,10 +549,14 @@ def prose_answers(description: Optional[str]) -> dict[str, bool]:
 # «مواقف خاصة» and «مطبخ» describe some of the project's units, not each one (backlog 467), so they are never
 # read from this list. YES or nothing, through the shared matcher («تأسيس مصعد» stays NULL).
 _PROJECT_COLS = ("elevator", "air_conditioner")
+# A term about the building's COMMON areas is not the unit: «ممرات مكيفة» (air-conditioned corridors) said AC = yes
+# for 54 units whose spec names no unit air conditioning (🔬 2026-10-18, caught on the first crawl and reverted).
+_COMMON_AREA = re.compile(r"ممرات|ممر |لوبي|ردهة|ردهات|المدخل|مداخل")
 
 
 def project_answers(features: list[str]) -> dict[str, bool]:
-    yes = normalize.prose_amenities_yes("\n".join(features or []))
+    unit_terms = [f for f in (features or []) if not _COMMON_AREA.search(f)]
+    yes = normalize.prose_amenities_yes("\n".join(unit_terms))
     return {c: True for c in _PROJECT_COLS if yes.get(c)}
 
 
