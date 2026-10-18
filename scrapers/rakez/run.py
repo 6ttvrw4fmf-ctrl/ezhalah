@@ -393,6 +393,29 @@ def resolve_location(term_ids: list[int], tree: dict[int, dict], title: Optional
 
 
 _ZONE = re.compile(r"(شمال|جنوب|شرق|غرب|وسط)\s")
+
+
+def tree_leaf_district(term_ids: list[int], tree: dict[int, dict], city_ar: Optional[str]) -> Optional[str]:
+    """The tree's OWN leaf term when it names a district — the source's word, as written. 255 live
+    units stayed without a district because the leaf («العنبرية» under المدينة المنورة, 56204) is not in
+    our catalogue and the old rule dropped it entirely (owner 2026-10-18: a source-named district is
+    shown, as written, attested or not). Never a district: the city itself, a zone («شمال الرياض»), a
+    root term (a city or a region)."""
+    tagged = [t for t in term_ids if t in tree]
+    if not tagged:
+        return None
+
+    def depth(tid: int) -> int:
+        d, seen = 0, set()
+        while tid in tree and tid not in seen and tree[tid]["parent"]:
+            seen.add(tid); tid = tree[tid]["parent"]; d += 1
+        return d
+
+    leaf = tree[max(tagged, key=depth)]
+    name = (leaf.get("name") or "").strip()
+    if not name or not leaf.get("parent") or name == (city_ar or "") or _ZONE.match(name):
+        return None
+    return name
 _DASH = re.compile(r"\s*[–—-]\s*")
 
 
@@ -479,6 +502,10 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
     city_term_ids = [t["id"] for t in _terms_of(ar_project, "city") if isinstance(t.get("id"), int)]
     ar_title = _clean(((ar_project or {}).get("title") or {}).get("rendered"))
     city_ar, city_id, region_id, district_ar = resolve_location(city_term_ids, tree, ar_title)
+    district_source = "catalogue" if district_ar else None
+    leaf = tree_leaf_district(city_term_ids, tree, city_ar) if city_id else None
+    if not district_ar and leaf:
+        district_ar, district_source = leaf, "tree_leaf"      # the source's own term, kept as written
 
     price = _to_int(acf.get("price"))
     area = unit_area(acf)
@@ -516,6 +543,7 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
         "city_id": city_id,
         "region_id": region_id,
         "additional_info": {k: v for k, v in {
+            "district_source": district_source,     # catalogue | tree_leaf (the taxonomy's own word, uncatalogued)
             "unit_code": _clean(acf.get("code")),
             "project_id": en_id,
             "project_title_ar": project_title,

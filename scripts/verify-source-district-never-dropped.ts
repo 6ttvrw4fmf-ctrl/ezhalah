@@ -20,6 +20,15 @@ const sql = readFileSync(join(dir, file), 'utf8');
 const file2 = readdirSync(dir).filter((f) => /^\d{14}_source_district_carried_fleet_wide_null_district_is_red\.sql$/.test(f)).sort().at(-1);
 if (!file2) { console.log('FAIL  migration *_source_district_carried_fleet_wide_null_district_is_red.sql is missing'); process.exit(1); }
 const sql2 = readFileSync(join(dir, file2), 'utf8');
+const file3 = readdirSync(dir).filter((f) => /^\d{14}_district_recovery_resolves_in_the_served_city\.sql$/.test(f)).sort().at(-1);
+if (!file3) { console.log('FAIL  migration *_district_recovery_resolves_in_the_served_city.sql is missing'); process.exit(1); }
+const sql3 = readFileSync(join(dir, file3), 'utf8');
+const file4 = readdirSync(dir).filter((f) => /^\d{14}_district_carry_folds_plot_codes\.sql$/.test(f)).sort().at(-1);
+if (!file4) { console.log('FAIL  migration *_district_carry_folds_plot_codes.sql is missing'); process.exit(1); }
+const sql4 = readFileSync(join(dir, file4), 'utf8');
+const file5 = readdirSync(dir).filter((f) => /^\d{14}_district_recovery_never_truncates_and_mubarraz_city_correction\.sql$/.test(f)).sort().at(-1);
+if (!file5) { console.log('FAIL  migration *_district_recovery_never_truncates_and_mubarraz_city_correction.sql is missing'); process.exit(1); }
+const sql5 = readFileSync(join(dir, file5), 'utf8');
 
 // Every rule as a function of the SQL text, so the mutants below run the SAME verdict.
 function problems(s: string): string[] {
@@ -102,6 +111,91 @@ function problems2(s: string): string[] {
   return fail;
 }
 
+// Step 3 (2026-10-18): the district is resolved in the SERVED city when v1 has none; one allowlist (#7485's).
+function problems3(s: string): string[] {
+  const fail: string[] = [];
+  const fn = (name: string): string => {
+    const m = s.match(new RegExp(`create or replace function public\\.${name}\\([\\s\\S]*?\\$(?:function|\\$)\\$;`));
+    if (!m) fail.push(`function ${name} is not defined in the served-city step`);
+    return m ? m[0] : '';
+  };
+  const table = fn('refresh_district_recovery_table');
+  const served = table.match(/coalesce\(v1\.city_id, s\.city_id\)/g) || [];
+  if (served.length !== 2) fail.push(`both recovery inserts must resolve in coalesce(v1.city_id, s.city_id) — found ${served.length}`);
+  if ((table.match(/left join public\.search_listings_ar s on s\.source_table = v1\.source_table and s\.listing_id = v1\.listing_id/g) || []).length !== 2) fail.push('the served city is no longer joined from search_listings_ar in both inserts');
+  const rows = fn('source_district_dropped_rows');
+  if (!/public\.ops_district_silent_source o where o\.platform = %L and o\.source_table is null/.test(rows)) fail.push("the measurement no longer reads #7485's allowlist (ops_district_silent_source)");
+  if (/district_silent_proven/.test(rows)) fail.push('the measurement reads the retired duplicate allowlist');
+  const det = fn('mon_detect_source_district_dropped');
+  if (!/mon_raise\('P1', 'source_district_dropped'/.test(det)) fail.push('a dropped source district no longer raises P1');
+  if (/district_null_unproven/.test(det)) fail.push("the duplicate P2 limb is back (blank sources are #7485's district_blank_unexplained)");
+  if (!/drop table public\.district_silent_proven;/.test(s)) fail.push('the duplicate allowlist table is not retired');
+  if (!/'coalesce\(v1\.city_id, s\.city_id\)', 'v1\.city_id'\);[\s\S]*?if r < 200 then raise exception/.test(s)) fail.push('the apply-time proof no longer restores the v1-city-only recovery and demands ≥ 200 re-dropped rows');
+  return fail;
+}
+
+// Step 4 (2026-10-18): a plot code is folded off a real district; pure codes stay NULL; the refill is MVCC-safe.
+// The fold and the carry test are LIFTED from the committed SQL and executed here on the owner's cases.
+function problems4(s: string): string[] {
+  const fail: string[] = [];
+  const fold = s.match(/create or replace function public\.district_plot_fold[\s\S]*?coalesce\(p, ''\),\s*'([^']+)', ''\),\s*'([^']+)', ''\),\s*'([^']+)', '', 'g'\)\), ''\)/);
+  const carry = s.match(/create or replace function public\.district_word_carryable[\s\S]*?w ~ '([^']+)'\s*and regexp_replace\(w, '([^']+)', ''\) ~ '([^']+)'\s*and \(w !~ '([^']+)' or w ~ '([^']+)'\)/);
+  if (!fold) fail.push('district_plot_fold() is missing or reshaped');
+  if (!carry) fail.push('district_word_carryable() is missing or reshaped');
+  if (fold && carry) {
+    const js = (p: string, f = 'u') => new RegExp(p, f);
+    const doFold = (v: string) => {
+      const out = v.replace(js(fold[1]), '').replace(js(fold[2]), '').replace(js(fold[3], 'gu'), '').trim();
+      return out === '' ? null : out;
+    };
+    const ok = (w: string | null) => w !== null && js(carry[1]).test(w) && js(carry[3]).test(w.replace(js(carry[2]), ''))
+      && (!js(carry[4]).test(w) || js(carry[5]).test(w));
+    const cases: Array<[string, string | null, boolean]> = [
+      ['بوسحبل (345/4)', 'بوسحبل', true], ['شرق المحدود 176 أ', 'شرق المحدود', true],
+      ['ضاحية هجر ،، الحي السابع رقم 351 / ب', 'ضاحية هجر ،، الحي السابع', true], ['الصفا ١ (93/14)', 'الصفا ١', true],
+      ['الغسانية ٢', 'الغسانية ٢', true], ['33ج', '33ج', false], ['حي 1029 مخطط رقم', 'حي', false],
+      ['حي (حي رقم (5', 'حي', false], ['حي ج1', 'حي ج1', false], ['7037 سلمان الفا', null, false],
+      ['حي 1النخيل', 'حي 1النخيل', false], ['البصر3 مدينه', 'البصر3 مدينه', false], ['حي جو', 'حي جو', false],
+    ];
+    for (const [src, want, c] of cases) {
+      const got = doFold(src);
+      if (got !== want) fail.push(`fold «${src}» → «${got}», want «${want}»`);
+      if (ok(got) !== c) fail.push(`carry «${src}» = ${ok(got)}, want ${c}`);
+    }
+  }
+  const value = s.match(/create or replace function public\.district_recovery_value[\s\S]*?\$\$;/)?.[0] ?? '';
+  if (!/district_word_carryable\(public\.district_plot_fold\(p_neighborhood\)\)\s*then public\.district_plot_fold\(p_neighborhood\)/.test(value)) fail.push('district_recovery_value() no longer carries the plot-folded word');
+  if (/truncate/i.test(s.replace(/--[^\n]*/g, ''))) fail.push('the refill truncates district_recovery (not MVCC-safe; the coordinator forbade it)');
+  if (!/pg_advisory_xact_lock\(hashtext\('location_pipeline:v1_refresh'\)\)/.test(s) || !/pg_try_advisory_xact_lock\(hashtext\('search_listings_ar:single_writer'\)\)/.test(s)) fail.push('the refill no longer holds the pipeline locks');
+  if (!/after_total < 0\.99 \* before_total/.test(s) || !/p\.after_n < 0\.99 \* p\.before_n/.test(s)) fail.push('the ≥ 99% total/per-platform refill assertion is gone');
+  if (!/\('33ج',\s+'33ج',\s+false\)/.test(s)) fail.push('the apply-time truth table lost the pure-code case «33ج»');
+  return fail;
+}
+
+// Step 5 (2026-10-18): the hourly refill never TRUNCATEs and never loses > 1%; the المبرز city correction is deterministic.
+function problems5(s: string): string[] {
+  const fail: string[] = [];
+  const code = s.replace(/--[^\n]*/g, '');
+  const fn = (name: string): string => {
+    const m = code.match(new RegExp(`create or replace function public\\.${name}\\([\\s\\S]*?\\$(?:function|\\$)\\$;`));
+    if (!m) fail.push(`function ${name} is not defined in step 5`);
+    return m ? m[0] : '';
+  };
+  const full = fn('refresh_district_recovery');
+  const table = fn('refresh_district_recovery_table');
+  if (/truncate/i.test(full) || /truncate/i.test(table)) fail.push('the hourly refill TRUNCATEs district_recovery (not MVCC-safe: a stale snapshot serves ~112k districts as NULL)');
+  if (!/v_elig >= 50 and v_lost > 0\.01 \* v_elig/.test(table) || !/'district_recovery_shrank'/.test(table) || !/return 0;\s*end if;\s*delete from public\.district_recovery where source_table = p_table;/.test(table)) fail.push('the > 1% loss guard (keep the previous rows + alert, BEFORE the delete) is gone');
+  if (!/perform public\.refresh_listing_city_correction\(\);/.test(full)) fail.push('the city correction is no longer refreshed hourly');
+  const corr = fn('refresh_listing_city_correction');
+  if (!/having count\(distinct d\.city_id\) = 1/.test(corr)) fail.push('the city correction no longer requires ONE governorate city');
+  if (!/where v1\.city_id in \(12, 3677\)\s*and u\.city_id not in \(12, 3677\)/.test(corr)) fail.push('the city correction is no longer limited to office-default الهفوف/الاحساء rows moving elsewhere');
+  if (!/u\.district_norm in \('غسانيه'/.test(corr)) fail.push('the city correction is no longer limited to the 10-08 hold names (uniqueness elsewhere is a guess)');
+  if (!/'unique_district_in_governorate'/.test(corr)) fail.push('the correction lost its provenance');
+  if (!/COALESCE\(xcc\.city_id, v1\.city_id/.test(code) || !/if k <> 3 then raise exception 'v2 anchor city found/.test(code)) fail.push('v2 no longer serves the correction ahead of v1 (or its anchor count check is gone)');
+  if (!/rows lost their district in v2/.test(code)) fail.push('the apply-time proof no longer checks that no row lost its district');
+  return fail;
+}
+
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : ` — ${why}`}`); };
 // Mutation proof: the SAME verdict function, run on a deliberately loosened copy of the committed SQL, must go red.
@@ -142,6 +236,47 @@ const mutants2: Array<[string, (s: string) => string]> = [
 for (const [label, mutate] of mutants2) {
   const m = mutate(sql2);
   mustCatch(`fleet-wide: ${label}`, m !== sql2 && problems2(m).length > 0, m === sql2 ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+}
+
+const live3 = problems3(sql3);
+check(`committed migration ${file3} holds every served-city pin`, live3.length === 0, live3.join('; '));
+const mutants3: Array<[string, (s: string) => string]> = [
+  ['served-city fallback removed (239 wasalt rows drop again)', (s) => s.replace(/coalesce\(v1\.city_id, s\.city_id\)(?=, x\.neighborhood)/, 'v1.city_id')],
+  ['duplicate P2 limb re-added', (s) => s.replace("if v_dropped = 0 then", "perform public.mon_raise('P2', 'district_null_unproven', 'location_pipeline', 'district_null_unproven', '{}'::jsonb);\n  if v_dropped = 0 then")],
+  ['measurement back on the retired allowlist', (s) => s.replace('public.ops_district_silent_source o where o.platform = %L and o.source_table is null', 'public.district_silent_proven p where p.platform = %L')],
+  ['served-city proof deleted', (s) => s.replace(/\n  begin\n    execute replace\(pg_get_functiondef[\s\S]*?end;\n/, '\n')],
+];
+for (const [label, mutate] of mutants3) {
+  const m = mutate(sql3);
+  mustCatch(`served-city: ${label}`, m !== sql3 && problems3(m).length > 0, m === sql3 ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+}
+
+const live4 = problems4(sql4);
+check(`committed migration ${file4} holds every fold/hold pin`, live4.length === 0, live4.join('; '));
+const mutants4: Array<[string, (s: string) => string]> = [
+  ['any digits carried (codes like «33ج» become districts)', (s) => s.replace("or w ~ '^[^0-9٠-٩]*[ء-ي]{3,}[^0-9٠-٩]*[0-9٠-٩]{1,2}$'", "or w ~ '.'")],
+  ['a bare «حي» counts as a name', (s) => s.replace("~ '[ء-ي]{3,}'\n    and (w !~", "~ '[ء-ي]{1,}'\n    and (w !~")],
+  ['fold stops at the bracket only (plot numbers kept)', (s) => s.replace("'\\s*(\\(|\\[|رقم\\s*[\\(:0-9٠-٩]|[0-9٠-٩]{3,}).*$'", "'\\s*(\\(|\\[).*$'")],
+  ['refill by TRUNCATE', (s) => s.replace('perform public.refresh_district_recovery_table(t);', 'truncate public.district_recovery; perform public.refresh_district_recovery_table(t);')],
+  ['writer lock dropped', (s) => s.replace("got := pg_try_advisory_xact_lock(hashtext('search_listings_ar:single_writer'));", 'got := true;')],
+  ['per-platform 99% check dropped', (s) => s.replace('if p.after_n < 0.99 * p.before_n then', 'if false then')],
+];
+for (const [label, mutate] of mutants4) {
+  const m = mutate(sql4);
+  mustCatch(`fold/hold: ${label}`, m !== sql4 && problems4(m).length > 0, m === sql4 ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+}
+
+const live5 = problems5(sql5);
+check(`committed migration ${file5} holds every refill/city pin`, live5.length === 0, live5.join('; '));
+const mutants5: Array<[string, (s: string) => string]> = [
+  ['TRUNCATE back in the hourly refill', (s) => s.replace("declare r record; n bigint := 0; m bigint;\nbegin\n  for r in", "declare r record; n bigint := 0; m bigint;\nbegin\n  truncate public.district_recovery;\n  for r in")],
+  ['loss guard removed', (s) => s.replace('if v_elig >= 50 and v_lost > 0.01 * v_elig then', 'if false then')],
+  ['correction without the uniqueness rule', (s) => s.replace('having count(distinct d.city_id) = 1) u', ') u')],
+  ['correction for every name (not only the hold list)', (s) => s.replace(/\n\s*-- the 10-08 المبرز hold names[\s\S]*?'بو سحبل الاول'\)/, '')],
+];
+for (const [label, mutate] of mutants5) {
+  const m = mutate(sql5);
+  mustCatch(`refill/city: ${label}`, m !== sql5 && problems5(m).length > 0, m === sql5 ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
 }
 
 console.log(failed === 0 ? 'OK: a source district can never be dropped silently again' : `${failed} check(s) failed`);

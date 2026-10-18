@@ -517,6 +517,12 @@ def crawl(files: int, skip_hours: int, limit: int = 0, today: Any = None, only: 
                 unresolved[f"{facts.get('city_raw_ar')} / {facts['district_raw_ar']}"] += 1
         if row.get("additional_info", {}).get("latitude") is not None:
             c["with_pin"] += 1
+        # The crawl just read this post's OWN page. When the liveness oracle's own reader says that same
+        # body is live and the page names this post, record it (no new request). 2026-10-18: the catch-up
+        # stored 3,800 posts from their own pages and 4,074 of 4,478 active rows read «never checked».
+        if _signal(st, h, False) == "live" and pid in h:
+            db.mark_direct_alive(row, oracle="haraj.post_page.own_read")
+            c["stamped_live"] += 1
         (com if cat == "commercial" else res).append(row)
     c["stored"] = len(res) + len(com)
     return res, com, c, unresolved, meta
@@ -568,17 +574,27 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
                          url_for=lambda _ad: f"{BASE}/{pid}/").verify_gone(ad_number)
 
 
-def liveness_controls(n: int, max_reads: int = 20) -> list[dict]:
-    """fleet_liveness controls (CONTROL_POOLS): property offers posted in Haraj's newest COMPLETE hour
+def liveness_controls(n: int, max_reads: int = 20, max_hours: int = 6) -> list[dict]:
+    """fleet_liveness controls (CONTROL_POOLS): property offers posted in Haraj's newest COMPLETE hours
     whose own page reads live now. Fresh posts are alive almost always; a block or a redesign reads
-    none live, so fewer than n come back and the run quarantines (fails closed)."""
+    none live, so fewer than n come back and the run quarantines (fails closed).
+
+    Walks back hour by hour (newest complete first, at most `max_hours` files, `max_reads` page reads
+    in all) until n read live. One quiet hour is not a block: the 07:48 UTC daily run on 2026-10-18
+    found 3 licensed-titled posts in the 06:00 hour, all 3 read live, and the gate (5 needed)
+    quarantined 3,600 ads with every control it had alive, while 273 struck at 1 strike sat on screen."""
     locs = hour_files()
     out: list[dict] = []
-    for pid in ids_in(locs[-2], Counter(), tight=True)[:max_reads]:
-        if _verify_gone(f"{PREFIX}{pid}")[0] == "live":
-            out.append({"ad_number": f"{PREFIX}{pid}", "listing_url": f"{BASE}/{pid}/"})
-            if len(out) >= n:
-                break
+    reads = 0
+    for u in reversed(locs[max(0, len(locs) - 1 - max_hours):-1]):
+        for pid in ids_in(u, Counter(), tight=True):
+            if reads >= max_reads:
+                return out
+            reads += 1
+            if _verify_gone(f"{PREFIX}{pid}")[0] == "live":
+                out.append({"ad_number": f"{PREFIX}{pid}", "listing_url": f"{BASE}/{pid}/"})
+                if len(out) >= n:
+                    return out
     return out
 
 
