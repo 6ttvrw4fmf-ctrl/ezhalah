@@ -143,6 +143,20 @@ const positive = (n: unknown): n is number => typeof n === 'number' && Number.is
 // EXACT, IN DIGITS (owner 2026-10-17): the live count as it is — «372,889», never «370 ألف».
 const exact = (n: unknown): string | null => (positive(n) ? fmt(n) : null);
 
+// THE NAME IS FILLED LAST, PER LANGUAGE (owner 2026-10-17: «رجعت يا yusuf؟» — a Latin name inside the
+// Arabic line). Lines are rendered and remembered with NAME_SLOT in place of the name; fillName() puts
+// in the Arabic spelling for Arabic and the Latin one for English when the line is shown. A remembered
+// sentence therefore never carries a name from another language or from before a rename.
+export const NAME_SLOT = '⟦n⟧';
+/** Put the user's name for THIS language into a slotted line; null when there is no fitting name
+ *  (an Arabic line never shows Latin letters for the name — the normal headline stays instead). */
+export function fillName(text: string | null | undefined, name: string, locale: 'ar' | 'en'): string | null {
+  if (!text) return null;
+  const first = (name ?? '').trim().split(/\s+/)[0] ?? '';
+  if (!first || (locale === 'ar' && /[A-Za-z]/.test(first))) return null;
+  return text.split(NAME_SLOT).join(first);
+}
+
 /** Fill a line, or null when any fact it states is missing or not true today. */
 export function renderWelcome(line: WelcomeLine, name: string, f: WelcomeFacts, locale: 'ar' | 'en'): string | null {
   const first = (name ?? '').trim().split(/\s+/)[0] ?? '';
