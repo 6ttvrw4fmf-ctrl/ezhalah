@@ -394,6 +394,11 @@ _LOC_FIELD_RE = re.compile(r"(?<![\u0600-\u06ff])الموقع\s*:\s*(.{3,300})",
 _ADDRESS_SIGNAL_RE = re.compile(r"\b\d{5}\b|Saudi Arabia|السعودية|المملكة العربية السعودية")
 _HAYY_SEG_RE = re.compile(r"^حي\s+\S")
 _PLUS_CODE_RE = re.compile(r"^[A-Z0-9]{4,8}\+[A-Z0-9]{2,3}\b")   # «QQWW+5XH», Google's plus code
+# A plus code ANYWHERE on the map line («عقارات الدمام 8Q9H+JHH», «6JJ6+25 ابو ال») marks it as the pin's label,
+# not an address: a short code with no locality resolves wherever Google guesses (8Q9H+JHH → Kirkuk, Iraq).
+_PLUS_CODE_ANY = re.compile(r"(?<![A-Z0-9])[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{0,3}(?![A-Z0-9])")
+# A map line that names ITSELF a district: «حي » + Arabic words only (no digits, latin, or a second clause).
+_HAYY_SELF = re.compile(r"حي\s+[\u0621-\u064A][\u0621-\u064A\s]{1,30}")
 
 
 def location_field_district(text: str) -> Optional[str]:
@@ -402,7 +407,9 @@ def location_field_district(text: str) -> Optional[str]:
     «حي …» segment. A prose field («تقع خلف نادي …») has no address signal and yields nothing."""
     for m in _LOC_FIELD_RE.finditer(text or ""):
         segs: list[str] = []
-        for seg in re.split(r"[،,]", m.group(1)):
+        # «_» separates segments too: «حي النهضه _ صبيا _ جازان _ المملكة العربية السعودية» (2026-10-18) was read as ONE
+        # segment and stored 300 chars of page — the reviews box, the advertiser's handle — as the district.
+        for seg in re.split(r"[،,_]", m.group(1)):
             seg = seg.strip()
             if not seg:
                 continue
@@ -412,7 +419,7 @@ def location_field_district(text: str) -> Optional[str]:
         else:
             continue                                       # no address signal anywhere: not an address
         hay = [x for x in segs if _HAYY_SEG_RE.match(x)]
-        if len(hay) == 1:
+        if len(hay) == 1 and _HAYY_SELF.fullmatch(hay[0]):     # a district name, never a run of page text
             return hay[0]
     return None
 
@@ -427,9 +434,23 @@ def district_candidate(text: str) -> Optional[str]:
     v = _STATUS_LEAD.sub("", m.group(1).strip())
     v = v.split("،")[0].split(",")[0].strip()
     # an agent reference code is latin/digits, and a plus code a grid cell — never a Saudi district name
-    if not v or re.fullmatch(r"[A-Za-z0-9\s\-_]+", v) or _PLUS_CODE_RE.match(v):
+    if not v or re.fullmatch(r"[A-Za-z0-9\s\-_]+", v) or _PLUS_CODE_RE.match(v) or _PLUS_CODE_ANY.search(v):
         return None
     return v
+
+
+def neighborhood_word(cand: Optional[str], field: Optional[str], cand_hit: Optional[str]) -> Optional[str]:
+    """The SOURCE's own district word for `neighborhood`. When the catalog has no match, the index carries
+    this word to the card and to the Filter's district list exactly as written (district_recovery «carries
+    the source word», 2026-10-18), so it must be a district the page STATES. Only the «الموقع:» field states
+    one. The map line is the pin's label — the ad's title («فلل فاخرة للبيع بدون دفعه مق»), the site's
+    category («عقارات جدة JIJB»), the country («المملكة العربية السعودية») — so it counts only when this
+    city's catalog recognised it or it names itself «حي X». Anything else stays in additional_info.map_line."""
+    if field:
+        return field
+    if cand and (cand_hit or _HAYY_SELF.fullmatch(cand)):
+        return cand
+    return None
 
 
 # TYPE comes from the breadcrumb the theme prints above the title: «شقق سكنية > شقق سكنية للإيجار»,
@@ -687,14 +708,15 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
     city_id, region_id = to_catalog(city_ar)
 
     # The district is PROPOSED from the page and kept only if this city's curated catalog knows it.
+    field = location_field_district(page_text)
     cand = district_candidate(page_text)
-    district_source = ("location_field" if location_field_district(page_text) else "map_line") if cand else None
+    district_source = ("location_field" if field else "map_line") if cand else None
     title = _clean((post.get("title") or {}).get("rendered", ""))
     body = _clean((post.get("content") or {}).get("rendered", ""))
-    district_ar = None
+    district_ar = cand_hit = None
     if city_id:
-        district_ar = (find_district_in_text(cand, city_id) if cand else None) \
-            or find_district_in_text(f"{title} {body}", city_id)
+        cand_hit = find_district_in_text(cand, city_id) if cand else None
+        district_ar = cand_hit or find_district_in_text(f"{title} {body}", city_id)
 
     price = own_price(page_html, link)
     rent_period, price_annual = (None, None)
@@ -713,7 +735,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         "city_id": city_id,
         "region_id": region_id,
         "district_ar": district_ar,
-        "neighborhood": cand,
+        "neighborhood": neighborhood_word(cand, field, cand_hit),
         "area_m2": parse_area(page_text),
         "bedrooms": spec_int(page_text, "عدد الغرف", 0, 50),
         "bathrooms": spec_int(page_text, "دورة المياه", 0, 50)
@@ -740,6 +762,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
 
     extra: dict[str, Any] = {
         "district_source": district_source,      # the page's «الموقع:» address field, or the map line
+        "map_line": cand if cand and not field else None,   # the pin label as read; a district only via neighborhood_word
         "wp_id": post.get("id"),
         "slug": post.get("slug") or None,
         "fal_licence": parse_licence(page_text),

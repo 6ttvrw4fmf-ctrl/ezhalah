@@ -10,6 +10,8 @@ among its comma segments) and holds exactly one «حي …» segment; the field'
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import scrapers.ksaaqar.run as K
@@ -65,8 +67,70 @@ def test_mutation_prose_conflict_plus_code_or_truncation_is_no_district(text):
     assert K.district_candidate(text) is None
 
 
-def test_the_map_line_still_answers_when_it_starts_with_the_district():
+def test_the_map_line_still_answers_when_it_starts_with_the_district(monkeypatch):
     assert K.district_candidate("غير مؤجرة الملقا، الرياض السعودية... انظر الخريطة") == "الملقا"
+    monkeypatch.setattr(K, "find_district_in_text", lambda text, city_id: "حي الملقا" if text == "الملقا" else None)
     row, _cat, why = K.map_listing(_post(), SPEC, "")
     assert row is not None, why
-    assert row["neighborhood"] == "الملقا" and row["additional_info"]["district_source"] == "map_line"
+    assert row["neighborhood"] == "الملقا" and row["district_ar"] == "حي الملقا"
+    assert row["additional_info"]["district_source"] == "map_line"
+
+
+# 2026-10-18. `neighborhood` is the SOURCE's own district word: when the catalog has no match, the index carries it
+# to the card and to the Filter's district list as written. Live before this fix: 162 ksaaqar rows served a carried
+# map line — «فلل فاخرة للبيع بدون دفعه مق», «المملكة العربية السعودية», «عقارات جدة JIJB», «شقه ايجار في الرياض 1» —
+# and 28 rows stored a Google plus code («عقارات الدمام 8Q9H+JHH» on 12226888, whose title says «حي القصور، الظهران»;
+# the bare code resolves to Kirkuk, Iraq). Every line below is a stored value, verbatim.
+JUNK_MAP_LINES = ["فلل فاخرة للبيع بدون دفعه مق", "المملكة العربية السعودية", "عقارات جدة JIJB",
+                  "شقه ايجار في الرياض 1", "تصميم تنفيذ مطاعم كافي", "خميس مشيط حي الراقي"]
+PLUS_CODE_LINES = ["عقارات الدمام 8Q9H+JHH", "6JJ6+25 ابو ال", "عقارات الرياض 3C5W+WW الخير", "66H5+WXP 16255",
+                   "عقارات الدمام 925V+M38 الدمام السع"]
+
+
+def _page(line):
+    return SPEC.replace("غير مؤجرة الملقا، الرياض السعودية... انظر الخريطة", f"غير مؤجرة {line}... انظر الخريطة")
+
+
+@pytest.mark.parametrize("line", JUNK_MAP_LINES)
+def test_mutation_a_map_line_the_catalog_does_not_know_is_never_the_neighborhood(line):
+    row, _cat, why = K.map_listing(_post(), _page(line), "")
+    assert row is not None, why
+    assert row["neighborhood"] is None and row["district_ar"] is None
+    assert row["additional_info"]["map_line"] == line          # kept as the fact it is, never as a district
+
+
+@pytest.mark.parametrize("line", PLUS_CODE_LINES)
+def test_mutation_a_plus_code_anywhere_on_the_map_line_reaches_nothing(line):
+    assert K.district_candidate(f"الدولة: {line}... انظر الخريطة") is None
+    row, _cat, why = K.map_listing(_post(), _page(line), "")
+    assert row is not None, why
+    assert row["neighborhood"] is None and row["district_ar"] is None
+    code = next(w for w in line.split() if "+" in w)
+    located = {k: row.get(k) for k in ("neighborhood", "district_ar")} | {"map_line": row["additional_info"].get("map_line")}
+    assert code not in json.dumps(located, ensure_ascii=False)     # no location field of ours carries the code
+
+
+def test_a_field_a_catalog_hit_or_a_self_named_hayy_is_kept_and_nothing_else():
+    assert K.neighborhood_word("الملقا", "حي الحيلة الغربي", None) == "حي الحيلة الغربي"   # the field wins
+    assert K.neighborhood_word("الملقا", None, "حي الملقا") == "الملقا"                    # the catalog knows it
+    assert K.neighborhood_word("حي بحرة", None, None) == "حي بحرة"                         # it names itself a district
+    for junk in ["حي", "حي 12", "حي الراقي JIJB", "خميس مشيط حي الراقي", None]:
+        assert K.neighborhood_word(junk, None, None) is None, junk
+
+
+# 2026-10-18, recorded: the field separated by «_», followed by the page's review box (advertiser handle and phone
+# scrubbed here). Read as one comma-free segment, the whole run was stored as the district.
+FIELD_UNDERSCORE = ("الموقع: حي النهضه _ صبيا _ جازان _ المملكة العربية السعودية اكتب مراجعة معرض المراجعات: اختر ملف "
+                    "اختر ملف تعليقات: * إرسال المراجعة")
+
+
+def test_an_underscore_separated_field_gives_the_district_segment_only():
+    assert K.location_field_district(FIELD_UNDERSCORE) == "حي النهضه"
+
+
+@pytest.mark.parametrize("field", [
+    "الموقع: حي النهضه صبيا جازان المملكة العربية السعودية اكتب مراجعة معرض المراجعات",   # no separator: a run of text
+    "الموقع: حي الربوة 12، الرياض 12345, Saudi Arabia",                                     # digits in the segment
+])
+def test_mutation_a_field_segment_that_is_not_a_district_name_is_nothing(field):
+    assert K.location_field_district(field) is None
