@@ -134,7 +134,7 @@ export default function Home() {
   const cityLabel = (o: { cityId: number; cityAr: string }) => (locale === 'en' ? cityNameEn(o.cityId, o.cityAr) : o.cityAr);
   const regionLabel = (o: { regionId: number | null; regionAr: string | null }) => (locale === 'en' ? regionNameEn(o.regionId, o.regionAr) : o.regionAr);
   const districtLabel = (cityId: number, ar: string) => (locale === 'en' ? districtNameEn(cityId, ar) : ar);
-  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history } = useApp();
+  const { query: storeQuery, setQuery, user, authChecked, openAuth, dismissSignInCard, history } = useApp();
   // ROTATING WELCOME (owner 2026-10-17): a signed-in user sometimes sees a personal line with a live
   // fact IN PLACE OF THE BIG HEADLINE (owner: «i meant the big text»); the subtitle below never changes. lib/filterWelcome.ts holds the approved lines
   // and the truth rules; null keeps the normal subtitle.
@@ -150,7 +150,10 @@ export default function Home() {
     }
     return best;
   }, [history]);
-  const welcomeLine = useFilterWelcome(!!user, pickName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
+  // `welcomeSettled` gates the headline's ENTRANCE (owner 2026-10-17: it must never visibly change
+  // after it appears): the title stays at opacity 0 until the session restore knows the visitor and,
+  // signed in, until the line's numbers are in — then it rises once and is final for this load.
+  const { line: welcomeLine, settled: welcomeSettled } = useFilterWelcome(!!user, authChecked, pickName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
   // THE ONE QUERY THIS SCREEN DERIVES EVERYTHING FROM (owner P0 2026-09-01).
   //
   // The store may now carry Advanced Filter answers committed in the chat — that is the whole fix:
@@ -1155,6 +1158,8 @@ export default function Home() {
   // hero entrance, even when we're already on Home (so a docked New Chat tap visibly "refreshes"
   // the screen). (user request: New Chat should feel like a refresh.)
   const { fresh } = useLocalSearchParams<{ fresh?: string }>();
+  // Bumped by every entrance so the title's own rise (effect below) re-arms with it.
+  const [entranceKey, setEntranceKey] = useState(0);
   const playEntrance = useCallback(() => {
     heroAnim.setValue(0);
     entrance.setValue(0);
@@ -1169,9 +1174,22 @@ export default function Home() {
     }).start();
     const rise = (v: RNAnimated.Value, delay: number) =>
       RNAnimated.timing(v, { toValue: 1, duration: 520, delay, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: Platform.OS !== 'web' });
-    RNAnimated.parallel([rise(badgeAnim, 80), rise(titleAnim, 230), rise(subAnim, 400)]).start();
+    // The TITLE is not in this parallel any more: it rises in the effect below, once the headline's
+    // text is settled (owner 2026-10-17 — no visible swap, ever). Badge and subtitle rise as before.
+    RNAnimated.parallel([rise(badgeAnim, 80), rise(subAnim, 400)]).start();
+    setEntranceKey((k) => k + 1);
   }, [heroAnim, entrance, badgeAnim, titleAnim, subAnim]);
   useFocusEffect(playEntrance);
+  // THE HEADLINE RISES ONCE ITS TEXT IS FINAL. Re-armed by every entrance (entranceKey) and released by
+  // welcomeSettled: for a guest that is right after the session restore; for a signed-in visitor once
+  // the personal line's numbers are in (or the cap passed). Until then the title holds at opacity 0,
+  // so the visitor never sees one headline turn into another.
+  useEffect(() => {
+    if (!welcomeSettled) return;
+    const a = RNAnimated.timing(titleAnim, { toValue: 1, duration: 520, delay: 230, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: Platform.OS !== 'web' });
+    a.start();
+    return () => a.stop();
+  }, [welcomeSettled, entranceKey, titleAnim]);
   // A RETURN TO THE FILTER IS A CLEAN FILTER (owner 2026-10-03). Coming back from a search — the
   // toggle, the browser's Back, a new visit — always opens an empty form: the previous search is NOT
   // kept here and there is no «مسح الكل» to undo it. Signed in, that search is in the sidebar history,

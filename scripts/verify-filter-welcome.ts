@@ -12,7 +12,7 @@
 //   7. rotation: one line held for 4 hours then a different one, always personal, time lines only at their time.
 import {
   WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, FACTLESS_ANYTIME_IDS,
-  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, type WelcomeFacts,
+  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, type WelcomeFacts,
 } from '../src/lib/filterWelcome.ts';
 
 let failed = 0;
@@ -154,6 +154,33 @@ check(`with a searched district, about 1 in 3 periods is one of THEIR lines (got
 console.log('  e.g. ' + renderWelcome(line(41), 'يوسف', FACTS, 'ar'));
 console.log('  e.g. ' + renderWelcome(line(42), 'يوسف', FACTS, 'ar'));
 console.log('  e.g. ' + renderWelcome(line(43), 'Yusuf', FACTS, 'en'));
+
+// ── 10. the headline never changes once shown (owner 2026-10-17: «never ever») ────────────────────
+const L19 = WELCOME_LINES.find((l) => l.id === 19)!;
+const factsEv = { type: 'facts' as const, line: L19, facts: FACTS };
+const neverSwaps = (reduce: typeof headlineReduce) => {
+  const afterGuest = reduce(HEADLINE_UNSETTLED, { type: 'guest' });
+  const afterTimeout = reduce(HEADLINE_UNSETTLED, { type: 'timeout' });
+  const afterFacts = reduce(HEADLINE_UNSETTLED, factsEv);
+  return afterGuest.settled && afterGuest.line === null
+    && afterTimeout.settled && afterTimeout.line === null
+    && afterFacts.settled && afterFacts.line === L19
+    // the rule: once settled, NOTHING changes the headline — not late facts, not a second event
+    && reduce(afterTimeout, factsEv).line === null
+    && reduce(afterGuest, factsEv).line === null
+    && reduce(afterFacts, { type: 'timeout' }).line === L19
+    && reduce(afterFacts, { ...factsEv, line: WELCOME_LINES[0] }).line === L19;
+};
+check('guest / timeout settle on the normal headline, facts settle on the personal line, and nothing moves afterwards', neverSwaps(headlineReduce));
+check('the cap is short enough that a slow network still gets a headline quickly (≤ 3 s)', SETTLE_CAP_MS > 0 && SETTLE_CAP_MS <= 3000);
+mustCatch('a reducer that lets late facts replace an already-shown headline (the swap the owner saw)',
+  !neverSwaps((s, ev) => (ev.type === 'facts' ? { settled: true, line: ev.line, facts: ev.facts } : s.settled ? s : { settled: true, line: null, facts: null })));
+mustCatch('a reducer that never settles on timeout (the title would hold at opacity 0 forever)',
+  !neverSwaps((s, ev) => (ev.type === 'timeout' ? s : headlineReduce(s, ev))));
+const homeSrc = (await import('node:fs')).readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
+check('the Filter home holds the title\'s entrance on welcomeSettled and passes authChecked to the hook',
+  /useFilterWelcome\(!!user, authChecked,/.test(homeSrc) && /if \(!welcomeSettled\) return;/.test(homeSrc)
+  && !/RNAnimated\.parallel\(\[rise\(badgeAnim, 80\), rise\(titleAnim, 230\)/.test(homeSrc));
 
 // ── 7. rotation ─────────────────────────────────────────────────────────────────────────────────
 const at = (iso: string) => new Date(iso);
