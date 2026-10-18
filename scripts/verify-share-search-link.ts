@@ -11,7 +11,7 @@
 //   5. no name → no message (never a line with a blank name).
 import {
   encodeSharePayload, decodeSharePayload, shareLink, shareMessage, shareLandingTitle, SHARE_COPY, SHARE_PARAM,
-  shareLandingPath, shareCardHtml, SHARE_CARD, shareTitle,
+  shareLandingPath, shareCardHtml, SHARE_CARD, shareTitle, isShareCode, sharedChatCardFrom,
 } from '../src/lib/shareSearch.ts';
 
 let failed = 0;
@@ -86,6 +86,26 @@ mustCatch('a card builder that does not escape the name', (() => {
 })() && !evil.includes('<script>alert'));
 const junk = shareCardHtml('https://x.example', 'not-a-payload');
 check('a broken link still gets a clean Ezhalah card and goes Home', /og:title" content="إزهله"/.test(junk) && junk.includes('content="0;url=/"'));
+
+// ── 3c. a SHARED CHAT link: /s/<8-char code> (owner 2026-10-17: «sharing it means I share the chat history») ──
+check('an 8-character code is a share code; a search payload and junk are not',
+  isShareCode('a7Kx2bQ9') && !isShareCode(fullPayload) && !isShareCode('a7Kx2b') && !isShareCode('a7Kx-bQ9') && !isShareCode(null));
+const row = { sender_name: 'يوسف الأحمد', locale: 'en', query: Q };
+const card = sharedChatCardFrom(row);
+const cardOk = (from: typeof sharedChatCardFrom) => {
+  const c = from(row);
+  return !!c && c.name === 'يوسف' && c.locale === 'en' && from(null) === null && from({ sender_name: '', locale: 'ar', query: Q }) === null
+    && from({ sender_name: 'x', locale: 'ar', query: { deal: 'Steal', location: 'x' } }) === null && from({ sender_name: 'x', query: 'nope' }) === null;
+};
+check('a database card row is validated (first name, sender\'s language) — anything off is null', cardOk(sharedChatCardFrom));
+mustCatch('a card reader that trusts whatever row comes back', !cardOk((r: any) => (r ? { q: r.query, name: r.sender_name, locale: r.locale } : null) as any));
+const chatHtml = shareCardHtml('https://x.example', 'a7Kx2bQ9', sharedChatCardFrom({ sender_name: 'يوسف', locale: 'ar', query: Q }));
+check('a shared chat\'s card says the approved title and sends the person to Home + ?share=<code>',
+  /og:title" content="شقق للإيجار في حي النرجس من يوسف على إزهله"/.test(chatHtml) && chatHtml.includes('location.replace("/?share=a7Kx2bQ9")') && !/\/agent/.test(chatHtml));
+const unread = shareCardHtml('https://x.example', 'a7Kx2bQ9', null);
+check('a code whose card could not be read still goes to Home + ?share=<code> (the app reads the chat) — never a dead link',
+  /og:title" content="إزهله"/.test(unread) && unread.includes('location.replace("/?share=a7Kx2bQ9")'));
+void card;
 
 // ── 4. the approved title: «{type} {deal} في {place} من {name} على إزهله» (owner 2026-10-17) ─────────
 const T = (q: any, loc: 'ar' | 'en' = 'ar') => shareTitle(loc === 'ar' ? 'يوسف' : 'Yusuf', q, loc);

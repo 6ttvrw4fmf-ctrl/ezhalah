@@ -99,6 +99,7 @@ import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
+import { createSharedChat } from '@/lib/sharedChat';
 import { useI18n, LocaleScope, detectLocale, resolveReplyLocale, getLocale, translate, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { listingLocationAr, listingPrice } from '@/lib/listingDisplay';
 import { noTranslateRef } from '@/noTranslate';
@@ -677,7 +678,8 @@ export default function Agent() {
   // approved line «عقارات من {name} لك على إزهله 🦅 …» (src/lib/shareSearch.ts). The link lands on
   // Home, never on /agent — a pasted link must not run a search by itself (appSession gate). A guest,
   // or a result whose query is unknown, keeps the plain homepage share.
-  const shareFor = (q: SearchQuery | undefined): { shareUrl?: string; shareText?: string } => {
+  const sharedCopyRef = useRef<{ j: string; url: string } | null>(null);
+  const shareFor = (q: SearchQuery | undefined): { shareUrl?: string; shareText?: string; prepareShare?: () => Promise<string | null> } => {
     if (!user || !q) return {};
     const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
     const name = pickName(user, loc);
@@ -685,7 +687,21 @@ export default function Agent() {
     const text = shareMessage(name, q, loc);
     if (!payload || !text) return {};
     const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : SHARE_LINK;
-    return { shareUrl: shareLink(origin, payload), shareText: text };
+    // THE WHOLE CHAT (owner 2026-10-17: «sharing it means I share the chat history»): pressing Share saves
+    // a COPY of this conversation (public.shared_chat) and shares its short /s/<code> link; the search
+    // link above is only the fallback when that save fails. One copy per unchanged conversation.
+    const prepareShare = async (): Promise<string | null> => {
+      const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow });
+      if (!t) return null;
+      const j = JSON.stringify(t);
+      if (sharedCopyRef.current?.j === j) return sharedCopyRef.current.url;
+      const code = await createSharedChat(name, loc, q, t);
+      if (!code) return null;
+      const url = shareLink(origin, code);
+      sharedCopyRef.current = { j, url };
+      return url;
+    };
+    return { shareUrl: shareLink(origin, payload), shareText: text, prepareShare };
   };
   // THE ONE STORE WRITER FOR THIS SCREEN. Every write into the shared query the Filter home binds to
   // goes through here, always sanitized — enforced by verify-af-state-never-leaks-into-filter.ts,

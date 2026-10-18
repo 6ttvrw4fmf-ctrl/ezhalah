@@ -76,6 +76,24 @@ export function decodeSharePayload(raw: string | null | undefined): { q: SearchQ
   } catch { return null; }
 }
 
+// A SHARED CHAT (owner 2026-10-17: «sharing it means I share the chat history»). A signed-in user's
+// Share saves a COPY of the whole conversation in the database (public.shared_chat, migration
+// 20261018031834) under an 8-character code, and the link is /s/<code>. The recipient signs in and the
+// chat is copied into their own history — never live-synced. Older links carry the search itself
+// (the base64url payload above) and keep working.
+export const SHARE_CODE_RE = /^[A-Za-z0-9]{8}$/;
+export const isShareCode = (raw: string | null | undefined): boolean => !!raw && SHARE_CODE_RE.test(raw);
+export type SharedChatCard = { q: SearchQuery; name: string; locale: 'ar' | 'en' };
+/** Validates a row the database returns (shared_chat_card / get_shared_chat); anything off is null. */
+export function sharedChatCardFrom(row: unknown): SharedChatCard | null {
+  const r = row as { sender_name?: unknown; locale?: unknown; query?: unknown } | null;
+  const name = firstName(String(r?.sender_name ?? ''));
+  const q = r?.query as SearchQuery | undefined;
+  if (!name || !q || typeof q !== 'object' || typeof q.location !== 'string') return null;
+  if (q.deal !== 'Rent' && q.deal !== 'Buy') return null;
+  return { q, name, locale: r?.locale === 'en' ? 'en' : 'ar' };
+}
+
 /** The link itself: always Home with the share param (a pasted link never runs a search by itself). */
 export function shareLink(origin: string, payload: string): string {
   // /s/<payload> is the WhatsApp PREVIEW page (api/share-card.ts): it serves the card's tags and then
@@ -153,14 +171,18 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
  * The preview page for /s/<payload>. A valid payload → the personal card + a redirect to Home with
  * ?share=; anything else → the plain Ezhalah card + a redirect to Home. Never throws.
  */
-export function shareCardHtml(origin: string, rawPayload: string | null | undefined): string {
+export function shareCardHtml(origin: string, rawPayload: string | null | undefined, chatCard?: SharedChatCard | null): string {
   const o = origin.replace(/\/+$/, '');
-  const d = decodeSharePayload(rawPayload);
+  // A short code is a SAVED CHAT (shared_chat); its card facts come from the database (chatCard). A code
+  // whose card could not be read still goes to Home + ?share=<code> — the app fetches it there.
+  const code = isShareCode(rawPayload);
+  const d = code ? (chatCard ?? null) : decodeSharePayload(rawPayload);
   const loc = d?.locale ?? 'ar';
   const c = SHARE_CARD[loc];
   const title = (d && shareTitle(d.name, d.q, loc)) || (loc === 'ar' ? 'إزهله' : 'Ezhalah');
-  const to = d && rawPayload ? shareLandingPath(rawPayload) : '/';
-  const url = `${o}${d && rawPayload ? `/s/${rawPayload}` : '/'}`;
+  const ok = !!rawPayload && (code || !!d);
+  const to = ok ? shareLandingPath(rawPayload!) : '/';
+  const url = `${o}${ok ? `/s/${rawPayload}` : '/'}`;
   const image = `${o}${SHARE_CARD_IMAGE_PATH}`;
   return `<!doctype html><html lang="${loc}" dir="${loc === 'ar' ? 'rtl' : 'ltr'}"><head><meta charset="utf-8">`
     + `<meta name="viewport" content="width=device-width,initial-scale=1">`

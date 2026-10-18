@@ -33,7 +33,9 @@ import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
 import { useFilterWelcome } from '@/lib/useFilterWelcome';
-import { decodeSharePayload, shareLandingTitle, SHARE_COPY, SHARE_PARAM } from '@/lib/shareSearch';
+import { decodeSharePayload, shareLandingTitle, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
+import { fetchSharedChat, fetchSharedChatCard } from '@/lib/sharedChat';
+import { isProbeFailure } from '@/lib/afProbe';
 import { pickName } from '@/lib/nameSync';
 import { useI18n, tDetailOption, tPriceTab, isLatinOnlyInput, ARABIC_ONLY_MSG, CITY_REQUIRED_MSG, DISTRICT_UNCONFIRMED_MSG } from '@/i18n';
 
@@ -135,46 +137,78 @@ export default function Home() {
   const cityLabel = (o: { cityId: number; cityAr: string }) => (locale === 'en' ? cityNameEn(o.cityId, o.cityAr) : o.cityAr);
   const regionLabel = (o: { regionId: number | null; regionAr: string | null }) => (locale === 'en' ? regionNameEn(o.regionId, o.regionAr) : o.regionAr);
   const districtLabel = (cityId: number, ar: string) => (locale === 'en' ? districtNameEn(cityId, ar) : ar);
-  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history } = useApp();
+  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history, importSharedChat } = useApp();
   // A SHARED SEARCH LANDS HERE (owner 2026-10-17). `/?share=<payload>` (src/lib/shareSearch.ts) shows a
   // card «عقارات من {name} لك على إزهله» with «اضغط وشوف العقارات». The TAP is what runs the search
   // (a pasted link never runs one by itself — appSession gate). Owner: the recipient signs in to open a
   // shared search so it is saved to their own list; a visitor who isn't signed in sees the sign-in
   // screen right after the tap, and the search opens once they're in — including across an OAuth
   // redirect, via a short-lived pending record. Ordinary «بحث» is untouched and stays free for everyone.
-  const [sharedSearch, setSharedSearch] = useState<{ q: SearchQuery; name: string } | null>(null);
+  // A /s/<code> link is a whole SHARED CHAT (src/lib/sharedChat.ts): the card's facts are read from the
+  // database, and the tap copies the conversation into the recipient's own history and opens it there.
+  const [sharedSearch, setSharedSearch] = useState<{ q: SearchQuery; name: string; code?: string } | null>(null);
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     const raw = new URLSearchParams(window.location.search).get(SHARE_PARAM);
-    const s = decodeSharePayload(raw);
     if (raw) { try { window.history.replaceState(null, '', window.location.pathname); } catch { /* cosmetic */ } }
+    if (isShareCode(raw)) {
+      let alive = true;
+      const load = async (tries: number) => {
+        const card = await fetchSharedChatCard(raw!);
+        if (!alive) return;
+        if (isProbeFailure(card)) { if (tries > 0) setTimeout(() => void load(tries - 1), 1500); return; }
+        if (card) setSharedSearch({ q: card.q, name: card.name, code: raw! });
+      };
+      void load(2);
+      return () => { alive = false; };
+    }
+    const s = decodeSharePayload(raw);
     if (s) setSharedSearch(s);
   }, []);
-  const openSharedSearch = useCallback((s: { q: SearchQuery }) => {
+  const openSharedSearch = useCallback(async (s: { q: SearchQuery; code?: string }) => {
     try { localStorage.removeItem(SHARED_PENDING_KEY); } catch { /* per-device only */ }
     setSharedSearch(null);
     dismissSignInCard();
+    if (s.code) {
+      // The same link opened again opens the same copy, never a second one.
+      let done: Record<string, string> = {};
+      try { done = JSON.parse(localStorage.getItem(SHARED_IMPORTED_KEY) ?? '{}') ?? {}; } catch { done = {}; }
+      const prior = done[s.code];
+      if (prior && history.some((h) => h.id === prior)) {
+        router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q), replay: '0', hid: prior } });
+        return;
+      }
+      const chat = await fetchSharedChat(s.code);
+      if (chat && !isProbeFailure(chat)) {
+        const hid = importSharedChat(chat.q, chat.transcript);
+        try { localStorage.setItem(SHARED_IMPORTED_KEY, JSON.stringify({ ...done, [s.code]: hid })); } catch { /* per-device only */ }
+        setTimeout(() => router.push({ pathname: '/agent', params: { filter: JSON.stringify(chat.q), replay: '0', hid } }), 0);
+        return;
+      }
+      // The copy could not be read: the shared SEARCH still opens (never a dead tap).
+    }
     router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q) } });
-  }, [router, dismissSignInCard]);
+  }, [router, dismissSignInCard, history, importSharedChat]);
   const onSharedTap = () => {
     if (!sharedSearch) return;
-    if (user) { openSharedSearch(sharedSearch); return; }
+    if (user) { void openSharedSearch(sharedSearch); return; }
     try {
-      localStorage.setItem(SHARED_PENDING_KEY, JSON.stringify({ q: sharedSearch.q, name: sharedSearch.name, at: Date.now() }));
+      localStorage.setItem(SHARED_PENDING_KEY, JSON.stringify({ q: sharedSearch.q, name: sharedSearch.name, code: sharedSearch.code, at: Date.now() }));
     } catch { /* without storage the search still opens if sign-in finishes in this page */ }
     openAuth();
   };
   // The tap's continuation once the visitor is signed in (same page, or back from an OAuth redirect).
   useEffect(() => {
     if (!user || Platform.OS !== 'web') return;
-    let pending: { q: SearchQuery; at: number } | null = null;
+    let pending: { q: SearchQuery; code?: string; at: number } | null = null;
     try { pending = JSON.parse(localStorage.getItem(SHARED_PENDING_KEY) ?? 'null'); } catch { pending = null; }
     if (!pending?.q || !(Date.now() - pending.at < SHARED_PENDING_TTL_MS)) {
       try { localStorage.removeItem(SHARED_PENDING_KEY); } catch { /* per-device only */ }
       return;
     }
     const q = pending.q;
-    const t = setTimeout(() => openSharedSearch({ q }), 0); // after the app session has started
+    const code = isShareCode(pending.code) ? pending.code : undefined;
+    const t = setTimeout(() => void openSharedSearch({ q, code }), 0); // after the app session has started
     return () => clearTimeout(t);
   }, [user, openSharedSearch]);
   // ROTATING WELCOME (owner 2026-10-17): a signed-in user sometimes sees a personal line with a live
@@ -2282,6 +2316,8 @@ const E = StyleSheet.create({
 // A shared search waits at most this long for the visitor to finish signing in after the tap.
 const SHARED_PENDING_KEY = 'ezhalah:sharedSearch:pending';
 const SHARED_PENDING_TTL_MS = 30 * 60 * 1000;
+// code → the history id its copy became on this device, so reopening the link never duplicates the chat.
+const SHARED_IMPORTED_KEY = 'ezhalah:sharedChat:imported';
 
 const s = StyleSheet.create({
   sharedBackdrop: {
