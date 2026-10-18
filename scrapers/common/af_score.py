@@ -266,6 +266,11 @@ def findable(rows: list[dict] | None, source_table: str, listing_id: int) -> boo
 # about a picture, not the advertiser's statement, so it never counts as the page saying the ad has one (🆕 2026-10-16).
 _WASALT_SKIP = re.compile(r"agent|broker|owner|advertiser|user|phone|mobile|whats|email|contact|licen|classification|\bid$|_id$|uuid",
                           re.I)
+# The REGA deed's border rows (regaVerifiedInfo … {"key": "borders.southLimitDescription", "value": «ممرات ودرج
+# ومصعد ثم ارتداد 2 ثم قطعة رقم 29»}) say what the unit's boundary TOUCHES: a corridor, a neighbour's plot, the
+# building's lift shaft. That is a legal boundary, not the ad stating what the unit has; all 4 wasalt misses on
+# 2026-10-18 asked «elevator» from it while the seller's own description never names one (re-read 39114420405).
+_WASALT_BORDER = re.compile(r"^borders\.", re.I)
 
 
 # wasalt's structured attribute keys → the Arabic label the comparison's keywords read («م²», «غرف», «دورات المياه»).
@@ -300,6 +305,8 @@ def wasalt_page(url: str, fetch=None) -> dict | None:
         if key and _WASALT_SKIP.search(key):
             return
         if isinstance(node, dict):
+            if _WASALT_BORDER.search(str(node.get("key") or "")):
+                return
             label = WASALT_FIELD_LABELS.get(str(node.get("key")))
             if label and isinstance(node.get("value"), (str, int, float)) and str(node["value"]).strip():
                 # wasalt's own {key, value} row as ONE labelled line: split into loose leaves, «96» never sat next

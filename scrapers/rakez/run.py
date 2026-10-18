@@ -528,6 +528,8 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
     # «موقف خاص», «يسار المصعد»): 1,660 / 385 / 85 of 3,535 active units on 2026-10-17 while every amenity
     # column was NULL. Prose says YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2), never False.
     row.update(prose_answers(acf.get("description_ar")))
+    for col, yes in project_answers(features).items():
+        row.setdefault(col, yes)
     return row, category.lower()
 
 
@@ -538,6 +540,20 @@ _PROSE_COLS = ("elevator", "parking", "kitchen", "air_conditioner", "maid_room",
 def prose_answers(description: Optional[str]) -> dict[str, bool]:
     yes = normalize.prose_amenities_yes(normalize.html_block_lines(description))
     return {c: True for c in _PROSE_COLS if yes.get(c)}
+
+
+# The project's `feature` terms are its build spec, shared by every unit (195 of 195 projects carry one list,
+# and no project mixes unit types: 2,235 apartments, 939 floors, 253 villas, 101 town houses, 2026-10-18).
+# A BUILDING trait the spec names holds for every unit in it: the lifts («مصاعد», «مصعد», «مصاعد إيطالية») and
+# the installed air conditioning («تكييف مخفي», «تكييف سبليت»). A UNIT trait does not: «غرفة خادمة», «غرفة سائق»,
+# «مواقف خاصة» and «مطبخ» describe some of the project's units, not each one (backlog 467), so they are never
+# read from this list. YES or nothing, through the shared matcher («تأسيس مصعد» stays NULL).
+_PROJECT_COLS = ("elevator", "air_conditioner")
+
+
+def project_answers(features: list[str]) -> dict[str, bool]:
+    yes = normalize.prose_amenities_yes("\n".join(features or []))
+    return {c: True for c in _PROJECT_COLS if yes.get(c)}
 
 
 def _page_gone(path: str) -> tuple[bool, str]:
