@@ -87,6 +87,9 @@ type AppState = {
   runQuery: (q: SearchQuery, record?: boolean, signal?: AbortSignal, chatId?: string | null) => Promise<SearchResult>;
   // Persist the serialized conversation for a chat (agent.tsx captures it after each settled turn).
   saveTranscript: (id: string, transcript: PersistedChat) => void;
+  // A chat someone SHARED with this user (owner 2026-10-17): becomes a NEW entry in their own history,
+  // holding the copied conversation — theirs from now on, never synced back. Returns the new entry id.
+  importSharedChat: (q: SearchQuery, transcript: PersistedChat) => string;
   // Fetch a transcript this device no longer holds locally (pruned cache / fresh sign-in) from the
   // server, validate it, and attach it to the entry. Resolves to the transcript or null.
   hydrateTranscript: (id: string) => Promise<PersistedChat | null>;
@@ -1068,6 +1071,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
           } catch {}
           return next;
         });
+      },
+      importSharedChat: (q, transcript) => {
+        const id = 'h' + Date.now();
+        const tRev = Date.now();
+        const next: HistoryItem = {
+          id, label: queryLabel(q), query: q, ts: Date.now(), starred: false,
+          title: autoTitleForQuery(q, getLocale()), titleSource: 'auto', transcript, tRev,
+        };
+        // Same direct-then-state write as saveTranscript, so the entry is on disk before the chat opens.
+        const merged = [next, ...historyRef.current].slice(0, 50);
+        historyRef.current = merged;
+        if (user) try {
+          if (typeof localStorage !== 'undefined') localStorage.setItem(historyKey(user.sub), serializeHistoryForDisk(merged));
+        } catch {}
+        setHistory((h) => [next, ...h.filter((it) => it.id !== id)].slice(0, 50));
+        setActiveChatId(id);
+        return id;
       },
       // Transcript pruned locally (older than LOCAL_TRANSCRIPT_ENTRIES) or absent on this device —
       // pull the server's copy, validate it, attach it. Returns null when the server has none

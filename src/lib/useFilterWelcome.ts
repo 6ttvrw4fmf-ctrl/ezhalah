@@ -13,12 +13,15 @@
 // export's server HTML (React #418 — see lib/responsive.ts); the decision lands in the mount effect.
 import { useEffect, useMemo, useState } from 'react';
 import {
-  welcomeForNow, fallbackLine, renderWelcome, instantWelcome,
+  welcomeForNow, fallbackLine, renderWelcome, instantWelcome, fillName, NAME_SLOT,
   type HeldWelcome, type WelcomeCache, type WelcomeLine, type WelcomeFacts,
 } from '@/lib/filterWelcome';
 import { loadWelcomeFacts } from '@/data/welcomeFacts';
+import { pickName } from '@/lib/nameSync';
 
-const CACHE_KEY = 'ezhalah:filterWelcome:shown';
+// v2: remembered lines hold NAME_SLOT, not a name. v1 entries had the name baked in (a Latin name
+// inside the Arabic line, owner 2026-10-17) and are ignored.
+const CACHE_KEY = 'ezhalah:filterWelcome:shown:v2';
 const readCache = (): WelcomeCache | null => {
   try {
     const v = JSON.parse(globalThis.localStorage?.getItem(CACHE_KEY) ?? 'null');
@@ -30,10 +33,13 @@ const writeCache = (c: WelcomeCache) => { try { globalThis.localStorage?.setItem
 
 // A stored Supabase session = this device is signed in (the restore only confirms it a moment later).
 // Same key shape src/lib/authStorageGuard.ts and src/i18n.tsx read: `sb-<ref>-auth-token`.
-function readStoredSession(): { present: boolean; name: string } {
+// The name in BOTH spellings, by the same pickName() the sidebar and account menu use — so the
+// Arabic line gets «يوسف», never «yusuf».
+type StoredSession = { present: boolean; nameAr: string; nameEn: string };
+function readStoredSession(): StoredSession {
   try {
     const ls = globalThis.localStorage;
-    if (!ls) return { present: false, name: '' };
+    if (!ls) return { present: false, nameAr: '', nameEn: '' };
     for (let i = 0; i < ls.length; i++) {
       const k = ls.key(i);
       if (!k || !/^sb-.+-auth-token$/.test(k)) continue;
@@ -41,15 +47,16 @@ function readStoredSession(): { present: boolean; name: string } {
       if (!raw) continue;
       const u = JSON.parse(raw)?.user;
       const m = u?.user_metadata ?? {};
-      const name = String(m.nameAr || m.full_name || m.name || m.nameEn || (u?.email ? String(u.email).split('@')[0] : '')).trim();
-      return { present: true, name };
+      const base = String(m.full_name || m.name || m.nameEn || m.nameAr || (u?.email ? String(u.email).split('@')[0] : '')).trim();
+      const names = { name: base, nameAr: m.nameAr, nameEn: m.nameEn };
+      return { present: true, nameAr: pickName(names, 'ar'), nameEn: pickName(names, 'en') };
     }
   } catch { /* fall through */ }
-  return { present: false, name: '' };
+  return { present: false, nameAr: '', nameEn: '' };
 }
 
-type Shown = { settled: boolean; id: number | null; ar: string | null; en: string | null };
-const UNSETTLED: Shown = { settled: false, id: null, ar: null, en: null };
+type Shown = { settled: boolean; id: number | null; ar: string | null; en: string | null; nameAr: string; nameEn: string };
+const UNSETTLED: Shown = { settled: false, id: null, ar: null, en: null, nameAr: '', nameEn: '' };
 
 export function useFilterWelcome(
   signedIn: boolean, name: string, locale: 'ar' | 'en',
@@ -62,8 +69,12 @@ export function useFilterWelcome(
     const now = new Date();
     const session = readStoredSession();
     const cache = readCache();
-    const inst = instantWelcome({ hasSession: session.present, cache, now, name: session.name || name });
-    setShown(inst ? { settled: true, id: inst.id, ar: inst.ar, en: inst.en } : { settled: true, id: null, ar: null, en: null });
+    // Names are fixed here, once, so the line on screen never changes in this page load. The store's
+    // name (passed in) is preferred when it is already restored; else the stored session's.
+    const nameAr = (locale === 'ar' && name) || session.nameAr;
+    const nameEn = (locale === 'en' && name) || session.nameEn;
+    const inst = (nameAr || nameEn) ? instantWelcome({ hasSession: session.present, cache, now, name: NAME_SLOT }) : null;
+    setShown(inst ? { settled: true, id: inst.id, ar: inst.ar, en: inst.en, nameAr, nameEn } : { settled: true, id: null, ar: null, en: null, nameAr, nameEn });
     if (!session.present) return;
     // BACKGROUND, for the NEXT visit: keep (or pick) the held line, load its live numbers, render both
     // languages and remember them. Nothing here touches the screen.
@@ -73,7 +84,7 @@ export function useFilterWelcome(
     if (!choice) return;
     loadWelcomeFacts(choice.line, lastLocation, lastDistrict).then((facts: WelcomeFacts) => {
       if (!live) return;
-      const nm = session.name || name || 'x';
+      const nm = NAME_SLOT;
       let line: WelcomeLine = choice.line;
       if (renderWelcome(line, nm, facts, 'ar') === null || renderWelcome(line, nm, facts, 'en') === null) line = fallbackLine(held?.id ?? null);
       const ar = renderWelcome(line, nm, facts, 'ar');
@@ -91,7 +102,7 @@ export function useFilterWelcome(
     // The restore may finish after the instant decision; a signed-out restore still never swaps the
     // text (owner rule) — the line simply stays for this load. Guests (no session stored) get null.
     void signedIn;
-    const text = locale === 'ar' ? shown.ar : shown.en;
+    const text = locale === 'ar' ? fillName(shown.ar, shown.nameAr, 'ar') : fillName(shown.en, shown.nameEn, 'en');
     return { line: text, settled: shown.settled };
   }, [shown, locale, signedIn]);
 }
