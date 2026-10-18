@@ -74,7 +74,7 @@ import { listingOpenUrl, openListing } from '@/lib/openListing';
 import {
   EMPTY_AD_PANE, closeAdTab, hideAdPane, inAppPreviewHost, inAppViewerHost, openAdTab, showAdPane, type AdPane, type AdTab,
 } from '@/lib/inAppViewer';
-import { PICKER_SHEET_BREAKPOINT, VIEWER_SPLIT_BREAKPOINT, CARDS_THREE_ACROSS_BREAKPOINT } from '@/lib/responsive';
+import { PICKER_SHEET_BREAKPOINT, VIEWER_SPLIT_BREAKPOINT, CARDS_THREE_ACROSS_BREAKPOINT, SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import AdViewer from '@/components/AdViewer';
 import { ConfettiOverlay } from '@/components/ConfettiOverlay';
@@ -856,6 +856,8 @@ export default function Agent() {
   const shareScale = useRef(new Animated.Value(1)).current;
   const shareSpring = (toValue: number) =>
     Animated.spring(shareScale, { toValue, stiffness: 260, damping: 26, mass: 0.7, useNativeDriver: Platform.OS !== 'web' }).start();
+  // «مشاركة» label beside the icon — same breakpoint as the Filter screen's share pill.
+  const shareLabelled = useAtLeast(SHARE_LABEL_BREAKPOINT);
   // Filter / AI ModeSwitch (owner 2026-08-16): the pill no longer lives in the top-right corner —
   // it sits CENTERED under the header, mirroring the home hero's centered pill, so switching modes
   // reads as one control staying in the middle rather than teleporting into the corner. And the
@@ -4182,15 +4184,25 @@ export default function Agent() {
         {/* Redesigned to match the home screen's share button (design review 2026-07-24) — same
             tint fill/hairline/height/radius as ModeSwitch's own track, so the pill + share cluster
             reads as one continuous control across both screens, not just within one. */}
+        {/* The SAME labelled «مشاركة» pill as the Filter screen (owner 2026-10-17: the bare box-arrow
+            glyph here was not read as "share"). Same icon, label, breakpoint and styles as index.tsx. */}
         <Pressable
           onPress={() => setShareOpen(true)}
-          style={({ pressed }) => [s.shareIcon, pressed && s.shareIconPressed]}
+          style={({ pressed, hovered }: any) => [
+            s.shareIcon,
+            shareLabelled && s.shareIconWide,
+            hovered && s.shareIconHover,
+            pressed && s.shareIconPressed,
+          ]}
           hitSlop={8}
           onPressIn={() => shareSpring(0.94)}
           onPressOut={() => shareSpring(1)}
+          accessibilityRole="button"
+          accessibilityLabel={t('Share')}
         >
-          <Animated.View style={{ transform: [{ scale: shareScale }] }}>
-            <Ionicons name="share-outline" size={19} color={colors.chipIcon} />
+          <Animated.View style={[s.shareInner, { transform: [{ scale: shareScale }] }]}>
+            <Ionicons name="share-social-outline" size={17} color={colors.primary} />
+            {shareLabelled ? <Text style={s.shareText}>{t('Share')}</Text> : null}
           </Animated.View>
         </Pressable>
       </View>
@@ -5387,7 +5399,8 @@ const s = StyleSheet.create({
   // Matches the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius, soft lift) so
   // the pill + share read as one cluster across both screens (owner redesign 2026-07-24 r2).
   shareIcon: {
-    width: 46,
+    // minWidth, not width — the labelled pill grows sideways (RNW won't release a fixed width; see index.tsx).
+    minWidth: 46,
     height: 46,
     borderRadius: radius.pill,
     alignItems: 'center',
@@ -5403,6 +5416,10 @@ const s = StyleSheet.create({
     elevation: 2,
   },
   shareIconPressed: { opacity: 0.85 },
+  shareIconWide: { paddingHorizontal: 15 },
+  shareIconHover: { backgroundColor: colors.tintFill, borderColor: colors.primary },
+  shareInner: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  shareText: { fontSize: 13.5, fontWeight: '700', color: colors.primary, includeFontPadding: false },
   // Reopen chip for a hidden ad pane — the share button's own tint/hairline idiom, beside it.
   topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },
