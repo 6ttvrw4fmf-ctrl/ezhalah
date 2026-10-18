@@ -71,7 +71,7 @@ const meta = (prop: string) => new RegExp(`<meta (?:property|name)="${prop}" con
 check('the card title names the type, the place, the sender and إزهله; the line is Ezhalah\'s promise',
   meta('og:title') === 'شقق للإيجار في حي النرجس من يوسف على إزهله' && meta('og:description') === 'كل مواقع العقار في مكان واحد · اضغط وشوف');
 check('every card URL follows the REQUEST\'S domain (a domain change needs no code change)',
-  meta('og:image') === 'https://new-domain.example/og-image-v5.png' && meta('og:url') === `https://new-domain.example/s/${fullPayload}`
+  meta('og:image') === 'https://new-domain.example/icon-192.png' && meta('og:url') === `https://new-domain.example/s/${fullPayload}`
   && !/vercel\.app/.test(html));
 check('the page sends a person to Home + ?share= (never /agent)',
   html.includes(`content="0;url=/?share=${fullPayload}"`) && html.includes(`location.replace("/?share=${fullPayload}")`) && !/\/agent/.test(html));
@@ -122,7 +122,19 @@ check('no type, no place: «عقارات من يوسف على إزهله»', T({
 check('a place in the other script is left out, never mixed into the sentence',
   T({ deal: 'Rent', location: 'Riyadh', type: 'Apartment' }) === 'شقق للإيجار من يوسف على إزهله'
   && T({ deal: 'Rent', location: 'Riyadh', type: 'Apartment' }, 'en') === 'Apartments for rent in Riyadh from Yusuf on Ezhalah');
-check('the message is the title + 👇 (short — the card holds the rest)', shareMessage('يوسف', Q, 'ar') === 'شقق للإيجار في حي النرجس من يوسف على إزهله 👇');
+// SMALL, PROFESSIONAL, NOT REPEATED (owner 2026-10-18: «the logo is very very big … remove the finger
+// emoji … not repetitive text»).
+const EMOJI = /\p{Extended_Pictographic}/u;
+check('the title carries no emoji (no 👇, no 🦅)', shareMessage('يوسف', Q, 'ar') === 'شقق للإيجار في حي النرجس من يوسف على إزهله' && !EMOJI.test(shareMessage('يوسف', Q, 'ar') ?? ''));
+mustCatch('a message that brings 👇 back', EMOJI.test('شقق للإيجار 👇'));
+check('the card image is small (≤ 299 px, so WhatsApp shows a thumbnail, not a big logo)',
+  /og:image:width" content="(\d+)"/.test(html) && Number(/og:image:width" content="(\d+)"/.exec(html)![1]) < 300);
+{
+  const agentSrc = (await import('node:fs')).readFileSync(new URL('../src/app/agent.tsx', import.meta.url), 'utf8');
+  const ret = /return \{ shareUrl: shareLink\(origin, payload\)[^}]*\}/.exec(agentSrc)?.[0] ?? '';
+  check('the signed-in share sends only the link — the card already shows the title (never said twice)', !!ret && !/shareText/.test(ret));
+  mustCatch('a share that sends the title text next to its card again', /shareText/.test(ret.replace('prepareShare', 'shareText: text, prepareShare')));
+}
 check('the landing title is the same title; the button is «اضغط وشوف العقارات»',
   shareLandingTitle('يوسف', Q, 'ar') === T(Q) && SHARE_COPY.ar.button === 'اضغط وشوف العقارات');
 mustCatch('a title that forgets the place', (() => {

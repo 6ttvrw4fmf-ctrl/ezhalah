@@ -26,10 +26,10 @@ export const SHARE_COPY = {
 const firstName = (name: string): string => (name ?? '').trim().split(/\s+/)[0] ?? '';
 
 /** The text sent next to the link, or null when there is no name to say it with. */
-/** The text sent next to the link: the personal title + 👇 (owner 2026-10-17: short; the card holds the rest). */
+/** The personal title on its own (owner 2026-10-18: no emoji, never repeated — the share sends only the LINK; its card already shows this title). */
 export function shareMessage(name: string, q: SearchQuery | null | undefined, locale: 'ar' | 'en'): string | null {
   const t = shareTitle(name, q, locale);
-  return t ? `${t} 👇` : null;
+  return t;
 }
 /** The title on the landing card — the same personal title. */
 export function shareLandingTitle(name: string, q: SearchQuery | null | undefined, locale: 'ar' | 'en'): string | null {
@@ -163,7 +163,8 @@ export const SHARE_CARD = {
   ar: { desc: 'كل مواقع العقار في مكان واحد · اضغط وشوف', site: 'إزهله' },
   en: { desc: 'Every real-estate site in one place · Tap to see', site: 'Ezhalah' },
 } as const;
-export const SHARE_CARD_IMAGE_PATH = '/og-image-v5.png';
+// Small on purpose (owner 2026-10-18: the logo was «very very big»): under 300 px WhatsApp shows a thumbnail.
+export const SHARE_CARD_IMAGE_PATH = '/icon-192.png';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
@@ -190,7 +191,7 @@ export function shareCardHtml(origin: string, rawPayload: string | null | undefi
     + `<meta property="og:type" content="website"><meta property="og:site_name" content="${esc(c.site)}">`
     + `<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(c.desc)}">`
     + `<meta property="og:url" content="${esc(url)}"><meta property="og:image" content="${esc(image)}">`
-    + `<meta property="og:image:width" content="512"><meta property="og:image:height" content="512">`
+    + `<meta property="og:image:width" content="192"><meta property="og:image:height" content="192">`
     + `<meta name="twitter:card" content="summary"><meta name="twitter:title" content="${esc(title)}">`
     + `<meta name="twitter:description" content="${esc(c.desc)}"><meta name="twitter:image" content="${esc(image)}">`
     + `<meta http-equiv="refresh" content="0;url=${esc(to)}">`
