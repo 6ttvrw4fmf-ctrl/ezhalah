@@ -94,10 +94,10 @@ function verifyRendering(text: string) {
   assert.equal(actualItemStyle.width, '100%', 'every desktop/phone row uses the full list width');
   const h = (type: string, props: any, ...children: any[]) => ({ type, props, children });
   // pickerRegion / regionLabel: the regions map's heading (2026-10-10) — rendered here with no region tapped.
-  const render = new Function('pickerPlatforms', 'PLATFORM_PICKER_PROFILES', 'locale', 'selectedSources', 'choosePlatform', 't', 's', 'pickerTwoColumns', 'colors', 'h', 'Pressable', 'View', 'Text', 'Image', 'Ionicons', 'pickerRegion', 'regionLabel', 'platformRegionListings', 'MAX_PICKER_SOURCES', js + '\nreturn cards;');
+  const render = new Function('pickerPlatforms', 'PLATFORM_PICKER_PROFILES', 'locale', 'selectedSources', 'choosePlatform', 't', 's', 'pickerTwoColumns', 'colors', 'h', 'Pressable', 'View', 'Text', 'Image', 'Ionicons', 'pickerRegion', 'regionLabel', 'platformRegionListings', 'MAX_PICKER_SOURCES', 'platformLogoBackgrounds', js + '\nreturn cards;');
   for (const locale of ['ar', 'en']) {
     for (const twoColumns of [true, false]) {
-      const cards = render(roster, profiles, locale, [], () => {}, (key: string) => key, { platformPickerItem: actualItemStyle }, twoColumns, {ink:'#253831'}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons', null, () => '', () => 0, load(source, 'MAX_PICKER_SOURCES'));
+      const cards = render(roster, profiles, locale, [], () => {}, (key: string) => key, { platformPickerItem: actualItemStyle }, twoColumns, {ink:'#253831'}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons', null, () => '', () => 0, load(source, 'MAX_PICKER_SOURCES'), load(read('../src/components/platform-logo-bounds.ts'), 'platformLogoBackgrounds'));
       for (let i = 0; i < cards.length; i++) {
         const root = cards[i]; const profile = profiles[roster[i].name];
         const nodes: any[] = [];
@@ -114,7 +114,7 @@ function verifyRendering(text: string) {
       }
       // At the cap (5 lit), every site not already lit renders inert and dimmed; a lit one stays tappable.
       const lit = roster.slice(0, 5).map((p: any) => p.name);
-      const full = render(roster, profiles, locale, lit, () => {}, (key: string) => key, { platformPickerItem: actualItemStyle }, twoColumns, {ink:'#253831'}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons', null, () => '', () => 0, load(source, 'MAX_PICKER_SOURCES'));
+      const full = render(roster, profiles, locale, lit, () => {}, (key: string) => key, { platformPickerItem: actualItemStyle }, twoColumns, {ink:'#253831'}, h, 'Pressable', 'View', 'Text', 'Image', 'Ionicons', null, () => '', () => 0, load(source, 'MAX_PICKER_SOURCES'), load(read('../src/components/platform-logo-bounds.ts'), 'platformLogoBackgrounds'));
       const press = (root: any): any => { if (root?.type === 'Pressable') return root; for (const c of root?.children ?? []) { const f = press(c); if (f) return f; } return null; };
       assert.equal(press(full[5]).props.disabled, true, 'at the cap a 6th site is inert');
       assert.ok(press(full[5]).props.style({ pressed: false }).some((v: any) => v?.opacity === 0.4), 'at the cap a 6th site is dimmed');
