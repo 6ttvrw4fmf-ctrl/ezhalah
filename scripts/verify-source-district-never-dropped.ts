@@ -23,6 +23,9 @@ const sql2 = readFileSync(join(dir, file2), 'utf8');
 const file3 = readdirSync(dir).filter((f) => /^\d{14}_district_recovery_resolves_in_the_served_city\.sql$/.test(f)).sort().at(-1);
 if (!file3) { console.log('FAIL  migration *_district_recovery_resolves_in_the_served_city.sql is missing'); process.exit(1); }
 const sql3 = readFileSync(join(dir, file3), 'utf8');
+const file4 = readdirSync(dir).filter((f) => /^\d{14}_district_carry_folds_plot_codes\.sql$/.test(f)).sort().at(-1);
+if (!file4) { console.log('FAIL  migration *_district_carry_folds_plot_codes.sql is missing'); process.exit(1); }
+const sql4 = readFileSync(join(dir, file4), 'utf8');
 
 // Every rule as a function of the SQL text, so the mutants below run the SAME verdict.
 function problems(s: string): string[] {
@@ -128,6 +131,44 @@ function problems3(s: string): string[] {
   return fail;
 }
 
+// Step 4 (2026-10-18): a plot code is folded off a real district; pure codes stay NULL; the refill is MVCC-safe.
+// The fold and the carry test are LIFTED from the committed SQL and executed here on the owner's cases.
+function problems4(s: string): string[] {
+  const fail: string[] = [];
+  const fold = s.match(/create or replace function public\.district_plot_fold[\s\S]*?coalesce\(p, ''\),\s*'([^']+)', ''\),\s*'([^']+)', ''\),\s*'([^']+)', '', 'g'\)\), ''\)/);
+  const carry = s.match(/create or replace function public\.district_word_carryable[\s\S]*?w ~ '([^']+)'\s*and regexp_replace\(w, '([^']+)', ''\) ~ '([^']+)'\s*and \(w !~ '([^']+)' or w ~ '([^']+)'\)/);
+  if (!fold) fail.push('district_plot_fold() is missing or reshaped');
+  if (!carry) fail.push('district_word_carryable() is missing or reshaped');
+  if (fold && carry) {
+    const js = (p: string, f = 'u') => new RegExp(p, f);
+    const doFold = (v: string) => {
+      const out = v.replace(js(fold[1]), '').replace(js(fold[2]), '').replace(js(fold[3], 'gu'), '').trim();
+      return out === '' ? null : out;
+    };
+    const ok = (w: string | null) => w !== null && js(carry[1]).test(w) && js(carry[3]).test(w.replace(js(carry[2]), ''))
+      && (!js(carry[4]).test(w) || js(carry[5]).test(w));
+    const cases: Array<[string, string | null, boolean]> = [
+      ['بوسحبل (345/4)', 'بوسحبل', true], ['شرق المحدود 176 أ', 'شرق المحدود', true],
+      ['ضاحية هجر ،، الحي السابع رقم 351 / ب', 'ضاحية هجر ،، الحي السابع', true], ['الصفا ١ (93/14)', 'الصفا ١', true],
+      ['الغسانية ٢', 'الغسانية ٢', true], ['33ج', '33ج', false], ['حي 1029 مخطط رقم', 'حي', false],
+      ['حي (حي رقم (5', 'حي', false], ['حي ج1', 'حي ج1', false], ['7037 سلمان الفا', null, false],
+      ['حي 1النخيل', 'حي 1النخيل', false], ['البصر3 مدينه', 'البصر3 مدينه', false], ['حي جو', 'حي جو', false],
+    ];
+    for (const [src, want, c] of cases) {
+      const got = doFold(src);
+      if (got !== want) fail.push(`fold «${src}» → «${got}», want «${want}»`);
+      if (ok(got) !== c) fail.push(`carry «${src}» = ${ok(got)}, want ${c}`);
+    }
+  }
+  const value = s.match(/create or replace function public\.district_recovery_value[\s\S]*?\$\$;/)?.[0] ?? '';
+  if (!/district_word_carryable\(public\.district_plot_fold\(p_neighborhood\)\)\s*then public\.district_plot_fold\(p_neighborhood\)/.test(value)) fail.push('district_recovery_value() no longer carries the plot-folded word');
+  if (/truncate/i.test(s.replace(/--[^\n]*/g, ''))) fail.push('the refill truncates district_recovery (not MVCC-safe; the coordinator forbade it)');
+  if (!/pg_advisory_xact_lock\(hashtext\('location_pipeline:v1_refresh'\)\)/.test(s) || !/pg_try_advisory_xact_lock\(hashtext\('search_listings_ar:single_writer'\)\)/.test(s)) fail.push('the refill no longer holds the pipeline locks');
+  if (!/after_total < 0\.99 \* before_total/.test(s) || !/p\.after_n < 0\.99 \* p\.before_n/.test(s)) fail.push('the ≥ 99% total/per-platform refill assertion is gone');
+  if (!/\('33ج',\s+'33ج',\s+false\)/.test(s)) fail.push('the apply-time truth table lost the pure-code case «33ج»');
+  return fail;
+}
+
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : ` — ${why}`}`); };
 // Mutation proof: the SAME verdict function, run on a deliberately loosened copy of the committed SQL, must go red.
@@ -181,6 +222,21 @@ const mutants3: Array<[string, (s: string) => string]> = [
 for (const [label, mutate] of mutants3) {
   const m = mutate(sql3);
   mustCatch(`served-city: ${label}`, m !== sql3 && problems3(m).length > 0, m === sql3 ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+}
+
+const live4 = problems4(sql4);
+check(`committed migration ${file4} holds every fold/hold pin`, live4.length === 0, live4.join('; '));
+const mutants4: Array<[string, (s: string) => string]> = [
+  ['any digits carried (codes like «33ج» become districts)', (s) => s.replace("or w ~ '^[^0-9٠-٩]*[ء-ي]{3,}[^0-9٠-٩]*[0-9٠-٩]{1,2}$'", "or w ~ '.'")],
+  ['a bare «حي» counts as a name', (s) => s.replace("~ '[ء-ي]{3,}'\n    and (w !~", "~ '[ء-ي]{1,}'\n    and (w !~")],
+  ['fold stops at the bracket only (plot numbers kept)', (s) => s.replace("'\\s*(\\(|\\[|رقم\\s*[\\(:0-9٠-٩]|[0-9٠-٩]{3,}).*$'", "'\\s*(\\(|\\[).*$'")],
+  ['refill by TRUNCATE', (s) => s.replace('perform public.refresh_district_recovery_table(t);', 'truncate public.district_recovery; perform public.refresh_district_recovery_table(t);')],
+  ['writer lock dropped', (s) => s.replace("got := pg_try_advisory_xact_lock(hashtext('search_listings_ar:single_writer'));", 'got := true;')],
+  ['per-platform 99% check dropped', (s) => s.replace('if p.after_n < 0.99 * p.before_n then', 'if false then')],
+];
+for (const [label, mutate] of mutants4) {
+  const m = mutate(sql4);
+  mustCatch(`fold/hold: ${label}`, m !== sql4 && problems4(m).length > 0, m === sql4 ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
 }
 
 console.log(failed === 0 ? 'OK: a source district can never be dropped silently again' : `${failed} check(s) failed`);
