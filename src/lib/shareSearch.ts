@@ -130,6 +130,22 @@ const stripDistrict = (s: string) => s.trim().replace(/^حي\s+/, '').replace(/\
 export function shareTitle(name: string, q: SearchQuery | null | undefined, locale: 'ar' | 'en'): string | null {
   const n = firstName(name);
   if (!n) return null;
+  const phrase = sharePhrase(q, locale);
+  return locale === 'ar' ? `${phrase} من ${n} على إزهله` : `${phrase} from ${n} on Ezhalah`;
+}
+
+// THE NOTE ON THE SIGN-IN POPUP (owner 2026-10-18): a visitor who opens a shared link sees the normal
+// sign-in / sign-up popup with this line on top — «يوسف شاركك: شقق للإيجار في حي النرجس» — and the
+// chat opens, saved to their list, once they are in.
+export function shareInviteNote(name: string, q: SearchQuery | null | undefined, locale: 'ar' | 'en'): string | null {
+  const n = firstName(name);
+  if (!n) return null;
+  const phrase = sharePhrase(q, locale);
+  return locale === 'ar' ? `${n} شاركك: ${phrase}` : `${n} shared with you: ${phrase}`;
+}
+
+/** «شقق للإيجار في حي النرجس» — what the share holds, without the sender or the brand. */
+export function sharePhrase(q: SearchQuery | null | undefined, locale: 'ar' | 'en'): string {
   const ar = locale === 'ar';
   const fits = (s: string) => !!s && (ar ? !LATIN.test(s) : !AR_SCRIPT.test(s));
   // WHAT: one picked type in plural, else «عقارات»; plus rent/sale when known.
@@ -152,7 +168,7 @@ export function shareTitle(name: string, q: SearchQuery | null | undefined, loca
     if (fits(city)) where = city;
   }
   const place = where ? (ar ? ` في ${where}` : ` in ${where}`) : '';
-  return ar ? `${what}${place} من ${n} على إزهله` : `${what}${place} from ${n} on Ezhalah`;
+  return `${what}${place}`;
 }
 
 // THE WHATSAPP PREVIEW CARD (owner 2026-10-17: «like this, simple, short» — a bold title with the
