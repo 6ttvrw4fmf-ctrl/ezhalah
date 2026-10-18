@@ -533,3 +533,13 @@ def test_the_price_grammar_is_deliberately_untouched_by_the_area_rule():
     the abstention above must not leak across and start nulling prices."""
     assert R.parse_money("3850.000")[0] == 3_850_000
     assert R.parse_money("1.600.000 الف")[0] == 1_600_000
+
+
+# ── this office's own spellings of two catalogued عنيزة districts (owner 2026-10-17) ──────────────
+def test_known_spellings_map_to_the_catalogued_district():
+    from scrapers.ialqarawi.run import _known_spelling
+    assert "الاشرفية" in _known_spelling("للبيع فيلا دورين مفصولات بحي الأشرافية بعنيزة")
+    assert "الاشرفية" in _known_spelling("للبيع أرض بحي الاشرافيه")
+    assert "اشبيلية" in _known_spelling("للبيع أرض بحي إشبيليا بعنيزة")
+    # exact words only: a longer word that merely contains the letters is left alone
+    assert _known_spelling("الأشرافيات") == "الأشرافيات"
