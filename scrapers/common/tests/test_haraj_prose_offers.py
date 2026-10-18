@@ -122,7 +122,9 @@ def test_real_unlicensed_post_end_to_end(catalog):
     assert skip == "" and cat == "residential"
     assert (row["property_type"], row["transaction_type"], row["rent_period"], row["price_annual"]) == (
         "Apartment", "Rent", "annual", 14000)
-    assert row["district_ar"] == "حي العزيزية" and row["license_number"] is None and row["photo_urls"] == [
+    # Owner 2026-10-18: the seller's prose («في حي العزيزيه») is never a district — only REGA's deed or Haraj's
+    # own neighbourhood field is (test_haraj_district_precedence.py); this post carries neither → NULL.
+    assert row["district_ar"] is None and row["license_number"] is None and row["photo_urls"] == [
         "https://img/a.jpg", "https://img/b.jpg"]
     assert row["additional_info"]["licensed"] is False
 

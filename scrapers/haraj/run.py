@@ -122,12 +122,21 @@ _NUMS = re.compile(r"\d[\d,٬.]*")
 
 
 def land_price_basis(price: int, area: Optional[float], text: str) -> Optional[str]:
+    # EVERY mention of the figure is read, not only the first, and the shared reader decides too (2026-10-18:
+    # 6 of 20 haraj plots under the city floor stated their rate where the first mention did not —
+    # «(المتر 1,650 ريال)», «البيع المتر 1100», «سعر المتر : 1,100 ريال», «1800ريال سعودي للمتر», «3500ريال بالمتر»).
     t = (text or "").translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
+    mentioned = False
     for m in _NUMS.finditer(t):
         if N.to_int(m.group(0)) != price:
             continue
-        near = t[max(0, m.start() - 30): m.end() + 15]
-        return "per_meter" if _PER_M_WORDS.search(near) else "total"
+        mentioned = True
+        if _PER_M_WORDS.search(t[max(0, m.start() - 30): m.end() + 15]):
+            return "per_meter"
+    if N.stated_per_metre(t, price):
+        return "per_meter"
+    if mentioned:
+        return "total"
     if area and area >= 50 and price <= 20_000:
         return "per_meter"
     if price >= 100_000:
@@ -199,6 +208,8 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
         basis = land_price_basis(price, area, free_text)
     if price and basis == "per_meter":
         price_per_meter = price
+        if p["deal"] == "Buy":
+            price_total = db.AUTHORITATIVE_NULL      # a stated rate, no total: clears a total an older read stored
     elif price and p["deal"] == "Buy" and (ptype not in LAND_TYPES or basis == "total"):
         price_total = price
     elif price and p["deal"] == "Rent" and (ptype not in LAND_TYPES or basis == "total"):
@@ -226,8 +237,11 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
         "city_ar": p["city_ar"],
         "city_id": city_id,
         "region_id": region_id,
-        "district_ar": p["district_ar"] if district else None,
-        "neighborhood": p["district_ar"] if district else None,
+        # The source's own word, kept as written whether or not the catalogue attests it (owner 2026-10-18:
+        # «exact-match against the city's catalog or keep the source word as-is»); additional_info carries
+        # the catalogue spelling when it does and which field the word came from.
+        "district_ar": p["district_ar"],
+        "neighborhood": p["district_ar"],
         "area_m2": round(area) if area else None,
         # «عدد الغرف» is a TOTAL room count, never bedrooms (owner 2026-07-28, aqar + dealapp): bedrooms
         # come only from the ad's own «N غرف …» phrase; the licence count is kept in additional_info.
@@ -276,6 +290,9 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
         "city_raw_ar": p["city_ar"],
         "district_raw_ar": p["district_ar"],
         "post_text_district_ar": p["post_text_district_ar"],
+        "district_source": p["district_source"],
+        "district_catalog_ar": district,
+        "haraj_neighbourhood_ar": p["haraj_neighbourhood_ar"],
         "city_basis": "rega_deed_lines",
         "rega_facts": {k: v for k, v in p["licence_fields"].items() if P._clean(v)},
         "deed_facts": {k: v for k, v in p["deed_fields"].items() if P._clean(v)},
@@ -321,11 +338,11 @@ def map_unlicensed(pid: str, ld: dict, p: dict, verdict: str, why: str, facts: d
     facts["city_resolved"] = bool(city_id)
     if not city_id:
         return None, "", "city_not_in_catalog", facts
-    districts = {d for d in (catalog_district(city_id, c) for c in X.district_phrases(title, description)) if d}
-    stated = X.district_phrases(title, description)
-    facts["district_raw_ar"] = stated[0] if stated else None
-    district = districts.pop() if len(districts) == 1 else None      # two different districts → NULL
-    facts["district_resolved"] = bool(district)
+    # Haraj's OWN neighbourhood field, as written; the seller's prose («حي X» in the text) is never a district
+    # (owner 2026-10-18). Catalogue attestation is recorded, not required.
+    district = p["haraj_neighbourhood_ar"]
+    facts["district_raw_ar"] = district
+    facts["district_resolved"] = bool(catalog_district(city_id, district)) if district else False
     category = category_of(ptype, None)
     # PRICE from the seller's own words — owner decision 2026-10-17 (declared in verify-no-derived-price.ts):
     # only a figure tied to a price word; a bid («السوم»), a range or two figures → NULL.
@@ -384,7 +401,8 @@ def map_unlicensed(pid: str, ld: dict, p: dict, verdict: str, why: str, facts: d
         "post_id": pid, "licensed": False, "classifier": f"{verdict}: {why}", "type_basis": type_why,
         "price_phrase": prose_price["phrase"], "price_basis": prose_price["why"], "price_period_stated": prose_price["period"],
         "area_phrase": area["phrase"], "area_basis": area["why"], "city_raw_ar": city_raw,
-        "district_raw_ar": facts["district_raw_ar"], "photo_count": len(row["photo_urls"]),
+        "district_raw_ar": facts["district_raw_ar"],
+        "district_source": "post_neighbourhood" if district else None, "photo_count": len(row["photo_urls"]),
         "date_posted": ld.get("datePosted"), "city_basis": "post_address_locality",
     }
     row["additional_info"] = redact_capture({k: v for k, v in info.items() if v not in (None, "", [], {})})
@@ -510,6 +528,12 @@ def crawl(files: int, skip_hours: int, limit: int = 0, today: Any = None, only: 
                 unresolved[f"{facts.get('city_raw_ar')} / {facts['district_raw_ar']}"] += 1
         if row.get("additional_info", {}).get("latitude") is not None:
             c["with_pin"] += 1
+        # The crawl just read this post's OWN page. When the liveness oracle's own reader says that same
+        # body is live and the page names this post, record it (no new request). 2026-10-18: the catch-up
+        # stored 3,800 posts from their own pages and 4,074 of 4,478 active rows read «never checked».
+        if _signal(st, h, False) == "live" and pid in h:
+            db.mark_direct_alive(row, oracle="haraj.post_page.own_read")
+            c["stamped_live"] += 1
         (com if cat == "commercial" else res).append(row)
     c["stored"] = len(res) + len(com)
     return res, com, c, unresolved, meta
@@ -561,17 +585,27 @@ def _verify_gone(ad_number: str) -> tuple[str, str]:
                          url_for=lambda _ad: f"{BASE}/{pid}/").verify_gone(ad_number)
 
 
-def liveness_controls(n: int, max_reads: int = 20) -> list[dict]:
-    """fleet_liveness controls (CONTROL_POOLS): property offers posted in Haraj's newest COMPLETE hour
+def liveness_controls(n: int, max_reads: int = 20, max_hours: int = 6) -> list[dict]:
+    """fleet_liveness controls (CONTROL_POOLS): property offers posted in Haraj's newest COMPLETE hours
     whose own page reads live now. Fresh posts are alive almost always; a block or a redesign reads
-    none live, so fewer than n come back and the run quarantines (fails closed)."""
+    none live, so fewer than n come back and the run quarantines (fails closed).
+
+    Walks back hour by hour (newest complete first, at most `max_hours` files, `max_reads` page reads
+    in all) until n read live. One quiet hour is not a block: the 07:48 UTC daily run on 2026-10-18
+    found 3 licensed-titled posts in the 06:00 hour, all 3 read live, and the gate (5 needed)
+    quarantined 3,600 ads with every control it had alive, while 273 struck at 1 strike sat on screen."""
     locs = hour_files()
     out: list[dict] = []
-    for pid in ids_in(locs[-2], Counter(), tight=True)[:max_reads]:
-        if _verify_gone(f"{PREFIX}{pid}")[0] == "live":
-            out.append({"ad_number": f"{PREFIX}{pid}", "listing_url": f"{BASE}/{pid}/"})
-            if len(out) >= n:
-                break
+    reads = 0
+    for u in reversed(locs[max(0, len(locs) - 1 - max_hours):-1]):
+        for pid in ids_in(u, Counter(), tight=True):
+            if reads >= max_reads:
+                return out
+            reads += 1
+            if _verify_gone(f"{PREFIX}{pid}")[0] == "live":
+                out.append({"ad_number": f"{PREFIX}{pid}", "listing_url": f"{BASE}/{pid}/"})
+                if len(out) >= n:
+                    return out
     return out
 
 

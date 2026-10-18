@@ -48,6 +48,18 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-10-18. Undoes 15 rows of a cancelled re-parse run, back to the exact district each served before it.
+  '20261018131709_dealapp_restore_numbered_districts_a_broad_plot_rule_moved.sql':
+    'restores 15 dealapp districts that the cancelled run 39129698696 rewrote under a too-broad plot-code rule, each to ' +
+    'the value search_listings_ar served before the run and only where the row still held the run\'s value; the rule ' +
+    'that caused it is pinned by test_dealapp_plot_code_district_2026_10_18.py (numbered districts stay, short codes go), ' +
+    'and the next re-parse writes the same page value, so there is no state left for a detector to watch',
+  // 2026-10-18. ksaaqar `neighborhood` repair (data half of #7511), applied before its detector existed.
+  '20261018125140_ksaaqar_neighborhood_holds_only_a_stated_district.sql':
+    'watched by its companion 20261018131230_mon_detect_ksaaqar_neighborhood_unstated.sql, which creates ' +
+    'mon_detect_ksaaqar_neighborhood_unstated() over the same predicate and splices it into the ' +
+    'mon_run_all_detectors() roster (0 live after the repair; a planted plus code is caught, 0 -> 1). The scraper ' +
+    'half is pinned by test_ksaaqar_location_field_district_2026_10_18.py',
   // 🔬 AF engineer, 2026-10-12. Two NULL-only back-fills of Advanced Filter answers from each ad's OWN stored
   // text, computed by the same shared reader the scrapers now call on every crawl (yes-or-nothing prose for
   // sites with no structured field), so a re-crawl writes the same value and a new row cannot re-open the gap.
@@ -131,6 +143,19 @@ const WAIVED: Record<string, string> = {
     'AUTHORITATIVE_NULL (scrapers/bossbih/run.py), pinned by test_bossbih_price_basis_and_traps.py',
   // 🔬 AF engineer, 2026-10-08. Each of tonight's three repairs is watched by its own companion or pinned the
   // same way as the 2026-10-07 entries below.
+  // 2026-10-18 (owner P1 «we can get sued»): the repair was applied before its watcher existed, so the applied file cannot
+  // name it; the companion creates it and splices it into the roster.
+  '20261018123454_wasalt_rate_is_not_the_total.sql':
+    'watched by its companion 20261018124842_mon_detect_rate_served_as_total.sql, which creates ' +
+    'mon_detect_rate_served_as_total() (P1, routed to 🔧 repair) over every SERVED sale row whose own description proves the ' +
+    'served price is a per-m² rate, and splices it into the mon_run_all_detectors() roster (a planted served 8,000 on the ' +
+    '9.8M ad 5848132 is caught at apply)',
+  // Same class, same watcher: the reader now reads both texts and the seller's line; the applied detector reads through it.
+  '20261018135052_wasalt_rate_proof_reads_both_texts_and_the_sellers_line.sql':
+    'watched by mon_detect_rate_served_as_total() (20261018124842, rostered, P1 to 🔧), which reads through the very ' +
+    'wasalt_description_total() this file widens, and by its companion 20261018135715_mon_detect_served_total_below_city_floor.sql ' +
+    '(P1 over every served sale plot under 2% of its city median SAR/m² that no page read backs; a planted 6.5 SAR/m² Riyadh ' +
+    'plot is caught at apply)',
   '20261008095541_sanadak_unticked_feature_box_is_silence_not_no.sql':
     'watched by its companion 20261008095825_mon_detect_sanadak_unticked_box_as_no.sql, which creates ' +
     'mon_detect_sanadak_unticked_box_as_no() over the served rows AND both views and splices it into the ' +

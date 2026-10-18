@@ -38,6 +38,10 @@
 -- the four same-day passes before it left this mirror stale and the barrier green (it compares
 -- dates, not bodies), while mon_detect_sql_mirror_drift compared live against the wave-2 digest.
 -- Re-verified 2026-10-16 (Haraj wiring): two haraj arms spliced after the maktab commercial arm; md5 ea8174b63953cfc25aef4a39af032f0a == live.
+-- Re-verified 2026-10-18 (migrations 20261018081657_district_recovery_carries_the_source_word and
+--   20261018083435_source_district_carried_fleet_wide_null_district_is_red): UNCHANGED. Both only READ this view
+--   (refresh_district_recovery_table selects from it; the proofs count rows it holds); md5(live pg_get_viewdef) ==
+--   ea8174b63953cfc25aef4a39af032f0a == body below.
  WITH native AS (
          SELECT 'alhoshan'::text AS platform,
             'alhoshan_residential_listings'::text AS source_table,

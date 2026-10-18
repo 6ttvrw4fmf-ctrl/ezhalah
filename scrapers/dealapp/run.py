@@ -64,6 +64,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, http_liveness, normalize, sold_pin  # noqa: E402
+from scrapers.common.arabic_location import norm_ar  # noqa: E402
 from scrapers.dealapp import liveness as dealapp_liveness  # noqa: E402
 
 SOURCE = "Deal App"
@@ -625,9 +626,47 @@ def _city_from_line(html: str) -> tuple[Optional[str], Optional[str]]:
     return (place, city) if city else (None, None)
 
 
+# A plot or plan code is never a district (owner 2026-10-18): «حي 1051 مخطط رقم», «حي 33ج», «حي ج19», «مخططات».
+# A NUMBERED district is not one: «حي الناصرية 4», «حي الياسمين1» name a real sub-district (a name of 3+ letters
+# followed by a 1-2 digit number). The first cut called every digit a plot code and its repair run (39129698696,
+# cancelled) moved 29 such rows to the title's district — «الناصرية 4» → «الشواجرة».
+_PLOT_CODE = re.compile(r"مخطط|رقم|[0-9٠-٩]{3,}")
+_NUMBERED_NAME = re.compile(r"(?:حي\s+)?[ء-ي]{3,}(?:\s+[ء-ي]+)*\s?[0-9٠-٩]{1,2}")
+
+
+def _is_plot_code(d: str) -> bool:
+    d = d.strip()
+    if _PLOT_CODE.search(d):
+        return True
+    return bool(re.search(r"[0-9٠-٩]", d)) and not _NUMBERED_NAME.fullmatch(d)
+# The deed's own location, which the ad prints in its description: «وصف موقع العقار حسب الصك / المدينة: X / الحي: Y».
+_DEED_RE = re.compile(r"حسب\s+الصك\s*المدينة\s*:\s*([^\n:]{2,30}?)\s*الحي\s*:\s*([^\n:]{2,40}?)"
+                      r"(?=\s*(?:\n|$|الموظف|عمولة|رقم|شاهد|الضمانات))")
+
+
+def _usable_district(d: Optional[str]) -> bool:
+    return bool(d) and bool(re.search(r"[ء-ي]{2}", d)) and not _is_plot_code(d) and "غير محدد" not in d
+
+
+def _deed_district_ar(schema: dict, city_ar: Optional[str]) -> Optional[str]:
+    """«الحي:» of the deed block, ONLY when its «المدينة:» is this listing's city. 422 of 1,949 live deed blocks
+    (2026-10-18) name another city — 581956, a Buraidah plot, prints «المدينة: جده الحي: الصفا» — so a block
+    about another place is never this ad's district."""
+    m = _DEED_RE.search(schema.get("description") or "")
+    if not m or not city_ar or norm_ar(m.group(1)) != norm_ar(city_ar):
+        return None
+    hay = m.group(2).strip()
+    return hay if _usable_district(hay) else None
+
+
 def _district_ar(schema: dict, html: str, city_ar: Optional[str]) -> Optional[str]:
-    """Dealapp's district: the page's own location line first, the title's middle segment as fallback."""
-    return _location_line_district_ar(html, city_ar) or _breadcrumb_district_ar(schema, city_ar)
+    """Dealapp's district: the page's own location line, then the title's middle segment — each only when it is a
+    district name, never a plot/plan code. When the listing itself names none (93 live rows on 2026-10-18 stored
+    a plot code and served no district), the deed block's «الحي:» for the same city."""
+    for own in (_location_line_district_ar(html, city_ar), _breadcrumb_district_ar(schema, city_ar)):
+        if _usable_district(own):
+            return own
+    return _deed_district_ar(schema, city_ar)
 
 
 def _spec_value(html: str, label: str) -> Optional[str]:

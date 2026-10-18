@@ -683,6 +683,11 @@ def map_listing(ix: dict, detail: Optional[dict]) -> tuple[Optional[dict], str, 
         rent_period, price_annual = (rp, annual) if rp else (None, amount)
     elif amount is not None and basis == "total":
         price_total = amount
+    if basis == "total" and basis_from == "detail_label" and detail_read:
+        # The ad's own page labels its figure a TOTAL («السعر 350 ريال», BSB14657 rendered 2026-10-18), so it states no
+        # rate: a rate stored by an older read clears instead of riding along (14657 kept price_per_meter 350 beside
+        # its 350 total — a None is dropped by db._unknown_must_not_overwrite_known).
+        price_per_meter = db.AUTHORITATIVE_NULL
     # A number with no basis label ANYWHERE stays out of both price columns: the source published a
     # figure but not what it means, and a total is a different fact from a rate. The raw figure
     # survives in additional_info, so nothing published is hidden.

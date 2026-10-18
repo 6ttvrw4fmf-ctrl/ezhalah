@@ -178,7 +178,8 @@ def prose_amenities(d: Any) -> dict[str, bool]:
 # every run first sweeps them from the payload we already hold: no proxy, no page fetch, the ad's own
 # stored words. Only rows whose column is still NULL and whose description carries the word are read,
 # so after the first pass each run re-reads only the few the matcher declined (a negation, «تأسيس»).
-_PROSE_SCAN = {"elevator": ("مصعد",), "air_conditioner": ("مكيف", "تكييف"), "private_entrance": ("مدخل",)}
+# «مصاعد» is the plural and shares no substring with «مصعد»: 199 active ads say only the plural (🔬 2026-10-18).
+_PROSE_SCAN = {"elevator": ("مصعد", "مصاعد"), "air_conditioner": ("مكيف", "تكييف"), "private_entrance": ("مدخل",)}
 _DESC = "ar_data->propertyInfo->>description"
 
 
@@ -453,6 +454,53 @@ def pending_count(c, table: str, flag: str, sel: str) -> int:
     return int(res.count)
 
 
+def _no_district_rows(c, table: str, base, limit: int) -> list[dict]:
+    """Un-fetched rows of `table` that the search index serves with NO district (production_ready).
+    Best effort: a failed read answers [] and the run keeps its normal order — never a crashed crawl."""
+    try:
+        idx = (c.table("search_listings_ar").select("listing_id").eq("source_table", table)
+               .eq("production_ready", True).is_("district_ar", "null").limit(5000).execute().data or [])
+        ids = [r["listing_id"] for r in idx if r.get("listing_id") is not None]
+        out: list[dict] = []
+        for i in range(0, len(ids), 200):
+            if len(out) >= limit:
+                break
+            out += base().in_("id", ids[i:i + 200]).execute().data or []
+        return out[:limit]
+    except Exception as e:  # noqa: BLE001
+        print(f"   ⚠ no-district priority read failed ({str(e)[:120]}) — normal order", flush=True)
+        return []
+
+
+# A per-m² RATE typed into the price field serves as a «total» of a few thousand riyals for a plot (wasalt 5813546: «6,500»
+# for 467 m², its own description says «Price: 3041220 SAR»). Real land never sells under this many SAR per m² in a city
+# we serve, so a SALE row below it is read FIRST: its Arabic payload carries the description whose stated total lets
+# trg_wrm_rate_is_not_the_total prove the unit. Reading it changes nothing by itself — the source's text decides.
+RATE_SUSPECT_PPM = 50
+
+
+def _rate_suspect_rows(c, table: str, base, limit: int) -> list[dict]:
+    """Un-fetched rows of `table` the index serves as a SALE under RATE_SUSPECT_PPM SAR/m² (2026-10-18: 54 of 108 such
+    wasalt plots had never had their Arabic page read, so the stored proof did not exist). Best effort like
+    _no_district_rows: a failed read answers [] and the run keeps its normal order."""
+    try:
+        idx = (c.table("search_listings_ar").select("listing_id,price_total_effective,area_m2").eq("source_table", table)
+               .eq("production_ready", True).eq("deal_ar", "بيع").lt("price_total_effective", 100000)
+               .limit(5000).execute().data or [])
+        ids = [r["listing_id"] for r in idx
+               if r.get("listing_id") is not None and (r.get("area_m2") or 0) > 0
+               and 0 < (r.get("price_total_effective") or 0) < RATE_SUSPECT_PPM * r["area_m2"]]
+        out: list[dict] = []
+        for i in range(0, len(ids), 200):
+            if len(out) >= limit:
+                break
+            out += base().in_("id", ids[i:i + 200]).execute().data or []
+        return out[:limit]
+    except Exception as e:  # noqa: BLE001
+        print(f"   ⚠ rate-suspect priority read failed ({str(e)[:120]}) — normal order", flush=True)
+        return []
+
+
 def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: int = 1,
                  max_pending: int = MAX_PENDING_DEFAULT, allow_backfill: bool = False,
                  retry_errs: int = 100, err_backoff_hours: float = 24.0,
@@ -532,6 +580,18 @@ def enrich_table(table: str, limit: int, workers: int, shard: int = 0, shards: i
         if len(rows) < limit:
             older = (_base().order("id", desc=True).limit(limit).execute().data or [])
             rows += [r for r in older if r["id"] not in seen][: limit - len(rows)]
+    # NO-DISTRICT FIRST (2026-10-18, owner «fix everything»). A live row whose English zone the
+    # source-attested EN→AR bridge cannot place is served with NO district until its Arabic page is read —
+    # 312 such rows sat up to 23,861 deep in a newest-first queue. Their Arabic page is the source's own
+    # word (it beats any transliteration), so they go to the FRONT of this run, inside the same `limit`.
+    nd = _no_district_rows(c, table, _base, limit)
+    rs = _rate_suspect_rows(c, table, _base, limit)
+    if nd or rs:
+        first = nd + [r for r in rs if r["id"] not in {x["id"] for x in nd}]
+        ids = {r["id"] for r in first}
+        rows = (first + [r for r in rows if r["id"] not in ids])[:limit]
+        print(f"   ⓘ {len(nd)} live rows served with no district + {len(first) - len(nd)} sale rows served under "
+              f"{RATE_SUSPECT_PPM} SAR/m² go first", flush=True)
     print(f"── {table} shard {shard}/{shards}: {len(rows)} un-fetched rows (cap {limit})", flush=True)
     stats = {"ok": 0, "empty": 0, "fail": 0, "skipped": 0}
     lock = threading.Lock()

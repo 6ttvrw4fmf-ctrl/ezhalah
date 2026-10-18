@@ -133,6 +133,14 @@ def parse_area(text: str) -> Optional[int]:
 _PER_METRE = re.compile(r"للمتر|لل?متر\s*المربع|/\s*م²|/\s*متر")
 
 
+def _stated_per_metre(text: str, n: int) -> bool:
+    """The ad's own description states THIS figure per metre: SDQ5562's header prints «550 ريال», its
+    description «الحد ( 550 ريال للمتر )» (2026-10-18). The marker must follow the same figure; a per-metre
+    phrase about another number never turns this one into a rate."""
+    flat = re.sub(r"(?<=\d),(?=\d)", "", text.translate(_AR_DIGITS))
+    return re.search(rf"(?<![\d.]){n}\s*(?:ريال|ر\.س)?\s*\(?\s*(?:{_PER_METRE.pattern})", flat) is not None
+
+
 def parse_price(text: str) -> tuple[Optional[int], Optional[int]]:
     """(price_total, price_per_meter). «على السوم» (by offer) is an ABSENCE — never a number, and
     never the «الدخل السنوي» rental income the description states further down."""
@@ -152,6 +160,8 @@ def parse_price(text: str) -> tuple[Optional[int], Optional[int]]:
     if n <= 0:
         return None, None
     if _PER_METRE.search(head):
+        return None, n
+    if _stated_per_metre(text, n):
         return None, n
     area = parse_area(text)
     if area and n < area:                 # a total under 1 SAR/m² cannot be a total
@@ -203,7 +213,17 @@ def resolve_district_words(text: str, city_id: Optional[int]) -> tuple[Optional[
             hit = find_district_in_text(cand, city_id)
             if hit and norm_district_tok(hit) == norm_district_tok(cand):
                 return hit, cand
-    return find_district_in_text(words[0], city_id), words[0]   # the one-word read, exactly as before
+    hit = find_district_in_text(words[0], city_id)
+    if hit is None:
+        # A spelling of a catalogued district (ops_district_name_decision 'variant', 20261018073107): mapped
+        # here, never added to the catalog. «الوسيطي» / «الوسيطى» is بريدة's «حي الوسيطا» (39 ads, 10-18).
+        alt = _DISTRICT_SPELLING.get((city_id, norm_district_tok(words[0])))
+        if alt:
+            hit = find_district_in_text(alt, city_id)
+    return hit, words[0]   # the one-word read, exactly as before
+
+
+_DISTRICT_SPELLING = {(11, norm_district_tok("الوسيطي")): "حي الوسيطا"}
 
 
 def resolve_district(text: str, city_id: Optional[int]) -> Optional[str]:
@@ -499,6 +519,7 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
         district_raw = district_words      # the ad's own full words («القاع البارد», not «القاع»)
 
     price_total, price_per_meter = parse_price(text)
+    rate_stated = price_per_meter is not None
     rent_period, price_annual = (None, None)
     if deal == "Rent":
         rent_period, price_annual = normalize.rent_period_and_annual(price_total, text)
@@ -529,7 +550,10 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
         if rent_period:
             row["rent_period"] = rent_period
     else:
-        row["price_total"] = price_total
+        # A stated rate with no total is the source settling «no total»: AUTHORITATIVE_NULL clears a total an
+        # older read stored (SDQ5562 held 550 as a total), where a plain None would be dropped by the upsert.
+        no_total = db.AUTHORITATIVE_NULL if rate_stated else None
+        row["price_total"] = price_total if price_total is not None else no_total
     if price_per_meter is not None:
         row["price_per_meter"] = price_per_meter
 

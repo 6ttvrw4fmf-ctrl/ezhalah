@@ -817,6 +817,17 @@ function originalCurrency(input: string): string {
 // more Latin words → "en". A tie or a letter-less message (digits/punctuation only, e.g. "4000")
 // returns null so the caller can fall back to the conversation's language. Counting words (not
 // letters) means a single foreign name — "ابحث عن فيلا في Riyadh" — doesn't flip the whole reply.
+// A model reply is one JSON object. json_object mode's documented defect answers a run of blank lines,
+// and the text-mode re-ask below may wrap the object in ```json fences or a sentence. Cut the object out
+// of whatever came back — the first "{" to the last "}" — and hand anything with no object through
+// untouched, so the parse below still decides and the 502 names what really arrived.
+function jsonObjectFromReply(content: unknown): string {
+  const s = String(content ?? "").trim();
+  if (!s || (s.startsWith("{") && s.endsWith("}"))) return s;
+  const a = s.indexOf("{"), b = s.lastIndexOf("}");
+  return a >= 0 && b > a ? s.slice(a, b + 1) : s;
+}
+
 function detectLang(text: string): "ar" | "en" | null {
   const words = text.match(/[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu) ?? [];
   let ar = 0, en = 0;
@@ -1057,8 +1068,14 @@ Deno.serve(async (req: Request) => {
       // the same spend gate and the same 2-attempt bound as an HTTP retry, so nothing routes around
       // the guards and spend stays bounded.
       const EMPTY_REPLY_NUDGE = "\nOUTPUT RULE: the previous attempt returned an empty reply. Output the complete JSON object now — never an empty or whitespace-only reply.";
+      // The re-ask LEAVES json_object mode. The blank-line reply is that mode's documented defect, and
+      // measured 2026-10-18 (backlog 643, 2/2 on the deployed #7310 code) the nudged re-ask in the same
+      // mode answered the same 39 blank characters (43 completion tokens, finish_reason stop). Text mode
+      // answers; jsonObjectFromReply() cuts the object out of fences or a sentence, and JSON.parse below
+      // still decides. The FIRST attempt keeps json_object mode — the cheap, usually-right path.
+      const { response_format: _jsonMode, ...textModePayload } = JSON.parse(payload);
       const nudgedPayload = JSON.stringify({
-        ...JSON.parse(payload),
+        ...textModePayload,
         messages: [{ ...messages[0], content: String(messages[0].content) + EMPTY_REPLY_NUDGE }, ...messages.slice(1)],
       });
       let res: Response | null = null;
@@ -1115,7 +1132,7 @@ Deno.serve(async (req: Request) => {
       }
       // `data` was parsed inside the loop (the body is consumed there so an empty reply can be re-asked).
       const choice = data?.choices?.[0];
-      const raw = String(choice?.message?.content ?? "").trim();
+      const raw = jsonObjectFromReply(choice?.message?.content);
       // finish_reason "length" means the ceiling was hit — the single most likely cause of both the
       // empty and the unparseable case, and invisible without this. Carry it (plus the reasoning-token
       // count, which is what silently ate the budget in the 2026-08-28 incident) into the error so the

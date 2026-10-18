@@ -128,11 +128,18 @@ def test_licence_location_arabic_fallback_and_corner_facade():
     assert row["license_number"] == "7201131815"
 
 
-def test_unresolved_district_is_null_with_raw_kept():
+def test_placeholder_district_is_null_and_an_unattested_word_is_kept():
+    # «حي غير معروف» is a non-answer → NULL (silence is never a district named «unknown»).
     desc = FLAT_AR.replace("الحي: الجنادرية", "الحي: حي غير معروف")
     row, _, skip, facts = mapped("للإيجار شقه", desc, city="الرياض")
     assert skip == "" and row["district_ar"] is None and row["neighborhood"] is None
-    assert row["additional_info"]["district_raw_ar"] == "حي غير معروف" and facts["district_resolved"] is False
+    assert "district_raw_ar" not in row["additional_info"] and facts["district_resolved"] is False
+    # Owner 2026-10-18 (reverses catalogue-or-NULL): a REAL deed word the catalogue does not attest is KEPT
+    # as the source wrote it, with its provenance; attestation is recorded, not required.
+    row, _, skip, facts = mapped("للإيجار شقه", FLAT_AR.replace("الحي: الجنادرية", "الحي: المصيف"), city="الرياض")
+    assert skip == "" and (row["district_ar"], row["neighborhood"]) == ("المصيف", "المصيف")
+    assert row["additional_info"]["district_source"] == "deed" and facts["district_resolved"] is False
+    assert "district_catalog_ar" not in row["additional_info"]
 
 
 def test_unlicensed_offer_is_stored_from_its_own_words_owner_2026_10_17():
@@ -271,6 +278,23 @@ def test_liveness_controls_are_fresh_posts_that_read_live_and_fail_closed(monkey
     assert R.liveness_controls(5) == []
 
 
+def test_liveness_controls_walk_back_past_a_quiet_hour(monkeypatch):
+    """2026-10-18 07:48 UTC: the newest complete hour held 3 licensed posts, all live, and the run
+    quarantined 3,600 ads on «controls 3/3 live». A thin hour walks back; a block still fails closed."""
+    files = {"h1": ["10", "11", "12"], "h2": ["20", "21"], "h3": ["30", "31", "32"], "filling": ["99"]}
+    monkeypatch.setattr(R, "hour_files", lambda: ["h1", "h2", "h3", "filling"])
+    seen = []
+    monkeypatch.setattr(R, "ids_in", lambda u, pre, tight=False: (seen.append(u) or files[u]))
+    monkeypatch.setattr(R, "_verify_gone", lambda ad: ("live", ""))
+    got = R.liveness_controls(5)
+    assert seen == ["h3", "h2"]                                    # newest complete first, never "filling"
+    assert [r["ad_number"] for r in got] == ["HRJ30", "HRJ31", "HRJ32", "HRJ20", "HRJ21"]
+    # the read budget still binds across hours, and a block still yields fewer than n
+    monkeypatch.setattr(R, "_verify_gone", lambda ad: ("unknown", "challenge"))
+    seen.clear()
+    assert R.liveness_controls(5, max_reads=4) == [] and seen == ["h3", "h2"]
+
+
 # ── several units in one licensed post = a catalogue (owner real-user check 2026-10-17) ─────────────
 @pytest.mark.parametrize("title,cat", [
     ("شقق تمليك فاخرة للسكن والا ستثمار ابحر الشمالية 3و4و 5غرف", True),   # HRJ11190739649, 1,161 m²
@@ -321,3 +345,41 @@ def test_body_catalogue_is_never_stored_and_reads_gone():
     one = ('<script type="application/ld+json">'
            + json.dumps(ld("شاليه للبيع - الطايف", BODY_ONE_UNIT_TWICE), ensure_ascii=False) + "</script>")
     assert R._signal(200, one, False) == "live"
+
+
+# ── the crawl's own-page read is a liveness reading (2026-10-18) ─────────────────────────────────
+def test_crawl_stamps_live_only_when_the_oracles_reader_says_live_on_this_post(monkeypatch):
+    """4,074 of 4,478 active haraj rows read «never checked» after the catch-up stored them from their
+    own pages. The crawl now records that read through the oracle's OWN reader (_signal), and only for
+    a page that names this post; a gone/request page is never stored, so never stamped."""
+    live = '<script type="application/ld+json">' + json.dumps(ld("x", FLAT_AR), ensure_ascii=False) + "</script>"
+    pages = {"11190690713": live + R.TAG,                       # live, names itself (ld url)
+             "11190690999": live + R.TAG}                       # live body, but about another post
+    monkeypatch.setattr(R, "read_post", lambda pid: (200, pages[pid]))
+    monkeypatch.setattr(R, "map_post", lambda pid, *a, **k: (
+        {"ad_number": f"{R.PREFIX}{pid}", "additional_info": {}}, "residential", "", {"district_resolved": True}))
+    res, _, c, _, _ = R.crawl(0, 0, only=list(pages), meta={"files": ["--ids"], "prefiltered": {}})
+    marked = {r["ad_number"]: R.db._DIRECT_ALIVE_KEY in r for r in res}
+    assert marked == {"HRJ11190690713": True, "HRJ11190690999": False} and c["stamped_live"] == 1
+
+
+# 2026-10-18, the haraj plots under the city floor: the RATE is stated somewhere other than the first mention of
+# the figure, or in a wording the narrow window missed. Recorded free-text lines (licence box excluded), verbatim.
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("price, area, text", [
+    (1650, 1080, "💰 سعر البيع: 1,780,000 ريال تقريبًا (المتر 1,650 ريال) 📄"),                       # 11190453852
+    (1100, 1014, "للبيع في حي المروج 3ج س ع شارعين المساحه 1014 البيع المتر 1100 شرقيه جنوبيه"),        # 11190435595
+    (1100, 660, "💵 السعر / Price💵 سعر المتر : 1,100 ريال السعر الاجمالي :"),                          # 11189560091
+    (1400, 900, "للبيع في محافظه المزاحميه حي المروج المساحه 900 سكني المتر 1400 ريال"),               # 11189410160
+    (1800, 400, "💰 السعر والشروط: السعر المطلوب: 1800ريال سعودي للمتر السعر غير شامل السعي"),          # 11189183446
+    (3500, 1443, "/ شارع30مـ شرقا -العرض/مباشر - المطلوب /3500ريال بالمتر -السعي وضريبة التصرف"),        # 11189087398
+])
+def test_a_rate_stated_anywhere_about_the_figure_is_per_meter(price, area, text):
+    assert R.land_price_basis(price, area, "مساحة الأرض " + str(area) + " " + str(price) + " نهائي " + text) == "per_meter"
+
+
+def test_mutation_a_mention_with_no_marker_anywhere_stays_a_total():
+    # 11189120675: «عليها سوم 750» on 1,008 m² — no per-metre word for this figure (owner default: a total)
+    assert R.land_price_basis(750, 1008, "أرض بمساحة مناسبة وموقع واعد، عليها سوم 750 والبيع قريب") == "total"

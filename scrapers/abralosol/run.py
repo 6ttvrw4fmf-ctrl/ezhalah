@@ -41,10 +41,12 @@ import json
 import re
 import sys
 import time
+from functools import lru_cache
 from typing import Any, Optional
 
 from curl_cffi import requests as cc
 
+from scrapers.common import arabic_location as AL
 from scrapers.common import db
 from scrapers.common.http import retry_smarter_session
 from scrapers.common.http_liveness import LivenessProbe
@@ -247,7 +249,10 @@ def _price(cell_html: str) -> dict:
             txt = txt[len(label):]
             break
     amount = N.to_int(txt)
-    # «على السوم» with no figure (~10% of the catalog) → NULL, never 0.
+    # «على السوم» with no figure (~10% of the catalog) → NULL, never 0. A NEGATIVE figure is the same placeholder:
+    # nid 7132 prints «على السوم | -2 ريال» and to_int drops the sign, so it was served as a 2 SAR plot (2026-10-18).
+    if re.match(r"\s*[-−–]\s*\d", txt):
+        amount = None
     if amount is not None and amount > 0:
         out["amount"] = amount
     return out
@@ -436,6 +441,77 @@ _OTHER_REGION = re.compile(r"(حائل|القصيم|بريدة|عنيزة|تبو
                            r"المدينة المنورة|جدة|الطائف|خميس مشيط|ينبع)")
 
 
+# ── DISTRICT FROM THE TITLE (2026-10-18) ────────────────────────────────────────────────────────
+# 96 live rows (92 الهفوف + 4 المبرز, both tables) carried an EMPTY tags cell while their own h1 named
+# the district («بيت جاهز للبيع في الراشديةأ», «أرض للبيع في الحي الخامس ضاحية هجرج»). The title may fill `neighborhood` ONLY where a whole slice of it keys EXACTLY to
+# a district already attested for THAT city: the catalogue (loc_catalog_district) plus the districts
+# this office's own tags cell already published for the city. Both sides use norm_district_tok — the
+# ONE key district_norm is built with (ة/ه, ى/ي, أإآ/ا, leading «حي »/«ال», end digits folded) — so
+# «الغسانيه» finds «الغسانية». The site glues the plot's BLOCK LETTER to the district («الراشديةأ» ×12,
+# «ضاحية هجرد» ×6, «الحي الثانيج»): one trailing أ/ب/ج/د is split off the last word before the same
+# exact comparison. Nothing else bends: no edit distance («ضاحية هجرة» is nothing), no prefix, no
+# fragment, no guess. The stored value is the title's own slice as written («حي الراجحي» keeps its
+# «حي »), never the catalogue spelling. Computed AFTER _city() and never fed back into it: the title
+# district names the neighbourhood, not the town.
+_CITY_AR = {OFFICE_CITY: "الهفوف", MUBARRAZ_CITY: "المبرز", **{city: tok for tok, city in OTHER_CITY_TOKENS}}
+_TITLE_WORD = re.compile(r"[\u0621-\u064a]+")   # Arabic letters only: a plot number never joins a name
+_BLOCK_LETTERS = "أبجد"                          # a plot's block letter, glued: «الراشديةأ», «ضاحية هجرج»
+_MAX_DISTRICT_WORDS = 4                          # «حي» + a three-word name; the taxonomy has nothing longer
+_PLAN_WORD = "مخطط"                              # «مخطط الرياض» is a subdivision plan, never the الرياض district
+# A town's own name is never its district: «شمال المبرز» (6997) is a direction from a city, and this
+# office's tags cell has filed «الهفوف» / «الاحساء» as a neighbourhood before.
+_CITY_KEYS = frozenset(AL.norm_district_tok(ar) for ar in (*_CITY_AR.values(), "الأحساء"))
+
+
+@lru_cache(maxsize=None)
+def _known_districts(city: str) -> frozenset[str]:
+    """norm_district_tok keys attested for `city`: the catalogue's districts for that town plus every
+    district this office's own tags cell already published there (both abralosol tables). Fetched
+    lazily, once per city per run. A failed lookup logs once and answers EMPTY — the title then fills
+    nothing, exactly as before — never a crash. ponytail: the empty answer is cached for the run too,
+    so an outage costs one log line, not one failed query per row."""
+    try:
+        cid, _ = AL.to_catalog(_CITY_AR.get(city), region_hint=N.region_for_city(city) or MUBARRAZ_REGION)
+        keys = set(AL.catalog_district_keys(cid))
+        for tbl in ("abralosol_residential_listings", "abralosol_commercial_listings"):
+            for lo in range(0, 50_000, 1000):          # PostgREST serves at most 1,000 rows a page
+                page = db._execute(db.sb().table(tbl).select("neighborhood").eq("city", city)
+                                   .range(lo, lo + 999), what=f"{tbl}.known_districts").data or []
+                keys.update(AL.norm_district_tok(r["neighborhood"]) for r in page if r.get("neighborhood"))
+                if len(page) < 1000:
+                    break
+        keys.discard("")
+        return frozenset(keys)
+    except Exception as e:  # noqa: BLE001 — degrade to «no district», never crash the crawl
+        print(f"⚠ known-district lookup failed for {city}: {str(e)[:160]} — titles fill no district this run",
+              flush=True)
+        return frozenset()
+
+
+def _title_district(title: Optional[str], known: frozenset[str]) -> Optional[str]:
+    """The title's OWN slice whose norm_district_tok key is in `known` — longest window first, so
+    «حي الراجحي» beats «الراجحي» and «ضاحية هجر» beats «هجر». Exact key equality only: no edit
+    distance, no prefix («الراجحية» ≠ «الراجحي»), no fragment of a longer known name; a plan's name
+    («مخطط الرياض») and a town's name («شمال المبرز») are never a district. Else None."""
+    if not title or not known:
+        return None
+    words = list(_TITLE_WORD.finditer(title))
+    for size in range(min(_MAX_DISTRICT_WORDS, len(words)), 0, -1):
+        for i in range(len(words) - size + 1):
+            window = [w.group() for w in words[i:i + size]]
+            if _PLAN_WORD in window or (i and words[i - 1].group() == _PLAN_WORD):
+                continue                       # a plan's name is the plan's, not a district's
+            span = title[words[i].start():words[i + size - 1].end()]
+            # As written first, then with a glued block letter split off the last word. Still exact:
+            # the de-glued span must itself key to a known name.
+            deglued = span[:-1] if len(window[-1]) > 1 and span[-1] in _BLOCK_LETTERS else ""
+            for cand in (span, deglued):
+                key = AL.norm_district_tok(cand) if cand else ""
+                if key and key in known and key not in _CITY_KEYS:
+                    return cand
+    return None
+
+
 # The ad body's own explicit per-metre statement, e.g. «... وسعر المتر 1,600 ريال». It overrides a
 # TOTAL-basis label ONLY when it names the SAME figure the label carries, so it can never pick up a
 # neighbouring plot's rate or a comparison price. Live proof (nid 7729, 2026-09-02): the index cell
@@ -455,6 +531,9 @@ def _per_metre_in_body(amount: Optional[int], blocks: list[str]) -> bool:
         for m in _PER_METRE_PROSE.finditer(block):
             if N.to_int(m.group(1)) == amount:
                 return True
+        # the marker AFTER the figure too: nid 7472 «الحد 1,650 ريال» and its body «بسعر 1,650 ريال للمتر» (2026-10-18)
+        if N.stated_per_metre(block, amount):
+            return True
     return False
 
 
@@ -547,6 +626,8 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
     if amount is not None and basis == "per_sqm":
         # PRICE = SOURCE: a per-m² rate is not a total, and area is never used to make one.
         price_per_meter = amount
+        if transaction_type == "Buy":
+            price_total = db.AUTHORITATIVE_NULL     # the source settled «a rate, no total»: clears a stored total
     elif transaction_type == "Rent":
         # PERIOD = SOURCE — only an explicit token the source states ABOUT THIS FIGURE, from the
         # price label or the adjacent body text (see _period_text). Nothing is read from magnitude,
@@ -557,6 +638,8 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
         price_annual = annual if rent_period and basis == "total" else None
     elif amount is not None and basis == "total":
         price_total = amount
+    elif amount is None and p.get("label") == "على السوم":
+        price_total = db.AUTHORITATIVE_NULL         # «على السوم», open to offers: the source states no price
     # amount with NO basis label anywhere (2/100 sampled) stays NULL in BOTH price columns: the
     # source published a number but not what it means, and a total is a different fact from a rate.
     # rent_period is still recorded when the body states it — the period is a fact about the LEASE,
@@ -569,6 +652,12 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
         # db._unknown_must_not_overwrite_known, so a row already filed under الهفوف stayed there
         # (17994690 re-crawled 10-17 05:55: still Hofuf). AUTHORITATIVE_NULL writes the unknown.
         city, region = db.AUTHORITATIVE_NULL, db.AUTHORITATIVE_NULL
+    district, district_from = ix["district"], None
+    if not district and detail.get("title") and isinstance(city, str):
+        # Tags cell empty → the h1, exact match only (see _title_district). AFTER _city(), so the
+        # city rules above are untouched; this fills neighborhood/district_ar and nothing else.
+        district = _title_district(detail["title"], _known_districts(city))
+        district_from = "title" if district else None
     photos = detail.get("photo_urls") or []
     if not photos and ix["thumb"] and PLACEHOLDER_IMG not in ix["thumb"]:
         thumb = re.sub(r"/styles/[^/]+/public/", "/", ix["thumb"]).split("?")[0]
@@ -583,7 +672,7 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
         "transaction_type": transaction_type,
         "city": city,
         "region": region,
-        "neighborhood": ix["district"],
+        "neighborhood": district,
         "area_m2": N.to_int(ix["area_raw"]),
         # The index cell «شارع 40» is the site's structured street width. It was kept only in
         # additional_info, so 1,890 ads (1,526 of 1,653 lands) answered no street-width question
@@ -617,7 +706,8 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
             "property_age_raw": detail.get("age_raw"),
             "bump_date": ix["bump_date"],       # a REFRESH date, not created_at
             "city_basis": city_basis,           # derived — see _city()
-            "district_ar": ix["district"],
+            "district_ar": district,
+            "district_from": district_from,   # "title" only when the h1 filled it
         }.items() if v is not None}),
         # Rule 7: the whole source payload, raw, so a future field never needs a re-scrape.
         "source_capture": redact_capture({
