@@ -153,7 +153,8 @@ export default function Home() {
   // `welcomeSettled` gates the headline's ENTRANCE (owner 2026-10-17: it must never visibly change
   // after it appears): the title stays at opacity 0 until the session restore knows the visitor and,
   // signed in, until the line's numbers are in — then it rises once and is final for this load.
-  const { line: welcomeLine, settled: welcomeSettled } = useFilterWelcome(!!user, pickName(user, locale), locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
+  const welcomeNames = useMemo(() => ({ ar: (user as { nameAr?: string } | null)?.nameAr ?? '', en: (user as { nameEn?: string } | null)?.nameEn ?? '' }), [user]);
+  const { line: welcomeLine, settled: welcomeSettled } = useFilterWelcome(!!user, welcomeNames, locale, lastSearched?.loc ?? null, lastSearched?.district ?? null);
   // THE ONE QUERY THIS SCREEN DERIVES EVERYTHING FROM (owner P0 2026-09-01).
   //
   // The store may now carry Advanced Filter answers committed in the chat — that is the whole fix:

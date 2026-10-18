@@ -1,3 +1,4 @@
+import { displayName as arabicSpelling } from './arabicName.ts';
 // THE FILTER HOME'S ROTATING WELCOME (owner 2026-10-17).
 //
 // The Filter home's BIG HEADLINE («موقع واحد للبحث…») sometimes becomes a short,
@@ -144,8 +145,32 @@ const positive = (n: unknown): n is number => typeof n === 'number' && Number.is
 const exact = (n: unknown): string | null => (positive(n) ? fmt(n) : null);
 
 /** Fill a line, or null when any fact it states is missing or not true today. */
-export function renderWelcome(line: WelcomeLine, name: string, f: WelcomeFacts, locale: 'ar' | 'en'): string | null {
+// THE NAME SPEAKS THE SENTENCE'S LANGUAGE (owner 2026-10-18: «why is my name in English and Arabic»).
+// The Arabic line read «رجعت يا yusuf؟» because the account's Google name is Latin. An Arabic sentence
+// always carries the Arabic spelling (transliterated when only a Latin one is known); an English sentence
+// never carries Arabic letters — with no Latin spelling it has no name, so that line is not used.
+const AR_LETTER = /[؀-ۿ]/;
+const LATIN_LETTER = /[A-Za-z]/;
+export function nameForLocale(name: string | null | undefined, locale: 'ar' | 'en'): string {
   const first = (name ?? '').trim().split(/\s+/)[0] ?? '';
+  if (!first) return '';
+  if (locale === 'ar') {
+    const ar = AR_LETTER.test(first) ? first : arabicSpelling(first, true);
+    return ar && !LATIN_LETTER.test(ar) ? ar : '';
+  }
+  return AR_LETTER.test(first) ? '' : first;
+}
+/** A held line is reused only when each language's text is in its own script (never «يا yusuf»). */
+export const welcomeTextFits = (text: string | null | undefined, locale: 'ar' | 'en'): boolean =>
+  !!text && (locale === 'ar' ? !LATIN_LETTER.test(text) : !AR_LETTER.test(text));
+/** A held pair is reusable when every non-empty side is in its own script and at least one is set. */
+export const cachedFits = (c: { ar: string; en: string }): boolean =>
+  (!!c.ar || !!c.en) && (!c.ar || welcomeTextFits(c.ar, 'ar')) && (!c.en || welcomeTextFits(c.en, 'en'));
+export type WelcomeNames = string | { ar: string; en: string };
+const pickWelcomeName = (n: WelcomeNames, locale: 'ar' | 'en') => (typeof n === 'string' ? n : n[locale]);
+
+export function renderWelcome(line: WelcomeLine, name: WelcomeNames, f: WelcomeFacts, locale: 'ar' | 'en'): string | null {
+  const first = nameForLocale(pickWelcomeName(name, locale), locale);
   if (!first) return null;
   const v: Record<string, string> = { n: first };
   for (const need of line.needs) {
@@ -305,16 +330,18 @@ export function headlineReduce(s: HeadlineState, ev: HeadlineEvent): HeadlineSta
 //   cache      = what this device showed last; reused only while held (HOLD_MS) and while it still
 //                fits the moment (a morning line is not reused at night)
 export type WelcomeCache = { id: number; at: number; ar: string; en: string };
-export function instantWelcome(a: { hasSession: boolean; cache: WelcomeCache | null; now: Date; name: string; rand?: () => number }): { id: number; ar: string; en: string; fromCache: boolean } | null {
+export function instantWelcome(a: { hasSession: boolean; cache: WelcomeCache | null; now: Date; name: WelcomeNames; rand?: () => number }): { id: number; ar: string; en: string; fromCache: boolean } | null {
   if (!a.hasSession) return null;
   const c = a.cache;
   if (c) {
     const line = WELCOME_LINES.find((l) => l.id === c.id);
     const age = a.now.getTime() - c.at;
-    if (line && age >= 0 && age < HOLD_MS && lineFitsTime(line, a.now) && c.ar && c.en) return { id: c.id, ar: c.ar, en: c.en, fromCache: true };
+    if (line && age >= 0 && age < HOLD_MS && lineFitsTime(line, a.now) && cachedFits(c)) return { id: c.id, ar: c.ar, en: c.en, fromCache: true };
   }
   const line = fallbackLine(c?.id ?? null, a.rand);
   const ar = renderWelcome(line, a.name, {}, 'ar');
   const en = renderWelcome(line, a.name, {}, 'en');
-  return ar && en ? { id: line.id, ar, en, fromCache: false } : null;
+  // Each language stands alone: a name with no Latin spelling has no English line ('' → the normal
+  // headline in English) and still greets in Arabic.
+  return ar || en ? { id: line.id, ar: ar ?? '', en: en ?? '', fromCache: false } : null;
 }
