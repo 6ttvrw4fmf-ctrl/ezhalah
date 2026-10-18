@@ -95,10 +95,13 @@ export const typeWordAr = (n: number, typeAr: string): string => (n >= 3 && n <=
 // on that district. Nothing here touches the pin path: mapPoint() is unchanged and a pin still needs
 // BOTH published coordinates.
 export type DistrictPlace = { query: string; district: string; city: string };
+export const DISTRICT_MAP_PLATFORMS: readonly string[] = ['aqar', 'aqarmonthly'];
 /** The district to show for an ad with no pin, from the ad's own row. Pure, exported for the barrier. */
 export function districtPlace(row: AdRow | null | undefined): DistrictPlace | null {
-  // Aqar only for now (owner 2026-10-17: «just do aqar now»); other sites keep no map without a pin.
-  if (String(row?.platform ?? '').trim().toLowerCase() !== 'aqar') return null;
+  // Aqar (buy + rent) and Aqar Monthly only for now (owner 2026-10-17: «just do aqar now», then «do the
+  // location thing for Aqar Monthly and rent, same style, just don't include the Ministry of Justice»);
+  // other sites keep no map without a pin. The ministry block stays Aqar-sale-only (pricesBlockEligible).
+  if (!DISTRICT_MAP_PLATFORMS.includes(String(row?.platform ?? '').trim().toLowerCase())) return null;
   const district = String(row?.district_ar ?? '').trim(), city = String(row?.city_ar ?? '').trim();
   if (!district || !city || district === 'غير معروف' || city === 'غير معروف') return null;
   const named = /^حي\s/.test(district) ? district : `حي ${district}`;

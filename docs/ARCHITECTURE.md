@@ -426,8 +426,10 @@ use `t(sourceName(listing.source))`, matching the result card. Arabic prose is h
 like ResultCard. No photos means no gallery box. The preview and iframe host lists are disjoint.
 
 **The map:** the source's own pin when it published both coordinates («الموقع كما نشره {site}»).
-When an **Aqar** ad published none (owner 2026-10-17: «show the entire district … all around the
-boundaries», «just do aqar now» — other sites still show no map without a pin),
+When an **Aqar (buy or rent) or Aqar Monthly** ad published none (owner 2026-10-17: «show the entire
+district … all around the boundaries», «just do aqar now», then «Aqar Monthly and rent, same style,
+just don't include the Ministry of Justice» — other sites still show no map without a pin; the
+ministry block stays Aqar-sale-only),
 the page asks the same free Google embed for the district by name («حي X، City») so Google fits the
 view and draws its own dashed border around the district; labelled «الموقع التقريبي» with «{site}
 لم ينشر موقعاً دقيقاً», never a pin. Free either way (keyless embed / Embed API place mode). The owner
