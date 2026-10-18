@@ -150,7 +150,7 @@ for (const f of pyFiles) {
 // a phone or a count → NULL; pinned by scrapers/common/tests/test_haraj_prose_offers.py). Line-anchored like
 // sadin's: re-verify it is still the file's ONLY asking_price(title, description) call before re-pinning.
 // (2026-10-18: 332 → 338 — the district-precedence change above it added six lines; still the only call.)
-const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:663', 'scrapers/haraj/run.py:338']);
+const PROSE_ALLOWLIST = new Set(['scrapers/sadin/run.py:663', 'scrapers/haraj/run.py:349']);
 const proseUnapproved = proseOffenders.filter(o => !PROSE_ALLOWLIST.has(o.split(': ')[0]));
 check('no scraper assigns a listing price from prose (outside the declared, dated exception)',
   proseUnapproved.length === 0);
