@@ -178,17 +178,21 @@ mustCatch('a catalogue that outgrows the reveal budget',
 // THE CAP MUST BE REAL (owner 2026-10-17). The page-dwell gate used to wait for every logo page with no
 // upper bound — that is what pushed a live Filter search past 11 s on 2026-10-17. The gate must carry
 // the cap in its own condition; a gate without it is the old unbounded wait.
-const gateRe = /loaderPresentedRef\.current\[statusId\] !== true && Date\.now\(\) - since < SEARCH_MAX_HOLD_MS\) await waitRun/;
-check('the page-dwell gate is bounded by SEARCH_MAX_HOLD_MS (results are never held past the cap)', gateRe.test(agentSrc));
-mustCatch('the old unbounded page-dwell gate',
-  !gateRe.test(agentSrc.replace(' && Date.now() - since < SEARCH_MAX_HOLD_MS', '')));
+// 2026-10-18 (owner, live-measured: data back at 5.7 s, results shown at 12.4 s): NO page-dwell gate at
+// all — after the minimum beat the results come in the moment they are ready.
+const gateRe = /while \([^)]*loaderPresentedRef\.current\[statusId\][^\n]*await waitRun/;
+check('no page-dwell gate holds a new search\'s results after the minimum beat (results as soon as ready)', !gateRe.test(agentSrc));
+mustCatch('the page-dwell gate coming back (even capped)',
+  gateRe.test(agentSrc.replace('// NO PAGE-DWELL GATE (owner 2026-10-18', 'while (!run.cancelled && loaderPresentedRef.current[statusId] !== true && Date.now() - since < SEARCH_MAX_HOLD_MS) await waitRun(run, 100);\n      // (owner 2026-10-18')));
 
 // AN ADVANCED FILTER ROUND HOLDS A 5-SECOND ONE-SENTENCE BEAT (owner 2026-10-11; 10-10 was 10 s of logos,
 // 10-05 skipped it). The 10.6 s floor + page-dwell gate are for a NEW search; an AF round waits a plain
 // AF_LOADER_MS = 5000 from when its beat appeared, never more, and renders AfRoundLoader, not the logos.
 {
   const play = windowBetween(agentSrc, 'const playListings = async', '// 2) RESULTS: ONE consolidated bubble', 'src/app/agent.tsx playListings');
-  check('a NEW search still waits the minimum beat and the (capped) page-dwell gate', /if \(!afCompleted\) \{[\s\S]{0,200}SEARCH_MIN_MS - \(Date\.now\(\) - since\)[\s\S]{0,600}loaderPresentedRef\.current\[statusId\] !== true && Date\.now\(\) - since < SEARCH_MAX_HOLD_MS/.test(play));
+  check('a NEW search waits only the short minimum beat — no page-dwell gate after it',
+    /if \(!afCompleted\) \{[\s\S]{0,200}SEARCH_MIN_MS - \(Date\.now\(\) - since\);\s*if \(remaining > 0\) await waitRun\(run, remaining\);/.test(play)
+    && !/loaderPresentedRef\.current\[statusId\] !== true/.test(play));
   check('…and only an Advanced Filter round (afCompleted) skips them — no other condition widens the skip',
     (play.match(/if \(!afCompleted\) \{/g) ?? []).length === 1 && !/if \(!afCompleted \|\|/.test(play) && !/if \(!afCompleted &&/.test(play));
   const afTen = (src: string, body: string) => /const AF_LOADER_MS = 5000;/.test(src) && /if \(m\.afRound\) return <AfRoundLoader /.test(src) && /\} else \{[\s\S]{0,400}const remaining = AF_LOADER_MS - \(Date\.now\(\) - since\);\s*if \(remaining > 0\) await waitRun\(run, remaining\);\s*\}/.test(body);

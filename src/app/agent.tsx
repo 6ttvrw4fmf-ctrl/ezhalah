@@ -1879,11 +1879,11 @@ export default function Agent() {
     if (!afCompleted) {
       const remaining = SEARCH_MIN_MS - (Date.now() - since);
       if (remaining > 0) await waitRun(run, remaining);
-      // Presentation-only gate: each logo/name page must finish its actual visible dwell.
-      // The search has already completed; this changes only when its results are revealed.
-      // …but never past the owner's ten-second cap (2026-10-17): whatever page is up when the cap
-      // lands, the results come in.
-      while (!run.cancelled && loaderPresentedRef.current[statusId] !== true && Date.now() - since < SEARCH_MAX_HOLD_MS) await waitRun(run, 100);
+      // NO PAGE-DWELL GATE (owner 2026-10-18, live-measured): the gate waited for every logo page of the
+      // 159-platform roster, so a Riyadh search whose data was back at 5.7 s still showed its results at
+      // 12.4 s. «Results as soon as they are ready»: after the short minimum beat above, the results
+      // come in the moment the search has them — whatever logo page is up. (SEARCH_MAX_HOLD_MS stays the
+      // ceiling the roster animation itself must fit inside — searchLoaderTiming.ts.)
     } else {
       // AN ADVANCED FILTER ROUND HOLDS ITS ONE-SENTENCE BEAT FOR 5 SECONDS (owner 2026-10-11: «make it 5
       // seconds … one sentence of what he selected»; 10-10 was 10 s of logos, 10-05 skipped it). A plain
