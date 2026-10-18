@@ -293,3 +293,28 @@ export function headlineReduce(s: HeadlineState, ev: HeadlineEvent): HeadlineSta
   if (ev.type === 'facts') return { settled: true, line: ev.line, facts: ev.facts };
   return { settled: true, line: null, facts: null };
 }
+
+// INSTANT (owner 2026-10-17: «could we make it built in, like it doesn't load?»). The headline must
+// not wait for the network. The device remembers the line it last SHOWED — its id, when it started,
+// and its rendered text in both languages — and the next page open shows that text immediately,
+// with no fetch in the way. Its numbers are refreshed in the background and written back for the
+// NEXT visit; what is on screen never changes (the no-swap rule above). A device with a session but
+// no usable memory yet shows a line that needs no numbers at all, instantly, and the real held line
+// (with its live numbers) is prepared in the background for the next visit.
+//   hasSession = a Supabase session is stored on this device (synchronous; the restore only confirms it)
+//   cache      = what this device showed last; reused only while held (HOLD_MS) and while it still
+//                fits the moment (a morning line is not reused at night)
+export type WelcomeCache = { id: number; at: number; ar: string; en: string };
+export function instantWelcome(a: { hasSession: boolean; cache: WelcomeCache | null; now: Date; name: string; rand?: () => number }): { id: number; ar: string; en: string; fromCache: boolean } | null {
+  if (!a.hasSession) return null;
+  const c = a.cache;
+  if (c) {
+    const line = WELCOME_LINES.find((l) => l.id === c.id);
+    const age = a.now.getTime() - c.at;
+    if (line && age >= 0 && age < HOLD_MS && lineFitsTime(line, a.now) && c.ar && c.en) return { id: c.id, ar: c.ar, en: c.en, fromCache: true };
+  }
+  const line = fallbackLine(c?.id ?? null, a.rand);
+  const ar = renderWelcome(line, a.name, {}, 'ar');
+  const en = renderWelcome(line, a.name, {}, 'en');
+  return ar && en ? { id: line.id, ar, en, fromCache: false } : null;
+}
