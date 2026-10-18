@@ -20,10 +20,16 @@ import { speakReadAloud, stopReadAloud, subscribeReadAloud, readAloudRefusal, ha
 import { readAloudRefusalMessageKey, type ReadAloudRefusal } from '@/lib/readAloudVoice';
 
 export default function FeedbackRow({
-  feedbackKey, shareUrl, onFeedback, readAloudSegments,
+  feedbackKey, shareUrl, shareText, prepareShare, onFeedback, readAloudSegments,
 }: {
   feedbackKey: string;
   shareUrl?: string;
+  // The line sent next to the link (owner 2026-10-17: a signed-in user shares THEIR SEARCH with
+  // «عقارات من {name} لك على إزهله 🦅 …» — src/lib/shareSearch.ts). Omitted for guests: bare link.
+  shareText?: string;
+  // A signed-in user's Share saves a COPY of the whole chat first (src/lib/sharedChat.ts) and shares its
+  // short /s/<code> link. Resolves to that link, or null → the shareUrl above is used instead.
+  prepareShare?: () => Promise<string | null>;
   onFeedback?: () => void; // fired when a rating is SET (not cleared) — host shows the thanks toast
   // The structured script (إزهله -> pause -> summary -> pause -> cards, owner 2026-08-19) this
   // response's 🔊 button reads. Omit/empty to hide the button entirely rather than render one that
@@ -92,16 +98,18 @@ export default function FeedbackRow({
   // Normal share/copy flow: OS share sheet where available, else copy the link (the share icon
   // briefly becomes a check). Never throws to the user (cancel = no-op).
   const onShare = async () => {
-    const url = shareUrl || 'https://ezhalah-app.vercel.app';
+    let url = shareUrl || 'https://ezhalah-app.vercel.app';
+    if (prepareShare) { try { url = (await prepareShare()) || url; } catch { /* the search link still works */ } }
+    const withText = shareText ? `${shareText}\n${url}` : url;
     try {
       if (Platform.OS === 'web') {
         const nav: any = typeof navigator !== 'undefined' ? navigator : null;
-        if (nav?.share) { await nav.share({ url }); return; }
-        await Clipboard.setStringAsync(url);
+        if (nav?.share) { await nav.share(shareText ? { text: shareText, url } : { url }); return; }
+        await Clipboard.setStringAsync(withText);
         setCopied(true);
         setTimeout(() => setCopied(false), 1600);
       } else {
-        await Share.share({ message: url, url });
+        await Share.share({ message: withText, url });
       }
     } catch { /* user cancelled or share unavailable — no-op */ }
   };
