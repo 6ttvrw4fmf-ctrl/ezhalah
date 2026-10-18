@@ -445,6 +445,20 @@ def rooms_from_prose(text: Optional[str]) -> dict[str, Any]:
     return out
 
 
+# This office's own spellings of two catalogued عنيزة districts (owner 2026-10-17: 34 ads had no district).
+# «الأشرافية» = حي الاشرفية, «إشبيليا» = حي اشبيلية — the same place, an extra alef / a final ا for ة.
+# Exact-word swaps only; find_district_in_text still accepts nothing outside loc_catalog_district.
+_KNOWN_SPELLINGS = [(re.compile(r"(?<![ء-ي])ال[أا]شرافي[ةه](?![ء-ي])"), "الاشرفية"),
+                    (re.compile(r"(?<![ء-ي])[إأا]شبيليا(?![ء-ي])"), "اشبيلية")]
+
+
+def _known_spelling(text: Optional[str]) -> str:
+    out = text or ""
+    for rx, canon in _KNOWN_SPELLINGS:
+        out = rx.sub(canon, out)
+    return out
+
+
 def city_from_title(title: str) -> tuple[Optional[str], Optional[int], Optional[int]]:
     """Ask the CATALOG which token of the title is a city, scanning right to left (Arabic titles
     put the city last, so «بحي بدر بمدينة الرياض» must not resolve to the town بدر). A region label
@@ -561,15 +575,15 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         city_ar = city_raw
         # The field WAS the city here, not a district — never also read it as one below.
         field_is_a_city = True
-        district_ar = find_district_in_text(title, city_id)
+        district_ar = find_district_in_text(_known_spelling(title), city_id)
     else:
         # city_ar is the source's own Arabic text for the city — the very token to_catalog accepted.
         city_ar = city_raw
         # A «الحي» the catalog recognises as a CITY is not this listing's district (measured: three
         # عنيزة rentals carry «الحي: الدوادمي»).
         field_is_a_city = bool(district_field) and bool(to_catalog(district_field)[0])
-        district_ar = ((find_district_in_text(district_field, city_id) if not field_is_a_city else None)
-                       or find_district_in_text(title, city_id))
+        district_ar = ((find_district_in_text(_known_spelling(district_field), city_id) if not field_is_a_city else None)
+                       or find_district_in_text(_known_spelling(title), city_id))
 
     area_m2, area_skip = parse_area(f.get("مساحة الأرض"))
     som, som_ppm, som_skip = parse_money(f.get("سعر السوم"))
