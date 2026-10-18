@@ -2,6 +2,8 @@
 // Theme variants keep the same canvas and original artwork geometry.
 type ArtworkBounds = readonly [width: number, height: number, left: number, top: number, right: number, bottom: number];
 export const platformLogoBounds = new Map<unknown, ArtworkBounds>([
+  [require('../../assets/images/platform-logos/maskanre.png'), [1575, 455, 0, 0, 1575, 455]],
+  [require('../../assets/images/platform-logos/wetheaddress.png'), [1024, 310, 0, 0, 1024, 310]],
   [require('../../assets/images/abaad.png'), [68, 80, 3, 3, 65, 77]],
   [require('../../assets/images/abeea.png'), [512, 436, 125, 6, 415, 368]],
   [require('../../assets/images/abralosol.png'), [724, 638, 110, 113, 590, 566]],
@@ -171,4 +173,10 @@ export const platformLogoContrast = new Map<unknown, { light?: number; dark?: nu
   [require('../../assets/images/wahadat.png'), { dark: require('../../assets/images/platform-contrast/wahadat-dark.png') }],
   [require('../../assets/images/wasalt-logo.png'), { dark: require('../../assets/images/platform-contrast/wasalt-logo-dark.png') }],
   [require('../../assets/images/wslnaa.png'), { dark: require('../../assets/images/platform-contrast/wslnaa-dark.png') }],
+]);
+
+// White-only legacy marks adapt their ink while retaining transparent backgrounds.
+export const platformLogoMonochrome = new Set<unknown>([
+  require('../../assets/images/platform-logos/maskanre.png'),
+  require('../../assets/images/platform-logos/wetheaddress.png'),
 ]);
