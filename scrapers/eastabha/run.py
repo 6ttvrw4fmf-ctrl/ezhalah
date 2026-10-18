@@ -778,7 +778,18 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
         "additional_info": add,
         **amenity_cols,
     }
+    # The WP Residence checklist has no furnished item, so the ad's own words are the statement (law §2): «مفروشة» /
+    # «مؤثثة» yes, «غير مفروشة» no, partly furnished or silence unknown and omitted (🔬 2026-10-18, backlog 626:
+    # 37 of 175 active ads state it). Only the residential table has the column (20261018093318); a commercial
+    # upsert carrying the key would fail the whole batch (PGRST204), so it is never written there.
+    if category == "residential":
+        row.update(furnished_answer(description))
     return row, category, gone
+
+
+def furnished_answer(description: Optional[str]) -> dict[str, bool]:
+    f = normalize.amenities_from_lines(description).get("furnished")
+    return {} if f is None else {"furnished": f}
 
 
 def _pin_sold_inactive(table: str, ad_numbers: list[str],
