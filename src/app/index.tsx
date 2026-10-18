@@ -1237,22 +1237,17 @@ export default function Home() {
   // Bumped by every entrance so the title's own rise (effect below) re-arms with it.
   const [entranceKey, setEntranceKey] = useState(0);
   const playEntrance = useCallback(() => {
+    // NO ENTRANCE ANIMATION (owner 2026-10-17: «same with the animation on top … the share button,
+    // the Ezhalah logo and everything» — the page must look built in, not load in). The card, the
+    // mode toggle and the subtitle are simply THERE: their values go straight to 1. The headline is
+    // the one exception — it stays hidden until its text is settled (owner: never a visible swap),
+    // then appears at once in the effect below. The backdrop's search-time dim (heroAnim) is not an
+    // entrance and keeps its own animation in navigateWithQuery.
     heroAnim.setValue(0);
-    entrance.setValue(0);
-    badgeAnim.setValue(0);
+    entrance.setValue(1);
+    badgeAnim.setValue(1);
     titleAnim.setValue(0);
-    subAnim.setValue(0);
-    RNAnimated.timing(entrance, {
-      toValue: 1,
-      duration: 440,
-      easing: RNEasing.out(RNEasing.cubic),
-      useNativeDriver: Platform.OS !== 'web',
-    }).start();
-    const rise = (v: RNAnimated.Value, delay: number) =>
-      RNAnimated.timing(v, { toValue: 1, duration: 520, delay, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: Platform.OS !== 'web' });
-    // The TITLE is not in this parallel any more: it rises in the effect below, once the headline's
-    // text is settled (owner 2026-10-17 — no visible swap, ever). Badge and subtitle rise as before.
-    RNAnimated.parallel([rise(badgeAnim, 80), rise(subAnim, 400)]).start();
+    subAnim.setValue(1);
     setEntranceKey((k) => k + 1);
   }, [heroAnim, entrance, badgeAnim, titleAnim, subAnim]);
   useFocusEffect(playEntrance);
@@ -1262,9 +1257,8 @@ export default function Home() {
   // so the visitor never sees one headline turn into another.
   useEffect(() => {
     if (!welcomeSettled) return;
-    const a = RNAnimated.timing(titleAnim, { toValue: 1, duration: 520, delay: 230, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: Platform.OS !== 'web' });
-    a.start();
-    return () => a.stop();
+    // Instant, not a rise (owner 2026-10-17): the text is final, so it is simply there.
+    titleAnim.setValue(1);
   }, [welcomeSettled, entranceKey, titleAnim]);
   // A RETURN TO THE FILTER IS A CLEAN FILTER (owner 2026-10-03). Coming back from a search — the
   // toggle, the browser's Back, a new visit — always opens an empty form: the previous search is NOT
