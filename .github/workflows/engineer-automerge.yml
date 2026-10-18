@@ -1,0 +1,47 @@
+# Owner decision 2026-10-18 («yes turn it on»): a night engineer's fix that touches ONLY the scraping robots
+# (every changed file under scrapers/) is armed for GitHub auto-merge, so it lands the same night once the
+# four REQUIRED checks on main are green (branch protection: «Production-target lock + no-bypass», «Full
+# verification suite (npm test)», «Taxonomy + location index (npm run verify)», «AF predicates vs an
+# independent oracle (live)», up to date with main). The engineers' routines may not merge themselves; this
+# rule is the owner's. Anything else — app screens (src/), the database (supabase/), workflows (.github/),
+# the agent — still waits for a person. A draft PR is never armed.
+name: Engineer auto-merge (scrapers only)
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: engineer-automerge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  arm:
+    # night-engineer routines push claude/* branches; a fork can never be armed
+    if: >-
+      startsWith(github.event.pull_request.head.ref, 'claude/') &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only scrapers/ changed → arm auto-merge; anything else → leave it for a person
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          files=$(gh pr view "$PR" --repo "$REPO" --json files -q '.files[].path')
+          echo "$files"
+          outside=$(printf '%s\n' "$files" | grep -v '^scrapers/' || true)
+          if [ -z "$files" ] || [ -n "$outside" ]; then
+            echo "::notice::Not armed — files outside scrapers/: ${outside:-<none listed>}"
+            gh pr merge "$PR" --repo "$REPO" --disable-auto 2>/dev/null || true
+            exit 0
+          fi
+          gh pr merge "$PR" --repo "$REPO" --auto --merge
+          echo "::notice::Armed: merges by itself once the required checks are green and the branch is up to date."
