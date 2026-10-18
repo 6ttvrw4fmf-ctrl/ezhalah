@@ -1,3 +1,4 @@
+import { platformLogoBackgrounds } from './platform-logo-bounds';
 import { useEffect, useRef } from 'react';
 import { Animated, Easing, View } from 'react-native';
 import { Image } from 'expo-image';
@@ -35,7 +36,7 @@ export default function HomeWebsiteStrip() {
       {[0, 1].map(copy => names.map(name => {
         const profile = PLATFORM_PICKER_PROFILES[name];
         return <View key={`${copy}-${name}`} style={{ width: STRIP_SLOT, height: 48, paddingHorizontal: 6 }}>
-          <View style={{ width: 96, height: 48, backgroundColor: 'transparent', overflow: 'hidden' }}>
+          <View style={{ width: 96, height: 48, backgroundColor: platformLogoBackgrounds.get(profile.logo) ?? 'transparent', borderRadius: 6, overflow: 'hidden' }}>
             <Image source={profile.logo} tintColor={profile.layout.monochrome ? (theme === 'dark' ? '#F3F5F3' : '#253831') : undefined} style={{ position: 'absolute', width: profile.layout.width, height: profile.layout.height, left: profile.layout.left, top: profile.layout.top }} contentFit="contain" accessible={false} />
           </View>
         </View>;
