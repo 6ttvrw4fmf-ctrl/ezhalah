@@ -34,7 +34,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from scrapers.common.db import sb, upsert_dealapp_commercial_batch, upsert_dealapp_residential_batch
-from scrapers.dealapp.run import _pin_sold_inactive, fetch_one, map_listing
+from scrapers.dealapp.run import _PLOT_CODE, _pin_sold_inactive, fetch_one, map_listing
 
 TABLES = {
     "dealapp_residential_listings": "residential",
@@ -45,13 +45,13 @@ CUTOFF = "2026-07-14"  # first crawl day fully on the decimal-safe to_int
 BATCH = 50
 
 
-def _candidates(table: str) -> list[dict]:
+def _candidates(table: str, plot_code_districts: bool = False) -> list[dict]:
     rows: list[dict] = []
     lo = 0
     while True:
         page = (
             sb().table(table)
-            .select("id,ad_number,scraped_at,price_total,price_annual,area_m2")
+            .select("id,ad_number,scraped_at,price_total,price_annual,area_m2,neighborhood")
             .eq("active", True)
             .order("id")
             .range(lo, lo + PAGE - 1)
@@ -72,6 +72,10 @@ def _candidates(table: str) -> list[dict]:
         a = r.get("area_m2")
         return isinstance(a, int) and a > 10_000
 
+    if plot_code_districts:
+        # 2026-10-18: rows whose stored district is a plot/plan code («حي 1051 مخطط رقم», «حي 33ج») and serve none;
+        # the current parser reads the title's district or the same-city deed block instead.
+        return [r for r in rows if _PLOT_CODE.search(r.get("neighborhood") or "")]
     return [r for r in rows if is_candidate(r)]
 
 
@@ -80,13 +84,15 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0, help="cap candidates per table (0 = all)")
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--dry-run", action="store_true", help="fetch+parse+report, write nothing")
+    ap.add_argument("--plot-code-districts", action="store_true",
+                    help="candidates = active rows whose stored district is a plot/plan code (not the legacy set)")
     args = ap.parse_args()
 
     started = datetime.now(timezone.utc).isoformat()
     grand = {"candidates": 0, "repaired": 0, "gone": 0, "cat_flip": 0, "fetch_fail": 0, "changed_price": 0, "changed_area": 0}
 
     for table, category in TABLES.items():
-        cands = _candidates(table)
+        cands = _candidates(table, args.plot_code_districts)
         if args.limit:
             cands = cands[: args.limit]
         grand["candidates"] += len(cands)
