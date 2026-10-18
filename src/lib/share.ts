@@ -12,8 +12,9 @@ export const SHARE_LINK = 'https://ezhalah-app.vercel.app';
 // on the old picture. RENAME THE FILE when the artwork changes; never overwrite it in place.
 export const OG_IMAGE = `${SHARE_LINK}/og-image-v5.png`;
 // Owner-approved original wording, without the AI sentence or dashes (2026-10-11), shared by metadata and every share target.
-export const SHARE_BLURB_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، الطريقة الأذكى للبحث على العقار في المملكة 🦅😉';
-export const SHARE_BLURB_EN = 'Looking for a property and want to see everything on offer in one place? Ezhalah, the smarter way to find properties in the Kingdom 🦅😉';
+// No emoji (owner 2026-10-18: «remove the emoji … make it professional»).
+export const SHARE_BLURB_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، الطريقة الأذكى للبحث على العقار في المملكة.';
+export const SHARE_BLURB_EN = 'Looking for a property and want to see everything on offer in one place? Ezhalah, the smarter way to find properties in the Kingdom.';
 export const SHARE_LEAD_AR = SHARE_BLURB_AR;
 export const SHARE_LEAD_EN = SHARE_BLURB_EN;
 export const SHARE_MESSAGE_AR = `${SHARE_LEAD_AR}\n${SHARE_LINK}`;

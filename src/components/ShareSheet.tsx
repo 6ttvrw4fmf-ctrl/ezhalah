@@ -19,6 +19,8 @@ import { SHARE_BLURB_AR, SHARE_BLURB_EN, SHARE_LEAD_AR, SHARE_LEAD_EN, SHARE_LIN
 // The link, the sentence and the message all come from lib/share.ts. This file used to hold its own
 // copy of every one of them, and they drifted: the sheet and the OS share text said different things.
 const LINK = SHARE_LINK;
+// The preview shows the bare domain only («ezhalah-app.vercel.app»), small — the full link still goes in the message.
+const DOMAIN = LINK.replace(/^https?:\/\//, '');
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const SLIDE_IN = { duration: 280, easing: Easing.bezier(0.22, 1, 0.36, 1) };
@@ -109,11 +111,15 @@ export default function ShareSheet({ onClose }: { onClose: () => void }) {
         <View style={s.grip} />
 
         <View style={s.preview}>
-          <RNImage source={require('../../public/og-image-v5.png')} style={s.logo} resizeMode="contain" />
+          {/* Link-preview look (owner 2026-10-18: «smaller … professional»): a small framed logo, the
+              name, a two-line description, and the bare domain in small muted type — not a big link. */}
+          <View style={s.logoFrame}>
+            <RNImage source={require('../../public/og-image-v5.png')} style={s.logo} resizeMode="contain" />
+          </View>
           <View style={{ flex: 1 }}>
             <Text style={s.pvT}>{t('Ezhalah')}</Text>
-            <Text style={s.pvS}>{locale === 'ar' ? SHARE_BLURB_AR : SHARE_BLURB_EN}</Text>
-            <Text style={s.pvL}>{LINK}</Text>
+            <Text style={s.pvS} numberOfLines={2}>{locale === 'ar' ? SHARE_BLURB_AR : SHARE_BLURB_EN}</Text>
+            <Text style={s.pvL} numberOfLines={1}>{DOMAIN}</Text>
           </View>
         </View>
 
@@ -154,11 +160,12 @@ const s = StyleSheet.create({
   card: { backgroundColor: colors.paper, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 12, paddingTop: 10 },
   grip: { width: 38, height: 5, borderRadius: 3, backgroundColor: colors.line, alignSelf: 'center', marginTop: 2, marginBottom: 12 },
 
-  preview: { flexDirection: 'row', alignItems: 'center', gap: 13, backgroundColor: colors.surface, borderRadius: 16, padding: 14 },
-  logo: { width: 50, height: 50, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  pvT: { fontSize: 15, fontWeight: '700', color: colors.ink },
-  pvS: { fontSize: 12, color: colors.muted, lineHeight: 16, marginTop: 2 },
-  pvL: { fontSize: 11.5, color: colors.primary, fontWeight: '600', marginTop: 4 },
+  preview: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.surface, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 12 },
+  logoFrame: { width: 40, height: 40, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line, backgroundColor: colors.paper, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  logo: { width: 30, height: 30 },
+  pvT: { fontSize: 14, fontWeight: '700', color: colors.ink },
+  pvS: { fontSize: 12, color: colors.muted, lineHeight: 16, marginTop: 1 },
+  pvL: { fontSize: 11, color: colors.muted, marginTop: 3 },
 
   // Note #3 — 4 share targets spread evenly across the sheet.
   apps: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', paddingTop: 18, paddingBottom: 10, paddingHorizontal: 6 },

@@ -41,8 +41,8 @@ const check = (label: string, ok: boolean, detail = '') => {
 const LAYOUT = 'src/app/_layout.tsx';
 const SHARE = 'src/lib/share.ts';
 const OG_FILE = 'public/og-image-v5.png';
-const REQUIRED_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، الطريقة الأذكى للبحث على العقار في المملكة 🦅😉';
-const REQUIRED_EN = 'Looking for a property and want to see everything on offer in one place? Ezhalah, the smarter way to find properties in the Kingdom 🦅😉';
+const REQUIRED_AR = 'تدور على عقار وتبي تشوف المعروض من مختلف المواقع بمكان واحد؟ إزهله، الطريقة الأذكى للبحث على العقار في المملكة.';
+const REQUIRED_EN = 'Looking for a property and want to see everything on offer in one place? Ezhalah, the smarter way to find properties in the Kingdom.';
 // Either word, anywhere in the line, names the country — «في» is not required: the 2026-09-25
 // wording says «عقارات السعودية», not «في السعودية».
 const NAMES_COUNTRY = /المملكة|السعودية/;
