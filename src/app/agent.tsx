@@ -681,7 +681,7 @@ export default function Agent() {
     if (!user || !q) return {};
     const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
     const name = pickName(user, loc);
-    const payload = encodeSharePayload(q, name);
+    const payload = encodeSharePayload(q, name, loc);
     const text = shareMessage(name, loc);
     if (!payload || !text) return {};
     const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : SHARE_LINK;

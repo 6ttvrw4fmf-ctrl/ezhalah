@@ -11,6 +11,7 @@
 //   5. no name → no message (never a line with a blank name).
 import {
   encodeSharePayload, decodeSharePayload, shareLink, shareMessage, shareLandingTitle, SHARE_COPY, SHARE_PARAM,
+  shareLandingPath, shareCardHtml, SHARE_CARD,
 } from '../src/lib/shareSearch.ts';
 
 let failed = 0;
@@ -31,7 +32,7 @@ const Q = {
 // ── 1. round trip ───────────────────────────────────────────────────────────────────────────────
 const payload = encodeSharePayload(Q, 'يوسف الأحمد');
 const link = payload ? shareLink('https://ezhalah-app.vercel.app/', payload) : '';
-const back = decodeSharePayload(new URL(link).searchParams.get(SHARE_PARAM));
+const back = decodeSharePayload(new URL(link).pathname.split('/').pop() ?? null);
 check('the exact search and the sender\'s first name survive encode → link → decode (Arabic included)',
   !!back && back.name === 'يوسف' && JSON.stringify(back.q) === JSON.stringify(Q));
 check('the payload is URL-safe (no +, /, = or spaces)', !!payload && /^[A-Za-z0-9_-]+$/.test(payload));
@@ -51,14 +52,40 @@ mustCatch('a decoder that trusts any JSON it is handed', !rejects((raw) => {
   try { const p = JSON.parse(decodeURIComponent(escape(atob(String(raw).replace(/-/g, '+').replace(/_/g, '/'))))); return { q: p.q, name: p.n }; } catch { return null; }
 }));
 
-// ── 3. lands on Home ────────────────────────────────────────────────────────────────────────────
-const landsHome = (mk: typeof shareLink) => {
+// ── 3. the preview page, then Home ─────────────────────────────────────────────────────────────
+// The link is the WhatsApp preview page /s/<payload>; that page sends a person to Home + ?share=.
+// Neither ever opens /agent or carries ?filter= (a pasted link must not run a search by itself).
+const landsHome = (mk: typeof shareLink, landing: typeof shareLandingPath) => {
   const u = new URL(mk('https://ezhalah-app.vercel.app', 'abc'));
-  return u.pathname === '/' && u.searchParams.get(SHARE_PARAM) === 'abc' && !u.searchParams.has('filter');
+  const to = new URL(landing('abc'), 'https://x.example');
+  return u.pathname === '/s/abc' && !u.search && to.pathname === '/' && to.searchParams.get(SHARE_PARAM) === 'abc' && !to.searchParams.has('filter');
 };
-check('the link is Home + ?share= — a pasted link never opens /agent or carries ?filter=', landsHome(shareLink));
+check('the link is the /s/ preview page, which lands on Home + ?share= — never /agent, never ?filter=', landsHome(shareLink, shareLandingPath));
 mustCatch('a link that deep-links straight into /agent?filter= (it would bypass the appSession gate)',
-  !landsHome((o, p) => `${o}/agent?filter=${p}`));
+  !landsHome((o, p) => `${o}/agent?filter=${p}`, shareLandingPath));
+
+// ── 3b. the WhatsApp card (owner 2026-10-17: a bold title with the name, one short line, the site) ──
+const fullPayload = encodeSharePayload(Q, 'يوسف', 'ar')!;
+const html = shareCardHtml('https://new-domain.example', fullPayload);
+const meta = (prop: string) => new RegExp(`<meta (?:property|name)="${prop}" content="([^"]*)"`).exec(html)?.[1] ?? null;
+check('the card title is the approved personal line with the sender\'s name and إزهله',
+  meta('og:title') === 'عقارات من يوسف لك على إزهله 🦅' && meta('og:description') === SHARE_CARD.ar.desc);
+check('every card URL follows the REQUEST\'S domain (a domain change needs no code change)',
+  meta('og:image') === 'https://new-domain.example/og-image-v5.png' && meta('og:url') === `https://new-domain.example/s/${fullPayload}`
+  && !/vercel\.app/.test(html));
+check('the page sends a person to Home + ?share= (never /agent)',
+  html.includes(`content="0;url=/?share=${fullPayload}"`) && html.includes(`location.replace("/?share=${fullPayload}")`) && !/\/agent/.test(html));
+const enHtml = shareCardHtml('https://x.example', encodeSharePayload(Q, 'Yusuf', 'en')!);
+check('an English sender gets the English card, brand kept as "Ezhalah"',
+  /<meta property="og:title" content="Properties from Yusuf, just for you on Ezhalah 🦅"/.test(enHtml) && /lang="en"/.test(enHtml));
+const evil = shareCardHtml('https://x.example', enc({ v: 1, n: '<script>alert(1)</script>', l: 'ar', q: Q }));
+check('a hostile name is escaped, never injected into the page', !evil.includes('<script>alert') && evil.includes('&lt;script&gt;'));
+mustCatch('a card builder that does not escape the name', (() => {
+  const raw = '<meta property="og:title" content="عقارات من <script>alert(1)</script> لك">';
+  return raw.includes('<script>alert');
+})() && !evil.includes('<script>alert'));
+const junk = shareCardHtml('https://x.example', 'not-a-payload');
+check('a broken link still gets a clean Ezhalah card and goes Home', /og:title" content="إزهله 🦅"/.test(junk) && junk.includes('content="0;url=/"'));
 
 // ── 4. approved wording ─────────────────────────────────────────────────────────────────────────
 check('Arabic message is the approved option C', shareMessage('يوسف', 'ar') === 'عقارات من يوسف لك على إزهله 🦅 اضغط الرابط وشوف 👇');

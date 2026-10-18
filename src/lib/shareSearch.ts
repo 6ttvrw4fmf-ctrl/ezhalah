@@ -60,14 +60,15 @@ function fromB64Url(s: string): string | null {
 }
 
 /** Packs the search and the sender's first name into the link payload. */
-export function encodeSharePayload(q: SearchQuery, senderName: string): string | null {
+export function encodeSharePayload(q: SearchQuery, senderName: string, locale: 'ar' | 'en' = 'ar'): string | null {
   const n = firstName(senderName);
   if (!n || !q || typeof q.location !== 'string') return null;
-  return toB64Url(JSON.stringify({ v: SHARE_PAYLOAD_VERSION, n, q }));
+  // `l` = the sender's language, so the WhatsApp preview card speaks it (owner 2026-10-17).
+  return toB64Url(JSON.stringify({ v: SHARE_PAYLOAD_VERSION, n, l: locale, q }));
 }
 
 /** Unpacks a payload; anything malformed, foreign or from another version is null (never a guess). */
-export function decodeSharePayload(raw: string | null | undefined): { q: SearchQuery; name: string } | null {
+export function decodeSharePayload(raw: string | null | undefined): { q: SearchQuery; name: string; locale: 'ar' | 'en' } | null {
   if (!raw || raw.length > 8000) return null;
   const json = fromB64Url(raw);
   if (!json) return null;
@@ -78,11 +79,57 @@ export function decodeSharePayload(raw: string | null | undefined): { q: SearchQ
     const q = p.q;
     if (!name || !q || typeof q !== 'object' || typeof q.location !== 'string') return null;
     if (q.deal !== 'Rent' && q.deal !== 'Buy') return null; // the only two Deal values (data/taxonomy.ts)
-    return { q: q as SearchQuery, name };
+    return { q: q as SearchQuery, name, locale: p.l === 'en' ? 'en' : 'ar' };
   } catch { return null; }
 }
 
 /** The link itself: always Home with the share param (a pasted link never runs a search by itself). */
 export function shareLink(origin: string, payload: string): string {
-  return `${origin.replace(/\/+$/, '')}/?${SHARE_PARAM}=${payload}`;
+  // /s/<payload> is the WhatsApp PREVIEW page (api/share-card.ts): it serves the card's tags and then
+  // sends a person straight to Home with ?share=. It still never opens /agent and never runs a search.
+  return `${origin.replace(/\/+$/, '')}/s/${payload}`;
+}
+
+/** Where the preview page sends a person: Home with the share param (the card + tap flow). */
+export function shareLandingPath(payload: string): string {
+  return `/?${SHARE_PARAM}=${payload}`;
+}
+
+// THE WHATSAPP PREVIEW CARD (owner 2026-10-17: «like this, simple, short» — a bold title with the
+// sender's name, one short line, the site, the link). WhatsApp/iMessage/X build that card from these
+// Open Graph tags, read from the page the link points to — so /s/<payload> answers with them. Every
+// URL is built from the REQUEST'S OWN origin, so a domain change needs no code change.
+export const SHARE_CARD = {
+  ar: { title: 'عقارات من {name} لك على إزهله 🦅', desc: 'كل مواقع العقار في السعودية في مكان واحد. اضغط وشوف.', site: 'إزهله' },
+  en: { title: 'Properties from {name}, just for you on Ezhalah 🦅', desc: 'Every Saudi real-estate site in one place. Tap to see.', site: 'Ezhalah' },
+} as const;
+export const SHARE_CARD_IMAGE_PATH = '/og-image-v5.png';
+
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+/**
+ * The preview page for /s/<payload>. A valid payload → the personal card + a redirect to Home with
+ * ?share=; anything else → the plain Ezhalah card + a redirect to Home. Never throws.
+ */
+export function shareCardHtml(origin: string, rawPayload: string | null | undefined): string {
+  const o = origin.replace(/\/+$/, '');
+  const d = decodeSharePayload(rawPayload);
+  const loc = d?.locale ?? 'ar';
+  const c = SHARE_CARD[loc];
+  const title = d ? fill(c.title, d.name) : (loc === 'ar' ? 'إزهله 🦅' : 'Ezhalah 🦅');
+  const to = d && rawPayload ? shareLandingPath(rawPayload) : '/';
+  const url = `${o}${d && rawPayload ? `/s/${rawPayload}` : '/'}`;
+  const image = `${o}${SHARE_CARD_IMAGE_PATH}`;
+  return `<!doctype html><html lang="${loc}" dir="${loc === 'ar' ? 'rtl' : 'ltr'}"><head><meta charset="utf-8">`
+    + `<meta name="viewport" content="width=device-width,initial-scale=1">`
+    + `<title>${esc(title)}</title>`
+    + `<meta property="og:type" content="website"><meta property="og:site_name" content="${esc(c.site)}">`
+    + `<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(c.desc)}">`
+    + `<meta property="og:url" content="${esc(url)}"><meta property="og:image" content="${esc(image)}">`
+    + `<meta property="og:image:width" content="512"><meta property="og:image:height" content="512">`
+    + `<meta name="twitter:card" content="summary"><meta name="twitter:title" content="${esc(title)}">`
+    + `<meta name="twitter:description" content="${esc(c.desc)}"><meta name="twitter:image" content="${esc(image)}">`
+    + `<meta http-equiv="refresh" content="0;url=${esc(to)}">`
+    + `</head><body><script>location.replace(${JSON.stringify(to)})</script>`
+    + `<a href="${esc(to)}">${esc(title)}</a></body></html>`;
 }

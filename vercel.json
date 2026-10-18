@@ -34,6 +34,10 @@
   ],
   "rewrites": [
     {
+      "source": "/s/:p",
+      "destination": "/api/share-card?p=:p"
+    },
+    {
       "source": "/_img/sadin/:path*",
       "destination": "https://sadin.com.sa/:path*"
     },
