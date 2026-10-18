@@ -26,6 +26,9 @@ const sql3 = readFileSync(join(dir, file3), 'utf8');
 const file4 = readdirSync(dir).filter((f) => /^\d{14}_district_carry_folds_plot_codes\.sql$/.test(f)).sort().at(-1);
 if (!file4) { console.log('FAIL  migration *_district_carry_folds_plot_codes.sql is missing'); process.exit(1); }
 const sql4 = readFileSync(join(dir, file4), 'utf8');
+const file5 = readdirSync(dir).filter((f) => /^\d{14}_district_recovery_never_truncates_and_mubarraz_city_correction\.sql$/.test(f)).sort().at(-1);
+if (!file5) { console.log('FAIL  migration *_district_recovery_never_truncates_and_mubarraz_city_correction.sql is missing'); process.exit(1); }
+const sql5 = readFileSync(join(dir, file5), 'utf8');
 
 // Every rule as a function of the SQL text, so the mutants below run the SAME verdict.
 function problems(s: string): string[] {
@@ -169,6 +172,30 @@ function problems4(s: string): string[] {
   return fail;
 }
 
+// Step 5 (2026-10-18): the hourly refill never TRUNCATEs and never loses > 1%; the المبرز city correction is deterministic.
+function problems5(s: string): string[] {
+  const fail: string[] = [];
+  const code = s.replace(/--[^\n]*/g, '');
+  const fn = (name: string): string => {
+    const m = code.match(new RegExp(`create or replace function public\\.${name}\\([\\s\\S]*?\\$(?:function|\\$)\\$;`));
+    if (!m) fail.push(`function ${name} is not defined in step 5`);
+    return m ? m[0] : '';
+  };
+  const full = fn('refresh_district_recovery');
+  const table = fn('refresh_district_recovery_table');
+  if (/truncate/i.test(full) || /truncate/i.test(table)) fail.push('the hourly refill TRUNCATEs district_recovery (not MVCC-safe: a stale snapshot serves ~112k districts as NULL)');
+  if (!/v_elig >= 50 and v_lost > 0\.01 \* v_elig/.test(table) || !/'district_recovery_shrank'/.test(table) || !/return 0;\s*end if;\s*delete from public\.district_recovery where source_table = p_table;/.test(table)) fail.push('the > 1% loss guard (keep the previous rows + alert, BEFORE the delete) is gone');
+  if (!/perform public\.refresh_listing_city_correction\(\);/.test(full)) fail.push('the city correction is no longer refreshed hourly');
+  const corr = fn('refresh_listing_city_correction');
+  if (!/having count\(distinct d\.city_id\) = 1/.test(corr)) fail.push('the city correction no longer requires ONE governorate city');
+  if (!/where v1\.city_id in \(12, 3677\)\s*and u\.city_id not in \(12, 3677\)/.test(corr)) fail.push('the city correction is no longer limited to office-default الهفوف/الاحساء rows moving elsewhere');
+  if (!/u\.district_norm in \('غسانيه'/.test(corr)) fail.push('the city correction is no longer limited to the 10-08 hold names (uniqueness elsewhere is a guess)');
+  if (!/'unique_district_in_governorate'/.test(corr)) fail.push('the correction lost its provenance');
+  if (!/COALESCE\(xcc\.city_id, v1\.city_id/.test(code) || !/if k <> 3 then raise exception 'v2 anchor city found/.test(code)) fail.push('v2 no longer serves the correction ahead of v1 (or its anchor count check is gone)');
+  if (!/rows lost their district in v2/.test(code)) fail.push('the apply-time proof no longer checks that no row lost its district');
+  return fail;
+}
+
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : ` — ${why}`}`); };
 // Mutation proof: the SAME verdict function, run on a deliberately loosened copy of the committed SQL, must go red.
@@ -237,6 +264,19 @@ const mutants4: Array<[string, (s: string) => string]> = [
 for (const [label, mutate] of mutants4) {
   const m = mutate(sql4);
   mustCatch(`fold/hold: ${label}`, m !== sql4 && problems4(m).length > 0, m === sql4 ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+}
+
+const live5 = problems5(sql5);
+check(`committed migration ${file5} holds every refill/city pin`, live5.length === 0, live5.join('; '));
+const mutants5: Array<[string, (s: string) => string]> = [
+  ['TRUNCATE back in the hourly refill', (s) => s.replace("declare r record; n bigint := 0; m bigint;\nbegin\n  for r in", "declare r record; n bigint := 0; m bigint;\nbegin\n  truncate public.district_recovery;\n  for r in")],
+  ['loss guard removed', (s) => s.replace('if v_elig >= 50 and v_lost > 0.01 * v_elig then', 'if false then')],
+  ['correction without the uniqueness rule', (s) => s.replace('having count(distinct d.city_id) = 1) u', ') u')],
+  ['correction for every name (not only the hold list)', (s) => s.replace(/\n\s*-- the 10-08 المبرز hold names[\s\S]*?'بو سحبل الاول'\)/, '')],
+];
+for (const [label, mutate] of mutants5) {
+  const m = mutate(sql5);
+  mustCatch(`refill/city: ${label}`, m !== sql5 && problems5(m).length > 0, m === sql5 ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
 }
 
 console.log(failed === 0 ? 'OK: a source district can never be dropped silently again' : `${failed} check(s) failed`);
