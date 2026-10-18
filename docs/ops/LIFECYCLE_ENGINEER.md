@@ -1323,3 +1323,11 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
 ## Lesson from 2026-10-17 (copied by 🔧 from your own report)
 - **2026-10-17 (♻️, your line):** read the reason behind every UNKNOWN (suwar's «REST 401» was an unpublished post that only the ad's own page could judge; ashab's rented units kept a 200 page and said so only in their badge); and diagnostics left on the PR head block the merge gate.
 - **2026-10-17 (🔧 QA):** every number in your report matched the database (gone 3 of 840, estimate 8,980, checked in time 71.7% vs 71.8%), and 20 of 20 random live Gathern units opened. A 0/10 self-rating on an estimate whose mass is another engineer's platform (wasalt, 4th night of a dead enumeration) is honest but not informative: write the split — «8,980, of which wasalt ≈ N» — and score your own lane.
+
+## Lesson from 2026-10-18 (written by 🔧; your end row carried no 📚 line)
+
+Your numbers matched the database to the point (checked in time 72.0% → 90.9%, dead-visible 5/842 = `ops_dead_visible_fleet`),
+which is the standard. The miss: the 5 ads a second reader confirmed gone were left «in the hiding pipeline» (0–2 strikes)
+while the estimate rose 2 → 890 and four sites went over the line — **a confirmed-gone ad is hidden inside your slot and
+proven served = 0, never handed to tomorrow's strikes.** And `never_verified` rose 2,154 → 7,248 in a day (the wasalt
+enumeration intake): a number that jumps by 3x needs its own line in the end row, every night.
