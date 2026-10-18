@@ -1286,6 +1286,7 @@ const AR: Record<string, string> = {
   'Approximate location': 'الموقع التقريبي',
   '{name} published no exact location': '{name} لم ينشر موقعاً دقيقاً',
   'Tap here to see the district': 'اضغط هنا لرؤية الحي',
+  'Tap here to see the city': 'اضغط هنا لرؤية المدينة',
   'District location on Google Maps': 'موقع الحي على خرائط Google',
   "and to confirm it's still on {siteName}": 'وللتأكد من توفّره في {siteName}',
   "This ad may have been removed or sold. We review ads continuously, but we can't guarantee they're still available.": 'قد يكون الإعلان حُذف أو بيع. نراجع الإعلانات باستمرار، لكن لا نضمن توفّرها.',

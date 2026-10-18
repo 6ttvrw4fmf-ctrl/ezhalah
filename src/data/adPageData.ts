@@ -103,7 +103,10 @@ export function districtPlace(row: AdRow | null | undefined): DistrictPlace | nu
   // other sites keep no map without a pin. The ministry block stays Aqar-sale-only (pricesBlockEligible).
   if (!DISTRICT_MAP_PLATFORMS.includes(String(row?.platform ?? '').trim().toLowerCase())) return null;
   const district = String(row?.district_ar ?? '').trim(), city = String(row?.city_ar ?? '').trim();
-  if (!district || !city || district === 'غير معروف' || city === 'غير معروف') return null;
+  if (!city || city === 'غير معروف') return null;
+  // No district written (owner 2026-10-17: «those with no district, we show the city»): the whole city,
+  // Google's own city border around it — still labelled approximate, never a pin.
+  if (!district || district === 'غير معروف') return { query: city, district: '', city };
   const named = /^حي\s/.test(district) ? district : `حي ${district}`;
   return { query: `${named}، ${city}`, district: named, city };
 }

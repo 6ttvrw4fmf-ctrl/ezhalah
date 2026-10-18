@@ -594,7 +594,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                   </View>
                   <View style={s.mapChip}>
                     <Ionicons name="expand-outline" size={15} color={lightColors.ink} />
-                    <Text style={s.mapChipTx}>{t('Tap here to see the district')}</Text>
+                    <Text style={s.mapChipTx}>{t(area.district ? 'Tap here to see the district' : 'Tap here to see the city')}</Text>
                   </View>
                   <View style={[s.mapPill, isRTL ? { right: 10 } : { left: 10 }]}>
                     <Text style={s.mapPillTx}>{t('{name} published no exact location', { name })}</Text>
