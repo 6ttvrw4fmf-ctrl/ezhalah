@@ -607,6 +607,13 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
     price, price_basis = ((som, "سعر السوم") if som is not None
                           else (lim, "سعر الحد") if lim is not None else (None, None))
     ppm = som_ppm if som_ppm is not None else lim_ppm
+    # The ad's own description states THIS figure per metre: QRW2823 prints «سعر الحد 900» and, in its description,
+    # «سعر المتر 900 ريال» on a 400 m² plot (rendered 2026-10-18) — the cell's figure is the rate, not a 900 total.
+    # Owner rule 2026-10-18: a rate needs the ad's own per-metre marker tied to that figure (normalize.stated_per_metre).
+    rate_in_text = bool(deal != "Rent" and price is not None and ppm is None
+                        and normalize.stated_per_metre(desc, price))
+    if rate_in_text:
+        ppm, price = price, None
     # ppm × area is NOT computed here: owner rule 2026-09-03 derives it in the search/display layer
     # only (price_total_effective, shown as ≈ and sale-only). price_total keeps meaning "the source
     # said this"; the rate goes to price_per_meter below.
@@ -662,7 +669,8 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         if period:
             row["rent_period"] = period
     else:
-        row["price_total"] = price if (price is not None or not zero_bid) else db.AUTHORITATIVE_NULL
+        row["price_total"] = (db.AUTHORITATIVE_NULL if rate_in_text
+                              else price if (price is not None or not zero_bid) else db.AUTHORITATIVE_NULL)
     row["additional_info"] = {k: v for k, v in {
         "property_number": f.get("رقم العقار"),
         "category_ar": cat_ar,
