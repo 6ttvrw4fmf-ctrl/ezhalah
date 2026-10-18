@@ -399,6 +399,7 @@ _PLUS_CODE_RE = re.compile(r"^[A-Z0-9]{4,8}\+[A-Z0-9]{2,3}\b")   # «QQWW+5XH»,
 _PLUS_CODE_ANY = re.compile(r"(?<![A-Z0-9])[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{0,3}(?![A-Z0-9])")
 # A map line that names ITSELF a district: «حي » + Arabic words only (no digits, latin, or a second clause).
 _HAYY_SELF = re.compile(r"حي\s+[\u0621-\u064A][\u0621-\u064A\s]{1,30}")
+_HAYY_TAIL = re.compile(r"(?<![\u0621-\u064A])حي\s+[\u0621-\u064A][\u0621-\u064A\s]{1,30}$")
 
 
 def location_field_district(text: str) -> Optional[str]:
@@ -450,6 +451,10 @@ def neighborhood_word(cand: Optional[str], field: Optional[str], cand_hit: Optio
         return field
     if cand and (cand_hit or _HAYY_SELF.fullmatch(cand)):
         return cand
+    # «الرياض حي النضيم», «خميس مشيط حي الاسكان»: the line ENDS in a district it names — that segment, as written.
+    tail = _HAYY_TAIL.search(cand or "")
+    if tail and _HAYY_SELF.fullmatch(tail.group(0).strip()):
+        return tail.group(0).strip()
     return None
 
 
