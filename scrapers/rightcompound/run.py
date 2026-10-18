@@ -340,6 +340,11 @@ def compound_facts(url: str, page_html: str) -> dict[str, Any]:
             district_en = parts[-2]
     # An explicit «X District» sentence is the page's own statement: it alone is offered (a JSON-LD
     # segment naming another place is a conflict, not a second chance). Otherwise every address segment.
+    # The site's TEMPLATE sentence («King Abdullah Financial District», printed on compounds that never
+    # filled a district) is not a statement: it must not mask the JSON-LD address — al-ghadeer-compound
+    # prints it while its streetAddress says «4100 Northern Ring Rd, Al Ghadir» (rendered 2026-10-18).
+    if dm and _norm_dist(district_en) in _TEMPLATE_EN:
+        dm, district_en = None, None
     if dm:
         candidates = [district_en]
     else:
