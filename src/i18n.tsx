@@ -623,6 +623,8 @@ const AR: Record<string, string> = {
   // truth; small exact counts said exactly; unknown → the line is not shown.
   'Searching {count} real-estate platforms…': 'نبحث في {count} منصة عقارية…',
   'Checking more than {count} listings across the Kingdom…': 'نفحص أكثر من {count} إعلان في المملكة…',
+  // Exact count in digits (owner 2026-10-17: «the actual number … not in word form») — the line now shipped.
+  'Checking {count} listings across the Kingdom…': 'نفحص {count} إعلان في المملكة…',
   'Reviewing more than {count} listings in {city}…': 'نراجع أكثر من {count} إعلان في {city}…',
   'Reviewing {count} listings in {city}…': 'نراجع {count} إعلان في {city}…',
   'Going through more than {count} listings in {district}…': 'ندقق في أكثر من {count} إعلان في {district}…',
