@@ -12,7 +12,8 @@
 //
 // Offline: reads the LATEST migration defining each function (date-prefixed names sort
 // chronologically) and checks that both judge with public.scrape_run_dangling_after(platform), that
-// no flat per-platform special case is back, and that the helper keeps its floor and cap.
+// no flat per-platform special case is back, and that the helper keeps its floor and cap. Each
+// predicate is also run against the pre-fix bodies and must catch them.
 import { readFileSync, readdirSync } from 'node:fs';
 
 const DIR = 'supabase/migrations';
@@ -23,7 +24,8 @@ const check = (name: string, ok: boolean) => {
   if (!ok) failed++;
 };
 
-// The body of the last `create or replace function public.<name>` in the tree, up to its closing $function$.
+// The body of the last `create or replace function public.<name>` in the tree, between its opening dollar
+// tag (whatever it is: $$, $function$, $body$) and the matching close. No close → '' (fails closed).
 function latestBody(name: string): string | null {
   const re = new RegExp(`^\\s*create\\s+or\\s+replace\\s+function\\s+public\\.${name}\\s*\\(`, 'im');
   for (const f of [...files].reverse()) {
@@ -31,32 +33,50 @@ function latestBody(name: string): string | null {
     const m = re.exec(sql);
     if (!m) continue;
     const rest = sql.slice(m.index);
-    const open = rest.indexOf('$function$');
-    const close = rest.indexOf('$function$', open + 1);
-    return open > -1 && close > -1 ? rest.slice(0, close) : rest;
+    const tag = /\$([A-Za-z_][A-Za-z0-9_]*)?\$/.exec(rest);
+    if (!tag) return '';
+    const close = rest.indexOf(tag[0], tag.index + tag[0].length);
+    return close > -1 ? rest.slice(tag.index + tag[0].length, close) : '';
   }
   return null;
 }
+
+// Every way the three bodies can fall back to a flat threshold, as a list of problems (empty = healthy).
+function problems(helper: string, detector: string, verifier: string): string[] {
+  const out: string[] = [];
+  const calls = (s: string) => (s.match(/scrape_run_dangling_after\s*\(\s*s\.platform\s*\)/gi) || []).length;
+  if (calls(detector) < 1) out.push('the detector does not raise with the per-platform threshold');
+  if (calls(detector) < 2) out.push('the detector does not self-heal with the same per-platform threshold');
+  if (calls(verifier) < 1) out.push('the remediation verifier does not use the per-platform threshold');
+  if (/case\s+when\s+s\.platform\s*=/i.test(detector)) out.push('a flat per-platform special case is back in the detector');
+  if (!/max\s*\(\s*s\.finished_at\s*-\s*s\.started_at\s*\)/i.test(helper)) out.push("the helper does not measure the platform's own ok runs");
+  if (!/greatest\s*\(\s*interval\s*'3 hours'/i.test(helper)) out.push('the helper lost the 3 h floor');
+  if (!/least\s*\(\s*interval\s*'6 hours 30 minutes'/i.test(helper)) out.push('the helper lost the 6 h 30 min cap');
+  if (!/not\s+like\s+'enum-rollup%'/i.test(helper)) out.push('enum-rollup rows can stretch the threshold');
+  return out;
+}
+
+const mustCatch = (name: string, broken: string[]) => check(`(mutation) ${name} is caught`, broken.length > 0);
 
 const helper = latestBody('scrape_run_dangling_after');
 const detector = latestBody('mon_detect_dangling_scrape_run');
 const verifier = latestBody('verify_dangling_scrape_run');
 
-check('a migration defines scrape_run_dangling_after()', helper !== null);
-check('mon_detect_dangling_scrape_run() is defined', detector !== null);
-check('verify_dangling_scrape_run() is defined', verifier !== null);
+check('a migration defines scrape_run_dangling_after()', !!helper);
+check('mon_detect_dangling_scrape_run() is defined', !!detector);
+check('verify_dangling_scrape_run() is defined', !!verifier);
 
 if (helper && detector && verifier) {
-  const calls = (s: string) => (s.match(/scrape_run_dangling_after\s*\(\s*s\.platform\s*\)/gi) || []).length;
-  check('the detector raises with the per-platform threshold', calls(detector) >= 1);
-  check('the detector self-heals with the same per-platform threshold', calls(detector) >= 2);
-  check('the remediation verifier uses the same per-platform threshold', calls(verifier) >= 1);
-  check('no flat per-platform special case is back in the detector',
-    !/case\s+when\s+s\.platform\s*=/i.test(detector));
-  check('the helper measures the platform\'s own ok runs', /max\s*\(\s*s\.finished_at\s*-\s*s\.started_at\s*\)/i.test(helper));
-  check('the helper keeps the 3 h floor', /greatest\s*\(\s*interval\s*'3 hours'/i.test(helper));
-  check('the helper caps at 6 h 30 min (a hosted GitHub job dies at 6 h)', /least\s*\(\s*interval\s*'6 hours 30 minutes'/i.test(helper));
-  check('enum-rollup rows (never open) do not stretch the threshold', /not\s+like\s+'enum-rollup%'/i.test(helper));
+  const found = problems(helper, detector, verifier);
+  for (const p of found) console.log(`  · ${p}`);
+  check('detector, verifier and helper judge each platform by its own run length', found.length === 0);
+
+  // The pre-2026-10-18 bodies (flat 3 h, dwelleo 6 h) and three single-clause breakages must each be caught.
+  const OLD_FLAT = "and s.started_at between now() - interval '48 hours' and now() - (case when s.platform = 'dwelleo' then interval '6 hours' else interval '3 hours' end)";
+  mustCatch('the old flat-threshold detector', problems(helper, OLD_FLAT + '\n' + OLD_FLAT, verifier));
+  mustCatch("the old verifier's flat 3 h", problems(helper, detector, "and s.started_at between now() - interval '48 hours' and now() - interval '3 hours'"));
+  mustCatch('a helper without its cap', problems(helper.replace(/least\s*\(\s*interval\s*'6 hours 30 minutes',/i, '('), detector, verifier));
+  mustCatch('a self-heal that went back to flat', problems(helper, detector.replace(/scrape_run_dangling_after\s*\(\s*s\.platform\s*\)(?![\s\S]*scrape_run_dangling_after)/i, "interval '3 hours'"), verifier));
 }
 
 if (failed) {
