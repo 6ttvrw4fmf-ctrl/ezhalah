@@ -93,6 +93,8 @@ import { useApp } from '@/store';
 import { pickResultsFoundSentence } from '@/data/resultsFoundRotation';
 import { pickNoResultsSentence } from '@/data/noResultsRotation';
 import { pickName } from '@/lib/nameSync';
+import { encodeSharePayload, shareLink, shareMessage } from '@/lib/shareSearch';
+import { SHARE_LINK } from '@/lib/share';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
@@ -671,6 +673,20 @@ export default function Agent() {
     hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
   const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript } = useApp();
+  // SHARE THIS SEARCH (owner 2026-10-17): a signed-in user's «مشاركة» sends the search itself with the
+  // approved line «عقارات من {name} لك على إزهله 🦅 …» (src/lib/shareSearch.ts). The link lands on
+  // Home, never on /agent — a pasted link must not run a search by itself (appSession gate). A guest,
+  // or a result whose query is unknown, keeps the plain homepage share.
+  const shareFor = (q: SearchQuery | undefined): { shareUrl?: string; shareText?: string } => {
+    if (!user || !q) return {};
+    const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
+    const name = pickName(user, loc);
+    const payload = encodeSharePayload(q, name);
+    const text = shareMessage(name, loc);
+    if (!payload || !text) return {};
+    const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : SHARE_LINK;
+    return { shareUrl: shareLink(origin, payload), shareText: text };
+  };
   // THE ONE STORE WRITER FOR THIS SCREEN. Every write into the shared query the Filter home binds to
   // goes through here, always sanitized — enforced by verify-af-state-never-leaks-into-filter.ts,
   // which counts the `setQuery(` calls in this file precisely so a second, unsanitized writer cannot
@@ -4904,7 +4920,7 @@ export default function Agent() {
                                 closing note + available actions above (owner 2026-08-23). Sliced to `shown`
                                 — never past what's actually rendered right now ("no hidden listing should be
                                 spoken") — but otherwise reads every visible card (owner 2026-08-22: no further cap). */}
-                            <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={readAloudSegments} />
+                            <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={readAloudSegments} {...shareFor(m.result.query)} />
                           </>
                         );
                       })()}

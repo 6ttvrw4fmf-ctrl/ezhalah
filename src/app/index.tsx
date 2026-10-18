@@ -33,6 +33,7 @@ import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
 import { useFilterWelcome } from '@/lib/useFilterWelcome';
+import { decodeSharePayload, shareLandingTitle, SHARE_COPY, SHARE_PARAM } from '@/lib/shareSearch';
 import { pickName } from '@/lib/nameSync';
 import { useI18n, tDetailOption, tPriceTab, isLatinOnlyInput, ARABIC_ONLY_MSG, CITY_REQUIRED_MSG, DISTRICT_UNCONFIRMED_MSG } from '@/i18n';
 
@@ -135,6 +136,47 @@ export default function Home() {
   const regionLabel = (o: { regionId: number | null; regionAr: string | null }) => (locale === 'en' ? regionNameEn(o.regionId, o.regionAr) : o.regionAr);
   const districtLabel = (cityId: number, ar: string) => (locale === 'en' ? districtNameEn(cityId, ar) : ar);
   const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history } = useApp();
+  // A SHARED SEARCH LANDS HERE (owner 2026-10-17). `/?share=<payload>` (src/lib/shareSearch.ts) shows a
+  // card «عقارات من {name} لك على إزهله» with «اضغط وشوف العقارات». The TAP is what runs the search
+  // (a pasted link never runs one by itself — appSession gate). Owner: the recipient signs in to open a
+  // shared search so it is saved to their own list; a visitor who isn't signed in sees the sign-in
+  // screen right after the tap, and the search opens once they're in — including across an OAuth
+  // redirect, via a short-lived pending record. Ordinary «بحث» is untouched and stays free for everyone.
+  const [sharedSearch, setSharedSearch] = useState<{ q: SearchQuery; name: string } | null>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const raw = new URLSearchParams(window.location.search).get(SHARE_PARAM);
+    const s = decodeSharePayload(raw);
+    if (raw) { try { window.history.replaceState(null, '', window.location.pathname); } catch { /* cosmetic */ } }
+    if (s) setSharedSearch(s);
+  }, []);
+  const openSharedSearch = useCallback((s: { q: SearchQuery }) => {
+    try { localStorage.removeItem(SHARED_PENDING_KEY); } catch { /* per-device only */ }
+    setSharedSearch(null);
+    dismissSignInCard();
+    router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q) } });
+  }, [router, dismissSignInCard]);
+  const onSharedTap = () => {
+    if (!sharedSearch) return;
+    if (user) { openSharedSearch(sharedSearch); return; }
+    try {
+      localStorage.setItem(SHARED_PENDING_KEY, JSON.stringify({ q: sharedSearch.q, name: sharedSearch.name, at: Date.now() }));
+    } catch { /* without storage the search still opens if sign-in finishes in this page */ }
+    openAuth();
+  };
+  // The tap's continuation once the visitor is signed in (same page, or back from an OAuth redirect).
+  useEffect(() => {
+    if (!user || Platform.OS !== 'web') return;
+    let pending: { q: SearchQuery; at: number } | null = null;
+    try { pending = JSON.parse(localStorage.getItem(SHARED_PENDING_KEY) ?? 'null'); } catch { pending = null; }
+    if (!pending?.q || !(Date.now() - pending.at < SHARED_PENDING_TTL_MS)) {
+      try { localStorage.removeItem(SHARED_PENDING_KEY); } catch { /* per-device only */ }
+      return;
+    }
+    const q = pending.q;
+    const t = setTimeout(() => openSharedSearch({ q }), 0); // after the app session has started
+    return () => clearTimeout(t);
+  }, [user, openSharedSearch]);
   // ROTATING WELCOME (owner 2026-10-17): a signed-in user sometimes sees a personal line with a live
   // fact IN PLACE OF THE BIG HEADLINE (owner: «i meant the big text»); the subtitle below never changes. lib/filterWelcome.ts holds the approved lines
   // and the truth rules; null keeps the normal subtitle.
@@ -2188,6 +2230,22 @@ export default function Home() {
       {/* Drawer overlays the home content (dimmed behind) instead of replacing it. */}
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
+      {sharedSearch && (
+        <View style={s.sharedBackdrop} accessibilityViewIsModal>
+          <View style={s.sharedCard}>
+            <Pressable onPress={() => setSharedSearch(null)} hitSlop={10} style={[s.sharedClose, isRTL ? { left: 12 } : { right: 12 }]} accessibilityRole="button" accessibilityLabel={t('Close')}>
+              <Ionicons name="close" size={20} color={colors.muted} />
+            </Pressable>
+            <Text style={s.sharedEagle}>🦅</Text>
+            <Text style={[s.sharedTitle, { writingDirection: isRTL ? 'rtl' : 'ltr' }]}>
+              {shareLandingTitle(sharedSearch.name, locale === 'en' ? 'en' : 'ar')}
+            </Text>
+            <Pressable onPress={onSharedTap} style={({ pressed }) => [s.sharedButton, pressed && { opacity: 0.9 }]} accessibilityRole="button">
+              <Text style={s.sharedButtonText}>{SHARE_COPY[locale === 'en' ? 'en' : 'ar'].button}</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -2221,7 +2279,27 @@ const E = StyleSheet.create({
   rangeNote: { textAlign: 'left' },
 });
 
+// A shared search waits at most this long for the visitor to finish signing in after the tap.
+const SHARED_PENDING_KEY = 'ezhalah:sharedSearch:pending';
+const SHARED_PENDING_TTL_MS = 30 * 60 * 1000;
+
 const s = StyleSheet.create({
+  sharedBackdrop: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60,
+    backgroundColor: 'rgba(18, 37, 27, 0.35)', alignItems: 'center', justifyContent: 'center', padding: 20,
+  },
+  sharedCard: {
+    width: '100%', maxWidth: 380, backgroundColor: colors.surface, borderRadius: radius.card,
+    paddingTop: 28, paddingBottom: 22, paddingHorizontal: 22, alignItems: 'center', ...cardShadow,
+  },
+  sharedClose: { position: 'absolute', top: 12 },
+  sharedEagle: { fontSize: 34, marginBottom: 10 },
+  sharedTitle: { fontSize: 19, fontWeight: '700', color: colors.ink, textAlign: 'center', lineHeight: 28 },
+  sharedButton: {
+    marginTop: 20, alignSelf: 'stretch', backgroundColor: colors.primary, borderRadius: 14,
+    paddingVertical: 14, alignItems: 'center',
+  },
+  sharedButtonText: { color: colors.onFill, fontSize: 16, fontWeight: '700' },
 
   scroll: { paddingHorizontal: space.screenSide, alignItems: 'center' },
   col: { width: '100%', maxWidth: MAX_W },
