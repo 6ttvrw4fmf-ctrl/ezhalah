@@ -33,6 +33,7 @@ a defaulted 'annual' (a monthly figure stored as yearly is a 12x error on the ca
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 import hashlib
 import html as ihtml
 import os
@@ -138,8 +139,10 @@ _OWN_CARD_RE = re.compile(
     r'class="recent-ads-list-price"\s*>(.*?)</div>',
     re.S,
 )
-# The theme always prints 2 decimals, in SAR or ريال. «0.00» is the theme rendering nothing.
-_MONEY_RE = re.compile(r"([\d٠-٩][\d٠-٩,]*\.\d{2})\s*(?:SAR|ريال|ر\.س)")
+# The theme always prints 2 decimals, in SAR or ريال. «0.00» is the theme rendering nothing. The decimals are real
+# when the advertiser typed them: /ad/‏فيلا-بالهدا-المربع-الرابع-…/ prints «1.20ريال», which int() stored as 1 (2026-10-18).
+# Arabic digits and the Arabic separators («١٫٢٠», «٥٠٬٠٠٠») are the same figure.
+_MONEY_RE = re.compile(r"([\d٠-٩][\d٠-٩,٬]*[.٫][\d٠-٩]{2})\s*(?:SAR|ريال|ر\.س)")
 
 
 def _same_ad(href: str, link: str) -> bool:
@@ -147,8 +150,8 @@ def _same_ad(href: str, link: str) -> bool:
     return unquote(href or "").rstrip("/") == unquote(link or "").rstrip("/")
 
 
-def own_price(page_html: str, link: str) -> Optional[int]:
-    """This listing's published price, or None. Never another ad's, never a guess."""
+def own_price_figure(page_html: str, link: str) -> Optional[Decimal]:
+    """This listing's published figure EXACTLY («1.20» stays 1.20), or None. Never another ad's, never a guess."""
     for href, price_html in _OWN_CARD_RE.findall(page_html or ""):
         if not _same_ad(href, link):
             continue
@@ -156,11 +159,18 @@ def own_price(page_html: str, link: str) -> Optional[int]:
         if not m:
             return None
         try:
-            v = float(m.group(1).translate(_AR_DIGITS).replace(",", ""))
-        except ValueError:
+            v = Decimal(m.group(1).translate(_AR_DIGITS).replace(",", "").replace("٬", "").replace("٫", "."))
+        except InvalidOperation:
             return None
-        return int(v) if v > 0 else None
+        return v if v > 0 else None
     return None
+
+
+def own_price(page_html: str, link: str) -> Optional[int]:
+    """The published figure as whole riyals — only when it IS whole («6,400.00»). A fraction («1.20») is never cut to
+    1: the price columns hold whole riyals, so such a figure is not stored as a price at all (map_listing)."""
+    v = own_price_figure(page_html, link)
+    return int(v) if v is not None and v == v.to_integral_value() else None
 
 
 # PHOTOS — the ad's own gallery only. This theme puts the listing's own photos in `.img-box`
@@ -797,7 +807,9 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
     if title_hayy:
         district_ar, district_source = title_hayy, "title"
 
+    figure = own_price_figure(page_html, link)
     price = own_price(page_html, link)
+    fractional = figure is not None and price is None      # «1.20ريال»: published, but not a whole-riyal amount
     rent_period, price_annual = (None, None)
     if deal == "Rent":
         rent_period, price_annual = rent_period_and_annual(price, f"{title} {body} {page_text}")
@@ -834,7 +846,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         "photo_urls": own_photos(page_html),
     }
     if deal == "Rent":
-        row["price_annual"] = price_annual
+        row["price_annual"] = db.AUTHORITATIVE_NULL if fractional else price_annual
         if rent_period:
             row["rent_period"] = rent_period
     else:
@@ -842,7 +854,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         # card prints «6,400.00 ريال», the description «… 6400 ريال للمتر». No marker: the total as published.
         # A stated rate writes AUTHORITATIVE_NULL as the total so the stored total clears.
         rate = stated_rate(page_html, price)
-        row["price_total"] = db.AUTHORITATIVE_NULL if rate else price
+        row["price_total"] = db.AUTHORITATIVE_NULL if (rate or fractional) else price
         if rate:
             row["price_per_meter"] = rate
 
@@ -860,7 +872,8 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         "ad_cats": _classes(post, "ad_cats-") or None,
         "ad_country": _classes(post, "ad_country-") or None,
         "ad_condition": _classes(post, "ad_condition-") or None,
-        "price_published": price is not None,
+        "price_published": figure is not None,
+        "price_published_text": f"{figure} ريال" if fractional else None,   # the card's figure, verbatim
     }
     row["additional_info"] = {k: v for k, v in extra.items() if v is not None}
     return row, category, ""
