@@ -502,7 +502,7 @@ type DistrictFns = {
   districtEmbedUrl: (d: { query: string; district: string; city: string }, hl?: string) => string;
 };
 const liftDistrict = async (file: string): Promise<DistrictFns> => (await liftSymbols(file, [
-  { header: 'export const DISTRICT_MAP_PLATFORMS: ' },
+  { header: 'export const DISTRICT_MAP_PLATFORMS: ', endsWith: /\];$/ },  // a one-line const: end on its own line
   { header: 'export function districtPlace(' },
   { header: 'export const districtEmbedUrl = (' },
 ], ['districtPlace', 'districtEmbedUrl'])) as unknown as DistrictFns;
