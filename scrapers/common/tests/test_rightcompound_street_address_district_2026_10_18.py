@@ -23,7 +23,7 @@ BRIDGE_READ = R._bridge_en_ar          # the real cached reader, captured before
 _TD = Path(__file__).resolve().parents[2] / "rightcompound" / "testdata"
 PAGE = (_TD / "al-bustan-village.excerpt.html").read_text(encoding="utf-8")
 URL = "https://rightcompound.com/compounds/riyadh/al-bustan-village"
-KNOWN = {(1, "حي الياسمين"), (1, "حي الملز"), (1, "حي الضباط"), (2, "حي التحلية"), (2, "حي الهدا"), (1, "حي الملك عبدالله المالي")}
+KNOWN = {(1, "حي الياسمين"), (1, "حي الملز"), (1, "حي الضباط"), (1, "حي الغدير"), (2, "حي التحلية"), (2, "حي الهدا"), (1, "حي الملك عبدالله المالي")}
 BRIDGE = {
     "Riyadh": [{"district_en": "Al Malaz", "district_ar": "حي الملز"}, {"district_en": "Al-Malaz", "district_ar": "حي الضباط"},
                {"district_en": "Malaz", "district_ar": "حي الملز"},
@@ -68,6 +68,19 @@ def test_mutation_ambiguous_unknown_template_or_city_text_is_no_district(street,
     assert rows, why
     assert all(r["district_ar"] is None and r["neighborhood"] == want_en for r in rows)
     assert all("district_source" not in r["additional_info"] for r in rows)
+
+
+def test_the_template_sentence_does_not_mask_the_jsonld_address():
+    # al-ghadeer-compound (rendered 2026-10-18): the page prints the template «King Abdullah Financial District»
+    # while its JSON-LD streetAddress reads «4100 Northern Ring Rd, Al Ghadir» — 40 live rows stood blank behind it.
+    page = _page("4100 Northern Ring Rd, Al Ghadir", "Riyadh").replace("</h1>", "</h1><p>Located in the King Abdullah Financial District area.</p>", 1)
+    assert R.compound_facts(URL, page)["district_en_candidates"] == ["Al Ghadir"]
+    rows, why, _ = R.map_units(URL, page)
+    assert rows, why
+    assert {r["district_ar"] for r in rows} == {"حي الغدير"} and {r["additional_info"]["district_source"] for r in rows} == {"dictionary"}
+    # …while a REAL «X District» sentence still stands alone, as before.
+    page2 = _page("Al Malaz, Riyadh", "Riyadh").replace("</h1>", "</h1><p>Located in the Al Yasmin District of Riyadh.</p>", 1)
+    assert R.compound_facts(URL, page2)["district_en_candidates"] == ["Al Yasmin"]
 
 
 def test_bridge_name_resolves_only_when_unique_and_catalogued():
