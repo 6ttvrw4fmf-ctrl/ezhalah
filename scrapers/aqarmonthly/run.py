@@ -539,6 +539,42 @@ def _district_from_aqar_id(city_id, district_id, category) -> str | None:
     return None
 
 
+# Aqar's OWN city id → our catalog region, used ONLY to break a same-name tie the slug cannot.
+#
+# Owner 2026-10-18 («make the small-town ads findable»): 13 active ads named a real catalog town in
+# their own slug — «الدرب-الدرب», «…-العقيق-العقيق», «…-البديعة» — and still had NO city, so they were
+# never production_ready and no search could reach them. The resolver was right to refuse: الدرب is
+# catalogued in Asir AND Jazan, العقيق in four places, and the slug names no «منطقة». But every ad
+# also carries Aqar's own city_id, and that id sits in one region. Measured over every resolved
+# aqarmonthly row (2026-10-18): each id below is ≥ 96% one region across ≥ 5 rows (21 → Riyadh in
+# 2,002 of 2,004). 56 has only 3 resolved rows: two «عتود ، الدرب» in Jazan, and one «… الكدرة ،
+# الدرب» resolved to a Riyadh-region الكدرة — the same «، الدرب» address, i.e. a mis-resolution,
+# not counter-evidence; Ad Darb is a Jazan governorate.
+#
+# A HINT, never a verdict: it is consulted only when the plain parse found no city, and the town must
+# still be a whole catalog name in the slug inside that region. Aqar's ids are not region-pure (id 1,
+# Abha, also carries «الكدارة ، الدرب» in Jazan), so it never overrides a city the slug resolved.
+AQAR_CITY_REGION: dict[int, int] = {
+    1: 6, 4: 6, 5: 12, 12: 5, 13: 1, 16: 1, 18: 5, 21: 1, 26: 2, 27: 5, 28: 3, 39: 6, 41: 3, 43: 1,
+    46: 5, 52: 4, 56: 10, 59: 7, 65: 10, 66: 2, 67: 8, 68: 5, 70: 6, 91: 4, 94: 2,
+}
+
+
+def _resolve_location(uri: str, aqar_city_id) -> dict:
+    """resolve_slug(uri); when that finds no city, once more with Aqar's own city id as a region hint."""
+    loc = resolve_slug(uri)
+    if loc.get("city_id"):
+        return loc
+    try:
+        hint = AQAR_CITY_REGION.get(int(aqar_city_id or 0))
+    except (TypeError, ValueError):
+        hint = None
+    if hint is None:
+        return loc
+    hinted = resolve_slug(uri, region_hint=hint)
+    return hinted if hinted.get("city_id") else loc
+
+
 def map_listing(g: dict, price: dict) -> dict | None:
     uri = g.get("uri") or ""
     if not uri:
@@ -577,7 +613,8 @@ def map_listing(g: dict, price: dict) -> dict | None:
     # unresolved stays null, never guessed). This FIXES the live false-positives (street «مكة المكرمة»
     # or district «المدينة» no longer mis-map the city). source_capture = the full detail minus PII
     # (descriptions phone-redacted; the detail exposes no broker contact field). Numbers unchanged.
-    loc = resolve_slug(uri)
+    # A same-name town the slug cannot place is tie-broken by Aqar's own city id (AQAR_CITY_REGION).
+    loc = _resolve_location(uri, g.get("city_id"))
     # Fallback ONLY — the slug's «حي X» capture wins when present (unchanged behavior); the
     # address-derived, catalog-validated candidate fills the gap when the slug had no «حي» at all.
     district_ar_val = (loc["district_ar"] or _district_from_address(g.get("address"), loc["city_id"])
