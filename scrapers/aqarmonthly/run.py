@@ -24,6 +24,7 @@ Usage (from ezhalah-app/ with the venv):
 from __future__ import annotations
 
 import argparse
+from functools import lru_cache
 import os
 import re
 import sys
@@ -489,6 +490,55 @@ def _district_from_address(address: str | None, city_id: int | None) -> str | No
     return candidate
 
 
+# ── THE DISTRICT BY AQAR'S OWN ID (2026-10-18) ───────────────────────────────────────────────────
+# 281 live rows had no district: their slug has no «حي» and their address ends «…، جدة ، جدة» (district ==
+# city), yet the listing record carries Aqar's own district_id (3494) and the rendered page redirects to
+# «/جدة/شمال-جدة/حي-الزمرد/…». Aqar names that id itself: Web.districts(category, city_id) → {district_id,
+# name}. The name is Aqar's own district entity — never a street, never a guess — kept as Aqar writes it.
+# One query per (city, category) per run; a failed read answers nothing (the row stays as before).
+_DISTRICTS_Q = ("query($c:Int!,$k:Int!){ Web{ districts(category:$k, city_id:$c){ district_id name } } }")
+
+
+@lru_cache(maxsize=None)
+def _aqar_districts(city_id: int, category: int) -> dict[int, str]:
+    """Aqar's own district list for one of ITS city ids: {district_id: name}; {} when unreadable."""
+    try:
+        data, errored = _gql(_DISTRICTS_Q, {"c": int(city_id), "k": int(category)})
+    except Exception as e:  # noqa: BLE001 — degrade: no district from the id this run
+        print(f"⚠ Web.districts unreadable for city {city_id}/{category}: {str(e)[:120]}", flush=True)
+        return {}
+    rows = (((data or {}).get("Web") or {}).get("districts")) or []
+    out = {}
+    for r in rows:
+        try:
+            did, name = int(r.get("district_id")), str(r.get("name") or "").strip()
+        except (TypeError, ValueError):
+            continue
+        if did and name:
+            out[did] = name
+    return out
+
+
+def _district_from_aqar_id(city_id, district_id, category) -> str | None:
+    """Aqar's own name for the listing's district_id, as written («حي الزمرد»), else None. The
+    listing's own category is asked first; category 1 (Aqar's fullest list) second."""
+    try:
+        cid, did = int(city_id or 0), int(district_id or 0)
+    except (TypeError, ValueError):
+        return None
+    if not cid or not did:
+        return None
+    cats = [c for c in (category, 1) if c is not None]
+    for k in dict.fromkeys(cats):
+        try:
+            name = _aqar_districts(cid, int(k)).get(did)
+        except (TypeError, ValueError):
+            continue
+        if name:
+            return name
+    return None
+
+
 def map_listing(g: dict, price: dict) -> dict | None:
     uri = g.get("uri") or ""
     if not uri:
@@ -530,7 +580,8 @@ def map_listing(g: dict, price: dict) -> dict | None:
     loc = resolve_slug(uri)
     # Fallback ONLY — the slug's «حي X» capture wins when present (unchanged behavior); the
     # address-derived, catalog-validated candidate fills the gap when the slug had no «حي» at all.
-    district_ar_val = loc["district_ar"] or _district_from_address(g.get("address"), loc["city_id"])
+    district_ar_val = (loc["district_ar"] or _district_from_address(g.get("address"), loc["city_id"])
+                       or _district_from_aqar_id(g.get("city_id"), g.get("district_id"), g.get("category")))
     capture = {k: (_redact(v) if k in ("content", "content_en") else v) for k, v in g.items()}
     return {
         "ad_number":        f"AQM{g['id']}",
