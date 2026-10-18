@@ -139,3 +139,14 @@ def test_nothing_measured_writes_nothing_instead_of_crashing():
         def table(self, _t):
             raise AssertionError("an empty run must not reach PostgREST")
     assert "nothing written" in D.write_rows(_C(), [])
+
+
+def test_a_control_that_did_not_read_live_says_what_its_page_answered(monkeypatch):
+    """almuteb and senan were void four nights running (10-15..10-18) with nothing saying why."""
+    from scrapers.common import lifecycle_spot_check as L
+    monkeypatch.setattr(L, "_probe", lambda url: (403, "<html>blocked</html>"))
+    ctl = [{"listing_url": "https://almuteb.sa/property/x/"}, {"listing_url": "https://almuteb.sa/property/y/"}]
+    verdicts = [L.open_ad(r["listing_url"], None) for r in ctl]
+    misses = L.control_misses(ctl, verdicts)
+    assert len(misses) == 2 and "HTTP 403, 20 bytes" in misses[0] and misses[0].startswith("https://almuteb.sa/property/x/")
+    assert L.control_misses(ctl, [L.ALIVE, L.ALIVE]) == []

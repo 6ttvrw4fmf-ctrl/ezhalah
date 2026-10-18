@@ -42,7 +42,7 @@ from scrapers.common.cleanup import PLATFORMS
 from scrapers.common.db import sb
 from scrapers.common.fleet_liveness import SITES, oracle_for
 from scrapers.common.fleet_liveness import read as oracle_read
-from scrapers.common.lifecycle_spot_check import CANARIES, _reader_for, open_ad, pick_controls
+from scrapers.common.lifecycle_spot_check import CANARIES, _reader_for, control_misses, open_ad, pick_controls
 from scrapers.common.liveness_contract import ALIVE, DEAD, UNKNOWN
 from scrapers.common.liveness_trust import canary_environment_ok
 
@@ -192,9 +192,12 @@ def score_site(client, platform: str, shown: int, *, n: int, rng: random.Random,
 
     if len(ctl) >= CANARIES:
         row["gated"] = True
-        alive = sum(opened(r) == ALIVE for r in ctl)
+        verdicts = [opened(r) for r in ctl]
+        alive = sum(v == ALIVE for v in verdicts)
         if not canary_environment_ok(alive, len(ctl)):
-            row["note"] = f"void: known-live controls {alive}/{len(ctl)} alive, nothing decided"
+            why = "; ".join(control_misses(ctl, verdicts)[:2])
+            row["note"] = (f"void: known-live controls {alive}/{len(ctl)} alive, nothing decided"
+                           + (f" | {why}" if why else ""))[:300]
             return row
     else:
         row["note"] = f"no control gate: fewer than {CANARIES} known-live ads"
