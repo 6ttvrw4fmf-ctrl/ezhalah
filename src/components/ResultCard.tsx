@@ -903,8 +903,8 @@ const EILMALRIYADA_LOGO = require('../../assets/images/eilmalriyada.png');
 const GOLDENDEAL_LOGO = require('../../assets/images/platform-logos/goldendeal-sa.png');
 const EBRIZA_LOGO = require('../../assets/images/platform-logos/ebriza-com-sa.png');
 const SHOMOU_LOGO = require('../../assets/images/platform-logos/shomoalaqar-com-sa.png');
-// Haraj (2026-10-16): the shared placeholder until the owner supplies Haraj's own logo file.
-const HARAJ_LOGO = require('../../assets/images/platform-placeholder.png');
+// Haraj: official header artwork, collected 2026-10-18 UTC.
+const HARAJ_LOGO = require('../../assets/images/platform-logos/haraj.png');
 const VMKSA_LOGO = require('../../assets/images/platform-logos/vm-ksa-com.png');
 const IBAAX_LOGO = require('../../assets/images/platform-logos/ibaax-sa.png');
 const THOUSAND_LOGO = require('../../assets/images/platform-logos/1000-com-sa.png');

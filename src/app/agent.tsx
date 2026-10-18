@@ -1,3 +1,4 @@
+import { platformLogoBackgrounds } from '@/components/platform-logo-bounds';
 import { agentResultRequest, resultQuantityChange } from '@/lib/agentResultRequest';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -4358,7 +4359,7 @@ export default function Agent() {
                       onPress={() => choosePlatform(platform.name)}
                       style={({ pressed }: any) => [s.platformPickerItem, selected && s.platformPickerItemOn, pressed && s.platformPickerItemPressed, atLimit && { opacity: 0.4 }]}
                     >
-                      <View style={s.platformPickerLogoFrame}>
+                      <View style={[s.platformPickerLogoFrame, { backgroundColor: platformLogoBackgrounds.get(profile.logo) ?? 'transparent', borderRadius: 6 }]}>
                         <Image source={profile.logo} tintColor={profile.layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: profile.layout.width * k, height: profile.layout.height * k, left: profile.layout.left * k, top: profile.layout.top * k }} contentFit="contain" accessible={false} />
                       </View>
                       <View style={s.platformPickerItemCopy}>
@@ -5020,7 +5021,7 @@ export default function Agent() {
                         const H = single ? 24 : W;
                         const k = Math.min((H - 2) / layout.height, (W - 2) / layout.width);
                         return (
-                          <View key={platform.name} style={[s.chipBadge, { width: W, height: H }, i > 0 && s.chipBadgeOverlap]}>
+                          <View key={platform.name} style={[s.chipBadge, { width: W, height: H, backgroundColor: platformLogoBackgrounds.get(logo) ?? 'transparent' }, i > 0 && s.chipBadgeOverlap]}>
                             <Image source={logo} tintColor={layout.monochrome ? colors.ink : undefined} style={{ position: 'absolute', width: layout.width * k, height: layout.height * k, left: W / 2 - (48 - layout.left) * k, top: H / 2 - (24 - layout.top) * k }} contentFit="contain" accessible={false} />
                           </View>
                         );
