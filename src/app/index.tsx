@@ -168,7 +168,6 @@ export default function Home() {
   const openSharedSearch = useCallback(async (s: { q: SearchQuery; code?: string }) => {
     try { localStorage.removeItem(SHARED_PENDING_KEY); } catch { /* per-device only */ }
     setSharedSearch(null);
-    dismissSignInCard();
     if (s.code) {
       // The same link opened again opens the same copy, never a second one.
       let done: Record<string, string> = {};
@@ -188,7 +187,7 @@ export default function Home() {
       // The copy could not be read: the shared SEARCH still opens (never a dead tap).
     }
     router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q) } });
-  }, [router, dismissSignInCard, history, importSharedChat]);
+  }, [router, history, importSharedChat]);
   const onSharedTap = () => {
     if (!sharedSearch) return;
     if (user) { void openSharedSearch(sharedSearch); return; }
