@@ -96,14 +96,31 @@ export const typeWordAr = (n: number, typeAr: string): string => (n >= 3 && n <=
 // BOTH published coordinates.
 export type DistrictPlace = { query: string; district: string; city: string };
 export const DISTRICT_MAP_PLATFORMS: readonly string[] = ['aqar', 'aqarmonthly'];
+/** The place an Aqar ad's own link names, e.g. sa.aqar.fm/شارع-الصليحى-212-الفرعاء-منطقة-عسير-6836489 →
+ *  «شارع الصليحى 212 الفرعاء منطقة عسير، السعودية». Only sa.aqar.fm; the trailing ad number is dropped; a
+ *  link that names nothing but the country («المملكة-العربية-السعودية-…») names no place → null. */
+export function aqarTownFromUrl(adUrl: string | null | undefined): string | null {
+  let u: URL;
+  try { u = new URL(String(adUrl ?? '')); } catch { return null; }
+  if (u.hostname.replace(/^www\./, '').toLowerCase() !== 'sa.aqar.fm') return null;
+  let seg = '';
+  try { seg = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() ?? ''); } catch { return null; }
+  const words = seg.replace(/-\d+$/, '').split('-').map((w) => w.trim()).filter(Boolean);
+  const text = words.join(' ').replace(/\s*المملكة العربية السعودية\s*/g, ' ').trim();
+  if (!text || !/[؀-ۿ]/.test(text)) return null;
+  return `${text}، السعودية`;
+}
 /** The district to show for an ad with no pin, from the ad's own row. Pure, exported for the barrier. */
-export function districtPlace(row: AdRow | null | undefined): DistrictPlace | null {
+export function districtPlace(row: AdRow | null | undefined, adUrl?: string | null): DistrictPlace | null {
   // Aqar (buy + rent) and Aqar Monthly only for now (owner 2026-10-17: «just do aqar now», then «do the
   // location thing for Aqar Monthly and rent, same style, just don't include the Ministry of Justice»);
   // other sites keep no map without a pin. The ministry block stays Aqar-sale-only (pricesBlockEligible).
   if (!DISTRICT_MAP_PLATFORMS.includes(String(row?.platform ?? '').trim().toLowerCase())) return null;
   const district = String(row?.district_ar ?? '').trim(), city = String(row?.city_ar ?? '').trim();
-  if (!city || city === 'غير معروف') return null;
+  // No city in our index (a small town outside the city list, owner 2026-10-17: «town fallback … if we have
+  // the pin perfect, if not we do this boundaries»): the town as the SOURCE wrote it in the ad's own
+  // address — the last segment of its sa.aqar.fm link — never a guess of ours.
+  if (!city || city === 'غير معروف') { const town = aqarTownFromUrl(adUrl); return town ? { query: town, district: '', city: town } : null; }
   // No district written (owner 2026-10-17: «those with no district, we show the city»): the whole city,
   // Google's own city border around it — still labelled approximate, never a pin.
   if (!district || district === 'غير معروف') return { query: city, district: '', city };
