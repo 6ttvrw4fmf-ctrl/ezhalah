@@ -161,6 +161,8 @@ def parse_price(text: str) -> tuple[Optional[int], Optional[int]]:
         return None, None
     if _PER_METRE.search(head):
         return None, n
+    if _stated_per_metre(text, n):
+        return None, n
     area = parse_area(text)
     if area and n < area:                 # a total under 1 SAR/m² cannot be a total
         return None, n
@@ -547,7 +549,10 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
         if rent_period:
             row["rent_period"] = rent_period
     else:
-        row["price_total"] = price_total
+        # A stated rate with no total is the source settling «no total»: AUTHORITATIVE_NULL clears a total an
+        # older read stored (SDQ5562 held 550 as a total), where a plain None would be dropped by the upsert.
+        row["price_total"] = (db.AUTHORITATIVE_NULL if price_total is None and price_per_meter is not None
+                              else price_total)
     if price_per_meter is not None:
         row["price_per_meter"] = price_per_meter
 

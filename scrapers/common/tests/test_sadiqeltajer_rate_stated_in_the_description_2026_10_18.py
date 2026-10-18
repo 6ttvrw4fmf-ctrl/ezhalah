@@ -33,3 +33,14 @@ def test_mutation_no_marker_on_this_figure_keeps_the_total(desc, expected):
 def test_arabic_digits_and_thousands_separators_are_the_same_figure():
     text = TEXT.replace("550 ريال 481", "1,100 ريال 481").replace("الحد ( 550 ريال للمتر )", "السوم ١١٠٠ للمتر")
     assert S.parse_price(text) == (None, 1100)
+
+
+def test_the_row_clears_a_stored_total_when_the_source_states_a_rate(monkeypatch):
+    from scrapers.common import db
+    monkeypatch.setattr(S, "to_catalog", lambda city_ar, region_ar=None: (1, 1))
+    monkeypatch.setattr(S, "resolve_district_words", lambda text, city_id: (None, None))
+    monkeypatch.setattr(S, "own_section", lambda html: TEXT)
+    row, _cat, why = S.map_listing("https://sadiq-eltajer.sa/ads/llbyaa-ardyn-bhy-alfysly-mkhtt-km-alshrk-shrk-bryd", "<html/>")
+    assert row is not None, why
+    assert row["price_per_meter"] == 550
+    assert row["price_total"] is db.AUTHORITATIVE_NULL        # a plain None would leave the stored 550 total
