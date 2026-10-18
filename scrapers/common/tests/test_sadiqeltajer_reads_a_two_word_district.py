@@ -101,3 +101,12 @@ def test_the_card_neighbourhood_carries_the_full_words():
 def test_map_row_stores_the_matched_words_as_neighborhood():
     src = (ROOT / "scrapers" / "sadiqeltajer" / "run.py").read_text(encoding="utf-8")
     assert "district_raw = district_words" in src
+
+
+def test_a_spelling_variant_maps_to_its_catalogued_district(monkeypatch):
+    # 2026-10-18 (#657): 39 بريدة ads say «الوسيطي»; the catalog holds «حي الوسيطا». A spelling is mapped in
+    # the scraper (ops_district_name_decision 'variant'), never added to the catalog.
+    cat = CATALOG + ["حي الوسيطا"]
+    monkeypatch.setattr(L, "_DISTRICT_BY_CITY", {BURAIDAH: {L.norm_district_tok(d) for d in cat}})
+    monkeypatch.setattr(L, "_DISTRICT_AR_BY_NORM", {L.norm_district_tok(d): d for d in cat})
+    assert _words("الموقع حسب الصك القصيم - بريدة - الوسيطي اعلانات مشابهة") == ("حي الوسيطا", "الوسيطي")

@@ -611,8 +611,42 @@ def muktamel_room_lines(url: str, fetch=None) -> list[str]:
     return out
 
 
+_TUBA_RECORDS: "dict | None" = None
+
+
+def tuba_rega_lines(url: str, fetch=None) -> list[str]:
+    """tuba's own REGA licence values for the ad, from the catalogue feed its grid is served from (#621, 2026-10-18).
+
+    The page shows no structured street width; its description prose says «شارع 20 متر» while the REGA licence
+    the platform stores says streetWidth 25 — and we store the licence (scrapers/tuba/run.py), because a
+    structured field beats prose (ADVANCED_FILTER_SOURCE_TRUTH). The score read only the prose and called
+    18258569 wrong, capping the 10-17 night on one ad. These lines restate the licence's own field; [] when
+    the record cannot be read (unknown, never wrong). The catalogue is walked once per run."""
+    global _TUBA_RECORDS
+    from urllib.parse import unquote
+    m = re.search(r"/property/([^/?#]+)", url or "")
+    if not m:
+        return []
+    slug = unquote(m.group(1))
+    try:
+        from scrapers.tuba import run as tuba
+        if _TUBA_RECORDS is None:
+            items = fetch() if fetch is not None else tuba.fetch_catalogue(tuba.session())[0]
+            _TUBA_RECORDS = {unquote(str(r.get("slug") or "")): r for r in items if isinstance(r, dict)}
+        rec = _TUBA_RECORDS.get(slug)
+        ar = tuba.rega(rec) if rec else {}
+    except Exception:  # noqa: BLE001
+        return []
+    v = ar.get("streetWidth")
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+        return [f"عرض الشارع {int(v) if float(v).is_integer() else v}"]
+    if isinstance(v, str) and re.fullmatch(r"\d+(?:\.\d+)?", v.strip()):
+        return [f"عرض الشارع {v.strip()}"]
+    return []
+
+
 def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: str,
-               pace: float = PACE_S, probe=None, wasalt=None, sanadak=None, muktamel=None) -> dict:
+               pace: float = PACE_S, probe=None, wasalt=None, sanadak=None, muktamel=None, tuba=None) -> dict:
     if probe is None:
         # Imported here, not at module level: af_score and its hermetic check load this module with
         # source_reread stubbed, and they always pass their own probe.
@@ -666,6 +700,9 @@ def score_site(client, platform: str, picks: list[tuple[str, int]], *, night: st
             continue
         if "muktamel.com" in url:
             extra = (muktamel or muktamel_room_lines)(url)
+            page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
+        if "tuba.com.sa" in url:
+            extra = (tuba or tuba_rega_lines)(url)
             page = {**page, "evidence_lines": extra + list(page.get("evidence_lines") or [])}
         fold(row, key, compare_listing(stored, page, skip_price=platform in SKIP_PRICE,
                                        prose_only_district=platform in PROSE_ONLY_DISTRICT), stored)

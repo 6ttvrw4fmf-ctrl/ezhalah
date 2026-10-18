@@ -57,6 +57,7 @@ import json
 import re
 import sys
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
@@ -129,14 +130,84 @@ _DISTRICT_EN_AR = {
     ("dhahran", "doha"): "حي الدوحة", ("dammam", "doha"): "حي الدوحة",
     ("jubail", "fanateer"): "حي الفناتير", ("jubail", "deffi"): "حي الدفي",
     ("al-ahsaa", "salam"): "حي السلام",
+    # 2026-10-18 (New Listings, #658): the English names left NULL on live rows, each catalogued for that city.
+    # NOT mapped, on purpose: «King Abdullah Financial» (site template text), «Al Khobar» (the city), «Doha» /
+    # «Aziziyah» under khobar (not in الخبر's catalog), street names, «Exit 8», postcodes.
+    ("khobar", "jawhara"): "حي الجوهرة", ("khobar", "qurtoba"): "حي قرطبة",
+    ("khobar", "tahliyah"): "حي التحلية", ("khobar", "bustan"): "حي البستان",
+    ("khobar", "sadafah"): "حي الصدفة", ("riyadh", "sulaimaniah"): "حي السليمانية",
+    ("riyadh", "deplomatic quarter"): "حي السفارات", ("riyadh", "diplomatic quarter"): "حي السفارات",
+    ("riyadh", "ghoroub"): "حي الغروب", ("riyadh", "qayrawan"): "حي القيروان",
+    ("riyadh", "ishbilia"): "حي اشبيلية", ("riyadh", "rafiah"): "حي الرفيعة",
+    ("jeddah", "rabwah"): "حي الربوة", ("jeddah", "bawadi"): "حي البوادي",
 }
+
+
+# ── THE DISTRICT THE PAGE STATES IN ENGLISH (2026-10-18) ────────────────────────────────────────
+# The JSON-LD streetAddress names the place in English in several shapes: «Near Al Thoumamah Rd. Al
+# Munsiyah, Riyadh», a bare «Al Malaz», «Dana Bay», «Al Douha Neighborhood », «Yasmeen Area - Near Prince
+# Salman Road». Only the «…, City» shape used to be read, so 242 live rows carried no English name at all
+# while their page printed one. Every place-like segment is now offered, in order, to the EXACT EN→AR
+# step: the hand dictionary below, else the source-attested bridge (public.district_name_bridge, one
+# city, keys with exactly ONE Arabic answer), then THIS city's catalogue. Two segments naming two
+# districts, an ambiguous bridge key («Al Malaz» → حي الملز AND حي الضباط), the site's template line
+# or the city's own name → NULL. The English word still sits in `neighborhood` as before.
+_SEG_SPLIT = re.compile(r"\s*(?:,|\.|\s-\s|–|—|/)\s*")
+_NEAR = re.compile(r"^(?:near|next to|behind|opposite|beside|off|close to|in front of|across)\b", re.I)
+_PLACE_TAIL = re.compile(r"\s+(?:neighbou?rhood|area|district|dist\.?)$", re.I)
+_ROAD_TAIL = re.compile(r"\b(?:rd|road|st|street|hwy|highway|ring)\.?$", re.I)
+_TEMPLATE_EN = frozenset({"king abdullah financial"})   # printed by every compound without an address (#658)
+
+
+def district_en_candidates(street: str, city_en: Optional[str] = None) -> list[str]:
+    """English place segments of a streetAddress, as written minus a trailing «Neighborhood/Area/District»,
+    skipping directions («Near …»), roads and the city itself. Order kept; nothing is chosen here."""
+    out: list[str] = []
+    cn = _norm_dist(city_en) if city_en else None
+    for seg in _SEG_SPLIT.split(street or ""):
+        seg = _PLACE_TAIL.sub("", seg.strip()).strip(" -")
+        if not seg or _NEAR.match(seg) or _ROAD_TAIL.search(seg):
+            continue
+        if cn and _norm_dist(seg) == cn:
+            continue
+        if seg not in out:
+            out.append(seg)
+    return out
+
+
+def _bridge_unique(rows: list[dict]) -> dict[str, str]:
+    """English bridge rows of ONE city → {_norm_dist(en): district_ar} for keys with exactly one Arabic
+    answer. «Al Malaz» → حي الملز AND حي الضباط in the same city is two answers = no answer (never a guess)."""
+    seen: dict[str, set[str]] = {}
+    for r in rows:
+        en, ar = str(r.get("district_en") or ""), str(r.get("district_ar") or "")
+        if not en or not ar or re.search(r"[ء-ي]", en):
+            continue
+        k = _norm_dist(en)
+        if k:
+            seen.setdefault(k, set()).add(ar)
+    return {k: next(iter(v)) for k, v in seen.items() if len(v) == 1}
+
+
+@lru_cache(maxsize=None)
+def _bridge_en_ar(city_en: str) -> dict[str, str]:
+    """The source-attested EN→AR district bridge (dealapp's bilingual pairs) for one city, unique keys
+    only. One read per city per run; a failed read logs and answers {} — the dictionary still works —
+    never a crashed crawl."""
+    try:
+        rows = db._execute(db.sb().table("district_name_bridge").select("district_en,district_ar")
+                           .eq("city_en", city_en).range(0, 1999), what="district_name_bridge.read").data or []
+        return _bridge_unique(rows)
+    except Exception as e:  # noqa: BLE001 — degrade to the dictionary alone
+        print(f"⚠ district bridge unreadable for {city_en}: {str(e)[:140]} — dictionary only", flush=True)
+        return {}
 
 
 def _norm_dist(name: Optional[str]) -> Optional[str]:
     """«Al Munsiyah District» / «An Narjis» / «Al-Arid» → «munsiyah» / «narjis» / «arid»."""
     if not name:
         return None
-    n = re.sub(r"\bdistrict\b", " ", name.strip().lower())
+    n = re.sub(r"\b(?:district|dist)\b\.?", " ", name.strip().lower())   # the bridge writes «… Dist.»
     n = re.sub(r"[^a-z\s-]", " ", n)
     n = re.sub(r"^\s*(?:al|an|ar|as|ad|ash|at)[\s-]+", "", n)
     n = re.sub(r"\s+", " ", n).strip()
@@ -282,10 +353,20 @@ def compound_facts(url: str, page_html: str) -> dict[str, Any]:
         parts = [p.strip() for p in re.split(r"[,.]", str(addr["streetAddress"])) if p.strip()]
         if len(parts) >= 2:
             district_en = parts[-2]
+    # An explicit «X District» sentence is the page's own statement: it alone is offered (a JSON-LD
+    # segment naming another place is a conflict, not a second chance). Otherwise every address segment.
+    if dm:
+        candidates = [district_en]
+    else:
+        candidates = district_en_candidates(str(addr.get("streetAddress") or ""), addr.get("addressLocality"))
+        if district_en and district_en not in candidates:
+            candidates.insert(0, district_en)
+        if not district_en and candidates:
+            district_en = candidates[0]       # the English word the card shows, as before
     features = [str(f.get("name", "")).strip() for f in (place.get("amenityFeature") or [])
                 if isinstance(f, dict) and f.get("value") is True]
     return {
-        "name": name, "about": about, "district_en": district_en,
+        "name": name, "about": about, "district_en": district_en, "district_en_candidates": candidates,
         "city_slug": url.rstrip("/").split("/")[-2] if url.count("/") >= 5 else None,
         "postal": str(addr.get("postalCode") or "").strip() or None,
         "lat": geo.get("latitude"), "lng": geo.get("longitude"),
@@ -321,12 +402,21 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str, dict[str, int]
     if not blocks:
         return [], "no_units", {}
 
-    district_ar = None
-    nd = _norm_dist(facts["district_en"])
-    if nd:
-        cand = _DISTRICT_EN_AR.get((facts["city_slug"], nd))
-        if cand:
-            district_ar = find_district_in_text(cand, city_id)
+    district_ar, district_source = None, None
+    city_en = normalize.map_city(city_ar)
+    found: dict[str, str] = {}                          # catalogued district_ar → how it was found
+    for cand_en in facts["district_en_candidates"]:
+        nd = _norm_dist(cand_en)
+        if not nd or nd in _TEMPLATE_EN:
+            continue
+        ar, how = _DISTRICT_EN_AR.get((facts["city_slug"], nd)), "dictionary"
+        if not ar and city_en:
+            ar, how = _bridge_en_ar(city_en).get(nd), "bridge"
+        got = find_district_in_text(ar, city_id) if ar else None
+        if got:
+            found.setdefault(got, how)
+    if len(found) == 1:                                 # two segments, two districts → no district
+        district_ar, district_source = next(iter(found.items()))
 
     rows: list[dict] = []
     skips: dict[str, int] = {}
@@ -385,6 +475,7 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str, dict[str, int]
                 kind=period or "annual", origin="structured"),
             "additional_info": {k: v for k, v in {
                 "unit_name": u["name"], "unit_id": u["villa_id"], "compound": facts["name"],
+                "district_source": district_source,     # "dictionary" | "bridge" when district_ar is set
                 "latitude": facts["lat"], "longitude": facts["lng"],
                 "area_raw": a_raw, "unit_meta": u["meta"],
                 "period_statement": (
