@@ -519,6 +519,7 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
         district_raw = district_words      # the ad's own full words («القاع البارد», not «القاع»)
 
     price_total, price_per_meter = parse_price(text)
+    rate_stated = price_per_meter is not None
     rent_period, price_annual = (None, None)
     if deal == "Rent":
         rent_period, price_annual = normalize.rent_period_and_annual(price_total, text)
@@ -551,8 +552,8 @@ def map_listing(url: str, page_html: str) -> tuple[Optional[dict], str, str]:
     else:
         # A stated rate with no total is the source settling «no total»: AUTHORITATIVE_NULL clears a total an
         # older read stored (SDQ5562 held 550 as a total), where a plain None would be dropped by the upsert.
-        row["price_total"] = (db.AUTHORITATIVE_NULL if price_total is None and price_per_meter is not None
-                              else price_total)
+        no_total = db.AUTHORITATIVE_NULL if rate_stated else None
+        row["price_total"] = price_total if price_total is not None else no_total
     if price_per_meter is not None:
         row["price_per_meter"] = price_per_meter
 
