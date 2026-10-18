@@ -19,12 +19,12 @@ export const SHARE_PAYLOAD_VERSION = 1;
 /** The approved lines (owner 2026-10-17, option C). {name} is the sender's first name. */
 export const SHARE_COPY = {
   ar: {
-    message: 'عقارات من {name} لك على إزهله 🦅 اضغط الرابط وشوف 👇',
+    message: 'عقارات من {name} لك على إزهله. اضغط الرابط وشوف 👇',
     title: 'عقارات من {name} لك على إزهله',
     button: 'اضغط وشوف العقارات',
   },
   en: {
-    message: 'Properties from {name}, just for you on Ezhalah 🦅 Tap to see 👇',
+    message: 'Properties from {name}, just for you on Ezhalah. Tap to see 👇',
     title: 'Properties from {name}, just for you on Ezhalah',
     button: 'Tap to see the properties',
   },
@@ -100,8 +100,8 @@ export function shareLandingPath(payload: string): string {
 // Open Graph tags, read from the page the link points to — so /s/<payload> answers with them. Every
 // URL is built from the REQUEST'S OWN origin, so a domain change needs no code change.
 export const SHARE_CARD = {
-  ar: { title: 'عقارات من {name} لك على إزهله 🦅', desc: 'كل مواقع العقار في السعودية في مكان واحد. اضغط وشوف.', site: 'إزهله' },
-  en: { title: 'Properties from {name}, just for you on Ezhalah 🦅', desc: 'Every Saudi real-estate site in one place. Tap to see.', site: 'Ezhalah' },
+  ar: { title: 'عقارات من {name} لك على إزهله', desc: 'كل مواقع العقار في السعودية في مكان واحد. اضغط وشوف.', site: 'إزهله' },
+  en: { title: 'Properties from {name}, just for you on Ezhalah', desc: 'Every Saudi real-estate site in one place. Tap to see.', site: 'Ezhalah' },
 } as const;
 export const SHARE_CARD_IMAGE_PATH = '/og-image-v5.png';
 
@@ -116,7 +116,7 @@ export function shareCardHtml(origin: string, rawPayload: string | null | undefi
   const d = decodeSharePayload(rawPayload);
   const loc = d?.locale ?? 'ar';
   const c = SHARE_CARD[loc];
-  const title = d ? fill(c.title, d.name) : (loc === 'ar' ? 'إزهله 🦅' : 'Ezhalah 🦅');
+  const title = d ? fill(c.title, d.name) : (loc === 'ar' ? 'إزهله' : 'Ezhalah');
   const to = d && rawPayload ? shareLandingPath(rawPayload) : '/';
   const url = `${o}${d && rawPayload ? `/s/${rawPayload}` : '/'}`;
   const image = `${o}${SHARE_CARD_IMAGE_PATH}`;

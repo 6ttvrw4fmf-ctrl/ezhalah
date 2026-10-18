@@ -2236,7 +2236,7 @@ export default function Home() {
             <Pressable onPress={() => setSharedSearch(null)} hitSlop={10} style={[s.sharedClose, isRTL ? { left: 12 } : { right: 12 }]} accessibilityRole="button" accessibilityLabel={t('Close')}>
               <Ionicons name="close" size={20} color={colors.muted} />
             </Pressable>
-            <Text style={s.sharedEagle}>🦅</Text>
+            <Image source={require('../../assets/images/eagle-mark.png')} style={s.sharedEagle} resizeMode="contain" accessibilityIgnoresInvertColors />
             <Text style={[s.sharedTitle, { writingDirection: isRTL ? 'rtl' : 'ltr' }]}>
               {shareLandingTitle(sharedSearch.name, locale === 'en' ? 'en' : 'ar')}
             </Text>
@@ -2293,7 +2293,7 @@ const s = StyleSheet.create({
     paddingTop: 28, paddingBottom: 22, paddingHorizontal: 22, alignItems: 'center', ...cardShadow,
   },
   sharedClose: { position: 'absolute', top: 12 },
-  sharedEagle: { fontSize: 34, marginBottom: 10 },
+  sharedEagle: { width: 56, height: 56, marginBottom: 12 },
   sharedTitle: { fontSize: 19, fontWeight: '700', color: colors.ink, textAlign: 'center', lineHeight: 28 },
   sharedButton: {
     marginTop: 20, alignSelf: 'stretch', backgroundColor: colors.primary, borderRadius: 14,

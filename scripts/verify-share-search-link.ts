@@ -69,7 +69,7 @@ const fullPayload = encodeSharePayload(Q, 'يوسف', 'ar')!;
 const html = shareCardHtml('https://new-domain.example', fullPayload);
 const meta = (prop: string) => new RegExp(`<meta (?:property|name)="${prop}" content="([^"]*)"`).exec(html)?.[1] ?? null;
 check('the card title is the approved personal line with the sender\'s name and إزهله',
-  meta('og:title') === 'عقارات من يوسف لك على إزهله 🦅' && meta('og:description') === SHARE_CARD.ar.desc);
+  meta('og:title') === 'عقارات من يوسف لك على إزهله' && meta('og:description') === SHARE_CARD.ar.desc);
 check('every card URL follows the REQUEST\'S domain (a domain change needs no code change)',
   meta('og:image') === 'https://new-domain.example/og-image-v5.png' && meta('og:url') === `https://new-domain.example/s/${fullPayload}`
   && !/vercel\.app/.test(html));
@@ -77,7 +77,7 @@ check('the page sends a person to Home + ?share= (never /agent)',
   html.includes(`content="0;url=/?share=${fullPayload}"`) && html.includes(`location.replace("/?share=${fullPayload}")`) && !/\/agent/.test(html));
 const enHtml = shareCardHtml('https://x.example', encodeSharePayload(Q, 'Yusuf', 'en')!);
 check('an English sender gets the English card, brand kept as "Ezhalah"',
-  /<meta property="og:title" content="Properties from Yusuf, just for you on Ezhalah 🦅"/.test(enHtml) && /lang="en"/.test(enHtml));
+  /<meta property="og:title" content="Properties from Yusuf, just for you on Ezhalah"/.test(enHtml) && /lang="en"/.test(enHtml));
 const evil = shareCardHtml('https://x.example', enc({ v: 1, n: '<script>alert(1)</script>', l: 'ar', q: Q }));
 check('a hostile name is escaped, never injected into the page', !evil.includes('<script>alert') && evil.includes('&lt;script&gt;'));
 mustCatch('a card builder that does not escape the name', (() => {
@@ -85,14 +85,14 @@ mustCatch('a card builder that does not escape the name', (() => {
   return raw.includes('<script>alert');
 })() && !evil.includes('<script>alert'));
 const junk = shareCardHtml('https://x.example', 'not-a-payload');
-check('a broken link still gets a clean Ezhalah card and goes Home', /og:title" content="إزهله 🦅"/.test(junk) && junk.includes('content="0;url=/"'));
+check('a broken link still gets a clean Ezhalah card and goes Home', /og:title" content="إزهله"/.test(junk) && junk.includes('content="0;url=/"'));
 
 // ── 4. approved wording ─────────────────────────────────────────────────────────────────────────
-check('Arabic message is the approved option C', shareMessage('يوسف', 'ar') === 'عقارات من يوسف لك على إزهله 🦅 اضغط الرابط وشوف 👇');
+check('Arabic message is the approved option C', shareMessage('يوسف', 'ar') === 'عقارات من يوسف لك على إزهله. اضغط الرابط وشوف 👇');
 check('Arabic landing title + button are the approved option C',
   shareLandingTitle('يوسف', 'ar') === 'عقارات من يوسف لك على إزهله' && SHARE_COPY.ar.button === 'اضغط وشوف العقارات');
 check('English keeps "Ezhalah" (brand never translated)',
-  shareMessage('Yusuf', 'en') === 'Properties from Yusuf, just for you on Ezhalah 🦅 Tap to see 👇'
+  shareMessage('Yusuf', 'en') === 'Properties from Yusuf, just for you on Ezhalah. Tap to see 👇'
   && /Ezhalah/.test(SHARE_COPY.en.title));
 const allCopy = JSON.stringify(SHARE_COPY);
 check('the wording never says "sign in / log in" (owner: «don\'t say log in»)', !/sign ?in|log ?in|سجل|تسجيل|دخولك/i.test(allCopy));
