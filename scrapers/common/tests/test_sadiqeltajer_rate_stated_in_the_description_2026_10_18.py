@@ -44,3 +44,21 @@ def test_the_row_clears_a_stored_total_when_the_source_states_a_rate(monkeypatch
     assert row is not None, why
     assert row["price_per_meter"] == 550
     assert row["price_total"] is db.AUTHORITATIVE_NULL        # a plain None would leave the stored 550 total
+
+
+# 2026-10-18, the other sadiqeltajer rows under the city floor (recorded description lines, verbatim):
+# tatweel inside «ريـــال» hid the marker after the figure, and a marker BEFORE the figure was never read.
+@pytest.mark.parametrize("line, n", [
+    ("للبيع ارض بحي الرحاب شمال بريدة الســــوم ( 1060 ريـــال للمتر ) المساحة : 1000م", 1060),   # SDQ6107
+    ("شارعين شمالي 20 وغربي 15 الاطوال 22*20 البيع للمتر 460 قريبه من طريق عائشه", 460),         # SDQ6985
+    ("المساحة لكل قطعه 375 على السوم مقابل اسواق سبت وقريبه من طريق البيارق السوم للمتر 700", 700), # SDQ7097
+])
+def test_tatweel_and_a_marker_before_the_figure_still_state_the_rate(line, n):
+    text = TEXT.replace("550 ريال 481", f"{n} ريال 481").replace("الحد ( 550 ريال للمتر )", line)
+    assert S.parse_price(text) == (None, n)
+
+
+def test_mutation_a_bare_figure_with_parenthesised_currency_stays_a_total():
+    # SDQ8769 «800 ريال ( ريال )»: the bracket repeats the currency, no rate
+    text = TEXT.replace("550 ريال 481", "800 ريال ( ريال ) 481").replace("الحد ( 550 ريال للمتر )", "الحد ( 800 ريال )")
+    assert S.parse_price(text) == (800, None)

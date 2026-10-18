@@ -568,8 +568,37 @@ def _images(body: str, ld: dict) -> list[str]:
     return out[:25]
 
 
+# The page's OWN address block (Houzez «property-address-wrap»): «<strong id="area-label">Area:</strong> <span
+# aria-labelledby="area-label">Qasr Al Khaleej</span>», and on its Arabic twin (hreflang="ar") «الحي: قصر الخليج»,
+# «المدينة: الدمام» (rendered 2026-10-18). The district used to come from the slug/title only, so 70 live ads whose title
+# names a compound or nothing («Apartment For Rent In 14 Rawas Al Bahar Compound») had none, and 30 English names
+# («Qasr Al Khaleej», «Al Shaati Al Gharbi») had no Arabic the index could serve.
+_HREFLANG_AR = re.compile(r'hreflang="ar"\s+href="(https://abeea\.com\.sa/ar/[^"]+)"')
+_ARABIC = re.compile(r"[\u0621-\u064A]")
+
+
+def address_field(body: Optional[str], label: str) -> Optional[str]:
+    m = re.search(rf'aria-labelledby="{label}-label">\s*([^<]*?)\s*</span>', body or "")
+    v = _clean(m.group(1)) if m else ""
+    return v or None
+
+
+def arabic_twin_url(body: str) -> Optional[str]:
+    m = _HREFLANG_AR.search(body or "")
+    return m.group(1) if m else None
+
+
+def _area_district(body: Optional[str], arabic: bool) -> Optional[str]:
+    """The address block's «Area»/«الحي» value — never the city or the region it may repeat."""
+    v = address_field(body, "area")
+    if not v or bool(_ARABIC.search(v)) != arabic or normalize.map_city(v) or CITY_EN.get(v.lower()):
+        return None
+    return v
+
+
 def map_listing(body: str, url: str,
-                rest_slugs: Optional[set[str]] = None) -> tuple[Optional[dict], str, Optional[bool]]:
+                rest_slugs: Optional[set[str]] = None,
+                ar_body: Optional[str] = None) -> tuple[Optional[dict], str, Optional[bool]]:
     """Return (row, category, gone). gone=True → sold/rented (skip / mark inactive).
 
     gone=None → the page carried no «Property Status» cell, so its availability was NOT READ. Abeea
@@ -652,6 +681,8 @@ def map_listing(body: str, url: str,
     postal = (addr.get("postalCode") or "").strip() or None
 
     city = CITY_EN.get(locality.lower()) or normalize.map_city(locality)
+    if not city and ar_body:
+        city = normalize.map_city(address_field(ar_body, "city") or "")     # «Al Dharan» → «الظهران»
     if not city:
         for ar, en in CITY_AR.items():
             if ar in name:
@@ -665,7 +696,11 @@ def map_listing(body: str, url: str,
                 break
     region = normalize.region_for_city(city)
 
-    district = _district_from(slug, name)
+    district_ar = _area_district(ar_body, arabic=True)
+    district_en = _area_district(body, arabic=False)
+    district = district_ar or district_en or _district_from(slug, name)
+    district_source = ("area_label_ar" if district_ar else "area_label" if district_en
+                       else "title" if district else None)
 
     # ── geo ──
     geo = ld.get("geo") if isinstance(ld.get("geo"), dict) else {}
@@ -694,6 +729,8 @@ def map_listing(body: str, url: str,
     info: dict[str, Any] = {
         "property_id": pid or None,
         "slug": slug,
+        "district_source": district_source,
+        "district_en": district_en or (_district_from(slug, name) if district_ar else None),
         # Every tag the page printed, in source order, whether or not we have a column for it.
         # A feature we cannot map today (Swimming Pool, Gym, Garden, Smart Entry, Sea View …) is
         # still a fact the source published, so it is kept verbatim rather than dropped.
@@ -888,7 +925,10 @@ def main() -> int:
                 com_buf = []
 
         for body, u in fetch_details(urls, failed):
-            row, cat, gone = map_listing(body, u, url_feats.get(u))
+            twin = arabic_twin_url(body)
+            got_ar = fetch_one(twin) if twin else None
+            twin_kw = {"ar_body": got_ar[0]} if got_ar else {}
+            row, cat, gone = map_listing(body, u, url_feats.get(u), **twin_kw)
             if not row:
                 continue
             if gone is None:
