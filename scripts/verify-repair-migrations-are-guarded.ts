@@ -48,6 +48,11 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // Repairs that legitimately need no standing detector. A waiver is a REASON, not a mute button:
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
+  // 2026-10-18. aqar `direction` repaired to the closed facade vocabulary (14 rows).
+  '20261018235847_aqar_facade_closed_vocabulary.sql':
+    'the same migration makes trg_aqar_parse write only public.aqar_facade(), and the Python enricher writes only ' +
+    'aqar_facade() (test_aqar_facade_closed_vocabulary_2026_10_18.py), so no write path can store a value outside the ' +
+    'vocabulary again; the migration asserts 0 such rows at apply',
   // 2026-10-18. Undoes 15 rows of a cancelled re-parse run, back to the exact district each served before it.
   '20261018131709_dealapp_restore_numbered_districts_a_broad_plot_rule_moved.sql':
     'restores 15 dealapp districts that the cancelled run 39129698696 rewrote under a too-broad plot-code rule, each to ' +

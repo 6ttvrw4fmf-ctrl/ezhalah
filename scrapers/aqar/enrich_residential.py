@@ -576,6 +576,18 @@ _SPEC_LABELS = (
 _SPEC_BOUNDARY_RE = re.compile("|".join(re.escape(s) for s in _SPEC_LABELS))
 
 
+# aqar's facade is a CLOSED choice (2026-10-18): the value must be one of these, longest first, else nothing — the
+# label was followed by the next spec fields, the seller's prose or the advertiser block on 14 live rows (6921061's
+# re-read wanted «على شارع بعرض 20 متر وحديقة خلفية …» over its «شمال»). Same list as SQL public.aqar_facade().
+AQAR_FACADES = ("شمال شرقي", "شمال غربي", "جنوب شرقي", "جنوب غربي", "شرق غربي", "شمال جنوبي",
+                "3 شوارع", "4 شوارع", "شمال", "جنوب", "شرق", "غرب")
+
+
+def aqar_facade(raw: Optional[str]) -> Optional[str]:
+    v = (raw or "").strip()
+    return next((f for f in AQAR_FACADES if v == f or v.startswith(f + " ")), None)
+
+
 def _text_after_label(html: str, *labels: str, max_len: int = 80) -> Optional[str]:
     """The value aqar prints after `label`, cut at the next spec label.
 
@@ -749,7 +761,7 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     reception_majlis  = _int_after_label_in_spec_table(text, r"مجالس", r"مجلس")
     property_age      = _property_age_from_text(text)
     street_width_m    = _int_after_label(text, r"عرض\s*الشارع")
-    direction         = _text_after_label(text, r"الواجهة", r"واجهة\s*العقار")
+    direction         = aqar_facade(_text_after_label(text, r"الواجهة", r"واجهة\s*العقار"))
     residence_type    = _text_after_label(text, r"نوع\s*السكن")
     project_name      = _text_after_label(text, r"اسم\s*المشروع")
 
