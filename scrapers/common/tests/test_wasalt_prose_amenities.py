@@ -150,3 +150,24 @@ def test_recheck_returns_a_yes_the_current_reader_no_longer_reads_to_unknown():
     assert out["elevator_unset"] == 1
     assert db.rows[0]["elevator"] is None and db.rows[1]["elevator"] is True
     assert (1, {"elevator": None}) in db.writes
+
+
+def test_the_plural_lifts_reaches_the_backfill_candidates():
+    # 🔬 2026-10-18: 199 active ads say only «مصاعد», which the «مصعد» pre-filter never selected, so the
+    # reader (which now knows the plural) was never shown them.
+    seen: list[str] = []
+
+    class _RecQ(_Q):
+        def or_(self, s):
+            seen.append(s)
+            return self
+
+    class _RecDB(_DB):
+        def table(self, t):
+            return _RecQ(self, t)
+
+    db = _RecDB([{"id": 1, "desc": "<p>العمارة فيها مصاعد حديثة</p>", "elevator": None,
+                  "air_conditioner": None, "private_entrance": None}])
+    E.prose_backfill(db, "wasalt_residential_listings", page=5)
+    assert any("مصاعد" in s for s in seen), seen
+    assert db.writes == [(1, {"elevator": True})]
