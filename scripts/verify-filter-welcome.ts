@@ -12,7 +12,7 @@
 //   7. rotation: one line held for 4 hours then a different one, always personal, time lines only at their time.
 import {
   WELCOME_LINES, moreThan, renderWelcome, chooseWelcomeLine, lineFitsTime, welcomeForNow, fallbackLine, HOLD_MS, FACTLESS_ANYTIME_IDS,
-  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, type WelcomeFacts,
+  MY_DISTRICT_SHARE, MY_DISTRICT_TOP, headlineReduce, HEADLINE_UNSETTLED, SETTLE_CAP_MS, instantWelcome, NEW_TODAY_MIN, riyadhDay, type WelcomeFacts,
 } from '../src/lib/filterWelcome.ts';
 
 let failed = 0;
@@ -27,7 +27,7 @@ const mustCatch = (label: string, caught: boolean) => {
 
 // Real production values on 2026-10-17, so the rendered examples read like the live site.
 const FACTS: WelcomeFacts = {
-  sites: 149, listings: 372_889, cities: 341, districts: 3_752, regions: 13,
+  sites: 149, newToday: 4_739, listings: 372_889, cities: 341, districts: 3_752, regions: 13,
   regionCounts: { 'منطقة الرياض': 170_363, 'منطقة مكة المكرمة': 104_681, 'المنطقة الشرقية': 48_662, 'منطقة القصيم': 16_235 },
   city: { ar: 'الرياض', en: 'Riyadh', count: 162_312 },
   topDistrict: { ar: 'حي المهدية', en: 'Al Mahdiyah', count: 11_994 },
@@ -43,7 +43,7 @@ const FACTS: WelcomeFacts = {
 
 // ── 6. shape ───────────────────────────────────────────────────────────────────────────────────
 const ids = WELCOME_LINES.map((l) => l.id);
-check('exactly the 45 approved lines (30 + 10 insight + 5 own-district), ids 1..45', ids.length === 45 && ids.every((id, i) => id === i + 1));
+check('exactly the 46 approved lines (30 + 10 insight + 5 own-district + 1 new-today), ids 1..46', ids.length === 46 && ids.every((id, i) => id === i + 1));
 check('every Arabic line ends with «إزهله»', WELCOME_LINES.every((l) => /إزهله[.؟!]?$/.test(l.ar)));
 check('every English line ends with "Ezhalah" (the brand is never translated)', WELCOME_LINES.every((l) => /Ezhalah[.?!]?$/.test(l.en)));
 check('Arabic lines carry no diacritics (owner: «remove alharakat»)', WELCOME_LINES.every((l) => !/[ً-ْ]/.test(l.ar)));
@@ -179,22 +179,37 @@ mustCatch('a reducer that never settles on timeout (the title would hold at opac
   !neverSwaps((s, ev) => (ev.type === 'timeout' ? s : headlineReduce(s, ev))));
 const homeSrc = (await import('node:fs')).readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
 check('the Filter home holds the title\'s entrance on welcomeSettled',
-  /useFilterWelcome\(!!user, pickName\(user, locale\)/.test(homeSrc) && /if \(!welcomeSettled\) return;/.test(homeSrc)
+  /useFilterWelcome\(!!user, welcomeNames, locale/.test(homeSrc) && /if \(!welcomeSettled\) return;/.test(homeSrc)
   && !/RNAnimated\.parallel\(\[rise\(badgeAnim, 80\), rise\(titleAnim, 230\)/.test(homeSrc));
 
 // ── 11. instant: the headline comes from device memory, no network in the way (owner 2026-10-17) ──
 const nowWed = new Date('2026-10-14T13:00:00'); // Wednesday afternoon — only any-time lines fit
-const freshCache = { id: 25, at: nowWed.getTime() - 60_000, ar: 'هلا يوسف، AR-CACHED. إزهله.', en: 'Hi Yusuf, EN-CACHED. Ezhalah.' };
-const inst = instantWelcome({ hasSession: true, cache: freshCache, now: nowWed, name: 'يوسف' });
+const freshCache = { id: 25, at: nowWed.getTime() - 60_000, ar: 'هلا يوسف، سطر محفوظ. إزهله.', en: 'Hi Yusuf, EN-CACHED. Ezhalah.' };
+const YN = { ar: 'يوسف', en: 'Yusuf' };
+const inst = instantWelcome({ hasSession: true, cache: freshCache, now: nowWed, name: YN });
 check('a fresh cached line is shown as-is, instantly, in both languages', !!inst && inst.fromCache && inst.ar === freshCache.ar && inst.en === freshCache.en && inst.id === 25);
-check('no stored session → no personal line (guest keeps the normal headline)', instantWelcome({ hasSession: true && false, cache: freshCache, now: nowWed, name: 'يوسف' }) === null);
-const stale = instantWelcome({ hasSession: true, cache: { ...freshCache, at: nowWed.getTime() - HOLD_MS - 1 }, now: nowWed, name: 'يوسف', rand: () => 0 });
+check('no stored session → no personal line (guest keeps the normal headline)', instantWelcome({ hasSession: true && false, cache: freshCache, now: nowWed, name: YN }) === null);
+const stale = instantWelcome({ hasSession: true, cache: { ...freshCache, at: nowWed.getTime() - HOLD_MS - 1 }, now: nowWed, name: YN, rand: () => 0 });
 check('a cache older than the 4-hour hold is NOT reused — an instant factless line stands in (never the previous id)',
   !!stale && !stale.fromCache && stale.id !== 25 && !WELCOME_LINES.find((l) => l.id === stale.id)!.needs.length && stale.ar.includes('يوسف') && /إزهله\.$/.test(stale.ar) && /Ezhalah\.$/.test(stale.en));
 const morningCache = { ...freshCache, id: 6 }; // a morning line
-const night = instantWelcome({ hasSession: true, cache: morningCache, now: new Date('2026-10-14T21:00:00'), name: 'يوسف', rand: () => 0 });
+const night = instantWelcome({ hasSession: true, cache: morningCache, now: new Date('2026-10-14T21:00:00'), name: YN, rand: () => 0 });
 check('a cached MORNING line is not reused at night, even inside the hold', !!night && !night.fromCache && night.id !== 6);
-check('no cache + a session → an instant line that needs no numbers', (() => { const r = instantWelcome({ hasSession: true, cache: null, now: nowWed, name: 'يوسف', rand: () => 0.5 }); return !!r && !r.fromCache && !WELCOME_LINES.find((l) => l.id === r.id)!.needs.length; })());
+check('no cache + a session → an instant line that needs no numbers', (() => { const r = instantWelcome({ hasSession: true, cache: null, now: nowWed, name: YN, rand: () => 0.5 }); return !!r && !r.fromCache && !WELCOME_LINES.find((l) => l.id === r.id)!.needs.length; })());
+// THE NAME SPEAKS THE SENTENCE'S LANGUAGE (owner 2026-10-18: «why is my name in English and Arabic» —
+// the Arabic line read «رجعت يا yusuf؟» from a Latin Google name).
+const latinOnly = instantWelcome({ hasSession: true, cache: null, now: nowWed, name: 'yusuf', rand: () => 0.5 });
+check('a Latin-only name greets in ARABIC letters in the Arabic line (never «يا yusuf»), Latin in the English one',
+  !!latinOnly && !/[A-Za-z]/.test(latinOnly.ar) && latinOnly.ar.includes('يوسف') && latinOnly.en.includes('yusuf'));
+const arOnly = instantWelcome({ hasSession: true, cache: null, now: nowWed, name: 'يوسف', rand: () => 0.5 });
+check('an Arabic-only name greets in Arabic and leaves English with the normal headline (never Arabic letters in English)',
+  !!arOnly && arOnly.ar.includes('يوسف') && arOnly.en === '');
+const mixedCache = { ...freshCache, ar: 'رجعت يا yusuf؟ إزهله.' };
+check('a held line with a Latin name in the Arabic text is NOT reused (the line already on phones heals)',
+  !instantWelcome({ hasSession: true, cache: mixedCache, now: nowWed, name: YN, rand: () => 0 })!.fromCache);
+const anyLine = WELCOME_LINES.find((l) => !l.needs.length)!;
+mustCatch('a renderer that drops the name in as-is, whatever its script',
+  /[A-Za-z]/.test(anyLine.ar.replace('{n}', 'yusuf')) && !/[A-Za-z]/.test(renderWelcome(anyLine, 'yusuf', {}, 'ar') ?? 'x'));
 check('no name on the device → no personal line (never a line with a blank name)', instantWelcome({ hasSession: true, cache: null, now: nowWed, name: '  ' }) === null);
 mustCatch('an instant path that reuses a cache past the hold',
   !!instantWelcome({ hasSession: true, cache: { ...freshCache, at: nowWed.getTime() - HOLD_MS - 1 }, now: nowWed, name: 'يوسف' })?.fromCache === false);
@@ -257,6 +272,26 @@ mustCatch('a picker that ignores the previous line', !neverRepeats((now, _last, 
   const pool = WELCOME_LINES.filter((l) => lineFitsTime(l, now));
   return pool[Math.min(pool.length - 1, Math.floor(rand() * pool.length))];
 }));
+
+// ── 12. NEW ON EZHALAH TODAY (owner 2026-10-18, option A) ─────────────────────────────────────────
+const nt = WELCOME_LINES.find((l) => l.id === 46)!;
+check('line A reads «يوسف، 4,739 إعلان جديد اليوم على إزهله.» / "Yusuf, 4,739 new listings today on Ezhalah."',
+  renderWelcome(nt, 'يوسف', FACTS, 'ar') === 'يوسف، 4,739 إعلان جديد اليوم على إزهله.'
+  && renderWelcome(nt, 'Yusuf', FACTS, 'en') === 'Yusuf, 4,739 new listings today on Ezhalah.');
+const ntOk = (min: number) => renderWelcome(nt, 'يوسف', { newToday: min - 1 }, 'ar') === null
+  && renderWelcome(nt, 'يوسف', {}, 'ar') === null && renderWelcome(nt, 'يوسف', { newToday: min }, 'ar') !== null;
+check(`a count under ${NEW_TODAY_MIN} or an unknown count shows no line (never «0 إعلان جديد», never a failed read as a number)`, ntOk(NEW_TODAY_MIN));
+mustCatch('a line that would show «1 إعلان جديد» just after midnight (a floor of 1)', !ntOk(1));
+const lateNight = new Date('2026-10-14T20:30:00Z'); // 23:30 Riyadh
+const nextDay = new Date('2026-10-14T21:30:00Z');   // 00:30 Riyadh, the next day
+const ntCache = { id: 46, at: lateNight.getTime(), ar: 'يوسف، 4,739 إعلان جديد اليوم على إزهله.', en: 'Yusuf, 4,739 new listings today on Ezhalah.' };
+check('a held «today» line is reused the same Riyadh day',
+  !!instantWelcome({ hasSession: true, cache: ntCache, now: new Date(lateNight.getTime() + 600_000), name: YN })?.fromCache);
+check('a held «today» line never crosses midnight Riyadh (yesterday\'s count is not «today»)',
+  riyadhDay(lateNight.getTime()) !== riyadhDay(nextDay.getTime())
+  && !instantWelcome({ hasSession: true, cache: ntCache, now: nextDay, name: YN, rand: () => 0 })?.fromCache);
+mustCatch('a cache rule that ignores the day for the «today» line',
+  riyadhDay(lateNight.getTime()) !== riyadhDay(nextDay.getTime()) && Math.floor(lateNight.getTime() / 86_400_000) === Math.floor(nextDay.getTime() / 86_400_000));
 
 console.log(`\nExample (ar): ${renderWelcome(WELCOME_LINES[3], 'يوسف', FACTS, 'ar')}`);
 console.log(`Example (en): ${renderWelcome(WELCOME_LINES[23], 'Yusuf', FACTS, 'en')}`);
