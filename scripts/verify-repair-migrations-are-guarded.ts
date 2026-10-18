@@ -54,6 +54,12 @@ const WAIVED: Record<string, string> = {
     'the value search_listings_ar served before the run and only where the row still held the run\'s value; the rule ' +
     'that caused it is pinned by test_dealapp_plot_code_district_2026_10_18.py (numbered districts stay, short codes go), ' +
     'and the next re-parse writes the same page value, so there is no state left for a detector to watch',
+  // 2026-10-18. ksaaqar `neighborhood` repair (data half of #7511), applied before its detector existed.
+  '20261018125140_ksaaqar_neighborhood_holds_only_a_stated_district.sql':
+    'watched by its companion 20261018131230_mon_detect_ksaaqar_neighborhood_unstated.sql, which creates ' +
+    'mon_detect_ksaaqar_neighborhood_unstated() over the same predicate and splices it into the ' +
+    'mon_run_all_detectors() roster (0 live after the repair; a planted plus code is caught, 0 -> 1). The scraper ' +
+    'half is pinned by test_ksaaqar_location_field_district_2026_10_18.py',
   // 🔬 AF engineer, 2026-10-12. Two NULL-only back-fills of Advanced Filter answers from each ad's OWN stored
   // text, computed by the same shared reader the scrapers now call on every crawl (yes-or-nothing prose for
   // sites with no structured field), so a re-crawl writes the same value and a new row cannot re-open the gap.
