@@ -254,7 +254,7 @@ function PhaseTitle({
     const what = kind ? [tWord(kind, loc), dealWord].filter(Boolean).join(' ') : '';
     return buildSearchLoaderTitles({
       search: platformCount > 0 ? t('Searching {count} real-estate platforms…', { count: platformCount }) : t(SEARCH_TITLES[0]),
-      checking: kingdom?.kind === 'more' ? t('Checking more than {count} listings across the Kingdom…', { count: kingdom.text }) : t(SEARCH_TITLES[1]),
+      checking: kingdom ? t('Checking {count} listings across the Kingdom…', { count: kingdom.text }) : t(SEARCH_TITLES[1]),
       city: placeLine(funnel.city, 'Reviewing more than {count} listings in {city}…', 'Reviewing {count} listings in {city}…', 'city'),
       district: placeLine(funnel.district, 'Going through more than {count} listings in {district}…', 'Going through {count} listings in {district}…', 'district'),
       matching: what ? t('Matching your request: {what}…', { what }) : t(SEARCH_TITLES[2]),

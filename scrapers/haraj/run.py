@@ -143,6 +143,18 @@ def _region_hint(licence_location: Optional[str]) -> Any:
     return REGION_EN_TO_ID.get(re.sub(r"(?i)\s*region$", "", head))
 
 
+def is_catalogue_title(title: Optional[str]) -> bool:
+    """A title whose first unit word is a plural («شقق تمليك فاخرة … 3و4و5 غرف») is several units — a
+    catalogue, never a listing — licensed or not (owner real-user check 2026-10-17: HRJ11190739649 and
+    HRJ11190629474 showed as single apartments of 1,161 m² and 2,484 m², the whole building's licence area)."""
+    t = X.norm(title or "")
+    for h in X._TYPE_RE.finditer(t):
+        if re.search(r"[0-9٠-٩]\s*(?:و\s*)?$", t[:h.start()]):
+            continue                  # a counted plural inside one unit: «للبيع عمار 4 شقق», «شقة 3 غرف»
+        return bool(re.fullmatch(X._PLURAL, h.group(1)))
+    return False
+
+
 def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: Any = None
              ) -> tuple[Optional[dict], str, str, dict]:
     """(row, category, skip_reason, facts). row is None exactly when the post must not be a listing."""
@@ -159,6 +171,8 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
         return None, "", "licence_expired", facts
     if not p["deal"]:
         return None, "", "deal_unstated", facts
+    if is_catalogue_title(ld.get("name")):
+        return None, "", "catalogue", facts
     usage = usage_of(p["usage_raw"])
     ptype = type_of(p["property_type_ar"], usage, ld.get("name"))
     if not ptype:
@@ -524,6 +538,8 @@ def _signal(status, body, moved):
     # (HRJ11190645357 «طلب شقه للايجار مستعجل» was stored before the classifier knew «طلب»): positive own-page
     # evidence, removed through the same strike path, never a private deactivation.
     if classify(ld.get("name"), P.strip_person_lines(desc))[0] in ("request", "other"):
+        return "gone"
+    if is_catalogue_title(ld.get("name")):    # several units in one post was never one listing (2026-10-17)
         return "gone"
     return "live"
 
