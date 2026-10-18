@@ -670,17 +670,27 @@ _DESC_P = re.compile(r"<p[^>]*>(.*?)</p>", re.S)
 _PROSE_SKIP = ("air_conditioner", "furnished")
 
 
-def parse_description_amenities(page_html: str) -> dict[str, bool]:
+def _description_text(page_html: str) -> Optional[str]:
     m = _DESC_BOX.search(page_html or "")
     if not m:
-        return {}
+        return None
     box = page_html[m.end():m.end() + 20000]
     first_p = box.find("<p")
     if first_p < 0:
-        return {}
+        return None
     end = box.find("</div>", first_p)
     paras = _DESC_P.findall(box[:end] if end >= 0 else box)
-    return normalize.prose_amenities_yes(normalize.html_block_lines("</p>".join(paras)), skip=_PROSE_SKIP)
+    return normalize.html_block_lines("</p>".join(paras))
+
+
+def stated_rate(page_html: str, price: Optional[int]) -> Optional[int]:
+    """The card's figure when the ad's own description states THAT figure per metre, else None."""
+    return price if price and normalize.stated_per_metre(_description_text(page_html), price) else None
+
+
+def parse_description_amenities(page_html: str) -> dict[str, bool]:
+    text = _description_text(page_html)
+    return normalize.prose_amenities_yes(text, skip=_PROSE_SKIP) if text is not None else {}
 
 
 def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Optional[dict], str, str]:
@@ -763,7 +773,13 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         if rent_period:
             row["rent_period"] = rent_period
     else:
-        row["price_total"] = price
+        # The card's figure is a RATE when the ad's own description states it per metre (owner 2026-10-18): the
+        # card prints «6,400.00 ريال», the description «… 6400 ريال للمتر». No marker: the total as published.
+        # A stated rate writes AUTHORITATIVE_NULL as the total so the stored total clears.
+        rate = stated_rate(page_html, price)
+        row["price_total"] = db.AUTHORITATIVE_NULL if rate else price
+        if rate:
+            row["price_per_meter"] = rate
 
     extra: dict[str, Any] = {
         "district_source": district_source,      # the page's «الموقع:» address field, or the map line
