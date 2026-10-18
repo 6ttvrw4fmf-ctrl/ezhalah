@@ -33,6 +33,9 @@ import { noTranslateRef } from '@/noTranslate';
 import { useApp } from '@/store';
 import { shareNative } from '@/lib/share';
 import { useFilterWelcome } from '@/lib/useFilterWelcome';
+import { decodeSharePayload, shareLandingTitle, SHARE_COPY, SHARE_PARAM, isShareCode } from '@/lib/shareSearch';
+import { fetchSharedChat, fetchSharedChatCard } from '@/lib/sharedChat';
+import { isProbeFailure } from '@/lib/afProbe';
 import { pickName } from '@/lib/nameSync';
 import { useI18n, tDetailOption, tPriceTab, isLatinOnlyInput, ARABIC_ONLY_MSG, CITY_REQUIRED_MSG, DISTRICT_UNCONFIRMED_MSG } from '@/i18n';
 
@@ -134,7 +137,79 @@ export default function Home() {
   const cityLabel = (o: { cityId: number; cityAr: string }) => (locale === 'en' ? cityNameEn(o.cityId, o.cityAr) : o.cityAr);
   const regionLabel = (o: { regionId: number | null; regionAr: string | null }) => (locale === 'en' ? regionNameEn(o.regionId, o.regionAr) : o.regionAr);
   const districtLabel = (cityId: number, ar: string) => (locale === 'en' ? districtNameEn(cityId, ar) : ar);
-  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history } = useApp();
+  const { query: storeQuery, setQuery, user, openAuth, dismissSignInCard, history, importSharedChat } = useApp();
+  // A SHARED SEARCH LANDS HERE (owner 2026-10-17). `/?share=<payload>` (src/lib/shareSearch.ts) shows a
+  // card «عقارات من {name} لك على إزهله» with «اضغط وشوف العقارات». The TAP is what runs the search
+  // (a pasted link never runs one by itself — appSession gate). Owner: the recipient signs in to open a
+  // shared search so it is saved to their own list; a visitor who isn't signed in sees the sign-in
+  // screen right after the tap, and the search opens once they're in — including across an OAuth
+  // redirect, via a short-lived pending record. Ordinary «بحث» is untouched and stays free for everyone.
+  // A /s/<code> link is a whole SHARED CHAT (src/lib/sharedChat.ts): the card's facts are read from the
+  // database, and the tap copies the conversation into the recipient's own history and opens it there.
+  const [sharedSearch, setSharedSearch] = useState<{ q: SearchQuery; name: string; code?: string } | null>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const raw = new URLSearchParams(window.location.search).get(SHARE_PARAM);
+    if (raw) { try { window.history.replaceState(null, '', window.location.pathname); } catch { /* cosmetic */ } }
+    if (isShareCode(raw)) {
+      let alive = true;
+      const load = async (tries: number) => {
+        const card = await fetchSharedChatCard(raw!);
+        if (!alive) return;
+        if (isProbeFailure(card)) { if (tries > 0) setTimeout(() => void load(tries - 1), 1500); return; }
+        if (card) setSharedSearch({ q: card.q, name: card.name, code: raw! });
+      };
+      void load(2);
+      return () => { alive = false; };
+    }
+    const s = decodeSharePayload(raw);
+    if (s) setSharedSearch(s);
+  }, []);
+  const openSharedSearch = useCallback(async (s: { q: SearchQuery; code?: string }) => {
+    try { localStorage.removeItem(SHARED_PENDING_KEY); } catch { /* per-device only */ }
+    setSharedSearch(null);
+    if (s.code) {
+      // The same link opened again opens the same copy, never a second one.
+      let done: Record<string, string> = {};
+      try { done = JSON.parse(localStorage.getItem(SHARED_IMPORTED_KEY) ?? '{}') ?? {}; } catch { done = {}; }
+      const prior = done[s.code];
+      if (prior && history.some((h) => h.id === prior)) {
+        router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q), replay: '0', hid: prior } });
+        return;
+      }
+      const chat = await fetchSharedChat(s.code);
+      if (chat && !isProbeFailure(chat)) {
+        const hid = importSharedChat(chat.q, chat.transcript);
+        try { localStorage.setItem(SHARED_IMPORTED_KEY, JSON.stringify({ ...done, [s.code]: hid })); } catch { /* per-device only */ }
+        setTimeout(() => router.push({ pathname: '/agent', params: { filter: JSON.stringify(chat.q), replay: '0', hid } }), 0);
+        return;
+      }
+      // The copy could not be read: the shared SEARCH still opens (never a dead tap).
+    }
+    router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q) } });
+  }, [router, history, importSharedChat]);
+  const onSharedTap = () => {
+    if (!sharedSearch) return;
+    if (user) { void openSharedSearch(sharedSearch); return; }
+    try {
+      localStorage.setItem(SHARED_PENDING_KEY, JSON.stringify({ q: sharedSearch.q, name: sharedSearch.name, code: sharedSearch.code, at: Date.now() }));
+    } catch { /* without storage the search still opens if sign-in finishes in this page */ }
+    openAuth();
+  };
+  // The tap's continuation once the visitor is signed in (same page, or back from an OAuth redirect).
+  useEffect(() => {
+    if (!user || Platform.OS !== 'web') return;
+    let pending: { q: SearchQuery; code?: string; at: number } | null = null;
+    try { pending = JSON.parse(localStorage.getItem(SHARED_PENDING_KEY) ?? 'null'); } catch { pending = null; }
+    if (!pending?.q || !(Date.now() - pending.at < SHARED_PENDING_TTL_MS)) {
+      try { localStorage.removeItem(SHARED_PENDING_KEY); } catch { /* per-device only */ }
+      return;
+    }
+    const q = pending.q;
+    const code = isShareCode(pending.code) ? pending.code : undefined;
+    const t = setTimeout(() => void openSharedSearch({ q, code }), 0); // after the app session has started
+    return () => clearTimeout(t);
+  }, [user, openSharedSearch]);
   // ROTATING WELCOME (owner 2026-10-17): a signed-in user sometimes sees a personal line with a live
   // fact IN PLACE OF THE BIG HEADLINE (owner: «i meant the big text»); the subtitle below never changes. lib/filterWelcome.ts holds the approved lines
   // and the truth rules; null keeps the normal subtitle.
@@ -1162,22 +1237,17 @@ export default function Home() {
   // Bumped by every entrance so the title's own rise (effect below) re-arms with it.
   const [entranceKey, setEntranceKey] = useState(0);
   const playEntrance = useCallback(() => {
+    // NO ENTRANCE ANIMATION (owner 2026-10-17: «same with the animation on top … the share button,
+    // the Ezhalah logo and everything» — the page must look built in, not load in). The card, the
+    // mode toggle and the subtitle are simply THERE: their values go straight to 1. The headline is
+    // the one exception — it stays hidden until its text is settled (owner: never a visible swap),
+    // then appears at once in the effect below. The backdrop's search-time dim (heroAnim) is not an
+    // entrance and keeps its own animation in navigateWithQuery.
     heroAnim.setValue(0);
-    entrance.setValue(0);
-    badgeAnim.setValue(0);
+    entrance.setValue(1);
+    badgeAnim.setValue(1);
     titleAnim.setValue(0);
-    subAnim.setValue(0);
-    RNAnimated.timing(entrance, {
-      toValue: 1,
-      duration: 440,
-      easing: RNEasing.out(RNEasing.cubic),
-      useNativeDriver: Platform.OS !== 'web',
-    }).start();
-    const rise = (v: RNAnimated.Value, delay: number) =>
-      RNAnimated.timing(v, { toValue: 1, duration: 520, delay, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: Platform.OS !== 'web' });
-    // The TITLE is not in this parallel any more: it rises in the effect below, once the headline's
-    // text is settled (owner 2026-10-17 — no visible swap, ever). Badge and subtitle rise as before.
-    RNAnimated.parallel([rise(badgeAnim, 80), rise(subAnim, 400)]).start();
+    subAnim.setValue(1);
     setEntranceKey((k) => k + 1);
   }, [heroAnim, entrance, badgeAnim, titleAnim, subAnim]);
   useFocusEffect(playEntrance);
@@ -1187,9 +1257,8 @@ export default function Home() {
   // so the visitor never sees one headline turn into another.
   useEffect(() => {
     if (!welcomeSettled) return;
-    const a = RNAnimated.timing(titleAnim, { toValue: 1, duration: 520, delay: 230, easing: RNEasing.out(RNEasing.cubic), useNativeDriver: Platform.OS !== 'web' });
-    a.start();
-    return () => a.stop();
+    // Instant, not a rise (owner 2026-10-17): the text is final, so it is simply there.
+    titleAnim.setValue(1);
   }, [welcomeSettled, entranceKey, titleAnim]);
   // A RETURN TO THE FILTER IS A CLEAN FILTER (owner 2026-10-03). Coming back from a search — the
   // toggle, the browser's Back, a new visit — always opens an empty form: the previous search is NOT
@@ -2189,6 +2258,22 @@ export default function Home() {
       {/* Drawer overlays the home content (dimmed behind) instead of replacing it. */}
       {sidebarOpen && <Sidebar onClose={() => setSidebarOpen(false)} />}
       {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
+      {sharedSearch && (
+        <View style={s.sharedBackdrop} accessibilityViewIsModal>
+          <View style={s.sharedCard}>
+            <Pressable onPress={() => setSharedSearch(null)} hitSlop={10} style={[s.sharedClose, isRTL ? { left: 12 } : { right: 12 }]} accessibilityRole="button" accessibilityLabel={t('Close')}>
+              <Ionicons name="close" size={20} color={colors.muted} />
+            </Pressable>
+            <Image source={require('../../assets/images/eagle-mark.png')} style={s.sharedEagle} resizeMode="contain" accessibilityIgnoresInvertColors />
+            <Text style={[s.sharedTitle, { writingDirection: isRTL ? 'rtl' : 'ltr' }]}>
+              {shareLandingTitle(sharedSearch.name, sharedSearch.q, locale === 'en' ? 'en' : 'ar')}
+            </Text>
+            <Pressable onPress={onSharedTap} style={({ pressed }) => [s.sharedButton, pressed && { opacity: 0.9 }]} accessibilityRole="button">
+              <Text style={s.sharedButtonText}>{SHARE_COPY[locale === 'en' ? 'en' : 'ar'].button}</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -2222,7 +2307,29 @@ const E = StyleSheet.create({
   rangeNote: { textAlign: 'left' },
 });
 
+// A shared search waits at most this long for the visitor to finish signing in after the tap.
+const SHARED_PENDING_KEY = 'ezhalah:sharedSearch:pending';
+const SHARED_PENDING_TTL_MS = 30 * 60 * 1000;
+// code → the history id its copy became on this device, so reopening the link never duplicates the chat.
+const SHARED_IMPORTED_KEY = 'ezhalah:sharedChat:imported';
+
 const s = StyleSheet.create({
+  sharedBackdrop: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60,
+    backgroundColor: 'rgba(18, 37, 27, 0.35)', alignItems: 'center', justifyContent: 'center', padding: 20,
+  },
+  sharedCard: {
+    width: '100%', maxWidth: 380, backgroundColor: colors.surface, borderRadius: radius.card,
+    paddingTop: 28, paddingBottom: 22, paddingHorizontal: 22, alignItems: 'center', ...cardShadow,
+  },
+  sharedClose: { position: 'absolute', top: 12 },
+  sharedEagle: { width: 56, height: 56, marginBottom: 12 },
+  sharedTitle: { fontSize: 19, fontWeight: '700', color: colors.ink, textAlign: 'center', lineHeight: 28 },
+  sharedButton: {
+    marginTop: 20, alignSelf: 'stretch', backgroundColor: colors.primary, borderRadius: 14,
+    paddingVertical: 14, alignItems: 'center',
+  },
+  sharedButtonText: { color: colors.onFill, fontSize: 16, fontWeight: '700' },
 
   scroll: { paddingHorizontal: space.screenSide, alignItems: 'center' },
   col: { width: '100%', maxWidth: MAX_W },
