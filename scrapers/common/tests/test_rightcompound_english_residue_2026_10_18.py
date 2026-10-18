@@ -37,3 +37,38 @@ def test_two_answers_or_no_catalogue_entry_stays_unmapped():
                      ("khobar", "Al Qashlah"), ("khobar", "Al Douha"), ("khobar", "Dana Bay"), ("jubail", "Khaldiya"),
                      ("riyadh", "King Abdullah Financial"), ("riyadh", "Arizona Golf Resort")]:
         assert _DISTRICT_EN_AR.get((city, _norm_dist(en))) is None, (city, en)
+
+
+# Read from the live compound pages 2026-10-18 (JSON-LD streetAddress / «X District» sentences, verbatim).
+PAGE_CASES = [
+    ("khobar", "Prince Hamoud Street no. 22 – AQRABIA Area", "AQRABIA", "حي العقربية"),       # al-ferdouse
+    ("khobar", "7316, B4 St., Al Safa", "Al Safa", "حي الصفا"),                              # safa-khobar-residence
+    ("riyadh", "Imam Abdullah Ibn Saud Ibn Abdulaziz Rd, Al Janadiriyah", "Al Janadiriyah", "حي الجنادرية"),  # vives
+    ("taif", "Alqarahin, Taif, Saudi Arabia", "Alqarahin", "حي القراحين"),                   # meral-oasis
+    ("riyadh", "Ar Rahmaniya District", "Ar Rahmaniya", "حي الرحمانية"),                     # tuwaiq-gate
+]
+
+
+def test_the_page_spellings_map():
+    from scrapers.rightcompound.run import district_en_candidates
+    for city, street, en, ar in PAGE_CASES:
+        if "District" not in street:
+            assert en in district_en_candidates(street), street
+        assert _DISTRICT_EN_AR.get((city, _norm_dist(en))) == ar, (city, en)
+
+
+def test_a_street_glued_to_the_district_shortens_to_the_district_but_never_past_a_direction():
+    from scrapers.rightcompound.run import _name_and_tails
+    # j-one-compound-jeddah: «7007 Muhammad Masud As Salamah District Jeddah 23»
+    assert "salamah" in _name_and_tails("Masud As Salamah")
+    assert _DISTRICT_EN_AR[("jeddah", "salamah")] == "حي السلامة"
+    assert "obhur" not in _name_and_tails("South Obhur")          # south Obhur is not (north) Obhur
+    assert "diriyah" not in _name_and_tails("New Ad Diriyah")
+
+
+def test_the_template_sentence_does_not_hide_the_next_district_sentence():
+    from scrapers.rightcompound.run import compound_facts
+    page = ("<h1>Tuwaiq Gate</h1><p>in King Abdullah Financial District</p><p>located in Ar Rahmaniya District</p>"
+            '<script type="application/ld+json">{"@type":"Place","geo":{"latitude":1,"longitude":2},'
+            '"address":{"streetAddress":"King Fahad Road","addressLocality":"Riyadh"}}</script>')
+    assert compound_facts("https://rightcompound.com/compounds/riyadh/tuwaiq-gate", page)["district_en_candidates"] == ["Ar Rahmaniya"]
