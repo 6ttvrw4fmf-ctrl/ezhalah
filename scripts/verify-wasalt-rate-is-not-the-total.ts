@@ -58,6 +58,20 @@ function problems(s: string): string[] {
   return fail;
 }
 
+// The companion detector flags OUR claim with the SAME predicate as the trigger, and is rostered.
+const detFile = readdirSync(dir).filter((f) => /^\d{14}_mon_detect_rate_served_as_total\.sql$/.test(f)).sort().at(-1);
+const detSql = detFile ? readFileSync(join(dir, detFile), 'utf8') : '';
+function detProblems(s: string): string[] {
+  const fail: string[] = [];
+  if (!s) return ['companion detector migration *_mon_detect_rate_served_as_total.sql is missing'];
+  const arms = s.match(/t\.total is not null and t\.total <> s\.price_total\s*and abs\(t\.total - s\.price_total::numeric \* s\.area_m2\) <= 0\.01 \* s\.price_total::numeric \* s\.area_m2/g) || [];
+  if (arms.length !== 2) fail.push(`the detector must apply the trigger's predicate to the SERVED rows of both wasalt tables (found ${arms.length} arms)`);
+  if (!/from public\.search_listings_ar s/.test(s)) fail.push('the detector no longer reads what we SERVE (search_listings_ar) — it would flag the source, not our claim');
+  if (!/mon_raise\('P1', 'rate_served_as_total'/.test(s)) fail.push('a served rate no longer raises P1');
+  if (!/position\('''mon_detect_rate_served_as_total''' in d\) = 0 then raise exception 'roster edit did not land'/.test(s)) fail.push('the detector is not rostered');
+  return fail;
+}
+
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : ` — ${why}`}`); };
 const mustCatch = (label: string, caught: boolean, why = '') => check(`mutant caught: ${label}`, caught, why);
@@ -75,5 +89,11 @@ for (const [label, mutate] of mutants) {
   const m = mutate(sql);
   mustCatch(label, m !== sql && problems(m).length > 0, m === sql ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
 }
+const dLive = detProblems(detSql);
+check(`companion detector ${detFile ?? '(missing)'} flags our claim`, dLive.length === 0, dLive.join('; '));
+mustCatch('detector reads the base table instead of what we serve', detProblems(detSql.replaceAll('from public.search_listings_ar s', 'from public.wasalt_residential_listings s')).length > 0);
+mustCatch('detector downgraded to P3', detProblems(detSql.replace("mon_raise('P1', 'rate_served_as_total'", "mon_raise('P3', 'rate_served_as_total'")).length > 0);
+mustCatch('detector roster block removed', detProblems(detSql.replace(/do \$roster\$[\s\S]*?\$roster\$;/, '')).length > 0);
+
 console.log(failed === 0 ? 'OK: a wasalt per-m² rate can never be stored or served as the total again' : `${failed} check(s) failed`);
 process.exit(failed === 0 ? 0 : 1);
