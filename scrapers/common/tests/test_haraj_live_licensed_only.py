@@ -278,6 +278,23 @@ def test_liveness_controls_are_fresh_posts_that_read_live_and_fail_closed(monkey
     assert R.liveness_controls(5) == []
 
 
+def test_liveness_controls_walk_back_past_a_quiet_hour(monkeypatch):
+    """2026-10-18 07:48 UTC: the newest complete hour held 3 licensed posts, all live, and the run
+    quarantined 3,600 ads on «controls 3/3 live». A thin hour walks back; a block still fails closed."""
+    files = {"h1": ["10", "11", "12"], "h2": ["20", "21"], "h3": ["30", "31", "32"], "filling": ["99"]}
+    monkeypatch.setattr(R, "hour_files", lambda: ["h1", "h2", "h3", "filling"])
+    seen = []
+    monkeypatch.setattr(R, "ids_in", lambda u, pre, tight=False: (seen.append(u) or files[u]))
+    monkeypatch.setattr(R, "_verify_gone", lambda ad: ("live", ""))
+    got = R.liveness_controls(5)
+    assert seen == ["h3", "h2"]                                    # newest complete first, never "filling"
+    assert [r["ad_number"] for r in got] == ["HRJ30", "HRJ31", "HRJ32", "HRJ20", "HRJ21"]
+    # the read budget still binds across hours, and a block still yields fewer than n
+    monkeypatch.setattr(R, "_verify_gone", lambda ad: ("unknown", "challenge"))
+    seen.clear()
+    assert R.liveness_controls(5, max_reads=4) == [] and seen == ["h3", "h2"]
+
+
 # ── several units in one licensed post = a catalogue (owner real-user check 2026-10-17) ─────────────
 @pytest.mark.parametrize("title,cat", [
     ("شقق تمليك فاخرة للسكن والا ستثمار ابحر الشمالية 3و4و 5غرف", True),   # HRJ11190739649, 1,161 m²
