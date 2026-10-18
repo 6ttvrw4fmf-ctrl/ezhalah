@@ -16,6 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from scrapers.haraj import parse as P  # noqa: E402
+from scrapers.haraj import prose as X  # noqa: E402
 from scrapers.haraj import run as R  # noqa: E402
 from scrapers.haraj.classify import classify  # noqa: E402
 
@@ -288,3 +289,35 @@ def test_licensed_catalogue_is_never_stored_and_reads_gone():
     assert row is None and skip == "catalogue"
     assert R._signal(200, '<script type="application/ld+json">' + json.dumps(ld(name, FLAT_AR), ensure_ascii=False)
                      + "</script>", False) == "gone"
+
+
+# ── several DIFFERENT units offered in the body = a catalogue (backlog 615, 2026-10-18) ──────────────
+BODY_TWO_UNITS = ("للبيع شاليه عمره سنه ونصف موجر حاليا ايجار سنوي للبيع استراحة بالطائف حي الرميدة، مساحة خمسمية "
+                  "وخمسين متر مسبح وحديقة وجلسات خارجية. للبيع استراحة مميزة في الطائف حي الرميدة.")   # HRJ11190705938
+BODY_ONE_UNIT_TWICE = ("للبيع استراحة بالطائف حي الرميدة، مساحة خمسمية وخمسين متر مسبح وحديقة. للبيع استراحة "
+                       "مميزة في الطائف حي الرميدة.")                                                 # HRJ11190717503
+
+
+@pytest.mark.parametrize("body,cat", [
+    (BODY_TWO_UNITS, True),
+    ("للايجار شقة 3 غرف ... للايجار محل تجاري على الشارع", True),
+    (BODY_ONE_UNIT_TWICE, False),
+    (FLAT_AR, False),
+    ("للبيع او الايجار شقة في حي النرجس", False),
+    ("فيلا للبيع في حي الملقا، للبيع الفيلا مع الاثاث", False),
+])
+def test_body_offers_several_units(body, cat):
+    assert X.body_offers_several_units(body) is cat
+
+
+def test_body_catalogue_is_never_stored_and_reads_gone():
+    row, _, skip, _ = R.map_post("1", ld("شاليه للبيع- بدخل ثابت", BODY_TWO_UNITS + "\n" + FLAT_AR), "",
+                                 "offer", "x", TODAY)
+    assert row is None and skip == "catalogue"
+    assert X.type_of("شاليه للبيع- بدخل ثابت", BODY_TWO_UNITS) == (None, "catalogue:body")
+    page = ('<script type="application/ld+json">'
+            + json.dumps(ld("شاليه للبيع- بدخل ثابت", BODY_TWO_UNITS), ensure_ascii=False) + "</script>")
+    assert R._signal(200, page, False) == "gone"
+    one = ('<script type="application/ld+json">'
+           + json.dumps(ld("شاليه للبيع - الطايف", BODY_ONE_UNIT_TWICE), ensure_ascii=False) + "</script>")
+    assert R._signal(200, one, False) == "live"
