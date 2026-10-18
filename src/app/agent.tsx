@@ -431,7 +431,16 @@ const SEARCH_MS = 600;
 // (the 52nd pill is lit at 9,740ms; a 57th roster would not be lit until 10,640ms). Platform #57
 // therefore needs a real decision — a longer floor, or a wave that lights more than one pill per
 // step — and MAX_ROSTER is the guard that will stop it silently slipping through.
-const SEARCH_MIN_MS = 10600;
+//
+// OWNER 2026-10-17 — RESULTS AS SOON AS THEY ARE READY, NEVER HELD PAST TEN SECONDS. This reverses
+// the 2026-09-06 "wait the full ten seconds" floor above (kept for history): the owner's goal is now
+// «less than 10 seconds, that's the max». So the floor becomes a short MINIMUM (the roster is never a
+// flash) and a hard MAXIMUM caps every artificial hold — the minimum beat AND the page-dwell gate
+// below. A slow network can still take longer; that is the network, not a hold. On a search that
+// resolves fast the user sees part of the logo wave; on a slow one the whole wave still fits inside
+// the cap (scripts/verify-search-loader-shows-every-platform.ts proves everyPlatformSeen(SEARCH_MAX_HOLD_MS)).
+const SEARCH_MIN_MS = 3000;
+const SEARCH_MAX_HOLD_MS = 10000;
 // An Advanced Filter round's search beat (owner 2026-10-11: 5 seconds, «نبحث عن …» changing pick by pick — AfRoundLoader).
 const AF_LOADER_MS = 5000;
 // Soft completion (owner v4): before morphing to results, flag the loader `exiting` and give its
@@ -1840,7 +1849,9 @@ export default function Agent() {
       if (remaining > 0) await waitRun(run, remaining);
       // Presentation-only gate: each logo/name page must finish its actual visible dwell.
       // The search has already completed; this changes only when its results are revealed.
-      while (!run.cancelled && loaderPresentedRef.current[statusId] !== true) await waitRun(run, 100);
+      // …but never past the owner's ten-second cap (2026-10-17): whatever page is up when the cap
+      // lands, the results come in.
+      while (!run.cancelled && loaderPresentedRef.current[statusId] !== true && Date.now() - since < SEARCH_MAX_HOLD_MS) await waitRun(run, 100);
     } else {
       // AN ADVANCED FILTER ROUND HOLDS ITS ONE-SENTENCE BEAT FOR 5 SECONDS (owner 2026-10-11: «make it 5
       // seconds … one sentence of what he selected»; 10-10 was 10 s of logos, 10-05 skipped it). A plain
