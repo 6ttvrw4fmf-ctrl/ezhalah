@@ -627,14 +627,25 @@ def _city_from_line(html: str) -> tuple[Optional[str], Optional[str]]:
 
 
 # A plot or plan code is never a district (owner 2026-10-18): «حي 1051 مخطط رقم», «حي 33ج», «حي ج19», «مخططات».
-_PLOT_CODE = re.compile(r"[0-9٠-٩]|مخطط|رقم")
+# A NUMBERED district is not one: «حي الناصرية 4», «حي الياسمين1» name a real sub-district (a name of 3+ letters
+# followed by a 1-2 digit number). The first cut called every digit a plot code and its repair run (39129698696,
+# cancelled) moved 29 such rows to the title's district — «الناصرية 4» → «الشواجرة».
+_PLOT_CODE = re.compile(r"مخطط|رقم|[0-9٠-٩]{3,}")
+_NUMBERED_NAME = re.compile(r"(?:حي\s+)?[ء-ي]{3,}(?:\s+[ء-ي]+)*\s?[0-9٠-٩]{1,2}")
+
+
+def _is_plot_code(d: str) -> bool:
+    d = d.strip()
+    if _PLOT_CODE.search(d):
+        return True
+    return bool(re.search(r"[0-9٠-٩]", d)) and not _NUMBERED_NAME.fullmatch(d)
 # The deed's own location, which the ad prints in its description: «وصف موقع العقار حسب الصك / المدينة: X / الحي: Y».
 _DEED_RE = re.compile(r"حسب\s+الصك\s*المدينة\s*:\s*([^\n:]{2,30}?)\s*الحي\s*:\s*([^\n:]{2,40}?)"
                       r"(?=\s*(?:\n|$|الموظف|عمولة|رقم|شاهد|الضمانات))")
 
 
 def _usable_district(d: Optional[str]) -> bool:
-    return bool(d) and bool(re.search(r"[ء-ي]{2}", d)) and not _PLOT_CODE.search(d) and "غير محدد" not in d
+    return bool(d) and bool(re.search(r"[ء-ي]{2}", d)) and not _is_plot_code(d) and "غير محدد" not in d
 
 
 def _deed_district_ar(schema: dict, city_ar: Optional[str]) -> Optional[str]:

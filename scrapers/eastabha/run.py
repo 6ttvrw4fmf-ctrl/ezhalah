@@ -778,7 +778,29 @@ def map_listing(p: dict, taxd: dict[str, dict[int, str]], detail: dict, featured
         "additional_info": add,
         **amenity_cols,
     }
+    # The WP Residence checklist has no furnished item, so the ad's own words are the statement (law §2): «مفروشة» /
+    # «مؤثثة» yes, «غير مفروشة» no, partly furnished or silence unknown and omitted (🔬 2026-10-18, backlog 626:
+    # 37 of 175 active ads state it). Only the residential table has the column (20261018093318); a commercial
+    # upsert carrying the key would fail the whole batch (PGRST204), so it is never written there.
+    if category == "residential":
+        row.update(furnished_answer(description))
     return row, category, gone
+
+
+# eastabha's ads end with a «أفضل استخدام / أفضل استخدامات العقار» SUGGESTION block — «تحويلها إلى شقق مفروشة»,
+# «استثمار راقٍ كفيلا مفروشة» — on land, shells and unfurnished villas alike (595438, 595409, 595405 and ten more
+# of the 37 that mention furnishing, 2026-10-18). A suggestion is not the ad stating the unit is furnished: the
+# block is cut, and any other clause that only proposes a use is dropped, before the shared reader runs.
+_SUGGESTION_BLOCK = re.compile(r"أفضل\s+استخدام|مقترحات|استخدامات\s+العقار")
+_SUGGESTION_CLAUSE = re.compile(r"تحويل|يمكن|[إا]مكانية|مثالي|مناسب|يناسب|يتناسب|يصلح|استثمار|العائد")
+_CLAUSE_SPLIT = re.compile(r"[^\w\s\u0600-\u06FF/–-]+")
+
+
+def furnished_answer(description: Optional[str]) -> dict[str, bool]:
+    text = _SUGGESTION_BLOCK.split(description or "", maxsplit=1)[0]
+    clauses = [c.strip() for c in _CLAUSE_SPLIT.split(text) if c.strip() and not _SUGGESTION_CLAUSE.search(c)]
+    f = normalize.amenities_from_lines("\n".join(clauses)).get("furnished")
+    return {} if f is None else {"furnished": f}
 
 
 def _pin_sold_inactive(table: str, ad_numbers: list[str],

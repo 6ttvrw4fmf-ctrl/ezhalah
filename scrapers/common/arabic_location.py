@@ -21,6 +21,7 @@ and Jazan). For those, this NEVER guesses — it resolves only when a region hin
 """
 from __future__ import annotations
 
+import os
 import re
 import threading
 import time
@@ -570,6 +571,52 @@ def catalog_district_keys(city_id: Optional[int]) -> frozenset[str]:
     caller that must test MANY candidate spans against one town (abralosol's title fallback)."""
     _load()
     return frozenset(_DISTRICT_BY_CITY.get(city_id, ())) if city_id else frozenset()
+
+
+_KNOWN_KEYS: dict[int, frozenset[str]] = {}
+
+
+def known_district_keys(city_id: Optional[int]) -> frozenset[str]:
+    """The catalogue's district keys for `city_id` PLUS every district word the served index already carries there
+    (public.loc_canonical_district: catalogue ∪ live, the list the Filter offers) — abralosol's title-fallback set
+    («catalogue + seen neighbourhoods», 2026-10-18), for every source. Read once per city per run; a failed read logs
+    once and answers the catalogue alone, so an outage fills less, never crashes and never guesses."""
+    if not city_id or not os.environ.get("SUPABASE_URL"):     # no database configured (a unit test): nothing known
+        return frozenset()
+    if city_id not in _KNOWN_KEYS:
+        keys = set()
+        try:
+            keys.update(catalog_district_keys(city_id))
+            from scrapers.common import db
+            page = db._execute(db.sb().table("loc_canonical_district").select("district_norm").eq("city_id", city_id)
+                               .range(0, 4999), what="loc_canonical_district.known").data or []
+            keys.update(r["district_norm"] for r in page if r.get("district_norm"))
+        except Exception as e:  # noqa: BLE001
+            print(f"⚠ known-district read failed for city {city_id}: {str(e)[:160]} — catalogue only", flush=True)
+        keys.discard("")
+        _KNOWN_KEYS[city_id] = frozenset(keys)
+    return _KNOWN_KEYS[city_id]
+
+
+# «بحي المليداء بمدينة بريدة», «للبيع أرض بحي شعب عامر …»: the words right after «حي». A direction or a place
+# word is never a district's name («بحي شرق الرياض» is east of the city, not a district called الشرق).
+_TITLE_HAYY = re.compile(r"(?:^|\s)(?:ب|و)?حي\s+([\u0621-\u064A0-9]+)(?:\s+([\u0621-\u064A0-9]+))?")
+_NOT_A_NAME = frozenset({"شمال", "جنوب", "شرق", "غرب", "وسط", "قرب", "بالقرب", "مدينة", "بمدينة", "محافظة", "بمحافظة",
+                         "مركز", "طريق", "على", "علي", "في", "خارج", "راقي", "جديد", "مميز", "هادئ"})
+
+
+def title_hayy_district(title: Optional[str], known: frozenset[str]) -> Optional[str]:
+    """«حي X [Y]» from the ad's own title, in the title's spelling, when its key is EXACTLY one `known` key — two words
+    first, then one; never fuzzy, never a direction or a place word, never a word glued to «ب» (a preposition)."""
+    for m in _TITLE_HAYY.finditer(title or ""):
+        w1, w2 = m.group(1), m.group(2)
+        if w1 in _NOT_A_NAME or w1.startswith("ب"):
+            continue
+        spans = [f"{w1} {w2}"] if w2 and w2 not in _NOT_A_NAME and not w2.startswith("ب") else []
+        for span in spans + [w1]:
+            if norm_district_tok(span) in known:
+                return f"حي {span}"
+    return None
 
 
 def find_district_in_text(text: Optional[str], city_id: Optional[int]) -> Optional[str]:
