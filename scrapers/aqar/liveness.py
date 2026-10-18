@@ -40,6 +40,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from scrapers.aqar.enrich_residential import (_html_to_text, _listing_json, _structured_price, headline_is_rate,
+                                              parse_price_per_meter)
 from scrapers.common.db import _TRANSIENT_MARKERS, begin_run, end_run, sb
 from scrapers.common.http import get
 from scrapers.common.liveness_trust import canary_environment_ok
@@ -316,6 +318,36 @@ def is_price_refresh_artifact(new_price: int, area_m2, price_per_meter) -> bool:
     return False
 
 
+def refresh_decision(body: str, old_price, area_m2, stored_ppm) -> tuple[str, Optional[int]]:
+    """What the price refresh does with the page it already holds: ('write', P) | ('clear', None) |
+    ('reject', None) | ('keep', None).
+
+    aqar's RSC payload is read FIRST — the same reader the enricher trusts (`_structured_price`), not the first
+    «"price":N» in the body. Read live 2026-10-18 (aqar-price-probe 39148998971): 6903628 publishes price 1,575,000
+    with meter_price 3,500, while we still held 3,500 as its TOTAL — the source moved from a rate to a total and
+    the refresh never followed. The reverse move is handled too: a headline that IS the rate (`headline_is_rate`)
+    clears the stored total instead of keeping a figure the page no longer calls a total. aqar stating no price
+    at all is the enricher's retraction to make, never this refresh's. The body regex stays the fallback for a
+    page whose payload we could not read, behind the artifact guard as before."""
+    obj = _listing_json(body)
+    s_price, s_auth = _structured_price(obj)
+    if s_auth and s_price is None:
+        return "keep", None
+    if s_auth:
+        if headline_is_rate(obj, s_price, parse_price_per_meter(_html_to_text(body))):
+            return ("clear", None) if old_price is not None else ("keep", None)
+        new_price: Optional[int] = s_price
+    else:
+        new_price = price_from_body(body)
+    if new_price is None:
+        return "keep", None
+    if is_price_refresh_artifact(new_price, area_m2, stored_ppm):
+        return "reject", None
+    if old_price is not None and int(old_price) != new_price:
+        return "write", new_price
+    return "keep", None
+
+
 CONTROLS = 5
 # The recheck (--min-strikes) reads a struck row only if nothing looked at it for this long, so the
 # three strikes stay three SEPARATE readings (the fleet recheck uses 6 h too).
@@ -450,6 +482,7 @@ def main() -> None:
     price_updated = 0   # prices re-read from the page we already fetched (owner-approved 2026-08-04)
     price_capped = 0    # changes seen past PRICE_REFRESH_CAP — next sweep picks them up
     price_artifact_rejected = 0  # refresh matched a proven artifact class (P1 2026-08-11) — skipped
+    price_rate_cleared = 0       # the headline is the rate: a stored total cleared (2026-10-18)
     # aqar only: aqar's JSON-LD offers.price is the published sale price. wasalt rows are swept by
     # this same script but their price comes from the wasalt API payload, so JSON-LD is not their
     # source of truth and must not overwrite it.
@@ -637,25 +670,24 @@ def main() -> None:
                     # Scope is deliberately narrow: aqar BUY rows only. aqar's JSON-LD offers.price
                     # is the sale price (verified against the visible badge on 150+ pages during the
                     # 2026-08-04 repair); for rentals the same field's period is ambiguous, so those
-                    # are left to the enricher, which knows سنوي/شهري. Never writes NULL over an
-                    # existing price, and never writes when unchanged.
+                    # are left to the enricher, which knows سنوي/شهري. Writes NULL over an existing
+                    # price only when the page's own headline is its per-metre rate (refresh_decision),
+                    # and never writes when unchanged.
                     if price_refresh_on and (row.get("transaction_type") == "Buy"):
-                        new_price = price_from_body(body)
-                        old_price = row.get("price_total")
-                        if (new_price is not None
-                                and is_price_refresh_artifact(new_price, row.get("area_m2"),
-                                                               row.get("price_per_meter"))):
+                        verdict, new_price = refresh_decision(body, row.get("price_total"),
+                                                              row.get("area_m2"), row.get("price_per_meter"))
+                        if verdict == "reject":
                             # Proven-live artifact class (P1 2026-08-11, see is_price_refresh_
                             # artifact docstring) — reject the write, keep the old value, count it
                             # so a spike is visible in scrape_runs.notes.
                             price_artifact_rejected += 1
-                            new_price = None
-                        if new_price and old_price is not None and int(old_price) != new_price:
+                        elif verdict in ("write", "clear"):
                             if price_updated < PRICE_REFRESH_CAP:
                                 _run_with_retry(lambda i=row["id"], p=new_price:
                                                 client.table(table)
                                                 .update({"price_total": p}).eq("id", i).execute())
                                 price_updated += 1
+                                price_rate_cleared += verdict == "clear"
                             else:
                                 price_capped += 1
 
@@ -717,7 +749,7 @@ def main() -> None:
         f"pending_kill={pending_kill} transient={transient} "
         f"unknown_soft_closed={unknown_soft_closed} "
         f"price_updated={price_updated} price_capped={price_capped} "
-        f"price_artifact_rejected={price_artifact_rejected}"
+        f"price_artifact_rejected={price_artifact_rejected} price_rate_cleared={price_rate_cleared}"
     )
     print(f"\n✓ Liveness sweep done. scanned={seen} {notes}")
     end_run(run_id, ok=True, rows_seen=seen, rows_upserted=killed, notes=notes)

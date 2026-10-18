@@ -375,6 +375,21 @@ def _structured_price(obj: Optional[dict[str, Any]]) -> tuple[Optional[int], boo
     return (v if v > 0 else None), True
 
 
+def headline_is_rate(obj: Optional[dict[str, Any]], s_price: Optional[int], text_ppm: Optional[int]) -> bool:
+    """aqar's published `price` IS the per-metre rate, not a total (owner rule 2026-10-18: a rate needs the ad's own
+    per-metre marker tied to that figure). Two shapes, both read live 2026-10-18:
+      • the payload's own `meter_price` equals `price` (the price slot prints «600 ريال» and «سعر المتر 600»);
+      • the page's «سعر المتر N» equals `price` — unless REGA's declared total (`rega_total_price`) is that same
+        figure: then the licence itself states it as the total (6896329: price 3,500 = rega_total_price 3,500).
+    A rate of 1 is aqar's placeholder («سعر المتر 1 §») and is never read this way (those rows are left as they are)."""
+    if not s_price or s_price <= 1:
+        return False
+    num = lambda v: int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None  # noqa: E731
+    if num((obj or {}).get("meter_price")) == s_price:
+        return True
+    return text_ppm == s_price and num((obj or {}).get("rega_total_price")) != s_price
+
+
 # aqar's rent-period enum. Only values PROVEN against a rendered page are mapped; an unmapped value
 # falls through to the rendered word rather than guessing a period.
 #   3 → annual  (77/150 live listings, every one rendering «N سنوي»)
@@ -855,6 +870,13 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
     # Anchored to the سعر المتر label — the old any-"N م²" pattern grabbed the AREA token and
     # caused the daily hide/recover flap on big-area land (see parse_price_per_meter above).
     price_per_meter = parse_price_per_meter(text)
+    # The source MOVED between a rate and a total (6903628: stored 3,500 as the total while aqar now publishes
+    # price 1,575,000 with meter_price 3,500), or publishes its rate as the headline: the headline is then not a
+    # total, and the stored one clears (AUTHORITATIVE_NULL below) instead of riding along.
+    rate_headline = bool(transaction_type == "Buy" and s_authoritative
+                         and headline_is_rate(obj, s_price, price_per_meter))
+    if rate_headline and price_per_meter is None:
+        price_per_meter = s_price
 
     # PRECEDENCE NOTE (observed 2026-09-19, NOT changed here). This block runs OUTSIDE the
     # `if s_authoritative:` branch above, so on a Buy listing that has BOTH a readable RSC payload
@@ -1062,8 +1084,8 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
         # published field and aqar's non-publication of a TOTAL says nothing about it.
         "price_annual":            (AUTHORITATIVE_NULL if authoritative_no_price and transaction_type == "Rent"
                                     else price_annual),
-        "price_total":             (AUTHORITATIVE_NULL if authoritative_no_price and transaction_type != "Rent"
-                                    else price_total),
+        "price_total":             (AUTHORITATIVE_NULL if (authoritative_no_price or rate_headline)
+                                    and transaction_type != "Rent" else price_total),
         "price_per_meter":         price_per_meter,
         "rent_period":             rent_period,
         # PRICE = SOURCE evidence (owner invariant 2026-08-04). Evidence exists so a stored price can
@@ -1086,9 +1108,9 @@ def enrich_residential(url: str, *, type_slug: str, deal_slug: str) -> Optional[
             field=("aqar RSC payload price field" if price_ev_origin == "structured"
                    else "price slot (rendered text)"),
             raw=price_ev_raw,
-            stored=price_total if price_total is not None else price_annual,
-            kind="total" if price_total is not None else "annual",
-            unit="total",
+            stored=price_per_meter if rate_headline else (price_total if price_total is not None else price_annual),
+            kind="per_meter" if rate_headline else ("total" if price_total is not None else "annual"),
+            unit="per_meter" if rate_headline else "total",
             origin=price_ev_origin,
             authoritative_absent=authoritative_no_price,
         ),
