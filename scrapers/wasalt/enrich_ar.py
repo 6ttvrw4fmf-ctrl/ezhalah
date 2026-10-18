@@ -178,7 +178,8 @@ def prose_amenities(d: Any) -> dict[str, bool]:
 # every run first sweeps them from the payload we already hold: no proxy, no page fetch, the ad's own
 # stored words. Only rows whose column is still NULL and whose description carries the word are read,
 # so after the first pass each run re-reads only the few the matcher declined (a negation, «تأسيس»).
-_PROSE_SCAN = {"elevator": ("مصعد",), "air_conditioner": ("مكيف", "تكييف"), "private_entrance": ("مدخل",)}
+# «مصاعد» is the plural and shares no substring with «مصعد»: 199 active ads say only the plural (🔬 2026-10-18).
+_PROSE_SCAN = {"elevator": ("مصعد", "مصاعد"), "air_conditioner": ("مكيف", "تكييف"), "private_entrance": ("مدخل",)}
 _DESC = "ar_data->propertyInfo->>description"
 
 

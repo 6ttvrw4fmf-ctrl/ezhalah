@@ -885,7 +885,9 @@ def ad_licence_from_prose(text) -> Optional[str]:
 # is never turned into a "no" (that would publish a claim the source never made). An explicit
 # negation («غير مؤثثة», «بدون مصعد», «لا يوجد مصعد») is itself a source statement, so it sets False.
 _AMENITY_TOKENS: dict[str, tuple[str, ...]] = {
-    "elevator":         ("مصعد", "المصعد", "elevator", "lift"),
+    # «مصاعد» is the plural, and «مصعد» is not a substring of it: rakez's own spec list says «مصاعد» /
+    # «مصاعد إيطالية» on 209 floor units that read elevator = NULL (🔬 2026-10-18, ops_af_score rakez 0 of 7).
+    "elevator":         ("مصعد", "المصعد", "مصاعد", "elevator", "lift"),
     "kitchen":          ("مطبخ", "المطبخ", "kitchen"),
     "air_conditioner":  ("مكيف", "مكيفات", "تكييف", "مكيفة", "air conditioning", "air conditioner", "a/c"),
     "parking":          ("موقف", "مواقف", "مواقف سيارات", "كراج", "جراج", "parking", "car park"),
