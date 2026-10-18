@@ -19,7 +19,7 @@ on:
         required: false
         default: "false"
       site:
-        description: "Only this site (empty = every site)"
+        description: "Only these sites, comma-separated (empty = every site)"
         required: false
         default: ""
 

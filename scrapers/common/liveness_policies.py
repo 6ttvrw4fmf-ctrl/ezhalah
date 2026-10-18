@@ -81,11 +81,12 @@ SOURCE_LIST_PRESENCE = "SOURCE_LIST_PRESENCE"
 # amlakalahsa JOINS this set on 2026-09-12 (single-office Al-Ahsa WordPress+ACF listing site).
 # CRAWL_PRESENCE_ONLY for the same reason as remal/amaall above: a small WordPress REST catalogue
 # (6 CPTs, ~260 posts) re-read in full each run, with no per-listing revisit endpoint of its own.
-# haraj and propertyfinder (2026-10-10) are SHADOW readers only (their shadow.py writes nothing): each gets its
-# liveness policy in the same change that makes it production-searchable (backlog 311).
+# propertyfinder (2026-10-10) is a SHADOW reader only (its shadow.py writes nothing): it gets its liveness
+# policy in the same change that makes it production-searchable. haraj LEFT this set on 2026-10-16 (owner:
+# licensed offers only go live) with its CANDIDATE_PLUS_DIRECT entry below.
 # moj (2026-10-10) is not a listing platform at all: it reads the Ministry of Justice's district sales
 # aggregates into moj_district_sales (scrapers/moj/sales.py) and writes no listing.
-NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "haraj", "propertyfinder", "moj"})
+NOT_PRODUCTION_SEARCHABLE = frozenset({"toor", "alnokhba", "deal", "common", "propertyfinder", "moj"})
 
 
 class _P(dict):
@@ -364,6 +365,15 @@ POLICIES: dict[str, _P] = {
         "111 homepage, 9 uncategorised pages; 60 of 60 indexed listings carry «القسم». Without the "
         "empty-category limb the probe would self-heal a delisted row forever, since no index can "
         "reach it again."),
+    "haraj": _P(
+        _pol("haraj", 3, 168), CANDIDATE_PLUS_DIRECT,
+        "the post's own /<id>/ page: HTTP 404/410; a 200 that prints «العرض محذوف او قديم» with no "
+        "RealEstateListing (measured 2026-10-16 on 3 removed ids); or, for a licensed ad, its own «تاريخ "
+        "انتهاء رخصة الإعلان» has passed. Any other 200 with its RealEstateListing is LIVE (since 2026-10-17 "
+        "unlicensed offers are listings too); anything else is UNKNOWN.",
+        "A STREAM (hourly sitemap files of new posts), never a catalogue: absence from a crawl is not a "
+        "candidate and nothing is pruned on it. scrapers/common/fleet_liveness.py reads every active row "
+        "through scrapers/haraj/run.py:_verify_gone with the honest bot UA at ≤1 read/s; shadow first."),
     "aljassim": _P(
         _pol("aljassim", 3, 168), CANDIDATE_PLUS_DIRECT,
         "the node's own /<nid> url: HTTP 404 (Drupal's themed 404). A 200 that passes "
@@ -1424,6 +1434,10 @@ FLEET_DAILY_DIRECT: tuple[str, ...] = (
     # 1,119-card list. A second read (lifecycle-spot-check 37943565545, controls 5/5) read 22 of 22
     # sampled ones gone. Its oracle became callable by the daily check on 10-08 (#6438).
     "aqalemhajer",
+    # 2026-10-17: Haraj. Shadow read locally with its own-hour controls (CONTROL_POOLS, 5/5 live):
+    # 680 probed, 408 live, 272 gone, 0 unknown; gone = «العرض محذوف او قديم», re-read gone by a second
+    # client (curl) 4/4 + the 2 first-run controls. 0 of 680 had ever been removed before this.
+    "haraj",
 )
 for _p in FLEET_DAILY_DIRECT:
     POLICIES[_p] = _P(_pol(_p, 3, 48), DIRECT_REVISIT, POLICIES[_p]["death_signals"],

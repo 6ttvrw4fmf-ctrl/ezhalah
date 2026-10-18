@@ -79,3 +79,19 @@ def test_controls_fall_back_to_the_most_recently_crawled_ads_when_the_crawl_is_s
     ctl = S.pick_controls(_Cl(), ["t_residential_listings"], random.Random(1))
     assert len(ctl) == S.CANARIES
     assert {r["id"] for r in ctl} == set(range(S.CANARIES)), "the most recently crawled ads, not older ones"
+
+
+def test_every_unknown_carries_the_oracles_reason(monkeypatch):
+    """A struck ad the oracle cannot judge must say WHY (2026-10-17: suwar's 5 struck rows read
+    "unknown 5" with no reason, so a 401 unpublished post could not be told from a block)."""
+    from scrapers.common import fleet_liveness as FL
+    monkeypatch.setitem(FL.SITES, "zz", "x:y")
+    monkeypatch.setattr(FL, "oracle_for", lambda spec, ctl: lambda ad: ("unknown", f"REST 401 for {ad}"))
+    read = S._oracle_reader_for("zz", None)
+    row = {"ad_number": "ZZ1", "table": "t", "id": 7, "listing_url": "u"}
+    v = read(row)
+    assert v == UNKNOWN and row["evidence"] == "REST 401 for ZZ1"
+    res = [{"side": "live", "table": "t", "id": 7, "url": "u", "verdict": v,
+            "judged": judge("live", v), "evidence": row["evidence"]}]
+    out = summarize("zz", "site-oracle", {"probed": 5, "alive": 5, "ok": True}, res)
+    assert out["live"]["unknown_examples"] == ["t:7 REST 401 for ZZ1"]

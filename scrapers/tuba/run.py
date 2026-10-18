@@ -395,6 +395,17 @@ def _pos(v) -> Optional[int]:
     return n if n and n > 0 else None
 
 
+def _area(v) -> Optional[int]:
+    """The source's m² to the nearest whole metre (area_m2 is an integer column, backlog #123), as the rest
+    of the fleet rounds. `_pos` truncates: 18258569's «232.8 م²» was stored 232, below a customer's 233."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    n = int(f + 0.5)
+    return n if f > 0 and n > 0 else None
+
+
 def _num(v) -> Optional[int]:
     """A source-published number, 0 INCLUDED. Used for `bathrooms`, which the source RENDERS at 0
     («0 حمامات» on the card, «الحمامات : 0» in the detail table) — so 0 is its published answer."""
@@ -550,7 +561,7 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "region_id": region_id,
         "district_ar": district_ar,
         "neighborhood": district_raw,
-        "area_m2": _pos(rec.get("property_area")),
+        "area_m2": _area(rec.get("property_area")),
         # `bedrooms` is DELIBERATELY absent: `property_rooms` is REGA's numberOfRooms — total rooms
         # (trap 3). It is kept in additional_info and raised as an open question.
         "bathrooms": _num(rec.get("bathrooms")),

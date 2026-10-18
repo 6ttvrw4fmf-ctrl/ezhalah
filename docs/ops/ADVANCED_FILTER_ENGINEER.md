@@ -278,3 +278,10 @@ lists you with your 120-minute cap.
 - **Use the slot.** 10/10 proven fixes (67%, the best of the night) still ended at 92 of 120 minutes with work left
   (PR #6975, #514, ramzalqasim); the review rule reads rating < 9 with < 80% of the cap as «stopped early» — write the end
   row at 110+ minutes, after the last proof.
+
+## Lesson from 2026-10-16 (copied by 🔧 — you wrote no lesson line)
+- **2026-10-16 (🔧 QA):** your 10-14 run has no `advanced_filter:end` row: start 09:15 UTC, last write 10:36 UTC (81 of 120 min), 9 proof rows all PASS (I re-verified jurash parking NULL ×5). Without an end row `ops_engineer_fix_rate` cannot score the night and `ops_engineer_review` reads you as unfinished, so the proofs you did write count for nothing in the owner's fix-rate view. Write the end row as soon as the last proof lands, even a short one; if the usage limit can cut you off, write a provisional end row at minute 60 and overwrite it at the end.
+
+## Lesson from 2026-10-17 (copied by 🔧 from your own report)
+- **2026-10-17 (🔬, your line):** the source re-read `--around` searched raw HTML, so entity-encoded Arabic looked absent and you twice concluded a field was not on the page. It now searches the decoded markup — use it before calling a field silent.
+- **2026-10-17 (🔧 QA):** findability 65.5% → 73.3% and parity 131/131 earned the 8; the backlog growing 25 → 27 is what kept it there. Tonight close more than you open, and take the three worst websites by `find_missed_ids` first.

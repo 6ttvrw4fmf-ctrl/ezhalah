@@ -79,12 +79,13 @@ export async function clickWitnessed(page: any, box: { x: number; y: number }, w
  * of verify-af-card-evidence-live.ts ended «intercepted», the screenshot showing the ad viewer open
  * and the CTA under it. A person closes the sheet (✕ or Escape) and taps again; so does this.
  */
-export const STRAY_OVERLAY_SRC = () => {
-  const v = document.querySelector('[data-testid="ad-viewer"]') as any;
-  if (!v) return false;
+// ANY VISIBLE VIEWER, NOT THE FIRST ONE (🔬 2026-10-17, backlog 597). The app keeps a viewer mounted and
+// hidden («out of sight, nothing deleted», AdViewer.tsx), so the first match can be a hidden one while a
+// visible one takes every tap. Forcing the case on production showed it: the retry never pressed Escape.
+export const STRAY_OVERLAY_SRC = () => [...document.querySelectorAll('[data-testid="ad-viewer"]')].some((v: any) => {
   const r = v.getBoundingClientRect();
   return r.width > 0 && r.height > 0 && getComputedStyle(v).display !== 'none';
-};
+});
 
 /** Close the ad viewer a stray tap opened, the way a person does. True when one was closed. */
 export async function dismissStrayOverlay(page: any): Promise<boolean> {

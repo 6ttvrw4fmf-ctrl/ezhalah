@@ -155,6 +155,26 @@ def _clean(s: Optional[str]) -> Optional[str]:
     return t or None
 
 
+def _to_num(v: Any) -> Optional[float]:
+    if v is None or v is False or v is True:
+        return None
+    s = re.sub(r"[,\s]", "", str(v).translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")))
+    return float(s) if re.match(r"^\d+(?:\.\d+)?$", s) else None
+
+
+def unit_area(acf: dict) -> Optional[int]:
+    """The unit's size as its project page prints it: `area` + `private_area` (owner ruling 2026-10-16,
+    backlog #541). The unit API splits the built area from the private courtyard/roof; the page's unit
+    table shows their SUM (unit 14631: 144 + 32 = «176 م²»; unit 68221: 169.42 + 102.15). Storing the
+    built part alone put every unit with a private area under a smaller size than its page states.
+    Nearest whole metre (area_m2 is an integer column, #123); a unit with no private area is unchanged."""
+    built = _to_num(acf.get("area"))
+    if not built or built <= 0:
+        return None
+    private = _to_num(acf.get("private_area")) or 0.0
+    return int(built + (private if private > 0 else 0.0) + 0.5)
+
+
 def _to_int(v: Any) -> Optional[int]:
     if v is None or v is False or v is True:
         return None
@@ -461,7 +481,7 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
     city_ar, city_id, region_id, district_ar = resolve_location(city_term_ids, tree, ar_title)
 
     price = _to_int(acf.get("price"))
-    area = _to_int(acf.get("area"))
+    area = unit_area(acf)
     bedrooms = _to_int(acf.get("rooms_count"))
     floor_number = _floor_number(acf.get("floor"))
 
@@ -504,7 +524,20 @@ def map_unit(unit: dict, en_project: Optional[dict], ar_project: Optional[dict],
             "source_unit_status": acf.get("unit_status"),
         }.items() if v not in (None, "", [], {})},
     }
+    # rakez publishes NO structured amenity field per unit, but its own description lists them («مطبخ»,
+    # «موقف خاص», «يسار المصعد»): 1,660 / 385 / 85 of 3,535 active units on 2026-10-17 while every amenity
+    # column was NULL. Prose says YES or nothing (ADVANCED_FILTER_SOURCE_TRUTH §2), never False.
+    row.update(prose_answers(acf.get("description_ar")))
     return row, category.lower()
+
+
+# The amenity columns search reads (listing_extra_attrs); prose may answer only these, YES-only.
+_PROSE_COLS = ("elevator", "parking", "kitchen", "air_conditioner", "maid_room", "driver_room", "private_entrance")
+
+
+def prose_answers(description: Optional[str]) -> dict[str, bool]:
+    yes = normalize.prose_amenities_yes(normalize.html_block_lines(description))
+    return {c: True for c in _PROSE_COLS if yes.get(c)}
 
 
 def _page_gone(path: str) -> tuple[bool, str]:

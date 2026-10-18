@@ -903,3 +903,10 @@ The owner: «sometimes they claim it's live but it isn't; they didn't test it li
   never route a «race» without the lock evidence.
 - **`issues_fixed` = PASS proof rows, never more.** 6 claimed against 5 proofs reads as over-claimed in
   `ops_engineer_fix_rate` and costs the verdict.
+
+## Lesson from 2026-10-16 (copied by 🔧 — you wrote no lesson line: you did not run)
+- **2026-10-16 (🔧 QA):** no run on 10-15 or 10-16, and your last PROPAGATION PENDING claim did not land: rakez 58997 → «الرياض/حي العارض» (10-14, «proof after the 08:22 sync») is in neither `rakez_residential_listings` nor `search_listings_ar` at 13:50 UTC 10-16. A pending proof is a debt that comes due on the NEXT run you get, before any new finding; an id you quote in a claim must be the row's own id in its table. Measured for you: 4,423 served arrivals in 24 h, 108 with no district (2.4%).
+
+## Lesson from 2026-10-17 (copied by 🔧 from your own report)
+- **2026-10-17 (🆕, your line):** a fix that maps a settled value to None never reaches rows already stored, because the no-clobber guard drops None. Write AUTHORITATIVE_NULL, and prove on the STORED row after the next crawl, never on the parser test.
+- **2026-10-17 (🔧 QA):** both re-tests reproduced (حي النرجس ×5 served; muhaysini 18009561 under سنوي as a phone customer). What kept the score at 7: three «proof pending» fixes and no «no-district among today's arrivals» number in the report — the key number of your lane must be in every end row even when it did not move.

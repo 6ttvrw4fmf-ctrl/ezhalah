@@ -13,7 +13,7 @@ import { useAtLeast } from '@/lib/useAtLeast';
 import { PICKER_SHEET_BREAKPOINT } from '@/lib/responsive';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SourceBadge, FEATURE_META, arAttrValue } from '@/components/ResultCard';
-import { MOJ_SOURCE_URL, PRICE_MAX, PRICE_MIN, dearerSplit, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojDeals, fetchMojSales, fetchSameAd, fetchSimilarListings, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojDeal, type MojFacts, type SimilarCard } from '@/data/adPageData';
+import { MOJ_SOURCE_URL, PRICE_MAX, PRICE_MIN, dearerSplit, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojDeals, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojDeal, type MojFacts, districtEmbedUrl, districtPlace, type DistrictPlace, fetchSimilarListings, type SimilarCard } from '@/data/adPageData';
 import { listingOpenUrl } from '@/lib/openListing';
 import type { Listing } from '@/data/listings';
 
@@ -192,6 +192,8 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
 
   // ── the source's pin + the asking prices around this ad (web only; native keeps the card data alone) ──
   const [geo, setGeo] = useState<GeoPoint | null>(null);
+  // No pin from the source → the district by name, Google's own border around it (owner 2026-10-17).
+  const [area, setArea] = useState<DistrictPlace | null>(null);
   // The «الأسعار» block's three sources, fetched together once the ad's own row is known: the asking
   // prices around it (each house once), the ministry's actual sales, the same ad on other sites.
   // stats = this ad's OWN type (card 3); group = the whole macro group, the split card's right half — the
@@ -206,6 +208,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
     void fetchAdPage(l).then(({ geo: pin, row }) => {
       if (!alive) return;
       setGeo(pin);
+      if (!pin) setArea(districtPlace(row));
       // Aqar sale ads only for now (owner update 22): nothing is even fetched for the rest.
       if (!pricesBlockEligible(row)) return;
       const price = Number(row?.price_total), area = Number(row?.area_m2);
@@ -592,6 +595,34 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
               </Pressable>
             </View>
           ) : null}
+          {/* THE DISTRICT BORDER (owner 2026-10-17): no pin from the source → the same free map, asked for the
+              district by name; Google fits it and draws its own border. Labelled approximate, never a pin. */}
+          {!geo && area && IS_WEB ? (
+              <View style={[s.mapBox, { height: mapH }]} testID="listing-preview-area">
+                <Frame
+                  src={districtEmbedUrl(area, locale)}
+                  title={t('District location on Google Maps')}
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0, pointerEvents: 'none' }}
+                />
+                <Pressable testID="listing-preview-map" onPress={openMap} accessibilityRole="button" accessibilityLabel={t('Expand the map')} style={s.mapTap}>
+                  <View style={[s.areaTag, isRTL ? { right: 10 } : { left: 10 }]}>
+                    <View style={s.areaDot} />
+                    <Text style={s.areaTagTx}>{t('Approximate location')}</Text>
+                  </View>
+                  <View style={s.mapChip}>
+                    <Ionicons name="expand-outline" size={15} color={lightColors.ink} />
+                    <Text style={s.mapChipTx}>{t(area.district ? 'Tap here to see the district' : 'Tap here to see the city')}</Text>
+                  </View>
+                  <View style={[s.mapPill, isRTL ? { right: 10 } : { left: 10 }]}>
+                    <Text style={s.mapPillTx}>{t('{name} published no exact location', { name })}</Text>
+                  </View>
+                </Pressable>
+              </View>
+          ) : null}
         </View>
 
         {/* (5) the first screen's last row: ONE button to the real ad */}
@@ -837,6 +868,27 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
         </View>
       ) : null}
 
+      {/* the expanded district: the same free map by name, interactive, Google's border around it */}
+      {mapOpen && !geo && area && IS_WEB ? (
+          <View testID="listing-preview-map-sheet" style={s.mapSheet}>
+            <Frame src={districtEmbedUrl(area, locale)} title={t('District location on Google Maps')} referrerPolicy="no-referrer-when-downgrade" allow="fullscreen" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }} />
+            <View pointerEvents="none" style={[s.areaTag, { top: 14 }, isRTL ? { right: 60 } : { left: 60 }]}>
+              <View style={s.areaDot} />
+              <Text style={s.areaTagTx}>{t('Approximate location')}</Text>
+            </View>
+            <Pressable
+              testID="listing-preview-map-close"
+              onPress={closeMap}
+              accessibilityRole="button"
+              accessibilityLabel={t('Close')}
+              style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
+              // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
+              dataSet={{ ...TAP44 }}
+            >
+              <Ionicons name="close" size={22} color={colors.ink} />
+            </Pressable>
+          </View>
+      ) : null}
       {/* the expanded map: the same embed, interactive, over this page — the page keeps its scroll */}
       {mapOpen && geo && IS_WEB ? (
         <View testID="listing-preview-map-sheet" style={s.mapSheet}>
@@ -1024,6 +1076,9 @@ const s = StyleSheet.create({
   },
   mapChipTx: { fontSize: 13, fontWeight: '700', color: lightColors.ink },
   mapSheet: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.surface },
+  areaTag: { position: 'absolute', top: 10, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
+  areaDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.selFill },
+  areaTagTx: { fontSize: 12.5, fontWeight: '800', color: colors.ink },
   // the ministry's deals sheet: a head, a sticky header row, then one row per deal
   dealsBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 6, marginTop: 6, borderWidth: 1, borderColor: colors.tintLine, backgroundColor: colors.tint, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 5 },
   dealsBtnTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },

@@ -116,6 +116,32 @@ _ADTEXT = re.compile(r'detail-order-adtext[^>]*>(.*?)</div>', re.S)
 # and the per-square-metre rate appears ONLY here, on 69 of 92. Where all three sources exist
 # (card / JSON-LD / index price cell) they agreed on 92 of 92 — zero disagreements.
 _PRICE_CARD = re.compile(r'detail-order-price[^>]*>(.*?)(?=<!--)', re.S)
+# The ad's OWN feature chips (🔬 AF engineer 2026-10-17): the detail page's description section lists them as
+# `<div class="property-description-feature-list"> <span class="property-description-feature"><i …></i>
+# <span>مطبخ مغلق مؤثث</span></span> …` (CI source-reread 39021280625 on /property/1895: «ثلاث غرف نوم»,
+# «ثلاث دورات مياه», «مطبخ مغلق مؤثث», «مصعد»). arkaan scored kitchen we-miss 3 and 0 of 3 findable: none of
+# them was read. Only the FIRST list is this ad's; a chip names a fact (yes), a negated chip («بدون مصعد») says
+# no, and a fact no chip names stays unknown (never «no»).
+_FEATURE_LIST = re.compile(r'<div class="property-description-feature-list[^"]*">(.*?)</div>', re.S)
+_FEATURE = re.compile(r'class="property-description-feature"[^>]*>(.*?)</span>\s*</span>', re.S)
+_FEATURE_COLS = (
+    ("kitchen", r"مطبخ"), ("elevator", r"مصعد|اسانسير"), ("parking", r"موقف|مواقف|كراج|جراج"),
+    ("air_conditioner", r"مكيف|تكييف"), ("maid_room", r"غرف[ةه] (?:خادم|عامل)"), ("driver_room", r"غرف[ةه] سائق"),
+    ("private_entrance", r"مدخل خاص"),
+)
+_FEATURE_NEG = r"(?:بدون|لا يوجد|لايوجد|غير متوفر)\s*"
+
+
+def feature_answers(chips: list[str]) -> dict[str, bool]:
+    out: dict[str, bool] = {}
+    for chip in chips:
+        for col, kw in _FEATURE_COLS:
+            if col in out or not re.search(kw, chip):
+                continue
+            out[col] = not re.search(_FEATURE_NEG + "(?:" + kw + ")", chip)
+    return out
+
+
 _CARD_TOTAL = re.compile(r'(السعر|السوم)\s*([\d,٬]+)\s*ريال')
 _CARD_PPM = re.compile(r'(?:سعر|سوم)\s*المتر\s*([\d,٬]+)\s*ريال')
 
@@ -232,7 +258,10 @@ def fetch_detail(s: cc.Session, pid: str) -> dict[str, Any]:
     ad = [_text(b) for b in _ADTEXT.findall(clean)]
     ad = [a for a in ad if a]
     pc = _PRICE_CARD.search(clean)
+    fl = _FEATURE_LIST.search(clean)
+    chips = [c for c in (_text(x) for x in _FEATURE.findall(fl.group(1))) if c] if fl else []
     return {
+        "feature_chips": chips,
         "http_status": 200,
         "ld": _listing_node(body),          # NOT `clean` — _STYLE strips the JSON-LD <script> too
         "type_text": _text(tt[0]) if tt else None,
@@ -512,6 +541,10 @@ def map_listing(item: dict[str, Any], detail: dict[str, Any]) -> Optional[tuple[
                        "http_status": detail.get("http_status")},
         },
     }
+    # The ad's own feature chips: a named fact only. An absent key never clobbers a stored value.
+    row.update(feature_answers(detail.get("feature_chips") or []))
+    if detail.get("feature_chips"):
+        info["feature_chips"] = detail["feature_chips"]
     # bathrooms / halls / property_age / rega_location_verified are DELIBERATELY ABSENT: this
     # source publishes none of them, and an absent key stores NULL without clobbering a known value.
     return row, ("commercial" if category == "Commercial" else "residential")

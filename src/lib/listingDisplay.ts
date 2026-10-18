@@ -203,6 +203,7 @@ export function sourceName(source: string): string {
   if (s.includes('عرش العقارية') || s.includes('arshglobal')) return 'عرش العقارية';
   if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return 'سوبر أوفيس';
   if (s.includes('شموع العقار') || s.includes('shomou')) return 'شموع العقار';
+  if (s.includes('حراج') || s.includes('haraj')) return 'حراج';
   if (s.includes('منصة مكتب') || s.includes('maktab')) return 'منصة مكتب';
   if (s.includes('سرداب') || s.includes('sirdab')) return 'سرداب';
   if (s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'عشاب العقارية';

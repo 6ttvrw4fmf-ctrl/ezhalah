@@ -408,6 +408,12 @@
     "grace": 3
   },
   {
+    "platform": "haraj",
+    "strategy": "DIRECT_REVISIT",
+    "sla_hours": 48,
+    "grace": 3
+  },
+  {
     "platform": "hasaad",
     "strategy": "DIRECT_REVISIT",
     "sla_hours": 48,

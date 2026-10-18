@@ -77,6 +77,7 @@ import {
 import { PICKER_SHEET_BREAKPOINT, VIEWER_SPLIT_BREAKPOINT, CARDS_THREE_ACROSS_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import AdViewer from '@/components/AdViewer';
+import { ConfettiOverlay } from '@/components/ConfettiOverlay';
 import { buildAfSummaryItems, buildAfBeatSteps } from '@/lib/afSummary';
 import { filterToChat, searchSummary, guidedSearchSummary, buildAfSummary, buildAfRoundLog, effectiveTypes, effectiveGroups, hasClientOnlyNarrowing, quotableTotal, NO_RESULTS_GENERIC_FALLBACK_EN, type SearchQuery, type SearchResult } from '@/data/search';
 import { deriveGuided, dedupeFacetsByLabel, sameKeys, type GuidedStep } from '@/lib/afSteps';
@@ -94,9 +95,9 @@ import { pickNoResultsSentence } from '@/data/noResultsRotation';
 import { pickName } from '@/lib/nameSync';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
-import { screenKeyboardInset } from '@/lib/visualViewportFrame';
+import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
-import { useI18n, detectLocale, resolveReplyLocale, getLocale, translate, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
+import { useI18n, LocaleScope, detectLocale, resolveReplyLocale, getLocale, translate, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { listingLocationAr, listingPrice } from '@/lib/listingDisplay';
 import { noTranslateRef } from '@/noTranslate';
 import { introExamplesForWidth, introExampleHoldMs } from '@/data/introExamples';
@@ -430,7 +431,16 @@ const SEARCH_MS = 600;
 // (the 52nd pill is lit at 9,740ms; a 57th roster would not be lit until 10,640ms). Platform #57
 // therefore needs a real decision — a longer floor, or a wave that lights more than one pill per
 // step — and MAX_ROSTER is the guard that will stop it silently slipping through.
-const SEARCH_MIN_MS = 10600;
+//
+// OWNER 2026-10-17 — RESULTS AS SOON AS THEY ARE READY, NEVER HELD PAST TEN SECONDS. This reverses
+// the 2026-09-06 "wait the full ten seconds" floor above (kept for history): the owner's goal is now
+// «less than 10 seconds, that's the max». So the floor becomes a short MINIMUM (the roster is never a
+// flash) and a hard MAXIMUM caps every artificial hold — the minimum beat AND the page-dwell gate
+// below. A slow network can still take longer; that is the network, not a hold. On a search that
+// resolves fast the user sees part of the logo wave; on a slow one the whole wave still fits inside
+// the cap (scripts/verify-search-loader-shows-every-platform.ts proves everyPlatformSeen(SEARCH_MAX_HOLD_MS)).
+const SEARCH_MIN_MS = 3000;
+const SEARCH_MAX_HOLD_MS = 10000;
 // An Advanced Filter round's search beat (owner 2026-10-11: 5 seconds, «نبحث عن …» changing pick by pick — AfRoundLoader).
 const AF_LOADER_MS = 5000;
 // Soft completion (owner v4): before morphing to results, flag the loader `exiting` and give its
@@ -749,6 +759,9 @@ export default function Agent() {
     [selectedSources, pickerRegionCounts],
   );
   const [loaderBottomInset, setLoaderBottomInset] = useState<number>();
+  // Where the logo grid's top will sit once the thread has glided down to it (window px) — the grid is sized for THAT, so every logo gets its full page (owner 2026-10-17).
+  const [loaderSettleTop, setLoaderSettleTop] = useState<number>();
+  const loaderNodeRef = useRef<any>(null);
   // FILTER RESULTS HAVE NO CHAT (owner, 2026-09-11): a search that arrived via Normal Filter's
   // «بحث» (the `?filter=` param — see the effect below, the ONE place this flips true) shows its
   // results with no composer at all; free-text follow-up chat exists ONLY on a conversation that
@@ -1576,6 +1589,79 @@ export default function Agent() {
     else if (pinModeRef.current === 'bottom') toBottom();
   };
 
+  // A SLOW, FRIENDLY SCROLL THE USER CAN INTERRUPT (owner 2026-10-17: «take the user slowly down»). The browser's own
+  // smooth scroll is a quick flick; this eases over about a second and stops the instant a finger, wheel or key moves.
+  const glideRef = useRef<number | null>(null);
+  const glideTo = (target: number, ms = 1100) => {
+    const node = (scrollRef.current as any)?.getScrollableNode?.();
+    if (glideRef.current != null) { cancelAnimationFrame(glideRef.current); glideRef.current = null; }
+    if (!node) { scrollRef.current?.scrollTo({ y: target, animated: true }); return; }
+    const from = node.scrollTop;
+    const dist = Math.min(target, node.scrollHeight - node.clientHeight) - from;
+    if (Math.abs(dist) < 4) return;
+    const calm = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (calm) { node.scrollTop = from + dist; return; }
+    let stopped = false;
+    const stop = () => { stopped = true; };
+    const kinds = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
+    kinds.forEach((k) => node.addEventListener(k, stop, { passive: true, once: true }));
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const p = Math.min(1, (now - t0) / ms);
+      if (stopped || p >= 1) {
+        kinds.forEach((k) => node.removeEventListener(k, stop));
+        glideRef.current = null;
+        if (!stopped) node.scrollTop = from + dist;
+        return;
+      }
+      node.scrollTop = from + dist * (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2);
+      glideRef.current = requestAnimationFrame(step);
+    };
+    glideRef.current = requestAnimationFrame(step);
+  };
+
+  // A SEARCH STARTS → THE LOADER GETS THE WHOLE SCREEN (owner 2026-10-17: «when you start the animation for the
+  // logos and search, make sure you show all animations and logos, no matter what, and take him down»). The thread
+  // glides down until the loader's top sits just under the header, and the logo grid is sized for that spot, so a
+  // long conversation can no longer squeeze the roster into two rows above the box.
+  const loaderId = msgs.find((m) => m.role === 'status' && m.phase === 'searching' && !m.afRound)?.id;
+  useEffect(() => {
+    if (!IS_WEB || !loaderId) { setLoaderSettleTop(undefined); return; }
+    const scNode = (scrollRef.current as any)?.getScrollableNode?.();
+    // The roster mounts and grows a moment AFTER the loader does (its site list loads first), so one glide would stop
+    // short of the room the grid later makes. Measure and glide again as it settles — until the user takes over.
+    let tookOver = false;
+    const take = () => { tookOver = true; };
+    const kinds = ['wheel', 'touchstart', 'keydown', 'mousedown'] as const;
+    kinds.forEach((k) => scNode?.addEventListener(k, take, { passive: true, once: true }));
+    const settle = (ms: number) => {
+      const wrap = loaderNodeRef.current;
+      if (tookOver || !wrap?.getBoundingClientRect || !scNode?.getBoundingClientRect) return;
+      const GAP = 8;
+      const sc = scNode.getBoundingClientRect();
+      const box = wrap.getBoundingClientRect();
+      const grid = wrap.querySelector?.('[data-testid="loader-roster"]')?.getBoundingClientRect();
+      const headlineH = grid ? Math.max(0, grid.top - box.top) : 48;
+      setLoaderSettleTop(Math.round(sc.top + GAP + headlineH));
+      glideTo(Math.max(0, box.top - sc.top + scNode.scrollTop - GAP), ms);
+    };
+    const timers = [280, 1200, 2400, 3800, 5500].map((at, n) => setTimeout(() => settle(n === 0 ? 1100 : 650), at));
+    return () => { timers.forEach(clearTimeout); kinds.forEach((k) => scNode?.removeEventListener(k, take)); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaderId]);
+
+  // THE KEYBOARD OPENS → THE CHAT GOES DOWN (owner 2026-10-17, screenshot: «when I click on it must take me down,
+  // not up, and I can't see anything»). The pinned root shrinks to the space above the keyboard and the thread
+  // stays where it was, so the newest answer sat behind the box. Settle at the newest message as the box takes
+  // focus and again as the visible window finishes resizing (iOS reports the keyboard late, in steps).
+  useEffect(() => {
+    if (!IS_WEB || !composerFocused) return;
+    const down = () => { if (!searchingVisibleRef.current) scrollRef.current?.scrollToEnd({ animated: true }); };
+    const ids = [0, 160, 380, 700].map((ms) => setTimeout(down, ms));
+    const off = onVisibleWindowResize(down);
+    return () => { ids.forEach(clearTimeout); off(); };
+  }, [composerFocused]);
+
   // OPEN A SAVED CHAT AT ITS LATEST CONTENT (owner 2026-08-29, supersedes the open-at-top rule):
   // tapping a sidebar conversation must land the viewport on the newest message, like every chat
   // product. One scroll is not enough — restored result cards and images report their height late,
@@ -1761,7 +1847,9 @@ export default function Agent() {
       if (remaining > 0) await waitRun(run, remaining);
       // Presentation-only gate: each logo/name page must finish its actual visible dwell.
       // The search has already completed; this changes only when its results are revealed.
-      while (!run.cancelled && loaderPresentedRef.current[statusId] !== true) await waitRun(run, 100);
+      // …but never past the owner's ten-second cap (2026-10-17): whatever page is up when the cap
+      // lands, the results come in.
+      while (!run.cancelled && loaderPresentedRef.current[statusId] !== true && Date.now() - since < SEARCH_MAX_HOLD_MS) await waitRun(run, 100);
     } else {
       // AN ADVANCED FILTER ROUND HOLDS ITS ONE-SENTENCE BEAT FOR 5 SECONDS (owner 2026-10-11: «make it 5
       // seconds … one sentence of what he selected»; 10-10 was 10 s of logos, 10-05 skipped it). A plain
@@ -4071,7 +4159,7 @@ export default function Agent() {
             // hitSlop is a NO-OP on react-native-web; the 44px floor comes from
             // TAP_TARGET_CSS via this marker (ops_incident #17).
             // @ts-expect-error web-only DOM props on the RNW host node
-            dataSet={{ ...TAP44 }}
+            dataSet={{ ...TAP44, consentKeep: '1' }}
             onPress={() => setSidebarOpen(true)}
           >
             <Ionicons name="menu" size={22} color={colors.ink} />
@@ -4336,7 +4424,7 @@ export default function Agent() {
                 // handled inside SearchLoader (the message column is LTR-pinned).
                 // An Advanced Filter round: one sentence of the user's picks, each landing in turn (owner 2026-10-11).
                 if (m.afRound) return <AfRoundLoader key={m.id} items={m.afRound.items} pools={m.afRound.pools} exiting={m.exiting} fontFamily={CHAT_FONT} />;
-                return <SearchLoader key={m.id} bottomInset={loaderBottomInset} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} />;
+                return <View key={m.id} ref={m.id === loaderId ? loaderNodeRef : undefined} collapsable={false}><SearchLoader bottomInset={loaderBottomInset} settleTop={loaderSettleTop} phase={m.phase} query={m.query} resultSources={m.resultSources} exiting={m.exiting} onPresented={complete => { loaderPresentedRef.current[m.id] = complete; }} /></View>;
               }
               if (m.role === 'agent') {
                 if (m.greeting) {
@@ -4515,6 +4603,9 @@ export default function Agent() {
                           per user request ("remove that, not nice"). The cards just appear, no fade,
                           no scale, no stagger. The responsive grid fills the available result width
                           while keeping the original card order in either language. */}
+                      {/* THE CARDS FOLLOW THE REPLY'S LANGUAGE (owner 2026-10-17: «the property cards should follow the language»):
+                          an English message in the Arabic app gets English cards, an Arabic one in the English app Arabic cards. */}
+                      <LocaleScope locale={(m.summary || m.text) ? (msgRTL(m.summary || m.text) ? 'ar' : 'en') : locale}>
                       <ResultCardGrid wide={viewerSplit} cols={cardCols}>
                         {/* Live typed turn: default to 0 visible until startReveal begins the one-by-one
                             drip (prevents a full-grid flash if setDoneTyping flushes a render before
@@ -4535,6 +4626,7 @@ export default function Agent() {
                           </CardIn>
                         ))}
                       </ResultCardGrid>
+                      </LocaleScope>
                       {/* MORE-RESULTS message + actions (user 2026-06-27, paging owner 2026-07-08): a NORMAL
                           assistant message shown once the first 10 are on screen and MORE matches exist.
                           Correctness: the RPC filtered the FULL matching set before any cap, so we page it —
@@ -4873,7 +4965,7 @@ export default function Agent() {
                 finished search keeps the box, and the next message simply starts the next search (send() clears
                 `completed`). ☰ still starts a clean chat. */}
             {!filterOrigin || completed ? (
-            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused]} ref={composerRef}>
+            <View style={[s.composer, COMPOSER_EASE, composerFocused && s.composerFocused, modeSearched && s.composerNoModel]} ref={composerRef}>
               {/* ── Normal controls ── keep LAYOUT ownership even while recording OR processing (the
                   recording row is an absolute overlay on the same surface), so the composer's size
                   never jumps during the morph — one physical object changing state, not a component
@@ -4891,8 +4983,10 @@ export default function Agent() {
               {/* ONE ROW (owner 2026-10-05: «this box is still big» → «One row»): «بحث» at the far left,
                   the text in the middle, mic + Send on the right. The chip is a flex SIBLING of the input,
                   never laid over it, so English text starting at the left can't run into it.
-                  ALWAYS there, also while Ezhalah searches (owner 2026-10-10: «it goes away» — the row
-                  must not rearrange mid-turn; ChatGPT keeps its tools in place and only Send turns to Stop). */}
+                  SHOWS ONLY AT THE START (owner 2026-10-17: «when a user sends a message, remove this search
+                  button, it just shows at the start» — supersedes 2026-10-10). While a search runs it is already
+                  gone, so nothing in the row moves mid-turn; the mic and Send/Stop keep their places. */}
+                {!modeSearched ? (
                 <Pressable
                   testID="initial-chat-search"
                   accessibilityRole="button"
@@ -4940,6 +5034,7 @@ export default function Agent() {
                   )}
                   <Ionicons name="chevron-down" size={13} color={colors.muted} />
                 </Pressable>
+                ) : null}
               <View style={s.composerInputColumn}>
               <View style={[s.inputGrow, INPUT_EASE, { height: composerH }]}>
               <TextInput
@@ -4952,7 +5047,7 @@ export default function Agent() {
                 // rotation stops (any interaction) the familiar static placeholder returns.
                 // COMPLETED (owner request 2026-09-05): the box stays, it just goes inert — the
                 // placeholder explains why instead of inviting a message that can never send.
-                placeholder={showIntroExamples ? '' : t("Type the property you're looking for in Saudi Arabia...")}
+                placeholder={showIntroExamples ? '' : (modeSearched ? t("Type your property and Ezhalah...") : t("Type the property you're looking for in Saudi Arabia..."))}
                 placeholderTextColor={colors.muted}
                 selectionColor={colors.primary}
                 // Stable Arabic label (owner brief §11): a screen reader always hears this one
@@ -5015,7 +5110,7 @@ export default function Agent() {
                 // @ts-expect-error web-only DOM props on the RNW host node
                 dataSet={{ ...TAP44 }}
                 accessibilityLabel={t('Voice input')}
-                style={({ pressed }: any) => [s.micBtn, pressed && s.micBtnPressed, (busy || revealing) && s.sendDisabled]}
+                style={({ pressed }: any) => [s.micBtn, s.micLift, pressed && s.micBtnPressed, (busy || revealing) && s.sendDisabled]}
               >
                 <Ionicons name="mic-outline" size={19} color={colors.body} />
               </Pressable>
@@ -5026,6 +5121,7 @@ export default function Agent() {
                 // 2026-10-10). Tap it to cancel the search and freeze the cards shown.
                 <Pressable
                   onPress={stop}
+                  style={s.rowBtnLift}
                   hitSlop={6}
                   // @ts-expect-error web-only DOM props on the RNW host node
                   dataSet={{ ...TAP44 }}
@@ -5051,7 +5147,7 @@ export default function Agent() {
                     // @ts-expect-error web-only DOM props on the RNW host node
                     dataSet={{ ...TAP44 }}
                     accessibilityLabel={t('Search')}
-                    style={!typed.trim() ? s.sendDisabled : undefined}
+                    style={[s.rowBtnLift, !typed.trim() && s.sendDisabled]}
                   >
                     <Animated.View style={[s.sendBtn, sendHover && !!typed.trim() && s.sendBtnHover, { transform: [{ scale: sendScale }] }]}>
                       <Ionicons name="arrow-up" size={17} color="#fff" />
@@ -5121,9 +5217,11 @@ export default function Agent() {
                   the microphone and send all in the same line — the model only below»). A zero-width anchor
                   centred on the mic (the row is LTR-pinned, so the same offset holds in both locales); the box's
                   bottom padding makes the room, so the one-line row above it never moves. */}
+              {!modeSearched ? (
               <View pointerEvents="box-none" style={s.composerModelAnchor}>
                 <AgentModelSelector disabled={busy || revealing || voiceState !== 'idle'} />
               </View>
+              ) : null}
             </View>
             ) : null}
             {/* FILTER-ORIGIN, STOP BUTTON REMOVED ENTIRELY (owner, 2026-09-12, second tightening:
@@ -5260,6 +5358,9 @@ export default function Agent() {
         onShow={() => commitAdPane(showAdPane(adPaneRef.current))}
       />
     )}
+    {/* The party confetti over EVERYTHING — the ad sheet/pane included (owner 2026-10-17). Last child, so
+        it paints above the viewer; pointerEvents none, so it never intercepts a tap. */}
+    <ConfettiOverlay />
     </View>
   );
 }
@@ -5460,6 +5561,8 @@ const s = StyleSheet.create({
   // Focus glow target — COMPOSER_EASE (web) glides border-color and box-shadow between these two.
   // Carries the FULL shadow set: RNW compiles box-shadow per-style, so a partial override here
   // would win wholesale and drop the green tint + offset (observed live).
+  // «شاهين 2.2» is gone after the first message (owner 2026-10-17): the 24 px that made room for it go with it.
+  composerNoModel: { paddingBottom: 6 },
   composerFocused: { borderColor: colors.primary, shadowColor: cardShadow.shadowColor, shadowOpacity: 0.2, shadowRadius: 18, shadowOffset: { width: 0, height: 6 } },
   // The wrapper owns the glide (INPUT_EASE) and the row position; marginVertical 6 =
   // (34 send-button − 22 line) / 2, the single-line centering trick above.
@@ -5509,6 +5612,10 @@ const s = StyleSheet.create({
   chipBadge: { width: 22, height: 22, overflow: 'hidden' },
   // The FIRST pick sits on top (zIndex inline), the rest peek out from behind it.
   chipBadgeOverlap: { marginLeft: CHIP_GAP },
+  // The row is 44 px and its buttons hug the bottom, so the 38 px Send/Stop circle sat 3 px (the 34 px mic 5 px) below the
+  // text's centre line — «it doesn't feel like it's in the same sentence» (owner 2026-10-17). Lift them onto it.
+  rowBtnLift: { marginBottom: 3 },
+  micLift: { marginBottom: 5 },
   micBtn: { width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
   micBtnPressed: { backgroundColor: colors.segTrack, transform: [{ scale: 0.96 }] },
 

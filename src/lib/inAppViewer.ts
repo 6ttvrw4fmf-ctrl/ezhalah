@@ -7,10 +7,106 @@
 //
 // A host earns its place here ONLY after its real ad page was proven to render inside a plain
 // <iframe> with the site's own headers — no X-Frame-Options, no CSP frame-ancestors, no
-// frame-busting script. Both entries were proven 2026-10-03 with Playwright against a local page
-// (dealapp.sa/ar/ad-details/530440, gathern.co/view/193264/unit/270328). We never proxy or strip a
-// site's headers to force an embed; the preview allowlist below uses already-loaded listing data.
-export const IN_APP_VIEWER_HOSTS = ['dealapp.sa', 'gathern.co'] as const;
+// frame-busting script. Deal App and Gathern were proven 2026-10-03 with Playwright against a local
+// page (dealapp.sa/ar/ad-details/530440, gathern.co/view/193264/unit/270328). The rest were proven
+// 2026-10-16/17 the same way: two live ads each, framed like AdViewer (same allow=, no sandbox), each
+// checked against a top-level control load; the test was calibrated first (aqar + wasalt refused,
+// dealapp + gathern opened). Every host must also show its ad within the speed budget on a phone over
+// throttled 4G, measured from the GitHub runner by e2e/viewer/speed-live.mjs: 3 s until 2026-10-17,
+// when the owner set it to 10 s («if it's below 10 seconds no problem»), which let 20 slower sites in.
+// Left off (re-checked 2026-10-17 against every platform Ezhalah searches): frames refused for
+// every client (haraj.com.sa, aqarcity.net, albdah.sa, 8floor.sa, nawafethalwatan.com, aqaralsaudia.com,
+// eydah.com, hazim.sa, alhoshan.sa, fursaghyr.com, manzo.com.sa, 1october.com.sa, wadod.sa,
+// nafithh.sa), blank
+// or error inside a frame (dwelleo.sa 404, alnowaisiry.com 403, sadin.com.sa 410), login wall
+// (nawait.sa), site down (almuteb.sa 503), removed-at-source ads (just.sa, ialqarawi.com), and over
+// budget (muktamel.com ~37 s — the owner said to leave it). aqaralmuhaysini.com measured 9.96 s, right
+// on the line; the owner chose to keep it on anyway (2026-10-17: «put almuhaysini its fine»), so a red
+// run on it alone is expected noise. albukaeri.sa and tamyaz-sa.com were off for a few hours while
+// their sites were down and came back once re-proven. ryadah.com.sa and sodasyat.sa looked like
+// SAMEORIGIN from the runner, but that was Cloudflare's challenge page (403 + cf-mitigated: challenge,
+// never served to a phone in Saudi); the guard now tells the two apart and both frame fine.
+// app.abaadapp.sa moved here from the preview list on 2026-10-17: it now renders its real ad in a frame.
+// We never proxy or strip a site's headers to force an embed; the preview allowlist uses already-
+// loaded data.
+export const IN_APP_VIEWER_HOSTS = [
+  'dealapp.sa',
+  'gathern.co',
+  'sadiq-eltajer.sa',
+  'rakez.sa',
+  'tuba.com.sa',
+  'amlakalahsa.com',
+  'listings.satel.sa',
+  'snam.sa',
+  'alqasem.com.sa',
+  'moftah-aleaqar.com',
+  'safera.inblaj.net',
+  'tawia.sa',
+  'daryusuf.com',
+  'hajerhouses.com',
+  'wslnaa.com',
+  'alrifai.com.sa',
+  'shmoua-alshmal.com',
+  'alkhaas.net',
+  'ramzalqasim.com',
+  'alajlan-re.com',
+  'alta.com.sa',
+  'ebriza.com.sa',
+  'expattrustedhousingriyadh.com',
+  'daraa.sa',
+  'razre.sa',
+  'shatrirealestate.com',
+  'azdadalaqaria.com',
+  'aqaralriyadh.com',
+  'fkralemar.com',
+  'fahadalshahri.com',
+  'eastabha.sa',
+  'suwar.sa',
+  'sqcc.sa',
+  'aalbarrak.com',
+  'abeea.com.sa',
+  'wajaf.sa',
+  'alsidra.com.sa',
+  'squares.com.sa',
+  'muajarh.com',
+  'compoundin.com',
+  'gomenassat.com',
+  'almotmkenah.com',
+  'gudai.inblaj.net',
+  'eilmalriyada.com',
+  'aoujestates.com',
+  'aqarnajran.com',
+  'mar-ksa.com',
+  'amaall.com',
+  'jurash.sa',
+  'awaalun.com',
+  'ego-aqar.com',
+  'rawaf.ai',
+  'rawasi-dark.com',
+  'mobasher.sa',
+  'villas-sa.com',
+  'vm-ksa.com',
+  'eaqartabuk.com',
+  '24.com.sa',
+  'livingcompound.com',
+  'wahadat.sa',
+  'dallali.com',
+  'remalre.com',
+  'safainv.sa',
+  'remax.sa',
+  'ibaax.sa',
+  'qmra.sa',
+  'aqaralmuhaysini.com',
+  'albukaeri.sa',
+  'tamyaz-sa.com',
+  'ashab.sa',
+  'macsaib.sa',
+  'sanadak.sa',
+  'masaraqarat.com',
+  'ryadah.com.sa',
+  'sodasyat.sa',
+  'app.abaadapp.sa',
+] as const;
 
 /** The allowlisted host a listing URL belongs to, or null when it must open the old way. */
 export function inAppViewerHost(url: string | null | undefined): string | null {
@@ -39,7 +135,6 @@ export const IN_APP_PREVIEW_HOSTS = [
   'reinvest.sa',
   'marketplace.sirdab.co',
   'therc.aqar.digital',
-  'app.abaadapp.sa',
   'sokok.sa',
   'raghdan.sa',
   'alsaedan.com',

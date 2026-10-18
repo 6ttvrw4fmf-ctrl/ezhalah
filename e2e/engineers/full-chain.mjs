@@ -127,15 +127,26 @@ try {
         }
       }
       if (!opened) {
-        const openAd = page.getByText(/افتح الإعلان في/).last();
-        await openAd.waitFor({ timeout: 8000 }).catch(() => {});
-        if (await openAd.count()) {
-          await openAd.click();
-          await page.waitForTimeout(800);
+        // Since the 2026-10-11 laptop cards, a press opens the ad in the side pane (testid ad-viewer)
+        // and the customer leaves through «فتح في نافذة جديدة» (ad-open-new-window; no testID on the
+        // phone sheet, so its text too) or, on a preview, «افتح الإعلان في …». Waiting only for the
+        // last one reported «opens: undefined» on every card (2026-10-16). Same order as
+        // customer-journey.mjs.
+        await page.locator('[data-testid="ad-viewer"]').first().waitFor({ timeout: 8000 }).catch(() => {});
+        const newWin = page.locator('[data-testid="ad-open-new-window"]');
+        const newWinText = page.getByText('فتح في نافذة جديدة', { exact: true });
+        const openAd = page.getByText(/افتح الإعلان في/);
+        let via = null;
+        if (await newWin.count()) { await newWin.last().click().catch(() => {}); via = '«فتح في نافذة جديدة»'; }
+        else if (await newWinText.count()) { await newWinText.last().click().catch(() => {}); via = '«فتح في نافذة جديدة»'; }
+        else if (await openAd.count()) { await openAd.last().click().catch(() => {}); via = '«افتح الإعلان»'; }
+        if (via) {
+          await page.waitForTimeout(1000);
           opened = await page.evaluate(() => window.__opened.at(-1));
-          log('(opened in the in-app viewer, then «افتح الإعلان»)');
+          log(`(opened in the in-app viewer, then ${via})`);
         }
       }
+      if (!opened) log(`ad-* testids on screen: ${await page.evaluate(() => [...new Set([...document.querySelectorAll('[data-testid^="ad-"]')].map((e) => e.getAttribute('data-testid')))].join(', ') || 'none')}`);
       ok = norm(opened) === norm(a.url) && (!a.price || text.includes(a.price));
       log(`card found after ${p} «عرض المزيد» press(es)`);
       log(`card: ${text}`);

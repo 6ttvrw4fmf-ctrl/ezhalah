@@ -11,9 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from scrapers.haraj.classify import classify  # noqa: E402
 
-REQUESTS = ["مطلوب شقه للايجار في حي النرجس", "ابغا شقة عزاب", "مطلوب عمارة للإيجار",
+REQUESTS = ["طلب شقه للايجار مستعجل لا ام وولدها", "مطلوب شقه للايجار في حي النرجس", "ابغا شقة عزاب", "مطلوب عمارة للإيجار",
             "أبحث عن أرض في شمال الرياض", "ابي فيلا للبيع بالتقسيط", "نبي استراحة للإيجار الشهري",
-            "من عنده ارض للبيع في الخرج", "أرغب في شراء دور"]
+            "من عنده ارض للبيع في الخرج", "أرغب في شراء دور",
+            # «و/ف» glued to the request word (HRJ11190725389, owner check 2026-10-17)
+            "بنت وابحث عن استديو للإيجار بشرق الرياض", "وابغى شقة للايجار في جدة", "فنبي ارض في الخرج"]
 OTHER = ["عامل مغسله يبحث عن عمل", "حارس يبحث عن عمل", "غرفة نوم للبيع نظيفة", "نقل عفش داخل الرياض",
          "تقبيل محل كوفي للبيع", "سائق خاص للتنازل"]
 OFFERS = [("شقة للبيع في حي الياسمين", "شقة 3 غرف"), ("ارض للبيع حي العارض", "المساحة 600"),
@@ -186,3 +188,13 @@ def test_gate3_open_shapes(t, b, want):
 ])
 def test_gate3_one_unit_one_neighbourhood_stays_an_offer(t, b):
     assert classify(t, b)[0] == "offer"
+
+
+def test_price_on_request_inside_an_offer_stays_an_offer():
+    # «طلب» opens a request only at the start of the TITLE (Haraj 18263109, 2026-10-17)
+    assert classify("شقة للايجار حي النرجس", "السعر عند الطلب")[0] == "offer"
+
+
+def test_glued_conjunction_keeps_the_blessing_an_offer():
+    # the «نبينا» look-ahead must sit after the optional «و/ف»: «ونبينا» is still the Prophet, not «نبي»
+    assert classify("للبيع شقه تمليك حي النرجس", "وصلى الله وسلم ونبينا محمد")[0] == "offer"

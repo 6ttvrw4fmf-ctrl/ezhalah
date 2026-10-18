@@ -54,7 +54,12 @@ export const PILL_FADE = 260;
  * floor. So 56 is the real ceiling of the owner's ten seconds, and platform #57 needs a decision
  * (a longer floor, or a wave that lights more than one pill per step) rather than a nudged constant.
  */
-export const MAX_ROSTER = 168;
+// 168 → 159 on 2026-10-17: the deadline the wave must beat is no longer the 10,600ms floor but the
+// owner's new 10,000ms MAXIMUM hold (agent.tsx SEARCH_MAX_HOLD_MS — results show as soon as they are
+// ready and are never held past ten seconds). Derived the same way, by execution: pills 157/158/159
+// share the 52nd step (waveDelayMs(158) = 52 × 180), lit at 9,920ms; a 160th starts step 53 and is
+// not lit until 10,100ms. (The barrier's TRUE-ceiling check is what caught a first guess of 158.)
+export const MAX_ROSTER = 159;
 /** Every pill is on screen by this point, worst case. */
 export const LOADER_REVEAL_MS = (MAX_ROSTER - 1) * PILL_STAGGER + PILL_FADE;
 /**

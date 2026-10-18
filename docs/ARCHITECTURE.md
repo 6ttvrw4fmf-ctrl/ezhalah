@@ -175,6 +175,26 @@ chat, which renders results inline. (Deliberate; single search engine — see §
 
 ## 5. Frontend — the Property Card (`src/components/ResultCard.tsx`) — SOURCE OF TRUTH
 
+**A press on a card whose listing opens INSIDE Ezhalah plays the golden buzzer + a screen-level
+confetti party (owner 2026-10-17: «whenever a user clicks on a listing I want this party confetti …
+on everything», then «your job is doing it for the 76 sites … the ones after I'll do it later»; «make
+it attractive … my goal is sending traffic to those sites»).** Photo, body or gold button, on the laptop
+photo-first card, the laptop compact row and the phone card alike: one shared `fire()` opens the ad
+first, synchronously, then — only when `IS_WEB && inAppViewerHost(listingOpenUrl(listing))` — bumps the
+card's `BuzzLayer` (`src/components/CardBuzzer.tsx`) and the screen-level `ConfettiOverlay`
+(`src/components/ConfettiOverlay.tsx`, last child of the agent screen, above the ad sheet/pane, never
+takes a tap). Cards that open a new tab or the native preview page open exactly as before, with no
+party. Decoration only — reduced motion draws nothing and the ad opens even if nothing paints.
+Guard: `scripts/verify-laptop-photo-card.ts`.
+
+**Gold = opens inside Ezhalah, silver = everything else (owner 2026-10-17: «make the frame and this
+golden shining like a buzzer», then «the golden frame only with the 76 … the rest silver»):** every
+card wears a 3 px shining metallic ring and a shining metallic «اضغط هنا» photo strip, both
+`GoldSurface` (`src/components/CardReveal.tsx`) — the gold button's own gradient shape plus its CSS
+glint, one compositor keyframe per surface. `tone` is `gold` when `inAppViewerHost(listingOpenUrl(l))`
+matches (the site opens instantly inside Ezhalah) and `silver` otherwise, so gold reads as "instant".
+Dark text on the strip. Reduced motion: a still metal. Same guard.
+
 **Card data is locked. Display scraped values verbatim; change presentation only with owner approval.** Fix data
 problems via backend mapping only (see §16), never by editing the card.
 
@@ -387,16 +407,34 @@ operating on the restored turns' own embedded queries and paging state.
 ### 7.5 Listing viewer (`src/components/AdViewer.tsx`)
 
 Owner-approved web behaviour (2026-10-03): Deal App and Gathern open their real pages in plain
-iframes, with their own headers unchanged. The allowlist in `src/lib/inAppViewer.ts` is exactly
-`dealapp.sa,gathern.co`. No proxy, header stripping, or framing bypass is permitted.
+iframes, with their own headers unchanged. No proxy, header stripping, or framing bypass is permitted.
+Owner 2026-10-16: more sites open the same way, with no new design. A host joins only after a live
+frame proof, which means two live ads framed like AdViewer, a top-level control load, and a calibration
+where Aqar and Wasalt must fail. It must also show its ad within the speed budget on phone 4G, measured
+from the GitHub runner by `e2e/viewer/speed-live.mjs` (which must list every host): 3 s until
+2026-10-17, then **10 s** by owner decision («if it's below 10 seconds no problem»). A host that later
+refuses framing, goes down, or goes over budget comes off the list; the guard runs every 6 hours and
+after every deploy. 2026-10-17: 76 hosts on the list after every platform Ezhalah searches was re-checked (aqaralmuhaysini.com measured 9.96 s and the owner chose to keep it on; muktamel.com ~37 s stays off by owner choice).
 
-Aqar, Aqar Monthly and the 50 owner-approved non-embeddable platforms (2026-10-04, exact hosts in
+Aqar, Aqar Monthly and the 49 owner-approved non-embeddable platforms (2026-10-04, re-checked
+2026-10-17 when Abaad moved to the iframe list; exact hosts in
 `IN_APP_PREVIEW_HOSTS`) use the same panel with a native `ListingPreview` of the
 card's existing `Listing`, with no additional listing-data fetch. Source-ordered photos, the shared
 `listingPrice` (including the stay-length note), source-stated facts and redacted description lead
 to an explicit external contact link to the original ad. Both the contact label and attribution
 use `t(sourceName(listing.source))`, matching the result card. Arabic prose is hidden in English
 like ResultCard. No photos means no gallery box. The preview and iframe host lists are disjoint.
+
+**The map:** the source's own pin when it published both coordinates («الموقع كما نشره {site}»).
+When an **Aqar (buy or rent) or Aqar Monthly** ad published none (owner 2026-10-17: «show the entire
+district … all around the boundaries», «just do aqar now», then «Aqar Monthly and rent, same style,
+just don't include the Ministry of Justice» — other sites still show no map without a pin; the
+ministry block stays Aqar-sale-only),
+the page asks the same free Google embed for the district by name («حي X، City») so Google fits the
+view and draws its own dashed border around the district; labelled «الموقع التقريبي» with «{site}
+لم ينشر موقعاً دقيقاً», never a pin. Free either way (keyless embed / Embed API place mode). The owner
+chose Google's border as Google draws it (no colour boost). Guard:
+`scripts/verify-ad-map-needs-both-coordinates.ts`.
 
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
 up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.

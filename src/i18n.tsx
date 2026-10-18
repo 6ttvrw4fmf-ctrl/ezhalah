@@ -617,6 +617,21 @@ const AR: Record<string, string> = {
   // Live-number variants (owner 2026-09-12) — {count}/{cities}/{districts} are real, derived
   // figures (loaderScaleStats.ts), never hardcoded; see SEARCH_TITLES's comment in SearchLoader.tsx.
   'Checking more than {count} properties…': 'نفحص أكثر من {count} عقار…',
+  // THE SEARCH FUNNEL (owner 2026-10-17) — every line an action, the numbers of THIS search inside it,
+  // narrowing all websites → Kingdom → the user's city → their district → their request. {count} is
+  // live and worded by lib/searchLoaderTitles.ts countWording(): «أكثر من» only strictly below the
+  // truth; small exact counts said exactly; unknown → the line is not shown.
+  'Searching {count} real-estate platforms…': 'نبحث في {count} منصة عقارية…',
+  'Checking more than {count} listings across the Kingdom…': 'نفحص أكثر من {count} إعلان في المملكة…',
+  // Exact count in digits (owner 2026-10-17: «the actual number … not in word form») — the line now shipped.
+  'Checking {count} listings across the Kingdom…': 'نفحص {count} إعلان في المملكة…',
+  'Reviewing more than {count} listings in {city}…': 'نراجع أكثر من {count} إعلان في {city}…',
+  'Reviewing {count} listings in {city}…': 'نراجع {count} إعلان في {city}…',
+  'Going through more than {count} listings in {district}…': 'ندقق في أكثر من {count} إعلان في {district}…',
+  'Going through {count} listings in {district}…': 'ندقق في {count} إعلان في {district}…',
+  'Matching your request: {what}…': 'نطابق طلبك: {what}…',
+  'for rent': 'للإيجار',
+  'for sale': 'للبيع',
   // The Advanced Filter round's beat (owner 2026-10-11): CHECKING with the real size of the set each answer is checked
   // against — «نفحص 1,425 عقار…» → «نفحص 830 عقار…» (and «نفحص مصعد…» when that size was never known).
   'Checking {count} properties…': 'نفحص {count} عقار…',
@@ -807,6 +822,11 @@ const AR: Record<string, string> = {
   'I can get you something more precise.': 'أقدر أجيب لك نتائج أدق.',
   // Composer placeholder (owner wording 2026-08-16) — names the domain and the country, in the
   // conversational register the rest of the agent speaks.
+  // The box's hint AFTER the first message (owner 2026-10-17: «include these messages after the user sends, not first thing; first
+  // thing will be a rotation of messages»): «type … and Ezhalah», with the word property in it, the name last, before the dots.
+  // The «بحث» chip is gone by then, so the line shows whole in both languages. At the very start the box keeps the older sentence
+  // below (and the rotating examples) until the owner's new rotation of start messages is written.
+  "Type your property and Ezhalah...": 'اكتب عقارك وإزهله...',
   "Type the property you're looking for in Saudi Arabia...": 'اكتب العقار اللي تبحث عنه في السعودية...',
   // Stable composer accessibility label (owner brief 2026-08-23 §11) — the ONE sentence a screen
   // reader hears for the AI input; the rotating examples are aria-hidden decoration.
@@ -1107,6 +1127,7 @@ const AR: Record<string, string> = {
   'Arsh': 'عرش العقارية',                    // the site's own Arabic name (arshglobal.com.sa)
   'SuperOffice': 'سوبر أوفيس',     // the site's own Arabic name (superoffice.sa)
   'Shomou': 'شموع العقار',         // «مكتب شموع العقار للاستثمار والتطوير العقاري» (shomoalaqar.com.sa footer)
+  'Haraj': 'حراج',                  // the site's own name (haraj.com.sa)
   'Maktab': 'منصة مكتب',            // the site's own title (maktab.sa)
   'Sirdab': 'سرداب',               // the site's own Arabic name (marketplace.sirdab.co)
   'Ashab': 'عشاب العقارية',        // the site's own Arabic name (ashab.sa)
@@ -1263,6 +1284,12 @@ const AR: Record<string, string> = {
   'Project': 'المشروع',
   'Tap here to contact': 'اضغط هنا للتواصل',
   'Tap here to see the location': 'اضغط هنا لرؤية الموقع',
+  // The district circle for an ad whose source published no pin (owner 2026-10-17).
+  'Approximate location': 'الموقع التقريبي',
+  '{name} published no exact location': '{name} لم ينشر موقعاً دقيقاً',
+  'Tap here to see the district': 'اضغط هنا لرؤية الحي',
+  'Tap here to see the city': 'اضغط هنا لرؤية المدينة',
+  'District location on Google Maps': 'موقع الحي على خرائط Google',
   "and to confirm it's still on {siteName}": 'وللتأكد من توفّره في {siteName}',
   "This ad may have been removed or sold. We review ads continuously, but we can't guarantee they're still available.": 'قد يكون الإعلان حُذف أو بيع. نراجع الإعلانات باستمرار، لكن لا نضمن توفّرها.',
   'Previous photo': 'الصورة السابقة',
@@ -1973,4 +2000,20 @@ export function useI18n(): I18nValue {
   const v = useContext(Ctx);
   if (!v) throw new Error('useI18n must be used within LocaleProvider');
   return v;
+}
+
+/**
+ * Render `children` in `locale`, whatever language the app itself is in (owner 2026-10-17: «the property cards should follow
+ * the language» of the message). Every `useI18n()` below it (card labels, «Click here», prices, places, alignment) reads this
+ * language; the app language, its saved choice and the page direction are untouched. No extra view: layout is unchanged.
+ */
+export function LocaleScope({ locale, children }: { locale: Locale; children: ReactNode }) {
+  const parent = useI18n();
+  const value = useMemo<I18nValue>(
+    () => (parent.locale === locale
+      ? parent
+      : { locale, isRTL: locale === 'ar', t: (en: string, vars?: Record<string, string | number>) => translate(locale, en, vars), setLocale: parent.setLocale }),
+    [locale, parent],
+  );
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

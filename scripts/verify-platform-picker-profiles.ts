@@ -247,9 +247,10 @@ assert.notEqual(retainsOldScope,source);
 assert.throws(() => assert.deepEqual(load(retainsOldScope,'applyPickerSources')({sources:['aqar']},[],true).sources, []), assert.AssertionError);
 
 const homepageCatalog = load(source, 'PLATFORM_PICKER_PROFILES');
-assert.equal(Object.keys(homepageCatalog).length, 149);
+// 150 = 149 + Haraj (2026-10-16, placeholder artwork until the owner supplies its logo).
+assert.equal(Object.keys(homepageCatalog).length, 150);
 assert.ok(Object.keys(homepageCatalog).includes('Deal App'));
-console.log('PASS: the complete website catalog includes all 149 original logo profiles, including Dealapp.');
+console.log('PASS: the complete website catalog includes all 150 logo profiles, including Dealapp.');
 
 const chooseMatch = agent.match(/const choosePlatform = \(source: string \| null\) => \{([\s\S]*?)\n  \};/);
 assert.ok(chooseMatch);

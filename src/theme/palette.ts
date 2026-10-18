@@ -58,6 +58,11 @@ export const lightColors = {
   goldLightHover: '#f0c94a', // both stops deepen slightly on hover/press
   goldDeepHover: '#a86f08',
   goldOnFill: '#2a1d06',
+  // SILVER (owner 2026-10-17): the card ring + «اضغط هنا» strip of a listing that does NOT open inside
+  // Ezhalah; gold is reserved for the sites that do. Same metallic read as the gold pair.
+  silverLight: '#f4f6f8',
+  silverDeep: '#9aa6b2',
+  silverOnFill: '#1f2a33',
   danger: '#c0392b', // destructive text/icons
   dangerBg: '#fbe8e6', // destructive tinted fill
   dangerLine: '#f3cfca', // destructive tinted border
@@ -120,6 +125,9 @@ export const darkColors: Record<PaletteKey, string> = {
   goldLightHover: '#f0c94a',
   goldDeepHover: '#a86f08',
   goldOnFill: '#2a1d06',
+  silverLight: '#e6eaef',
+  silverDeep: '#7f8a96',
+  silverOnFill: '#161d24',
   danger: '#e46a5e',
   dangerBg: '#3a1e19',
   dangerLine: '#562a23',
@@ -231,8 +239,8 @@ export const TAP44_DOWN_CSS = '[data-tap44-down]::after{top:0;transform:translat
 export const TAP44 = { tap44: '1' } as const;
 
 /** The AI-chat composer's empty-box hint stays on ONE line and ends in an ellipsis (owner 2026-10-05).
- *  With the typed text sharing a line with the mic and Send, the long hint «اكتب العقار اللي تبحث عنه في
- *  السعودية...» wrapped to two lines on a phone, which made the box taller and lifted typed text above
+ *  With the typed text sharing a line with the mic and Send, the old long hint «اكتب العقار اللي تبحث عنه في
+ *  السعودية...» wrapped to two lines on a phone (since 2026-10-17 the hint is the short «اكتب عقارك وإزهله...»), which made the box taller and lifted typed text above
  *  the buttons. `text-overflow` trails at the END of the line in the field's own direction, so in Arabic
  *  the dots sit on the left, after the words. Opt-in by marker, like TAP44. */
 export const COMPOSER_INPUT = { composerInput: '1' } as const;

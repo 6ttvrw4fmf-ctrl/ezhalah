@@ -151,7 +151,10 @@ def reader_for(platform: str, control: dict | None):
     """(method, read(row) -> ALIVE / DEAD / UNKNOWN): the website's own hiding check, strongest first."""
     site = _reader_for(platform)
     if site is not None:
-        return "site-reader", lambda r: site(r["listing_url"])
+        def read_site(r: dict) -> str:
+            out = site(r["listing_url"])            # a reader may also say why: (verdict, evidence)
+            return out[0] if isinstance(out, tuple) else out
+        return "site-reader", read_site
     if platform in SITES:
         oracle = oracle_for(SITES[platform], control)
         return "site-oracle", lambda r: oracle_read(oracle, r["ad_number"])[0]

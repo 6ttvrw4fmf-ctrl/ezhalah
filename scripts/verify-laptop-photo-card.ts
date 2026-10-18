@@ -29,6 +29,8 @@ const ROOT = join(import.meta.dirname, '..');
 const read = (f: string) => readFileSync(join(ROOT, f), 'utf8');
 const CARD = read('src/components/ResultCard.tsx');
 const BUZZ = read('src/components/CardBuzzer.tsx');
+const OVERLAY = read('src/components/ConfettiOverlay.tsx');
+const REVEAL = read('src/components/CardReveal.tsx');
 const GRID = read('src/components/ResultCardGrid.tsx');
 const AGENT = read('src/app/agent.tsx');
 const I18N = read('src/i18n.tsx');
@@ -48,14 +50,29 @@ const lpStyles = (src: string): string => {
   return a >= 0 && b > a ? src.slice(a, b) : '';
 };
 
-const rules = (card: string, buzz: string, grid: string, agent: string, i18n: string, resp: string): Record<string, boolean> => {
+const rules = (card: string, buzz: string, grid: string, agent: string, i18n: string, resp: string, overlay: string = OVERLAY, reveal: string = REVEAL): Record<string, boolean> => {
   const lp = laptopBlock(card);
   const styles = lpStyles(card);
   return {
     'the photo-first layout is ONLY behind `if (row === \'roomy\')`; the old compact row and the phone card are still below it':
       lp.length > 500 && card.indexOf("  if (row === 'roomy') {") < card.indexOf('photoColMobile') && /row \? \[card\.photoColRow/.test(card),
-    'press = open FIRST, synchronously: const fire = () => { onOpen(); setBurst(…) } — no timer, no animation':
-      /const fire = \(\) => \{ onOpen\(\); setBurst\(\(b\) => b \+ 1\); \};/.test(lp),
+    'press = open FIRST, synchronously: const fire = () => { onOpen(); if (partyHere) { setBurst(…); partyConfetti() } } — no timer, no animation':
+      /const fire = \(\) => \{ onOpen\(\); if \(partyHere\) \{ setBurst\(\(b\) => b \+ 1\); partyConfetti\(\); \} \};/.test(card),
+    // Owner 2026-10-17: the party is for the sites that open INSIDE Ezhalah (the in-app viewer list), not every card.
+    'the party plays only for a listing that opens inside Ezhalah: inside = inAppViewerHost(listingOpenUrl(listing)); partyHere = IS_WEB && inside':
+      /const inside = !!inAppViewerHost\(listingOpenUrl\(listing\)\);/.test(card) && /const partyHere = IS_WEB && inside;/.test(card) && /import \{ inAppViewerHost \} from '@\/lib\/inAppViewer';/.test(card),
+    // Owner 2026-10-17: «the golden frame only with the 76 … the rest silver».
+    'GOLD = opens inside Ezhalah, SILVER = everything else: tone = inside ? gold : silver, passed to the ring AND both strips; GoldSurface paints silver stops for it':
+      /const tone: 'gold' \| 'silver' = inside \? 'gold' : 'silver';/.test(card)
+      && (card.match(/<GoldSurface tone=\{tone\} /g) || []).length === 4 && !/<GoldSurface style=/.test(card)
+      && /tone === 'silver' \? \[pal\.silverLight, pal\.silverDeep\] : \[pal\.goldLight, pal\.goldDeep\]/.test(reveal),
+    // The screen-level party: above the ad sheet/pane, which covers the card\'s own layer on a phone.
+    'the ConfettiOverlay is the LAST child of the agent screen (above the AdViewer), and it never takes a tap':
+      /<\/AdViewer>|\/>\n    \)\}\n[\s\S]{0,300}<ConfettiOverlay \/>\n    <\/View>\n  \);\n\}/.test(agent) && /pointerEvents="none" style=\{\[StyleSheet\.absoluteFill, s\.top\]\} testID="confetti-overlay"/.test(overlay)
+      && /if \(!live \|\| reduced\) return null;/.test(overlay) && /setTimeout\(\(\) => setLive\(false\)/.test(overlay) && !/\.start\(\s*\(/.test(overlay) && !/Math\.random/.test(overlay),
+    // Owner 2026-10-17: «whenever a user clicks on a listing I want this party confetti … on everything».
+    'EVERY card presses the shared handler — the compact row and the phone card too, never onOpen directly':
+      !/onPress=\{onOpen\}/.test(card) && /<Pressable onPress=\{fire\} style=\{\[card\.midCol/.test(card),
     'the photo AND the gold button both press the same handler':
       /<Pressable onPress=\{fire\} accessibilityRole="link"/.test(lp) && /<GoldShineButton shine="css" onPress=\{fire\}/.test(lp),
     'the gold button SHINES on every card, by a CSS keyframe (no worklet per card)':
@@ -63,8 +80,17 @@ const rules = (card: string, buzz: string, grid: string, agent: string, i18n: st
     'the buzzer is decoration: reduced motion draws nothing; removed by a timer; no .start(callback); no Math.random':
       /if \(!live \|\| reduced\) return null;/.test(buzz) && /setTimeout\(\(\) => setLive\(false\)/.test(buzz)
       && !/\.start\(\s*\(/.test(buzz) && !/Math\.random/.test(buzz),
-    'the buzzer layer mounts in the photo-first card AND stays while it re-flows into the compact row':
-      /<BuzzLayer burst=\{burst\} \/>/.test(lp) && /\{row \? <BuzzLayer burst=\{burst\} \/> : null\}/.test(card),
+    'the buzzer layer mounts in the photo-first card AND unconditionally in the compact/phone card (every layout, owner 2026-10-17)':
+      /<BuzzLayer burst=\{burst\} \/>/.test(lp) && /\n      <BuzzLayer burst=\{burst\} \/>\n    <\/View>\n    <\/GoldSurface>\n  \);\n\}/.test(card) && !/\{row \? <BuzzLayer/.test(card),
+    // Owner 2026-10-17: «make the frame and this golden shining like a buzzer … for all».
+    'EVERY card sits in a shining gold ring and its «اضغط هنا» strip is a shining gold surface (GoldSurface = the gold button\'s gradient + CSS glint)':
+      (card.match(/<GoldSurface tone=\{tone\} style=\{card\.goldRing\} testID="card-gold-frame">/g) || []).length === 2
+      && /<GoldSurface tone=\{tone\} style=\{\[card\.sourceStrip, row && card\.sourceStripRow\]\} pointerEvents="none" testID="card-gold-strip">/.test(card)
+      && /<GoldSurface tone=\{tone\} style=\{card\.lpPhotoFoot\} pointerEvents="none" testID="card-gold-strip">/.test(lp) && /lpPhotoFootTx: \{ color: colors\.goldOnFill/.test(card)
+      // GoldSurface must let the caller's `position: absolute` win (the strip sits at the photo's foot): clip first, style second
+      && /<View style=\{\[s\.goldClip, style\]\} pointerEvents=\{pointerEvents\} testID=\{testID\}>/.test(reveal)
+      && /export function GoldSurface\(/.test(reveal) && /<CssShine \/>/.test(reveal.slice(reveal.indexOf('export function GoldSurface(')))
+      && /sourceText: \{ color: colors\.goldOnFill/.test(card) && /photoAction: \{ color: colors\.goldOnFill/.test(card),
     'the TYPE (with its Filter icon) comes before the rooms in the main line':
       lp.indexOf('style={card.lpType}') > 0 && lp.indexOf('style={card.lpType}') < lp.indexOf('listing.beds > 0 ? <Stat') && /typeImg\(listing\.cleanType/.test(lp),
     'the Advanced-Filter picks are the lit chips (✓), driven by pickedFeatures':
@@ -98,11 +124,48 @@ const mustCatch = (what: string, rule: string, broken: Record<string, boolean>) 
   if (!caught) failed++;
   console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
 };
-const R_OPEN = 'press = open FIRST, synchronously: const fire = () => { onOpen(); setBurst(…) } — no timer, no animation';
+const R_OPEN = 'press = open FIRST, synchronously: const fire = () => { onOpen(); if (partyHere) { setBurst(…); partyConfetti() } } — no timer, no animation';
+const FIRE = 'const fire = () => { onOpen(); if (partyHere) { setBurst((b) => b + 1); partyConfetti(); } };';
 mustCatch('opening the ad behind a timer (popup-blocked window.open)', R_OPEN,
-  rules(CARD.replace('const fire = () => { onOpen(); setBurst((b) => b + 1); };', 'const fire = () => { setBurst((b) => b + 1); setTimeout(onOpen, 400); };'), BUZZ, GRID, AGENT, I18N, RESP));
+  rules(CARD.replace(FIRE, 'const fire = () => { if (partyHere) { setBurst((b) => b + 1); partyConfetti(); } setTimeout(onOpen, 400); };'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('a card press that forgets the screen-level party', R_OPEN,
+  rules(CARD.replace(FIRE, 'const fire = () => { onOpen(); if (partyHere) { setBurst((b) => b + 1); } };'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('the party playing for every card again (new-tab and preview sites included)', R_OPEN,
+  rules(CARD.replace(FIRE, 'const fire = () => { onOpen(); setBurst((b) => b + 1); partyConfetti(); };'), BUZZ, GRID, AGENT, I18N, RESP));
+const R_INSIDE = 'the party plays only for a listing that opens inside Ezhalah: inside = inAppViewerHost(listingOpenUrl(listing)); partyHere = IS_WEB && inside';
+mustCatch('the in-app gate replaced by a constant', R_INSIDE,
+  rules(CARD.replace('const partyHere = IS_WEB && inside;', 'const partyHere = true;'), BUZZ, GRID, AGENT, I18N, RESP));
+const R_TONE = 'GOLD = opens inside Ezhalah, SILVER = everything else: tone = inside ? gold : silver, passed to the ring AND both strips; GoldSurface paints silver stops for it';
+mustCatch('every card gold again (tone pinned to gold)', R_TONE,
+  rules(CARD.replace("const tone: 'gold' | 'silver' = inside ? 'gold' : 'silver';", "const tone: 'gold' | 'silver' = 'gold';"), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('a ring that ignores the tone', R_TONE,
+  rules(CARD.replace('\n    <GoldSurface tone={tone} style={card.goldRing} testID="card-gold-frame">\n    <View ', '\n    <GoldSurface style={card.goldRing} testID="card-gold-frame">\n    <View '), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('GoldSurface painting gold for the silver tone', R_TONE,
+  rules(CARD, BUZZ, GRID, AGENT, I18N, RESP, OVERLAY, REVEAL.replace("tone === 'silver' ? [pal.silverLight, pal.silverDeep] : [pal.goldLight, pal.goldDeep]", '[pal.goldLight, pal.goldDeep]')));
+mustCatch('the overlay unmounted from the agent screen', 'the ConfettiOverlay is the LAST child of the agent screen (above the AdViewer), and it never takes a tap',
+  rules(CARD, BUZZ, GRID, AGENT.replace('    <ConfettiOverlay />\n    </View>\n  );\n}', '    </View>\n  );\n}'), I18N, RESP));
+mustCatch('the overlay catching taps (it would block the sheet under it)', 'the ConfettiOverlay is the LAST child of the agent screen (above the AdViewer), and it never takes a tap',
+  rules(CARD, BUZZ, GRID, AGENT, I18N, RESP, OVERLAY.replace('pointerEvents="none" style={[StyleSheet.absoluteFill, s.top]}', 'style={[StyleSheet.absoluteFill, s.top]}')));
 mustCatch('the photo no longer pressing the shared handler', 'the photo AND the gold button both press the same handler',
   rules(CARD.replace('<Pressable onPress={fire} accessibilityRole="link"', '<Pressable onPress={onOpen} accessibilityRole="link"'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('the phone/compact card pressing onOpen directly (no confetti there)', 'EVERY card presses the shared handler — the compact row and the phone card too, never onOpen directly',
+  rules(CARD.replace('<Pressable onPress={fire} style={[card.midCol', '<Pressable onPress={onOpen} style={[card.midCol'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('the buzzer layer gated back to laptop rows only', 'the buzzer layer mounts in the photo-first card AND unconditionally in the compact/phone card (every layout, owner 2026-10-17)',
+  rules(CARD.replace('\n      <BuzzLayer burst={burst} />\n    </View>\n    </GoldSurface>\n  );\n}', '\n      {row ? <BuzzLayer burst={burst} /> : null}\n    </View>\n    </GoldSurface>\n  );\n}'), BUZZ, GRID, AGENT, I18N, RESP));
+const R_GOLD = 'EVERY card sits in a shining gold ring and its «اضغط هنا» strip is a shining gold surface (GoldSurface = the gold button\'s gradient + CSS glint)';
+mustCatch('the phone/compact card losing its gold ring', R_GOLD,
+  // (the 4-space indent is the compact/phone card's ring; the photo-first card's sits at 6 spaces)
+  rules(CARD.replace('\n    <GoldSurface tone={tone} style={card.goldRing} testID="card-gold-frame">\n    <View ', '\n    <View style={card.goldRing} testID="card-gold-frame">\n    <View '), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('the strip back to the flat dark-green View', R_GOLD,
+  rules(CARD.replace('<GoldSurface tone={tone} style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none" testID="card-gold-strip">', '<View style={[card.sourceStrip, row && card.sourceStripRow]} pointerEvents="none">'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('a gold surface that does not shine', R_GOLD,
+  rules(CARD, BUZZ, GRID, AGENT, I18N, RESP, OVERLAY, REVEAL.replace(/(export function GoldSurface\([\s\S]*?)<CssShine \/>/, '$1')));
+mustCatch('the laptop photo-first strip left dark green', R_GOLD,
+  rules(CARD.replace('<GoldSurface tone={tone} style={card.lpPhotoFoot} pointerEvents="none" testID="card-gold-strip">', '<View style={card.lpPhotoFoot} pointerEvents="none">'), BUZZ, GRID, AGENT, I18N, RESP));
+mustCatch('GoldSurface overriding the strip\'s absolute position (the strip would fall out of the photo)', R_GOLD,
+  rules(CARD, BUZZ, GRID, AGENT, I18N, RESP, OVERLAY, REVEAL.replace('<View style={[s.goldClip, style]} pointerEvents={pointerEvents} testID={testID}>', '<View style={[style, s.goldClip]} pointerEvents={pointerEvents} testID={testID}>')));
+mustCatch('white text on the gold strip', R_GOLD,
+  rules(CARD.replace("photoAction: { color: colors.goldOnFill", "photoAction: { color: '#fff'"), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('a still (non-shining) gold button', 'the gold button SHINES on every card, by a CSS keyframe (no worklet per card)',
   rules(CARD.replace('<GoldShineButton shine="css" onPress={fire}', '<GoldShineButton shine="none" onPress={fire}'), BUZZ, GRID, AGENT, I18N, RESP));
 mustCatch('the buzzer ignoring reduced motion', 'the buzzer is decoration: reduced motion draws nothing; removed by a timer; no .start(callback); no Math.random',
@@ -130,5 +193,5 @@ mustCatch('the laptop layout leaking onto the phone card', 'the photo-first layo
 mustCatch('the new copy missing in Arabic', 'the new copy exists in Arabic',
   rules(CARD, BUZZ, GRID, AGENT, I18N.replace("'To confirm availability and details': 'للتأكد من التوفر والتفاصيل',", ''), RESP));
 
-console.log(failed === 0 ? '\n✅ the laptop card is photo-first, laptop-only, opens first, and the buzzer is only decoration.\n' : `\n❌ ${failed} check(s) failed.\n`);
+console.log(failed === 0 ? '\n✅ the laptop card is photo-first, laptop-only, opens first, and the buzzer plays on every card as decoration only.\n' : `\n❌ ${failed} check(s) failed.\n`);
 process.exit(failed === 0 ? 0 : 1);

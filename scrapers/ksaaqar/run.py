@@ -600,7 +600,11 @@ def _retire_abroad(table: str, abroad: dict[str, str]) -> list[str]:
 # structured spec list has «التكييف» and «التأثيث» but no kitchen / lift / parking / maid room (30-page census
 # above, re-checked 2026-10-08 on 12226455 and 12226526), so for those the description is the only statement
 # and prose is lawful, four outcomes, line by line. AC and furnished stay structured-only.
-_DESC_BOX = re.compile(r'id="adt-ad-description-box"[^>]*>.*?<p>(.*?)</p>', re.S)
+# EVERY paragraph of the box, not the first (🔬 2026-10-17, backlog 630): 12225735 and 12226520 open with a
+# headline paragraph («فيلا مع شقتين. حي المصيف») and name «مطبخ» / «غرفة سائق» in the next ones, so kitchen stayed
+# NULL on ads that state it (CI re-read 39026652684). The «الوصف:» heading is dropped, never read as a fact.
+_DESC_BOX = re.compile(r'id="adt-ad-description-box"[^>]*>', re.S)
+_DESC_P = re.compile(r"<p[^>]*>(.*?)</p>", re.S)
 _PROSE_SKIP = ("air_conditioner", "furnished")
 
 
@@ -608,7 +612,13 @@ def parse_description_amenities(page_html: str) -> dict[str, bool]:
     m = _DESC_BOX.search(page_html or "")
     if not m:
         return {}
-    return normalize.prose_amenities_yes(normalize.html_block_lines(m.group(1)), skip=_PROSE_SKIP)
+    box = page_html[m.end():m.end() + 20000]
+    first_p = box.find("<p")
+    if first_p < 0:
+        return {}
+    end = box.find("</div>", first_p)
+    paras = _DESC_P.findall(box[:end] if end >= 0 else box)
+    return normalize.prose_amenities_yes(normalize.html_block_lines("</p>".join(paras)), skip=_PROSE_SKIP)
 
 
 def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Optional[dict], str, str]:

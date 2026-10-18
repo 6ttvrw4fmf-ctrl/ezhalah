@@ -564,6 +564,11 @@ def map_listing(ix: dict, detail: dict) -> Optional[tuple[dict, str]]:
 
     city, region, city_basis = _city(
         ix["district"], f"{detail.get('title') or ''} {detail.get('description') or ''}")
+    if city_basis == "names_other_region":
+        # The ad itself settles that the office city is wrong. A plain None is dropped by
+        # db._unknown_must_not_overwrite_known, so a row already filed under الهفوف stayed there
+        # (17994690 re-crawled 10-17 05:55: still Hofuf). AUTHORITATIVE_NULL writes the unknown.
+        city, region = db.AUTHORITATIVE_NULL, db.AUTHORITATIVE_NULL
     photos = detail.get("photo_urls") or []
     if not photos and ix["thumb"] and PLACEHOLDER_IMG not in ix["thumb"]:
         thumb = re.sub(r"/styles/[^/]+/public/", "/", ix["thumb"]).split("?")[0]
