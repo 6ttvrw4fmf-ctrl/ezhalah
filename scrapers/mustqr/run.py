@@ -665,6 +665,14 @@ def _price_fields(p: dict, is_rent: bool) -> dict[str, Any]:
             period = "monthly" if n < 10000 else "annual"
         return {"price_annual": normalize.annualize_rent(n, period),
                 "rent_period": period}
+    # A RATE the ad's own text states for THIS figure — 4993: «السعر: السوم 1,100 ريال», its text «السوم للمتر
+    # 1100» (2026-10-18) — is price_per_meter, never a total. That text is raw_text, which is PII and never
+    # fetched: mustqr's own PostgREST decides the match server-side (stated_rate_ids) and only ids come back.
+    # No marker: the figure stays the total exactly as published.
+    if p.get("_rate_stated") or normalize.stated_per_metre(p.get("description"), n):
+        # the source settled «a rate, no total»: AUTHORITATIVE_NULL clears the total an older read stored
+        # (a plain None is dropped by the upsert and would leave 1,100 standing as a total)
+        return {"price_per_meter": n, "price_total": db.AUTHORITATIVE_NULL}
     return {"price_total": n}
 
 
@@ -782,8 +790,8 @@ def map_listing(p: dict, n_to_region: dict[str, str]) -> tuple[Optional[dict], s
     }
     row.update(_price_fields(p, is_rent))
     row.update(feature_answers(p.get("features")))
-    # price_per_meter is NEVER derived (listing-fidelity rule): mustqr's API publishes no ppm field,
-    # so the field stays NULL. The old round(price_total/area_m2) derivation fabricated 621 live
+    # price_per_meter is NEVER derived (listing-fidelity rule): it is set only where the ad's own text states
+    # its figure per metre (_price_fields), otherwise it stays NULL. The old round(price_total/area_m2) derivation fabricated 621 live
     # values — removed 2026-07-27 (audit item 4); scripts/verify-no-derived-price.ts guards the
     # whole fleet against this pattern re-appearing.
 
@@ -804,6 +812,51 @@ def feature_answers(features: Any) -> dict[str, bool]:
         for col, val in normalize.amenities_from_text(item.strip()).items():
             if val is True and col in _FEATURE_COLS:
                 out[col] = True
+    return out
+
+
+_AR_DIGITS_STR = "٠١٢٣٤٥٦٧٨٩"
+_SP = "[ \t\r\n]*"
+_RATE_WORDS_AFTER = f"(للمتر|لل?متر{_SP}المربع|/{_SP}م²|/{_SP}متر)"
+_RATE_WORDS_BEFORE = f"(للمتر|لل?متر{_SP}المربع|سعر{_SP}المتر|المتر)"
+_ANY_RATE_WORD = f"(للمتر|المتر|م²|/{_SP}متر)"
+
+
+def rate_regex(n: int) -> str:
+    """A regex valid in POSIX (PostgREST `match`) and Python alike: the text states THIS figure per metre —
+    «السوم للمتر 1100», «1,100 ريال للمتر», «سعر المتر ١١٠٠». Same rule as normalize.stated_per_metre."""
+    fig = ",?".join(f"[{d}{_AR_DIGITS_STR[int(d)]}]" for d in str(int(n)))
+    after = f"(^|[^0-9٠-٩.,]){fig}{_SP}(ريال|ر\\.س)?{_SP}\\(?{_SP}{_RATE_WORDS_AFTER}"
+    before = f"{_RATE_WORDS_BEFORE}{_SP}(ب|:|=)?{_SP}{fig}([^0-9٠-٩.,]|$)"
+    return f"({after})|({before})"
+
+
+def stated_rate_ids(s: cc.Session, jwt: str, rows: list[dict]) -> set[int]:
+    """Ids of sale rows whose own text (raw_text) states their price figure per metre. raw_text is PII and is
+    never fetched (test_mustqr_fetch_page_column_allowlist): mustqr's PostgREST evaluates the regex and returns
+    only ids. One call finds the rows that carry any per-metre word, then one call per such row ties it to its
+    own figure. A failed call is «not known», never «a rate»."""
+    from urllib.parse import quote
+    out: set[int] = set()
+    try:
+        _throttle()
+        r = s.get(f"{PROJECT}/rest/v1/properties?select=id&raw_text=match.{quote(_ANY_RATE_WORD)}",
+                  headers=_headers(jwt), timeout=45)
+        cand = {x["id"] for x in r.json()} if r.status_code == 200 else set()
+    except Exception:
+        return out
+    for p in rows:
+        n = _int(p.get("price") or p.get("price_som") or p.get("price_had"))
+        if p.get("id") not in cand or not n or (p.get("category") or "").strip() == "إيجار":
+            continue
+        try:
+            _throttle()
+            r = s.get(f"{PROJECT}/rest/v1/properties?select=id&id=eq.{int(p['id'])}"
+                      f"&raw_text=match.{quote(rate_regex(n))}", headers=_headers(jwt), timeout=45)
+            if r.status_code == 200 and r.json():
+                out.add(int(p["id"]))
+        except Exception:
+            continue
     return out
 
 
@@ -894,6 +947,11 @@ def main() -> int:
 
     raw = fetch_all(s, jwt, limit=args.limit)
     print(f"Mustqr: {len(raw)} active rows pulled")
+    rate_ids = stated_rate_ids(s, jwt, raw)
+    for p in raw:
+        if p.get("id") in rate_ids:
+            p["_rate_stated"] = True
+    print(f"  prices the ad's own text states per metre (server-side match): {len(rate_ids)}")
 
     res: list[dict] = []
     com: list[dict] = []

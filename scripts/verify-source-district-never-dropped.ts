@@ -29,6 +29,9 @@ const sql4 = readFileSync(join(dir, file4), 'utf8');
 const file5 = readdirSync(dir).filter((f) => /^\d{14}_district_recovery_never_truncates_and_mubarraz_city_correction\.sql$/.test(f)).sort().at(-1);
 if (!file5) { console.log('FAIL  migration *_district_recovery_never_truncates_and_mubarraz_city_correction.sql is missing'); process.exit(1); }
 const sql5 = readFileSync(join(dir, file5), 'utf8');
+const file6 = readdirSync(dir).filter((f) => /^\d{14}_carried_district_no_latin_no_prose_and_card_label_contract_fast\.sql$/.test(f)).sort().at(-1);
+if (!file6) { console.log('FAIL  migration *_carried_district_no_latin_no_prose_and_card_label_contract_fast.sql is missing'); process.exit(1); }
+const sql6 = readFileSync(join(dir, file6), 'utf8');
 
 // Every rule as a function of the SQL text, so the mutants below run the SAME verdict.
 function problems(s: string): string[] {
@@ -196,6 +199,19 @@ function problems5(s: string): string[] {
   return fail;
 }
 
+// Step 6 (2026-10-18): a carried word never has Latin letters or prose length (they broke the whole detector roster), and
+// card_label_contract's sample query computes `split` once.
+function problems6(s: string): string[] {
+  const fail: string[] = [];
+  const carry = s.match(/create or replace function public\.district_word_carryable[\s\S]*?\$\$;/)?.[0] ?? '';
+  if (!/and w !~ '\[A-Za-z\]'/.test(carry)) fail.push('a carried district may contain Latin letters again (page chrome such as «عقارات جدة JIJB»)');
+  if (!/and length\(btrim\(w\)\) <= 40/.test(carry)) fail.push('a carried district may be an address chain or prose again (> 40 characters)');
+  if (!/a_cte, 'with split as materialized \('\)/.test(s)) fail.push('card_label_contract\'s split CTE is no longer materialized (inlined per row = the 15-minute roster timeout)');
+  if (!/in \(select p\.city_id, p\.tok from split p\)\)'\)/.test(s)) fail.push('card_label_contract still probes split with a correlated EXISTS');
+  if (!/if secs > 120 then raise exception/.test(s)) fail.push('the apply-time timing proof of the detector is gone');
+  return fail;
+}
+
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : ` — ${why}`}`); };
 // Mutation proof: the SAME verdict function, run on a deliberately loosened copy of the committed SQL, must go red.
@@ -278,6 +294,11 @@ for (const [label, mutate] of mutants5) {
   const m = mutate(sql5);
   mustCatch(`refill/city: ${label}`, m !== sql5 && problems5(m).length > 0, m === sql5 ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
 }
+
+const live6 = problems6(sql6);
+check(`committed migration ${file6} holds the carry and roster-speed pins`, live6.length === 0, live6.join('; '));
+mustCatch('carry: Latin guard removed', problems6(sql6.replace("    and w !~ '[A-Za-z]'", '')).length > 0);
+mustCatch('detector: split CTE inlined again', problems6(sql6.replace("a_cte, 'with split as materialized ('", "a_cte, 'with split as ('")).length > 0);
 
 console.log(failed === 0 ? 'OK: a source district can never be dropped silently again' : `${failed} check(s) failed`);
 process.exit(failed === 0 ? 0 : 1);
