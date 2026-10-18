@@ -157,6 +157,7 @@ _SEG_SPLIT = re.compile(r"\s*(?:,|\.|\s-\s|–|—|/)\s*")
 _NEAR = re.compile(r"^(?:near|next to|behind|opposite|beside|off|close to|in front of|across)\b", re.I)
 _PLACE_TAIL = re.compile(r"\s+(?:neighbou?rhood|area|district|dist\.?)$", re.I)
 _ROAD_TAIL = re.compile(r"\b(?:rd|road|st|street|hwy|highway|ring)\.?$", re.I)
+_COUNTRY = re.compile(r"^(?:ksa|k\.s\.a\.?|saudi arabia|kingdom of saudi arabia)$", re.I)   # «KSA» ×55 live, 2026-10-18
 _TEMPLATE_EN = frozenset({"king abdullah financial"})   # printed by every compound without an address (#658)
 
 
@@ -167,7 +168,7 @@ def district_en_candidates(street: str, city_en: Optional[str] = None) -> list[s
     cn = _norm_dist(city_en) if city_en else None
     for seg in _SEG_SPLIT.split(street or ""):
         seg = _PLACE_TAIL.sub("", seg.strip()).strip(" -")
-        if not seg or _NEAR.match(seg) or _ROAD_TAIL.search(seg):
+        if not seg or _NEAR.match(seg) or _ROAD_TAIL.search(seg) or _COUNTRY.match(seg):
             continue
         if cn and _norm_dist(seg) == cn:
             continue
