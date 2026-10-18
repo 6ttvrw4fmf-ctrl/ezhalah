@@ -122,12 +122,21 @@ _NUMS = re.compile(r"\d[\d,٬.]*")
 
 
 def land_price_basis(price: int, area: Optional[float], text: str) -> Optional[str]:
+    # EVERY mention of the figure is read, not only the first, and the shared reader decides too (2026-10-18:
+    # 6 of 20 haraj plots under the city floor stated their rate where the first mention did not —
+    # «(المتر 1,650 ريال)», «البيع المتر 1100», «سعر المتر : 1,100 ريال», «1800ريال سعودي للمتر», «3500ريال بالمتر»).
     t = (text or "").translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
+    mentioned = False
     for m in _NUMS.finditer(t):
         if N.to_int(m.group(0)) != price:
             continue
-        near = t[max(0, m.start() - 30): m.end() + 15]
-        return "per_meter" if _PER_M_WORDS.search(near) else "total"
+        mentioned = True
+        if _PER_M_WORDS.search(t[max(0, m.start() - 30): m.end() + 15]):
+            return "per_meter"
+    if N.stated_per_metre(t, price):
+        return "per_meter"
+    if mentioned:
+        return "total"
     if area and area >= 50 and price <= 20_000:
         return "per_meter"
     if price >= 100_000:
@@ -199,6 +208,8 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
         basis = land_price_basis(price, area, free_text)
     if price and basis == "per_meter":
         price_per_meter = price
+        if p["deal"] == "Buy":
+            price_total = db.AUTHORITATIVE_NULL      # a stated rate, no total: clears a total an older read stored
     elif price and p["deal"] == "Buy" and (ptype not in LAND_TYPES or basis == "total"):
         price_total = price
     elif price and p["deal"] == "Rent" and (ptype not in LAND_TYPES or basis == "total"):

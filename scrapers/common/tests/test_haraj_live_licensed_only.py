@@ -361,3 +361,25 @@ def test_crawl_stamps_live_only_when_the_oracles_reader_says_live_on_this_post(m
     res, _, c, _, _ = R.crawl(0, 0, only=list(pages), meta={"files": ["--ids"], "prefiltered": {}})
     marked = {r["ad_number"]: R.db._DIRECT_ALIVE_KEY in r for r in res}
     assert marked == {"HRJ11190690713": True, "HRJ11190690999": False} and c["stamped_live"] == 1
+
+
+# 2026-10-18, the haraj plots under the city floor: the RATE is stated somewhere other than the first mention of
+# the figure, or in a wording the narrow window missed. Recorded free-text lines (licence box excluded), verbatim.
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("price, area, text", [
+    (1650, 1080, "💰 سعر البيع: 1,780,000 ريال تقريبًا (المتر 1,650 ريال) 📄"),                       # 11190453852
+    (1100, 1014, "للبيع في حي المروج 3ج س ع شارعين المساحه 1014 البيع المتر 1100 شرقيه جنوبيه"),        # 11190435595
+    (1100, 660, "💵 السعر / Price💵 سعر المتر : 1,100 ريال السعر الاجمالي :"),                          # 11189560091
+    (1400, 900, "للبيع في محافظه المزاحميه حي المروج المساحه 900 سكني المتر 1400 ريال"),               # 11189410160
+    (1800, 400, "💰 السعر والشروط: السعر المطلوب: 1800ريال سعودي للمتر السعر غير شامل السعي"),          # 11189183446
+    (3500, 1443, "/ شارع30مـ شرقا -العرض/مباشر - المطلوب /3500ريال بالمتر -السعي وضريبة التصرف"),        # 11189087398
+])
+def test_a_rate_stated_anywhere_about_the_figure_is_per_meter(price, area, text):
+    assert R.land_price_basis(price, area, "مساحة الأرض " + str(area) + " " + str(price) + " نهائي " + text) == "per_meter"
+
+
+def test_mutation_a_mention_with_no_marker_anywhere_stays_a_total():
+    # 11189120675: «عليها سوم 750» on 1,008 m² — no per-metre word for this figure (owner default: a total)
+    assert R.land_price_basis(750, 1008, "أرض بمساحة مناسبة وموقع واعد، عليها سوم 750 والبيع قريب") == "total"

@@ -528,7 +528,7 @@ def count_flag(v) -> Optional[bool]:
 
 
 _AR_DIGIT_MAP = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
-_RATE_AFTER = r"(?:للمتر|لل?متر\s*المربع|/\s*م²|/\s*متر)"
+_RATE_AFTER = r"(?:للمتر|بالمتر|لل?متر\s*المربع|/\s*م[²2]|/\s*متر)"
 _RATE_BEFORE = r"(?:للمتر|لل?متر\s*المربع|سعر\s*المتر|المتر)"
 
 
@@ -542,7 +542,7 @@ def stated_per_metre(text: Optional[str], n: int) -> bool:
         return False
     flat = re.sub(r"(?<=\d),(?=\d)", "", text.translate(_AR_DIGIT_MAP))
     fig = rf"(?<![\d.]){int(n)}(?![\d.])"
-    return bool(re.search(rf"{fig}\s*(?:ريال|ر\.س|﷼)?\s*\(?\s*{_RATE_AFTER}", flat)
+    return bool(re.search(rf"{fig}\s*(?:ريال(?:\s*سعودي)?|ر\.س|﷼)?\s*\(?\s*{_RATE_AFTER}", flat)
                 or re.search(rf"{_RATE_BEFORE}\s*(?:ب|:|=)?\s*{fig}", flat))
 
 
