@@ -11,7 +11,7 @@
 //   5. no name → no message (never a line with a blank name).
 import {
   encodeSharePayload, decodeSharePayload, shareLink, shareMessage, shareLandingTitle, SHARE_COPY, SHARE_PARAM,
-  shareLandingPath, shareCardHtml, SHARE_CARD, shareTitle, isShareCode, sharedChatCardFrom,
+  shareLandingPath, shareCardHtml, SHARE_CARD, shareTitle, isShareCode, sharedChatCardFrom, shareInviteNote,
 } from '../src/lib/shareSearch.ts';
 
 let failed = 0;
@@ -150,6 +150,22 @@ check('the Arabic title names إزهله and the English keeps "Ezhalah"', T(Q).
 // ── 5. no name → nothing ────────────────────────────────────────────────────────────────────────
 check('no sender name → no message, no title, no payload (never a blank-name line)',
   shareMessage('  ', Q, 'ar') === null && shareLandingTitle('', Q, 'en') === null && encodeSharePayload(Q, ' ') === null);
+
+// ── 6. OPENING THE LINK = THE SIGN-IN POPUP WITH A NOTE (owner 2026-10-18) ─────────────────────────
+check('the popup note reads «يوسف شاركك: شقق للإيجار في حي النرجس» / "Yusuf shared with you: …"',
+  shareInviteNote('يوسف الأحمد', Q, 'ar') === 'يوسف شاركك: شقق للإيجار في حي النرجس'
+  && shareInviteNote('Yusuf', { deal: 'Rent', location: 'Riyadh', type: 'Apartment' } as any, 'en') === 'Yusuf shared with you: Apartments for rent in Riyadh'
+  && shareInviteNote(' ', Q, 'ar') === null && !EMOJI.test(shareInviteNote('يوسف', Q, 'ar') ?? ''));
+{
+  const fs = await import('node:fs');
+  const home = fs.readFileSync(new URL('../src/app/index.tsx', import.meta.url), 'utf8');
+  const flow = /if \(!sharedSearch \|\| !authChecked \|\| sharedHandledRef\.current\) return;[\s\S]{0,700}?if \(!user\) \{[\s\S]{0,400}?SHARED_PENDING_KEY[\s\S]{0,300}?openAuth\(shareInviteNote\([\s\S]{0,200}?if \(sharedSearch\.code\) void openSharedSearch\(sharedSearch\);/;
+  check('a signed-out visitor gets the sign-in popup with the note (and the chat opens once in); signed-in opens the chat directly', flow.test(home));
+  mustCatch('a link that opens the popup with no note', !flow.test(home.replace('openAuth(shareInviteNote(', 'openAuth((')));
+  check('signed-out visitors and shared chats never see the old tap card', /\{sharedSearch && user && !sharedSearch\.code && \(/.test(home));
+  const modal = fs.readFileSync(new URL('../src/components/AuthModal.tsx', import.meta.url), 'utf8');
+  check('the sign-in popup shows the note above its heading', /\{note \? <Text style=\{s\.shareNote\}[^\n]*>\{note\}<\/Text> : null\}\s*<Text style=\{\[s\.formHead/.test(modal));
+}
 
 console.log(`\nexample link: ${link.slice(0, 90)}…`);
 if (failed) { console.error(`\n❌ verify-share-search-link: ${failed} check(s) failed.`); process.exit(1); }
