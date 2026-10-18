@@ -425,6 +425,14 @@ to an explicit external contact link to the original ad. Both the contact label 
 use `t(sourceName(listing.source))`, matching the result card. Arabic prose is hidden in English
 like ResultCard. No photos means no gallery box. The preview and iframe host lists are disjoint.
 
+**The map:** the source's own pin when it published both coordinates («الموقع كما نشره {site}»).
+When it published none (owner 2026-10-17: «show the entire district … all around the boundaries»),
+the page asks the same free Google embed for the district by name («حي X، City») so Google fits the
+view and draws its own dashed border around the district; labelled «الموقع التقريبي» with «{site}
+لم ينشر موقعاً دقيقاً», never a pin. Free either way (keyless embed / Embed API place mode). The owner
+chose Google's border as Google draws it (no colour boost). Guard:
+`scripts/verify-ad-map-needs-both-coordinates.ts`.
+
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
 up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.
 Preview tabs have no frame history/loading indicator, and reload remounts their content.

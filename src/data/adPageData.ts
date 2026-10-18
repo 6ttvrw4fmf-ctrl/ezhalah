@@ -85,6 +85,31 @@ const TYPE_PLURAL_AR: Record<string, string> = {
 export const typePluralAr = (typeAr: string): string => TYPE_PLURAL_AR[typeAr.trim()] ?? typeAr.trim();
 export const typeWordAr = (n: number, typeAr: string): string => (n >= 3 && n <= 10 ? typePluralAr(typeAr) : typeAr.trim());
 
+// THE DISTRICT BORDER (owner 2026-10-17: «use the same Google map and … show the entire district
+// exactly, all around the boundaries», then, shown both, «I like the one with the boundaries»). When the
+// source published NO pin for an ad (both coordinates missing), the ad page asks the SAME free Google
+// embed for the district by NAME — «حي X، City» — and Google itself fits the view to the district and
+// draws its own dashed border around it. Free (the keyless embed, or the Embed API place mode with the
+// owner's key — both $0, unlimited). Never a pin: Ezhalah's label reads «الموقع التقريبي» and the note
+// says the site published no exact location. Where Google holds no border for a name it still centres
+// on that district. Nothing here touches the pin path: mapPoint() is unchanged and a pin still needs
+// BOTH published coordinates.
+export type DistrictPlace = { query: string; district: string; city: string };
+/** The district to show for an ad with no pin, from the ad's own row. Pure, exported for the barrier. */
+export function districtPlace(row: AdRow | null | undefined): DistrictPlace | null {
+  const district = String(row?.district_ar ?? '').trim(), city = String(row?.city_ar ?? '').trim();
+  if (!district || !city || district === 'غير معروف' || city === 'غير معروف') return null;
+  const named = /^حي\s/.test(district) ? district : `حي ${district}`;
+  return { query: `${named}، ${city}`, district: named, city };
+}
+export const districtEmbedUrl = (d: DistrictPlace, hl: string = 'ar'): string => {
+  const key = process.env.EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY;
+  const q = encodeURIComponent(d.query);
+  return key
+    ? `https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(key)}&q=${q}&maptype=satellite&language=${hl}`
+    : `https://maps.google.com/maps?q=${q}&t=h&hl=${hl}&output=embed`;
+};
+
 export type AdPage = { geo: GeoPoint | null; row: AdRow | null };
 const EMPTY_PAGE: AdPage = { geo: null, row: null };
 const pageCache = new Map<string, Promise<AdPage>>();
