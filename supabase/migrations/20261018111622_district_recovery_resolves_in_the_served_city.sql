@@ -133,7 +133,7 @@ begin
   elsif v_open is null then
     r := public.mon_raise('P1', 'source_district_dropped', 'location_pipeline', 'source_district_dropped',
       jsonb_build_object('dropped', v_dropped, 'per_platform', v_table, 'for', '🔧',
-        'why', 'The source field names an Arabic district for these live ads and OUR index serves none (older than the 3 h pipeline grace). SOURCE IS TRUTH: district_recovery_value() carries the source word when the catalog has no match, resolved in the served city (20261018081657 → 20261018111500). Check refresh_district_recovery() ran (cron 45/17) and the sync wrote; never fix by hand-NULLing the source. Blank sources: district_blank_unexplained (#7485).'));
+        'why', 'The source field names an Arabic district for these live ads and OUR index serves none (older than the 3 h pipeline grace). SOURCE IS TRUTH: district_recovery_value() carries the source word when the catalog has no match, resolved in the served city (20261018081657 → 20261018111622). Check refresh_district_recovery() ran (cron 45/17) and the sync wrote; never fix by hand-NULLing the source. Blank sources: district_blank_unexplained (#7485).'));
   end if;
   return r;
 end $function$;
