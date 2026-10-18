@@ -517,6 +517,12 @@ def crawl(files: int, skip_hours: int, limit: int = 0, today: Any = None, only: 
                 unresolved[f"{facts.get('city_raw_ar')} / {facts['district_raw_ar']}"] += 1
         if row.get("additional_info", {}).get("latitude") is not None:
             c["with_pin"] += 1
+        # The crawl just read this post's OWN page. When the liveness oracle's own reader says that same
+        # body is live and the page names this post, record it (no new request). 2026-10-18: the catch-up
+        # stored 3,800 posts from their own pages and 4,074 of 4,478 active rows read «never checked».
+        if _signal(st, h, False) == "live" and pid in h:
+            db.mark_direct_alive(row, oracle="haraj.post_page.own_read")
+            c["stamped_live"] += 1
         (com if cat == "commercial" else res).append(row)
     c["stored"] = len(res) + len(com)
     return res, com, c, unresolved, meta
