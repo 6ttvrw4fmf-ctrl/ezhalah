@@ -167,3 +167,6 @@ None.
 - مكتب سدين للعقارات — sadin.com.sa — Registry status: down at its own end; no verifiable logo asset was exposed.
 - النخبة العقارية — alnokhba-services.com — Registry status: retired; no live site/logo available.
 - منصة توور — toor.ooo — Registry status: retired; excluded from the active-logo pack.
+
+- `haraj.png` — Haraj official header wordmark, `https://haraj.com.sa/`, observed 2026-10-18 UTC. Rasterized its `svg[data-testid="logo-image"]` at 2×, resolving the source's `fill-white` CSS. No redrawing or background removal. The UI uses theme-aware ink on a transparent background, as requested by the owner.
+- Maskan United and The Address retain their existing original assets. Their white-only artwork uses theme-aware ink with no background panel, as requested by the owner.

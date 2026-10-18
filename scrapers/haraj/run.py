@@ -171,7 +171,7 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
         return None, "", "licence_expired", facts
     if not p["deal"]:
         return None, "", "deal_unstated", facts
-    if is_catalogue_title(ld.get("name")):
+    if is_catalogue_title(ld.get("name")) or X.body_offers_several_units(ld.get("description")):
         return None, "", "catalogue", facts
     usage = usage_of(p["usage_raw"])
     ptype = type_of(p["property_type_ar"], usage, ld.get("name"))
@@ -540,6 +540,8 @@ def _signal(status, body, moved):
     if classify(ld.get("name"), P.strip_person_lines(desc))[0] in ("request", "other"):
         return "gone"
     if is_catalogue_title(ld.get("name")):    # several units in one post was never one listing (2026-10-17)
+        return "gone"
+    if X.body_offers_several_units(desc):     # the same, offered in the body (backlog 615, 2026-10-18)
         return "gone"
     return "live"
 
