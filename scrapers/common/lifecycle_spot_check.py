@@ -156,7 +156,19 @@ def open_ad(url: str, dead_marker) -> str:
     # The deletion tier's own transport: it keeps the real status (a 404 vs a block) and reaches
     # wasalt only through the browser (WASALT_BROWSER), which curl_cffi can no longer do.
     status, body = _probe(url)
+    _LAST_READ[url] = f"HTTP {status if status is not None else 'none (network error)'}, {len(body or '')} bytes"
     return classify_response(status, body or "", dead_marker=dead_marker)
+
+
+# What open_ad last saw per URL, so a control that did not read live says WHY (2026-10-18: almuteb and
+# senan read «controls 0/5» four nights running with nothing to say what their pages answered).
+_LAST_READ: dict[str, str] = {}
+
+
+def control_misses(ctl: list[dict], verdicts: list[str]) -> list[str]:
+    """One line per control that did not read live: its URL and what its own page answered."""
+    return [f"{r.get('listing_url')}: {v}" + (f" ({_LAST_READ[r['listing_url']]})" if r.get("listing_url") in _LAST_READ else "")
+            for r, v in zip(ctl, verdicts) if v != ALIVE][:5]
 
 
 def _ashab_session():
@@ -298,8 +310,10 @@ def main() -> int:
     # environment (a block, a proxy failure) is lying and the run is void.
     ctl = pick_controls(client, tables, rng)
     method, read = pick_reader(a.platform, dead_marker, ctl[0] if ctl else None)
-    ctl_alive = sum(read(r) == ALIVE for r in ctl)
-    canary = {"probed": len(ctl), "alive": ctl_alive, "ok": canary_environment_ok(ctl_alive, len(ctl))}
+    ctl_verdicts = [read(r) for r in ctl]
+    ctl_alive = sum(v == ALIVE for v in ctl_verdicts)
+    canary = {"probed": len(ctl), "alive": ctl_alive, "ok": canary_environment_ok(ctl_alive, len(ctl)),
+              "misses": control_misses(ctl, ctl_verdicts)}
 
     since = (datetime.now(timezone.utc) - timedelta(days=a.hidden_days)).isoformat()
     results = []

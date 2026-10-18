@@ -278,6 +278,23 @@ def test_liveness_controls_are_fresh_posts_that_read_live_and_fail_closed(monkey
     assert R.liveness_controls(5) == []
 
 
+def test_liveness_controls_walk_back_past_a_quiet_hour(monkeypatch):
+    """2026-10-18 07:48 UTC: the newest complete hour held 3 licensed posts, all live, and the run
+    quarantined 3,600 ads on «controls 3/3 live». A thin hour walks back; a block still fails closed."""
+    files = {"h1": ["10", "11", "12"], "h2": ["20", "21"], "h3": ["30", "31", "32"], "filling": ["99"]}
+    monkeypatch.setattr(R, "hour_files", lambda: ["h1", "h2", "h3", "filling"])
+    seen = []
+    monkeypatch.setattr(R, "ids_in", lambda u, pre, tight=False: (seen.append(u) or files[u]))
+    monkeypatch.setattr(R, "_verify_gone", lambda ad: ("live", ""))
+    got = R.liveness_controls(5)
+    assert seen == ["h3", "h2"]                                    # newest complete first, never "filling"
+    assert [r["ad_number"] for r in got] == ["HRJ30", "HRJ31", "HRJ32", "HRJ20", "HRJ21"]
+    # the read budget still binds across hours, and a block still yields fewer than n
+    monkeypatch.setattr(R, "_verify_gone", lambda ad: ("unknown", "challenge"))
+    seen.clear()
+    assert R.liveness_controls(5, max_reads=4) == [] and seen == ["h3", "h2"]
+
+
 # ── several units in one licensed post = a catalogue (owner real-user check 2026-10-17) ─────────────
 @pytest.mark.parametrize("title,cat", [
     ("شقق تمليك فاخرة للسكن والا ستثمار ابحر الشمالية 3و4و 5غرف", True),   # HRJ11190739649, 1,161 m²
@@ -328,3 +345,19 @@ def test_body_catalogue_is_never_stored_and_reads_gone():
     one = ('<script type="application/ld+json">'
            + json.dumps(ld("شاليه للبيع - الطايف", BODY_ONE_UNIT_TWICE), ensure_ascii=False) + "</script>")
     assert R._signal(200, one, False) == "live"
+
+
+# ── the crawl's own-page read is a liveness reading (2026-10-18) ─────────────────────────────────
+def test_crawl_stamps_live_only_when_the_oracles_reader_says_live_on_this_post(monkeypatch):
+    """4,074 of 4,478 active haraj rows read «never checked» after the catch-up stored them from their
+    own pages. The crawl now records that read through the oracle's OWN reader (_signal), and only for
+    a page that names this post; a gone/request page is never stored, so never stamped."""
+    live = '<script type="application/ld+json">' + json.dumps(ld("x", FLAT_AR), ensure_ascii=False) + "</script>"
+    pages = {"11190690713": live + R.TAG,                       # live, names itself (ld url)
+             "11190690999": live + R.TAG}                       # live body, but about another post
+    monkeypatch.setattr(R, "read_post", lambda pid: (200, pages[pid]))
+    monkeypatch.setattr(R, "map_post", lambda pid, *a, **k: (
+        {"ad_number": f"{R.PREFIX}{pid}", "additional_info": {}}, "residential", "", {"district_resolved": True}))
+    res, _, c, _, _ = R.crawl(0, 0, only=list(pages), meta={"files": ["--ids"], "prefiltered": {}})
+    marked = {r["ad_number"]: R.db._DIRECT_ALIVE_KEY in r for r in res}
+    assert marked == {"HRJ11190690713": True, "HRJ11190690999": False} and c["stamped_live"] == 1
