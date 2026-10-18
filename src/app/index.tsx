@@ -2238,7 +2238,7 @@ export default function Home() {
             </Pressable>
             <Image source={require('../../assets/images/eagle-mark.png')} style={s.sharedEagle} resizeMode="contain" accessibilityIgnoresInvertColors />
             <Text style={[s.sharedTitle, { writingDirection: isRTL ? 'rtl' : 'ltr' }]}>
-              {shareLandingTitle(sharedSearch.name, locale === 'en' ? 'en' : 'ar')}
+              {shareLandingTitle(sharedSearch.name, sharedSearch.q, locale === 'en' ? 'en' : 'ar')}
             </Text>
             <Pressable onPress={onSharedTap} style={({ pressed }) => [s.sharedButton, pressed && { opacity: 0.9 }]} accessibilityRole="button">
               <Text style={s.sharedButtonText}>{SHARE_COPY[locale === 'en' ? 'en' : 'ar'].button}</Text>

@@ -11,7 +11,7 @@
 //   5. no name → no message (never a line with a blank name).
 import {
   encodeSharePayload, decodeSharePayload, shareLink, shareMessage, shareLandingTitle, SHARE_COPY, SHARE_PARAM,
-  shareLandingPath, shareCardHtml, SHARE_CARD,
+  shareLandingPath, shareCardHtml, SHARE_CARD, shareTitle,
 } from '../src/lib/shareSearch.ts';
 
 let failed = 0;
@@ -68,8 +68,8 @@ mustCatch('a link that deep-links straight into /agent?filter= (it would bypass 
 const fullPayload = encodeSharePayload(Q, 'يوسف', 'ar')!;
 const html = shareCardHtml('https://new-domain.example', fullPayload);
 const meta = (prop: string) => new RegExp(`<meta (?:property|name)="${prop}" content="([^"]*)"`).exec(html)?.[1] ?? null;
-check('the card title is the approved personal line with the sender\'s name and إزهله',
-  meta('og:title') === 'عقارات من يوسف لك على إزهله' && meta('og:description') === SHARE_CARD.ar.desc);
+check('the card title names the type, the place, the sender and إزهله; the line is Ezhalah\'s promise',
+  meta('og:title') === 'شقق للإيجار في حي النرجس من يوسف على إزهله' && meta('og:description') === 'كل مواقع العقار في مكان واحد · اضغط وشوف');
 check('every card URL follows the REQUEST\'S domain (a domain change needs no code change)',
   meta('og:image') === 'https://new-domain.example/og-image-v5.png' && meta('og:url') === `https://new-domain.example/s/${fullPayload}`
   && !/vercel\.app/.test(html));
@@ -77,7 +77,7 @@ check('the page sends a person to Home + ?share= (never /agent)',
   html.includes(`content="0;url=/?share=${fullPayload}"`) && html.includes(`location.replace("/?share=${fullPayload}")`) && !/\/agent/.test(html));
 const enHtml = shareCardHtml('https://x.example', encodeSharePayload(Q, 'Yusuf', 'en')!);
 check('an English sender gets the English card, brand kept as "Ezhalah"',
-  /<meta property="og:title" content="Properties from Yusuf, just for you on Ezhalah"/.test(enHtml) && /lang="en"/.test(enHtml));
+  /<meta property="og:title" content="Apartments for rent from Yusuf on Ezhalah"/.test(enHtml) && /lang="en"/.test(enHtml));
 const evil = shareCardHtml('https://x.example', enc({ v: 1, n: '<script>alert(1)</script>', l: 'ar', q: Q }));
 check('a hostile name is escaped, never injected into the page', !evil.includes('<script>alert') && evil.includes('&lt;script&gt;'));
 mustCatch('a card builder that does not escape the name', (() => {
@@ -87,21 +87,37 @@ mustCatch('a card builder that does not escape the name', (() => {
 const junk = shareCardHtml('https://x.example', 'not-a-payload');
 check('a broken link still gets a clean Ezhalah card and goes Home', /og:title" content="إزهله"/.test(junk) && junk.includes('content="0;url=/"'));
 
-// ── 4. approved wording ─────────────────────────────────────────────────────────────────────────
-check('Arabic message is the approved option C', shareMessage('يوسف', 'ar') === 'عقارات من يوسف لك على إزهله. اضغط الرابط وشوف 👇');
-check('Arabic landing title + button are the approved option C',
-  shareLandingTitle('يوسف', 'ar') === 'عقارات من يوسف لك على إزهله' && SHARE_COPY.ar.button === 'اضغط وشوف العقارات');
-check('English keeps "Ezhalah" (brand never translated)',
-  shareMessage('Yusuf', 'en') === 'Properties from Yusuf, just for you on Ezhalah. Tap to see 👇'
-  && /Ezhalah/.test(SHARE_COPY.en.title));
-const allCopy = JSON.stringify(SHARE_COPY);
+// ── 4. the approved title: «{type} {deal} في {place} من {name} على إزهله» (owner 2026-10-17) ─────────
+const T = (q: any, loc: 'ar' | 'en' = 'ar') => shareTitle(loc === 'ar' ? 'يوسف' : 'Yusuf', q, loc);
+check('district: «شقق للإيجار في حي النرجس من يوسف على إزهله»', T(Q) === 'شقق للإيجار في حي النرجس من يوسف على إزهله');
+check('two districts read «النرجس والياسمين»',
+  T({ ...Q, districtLabel: undefined, districts: ['حي النرجس', 'حي الياسمين'] }) === 'شقق للإيجار في النرجس والياسمين من يوسف على إزهله');
+check('three districts are all named',
+  T({ ...Q, districtLabel: undefined, districts: ['النرجس', 'الياسمين', 'الملقا'] }) === 'شقق للإيجار في النرجس والياسمين والملقا من يوسف على إزهله');
+check('four or more stay short: «النرجس و3 أحياء ثانية»',
+  T({ ...Q, districtLabel: undefined, districts: ['النرجس', 'الياسمين', 'الملقا', 'حطين'] }) === 'شقق للإيجار في النرجس و3 أحياء ثانية من يوسف على إزهله');
+check('city only: «فلل للبيع في جدة …»',
+  T({ deal: 'Buy', location: 'جدة', type: 'Villa' }) === 'فلل للبيع في جدة من يوسف على إزهله');
+check('no type, no place: «عقارات من يوسف على إزهله»', T({ deal: 'Rent', location: '' }) === 'عقارات من يوسف على إزهله');
+check('a place in the other script is left out, never mixed into the sentence',
+  T({ deal: 'Rent', location: 'Riyadh', type: 'Apartment' }) === 'شقق للإيجار من يوسف على إزهله'
+  && T({ deal: 'Rent', location: 'Riyadh', type: 'Apartment' }, 'en') === 'Apartments for rent in Riyadh from Yusuf on Ezhalah');
+check('the message is the title + 👇 (short — the card holds the rest)', shareMessage('يوسف', Q, 'ar') === 'شقق للإيجار في حي النرجس من يوسف على إزهله 👇');
+check('the landing title is the same title; the button is «اضغط وشوف العقارات»',
+  shareLandingTitle('يوسف', Q, 'ar') === T(Q) && SHARE_COPY.ar.button === 'اضغط وشوف العقارات');
+mustCatch('a title that forgets the place', (() => {
+  const noPlace = (q: any) => shareTitle('يوسف', { ...q, districtLabel: undefined, districts: [], location: '' }, 'ar');
+  return noPlace(Q) !== T(Q);
+})());
+const allCopy = JSON.stringify(SHARE_COPY) + JSON.stringify(SHARE_CARD) + T(Q) + T(Q, 'en');
 check('the wording never says "sign in / log in" (owner: «don\'t say log in»)', !/sign ?in|log ?in|سجل|تسجيل|دخولك/i.test(allCopy));
 check('the wording never uses the forbidden word «حيك»', !allCopy.includes('حيك'));
-check('every Arabic line names إزهله', [SHARE_COPY.ar.message, SHARE_COPY.ar.title].every((s) => s.includes('إزهله')));
+check('no eagle emoji anywhere — the Ezhalah logo is enough (owner 2026-10-17)', !allCopy.includes('🦅'));
+check('the Arabic title names إزهله and the English keeps "Ezhalah"', T(Q).includes('إزهله') && /Ezhalah/.test(T(Q, 'en') ?? ''));
 
 // ── 5. no name → nothing ────────────────────────────────────────────────────────────────────────
 check('no sender name → no message, no title, no payload (never a blank-name line)',
-  shareMessage('  ', 'ar') === null && shareLandingTitle('', 'en') === null && encodeSharePayload(Q, ' ') === null);
+  shareMessage('  ', Q, 'ar') === null && shareLandingTitle('', Q, 'en') === null && encodeSharePayload(Q, ' ') === null);
 
 console.log(`\nexample link: ${link.slice(0, 90)}…`);
 if (failed) { console.error(`\n❌ verify-share-search-link: ${failed} check(s) failed.`); process.exit(1); }

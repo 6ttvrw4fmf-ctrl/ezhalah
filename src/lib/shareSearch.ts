@@ -18,29 +18,22 @@ export const SHARE_PAYLOAD_VERSION = 1;
 
 /** The approved lines (owner 2026-10-17, option C). {name} is the sender's first name. */
 export const SHARE_COPY = {
-  ar: {
-    message: 'عقارات من {name} لك على إزهله. اضغط الرابط وشوف 👇',
-    title: 'عقارات من {name} لك على إزهله',
-    button: 'اضغط وشوف العقارات',
-  },
-  en: {
-    message: 'Properties from {name}, just for you on Ezhalah. Tap to see 👇',
-    title: 'Properties from {name}, just for you on Ezhalah',
-    button: 'Tap to see the properties',
-  },
+  // The title itself is built by shareTitle() (type + place + name + brand); this holds the fixed button.
+  ar: { button: 'اضغط وشوف العقارات' },
+  en: { button: 'Tap to see the properties' },
 } as const;
 
 const firstName = (name: string): string => (name ?? '').trim().split(/\s+/)[0] ?? '';
-const fill = (tpl: string, name: string) => tpl.replace('{name}', name);
 
 /** The text sent next to the link, or null when there is no name to say it with. */
-export function shareMessage(name: string, locale: 'ar' | 'en'): string | null {
-  const n = firstName(name);
-  return n ? fill(SHARE_COPY[locale].message, n) : null;
+/** The text sent next to the link: the personal title + 👇 (owner 2026-10-17: short; the card holds the rest). */
+export function shareMessage(name: string, q: SearchQuery | null | undefined, locale: 'ar' | 'en'): string | null {
+  const t = shareTitle(name, q, locale);
+  return t ? `${t} 👇` : null;
 }
-export function shareLandingTitle(name: string, locale: 'ar' | 'en'): string | null {
-  const n = firstName(name);
-  return n ? fill(SHARE_COPY[locale].title, n) : null;
+/** The title on the landing card — the same personal title. */
+export function shareLandingTitle(name: string, q: SearchQuery | null | undefined, locale: 'ar' | 'en'): string | null {
+  return shareTitle(name, q, locale);
 }
 
 // UTF-8 safe base64url (Arabic names and place names survive the round trip; no '+', '/', '=').
@@ -95,13 +88,62 @@ export function shareLandingPath(payload: string): string {
   return `/?${SHARE_PARAM}=${payload}`;
 }
 
+// THE PERSONAL TITLE (owner 2026-10-17: «real estate in this [place] from Yusuf on Ezhalah», then the
+// 9.5 refinement — the TYPE and rent/sale when known). One title is used everywhere: the message, the
+// WhatsApp card and the landing card. Examples:
+//   «شقق للإيجار في حي النرجس من يوسف على إزهله»
+//   «شقق للإيجار في النرجس والياسمين من يوسف على إزهله»
+//   «شقق للإيجار في النرجس و3 أحياء ثانية من يوسف على إزهله»   (4+ districts stay short)
+//   «فلل للبيع في جدة من يوسف على إزهله»   ·   «عقارات من يوسف على إزهله»   (nothing specific)
+// A place written in the other script is left out rather than mixed into the sentence.
+const TYPE_PLURAL: Record<string, { ar: string; en: string }> = {
+  Apartment: { ar: 'شقق', en: 'Apartments' }, Villa: { ar: 'فلل', en: 'Villas' }, Floor: { ar: 'أدوار', en: 'Floors' },
+  Duplex: { ar: 'دوبلكسات', en: 'Duplexes' }, Studio: { ar: 'استوديوهات', en: 'Studios' }, Room: { ar: 'غرف', en: 'Rooms' },
+  Chalet: { ar: 'شاليهات', en: 'Chalets' }, 'Rest House': { ar: 'استراحات', en: 'Rest houses' }, Palace: { ar: 'قصور', en: 'Palaces' },
+  'Residential Land': { ar: 'أراضي سكنية', en: 'Residential land' }, 'Residential Plots': { ar: 'أراضي سكنية', en: 'Residential plots' },
+  'Raw Land': { ar: 'أراضي خام', en: 'Raw land' }, 'Agriculture Plot': { ar: 'أراضي زراعية', en: 'Farm land' },
+  'Commercial Land': { ar: 'أراضي تجارية', en: 'Commercial land' }, 'Industrial Land': { ar: 'أراضي صناعية', en: 'Industrial land' },
+  'Commercial Building': { ar: 'عمائر تجارية', en: 'Commercial buildings' },
+};
+const AR_SCRIPT = /[؀-ۿ]/;
+const LATIN = /[A-Za-z]/;
+const stripDistrict = (s: string) => s.trim().replace(/^حي\s+/, '').replace(/\s+district$/i, '');
+
+export function shareTitle(name: string, q: SearchQuery | null | undefined, locale: 'ar' | 'en'): string | null {
+  const n = firstName(name);
+  if (!n) return null;
+  const ar = locale === 'ar';
+  const fits = (s: string) => !!s && (ar ? !LATIN.test(s) : !AR_SCRIPT.test(s));
+  // WHAT: one picked type in plural, else «عقارات»; plus rent/sale when known.
+  const types = (q as (SearchQuery & { types?: string[] | null }) | null | undefined)?.types ?? null;
+  const oneType = q?.type ?? (types && types.length === 1 ? types[0] : null);
+  const plural = oneType ? TYPE_PLURAL[oneType]?.[locale] : undefined;
+  const deal = q?.deal === 'Rent' ? (ar ? 'للإيجار' : 'for rent') : q?.deal === 'Buy' ? (ar ? 'للبيع' : 'for sale') : '';
+  const what = plural ? [plural, deal].filter(Boolean).join(' ') : (ar ? 'عقارات' : 'Properties');
+  // WHERE: the picked district(s), else the city / region the search names.
+  const label = q?.districtLabel?.trim();
+  const ds = label ? [label] : (q?.districts ?? []).map((d) => String(d).trim()).filter(Boolean);
+  let where = '';
+  if (ds.length && ds.every(fits)) {
+    const names = ds.map(stripDistrict);
+    if (names.length === 1) where = ar ? `حي ${names[0]}` : names[0];
+    else if (names.length <= 3) where = ar ? names.join(' و') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    else where = ar ? `${names[0]} و${names.length - 1} أحياء ثانية` : `${names[0]} + ${names.length - 1} more districts`;
+  } else {
+    const city = (q?.location ?? '').split(/[,،]/)[0].trim();
+    if (fits(city)) where = city;
+  }
+  const place = where ? (ar ? ` في ${where}` : ` in ${where}`) : '';
+  return ar ? `${what}${place} من ${n} على إزهله` : `${what}${place} from ${n} on Ezhalah`;
+}
+
 // THE WHATSAPP PREVIEW CARD (owner 2026-10-17: «like this, simple, short» — a bold title with the
 // sender's name, one short line, the site, the link). WhatsApp/iMessage/X build that card from these
 // Open Graph tags, read from the page the link points to — so /s/<payload> answers with them. Every
 // URL is built from the REQUEST'S OWN origin, so a domain change needs no code change.
 export const SHARE_CARD = {
-  ar: { title: 'عقارات من {name} لك على إزهله', desc: 'كل مواقع العقار في السعودية في مكان واحد. اضغط وشوف.', site: 'إزهله' },
-  en: { title: 'Properties from {name}, just for you on Ezhalah', desc: 'Every Saudi real-estate site in one place. Tap to see.', site: 'Ezhalah' },
+  ar: { desc: 'كل مواقع العقار في مكان واحد · اضغط وشوف', site: 'إزهله' },
+  en: { desc: 'Every real-estate site in one place · Tap to see', site: 'Ezhalah' },
 } as const;
 export const SHARE_CARD_IMAGE_PATH = '/og-image-v5.png';
 
@@ -116,7 +158,7 @@ export function shareCardHtml(origin: string, rawPayload: string | null | undefi
   const d = decodeSharePayload(rawPayload);
   const loc = d?.locale ?? 'ar';
   const c = SHARE_CARD[loc];
-  const title = d ? fill(c.title, d.name) : (loc === 'ar' ? 'إزهله' : 'Ezhalah');
+  const title = (d && shareTitle(d.name, d.q, loc)) || (loc === 'ar' ? 'إزهله' : 'Ezhalah');
   const to = d && rawPayload ? shareLandingPath(rawPayload) : '/';
   const url = `${o}${d && rawPayload ? `/s/${rawPayload}` : '/'}`;
   const image = `${o}${SHARE_CARD_IMAGE_PATH}`;
