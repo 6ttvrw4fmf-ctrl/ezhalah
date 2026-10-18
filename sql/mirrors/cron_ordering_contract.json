@@ -19,10 +19,10 @@
     "PART 6) — never weaken a barrier to make it green."
   ],
   "_semantics": "gap = downstream_minute - upstream_minute, PLAIN subtraction, not modulo 60 — copied from the live detector on purpose. A consumer must trail its producer WITHIN the hour; one that runs first reads an input up to a full cycle stale. See scripts/lib/cronOrdering.ts.",
-  "_mirrored_through_migration": "20261013134139",
+  "_mirrored_through_migration": "20261018120750",
   "_mirrored_through_migration_why": "The NEWEST migration version in supabase/migrations/ whose SQL mentions ops_cron_ordering_contract. scripts/verify-cron-ordering-contract.ts recomputes this from the tree and fails if it does not match, so a migration that changes the contract without updating this file goes RED on its own PR. That is AGENTS.md's apply-and-mirror rule enforced from the diff alone — no secret, no network, and no SQL parsing. If you add such a migration, re-read production, update the rows/schedules above, and set this to the new version.",
-  "_measured_at": "2026-10-13",
-  "_measured_by": "🔧 Quality & Repair, via Supabase MCP against project aannarbkwcymrotzwdbo: select * from ops_cron_ordering_contract; select jobid, jobname, schedule, command from cron.job (jobid 28 has been at :22 since 20260918171507; the 2026-09-12 reading of :36 was stale).",
+  "_measured_at": "2026-10-18",
+  "_measured_by": "🔧 Quality & Repair, via Supabase MCP against project aannarbkwcymrotzwdbo: select * from ops_cron_ordering_contract; select jobid, jobname, schedule, command from cron.job (jobid 28 has been at :22 since 20260918171507; the 2026-09-12 reading of :36 was stale). [2026-10-18] re-read after 20261018120750 via Supabase MCP: select * from ops_cron_ordering_contract; jobid 180 refresh-district-list-after-sync at 33 * * * *.",
   "contract": [
     {
       "upstream_job": "sync-search-listings-ar",
@@ -42,24 +42,33 @@
       "downstream_job": "sync-search-listings-ar",
       "min_gap_minutes": 2,
       "why": "sync_search_listings_ar() reads loc_display_district_canon, the ONE canonical user-visible district rendering per (city_id, normalised district) required by SEARCH_MATCH_QA_ENGINEER.md §42.1; jobid 109 rebuilds it. Floor 2 min: jobid 109 max runtime 6.9s over 125 runs in 7 days."
+    },
+    {
+      "upstream_job": "sync-search-listings-ar",
+      "downstream_job": "refresh-district-list-after-sync",
+      "min_gap_minutes": 9,
+      "why": "refresh_loc_canonical_district() adds every district word the sync served (source live) to the Filter district list. Run before the sync finishes, it misses the words that sync carried in and the customer cannot pick a district the cards show until the next rebuild (2026-10-18: «العنبرية», المدينة المنورة, 41 ads). Floor 9 min = the sync's measured max runtime 8.1 min, as in contract 1."
     }
   ],
   "schedules": {
     "refresh-district-display-canon": "8 * * * *",
     "refresh_listing_native_location_v1": "20 * * * *",
     "sync-search-listings-ar": "22 * * * *",
-    "resolve-english-city-overlay": "50 * * * *"
+    "resolve-english-city-overlay": "50 * * * *",
+    "refresh-district-list-after-sync": "33 * * * *"
   },
   "_jobids": {
     "refresh-district-display-canon": 109,
     "refresh_listing_native_location_v1": 17,
     "sync-search-listings-ar": 28,
-    "resolve-english-city-overlay": 35
+    "resolve-english-city-overlay": 35,
+    "refresh-district-list-after-sync": 180
   },
   "_gaps_as_measured": [
     "refresh-district-display-canon :08 -> sync-search-listings-ar :22 = 14 min (floor 2)",
     "refresh_listing_native_location_v1 :20 -> sync-search-listings-ar :22 = 2 min (floor 7) — satisfied by the advisory lock location_pipeline:v1_refresh, not by the clock",
-    "sync-search-listings-ar :22 -> resolve-english-city-overlay :50 = 28 min (floor 9)"
+    "sync-search-listings-ar :22 -> resolve-english-city-overlay :50 = 28 min (floor 9)",
+    "sync-search-listings-ar :22 -> refresh-district-list-after-sync :33 = 11 min (floor 9)"
   ],
   "lock_dependencies": [
     {
