@@ -75,9 +75,24 @@ def _type_of_word(w: str) -> Optional[str]:
     return None
 
 
+_OFFER_UNIT = re.compile(r"(?:للبيع|للايجار|للاجار|للتاجير)\s+(?:ال)?("
+                         + "|".join(p for p, _ in _SINGULAR) + r")" + _E)
+
+
+def body_offers_several_units(body: Optional[str]) -> bool:
+    """The body offers two or more DIFFERENT units («للبيع شاليه … للبيع استراحة بالطائف …», HRJ11190705938,
+    backlog 615): a catalogue, whatever the title says. The same unit offered twice («للبيع استراحة … للبيع
+    استراحة مميزة», HRJ11190717503) is one unit. Tuned on the 10-17 stored window (1 of 1,156 moves), gated on
+    the untouched 10-18 window (0 of 1,249 move; commercial 0 of 154)."""
+    types = {_type_of_word(m.group(1)) for m in _OFFER_UNIT.finditer(norm(body))}
+    return len(types - {None}) >= 2
+
+
 def type_of(title: str, body: str) -> tuple[Optional[str], str]:
     """(our type or None, reason). The first unit word of the TITLE (else the body's first) decides; a plural
     first word is a catalogue; a second, different unit word not introduced by «في/ب/داخل…» is ambiguous."""
+    if body_offers_several_units(body):
+        return None, "catalogue:body"
     for txt in (norm(title), norm(body)):
         hits = list(_TYPE_RE.finditer(txt))
         if not hits:
