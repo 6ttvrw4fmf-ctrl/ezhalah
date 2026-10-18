@@ -507,13 +507,16 @@ const liftDistrict = async (file: string): Promise<DistrictFns> => (await liftSy
 ], ['districtPlace', 'districtEmbedUrl'])) as unknown as DistrictFns;
 const districtProblems = (f: DistrictFns): string[] => {
   const out: string[] = [];
-  const sah = f.districtPlace({ district_ar: 'حي الساحل', city_ar: 'جدة' });
+  const sah = f.districtPlace({ platform: 'aqar', district_ar: 'حي الساحل', city_ar: 'جدة' });
   if (sah?.query !== 'حي الساحل، جدة') out.push(`a «حي …» district is named as is, got ${sah?.query}`);
-  const bare = f.districtPlace({ district_ar: 'النرجس', city_ar: 'الرياض' });
+  const bare = f.districtPlace({ platform: 'aqar', district_ar: 'النرجس', city_ar: 'الرياض' });
   if (bare?.query !== 'حي النرجس، الرياض') out.push(`a bare district name gets «حي », got ${bare?.query}`);
-  if (f.districtPlace({ district_ar: '', city_ar: 'جدة' }) !== null) out.push('no district → no district map');
-  if (f.districtPlace({ district_ar: 'حي الساحل', city_ar: '' }) !== null) out.push('no city → no district map (a name alone can land in the wrong city)');
-  if (f.districtPlace({ district_ar: 'غير معروف', city_ar: 'جدة' }) !== null) out.push('«غير معروف» is not a district');
+  if (f.districtPlace({ platform: 'aqar', district_ar: '', city_ar: 'جدة' }) !== null) out.push('no district → no district map');
+  if (f.districtPlace({ platform: 'aqar', district_ar: 'حي الساحل', city_ar: '' }) !== null) out.push('no city → no district map (a name alone can land in the wrong city)');
+  if (f.districtPlace({ platform: 'aqar', district_ar: 'غير معروف', city_ar: 'جدة' }) !== null) out.push('«غير معروف» is not a district');
+  // Aqar only for now (owner 2026-10-17: «just do aqar now»).
+  if (f.districtPlace({ platform: 'wasalt', district_ar: 'حي الساحل', city_ar: 'جدة' }) !== null) out.push('only Aqar gets the district map for now (wasalt must not)');
+  if (f.districtPlace({ platform: 'aqarmonthly', district_ar: 'حي الساحل', city_ar: 'جدة' }) !== null) out.push('Aqar Monthly is not Aqar');
   const prev = process.env.EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY;
   try {
     delete process.env.EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY;
@@ -538,6 +541,7 @@ const mustCatchDistrict = async (what: string, from: string, to: string) => {
   console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
 };
 await mustCatchDistrict('a district map from the district name alone (no city)', "if (!district || !city || district === 'غير معروف' || city === 'غير معروف') return null;", "if (!district || district === 'غير معروف') return null;");
+await mustCatchDistrict('the district map spreading past Aqar', "if (String(row?.platform ?? '').trim().toLowerCase() !== 'aqar') return null;", '');
 await mustCatchDistrict('the district embed losing the name', '`https://maps.google.com/maps?q=${q}&t=h&hl=${hl}&output=embed`', '`https://maps.google.com/maps?t=h&hl=${hl}&output=embed`');
 const districtWired = (dataSrc: string, previewSrc: string) =>
   /if \(!pin\) setArea\(districtPlace\(row\)\);/.test(previewSrc)                     // only when the source published no pin

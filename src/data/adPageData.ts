@@ -97,6 +97,8 @@ export const typeWordAr = (n: number, typeAr: string): string => (n >= 3 && n <=
 export type DistrictPlace = { query: string; district: string; city: string };
 /** The district to show for an ad with no pin, from the ad's own row. Pure, exported for the barrier. */
 export function districtPlace(row: AdRow | null | undefined): DistrictPlace | null {
+  // Aqar only for now (owner 2026-10-17: «just do aqar now»); other sites keep no map without a pin.
+  if (String(row?.platform ?? '').trim().toLowerCase() !== 'aqar') return null;
   const district = String(row?.district_ar ?? '').trim(), city = String(row?.city_ar ?? '').trim();
   if (!district || !city || district === 'غير معروف' || city === 'غير معروف') return null;
   const named = /^حي\s/.test(district) ? district : `حي ${district}`;
