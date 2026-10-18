@@ -203,7 +203,17 @@ def resolve_district_words(text: str, city_id: Optional[int]) -> tuple[Optional[
             hit = find_district_in_text(cand, city_id)
             if hit and norm_district_tok(hit) == norm_district_tok(cand):
                 return hit, cand
-    return find_district_in_text(words[0], city_id), words[0]   # the one-word read, exactly as before
+    hit = find_district_in_text(words[0], city_id)
+    if hit is None:
+        # A spelling of a catalogued district (ops_district_name_decision 'variant', 20261018073107): mapped
+        # here, never added to the catalog. «الوسيطي» / «الوسيطى» is بريدة's «حي الوسيطا» (39 ads, 10-18).
+        alt = _DISTRICT_SPELLING.get((city_id, norm_district_tok(words[0])))
+        if alt:
+            hit = find_district_in_text(alt, city_id)
+    return hit, words[0]   # the one-word read, exactly as before
+
+
+_DISTRICT_SPELLING = {(11, norm_district_tok("الوسيطي")): "حي الوسيطا"}
 
 
 def resolve_district(text: str, city_id: Optional[int]) -> Optional[str]:
