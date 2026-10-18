@@ -856,8 +856,8 @@ export default function Agent() {
   const shareScale = useRef(new Animated.Value(1)).current;
   const shareSpring = (toValue: number) =>
     Animated.spring(shareScale, { toValue, stiffness: 260, damping: 26, mass: 0.7, useNativeDriver: Platform.OS !== 'web' }).start();
-  // «مشاركة» label beside the icon — same breakpoint as the Filter screen's share pill.
-  const shareLabelled = useAtLeast(SHARE_LABEL_BREAKPOINT);
+  // Same rule as the Filter screen: «مشاركة» always shows; below this width the sign-in pill shortens.
+  const topBarRoomy = useAtLeast(SHARE_LABEL_BREAKPOINT);
   // Filter / AI ModeSwitch (owner 2026-08-16): the pill no longer lives in the top-right corner —
   // it sits CENTERED under the header, mirroring the home hero's centered pill, so switching modes
   // reads as one control staying in the middle rather than teleporting into the corner. And the
@@ -4169,14 +4169,14 @@ export default function Agent() {
         {/* Logged-out sign-in (mobile only — desktop has the docked sidebar CTA). Owner 2026-08-19. */}
         {!user && !docked && (
           <Pressable
-            style={s.topSignIn}
+            style={[s.topSignIn, !topBarRoomy && s.topSignInNarrow]}
             onPress={openAuth}
             hitSlop={6}
             // @ts-expect-error web-only DOM props on the RNW host node
             dataSet={{ ...TAP44 }}
           >
-            <Ionicons name="person-outline" size={15} color="#fff" />
-            <Text style={s.topSignInText}>{t('Sign up / Log in')}</Text>
+            {topBarRoomy ? <Ionicons name="person-outline" size={15} color="#fff" /> : null}
+            <Text style={s.topSignInText}>{t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')}</Text>
           </Pressable>
         )}
         {/* Note #5 — Share is ALWAYS visible the moment the user is in AI Agent mode. Not gated on
@@ -4190,7 +4190,8 @@ export default function Agent() {
           onPress={() => setShareOpen(true)}
           style={({ pressed, hovered }: any) => [
             s.shareIcon,
-            shareLabelled && s.shareIconWide,
+            s.shareIconWide,
+            !topBarRoomy && s.shareIconNarrow,
             hovered && s.shareIconHover,
             pressed && s.shareIconPressed,
           ]}
@@ -4202,7 +4203,7 @@ export default function Agent() {
         >
           <Animated.View style={[s.shareInner, { transform: [{ scale: shareScale }] }]}>
             <Ionicons name="share-social-outline" size={17} color={colors.primary} />
-            {shareLabelled ? <Text style={s.shareText}>{t('Share')}</Text> : null}
+            <Text style={s.shareText}>{t('Share')}</Text>
           </Animated.View>
         </Pressable>
       </View>
@@ -5417,6 +5418,9 @@ const s = StyleSheet.create({
   },
   shareIconPressed: { opacity: 0.85 },
   shareIconWide: { paddingHorizontal: 15 },
+  // Small phones (<380px): the header holds menu + name + sign-in + «مشاركة»; tighten so nothing is cut off.
+  shareIconNarrow: { paddingHorizontal: 11, marginLeft: 0 },
+  topSignInNarrow: { marginRight: 0, paddingHorizontal: 11 },
   shareIconHover: { backgroundColor: colors.tintFill, borderColor: colors.primary },
   shareInner: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   shareText: { fontSize: 13.5, fontWeight: '700', color: colors.primary, includeFontPadding: false },
