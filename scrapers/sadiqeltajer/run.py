@@ -134,11 +134,11 @@ _PER_METRE = re.compile(r"للمتر|لل?متر\s*المربع|/\s*م²|/\s*م�
 
 
 def _stated_per_metre(text: str, n: int) -> bool:
-    """The ad's own description states THIS figure per metre: SDQ5562's header prints «550 ريال», its
-    description «الحد ( 550 ريال للمتر )» (2026-10-18). The marker must follow the same figure; a per-metre
-    phrase about another number never turns this one into a rate."""
-    flat = re.sub(r"(?<=\d),(?=\d)", "", text.translate(_AR_DIGITS))
-    return re.search(rf"(?<![\d.]){n}\s*(?:ريال|ر\.س)?\s*\(?\s*(?:{_PER_METRE.pattern})", flat) is not None
+    """The ad's own text states THIS figure per metre — the shared reader (normalize.stated_per_metre): the marker
+    right after the figure (SDQ5562 «الحد ( 550 ريال للمتر )», SDQ6107 «الســــوم ( 1060 ريـــال للمتر )» with
+    tatweel) or right before it (SDQ6985 «البيع للمتر 460», SDQ7097 «السوم للمتر 700»). Read 2026-10-18 for the
+    under-the-city-floor alarm: 10 of 14 sadiqeltajer rows state their rate one of these two ways."""
+    return normalize.stated_per_metre(text, n)
 
 
 def parse_price(text: str) -> tuple[Optional[int], Optional[int]]:
