@@ -20,6 +20,9 @@ const sql = readFileSync(join(dir, file), 'utf8');
 const file2 = readdirSync(dir).filter((f) => /^\d{14}_source_district_carried_fleet_wide_null_district_is_red\.sql$/.test(f)).sort().at(-1);
 if (!file2) { console.log('FAIL  migration *_source_district_carried_fleet_wide_null_district_is_red.sql is missing'); process.exit(1); }
 const sql2 = readFileSync(join(dir, file2), 'utf8');
+const file3 = readdirSync(dir).filter((f) => /^\d{14}_district_recovery_resolves_in_the_served_city\.sql$/.test(f)).sort().at(-1);
+if (!file3) { console.log('FAIL  migration *_district_recovery_resolves_in_the_served_city.sql is missing'); process.exit(1); }
+const sql3 = readFileSync(join(dir, file3), 'utf8');
 
 // Every rule as a function of the SQL text, so the mutants below run the SAME verdict.
 function problems(s: string): string[] {
@@ -102,6 +105,29 @@ function problems2(s: string): string[] {
   return fail;
 }
 
+// Step 3 (2026-10-18): the district is resolved in the SERVED city when v1 has none; one allowlist (#7485's).
+function problems3(s: string): string[] {
+  const fail: string[] = [];
+  const fn = (name: string): string => {
+    const m = s.match(new RegExp(`create or replace function public\\.${name}\\([\\s\\S]*?\\$(?:function|\\$)\\$;`));
+    if (!m) fail.push(`function ${name} is not defined in the served-city step`);
+    return m ? m[0] : '';
+  };
+  const table = fn('refresh_district_recovery_table');
+  const served = table.match(/coalesce\(v1\.city_id, s\.city_id\)/g) || [];
+  if (served.length !== 2) fail.push(`both recovery inserts must resolve in coalesce(v1.city_id, s.city_id) — found ${served.length}`);
+  if ((table.match(/left join public\.search_listings_ar s on s\.source_table = v1\.source_table and s\.listing_id = v1\.listing_id/g) || []).length !== 2) fail.push('the served city is no longer joined from search_listings_ar in both inserts');
+  const rows = fn('source_district_dropped_rows');
+  if (!/public\.ops_district_silent_source o where o\.platform = %L and o\.source_table is null/.test(rows)) fail.push("the measurement no longer reads #7485's allowlist (ops_district_silent_source)");
+  if (/district_silent_proven/.test(rows)) fail.push('the measurement reads the retired duplicate allowlist');
+  const det = fn('mon_detect_source_district_dropped');
+  if (!/mon_raise\('P1', 'source_district_dropped'/.test(det)) fail.push('a dropped source district no longer raises P1');
+  if (/district_null_unproven/.test(det)) fail.push("the duplicate P2 limb is back (blank sources are #7485's district_blank_unexplained)");
+  if (!/drop table public\.district_silent_proven;/.test(s)) fail.push('the duplicate allowlist table is not retired');
+  if (!/'coalesce\(v1\.city_id, s\.city_id\)', 'v1\.city_id'\);[\s\S]*?if r < 200 then raise exception/.test(s)) fail.push('the apply-time proof no longer restores the v1-city-only recovery and demands ≥ 200 re-dropped rows');
+  return fail;
+}
+
 let failed = 0;
 const check = (label: string, ok: boolean, why = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !why ? '' : ` — ${why}`}`); };
 // Mutation proof: the SAME verdict function, run on a deliberately loosened copy of the committed SQL, must go red.
@@ -142,6 +168,19 @@ const mutants2: Array<[string, (s: string) => string]> = [
 for (const [label, mutate] of mutants2) {
   const m = mutate(sql2);
   mustCatch(`fleet-wide: ${label}`, m !== sql2 && problems2(m).length > 0, m === sql2 ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
+}
+
+const live3 = problems3(sql3);
+check(`committed migration ${file3} holds every served-city pin`, live3.length === 0, live3.join('; '));
+const mutants3: Array<[string, (s: string) => string]> = [
+  ['served-city fallback removed (239 wasalt rows drop again)', (s) => s.replace(/coalesce\(v1\.city_id, s\.city_id\)(?=, x\.neighborhood)/, 'v1.city_id')],
+  ['duplicate P2 limb re-added', (s) => s.replace("if v_dropped = 0 then", "perform public.mon_raise('P2', 'district_null_unproven', 'location_pipeline', 'district_null_unproven', '{}'::jsonb);\n  if v_dropped = 0 then")],
+  ['measurement back on the retired allowlist', (s) => s.replace('public.ops_district_silent_source o where o.platform = %L and o.source_table is null', 'public.district_silent_proven p where p.platform = %L')],
+  ['served-city proof deleted', (s) => s.replace(/\n  begin\n    execute replace\(pg_get_functiondef[\s\S]*?end;\n/, '\n')],
+];
+for (const [label, mutate] of mutants3) {
+  const m = mutate(sql3);
+  mustCatch(`served-city: ${label}`, m !== sql3 && problems3(m).length > 0, m === sql3 ? 'mutation did not apply (pattern drifted)' : 'verdict stayed green');
 }
 
 console.log(failed === 0 ? 'OK: a source district can never be dropped silently again' : `${failed} check(s) failed`);
