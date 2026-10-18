@@ -14,6 +14,7 @@ import json
 
 import pytest
 
+import scrapers.common.db as db
 import scrapers.ksaaqar.run as K
 
 # the two recorded «الموقع:» fields, exactly as K._txt() renders them (2026-10-18)
@@ -95,7 +96,8 @@ def _page(line):
 def test_mutation_a_map_line_the_catalog_does_not_know_is_never_the_neighborhood(line):
     row, _cat, why = K.map_listing(_post(), _page(line), "")
     assert row is not None, why
-    assert row["neighborhood"] is None and row["district_ar"] is None
+    # None, or AUTHORITATIVE_NULL when the line names another city («عقارات جدة JIJB» on a الرياض ad): no district either way
+    assert row["neighborhood"] in (None, db.AUTHORITATIVE_NULL) and row["district_ar"] in (None, db.AUTHORITATIVE_NULL)
     assert row["additional_info"]["map_line"] == line          # kept as the fact it is, never as a district
 
 

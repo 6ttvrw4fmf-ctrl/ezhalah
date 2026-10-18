@@ -42,7 +42,7 @@ def test_the_ksaaqar_row_takes_the_titles_district_and_its_provenance(monkeypatc
     monkeypatch.setattr(K, "to_catalog", lambda city_ar, region_hint=None: (1, 1))
     monkeypatch.setattr(K, "find_district_in_text", lambda text, city_id: None)
     monkeypatch.setattr(K, "known_district_keys", lambda city_id: KNOWN)
-    row, _cat, why = K.map_listing(_post("شقق تمليك للبيع بحي المروة"), SPEC.replace("الملقا، ", "عقارات جدة، "), "")
+    row, _cat, why = K.map_listing(_post("شقق تمليك للبيع بحي المروة"), SPEC.replace("الملقا، ", "عقارات الرياض، "), "")
     assert row is not None, why
     assert row["district_ar"] == "حي المروة" and row["neighborhood"] == "حي المروة"
     assert row["additional_info"]["district_source"] == "title"
