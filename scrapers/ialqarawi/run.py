@@ -102,7 +102,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, http, normalize  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
-    find_district_in_text, is_ambiguous_standalone_word, to_catalog,
+    find_district_in_text, is_ambiguous_standalone_word, known_district_keys, title_hayy_district, to_catalog,
 )
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
@@ -585,6 +585,13 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         district_ar = ((find_district_in_text(_known_spelling(district_field), city_id) if not field_is_a_city else None)
                        or find_district_in_text(_known_spelling(title), city_id))
 
+    # The title names the district the catalogue lacks: «للبيع أرض سكنية بحي المليداء بمدينة بريدة», «بحي شعب عامر …».
+    # Its «حي X» in the title's spelling when it is exactly a district the catalogue or the served index knows for
+    # this city (2026-10-18: 52 of the 100 titled rows with no district). Never fuzzy.
+    title_hayy = title_hayy_district(title, known_district_keys(city_id)) if (city_id and not district_ar) else None
+    if title_hayy:
+        district_ar = title_hayy
+
     area_m2, area_skip = parse_area(f.get("مساحة الأرض"))
     som, som_ppm, som_skip = parse_money(f.get("سعر السوم"))
     lim, lim_ppm, lim_skip = parse_money(f.get("سعر الحد"))
@@ -622,7 +629,7 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         "city_id": city_id,
         "region_id": region_id,
         "district_ar": district_ar,
-        "neighborhood": (None if field_is_a_city else district_field) or None,
+        "neighborhood": (None if field_is_a_city else district_field) or title_hayy or None,
         "area_m2": area_m2,
         "price_per_meter": ppm,
         "photo_urls": detail.get("photos", [])[:20] or None,
@@ -671,6 +678,7 @@ def map_listing(card: dict, detail: dict) -> tuple[Optional[dict], str, str]:
         "area_skip_reason": area_skip or None,
         "area_raw": f.get("مساحة الأرض") or None,
         "district_field_raw": district_field if field_is_a_city else None,
+        "district_source": "title" if title_hayy else None,
         "added_ago_raw": None if _is_blank(f.get("مضاف منذ")) else f.get("مضاف منذ"),
     }.items() if v is not None}
     return row, category, ""

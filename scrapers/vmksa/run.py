@@ -188,6 +188,13 @@ _NEVER_STORE_OPTIONS = {"مسؤول الاعلان", "رقم مسؤول الاع
 # never False — a list that does not mention water does not say there is none.
 _SERVICES = {"كهرباء": "electricity", "مياه": "water_supply", "صرف صحي": "sanitation"}
 
+# Fiber is published structurally (the attributes list above), so prose never answers it.
+_PROSE_SKIP = ("optical_fibers",)
+
+
+def prose_answers(description: Optional[str]) -> dict[str, bool]:
+    return normalize.prose_amenities_yes(description, skip=_PROSE_SKIP)
+
 # Ready units only. Ad 813 (2026-09-26) is an apartment block «( تحت الإنشاء )».
 _OFFPLAN_RE = re.compile(r"تحت\s*ال[إا]نشاء|قيد\s*ال[إا]نشاء|على\s*الخارطة|على\s*المخطط")
 
@@ -337,6 +344,11 @@ def map_ad(ad: dict, rows: dict[str, Any]) -> tuple[Optional[tuple[dict, str]], 
             row[col] = True
     if "الياف ضوئية" in amenities:
         row["optical_fibers"] = True
+    # vmksa's structured lists are utilities only («مياه», «صرف صحي», «الياف ضوئية»): no kitchen, lift, parking
+    # or furnishing field anywhere on the ad, while its own description says «مطبخ» (22 of 74 homes), «موقف»
+    # (91 of 187) and «مؤثث» (81). Every column was NULL, and ops_af_score 10-18 read vmksa 0 of 4 findable.
+    # ADVANCED_FILTER_SOURCE_TRUTH §2: prose may answer only where no structured field exists, YES or nothing.
+    row.update(prose_answers(desc))
     if deal == "Rent":
         row["price_annual"] = price_annual
         row["rent_period"] = rent_period

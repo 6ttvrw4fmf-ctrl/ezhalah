@@ -61,3 +61,23 @@ def test_a_real_location_line_district_still_wins_over_the_deed():
             "</body></html>")
     s = {"description": "وصف موقع العقار حسب الصك\nالمدينة: القويعية\nالحي: الصناعية\n"}
     assert D._district_ar(s, html, "القويعية") == "حي الخليج"
+
+
+# Recorded 2026-10-18 (fresh renders): the location line of 426903 is «جازان, حي الناصرية 4» and of 520500
+# «قرية العليا - الرفيعه, حي الياسمين1». Both are numbered districts the page states; the title's segment
+# («الشواجرة», «الرفيعة») must not replace them.
+@pytest.mark.parametrize("word", ["حي الناصرية 4", "حي الياسمين1", "الناصرية 4", "حي المصيف ٢", "حي الملك فهد 2"])
+def test_a_numbered_district_is_a_district_not_a_plot_code(word):
+    assert D._usable_district(word)
+
+
+def test_mutation_a_numbered_location_line_still_wins_over_the_title():
+    html = ("<html><head><title>x</title></head><body><div>جازان, حي الناصرية 4</div><div>حي الناصرية 4, جازان</div>"
+            "</body></html>")
+    s = {"_breadcrumb": {"itemListElement": [{"position": 3, "name": "ارض للبيع - الشواجرة - جازان"}]}}
+    assert D._district_ar(s, html, "جازان") == "حي الناصرية 4"
+
+
+@pytest.mark.parametrize("word", ["حي ج1", "ج1", "حي 1النخيل", "حي مخطط 144", "حي 1156"])
+def test_mutation_short_codes_are_still_plot_codes(word):
+    assert not D._usable_district(word)

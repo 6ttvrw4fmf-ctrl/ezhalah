@@ -141,6 +141,18 @@ _DISTRICT_EN_AR = {
     ("riyadh", "ghoroub"): "حي الغروب", ("riyadh", "qayrawan"): "حي القيروان",
     ("riyadh", "ishbilia"): "حي اشبيلية", ("riyadh", "rafiah"): "حي الرفيعة",
     ("jeddah", "rabwah"): "حي الربوة", ("jeddah", "bawadi"): "حي البوادي",
+    # 2026-10-18 (unexplained-district residue): spellings live rows print, each catalogued for that city. Still NOT
+    # mapped: «Rakah»/«Rakaa» under khobar (الراكة الشمالية AND الجنوبية), «Aziziyah»/«Khaldiya»/«Fanateer» (not in
+    # الخبر's / الجبيل's catalogue), «Al Qashlah»/«Al Douha» (الظهران's), «Dana Bay», compound and landmark names.
+    ("riyadh", "rahmaniah"): "حي الرحمانية", ("riyadh", "monisya"): "حي المونسية",
+    ("riyadh", "monsyah"): "حي المونسية", ("riyadh", "qirawan"): "حي القيروان",
+    ("riyadh", "yasameen"): "حي الياسمين", ("riyadh", "safarat"): "حي السفارات",
+    ("riyadh", "nafel"): "حي النفل", ("riyadh", "masif"): "حي المصيف",
+    ("riyadh", "sulaimaniya"): "حي السليمانية", ("riyadh", "hada"): "حي الهدا",
+    ("riyadh", "olya"): "حي العليا", ("riyadh", "second industrial zone"): "المدينة الصناعية الثانية",
+    ("khobar", "qutuba"): "حي قرطبة", ("khobar", "olya"): "حي العليا", ("khobar", "cornish"): "حي الكورنيش",
+    ("jeddah", "shatieh"): "حي الشاطئ", ("khobar", "aqrabia"): "حي العقربية", ("khobar", "safa"): "حي الصفا",
+    ("riyadh", "janadiriyah"): "حي الجنادرية", ("riyadh", "rahmaniya"): "حي الرحمانية", ("taif", "qarahin"): "حي القراحين",
 }
 
 
@@ -177,6 +189,21 @@ def district_en_candidates(street: str, city_en: Optional[str] = None) -> list[s
     return out
 
 
+_DIRECTION_WORD = re.compile(r"\b(?:north|south|east|west|northern|southern|eastern|western|central|new|old)\b", re.I)
+
+
+def _name_and_tails(name: str) -> list[str]:
+    """The normalised name, then its last two and last one words: «Muhammad Masud As Salamah District» (a street
+    glued to the district, j-one-compound-jeddah 2026-10-18) → … «salamah». A dropped direction («South Obhur» is
+    not «Obhur», «New Ad Diriyah» not «Ad Diriyah») stops the shortening; every key is still dictionary-exact."""
+    words = name.split()
+    out = [_norm_dist(name)]
+    for k in (2, 1):
+        if len(words) > k and not _DIRECTION_WORD.search(" ".join(words[:-k])):
+            out.append(_norm_dist(" ".join(words[-k:])))
+    return [k for i, k in enumerate(out) if k and k not in out[:i]]
+
+
 def _bridge_unique(rows) -> dict[str, str]:
     """This site's view of the shared bridge: keys normalised with _norm_dist, unique answers only."""
     return bridge_unique(rows, _norm_dist)
@@ -194,7 +221,9 @@ def _norm_dist(name: Optional[str]) -> Optional[str]:
         return None
     n = re.sub(r"\b(?:district|dist)\b\.?", " ", name.strip().lower())   # the bridge writes «… Dist.»
     n = re.sub(r"[^a-z\s-]", " ", n)
-    n = re.sub(r"^\s*(?:al|an|ar|as|ad|ash|at)[\s-]+", "", n)
+    n = re.sub(r"^\s*(?:the\s+)?(?:al|an|ar|as|ad|ash|at)[\s-]+", "", n)
+    n = re.sub(r"^\s*the\s+", "", n)                       # «The Olya»
+    n = re.sub(r"^\s*al(?=[a-z]{4})", "", n)                # «Almonisya», «Alsulaimaniya», «AlNafel»: the article glued on
     n = re.sub(r"\s+", " ", n).strip()
     return n or None
 
@@ -330,7 +359,11 @@ def compound_facts(url: str, page_html: str) -> dict[str, Any]:
     if am:
         about = plain(am.group(1))
     district_en = None
-    dm = re.search(r"\b([A-Z][A-Za-z\-]+(?: [A-Z][A-Za-z\-]+){0,2}) [Dd]istrict\b", page_html)
+    # The first «X District» sentence that is not the site's template one (tuwaiq-gate prints «King Abdullah
+    # Financial District» and then «Ar Rahmaniya District»; only the first was ever looked at, 2026-10-18).
+    dm = next((m for m in re.finditer(r"\b([A-Z][A-Za-z\-]+(?: [A-Z][A-Za-z\-]+){0,2}) [Dd]istrict\b", page_html)
+               if _norm_dist(m.group(1)) not in _TEMPLATE_EN), None) or \
+        re.search(r"\b([A-Z][A-Za-z\-]+(?: [A-Z][A-Za-z\-]+){0,2}) [Dd]istrict\b", page_html)
     if dm:
         district_en = dm.group(1).strip()
     elif addr.get("streetAddress"):
@@ -399,9 +432,13 @@ def map_units(url: str, page_html: str) -> tuple[list[dict], str, dict[str, int]
         nd = _norm_dist(cand_en)
         if not nd or nd in _TEMPLATE_EN:
             continue
-        ar, how = _DISTRICT_EN_AR.get((facts["city_slug"], nd)), "dictionary"
-        if not ar and city_en:
-            ar, how = _bridge_en_ar(city_en).get(nd), "bridge"
+        ar, how = None, None
+        for key in _name_and_tails(cand_en):
+            ar, how = _DISTRICT_EN_AR.get((facts["city_slug"], key)), "dictionary"
+            if not ar and city_en:
+                ar, how = _bridge_en_ar(city_en).get(key), "bridge"
+            if ar:
+                break
         got = find_district_in_text(ar, city_id) if ar else None
         if got:
             found.setdefault(got, how)
