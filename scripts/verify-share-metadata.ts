@@ -60,7 +60,7 @@ export function auditShareMeta(layout: string, share: string, exists: (p: string
     bad.push('the title is not set through <Head>; helmet emits its own empty <title> FIRST and wins');
   for (const [name, re] of [
     ['og:title', /property="og:title"[^/]*content=\{SHARE_TITLE_AR\}/],
-    ['og:description', /property="og:description"[^/]*content=\{SHARE_BLURB_AR\}/],
+    ['og:description', /property="og:description"[^/]*content=\{SHARE_CARD_DESC_AR\}/],
     ['og:image', /property="og:image"[^/]*content=\{OG_IMAGE\}/],
     ['og:url', /property="og:url"/],
     ['twitter:card', /name="twitter:card"[^/]*content="summary"/],
