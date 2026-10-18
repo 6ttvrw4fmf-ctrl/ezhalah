@@ -63,6 +63,14 @@ function verify(cardSource = card, imageSource = renderer, theme = 'light') {
       assert.equal(image.props.style.tintColor, undefined);
     }
   }
+  for (const filename of ['maskanre','wetheaddress']) {
+    const node = PlatformLogo({source:`../../assets/images/platform-logos/${filename}.png`});
+    assert.equal(node.type,'View');
+    assert.equal(node.props.style.backgroundColor,'transparent',`${filename}: no backing tile`);
+    assert.equal(node.props.children[0].props.tintColor,theme === 'dark' ? '#F3F5F3' : '#253831',`${filename}: readable theme-aware ink`);
+    assert.equal(node.props.children[0].props.source,`../../assets/images/platform-logos/${filename}.png`);
+  }
+  assert.equal(profiles['حراج'].logo,'../../assets/images/platform-logos/haraj.png','Haraj uses its official wordmark');
   assert.deepEqual(mismatches, [], 'card source aliases use their own supplied logos');
   assert.equal(profiles['Deal App'].logo, '../../assets/images/dealapp.png', 'Deal is the original yellow asset');
 }
@@ -79,7 +87,8 @@ function mustCatch(name: string, mutatedCard: string, mutatedRenderer: string) {
 for (const [name, mutatedCard, mutatedRenderer] of [
   ['generic placeholder', card.replace(/const WADOD_LOGO = require\('[^']+'\)/, "const WADOD_LOGO = require('../../assets/images/platform-placeholder.png')"), renderer],
   ['white Nufouth wordmark', card.replace(/const NUFOUTH_LOGO = require\('[^']+'\)/, "const NUFOUTH_LOGO = require('../../assets/images/platform-logos/nufouth-com.png')"), renderer],
-  ['opaque backing tile', card, renderer.replace("backgroundColor: 'transparent'", "backgroundColor: '#263D32'")],
+  ['opaque backing tile', card, renderer.replace("const backgroundColor = 'transparent'", "const backgroundColor = '#263D32'")],
+  ['missing white-mark contrast', card, renderer.replace('platformLogoMonochrome.has(source)', 'false')],
   ['Deal recoloring', card, renderer.replace('source={source}', "source={source === require('../../assets/images/dealapp.png') ? require('../../assets/images/platform-contrast/dealapp-light.png') : source}")],
 ] as const) {
   mustCatch(name, mutatedCard, mutatedRenderer);
