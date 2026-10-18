@@ -169,21 +169,26 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
  * FAILS CLOSED. If either constant cannot be read this THROWS rather than falling back to a
  * default: a harness that silently guesses the beat is how the accusation above got written.
  */
-export function readSearchBeatMs(agentSrc?: string): { floorMs: number; exitMs: number } {
+export function readSearchBeatMs(agentSrc?: string): { floorMs: number; holdMs: number; exitMs: number } {
   const src = agentSrc ?? readFileSync(join(REPO_ROOT, 'src', 'app', 'agent.tsx'), 'utf8');
   const floor = src.match(/^const SEARCH_MIN_MS = (\d+);/m);
   const exit = src.match(/^const LOADER_EXIT_MS = (\d+);/m);
+  // OWNER 2026-10-17: the beat is no longer "exactly the floor". Results show as soon as they are ready
+  // (SEARCH_MIN_MS is now a short minimum) and NOTHING is held past SEARCH_MAX_HOLD_MS. A post-search
+  // read must outlast the LONGEST hold the product can impose, so the beat is the cap when present.
+  const cap = src.match(/^const SEARCH_MAX_HOLD_MS = (\d+);/m);
   if (!floor || !exit) {
     throw new Error(
       'afJourneyPacing: could not read SEARCH_MIN_MS / LOADER_EXIT_MS from src/app/agent.tsx. ' +
       'The searching beat is the thing every post-search read must outlast, so a harness that ' +
       'cannot see it must stop, not guess.');
   }
-  return { floorMs: Number(floor[1]), exitMs: Number(exit[1]) };
+  const floorMs = Number(floor[1]);
+  return { floorMs, holdMs: Math.max(floorMs, cap ? Number(cap[1]) : floorMs), exitMs: Number(exit[1]) };
 }
 
-/** The full beat a committed answer must outlast before the new results turn is on screen. */
-export const SEARCH_BEAT_MS = (() => { const b = readSearchBeatMs(); return b.floorMs + b.exitMs; })();
+/** The full beat a committed answer must outlast before the new results turn is on screen (the longest hold + exit). */
+export const SEARCH_BEAT_MS = (() => { const b = readSearchBeatMs(); return b.holdMs + b.exitMs; })();
 
 /**
  * Budget for a post-search read: the beat, plus the real network/render time that follows it, plus
