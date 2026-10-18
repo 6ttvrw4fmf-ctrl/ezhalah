@@ -560,19 +560,107 @@ AQAR_CITY_REGION: dict[int, int] = {
 }
 
 
-def _resolve_location(uri: str, aqar_city_id) -> dict:
-    """resolve_slug(uri); when that finds no city, once more with Aqar's own city id as a region hint."""
+_STREET_SEG = re.compile(r"^s*(?:شارع|طريق)(?:s|$)")
+
+
+def _address_segments(address) -> list[str]:
+    """Aqar's own comma-delimited address, «[street?, district?, city]», as trimmed segments."""
+    return [x.strip() for x in re.split(r"[،,]", str(address or "")) if x.strip()]
+
+
+def _has_name(segment: str, name: str) -> bool:
+    return f" {AL.norm_ar(name)} " in f" {AL.norm_ar(segment)} "
+
+
+def _city_only_in_street(city_ar, address) -> bool:
+    """True when the city we picked appears in the ad's address ONLY inside a «شارع …» / «طريق …»
+    segment — i.e. a street named after a town, not the ad's town. Measured 2026-10-18: «شارع
+    الاحساء, العيينة» was filed under الاحساء, «شارع سكاكا, العيينة» under سكاكا, «شارع بدر ، … ،
+    المجمعة ، المجمعة» under بدر. «شارع 44 تمنية ، تمنية ، …» names the town outside the street too and
+    is left alone."""
+    segs = _address_segments(address)
+    if not city_ar or not segs:
+        return False
+    street = [x for x in segs if _STREET_SEG.match(x)]
+    other = [x for x in segs if not _STREET_SEG.match(x)]
+    return any(_has_name(x, city_ar) for x in street) and not any(_has_name(x, city_ar) for x in other)
+
+
+@lru_cache(maxsize=1)
+def _city_region() -> dict[int, int]:
+    AL._load()
+    return {cid: rid for lst in AL._CITY.values() for cid, rid in lst if rid is not None}
+
+
+def _city_for_district(name, region_id) -> tuple[int, str] | None:
+    """(city_id, catalog district spelling) when `name` is a catalog DISTRICT of exactly ONE city
+    inside `region_id`; else None. «الفرعاء» in منطقة عسير is a district of أبها — the town an
+    Aqar ad names is often a district of a catalog city. No region → never (a district name alone is
+    too common to place)."""
+    if not name or region_id is None:
+        return None
+    AL._load()
+    key = AL.norm_district_tok(name)
+    if not key:
+        return None
+    reg = _city_region()
+    hits = {cid for (cid, k) in AL._DISTRICT_AR_BY_CITY if k == key and reg.get(cid) == region_id}
+    if len(hits) != 1:
+        return None
+    cid = hits.pop()
+    return cid, AL._DISTRICT_AR_BY_CITY[(cid, key)]
+
+
+def _placed(cid: int, rid, district_ar) -> dict:
+    return {"city_ar": AL._CID_AR.get(cid), "city_id": cid, "region_id": _city_region().get(cid, rid),
+            "district_ar": district_ar, "confidence": "address"}
+
+
+def _resolve_location(uri: str, aqar_city_id, address=None, aqar_district=None) -> dict:
+    """The ad's city, from the strongest evidence the source gives, in this order:
+      1. the slug (resolve_slug) — unless that city appears only as a street name in the address;
+      2. the slug again, a same-name twin tie-broken by Aqar's own city id (AQAR_CITY_REGION);
+      3. the address's LAST segment (Aqar ends the address with the town) as a catalog city, then as
+         a catalog district of exactly one city in the region («الفرعاء ، منطقة عسير» → أبها);
+      4. Aqar's own district name for the ad as a catalog district of exactly one city in the region.
+    Every step is catalog-validated; nothing is guessed. Unresolved stays unresolved."""
     loc = resolve_slug(uri)
-    if loc.get("city_id"):
+    if loc.get("city_id") and not _city_only_in_street(loc.get("city_ar"), address):
         return loc
+    if loc.get("city_id"):
+        loc = {**loc, "city_ar": None, "city_id": None, "confidence": "unresolved"}
     try:
         hint = AQAR_CITY_REGION.get(int(aqar_city_id or 0))
     except (TypeError, ValueError):
         hint = None
-    if hint is None:
-        return loc
-    hinted = resolve_slug(uri, region_hint=hint)
-    return hinted if hinted.get("city_id") else loc
+    if hint is not None:
+        hinted = resolve_slug(uri, region_hint=hint)
+        if hinted.get("city_id") and not _city_only_in_street(hinted.get("city_ar"), address):
+            return hinted
+
+    segs = [x for x in _address_segments(address) if not _STREET_SEG.match(x)]
+    rid = hint
+    rest: list[str] = []
+    for x in segs:
+        cid, r = AL.to_catalog(re.sub(r"^\s*(?:امارة|إمارة)\s+", "", x))   # «امارة منطقة عسير» is a region
+        if cid is None and r is not None:      # an explicit «منطقة X» in the source beats the hint
+            rid = r
+        elif not _has_name(x, "المملكة العربية السعودية"):
+            rest.append(x)
+    if rest:
+        last = rest[-1].replace("عبد الله", "عبدالله")
+        cid, r = AL.to_catalog(last, region_hint=rid)
+        if cid and (rid is None or r == rid) and not _city_only_in_street(AL._CID_AR.get(cid), address):
+            return _placed(cid, r, loc.get("district_ar"))
+        hit = _city_for_district(last, rid)
+        if hit:
+            return _placed(hit[0], rid, hit[1])
+    if rid is not None and callable(aqar_district):   # lazy: Aqar's district list is a network read
+        aqar_district = aqar_district()
+    hit = _city_for_district(aqar_district if isinstance(aqar_district, str) else None, rid)
+    if hit:
+        return _placed(hit[0], rid, hit[1])
+    return {**loc, "region_id": loc.get("region_id") or rid}
 
 
 def map_listing(g: dict, price: dict) -> dict | None:
@@ -614,7 +702,8 @@ def map_listing(g: dict, price: dict) -> dict | None:
     # or district «المدينة» no longer mis-map the city). source_capture = the full detail minus PII
     # (descriptions phone-redacted; the detail exposes no broker contact field). Numbers unchanged.
     # A same-name town the slug cannot place is tie-broken by Aqar's own city id (AQAR_CITY_REGION).
-    loc = _resolve_location(uri, g.get("city_id"))
+    loc = _resolve_location(uri, g.get("city_id"), g.get("address"),
+                            lambda: _district_from_aqar_id(g.get("city_id"), g.get("district_id"), g.get("category")))
     # Fallback ONLY — the slug's «حي X» capture wins when present (unchanged behavior); the
     # address-derived, catalog-validated candidate fills the gap when the slug had no «حي» at all.
     district_ar_val = (loc["district_ar"] or _district_from_address(g.get("address"), loc["city_id"])
