@@ -34,6 +34,13 @@ const siteCount = once(async () => {
   return !error && Array.isArray(data) && data.length > 0 ? data.length : null;
 });
 
+const newToday = once(async () => {
+  if (!supabase) return null;
+  const { data, error } = await boundedRpc<number | string>(supabase.rpc('welcome_new_today_ar'), WELCOME_RPC_MS);
+  const n = Number(data);
+  return !error && Number.isFinite(n) && n > 0 ? n : null;
+});
+
 export const cityPool = once(async () => {
   if (!supabase) return null;
   const { data, error } = await boundedRpc<CityRow[]>(supabase.rpc('top_cities_by_deal_ar', { p_deal: null }), WELCOME_RPC_MS);
@@ -97,6 +104,7 @@ export async function loadWelcomeFacts(line: WelcomeLine, lastLocation: string |
   const needs = new Set(line.needs);
   const jobs: Promise<void>[] = [];
   if (needs.has('sites')) jobs.push(siteCount().then((n) => { if (n) f.sites = n; }));
+  if (needs.has('newToday')) jobs.push(newToday().then((n) => { if (n) f.newToday = n; }));
   if (needs.has('listings') || needs.has('cities') || needs.has('districts')) {
     jobs.push(fetchLoaderScaleStats().then((s) => {
       if (!s) return;

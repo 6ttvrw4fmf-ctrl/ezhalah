@@ -425,6 +425,17 @@ to an explicit external contact link to the original ad. Both the contact label 
 use `t(sourceName(listing.source))`, matching the result card. Arabic prose is hidden in English
 like ResultCard. No photos means no gallery box. The preview and iframe host lists are disjoint.
 
+**The map:** the source's own pin when it published both coordinates («الموقع كما نشره {site}»).
+When an **Aqar (buy or rent) or Aqar Monthly** ad published none (owner 2026-10-17: «show the entire
+district … all around the boundaries», «just do aqar now», then «Aqar Monthly and rent, same style,
+just don't include the Ministry of Justice» — other sites still show no map without a pin; the
+ministry block stays Aqar-sale-only),
+the page asks the same free Google embed for the district by name («حي X، City») so Google fits the
+view and draws its own dashed border around the district; labelled «الموقع التقريبي» with «{site}
+لم ينشر موقعاً دقيقاً», never a pin. Free either way (keyless embed / Embed API place mode). The owner
+chose Google's border as Google draws it (no colour boost). Guard:
+`scripts/verify-ad-map-needs-both-coordinates.ts`.
+
 Desktop: right panel; phone: 88%-height sheet. Every card click opens a new tab (including repeats),
 up to 12 with oldest eviction. Individual tab close removes that tab; panel hide preserves all tabs.
 Preview tabs have no frame history/loading indicator, and reload remounts their content.
@@ -962,6 +973,7 @@ migration-drift-guard rule in `AGENTS.md`).
 
 **Share preview (owner, 2026-10-11):** use the existing green eagle and rooftops on white, identical to `public/icon-512.png`, for both the in-app share preview and external link artwork. Keep the owner’s original conversational Arabic message and approved English translation in `src/lib/share.ts`, without an AI sentence or dashes; every share target uses the constants for the selected language. Version the image URL when artwork changes.
 
+- **Share a search (owner 2026-10-17):** a signed-in user's «مشاركة» under a result sends THAT search; a guest's Share stays the plain homepage link. One personal title is used everywhere — message (+ 👇), WhatsApp card and landing card: «{type plural} {للإيجار/للبيع} في {place} من {first name} على إزهله» (e.g. «شقق للإيجار في حي النرجس من يوسف على إزهله»; 2–3 districts named, 4+ as «النرجس و3 أحياء ثانية»; no type → «عقارات»; no place → omitted). Card line: «كل مواقع العقار في مكان واحد · اضغط وشوف»; image = the Ezhalah logo; no eagle emoji; the wording never says "sign in". Language = the SENDER's app language setting. The link is `/s/<payload>` (`api/share-card.ts` serves the Open Graph card from the request's own domain, then redirects to `/?share=`); it never opens `/agent` (appSession gate). Home shows the title + «اضغط وشوف العقارات»; the tap opens the search through the Filter's normal path, saved to the recipient's list. Owner decision: opening a shared search requires signing in with Google/Apple; ordinary «بحث» stays free (`verify-search-is-free.ts`). **Whole chat (owner 2026-10-17, «sharing it means I share the chat history»):** pressing Share saves a COPY of the conversation in `public.shared_chat` (migration `20261018031834`; RLS on, no policies — only `create_shared_chat` [authenticated, 3 MB cap, 60/h], `get_shared_chat` [authenticated], `shared_chat_card` [anon: name/locale/query]) and shares `/s/<8-char code>`. The recipient signs in, the chat is copied into THEIR history (`importSharedChat`, synced like any chat) and opens there; they can keep typing; nothing is live-synced between the two. The same link reopens the same copy on that device. If the save fails the search link above is shared instead; if the copy cannot be read the shared search opens. Client: `src/lib/sharedChat.ts`. Guard: `scripts/verify-share-search-link.ts`.
 - **Read Aloud language (owner 2026-10-14):** English responses and visible card facts are read in English using an explicitly matched English device voice; Arabic retains its Saudi-preferred Arabic voice. Speak the displayed summary/closing note unchanged, keep the same visible card order and free device-only speech, and refuse gracefully if the matching voice is unavailable.
 - **Response feedback (owner 2026-10-01):** selecting either thumb moves both visible thumbs together until they touch, then fades the unselected thumb, leaving one selected thumb; tapping it again restores both choices. Keep share/read-aloud stationary, mirror the layout for Arabic/English, and skip motion when reduced motion is enabled. Keep the existing top-of-chat confirmation popup. Feedback storage and response scope remain unchanged.
 

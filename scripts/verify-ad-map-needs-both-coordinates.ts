@@ -333,6 +333,72 @@ sourceMutant('the sheet recomputing a deal\'s m² price', !dealsWired(PREVIEW.re
 sourceMutant('the deals read losing its newest-first order', !dealsWired(PREVIEW, codeOnly(DATA_SRC).replace(".order('deal_date', { ascending: false })", '')));
 sourceMutant('the button shown with nothing to list', !dealsWired(PREVIEW.replace('{h.gov && prices.deals.length > 0 ? (', '{h.gov ? ('), codeOnly(DATA_SRC)));
 
+// ── THE CLOSELY SIMILAR LISTINGS (owner 2026-10-16: «not all of them, just the ones very closely alike») ─────────────
+// similarRows(): same type only, area within ±20%, the same bedrooms when both state one, never the ad itself, each
+// property once (licence+type+area, lowest price), down sites out, nearest first, capped. EXECUTED here; the sheet's wiring
+// (button under OUR half, rows open the real ad through the one opener, never a frame) is pinned with mutation proofs.
+type Similar = (rows: Record<string, unknown>[], ad: Record<string, unknown>, down: Set<string>) => { listing_id?: unknown; platform?: unknown; price: number; area: number; ppm: number; beds: number | null }[];
+const liftSimilar = async (file: string): Promise<Similar> => (await liftSymbols(file, [
+  { header: 'const num = (', endsWith: /: NaN;$/ },
+  { header: 'export const PRICE_MIN', endsWith: /;$/ }, { header: 'export const PRICE_MAX', endsWith: /;$/ },
+  { header: 'export const SIMILAR_AREA_BAND', endsWith: /;$/ }, { header: 'export const SIMILAR_LIMIT', endsWith: /;$/ },
+  { header: 'export function similarRows(' },
+], ['similarRows'])).similarRows as Similar;
+const AD_SIM: Record<string, unknown> = { source_table: 'aqar_residential_listings', listing_id: 14871919, type_ar: 'فيلا', area_m2: '200', price_total: '4450000', bedrooms: 4 };
+const sim = (o: Record<string, unknown>) => ({ source_table: 'aqar_residential_listings', platform: 'aqar', type_ar: 'فيلا', bedrooms: 4, ...o });
+const SIM_FIX: Record<string, unknown>[] = [
+  sim({ listing_id: 1, area_m2: 200, price_total: '3900000', license_number: 'L1' }),              // closest: same area
+  sim({ listing_id: 2, area_m2: 230, price_total: '5000000', license_number: 'L2' }),              // within the band
+  sim({ listing_id: 3, area_m2: 165, price_total: '3000000', license_number: 'L3', bedrooms: null }), // bedrooms unknown: allowed
+  sim({ listing_id: 4, area_m2: 300, price_total: '6000000', license_number: 'L4' }),              // out of the band → out
+  sim({ listing_id: 5, area_m2: 200, price_total: '4000000', license_number: 'L5', type_ar: 'شقة' }), // another type → out
+  sim({ listing_id: 6, area_m2: 200, price_total: '4100000', license_number: 'L6', bedrooms: 6 }),   // other bedrooms → out
+  sim({ listing_id: 14871919, area_m2: 200, price_total: '4450000', license_number: 'L0' }),       // the ad itself → out
+  sim({ listing_id: 7, area_m2: 200, price_total: '3950000', license_number: 'L1', platform: 'wasalt', source_table: 'wasalt_residential_listings' }), // the same property as 1 on another site → once, at its lowest (1)
+  sim({ listing_id: 8, area_m2: 210, price_total: '50000', license_number: 'L8' }),                // junk price → out
+  sim({ listing_id: 9, area_m2: 205, price_total: '4200000', license_number: 'L9', platform: 'toor', source_table: 'toor_residential_listings' }), // down site → out
+];
+const similarProblems = (f: Similar): string[] => {
+  const out: string[] = [];
+  const r = f(SIM_FIX, AD_SIM, new Set(['toor']));
+  const ids = r.map((x) => String(x.listing_id)).join(',');
+  if (ids !== '1,2,3') out.push(`picked ${ids} ≠ 1,2,3 (nearest first; out: other type, other bedrooms, out of band, itself, junk, down site, the duplicate)`);
+  if (r[0]?.price !== 3_900_000 || r[0]?.ppm !== 19_500 || r[0]?.beds !== 4) out.push(`row 1 figures ${JSON.stringify(r[0])} ≠ 3,900,000 · 19,500/m² · 4 beds (the duplicate's dearer price must not win)`);
+  if (r[2]?.beds !== null) out.push('unknown bedrooms must stay unknown, never 0');
+  if (f(SIM_FIX, { ...AD_SIM, area_m2: null }, new Set()).length) out.push('an ad without an area produced similar rows');
+  if (f(SIM_FIX, { ...AD_SIM, type_ar: '' }, new Set()).length) out.push('an ad without a type produced similar rows');
+  const many = Array.from({ length: 80 }, (_, i) => sim({ listing_id: 100 + i, area_m2: 200 + (i % 30), price_total: String(4_000_000 + i * 1000), license_number: `M${i}` }));
+  if (f(many, AD_SIM, new Set()).length !== 30) out.push(`the list is capped at 30, got ${f(many, AD_SIM, new Set()).length}`);
+  return out;
+};
+const similarReal = similarProblems(await liftSimilar(DATA));
+check('the similar listings: same type, area within 20%, same bedrooms when stated, never itself, each property once, nearest first, capped', similarReal.length === 0, similarReal.join('\n      '));
+const mustCatchSimilar = async (what: string, from: string, to: string) => {
+  if (!DATA_SRC.includes(from)) { failed++; console.log(`FAIL  mutation anchor missing: ${what}`); return; }
+  const file = join(mkdtempSync(join(tmpdir(), 'ad-similar-')), 'adPageData.ts');
+  writeFileSync(file, DATA_SRC.replace(from, to));
+  const caught = similarProblems(await liftSimilar(file)).length > 0;
+  if (!caught) failed++;
+  console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
+};
+await mustCatchSimilar('another property type slipping in', "if (String(r.type_ar ?? '').trim() !== adType) continue;", '');
+await mustCatchSimilar('the area band ignored', 'if (!(area >= lo && area <= hi) ||', 'if (');
+await mustCatchSimilar('a different bedroom count accepted', 'if (bedsKnown && adBedsKnown && beds !== adBeds) continue;', '');
+await mustCatchSimilar('the ad listed as similar to itself', "if (String(r.source_table) === String(ad.source_table ?? '') && String(r.listing_id) === String(ad.listing_id ?? '')) continue;   // never itself", '');
+await mustCatchSimilar('the same property counted twice (dearer copy kept)', 'if (!cur || price < cur.price) best.set(key, { ...r, price, area, ppm: price / area, beds: bedsKnown ? beds : null });', 'best.set(`${key}|${best.size}`, { ...r, price, area, ppm: price / area, beds: bedsKnown ? beds : null });');
+await mustCatchSimilar('farthest first', 'return a1 - b1 || a2 - b2; })', 'return b1 - a1 || b2 - a2; })');
+const similarWired = (p: string, d: string): boolean =>
+  /select\('source_table,listing_id,platform,license_number,type_ar,area_m2,price_total,bedrooms'\)/.test(d) && /\.eq\('type_ar', String\(ad\.type_ar\)\.trim\(\)\)/.test(d) && /similarRows\(data \?\? \[\], ad, downPlatformSlugs\(\)\)/.test(d)
+  && /const AD_ROW_SELECT = 'latitude,longitude,[^']*,bedrooms'/.test(d)
+  && /fetchSimilarListings\(row\)/.test(p) && /testID="listing-preview-similar"[\s\S]{0,120}onPress=\{openSimilar\}/.test(p) && /\{!h\.gov && prices\.similar\.length > 0 \? \(/.test(p)
+  && /\{similarOpen && IS_WEB && prices\.similar\.length > 0 \? \(/.test(p) && /testID="listing-preview-similar-sheet"/.test(p)
+  && /testID="listing-preview-similar-row"[\s\S]{0,80}onPress=\{\(\) => open\(href\)\}/.test(p) && /const href = listingOpenUrl\(card\) \?\? '';/.test(p)
+  && /\{listingPrice\(card, locale\)\}/.test(p) && !/listing-preview-similar-sheet"[\s\S]{0,4000}<Frame/.test(p);
+check('the similar sheet is wired: the index read by district/type/band, the button under OUR half, rows open the real ad on its site (never a frame)', similarWired(PREVIEW, codeOnly(DATA_SRC)));
+sourceMutant('a similar row opening a URL built from our id', !similarWired(PREVIEW.replace("const href = listingOpenUrl(card) ?? '';", "const href = `https://sa.aqar.fm/${card.id}`;"), codeOnly(DATA_SRC)));
+sourceMutant('the similar button under the ministry half', !similarWired(PREVIEW.replace('{!h.gov && prices.similar.length > 0 ? (', '{h.gov && prices.similar.length > 0 ? ('), codeOnly(DATA_SRC)));
+sourceMutant('the similar read dropping the type filter', !similarWired(PREVIEW, codeOnly(DATA_SRC).replace(".eq('type_ar', String(ad.type_ar).trim())", '')));
+
 const honestReal = labelsHonest(PREVIEW, I18N);
 check('honest labels: no sold-average tile, the ministry half names its class, our half names its types, the explanation is wired', honestReal.length === 0, honestReal.join('\n      '));
 sourceMutant('the sold-average tile coming back', labelsHonest(PREVIEW + "\n<Text>{fmtInt(tileFromShown(prices.moj.avgPpm, prices.area))}</Text>", I18N).length > 0);
@@ -492,13 +558,79 @@ sourceMutant('a district-centroid fallback for the pin', !wired(codeOnly(DATA_SR
 sourceMutant('the page drawing a map without a pin', !wired(codeOnly(DATA_SRC), PREVIEW.replace('{geo && IS_WEB ? (', '{IS_WEB ? (')));
 sourceMutant('the map opening a new tab from our UI', !wired(codeOnly(DATA_SRC), PREVIEW.replace('const openMap = () => {', "const openMap = () => { window.open(mapEmbedUrl(geo, locale, 15), '_blank');")));
 
+// ── THE DISTRICT BORDER (owner 2026-10-17): no pin → the district by name, Google's own border ─────────
+// districtPlace() and districtEmbedUrl() are EXECUTED on real-shaped rows; the wiring is pinned in source:
+// the district path only runs when the pin is null, the embed asks for the district by NAME (never a
+// coordinate, which would draw a marker the source never published), and the label says approximate.
+// mapPoint() is untouched by all of it.
+type DistrictFns = {
+  districtPlace: (r: Row | null) => { query: string; district: string; city: string } | null;
+  districtEmbedUrl: (d: { query: string; district: string; city: string }, hl?: string) => string;
+};
+const liftDistrict = async (file: string): Promise<DistrictFns> => (await liftSymbols(file, [
+  { header: 'export const DISTRICT_MAP_PLATFORMS: ', endsWith: /\];$/ },  // a one-line const: end on its own line
+  { header: 'export function districtPlace(' },
+  { header: 'export const districtEmbedUrl = (' },
+], ['districtPlace', 'districtEmbedUrl'])) as unknown as DistrictFns;
+const districtProblems = (f: DistrictFns): string[] => {
+  const out: string[] = [];
+  const sah = f.districtPlace({ platform: 'aqar', district_ar: 'حي الساحل', city_ar: 'جدة' });
+  if (sah?.query !== 'حي الساحل، جدة') out.push(`a «حي …» district is named as is, got ${sah?.query}`);
+  const bare = f.districtPlace({ platform: 'aqar', district_ar: 'النرجس', city_ar: 'الرياض' });
+  if (bare?.query !== 'حي النرجس، الرياض') out.push(`a bare district name gets «حي », got ${bare?.query}`);
+  if (f.districtPlace({ platform: 'aqar', district_ar: '', city_ar: 'جدة' })?.query !== 'جدة') out.push('no district → the whole city (owner 2026-10-17: «those with no district, we show the city»)');
+  if (f.districtPlace({ platform: 'aqar', district_ar: null, city_ar: '' }) !== null) out.push('no district AND no city → no map');
+  if (f.districtPlace({ platform: 'aqar', district_ar: 'حي الساحل', city_ar: '' }) !== null) out.push('no city → no district map (a name alone can land in the wrong city)');
+  if (f.districtPlace({ platform: 'aqar', district_ar: 'غير معروف', city_ar: 'جدة' })?.query !== 'جدة') out.push('«غير معروف» is not a district → the city');
+  if (f.districtPlace({ platform: 'aqar', district_ar: 'حي الساحل', city_ar: 'غير معروف' }) !== null) out.push('«غير معروف» is not a city → no map');
+  // Aqar + Aqar Monthly only for now (owner 2026-10-17: «just do aqar now», then «Aqar Monthly and rent … same style»).
+  if (f.districtPlace({ platform: 'wasalt', district_ar: 'حي الساحل', city_ar: 'جدة' }) !== null) out.push('only Aqar and Aqar Monthly get the district map for now (wasalt must not)');
+  if (f.districtPlace({ platform: 'aqarmonthly', district_ar: 'حي الملز', city_ar: 'الرياض' })?.query !== 'حي الملز، الرياض') out.push('Aqar Monthly gets the district map too (owner 2026-10-17)');
+  const prev = process.env.EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY;
+  try {
+    delete process.env.EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY;
+    const free = f.districtEmbedUrl(sah!, 'ar');
+    if (free !== `https://maps.google.com/maps?q=${encodeURIComponent('حي الساحل، جدة')}&t=h&hl=ar&output=embed`) out.push(`keyless district embed must ask by name, got ${free}`);
+    process.env.EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY = 'TEST-KEY';
+    const official = f.districtEmbedUrl(sah!, 'ar');
+    if (!official.startsWith('https://www.google.com/maps/embed/v1/place?key=TEST-KEY&q=' + encodeURIComponent('حي الساحل، جدة'))) out.push(`keyed district embed must be the free place mode by name, got ${official}`);
+  } finally {
+    if (prev === undefined) delete process.env.EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY; else process.env.EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY = prev;
+  }
+  return out;
+};
+const districtReal = districtProblems(await liftDistrict(DATA));
+check('district border: Aqar + Aqar Monthly only, «حي X، City» by name, the city when no district, no map without a city, the free embed (keyless or place mode)', districtReal.length === 0, districtReal.join('\n      '));
+const mustCatchDistrict = async (what: string, from: string, to: string) => {
+  if (!DATA_SRC.includes(from)) { failed++; console.log(`FAIL  mutation anchor missing: ${what}`); return; }
+  const file = join(mkdtempSync(join(tmpdir(), 'ad-district-')), 'adPageData.ts');
+  writeFileSync(file, DATA_SRC.replace(from, to));
+  const caught = districtProblems(await liftDistrict(file)).length > 0;
+  if (!caught) failed++;
+  console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) catches ${what}`);
+};
+await mustCatchDistrict('a map from the district name alone (no city)', "if (!city || city === 'غير معروف') return null;", '');
+await mustCatchDistrict('no district → nothing (the city fallback lost)', "if (!district || district === 'غير معروف') return { query: city, district: '', city };", "if (!district || district === 'غير معروف') return null;");
+await mustCatchDistrict('the district map spreading past Aqar', "if (!DISTRICT_MAP_PLATFORMS.includes(String(row?.platform ?? '').trim().toLowerCase())) return null;", '');
+await mustCatchDistrict('Aqar Monthly dropped from the district map', "export const DISTRICT_MAP_PLATFORMS: readonly string[] = ['aqar', 'aqarmonthly'];", "export const DISTRICT_MAP_PLATFORMS: readonly string[] = ['aqar'];");
+await mustCatchDistrict('the district embed losing the name', '`https://maps.google.com/maps?q=${q}&t=h&hl=${hl}&output=embed`', '`https://maps.google.com/maps?t=h&hl=${hl}&output=embed`');
+const districtWired = (dataSrc: string, previewSrc: string) =>
+  /if \(!pin\) setArea\(districtPlace\(row\)\);/.test(previewSrc)                     // only when the source published no pin
+  && /\{!geo && area && IS_WEB \? \(/.test(previewSrc) && /\{mapOpen && !geo && area && IS_WEB \? \(/.test(previewSrc)
+  && (previewSrc.match(/districtEmbedUrl\(area, locale\)/g) ?? []).length === 2
+  && /t\('Approximate location'\)/.test(previewSrc) && /t\('\{name\} published no exact location', \{ name \}\)/.test(previewSrc)
+  && /const geo = mapPoint\(own\);\s*return \{ geo, row: own \};/.test(dataSrc);        // the pin path is untouched
+check('district border wiring: only without a pin, the free embed by name in both views, approximate labels, pin path untouched', districtWired(codeOnly(DATA_SRC), PREVIEW));
+sourceMutant('the district map drawn even when the source published a pin', !districtWired(codeOnly(DATA_SRC), PREVIEW.replace('if (!pin) setArea(districtPlace(row));', 'setArea(districtPlace(row));')));
+sourceMutant('the approximate label dropped', !districtWired(codeOnly(DATA_SRC), PREVIEW.replaceAll("t('Approximate location')", "t('Location')")));
+
 // ── the page counts only what search shows (owner 2026-10-10: a site the engineer marks dead/suspended
 // is hidden EVERYWHERE). Search's own switch is production_ready (a dormant platform's rows are false);
 // both search_listings_ar reads behind the block must carry it, on top of the registry's down list.
 const prodGated = (src: string) => {
   const reads = codeOnly(src).match(/from\('search_listings_ar'\)[^;]*?\.(limit|range)\(/g) ?? [];
-  const block = reads.filter((r) => /license_number|deal_ar/.test(r));   // the duplicates + asking-price reads
-  return block.length === 2 && block.every((r) => /\.eq\('production_ready', true\)/.test(r));
+  const block = reads.filter((r) => /license_number|deal_ar/.test(r));   // the duplicates + asking-price + similar-listings reads
+  return block.length === 3 && block.every((r) => /\.eq\('production_ready', true\)/.test(r));
 };
 check('the duplicates and asking-price reads count only rows search shows (production_ready)', prodGated(DATA_SRC));
 sourceMutant('the duplicates read without search\'s switch', !prodGated(DATA_SRC.replace(".eq('area_m2', area).eq('production_ready', true)", ".eq('area_m2', area)")));

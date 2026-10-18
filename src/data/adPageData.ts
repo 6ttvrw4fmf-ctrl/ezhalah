@@ -35,9 +35,9 @@ export type AdRow = {
   source_table?: string; listing_id?: number | string;
   latitude?: unknown; longitude?: unknown;
   type_ar?: string | null; deal_ar?: string | null; city_ar?: string | null; district_ar?: string | null;
-  price_total?: unknown; area_m2?: unknown; license_number?: string | null; platform?: string | null;
+  price_total?: unknown; area_m2?: unknown; license_number?: string | null; platform?: string | null; bedrooms?: unknown;
 };
-const AD_ROW_SELECT = 'latitude,longitude,type_ar,deal_ar,city_ar,district_ar,price_total,area_m2,license_number,platform,source_table,listing_id';
+const AD_ROW_SELECT = 'latitude,longitude,type_ar,deal_ar,city_ar,district_ar,price_total,area_m2,license_number,platform,source_table,listing_id,bedrooms';
 
 const num = (v: unknown): number =>
   typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
@@ -84,6 +84,39 @@ const TYPE_PLURAL_AR: Record<string, string> = {
 };
 export const typePluralAr = (typeAr: string): string => TYPE_PLURAL_AR[typeAr.trim()] ?? typeAr.trim();
 export const typeWordAr = (n: number, typeAr: string): string => (n >= 3 && n <= 10 ? typePluralAr(typeAr) : typeAr.trim());
+
+// THE DISTRICT BORDER (owner 2026-10-17: «use the same Google map and … show the entire district
+// exactly, all around the boundaries», then, shown both, «I like the one with the boundaries»). When the
+// source published NO pin for an ad (both coordinates missing), the ad page asks the SAME free Google
+// embed for the district by NAME — «حي X، City» — and Google itself fits the view to the district and
+// draws its own dashed border around it. Free (the keyless embed, or the Embed API place mode with the
+// owner's key — both $0, unlimited). Never a pin: Ezhalah's label reads «الموقع التقريبي» and the note
+// says the site published no exact location. Where Google holds no border for a name it still centres
+// on that district. Nothing here touches the pin path: mapPoint() is unchanged and a pin still needs
+// BOTH published coordinates.
+export type DistrictPlace = { query: string; district: string; city: string };
+export const DISTRICT_MAP_PLATFORMS: readonly string[] = ['aqar', 'aqarmonthly'];
+/** The district to show for an ad with no pin, from the ad's own row. Pure, exported for the barrier. */
+export function districtPlace(row: AdRow | null | undefined): DistrictPlace | null {
+  // Aqar (buy + rent) and Aqar Monthly only for now (owner 2026-10-17: «just do aqar now», then «do the
+  // location thing for Aqar Monthly and rent, same style, just don't include the Ministry of Justice»);
+  // other sites keep no map without a pin. The ministry block stays Aqar-sale-only (pricesBlockEligible).
+  if (!DISTRICT_MAP_PLATFORMS.includes(String(row?.platform ?? '').trim().toLowerCase())) return null;
+  const district = String(row?.district_ar ?? '').trim(), city = String(row?.city_ar ?? '').trim();
+  if (!city || city === 'غير معروف') return null;
+  // No district written (owner 2026-10-17: «those with no district, we show the city»): the whole city,
+  // Google's own city border around it — still labelled approximate, never a pin.
+  if (!district || district === 'غير معروف') return { query: city, district: '', city };
+  const named = /^حي\s/.test(district) ? district : `حي ${district}`;
+  return { query: `${named}، ${city}`, district: named, city };
+}
+export const districtEmbedUrl = (d: DistrictPlace, hl: string = 'ar'): string => {
+  const key = process.env.EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY;
+  const q = encodeURIComponent(d.query);
+  return key
+    ? `https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(key)}&q=${q}&maptype=satellite&language=${hl}`
+    : `https://maps.google.com/maps?q=${q}&t=h&hl=${hl}&output=embed`;
+};
 
 export type AdPage = { geo: GeoPoint | null; row: AdRow | null };
 const EMPTY_PAGE: AdPage = { geo: null, row: null };
@@ -322,6 +355,73 @@ export function fetchSameAd(row: AdRow | null): Promise<Listing[]> {
       return cards.flat();
     })();
     sameCache.set(key, p);
+  }
+  return p;
+}
+
+// ── the closely similar listings (owner 2026-10-16: «not all of them, just the ones very closely alike») ───────────
+// The «Listed now» half gets its own sheet: the SALE ads in this district that are close to this one — the same
+// property type, the area within ±20%, the same bedroom count when both ads state one — each property once, nearest
+// first, every row a real ad on its own site at its own published price. Numbers only; no ranking by anything but closeness.
+export type SimilarRow = { source_table?: string; listing_id?: number | string; platform?: string | null; license_number?: string | null; type_ar?: string | null; area_m2?: unknown; price_total?: unknown; bedrooms?: unknown };
+export type SimilarCard = { card: Listing; price: number; area: number; ppm: number; beds: number | null };
+export const SIMILAR_AREA_BAND = 0.2;
+export const SIMILAR_LIMIT = 30;
+export function similarRows(rows: SimilarRow[], ad: AdRow, downSlugs: Set<string>): (SimilarRow & { price: number; area: number; ppm: number; beds: number | null })[] {
+  const adArea = num(ad.area_m2), adPrice = num(ad.price_total);
+  const adType = String(ad.type_ar ?? '').trim();
+  if (!(adArea > 0) || !adType) return [];
+  const adBeds = num(ad.bedrooms);
+  const adPpm = adPrice > 0 ? adPrice / adArea : NaN;
+  const lo = adArea * (1 - SIMILAR_AREA_BAND), hi = adArea * (1 + SIMILAR_AREA_BAND);
+  const best = new Map<string, SimilarRow & { price: number; area: number; ppm: number; beds: number | null }>();
+  for (const r of rows) {
+    const platform = String(r.platform ?? '').trim().toLowerCase();
+    if (!platform || downSlugs.has(platform) || !r.source_table) continue;
+    if (String(r.source_table) === String(ad.source_table ?? '') && String(r.listing_id) === String(ad.listing_id ?? '')) continue;   // never itself
+    if (String(r.type_ar ?? '').trim() !== adType) continue;
+    const area = num(r.area_m2), price = num(r.price_total);
+    if (!(area >= lo && area <= hi) || !Number.isFinite(price) || price < PRICE_MIN || price > PRICE_MAX) continue;
+    const beds = num(r.bedrooms);
+    const bedsKnown = Number.isFinite(beds) && beds > 0, adBedsKnown = Number.isFinite(adBeds) && adBeds > 0;
+    if (bedsKnown && adBedsKnown && beds !== adBeds) continue;
+    const lic = String(r.license_number ?? '').trim();
+    const key = lic ? `${lic}|${adType}|${area}` : `${platform}|${adType}|${price}|${area}`;
+    const cur = best.get(key);
+    if (!cur || price < cur.price) best.set(key, { ...r, price, area, ppm: price / area, beds: bedsKnown ? beds : null });
+  }
+  const closeness = (x: { area: number; ppm: number }) => [Math.abs(x.area - adArea), Number.isFinite(adPpm) ? Math.abs(x.ppm - adPpm) : 0] as const;
+  return [...best.values()]
+    .sort((a, b) => { const [a1, a2] = closeness(a), [b1, b2] = closeness(b); return a1 - b1 || a2 - b2; })
+    .slice(0, SIMILAR_LIMIT);
+}
+const similarCache = new Map<string, Promise<SimilarCard[]>>();
+/** The real cards of the closely similar listings, nearest first; a failed read is [] and forgotten. */
+export function fetchSimilarListings(row: AdRow | null): Promise<SimilarCard[]> {
+  const area = num(row?.area_m2);
+  if (!supabase || !row || row.deal_ar !== 'بيع' || !row.type_ar || !row.city_ar || !row.district_ar || !(area > 0)) return Promise.resolve([]);
+  const key = `${row.source_table}|${row.listing_id}`;
+  let p = similarCache.get(key);
+  if (!p) {
+    const ad = row;
+    p = (async () => {
+      await loadHiddenPlatformNames();
+      const { data, error } = await boundedRpc<SimilarRow[]>(
+        supabase!.from('search_listings_ar').select('source_table,listing_id,platform,license_number,type_ar,area_m2,price_total,bedrooms')
+          .eq('city_ar', ad.city_ar as string).eq('district_ar', ad.district_ar as string).eq('deal_ar', 'بيع').eq('type_ar', String(ad.type_ar).trim())
+          .eq('production_ready', true).gte('area_m2', Math.floor(area * (1 - SIMILAR_AREA_BAND))).lte('area_m2', Math.ceil(area * (1 + SIMILAR_AREA_BAND)))
+          .not('price_total', 'is', null).limit(600),
+      );
+      if (error) { similarCache.delete(key); return []; }
+      const picked = similarRows(data ?? [], ad, downPlatformSlugs());
+      const byTable = new Map<string, number[]>();
+      for (const r of picked) byTable.set(r.source_table as string, [...(byTable.get(r.source_table as string) ?? []), Number(r.listing_id)]);
+      const cards = (await Promise.all([...byTable].map(([t, ids]) => fetchListingCards(t, ids)))).flat();
+      const byKey = new Map(cards.map((c) => [`${(c as Listing & { sourceTable?: string }).sourceTable}|${c.id}`, c]));
+      // the sheet keeps the closeness order and prints the INDEX row's own figures beside the card
+      return picked.flatMap((r) => { const c = byKey.get(`${r.source_table}|${r.listing_id}`); return c ? [{ card: c, price: r.price, area: r.area, ppm: r.ppm, beds: r.beds }] : []; });
+    })();
+    similarCache.set(key, p);
   }
   return p;
 }

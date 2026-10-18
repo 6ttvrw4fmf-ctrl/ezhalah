@@ -74,7 +74,7 @@ import { listingOpenUrl, openListing } from '@/lib/openListing';
 import {
   EMPTY_AD_PANE, closeAdTab, hideAdPane, inAppPreviewHost, inAppViewerHost, openAdTab, showAdPane, type AdPane, type AdTab,
 } from '@/lib/inAppViewer';
-import { PICKER_SHEET_BREAKPOINT, VIEWER_SPLIT_BREAKPOINT, CARDS_THREE_ACROSS_BREAKPOINT } from '@/lib/responsive';
+import { PICKER_SHEET_BREAKPOINT, VIEWER_SPLIT_BREAKPOINT, CARDS_THREE_ACROSS_BREAKPOINT, SHARE_LABEL_BREAKPOINT } from '@/lib/responsive';
 import { useAtLeast } from '@/lib/useAtLeast';
 import AdViewer from '@/components/AdViewer';
 import { ConfettiOverlay } from '@/components/ConfettiOverlay';
@@ -93,10 +93,13 @@ import { useApp } from '@/store';
 import { pickResultsFoundSentence } from '@/data/resultsFoundRotation';
 import { pickNoResultsSentence } from '@/data/noResultsRotation';
 import { pickName } from '@/lib/nameSync';
+import { encodeSharePayload, shareLink, shareMessage } from '@/lib/shareSearch';
+import { SHARE_LINK } from '@/lib/share';
 import { replayMsgIds } from '@/lib/replayIds';
 import { primeResultsFound } from '@/data/loaderResultsFound';
 import { onVisibleWindowResize, screenKeyboardInset } from '@/lib/visualViewportFrame';
 import { serializeChat, restoreChat, type PersistedChat } from '@/lib/chatTranscript';
+import { createSharedChat } from '@/lib/sharedChat';
 import { useI18n, LocaleScope, detectLocale, resolveReplyLocale, getLocale, translate, t as tr, type Locale, LOCATION_UNRESOLVED_AR } from '@/i18n';
 import { listingLocationAr, listingPrice } from '@/lib/listingDisplay';
 import { noTranslateRef } from '@/noTranslate';
@@ -680,6 +683,35 @@ export default function Agent() {
     hid?: string; // history entry id — lets the replay path pick up the entry's saved result snapshot
   }>();
   const { user, runQuery, loadMoreListings, pendingMessage, setPendingMessage, recordChatTurn, trackOpen, history, setQuery, openAuth, dismissSignInCard, saveTranscript, hydrateTranscript } = useApp();
+  // SHARE THIS SEARCH (owner 2026-10-17): a signed-in user's «مشاركة» sends the search itself with the
+  // approved line «عقارات من {name} لك على إزهله 🦅 …» (src/lib/shareSearch.ts). The link lands on
+  // Home, never on /agent — a pasted link must not run a search by itself (appSession gate). A guest,
+  // or a result whose query is unknown, keeps the plain homepage share.
+  const sharedCopyRef = useRef<{ j: string; url: string } | null>(null);
+  const shareFor = (q: SearchQuery | undefined): { shareUrl?: string; shareText?: string; prepareShare?: () => Promise<string | null> } => {
+    if (!user || !q) return {};
+    const loc: 'ar' | 'en' = locale === 'en' ? 'en' : 'ar';
+    const name = pickName(user, loc);
+    const payload = encodeSharePayload(q, name, loc);
+    const text = shareMessage(name, q, loc);
+    if (!payload || !text) return {};
+    const origin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : SHARE_LINK;
+    // THE WHOLE CHAT (owner 2026-10-17: «sharing it means I share the chat history»): pressing Share saves
+    // a COPY of this conversation (public.shared_chat) and shares its short /s/<code> link; the search
+    // link above is only the fallback when that save fails. One copy per unchanged conversation.
+    const prepareShare = async (): Promise<string | null> => {
+      const t = serializeChat({ msgs: msgs as any, revealCount, afReceipt, guidedPills, completed, afCanNarrow: afCanNarrow }); // same fields as the capture below
+      if (!t) return null;
+      const j = JSON.stringify(t);
+      if (sharedCopyRef.current?.j === j) return sharedCopyRef.current.url;
+      const code = await createSharedChat(name, loc, q, t);
+      if (!code) return null;
+      const url = shareLink(origin, code);
+      sharedCopyRef.current = { j, url };
+      return url;
+    };
+    return { shareUrl: shareLink(origin, payload), shareText: text, prepareShare };
+  };
   // THE ONE STORE WRITER FOR THIS SCREEN. Every write into the shared query the Filter home binds to
   // goes through here, always sanitized — enforced by verify-af-state-never-leaks-into-filter.ts,
   // which counts the `setQuery(` calls in this file precisely so a second, unsanitized writer cannot
@@ -865,6 +897,8 @@ export default function Agent() {
   const shareScale = useRef(new Animated.Value(1)).current;
   const shareSpring = (toValue: number) =>
     Animated.spring(shareScale, { toValue, stiffness: 260, damping: 26, mass: 0.7, useNativeDriver: Platform.OS !== 'web' }).start();
+  // Same rule as the Filter screen: «مشاركة» always shows; below this width the sign-in pill shortens.
+  const topBarRoomy = useAtLeast(SHARE_LABEL_BREAKPOINT);
   // Filter / AI ModeSwitch (owner 2026-08-16): the pill no longer lives in the top-right corner —
   // it sits CENTERED under the header, mirroring the home hero's centered pill, so switching modes
   // reads as one control staying in the middle rather than teleporting into the corner. And the
@@ -4178,14 +4212,14 @@ export default function Agent() {
         {/* Logged-out sign-in (mobile only — desktop has the docked sidebar CTA). Owner 2026-08-19. */}
         {!user && !docked && (
           <Pressable
-            style={s.topSignIn}
+            style={[s.topSignIn, !topBarRoomy && s.topSignInNarrow]}
             onPress={openAuth}
             hitSlop={6}
             // @ts-expect-error web-only DOM props on the RNW host node
             dataSet={{ ...TAP44 }}
           >
-            <Ionicons name="person-outline" size={15} color="#fff" />
-            <Text style={s.topSignInText}>{t('Sign up / Log in')}</Text>
+            {topBarRoomy ? <Ionicons name="person-outline" size={15} color="#fff" /> : null}
+            <Text style={s.topSignInText}>{t(topBarRoomy ? 'Sign up / Log in' : 'Sign in')}</Text>
           </Pressable>
         )}
         {/* Note #5 — Share is ALWAYS visible the moment the user is in AI Agent mode. Not gated on
@@ -4193,15 +4227,26 @@ export default function Agent() {
         {/* Redesigned to match the home screen's share button (design review 2026-07-24) — same
             tint fill/hairline/height/radius as ModeSwitch's own track, so the pill + share cluster
             reads as one continuous control across both screens, not just within one. */}
+        {/* The SAME labelled «مشاركة» pill as the Filter screen (owner 2026-10-17: the bare box-arrow
+            glyph here was not read as "share"). Same icon, label, breakpoint and styles as index.tsx. */}
         <Pressable
           onPress={() => setShareOpen(true)}
-          style={({ pressed }) => [s.shareIcon, pressed && s.shareIconPressed]}
+          style={({ pressed, hovered }: any) => [
+            s.shareIcon,
+            s.shareIconWide,
+            !topBarRoomy && s.shareIconNarrow,
+            hovered && s.shareIconHover,
+            pressed && s.shareIconPressed,
+          ]}
           hitSlop={8}
           onPressIn={() => shareSpring(0.94)}
           onPressOut={() => shareSpring(1)}
+          accessibilityRole="button"
+          accessibilityLabel={t('Share')}
         >
-          <Animated.View style={{ transform: [{ scale: shareScale }] }}>
-            <Ionicons name="share-outline" size={19} color={colors.chipIcon} />
+          <Animated.View style={[s.shareInner, { transform: [{ scale: shareScale }] }]}>
+            <Ionicons name="share-social-outline" size={17} color={colors.primary} />
+            <Text style={s.shareText}>{t('Share')}</Text>
           </Animated.View>
         </Pressable>
       </View>
@@ -4915,7 +4960,7 @@ export default function Agent() {
                                 closing note + available actions above (owner 2026-08-23). Sliced to `shown`
                                 — never past what's actually rendered right now ("no hidden listing should be
                                 spoken") — but otherwise reads every visible card (owner 2026-08-22: no further cap). */}
-                            <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={readAloudSegments} />
+                            <FeedbackRow feedbackKey={m.id} onFeedback={showFbToast} readAloudSegments={readAloudSegments} {...shareFor(m.result.query)} />
                           </>
                         );
                       })()}
@@ -5398,7 +5443,8 @@ const s = StyleSheet.create({
   // Matches the taller premium ModeSwitch (46-tall, tint fill + hairline, pill radius, soft lift) so
   // the pill + share read as one cluster across both screens (owner redesign 2026-07-24 r2).
   shareIcon: {
-    width: 46,
+    // minWidth, not width — the labelled pill grows sideways (RNW won't release a fixed width; see index.tsx).
+    minWidth: 46,
     height: 46,
     borderRadius: radius.pill,
     alignItems: 'center',
@@ -5414,6 +5460,13 @@ const s = StyleSheet.create({
     elevation: 2,
   },
   shareIconPressed: { opacity: 0.85 },
+  shareIconWide: { paddingHorizontal: 15 },
+  // Small phones (<380px): the header holds menu + name + sign-in + «مشاركة»; tighten so nothing is cut off.
+  shareIconNarrow: { paddingHorizontal: 11, marginLeft: 0 },
+  topSignInNarrow: { marginRight: 0, paddingHorizontal: 11 },
+  shareIconHover: { backgroundColor: colors.tintFill, borderColor: colors.primary },
+  shareInner: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  shareText: { fontSize: 13.5, fontWeight: '700', color: colors.primary, includeFontPadding: false },
   // Reopen chip for a hidden ad pane — the share button's own tint/hairline idiom, beside it.
   topSignIn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.selFill, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 13, marginRight: 8 },
   topSignInText: { fontSize: 12, fontWeight: '700', color: '#fff' },

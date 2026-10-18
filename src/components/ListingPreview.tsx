@@ -13,7 +13,7 @@ import { useAtLeast } from '@/lib/useAtLeast';
 import { PICKER_SHEET_BREAKPOINT } from '@/lib/responsive';
 import { useReducedMotion } from '@/lib/useReducedMotion';
 import { SourceBadge, FEATURE_META, arAttrValue } from '@/components/ResultCard';
-import { MOJ_SOURCE_URL, PRICE_MAX, PRICE_MIN, dearerSplit, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojDeals, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojDeal, type MojFacts } from '@/data/adPageData';
+import { MOJ_SOURCE_URL, PRICE_MAX, PRICE_MIN, dearerSplit, fetchAdPage, fetchAskingPrices, fetchGroupPrices, fetchMojDeals, fetchMojSales, fetchSameAd, mapEmbedUrl, pricesBlockEligible, tileFromShown, typePluralAr, type AskingPrices, type GeoPoint, type MojDeal, type MojFacts, districtEmbedUrl, districtPlace, type DistrictPlace, fetchSimilarListings, type SimilarCard } from '@/data/adPageData';
 import { listingOpenUrl } from '@/lib/openListing';
 import type { Listing } from '@/data/listings';
 
@@ -44,6 +44,7 @@ const MAP_MIN = 150;
 // browser's Back closes the map and lands on the viewer's own marked entry, which it treats as «show».
 const SHEET_MARK = 'ezAdMap';
 const DEALS_MARK = 'ezAdDeals';
+const SIMILAR_MARK = 'ezAdSimilar';
 // THE TAP MOMENT (owner 2026-10-10): the open happens OPEN_DELAY_MS after the tap — inside the browser's
 // user-activation window, so Safari lets the new tab through — while confetti marks the hand-off. Keep
 // it under ~1s or the tab is blocked.
@@ -191,12 +192,14 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
 
   // ── the source's pin + the asking prices around this ad (web only; native keeps the card data alone) ──
   const [geo, setGeo] = useState<GeoPoint | null>(null);
+  // No pin from the source → the district by name, Google's own border around it (owner 2026-10-17).
+  const [area, setArea] = useState<DistrictPlace | null>(null);
   // The «الأسعار» block's three sources, fetched together once the ad's own row is known: the asking
   // prices around it (each house once), the ministry's actual sales, the same ad on other sites.
   // stats = this ad's OWN type (card 3); group = the whole macro group, the split card's right half — the
   // same group the ministry's left half is built on (owner update 24).
-  type Prices = { stats: AskingPrices | null; group: AskingPrices | null; moj: MojFacts | null; deals: MojDeal[]; same: Listing[]; price: number | null; area: number | null; typeAr: string };
-  const [prices, setPrices] = useState<Prices>({ stats: null, group: null, moj: null, deals: [], same: [], price: null, area: null, typeAr: '' });
+  type Prices = { stats: AskingPrices | null; group: AskingPrices | null; moj: MojFacts | null; deals: MojDeal[]; similar: SimilarCard[]; same: Listing[]; price: number | null; area: number | null; typeAr: string };
+  const [prices, setPrices] = useState<Prices>({ stats: null, group: null, moj: null, deals: [], similar: [], same: [], price: null, area: null, typeAr: '' });
   const commercial = l.macro === 'Commercial';
   const [explainOpen, setExplainOpen] = useState(false);
   useEffect(() => {
@@ -205,11 +208,12 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
     void fetchAdPage(l).then(({ geo: pin, row }) => {
       if (!alive) return;
       setGeo(pin);
+      if (!pin) setArea(districtPlace(row));
       // Aqar sale ads only for now (owner update 22): nothing is even fetched for the rest.
       if (!pricesBlockEligible(row)) return;
       const price = Number(row?.price_total), area = Number(row?.area_m2);
-      void Promise.all([fetchAskingPrices(row), fetchGroupPrices(row, commercial ? 'Commercial' : 'Residential'), fetchMojSales(row, commercial ? 'تجاري' : 'سكني'), fetchSameAd(row), fetchMojDeals(row, commercial ? 'تجاري' : 'سكني')]).then(([stats, group, moj, same, deals]) => {
-        if (alive) setPrices({ stats, group, moj, deals, same, price: Number.isFinite(price) && price > 0 ? price : null, area: Number.isFinite(area) && area > 0 ? area : null, typeAr: String(row?.type_ar ?? '') });
+      void Promise.all([fetchAskingPrices(row), fetchGroupPrices(row, commercial ? 'Commercial' : 'Residential'), fetchMojSales(row, commercial ? 'تجاري' : 'سكني'), fetchSameAd(row), fetchMojDeals(row, commercial ? 'تجاري' : 'سكني'), fetchSimilarListings(row)]).then(([stats, group, moj, same, deals, similar]) => {
+        if (alive) setPrices({ stats, group, moj, deals, similar, same, price: Number.isFinite(price) && price > 0 ? price : null, area: Number.isFinite(area) && area > 0 ? area : null, typeAr: String(row?.type_ar ?? '') });
       });
     });
     return () => { alive = false; };
@@ -258,17 +262,37 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
       if (st?.[DEALS_MARK]) { const { [DEALS_MARK]: _drop, ...rest } = st; window.history.replaceState(rest, ''); }
     } catch { /* history unavailable: closing still works */ }
   };
+  // ── the closely similar listings: a third in-page sheet, the same pattern ──
+  const [similarOpen, setSimilarOpen] = useState(false);
+  const similarOpenRef = useRef(similarOpen); similarOpenRef.current = similarOpen;
+  const openSimilar = () => {
+    setSimilarOpen(true);
+    if (!IS_WEB) return;
+    try {
+      const st = window.history.state;
+      if (!st?.[SIMILAR_MARK]) window.history.pushState({ ...(st ?? {}), [SIMILAR_MARK]: true }, '');
+    } catch { /* history unavailable: the sheet still opens */ }
+  };
+  const closeSimilar = () => {
+    setSimilarOpen(false);
+    if (!IS_WEB) return;
+    try {
+      const st = window.history.state;
+      if (st?.[SIMILAR_MARK]) { const { [SIMILAR_MARK]: _drop, ...rest } = st; window.history.replaceState(rest, ''); }
+    } catch { /* history unavailable: closing still works */ }
+  };
   useEffect(() => {
     if (!IS_WEB) return;
     const onPop = () => {
       if (mapOpenRef.current && !window.history.state?.[SHEET_MARK]) setMapOpen(false);
       if (dealsOpenRef.current && !window.history.state?.[DEALS_MARK]) setDealsOpen(false);
+      if (similarOpenRef.current && !window.history.state?.[SIMILAR_MARK]) setSimilarOpen(false);
     };
     // Capture phase: this runs before AdViewer's own Escape (which would hide the whole pane).
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || !(mapOpenRef.current || dealsOpenRef.current)) return;
+      if (e.key !== 'Escape' || !(mapOpenRef.current || dealsOpenRef.current || similarOpenRef.current)) return;
       e.stopImmediatePropagation();
-      if (dealsOpenRef.current) closeDeals(); else closeMap();
+      if (similarOpenRef.current) closeSimilar(); else if (dealsOpenRef.current) closeDeals(); else closeMap();
     };
     window.addEventListener('popstate', onPop);
     window.addEventListener('keydown', onKey, true);
@@ -571,6 +595,34 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
               </Pressable>
             </View>
           ) : null}
+          {/* THE DISTRICT BORDER (owner 2026-10-17): no pin from the source → the same free map, asked for the
+              district by name; Google fits it and draws its own border. Labelled approximate, never a pin. */}
+          {!geo && area && IS_WEB ? (
+              <View style={[s.mapBox, { height: mapH }]} testID="listing-preview-area">
+                <Frame
+                  src={districtEmbedUrl(area, locale)}
+                  title={t('District location on Google Maps')}
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0, pointerEvents: 'none' }}
+                />
+                <Pressable testID="listing-preview-map" onPress={openMap} accessibilityRole="button" accessibilityLabel={t('Expand the map')} style={s.mapTap}>
+                  <View style={[s.areaTag, isRTL ? { right: 10 } : { left: 10 }]}>
+                    <View style={s.areaDot} />
+                    <Text style={s.areaTagTx}>{t('Approximate location')}</Text>
+                  </View>
+                  <View style={s.mapChip}>
+                    <Ionicons name="expand-outline" size={15} color={lightColors.ink} />
+                    <Text style={s.mapChipTx}>{t(area.district ? 'Tap here to see the district' : 'Tap here to see the city')}</Text>
+                  </View>
+                  <View style={[s.mapPill, isRTL ? { right: 10 } : { left: 10 }]}>
+                    <Text style={s.mapPillTx}>{t('{name} published no exact location', { name })}</Text>
+                  </View>
+                </Pressable>
+              </View>
+          ) : null}
         </View>
 
         {/* (5) the first screen's last row: ONE button to the real ad */}
@@ -639,6 +691,18 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                               <Ionicons name="open-outline" size={12} color={colors.primary} />
                             </Pressable>
                           ) : null}
+                          {!h.gov && prices.similar.length > 0 ? (
+                            <Pressable
+                              testID="listing-preview-similar"
+                              onPress={openSimilar}
+                              accessibilityRole="button"
+                              accessibilityLabel={t('Show the similar listings ({n})', { n: fmtInt(prices.similar.length) })}
+                              style={({ hovered }: any) => [s.dealsBtn, hovered && s.hover]}
+                            >
+                              <Ionicons name="list-outline" size={14} color={colors.primary} />
+                              <Text style={s.dealsBtnTx}>{t('Show the similar listings ({n})', { n: fmtInt(prices.similar.length) })}</Text>
+                            </Pressable>
+                          ) : null}
                           {h.gov && prices.deals.length > 0 ? (
                             <Pressable
                               testID="listing-preview-moj-deals"
@@ -683,6 +747,7 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
                       {prices.moj ? bullet(t(commercial
                         ? 'Actual sales: the deals recorded by the Ministry of Justice in the period shown, with its numbers unchanged. The Ministry classifies each deal as residential or commercial and does not record the property type, so the figures cover every deal it classified commercial in this district.'
                         : 'Actual sales: the deals recorded by the Ministry of Justice in the period shown, with its numbers unchanged. The Ministry classifies each deal as residential or commercial and does not record the property type, so the figures cover every deal it classified residential in this district; villa, apartment and land deals are not separated.')) : null}
+                      {prices.similar.length > 0 ? bullet(t('Tap «Show the similar listings» under our half to see the ads closest to this one (same district and type, area within 20%, same bedrooms when stated), each on its own website at its published price.')) : null}
                       {prices.deals.length > 0 ? bullet(t('Tap «Show the deals» under the ministry’s half to see those deals one by one, as the ministry recorded them.')) : null}
                       {prices.moj?.path ? bullet(t('To see the same sales in the ministry’s report: open «Source: Ministry of Justice», then choose in its filters Region / City / District: {path}, property class: {cls}, and the period {from} to {to}. The report cannot open already filtered.', { path: prices.moj.path, cls: commercial ? 'تجاري' : 'سكني', from: prices.moj.from, to: prices.moj.to })) : null}
                       {prices.moj ? bullet(t('We refresh the Ministry’s numbers and deals automatically every week{last}. The Ministry’s own records can lag, so we print the exact period of the deals.', { last: prices.moj.updatedAt ? t(' (last update {date})', { date: dayLabel(prices.moj.updatedAt) }) : '' })) : null}
@@ -803,6 +868,27 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
         </View>
       ) : null}
 
+      {/* the expanded district: the same free map by name, interactive, Google's border around it */}
+      {mapOpen && !geo && area && IS_WEB ? (
+          <View testID="listing-preview-map-sheet" style={s.mapSheet}>
+            <Frame src={districtEmbedUrl(area, locale)} title={t('District location on Google Maps')} referrerPolicy="no-referrer-when-downgrade" allow="fullscreen" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }} />
+            <View pointerEvents="none" style={[s.areaTag, { top: 14 }, isRTL ? { right: 60 } : { left: 60 }]}>
+              <View style={s.areaDot} />
+              <Text style={s.areaTagTx}>{t('Approximate location')}</Text>
+            </View>
+            <Pressable
+              testID="listing-preview-map-close"
+              onPress={closeMap}
+              accessibilityRole="button"
+              accessibilityLabel={t('Close')}
+              style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
+              // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
+              dataSet={{ ...TAP44 }}
+            >
+              <Ionicons name="close" size={22} color={colors.ink} />
+            </Pressable>
+          </View>
+      ) : null}
       {/* the expanded map: the same embed, interactive, over this page — the page keeps its scroll */}
       {mapOpen && geo && IS_WEB ? (
         <View testID="listing-preview-map-sheet" style={s.mapSheet}>
@@ -811,12 +897,58 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             testID="listing-preview-map-close"
             onPress={closeMap}
             accessibilityRole="button"
-            accessibilityLabel={t('Close')}
+            accessibilityLabel={t('Back')}
             style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
             // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
             dataSet={{ ...TAP44 }}
           >
-            <Ionicons name="close" size={22} color={colors.ink} />
+            <Ionicons name={isRTL ? 'arrow-forward' : 'arrow-back'} size={22} color={colors.ink} />
+          </Pressable>
+        </View>
+      ) : null}
+
+      {/* the closely similar listings: real ads on their own sites, nearest first; a tap opens the ad on its site */}
+      {similarOpen && IS_WEB && prices.similar.length > 0 ? (
+        <View testID="listing-preview-similar-sheet" style={s.mapSheet}>
+          <View style={s.dealsHead}>
+            <Text style={[s.dealsTitle, tx]}>{t('Similar listings in the district')}</Text>
+            <Text style={[s.dealsSub, tx]}>{`${district || city} · ${typePlural()} · ${t('{n} listings', { n: fmtInt(prices.similar.length) })}`}</Text>
+            <Text style={[s.dealsSub, tx]}>{t('Same district and type, area within 20% of this ad, same bedrooms when stated. Each property once, nearest first, prices as published.')}</Text>
+          </View>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
+            {prices.similar.map(({ card, price, area, ppm, beds }) => {
+              const href = listingOpenUrl(card) ?? '';
+              return (
+                <Pressable
+                  key={`${card.source}:${card.id}`}
+                  testID="listing-preview-similar-row"
+                  onPress={() => open(href)}
+                  disabled={!href}
+                  accessibilityRole="link"
+                  accessibilityLabel={t('Open the ad on {name} to contact', { name: t(sourceName(card.source)) })}
+                  style={({ hovered }: any) => [s.simRow, hovered && s.hover]}
+                >
+                  <View style={s.simLogo} pointerEvents="none"><View style={{ transform: [{ scale: 0.5 }] }}><SourceBadge source={card.source} /></View></View>
+                  <View style={s.simMain}>
+                    <Text numberOfLines={1} style={[s.simPrice, tx]}>{listingPrice(card, locale)}</Text>
+                    <Text numberOfLines={1} style={[s.simMeta, tx]}>{`${fmtArea(area)} م² · ${fmtInt(ppm)} ${t('SAR/m²')}${beds != null ? ` · ${t('{n} bedrooms', { n: fmtInt(beds) })}` : ''}`}</Text>
+                    <Text numberOfLines={1} style={[s.simSite, tx]}>{t(sourceName(card.source))} · {t('Tap to view it')}</Text>
+                  </View>
+                  <Ionicons name="open-outline" size={16} color={colors.primary} />
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <Pressable
+            testID="listing-preview-similar-close"
+            onPress={closeSimilar}
+            accessibilityRole="button"
+            accessibilityLabel={t('Back')}
+            style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
+            // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
+            dataSet={{ ...TAP44 }}
+          >
+            <Ionicons name={isRTL ? 'arrow-forward' : 'arrow-back'} size={22} color={colors.ink} />
           </Pressable>
         </View>
       ) : null}
@@ -860,12 +992,12 @@ export default function ListingPreview({ listing: l, url, onClose, inViewer }: {
             testID="listing-preview-moj-deals-close"
             onPress={closeDeals}
             accessibilityRole="button"
-            accessibilityLabel={t('Close')}
+            accessibilityLabel={t('Back')}
             style={({ hovered }: any) => [s.mapClose, isRTL ? { left: 12 } : { right: 12 }, hovered && s.hover]}
             // @ts-expect-error web-only DOM props on the RNW host node (44px tap floor)
             dataSet={{ ...TAP44 }}
           >
-            <Ionicons name="close" size={22} color={colors.ink} />
+            <Ionicons name={isRTL ? 'arrow-forward' : 'arrow-back'} size={22} color={colors.ink} />
           </Pressable>
         </View>
       ) : null}
@@ -944,6 +1076,9 @@ const s = StyleSheet.create({
   },
   mapChipTx: { fontSize: 13, fontWeight: '700', color: lightColors.ink },
   mapSheet: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.surface },
+  areaTag: { position: 'absolute', top: 10, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.surface, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
+  areaDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.selFill },
+  areaTagTx: { fontSize: 12.5, fontWeight: '800', color: colors.ink },
   // the ministry's deals sheet: a head, a sticky header row, then one row per deal
   dealsBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 6, marginTop: 6, borderWidth: 1, borderColor: colors.tintLine, backgroundColor: colors.tint, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 5 },
   dealsBtnTx: { fontSize: 12.5, fontWeight: '600', color: colors.primary },
@@ -955,6 +1090,13 @@ const s = StyleSheet.create({
   dealCell: { flex: 1, minWidth: 0, fontSize: 12.5, color: colors.dark, textAlign: 'center', fontVariant: ['tabular-nums'] },
   dealCellHead: { fontSize: 11, fontWeight: '600', color: colors.muted },
   dealRef: { color: colors.muted },
+  // the similar-listings sheet: one tappable row per ad (logo · price · m², m² price, bedrooms · site)
+  simRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: colors.line },
+  simLogo: { width: 48, height: 24, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  simMain: { flex: 1, minWidth: 0, gap: 1 },
+  simPrice: { fontSize: 14.5, fontWeight: '700', color: colors.dark, fontVariant: ['tabular-nums'] },
+  simMeta: { fontSize: 12, color: colors.ink },
+  simSite: { fontSize: 11, color: colors.muted },
   mapClose: {
     position: 'absolute', top: 12, width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, boxShadow: '0 2px 10px rgba(20,40,30,0.18)',
