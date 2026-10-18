@@ -5,6 +5,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+import pytest  # noqa: E402
+
+from scrapers.haraj import parse as P  # noqa: E402
 from scrapers.haraj.parse import ld_listing, parse_post  # noqa: E402
 
 SALE = {"@type": "RealEstateListing", "name": "بيت دور وشقتين للبيع في حي العاصمة",
@@ -48,3 +51,20 @@ def test_ld_listing_from_page():
 
 def test_licence_holder_name_is_redacted():
     assert "فلان" not in parse_post(SALE)["description"]
+
+
+# ── REGA single-choice facade diagonals + «Less Than Year» (2026-10-17: 119 + 14 Haraj ads stored none) ──
+@pytest.mark.parametrize("raw,want", [
+    ("شمالية شرقية", "شمال شرق"), ("جنوبية غربية", "جنوب غرب"), ("Northeast", "شمال شرق"),
+    ("South west", "جنوب غرب"), ("North west", "شمال غرب"), ("South east", "جنوب شرق"),
+    ("جنوبية - شرقية", None), ("Eastern - Western", None), ("ثلاثة شوارع", None),   # two+ streets: raw kept
+    ("شمالية", "شمال"), ("Eastern", "شرق"),
+])
+def test_facade_diagonals_are_one_facade(raw, want):
+    assert P.facade_of(raw) == want
+
+
+@pytest.mark.parametrize("raw,want", [("Less Than Year", 0), ("less than a year", 0), ("أقل من سنة", 0),
+                                      ("اكثر من عشر سنوات", None), ("Seven Year", 7)])
+def test_less_than_a_year_is_new(raw, want):
+    assert P.age_of(raw) == want
