@@ -384,14 +384,50 @@ _MAP_RE = re.compile(r"([^:]{3,70}?)\s*\.{2,}\s*انظر\s*الخريطة")
 _STATUS_LEAD = re.compile(r"^(?:غير\s+مؤجرة|مؤجرة|جديدة|جديد|أخرى|مستعملة)\s+")
 
 
+# The page's OWN «الموقع:» field (2026-10-18). On many ads it holds a Google-formatted address —
+# «AHAA8868، 8868 خليفة ابن عبدالله ابن الحارث، 4816، حي الحيلة الغربي، محايل 63312, Saudi Arabia» —
+# whose «حي X» segment is the district the source states. The map line beneath it is TRUNCATED by the
+# theme («AHAA8868، 8868 ... انظر الخريطة»), so reading the map line gave a plus-code, a street, or
+# nothing (287 live rows with no district; rendered 2026-10-18). The field's prose («تقع خلف نادي …»)
+# is never a district; two «حي» segments are a conflict, not a choice.
+_LOC_FIELD_RE = re.compile(r"(?<![\u0600-\u06ff])الموقع\s*:\s*(.{3,300})", re.S)
+_ADDRESS_SIGNAL_RE = re.compile(r"\b\d{5}\b|Saudi Arabia|السعودية|المملكة العربية السعودية")
+_HAYY_SEG_RE = re.compile(r"^حي\s+\S")
+_PLUS_CODE_RE = re.compile(r"^[A-Z0-9]{4,8}\+[A-Z0-9]{2,3}\b")   # «QQWW+5XH», Google's plus code
+
+
+def location_field_district(text: str) -> Optional[str]:
+    """The «حي X» segment of the page's «الموقع:» field, as written — only when that field is a
+    structured address (a postal code or the country among its comma segments) and holds exactly one
+    «حي …» segment. A prose field («تقع خلف نادي …») has no address signal and yields nothing."""
+    for m in _LOC_FIELD_RE.finditer(text or ""):
+        segs: list[str] = []
+        for seg in re.split(r"[،,]", m.group(1)):
+            seg = seg.strip()
+            if not seg:
+                continue
+            segs.append(seg)
+            if _ADDRESS_SIGNAL_RE.search(seg):            # the address ends at its postal code / country
+                break
+        else:
+            continue                                       # no address signal anywhere: not an address
+        hay = [x for x in segs if _HAYY_SEG_RE.match(x)]
+        if len(hay) == 1:
+            return hay[0]
+    return None
+
+
 def district_candidate(text: str) -> Optional[str]:
+    field = location_field_district(text)
+    if field:
+        return field
     m = _MAP_RE.search(text)
     if not m:
         return None
     v = _STATUS_LEAD.sub("", m.group(1).strip())
     v = v.split("،")[0].split(",")[0].strip()
-    # an agent reference code is latin/digits, never a Saudi district name
-    if not v or re.fullmatch(r"[A-Za-z0-9\s\-_]+", v):
+    # an agent reference code is latin/digits, and a plus code a grid cell — never a Saudi district name
+    if not v or re.fullmatch(r"[A-Za-z0-9\s\-_]+", v) or _PLUS_CODE_RE.match(v):
         return None
     return v
 
@@ -652,6 +688,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
 
     # The district is PROPOSED from the page and kept only if this city's curated catalog knows it.
     cand = district_candidate(page_text)
+    district_source = ("location_field" if location_field_district(page_text) else "map_line") if cand else None
     title = _clean((post.get("title") or {}).get("rendered", ""))
     body = _clean((post.get("content") or {}).get("rendered", ""))
     district_ar = None
@@ -702,6 +739,7 @@ def map_listing(post: dict, page_text: str, page_html: str = "") -> tuple[Option
         row["price_total"] = price
 
     extra: dict[str, Any] = {
+        "district_source": district_source,      # the page's «الموقع:» address field, or the map line
         "wp_id": post.get("id"),
         "slug": post.get("slug") or None,
         "fal_licence": parse_licence(page_text),
