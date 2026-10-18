@@ -82,7 +82,7 @@ def test_the_map_line_still_answers_when_it_starts_with_the_district(monkeypatch
 # and 28 rows stored a Google plus code («عقارات الدمام 8Q9H+JHH» on 12226888, whose title says «حي القصور، الظهران»;
 # the bare code resolves to Kirkuk, Iraq). Every line below is a stored value, verbatim.
 JUNK_MAP_LINES = ["فلل فاخرة للبيع بدون دفعه مق", "المملكة العربية السعودية", "عقارات جدة JIJB",
-                  "شقه ايجار في الرياض 1", "تصميم تنفيذ مطاعم كافي", "خميس مشيط حي الراقي"]
+                  "شقه ايجار في الرياض 1", "تصميم تنفيذ مطاعم كافي", "القاهرة طريق الواحات مح"]
 PLUS_CODE_LINES = ["عقارات الدمام 8Q9H+JHH", "6JJ6+25 ابو ال", "عقارات الرياض 3C5W+WW الخير", "66H5+WXP 16255",
                    "عقارات الدمام 925V+M38 الدمام السع"]
 
@@ -114,8 +114,18 @@ def test_a_field_a_catalog_hit_or_a_self_named_hayy_is_kept_and_nothing_else():
     assert K.neighborhood_word("الملقا", "حي الحيلة الغربي", None) == "حي الحيلة الغربي"   # the field wins
     assert K.neighborhood_word("الملقا", None, "حي الملقا") == "الملقا"                    # the catalog knows it
     assert K.neighborhood_word("حي بحرة", None, None) == "حي بحرة"                         # it names itself a district
-    for junk in ["حي", "حي 12", "حي الراقي JIJB", "خميس مشيط حي الراقي", None]:
+    for junk in ["حي", "حي 12", "حي الراقي JIJB", "بحي الراقي", "محافظة محايل عسير حى", None]:
         assert K.neighborhood_word(junk, None, None) is None, junk
+
+
+# Recorded map lines (stored 2026-10-18) that END in a district they name: that segment is the source's word.
+@pytest.mark.parametrize("line, word", [
+    ("الرياض حي النضيم", "حي النضيم"),
+    ("خميس مشيط حي الاسكان", "حي الاسكان"),
+    ("عقارات الرياض الرياض حي ضهر البن", "حي ضهر البن"),
+])
+def test_a_map_line_ending_in_a_named_district_gives_that_segment(line, word):
+    assert K.neighborhood_word(line, None, None) == word
 
 
 # 2026-10-18, recorded: the field separated by «_», followed by the page's review box (advertiser handle and phone
