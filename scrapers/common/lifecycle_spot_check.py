@@ -207,6 +207,28 @@ def _reader_for(platform: str):
         # hollow). Read it the way its crawl and oracle do.
         from scrapers.muktamel import run as mk
         return mk.page_verdict
+    if platform == "almuteb":
+        # 2026-10-18: its HTML pages answer HTTP 503 (a 4 KB stub) to every CI read, so the status
+        # reader voided the dead-visible score four nights running (10-15..10-18), while its crawl reads
+        # all 10 ads through WordPress REST. Read it as its crawl's oracle does: the post's own REST
+        # record (publish = live, expired / closed status / rest_post_invalid_id = gone).
+        from scrapers.almuteb import run as mt
+        from scrapers.common.db import sb as _sb
+        oracle = mt._verify_gone_with(mt.fetch_taxonomies(mt.session()))
+        client = _sb()
+
+        def read_almuteb(url: str):
+            ad = None
+            for t in ("almuteb_residential_listings", "almuteb_commercial_listings"):
+                rows = client.table(t).select("ad_number").eq("listing_url", url).limit(1).execute().data or []
+                if rows:
+                    ad = rows[0]["ad_number"]
+                    break
+            if not ad:
+                return UNKNOWN, "no ad_number on file for this url"
+            v, why = oracle(ad)
+            return {"live": ALIVE, "gone": DEAD}.get(v, UNKNOWN), why
+        return read_almuteb
     if platform == "ashab":
         # 2026-10-17: a rented/sold ashab unit keeps a 200 page and says so only in its own status
         # badge, so a status read called 11 of 12 struck-but-shown units "live". Read the badge the
