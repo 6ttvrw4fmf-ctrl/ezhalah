@@ -527,6 +527,25 @@ def count_flag(v) -> Optional[bool]:
         return None
 
 
+_AR_DIGIT_MAP = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+_RATE_AFTER = r"(?:للمتر|لل?متر\s*المربع|/\s*م²|/\s*متر)"
+_RATE_BEFORE = r"(?:للمتر|لل?متر\s*المربع|سعر\s*المتر|المتر)"
+
+
+def stated_per_metre(text: Optional[str], n: int) -> bool:
+    """The ad's OWN text states THIS figure per square metre — «550 ريال للمتر», «السوم للمتر 1100»,
+    «سعر المتر: 750» (owner 2026-10-18: a rate needs the source's own marker on that ad; no marker = the
+    figure stays a total, PRICE = SOURCE). The marker must sit right before or right after the same figure;
+    a per-metre phrase about another number, or a number that only contains this one, never counts. A bare
+    «متر» after a figure is an area, not a rate."""
+    if not text or not n:
+        return False
+    flat = re.sub(r"(?<=\d),(?=\d)", "", text.translate(_AR_DIGIT_MAP))
+    fig = rf"(?<![\d.]){int(n)}(?![\d.])"
+    return bool(re.search(rf"{fig}\s*(?:ريال|ر\.س|﷼)?\s*\(?\s*{_RATE_AFTER}", flat)
+                or re.search(rf"{_RATE_BEFORE}\s*(?:ب|:|=)?\s*{fig}", flat))
+
+
 def annualize_rent(price: Optional[int], period: Optional[str]) -> Optional[int]:
     """Make sure rent is stored ANNUAL. Daily/weekly/monthly/quarterly → ×N. Annual or
     unknown → leave as-is (assume the scraper already got an annual figure).
