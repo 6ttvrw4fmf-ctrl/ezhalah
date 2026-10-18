@@ -58,15 +58,19 @@ console.log('\nA post-search read must outlast the searching beat, and nobody ma
 // ── 1. THE DERIVATION IS LIVE ───────────────────────────────────────────────────────────────────
 const beat = readSearchBeatMs();
 check('the beat is READ from the product (src/app/agent.tsx), not typed into the harness',
-  Number.isFinite(beat.floorMs) && beat.floorMs > 0 && Number.isFinite(beat.exitMs) && beat.exitMs >= 0,
-  `SEARCH_MIN_MS=${beat.floorMs} LOADER_EXIT_MS=${beat.exitMs}`);
-check('SEARCH_BEAT_MS is exactly the product\'s floor + exit (no margin baked into the constant)',
-  SEARCH_BEAT_MS === beat.floorMs + beat.exitMs, `${SEARCH_BEAT_MS} vs ${beat.floorMs} + ${beat.exitMs}`);
+  Number.isFinite(beat.floorMs) && beat.floorMs > 0 && Number.isFinite(beat.holdMs) && beat.holdMs >= beat.floorMs
+  && Number.isFinite(beat.exitMs) && beat.exitMs >= 0,
+  `SEARCH_MIN_MS=${beat.floorMs} SEARCH_MAX_HOLD_MS=${beat.holdMs} LOADER_EXIT_MS=${beat.exitMs}`);
+check('SEARCH_BEAT_MS is exactly the product\'s LONGEST hold + exit (no margin baked into the constant)',
+  SEARCH_BEAT_MS === beat.holdMs + beat.exitMs, `${SEARCH_BEAT_MS} vs ${beat.holdMs} + ${beat.exitMs}`);
 check('a post-search budget leaves room for the agent turn that follows the beat',
   POST_SEARCH_BUDGET_MS >= SEARCH_BEAT_MS + AGENT_TURN_MS,
   `${POST_SEARCH_BUDGET_MS}ms budget vs ${SEARCH_BEAT_MS}ms beat + ${AGENT_TURN_MS}ms turn`);
-check('the beat currently honours the owner\'s ten seconds (2026-09-06)',
-  beat.floorMs >= 10_000, `SEARCH_MIN_MS=${beat.floorMs}`);
+// OWNER 2026-10-17 reversed the 2026-09-06 ten-second FLOOR into a ten-second MAXIMUM: results show as
+// soon as they are ready, and no hold may exceed SEARCH_MAX_HOLD_MS. The journeys must still outlast
+// the WORST case (the cap), and the sub-beat blind band below only means something under it.
+check('the beat the journeys outlast is the product\'s maximum hold: ≤ 10 s (owner 2026-10-17) and above the blind band',
+  beat.holdMs <= 10_000 && beat.holdMs >= 8_000, `SEARCH_MAX_HOLD_MS=${beat.holdMs}`);
 
 // ── 2. THE HELPERS ACTUALLY OBSERVE — EXECUTED, NOT READ ────────────────────────────────────────
 // A virtual clock: `sleep` advances time without spending it, so the beat is exercised in full at
