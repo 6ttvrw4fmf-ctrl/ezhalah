@@ -133,7 +133,7 @@ _DISTRICT_EN_AR = {
     ("al-ahsaa", "salam"): "حي السلام",
     # 2026-10-18 (New Listings, #658): the English names left NULL on live rows, each catalogued for that city.
     # NOT mapped, on purpose: «King Abdullah Financial» (site template text), «Al Khobar» (the city), «Doha» /
-    # «Aziziyah» under khobar (not in الخبر's catalog), street names, «Exit 8», postcodes.
+    # street names, «Exit 8», postcodes. («Aziziyah» under khobar: mapped below since 2026-10-18.)
     ("khobar", "jawhara"): "حي الجوهرة", ("khobar", "qurtoba"): "حي قرطبة",
     ("khobar", "tahliyah"): "حي التحلية", ("khobar", "bustan"): "حي البستان",
     ("khobar", "sadafah"): "حي الصدفة", ("riyadh", "sulaimaniah"): "حي السليمانية",
@@ -142,7 +142,7 @@ _DISTRICT_EN_AR = {
     ("riyadh", "ishbilia"): "حي اشبيلية", ("riyadh", "rafiah"): "حي الرفيعة",
     ("jeddah", "rabwah"): "حي الربوة", ("jeddah", "bawadi"): "حي البوادي",
     # 2026-10-18 (unexplained-district residue): spellings live rows print, each catalogued for that city. Still NOT
-    # mapped: «Rakah»/«Rakaa» under khobar (الراكة الشمالية AND الجنوبية), «Aziziyah»/«Khaldiya»/«Fanateer» (not in
+    # mapped: «Rakah»/«Rakaa» under khobar (الراكة الشمالية AND الجنوبية), «Khaldiya»/«Fanateer» (not in
     # الخبر's / الجبيل's catalogue), «Al Qashlah»/«Al Douha» (الظهران's), «Dana Bay», compound and landmark names.
     ("riyadh", "rahmaniah"): "حي الرحمانية", ("riyadh", "monisya"): "حي المونسية",
     ("riyadh", "monsyah"): "حي المونسية", ("riyadh", "qirawan"): "حي القيروان",
@@ -153,6 +153,8 @@ _DISTRICT_EN_AR = {
     ("khobar", "qutuba"): "حي قرطبة", ("khobar", "olya"): "حي العليا", ("khobar", "cornish"): "حي الكورنيش",
     ("jeddah", "shatieh"): "حي الشاطئ", ("khobar", "aqrabia"): "حي العقربية", ("khobar", "safa"): "حي الصفا",
     ("riyadh", "janadiriyah"): "حي الجنادرية", ("riyadh", "rahmaniya"): "حي الرحمانية", ("taif", "qarahin"): "حي القراحين",
+    # 2026-10-18: الخبر's «العزيزية» admitted to the catalogue (migration 20261018235112); 14 units print it.
+    ("khobar", "aziziyah"): "حي العزيزية", ("khobar", "azzizyah"): "حي العزيزية",
 }
 
 
