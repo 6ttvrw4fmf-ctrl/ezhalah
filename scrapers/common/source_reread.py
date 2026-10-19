@@ -164,6 +164,23 @@ def _label_value_lines(body: str) -> list[str]:
     return out
 
 
+# A chip whose NUMBER comes first: abaad prints «<strong>6</strong> حمام», «<strong>8</strong> غرف نوم»,
+# «<strong>3</strong> صالات». The visible-text split puts each figure on the line BEFORE its label, so
+# _with_values glued every label to the NEXT chip's figure («حمام 8», «غرف نوم 3») and the score called
+# 18623200's 8 bedrooms / 6 bathrooms wrong (2026-10-19, re-read run 39215583152). The pair is rejoined as
+# one line «LABEL VALUE», read without our parser.
+_CHIP_PAIR = re.compile(r"<strong>\s*(\d{1,3})\s*</strong>\s*([^<>\d]{2,30}?)\s*<")
+
+
+def _number_first_lines(body: str) -> list[str]:
+    out = []
+    for m in _CHIP_PAIR.finditer(body or ""):
+        label = re.sub(r"\s+", " ", html.unescape(m.group(2))).strip()
+        if label and EVIDENCE.search(label):
+            out.append(f"{label} {m.group(1)}")
+    return out
+
+
 def page_evidence(body: str) -> dict:
     """What a person (or the page's own structured data) says, with no parser of ours involved."""
     jsonld = []
@@ -187,7 +204,7 @@ def page_evidence(body: str) -> dict:
         # score only saw the OTHER units and called our exact values wrong (backlog #124). The job log
         # still prints only the first n_evidence lines.
         "evidence_lines": (_payload_area_lines(body) + _payload_place_lines(body) + _label_value_lines(body)
-                           + _with_values(lines))[:400],
+                           + _number_first_lines(body) + _with_values(lines))[:400],
         "text_head": " | ".join(lines)[:1500],
     }
 
