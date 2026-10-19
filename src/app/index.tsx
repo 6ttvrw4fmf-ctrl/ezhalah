@@ -20,7 +20,7 @@ import { CATEGORIES, detailFor, detailForContext, priceTabsFor, type Category } 
 import { groupsFor, groupMembers, type Macro } from '@/data/propertyTypes';
 import { cityNameEn, regionNameEn, districtNameEn, ensureLocationIndex, ensureCityFieldIndex, topCitiesByListings, matchCitiesByText, hasNameCollision, resolveCitySelection, type CityOption, ensureDistrictOptions, topDistrictsForCityId, matchDistrictsByCityId, type DistrictOption, cityPoolStatus, districtPoolStatus } from '@/data/locations';
 import { TrendingHeader, TrendingRows } from '@/components/TrendingList';
-import { grouped, type SearchQuery } from '@/data/search';
+import { grouped, emptyQuery, type SearchQuery } from '@/data/search';
 import { scopeCrossesMacro } from '@/lib/searchDefaults';
 import { fetchDistrictEligibleCounts, IMPLIED_CATEGORY_DEFAULT, cohortTypesAr, rpcAllNarrowingParams, searchTableScope, rentPeriodParam } from '@/data/remote';
 import { HOME_DEFAULT_QUERY, togglePeriodButton, validRentPeriod, toggleDealButton, dealSelectionFromQuery, dealSelectionToQuery, effectiveGroups, toggleGroup, typesForGroups, setCategory } from '@/lib/searchDefaults';
@@ -146,7 +146,7 @@ export default function Home() {
   // redirect, via a short-lived pending record. Ordinary «بحث» is untouched and stays free for everyone.
   // A /s/<code> link is a whole SHARED CHAT (src/lib/sharedChat.ts): the card's facts are read from the
   // database, and the tap copies the conversation into the recipient's own history and opens it there.
-  const [sharedSearch, setSharedSearch] = useState<{ q: SearchQuery; name: string; code?: string } | null>(null);
+  const [sharedSearch, setSharedSearch] = useState<{ q: SearchQuery | null; name: string; code?: string } | null>(null);
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     const raw = new URLSearchParams(window.location.search).get(SHARE_PARAM);
@@ -165,7 +165,7 @@ export default function Home() {
     const s = decodeSharePayload(raw);
     if (s) setSharedSearch(s);
   }, []);
-  const openSharedSearch = useCallback(async (s: { q: SearchQuery; code?: string }) => {
+  const openSharedSearch = useCallback(async (s: { q: SearchQuery | null; code?: string }) => {
     try { localStorage.removeItem(SHARED_PENDING_KEY); } catch { /* per-device only */ }
     setSharedSearch(null);
     if (s.code) {
@@ -174,19 +174,20 @@ export default function Home() {
       try { done = JSON.parse(localStorage.getItem(SHARED_IMPORTED_KEY) ?? '{}') ?? {}; } catch { done = {}; }
       const prior = done[s.code];
       if (prior && history.some((h) => h.id === prior)) {
-        router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q), replay: '0', hid: prior } });
+        router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q ?? emptyQuery()), replay: '0', hid: prior } });
         return;
       }
       const chat = await fetchSharedChat(s.code);
       if (chat && !isProbeFailure(chat)) {
         const hid = importSharedChat(chat.q, chat.transcript);
         try { localStorage.setItem(SHARED_IMPORTED_KEY, JSON.stringify({ ...done, [s.code]: hid })); } catch { /* per-device only */ }
-        setTimeout(() => router.push({ pathname: '/agent', params: { filter: JSON.stringify(chat.q), replay: '0', hid } }), 0);
+        setTimeout(() => router.push({ pathname: '/agent', params: { filter: JSON.stringify(chat.q ?? emptyQuery()), replay: '0', hid } }), 0);
         return;
       }
-      // The copy could not be read: the shared SEARCH still opens (never a dead tap).
+      // The copy could not be read: the shared SEARCH still opens (never a dead tap). A chat with no
+      // search has nothing to run — Home stays.
     }
-    router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q) } });
+    if (s.q) router.push({ pathname: '/agent', params: { filter: JSON.stringify(s.q) } });
   }, [router, history, importSharedChat]);
   // OPENING A SHARED LINK (owner 2026-10-18: «the pop up should be the log in and sign up … with a message
   // of what the user wants to send him … when user clicks sign up / log in the screen shows the history
@@ -218,9 +219,9 @@ export default function Home() {
   // The tap's continuation once the visitor is signed in (same page, or back from an OAuth redirect).
   useEffect(() => {
     if (!user || Platform.OS !== 'web') return;
-    let pending: { q: SearchQuery; code?: string; at: number } | null = null;
+    let pending: { q: SearchQuery | null; code?: string; at: number } | null = null;
     try { pending = JSON.parse(localStorage.getItem(SHARED_PENDING_KEY) ?? 'null'); } catch { pending = null; }
-    if (!pending?.q || !(Date.now() - pending.at < SHARED_PENDING_TTL_MS)) {
+    if (!(pending?.q || pending?.code) || !(Date.now() - pending!.at < SHARED_PENDING_TTL_MS)) {
       try { localStorage.removeItem(SHARED_PENDING_KEY); } catch { /* per-device only */ }
       return;
     }
