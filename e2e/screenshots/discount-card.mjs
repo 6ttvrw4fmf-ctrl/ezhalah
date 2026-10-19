@@ -10,6 +10,8 @@
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dismissCookieConsent } from '../../scripts/lib/liveConsent.ts';
+import { clickWitnessed } from '../../scripts/lib/liveClick.ts';
+import { searchSettled } from '../lib/resultsSentence.mjs';
 
 const BASE = process.env.BASE_URL || 'https://ezhalah-app.vercel.app';
 const CITY = process.env.CITY || 'الرياض';
@@ -39,7 +41,6 @@ const CLICK_LEAF = (txt) => {
   const r = best.getBoundingClientRect();
   return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
 };
-const RESULT_COUNT = /نتيجة|نتائج|ما لقينا|ما لقيت|ما فيه/;
 
 const browser = await chromium.launch({ headless: true });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'ar-SA' });
@@ -48,7 +49,8 @@ const body = () => page.innerText('body');
 const tap = async (txt) => {
   const box = await page.evaluate(CLICK_LEAF, txt);
   if (!box) throw new Error(`control not found: ${txt}`);
-  await page.mouse.click(box.x, box.y);
+  const w = await clickWitnessed(page, box, { text: txt });
+  if (!w.landed) log(`tap(${txt}) did not land on its target — hit: ${w.hit}`);
   await page.waitForTimeout(1200);
 };
 const tapWhenRendered = async (txt, timeoutMs = 8000) => {
@@ -68,9 +70,9 @@ const dismissAuthPopup = async (windowMs = 4000) => {
   await page.waitForFunction(() => !document.querySelector('[data-testid="signin-card"]'), { timeout: 5000 }).catch(() => {});
   await page.waitForTimeout(250);
 };
-const waitForBody = async (re, timeoutMs) => {
+const waitForSettled = async (timeoutMs) => {
   const until = Date.now() + timeoutMs;
-  while (Date.now() < until) { if (re.test(await body())) return true; await page.waitForTimeout(500); }
+  while (Date.now() < until) { if (searchSettled(await body())) return true; await page.waitForTimeout(500); }
   return false;
 };
 const pickCity = async (name) => {
@@ -93,12 +95,11 @@ await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForTimeout(5000);
 await dismissCookieConsent(page);
 await dismissAuthPopup();
-log('home rendered:', (await body()).includes('تصفية'));
 // Home starts on شراء (Buy) — exactly what the discount applies to; no deal tap needed.
 await pickCity(CITY);
 await pickDistrict(DISTRICT_TYPED, DISTRICT_ROW);
 await tap('بحث');
-log('results landed:', await waitForBody(RESULT_COUNT, 60000), '| url:', page.url());
+log('results landed:', await waitForSettled(60000), '| url:', page.url());
 await page.waitForTimeout(3000);
 
 // Find the first card with a discount line; page through «عرض المزيد» a few times if needed.
