@@ -64,7 +64,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, http_liveness, normalize, sold_pin  # noqa: E402
-from scrapers.common.arabic_location import norm_ar  # noqa: E402
+from scrapers.common.arabic_location import city_by_own_pin, norm_ar  # noqa: E402
 from scrapers.dealapp import liveness as dealapp_liveness  # noqa: E402
 
 SOURCE = "Deal App"
@@ -1216,6 +1216,12 @@ def map_listing(html: str, adid: str) -> tuple[Optional[dict], str, bool]:
         "longitude": str(lng) if lng is not None else None,
         "date_posted": schema.get("datePosted"),
     }
+    # A town that is a city in several regions (الكهفة, الدرب, قصيباء …) is placed by the ad's own pin, or not at all
+    # (owner 2026-10-18). resolve_dealapp_city() reads pin_city_id only with this provenance.
+    pin_city_id = city_by_own_pin(city_ar, lat, lng) if (city_ar and not city) else None
+    if pin_city_id:
+        info["pin_city_id"] = pin_city_id
+        info["city_source"] = "own_pin_disambiguation"
     info = {k: v for k, v in info.items() if v not in (None, "", "—")}
 
     listing_url = f"{BASE}/ar/ad-details/{adid}"
