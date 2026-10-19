@@ -49,6 +49,11 @@ const MIGRATIONS = join(root, 'supabase', 'migrations');
 // state why the invariant cannot decay, or which existing detector already covers it.
 const WAIVED: Record<string, string> = {
   // 2026-10-18. aqar `direction` repaired to the closed facade vocabulary (14 rows).
+  '20261018234721_trg_aqar_parse_respects_a_rate_headline.sql':
+    'its UPDATEs are an apply-time PROOF inside a rolled-back block (no row is repaired). The outcome it protects, a ' +
+    'per-metre rate served as the total, is watched by mon_detect_rate_served_as_total (20261018124842) and ' +
+    'mon_detect_served_total_below_city_floor (20261018135715), both on the hourly roster; the edit is already applied, ' +
+    'so the file stays byte-identical to the recorded migration and cannot name its watcher itself',
   '20261018235847_aqar_facade_closed_vocabulary.sql':
     'the same migration makes trg_aqar_parse write only public.aqar_facade(), and the Python enricher writes only ' +
     'aqar_facade() (test_aqar_facade_closed_vocabulary_2026_10_18.py), so no write path can store a value outside the ' +
