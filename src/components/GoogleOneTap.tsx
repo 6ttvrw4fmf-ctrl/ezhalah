@@ -93,18 +93,33 @@ export function isGsiFrame(el: Element | null | undefined): boolean {
   return /accounts\.google\.com\/gsi/.test(el.getAttribute('src') ?? '');
 }
 type GuardDoc = Pick<Document, 'activeElement' | 'addEventListener' | 'removeEventListener' | 'contains'>;
+const isTextField = (el: any): boolean =>
+  !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true);
+// Only a visitor who is TYPING is protected: a field that got focus or a keystroke within this window.
+// A visitor who stopped typing and then taps the sheet on purpose is leaving the field, and is let go.
+export const TYPING_WINDOW_MS = 2000;
 /** Returns the field's focus when Google's iframe steals it mid-typing. Returns the teardown. */
-export function installTypingGuard(doc: GuardDoc, schedule: (fn: () => void) => void = (fn) => setTimeout(fn, 0)): () => void {
+export function installTypingGuard(
+  doc: GuardDoc,
+  schedule: (fn: () => void) => void = (fn) => setTimeout(fn, 0),
+  now: () => number = () => Date.now(),
+): () => void {
+  let lastTypingAt = -Infinity;
+  const onIn = (e: Event) => { if (isTextField(e.target)) lastTypingAt = now(); };
+  const onKey = (e: Event) => { if (isTextField(e.target)) lastTypingAt = now(); };
   const onOut = (e: Event) => {
-    const field = e.target as (Element & { focus?: (o?: FocusOptions) => void; isContentEditable?: boolean }) | null;
-    if (!field || !(field.tagName === 'INPUT' || field.tagName === 'TEXTAREA' || field.isContentEditable === true)) return;
+    const field = e.target as (Element & { focus?: (o?: FocusOptions) => void }) | null;
+    if (!isTextField(field)) return;
+    if (now() - lastTypingAt > TYPING_WINDOW_MS) return;   // the visitor had stopped: a deliberate tap elsewhere
     // The cross-origin frame becomes activeElement only AFTER focusout has dispatched, so the check is deferred.
     schedule(() => {
-      if (isGsiFrame(doc.activeElement) && doc.contains(field)) field.focus?.({ preventScroll: true });
+      if (isGsiFrame(doc.activeElement) && doc.contains(field!)) field!.focus?.({ preventScroll: true });
     });
   };
+  doc.addEventListener('focusin', onIn);
+  doc.addEventListener('keydown', onKey);
   doc.addEventListener('focusout', onOut);
-  return () => doc.removeEventListener('focusout', onOut);
+  return () => { doc.removeEventListener('focusin', onIn); doc.removeEventListener('keydown', onKey); doc.removeEventListener('focusout', onOut); };
 }
 
 const FEDCM_FALLBACK_MS = 4000;

@@ -18,10 +18,13 @@ console.log('\nGoogle One Tap gives the keyboard back to a typing visitor\n');
 
 const lifted = await liftSymbols(FILE, [
   { header: 'export function isGsiFrame(', endsWith: /^\}$/ },
+  { header: 'const isTextField = (', endsWith: /^  [^ ].*;$/ },
+  { header: 'export const TYPING_WINDOW_MS', endsWith: /;$/ },
   { header: 'export function installTypingGuard(', endsWith: /^\}$/ },
-], ['isGsiFrame', 'installTypingGuard'], 'type GuardDoc = any;');
+], ['isGsiFrame', 'installTypingGuard', 'TYPING_WINDOW_MS'], 'type GuardDoc = any;');
+const TYPING_WINDOW_MS = lifted.TYPING_WINDOW_MS as number;
 const isGsiFrame = lifted.isGsiFrame as (el: any) => boolean;
-const installTypingGuard = lifted.installTypingGuard as (doc: any, schedule?: (fn: () => void) => void) => () => void;
+const installTypingGuard = lifted.installTypingGuard as (doc: any, schedule?: (fn: () => void) => void, now?: () => number) => () => void;
 
 // A tiny document: listeners, an active element, containment, and elements that can be focused.
 function fakeDoc() {
@@ -45,14 +48,18 @@ const el = (tagName: string, attrs: Record<string, string> = {}) => {
 const gsiFrame = () => el('IFRAME', { src: 'https://accounts.google.com/gsi/iframe/select?client_id=x' });
 
 // Run one scenario: a field loses focus, then `next` owns focus; the deferred check runs.
-function scenario(opts: { fieldTag?: string; next: any; removed?: boolean; contentEditable?: boolean }) {
+function scenario(opts: { fieldTag?: string; next: any; removed?: boolean; contentEditable?: boolean; idleMs?: number; keyAt?: number }) {
   const doc = fakeDoc();
   const queue: Array<() => void> = [];
-  const stop = installTypingGuard(doc, (fn) => queue.push(fn));
+  let t = 10_000;
+  const stop = installTypingGuard(doc, (fn) => queue.push(fn), () => t);
   const field = el(opts.fieldTag ?? 'INPUT');
   if (opts.contentEditable) field.isContentEditable = true;
   if (!opts.removed) doc.nodes.add(field);
   doc.activeElement = field;
+  doc.dispatch('focusin', { target: field });           // the visitor taps the field at t
+  if (opts.keyAt !== undefined) { t += opts.keyAt; doc.dispatch('keydown', { target: field }); }
+  t += opts.idleMs ?? 500;                               // …and the steal comes this long after the last typing
   doc.dispatch('focusout', { target: field });
   doc.activeElement = opts.next;         // the cross-origin frame (or whoever) owns focus AFTER the event
   queue.forEach((fn) => fn());
@@ -72,21 +79,30 @@ check('the visitor really leaves the field (focus on the body) → NOT dragged b
 check('the visitor taps a button → NOT dragged back', scenario({ next: el('BUTTON') }).field.focusCalls === 0);
 check('the visitor moves to another field → NOT dragged back', scenario({ next: el('INPUT') }).field.focusCalls === 0);
 check('a field no longer in the document is never focused', scenario({ next: gsiFrame(), removed: true }).field.focusCalls === 0);
+check('the steal comes 1.5 s after the tap into the field → still refocused (inside the typing window)', scenario({ next: gsiFrame(), idleMs: 1500 }).field.focusCalls === 1);
+check('the visitor typed 5 s ago and then focus moves to the sheet → NOT dragged back (a deliberate tap is honoured)', scenario({ next: gsiFrame(), idleMs: TYPING_WINDOW_MS + 3000 }).field.focusCalls === 0);
+check('a keystroke renews the window: tap at t, key at t+4 s, steal 800 ms later → refocused', scenario({ next: gsiFrame(), keyAt: 4000, idleMs: 800 }).field.focusCalls === 1);
+check('the window is 2 s (a human types a character well inside it)', TYPING_WINDOW_MS === 2000);
 check('a non-field losing focus (a button) is ignored even when the frame wins', (() => {
   const doc = fakeDoc(); const q: Array<() => void> = []; installTypingGuard(doc, (fn) => q.push(fn));
   const btn = el('BUTTON'); doc.nodes.add(btn); doc.dispatch('focusout', { target: btn }); doc.activeElement = gsiFrame(); q.forEach((fn) => fn());
   return btn.focusCalls === 0 && q.length === 0;
 })());
-check('teardown removes the listener (no guard after the component unmounts)', (() => {
-  const s = scenario({ next: gsiFrame() }); s.stop(); return s.doc.listenerCount('focusout') === 0;
+check('teardown removes every listener (no guard after the component unmounts)', (() => {
+  const s = scenario({ next: gsiFrame() }); s.stop(); return s.doc.listenerCount('focusout') === 0 && s.doc.listenerCount('focusin') === 0 && s.doc.listenerCount('keydown') === 0;
 })());
 
 // Mutations, executed: the two ways the guard could decay.
 const neverRefocus = (doc: any) => { doc.addEventListener('focusout', () => {}); return () => {}; };
+const ignoresTheWindow = (doc: any, schedule: any) => { doc.addEventListener('focusout', (e: any) => schedule(() => { if (isGsiFrame(doc.activeElement)) e.target.focus(); })); return () => {}; };
 const alwaysRefocus = (doc: any, schedule: any) => { doc.addEventListener('focusout', (e: any) => schedule(() => e.target.focus())); return () => {}; };
 mustCatch('a guard that never refocuses', (() => {
   const doc = fakeDoc(); const q: Array<() => void> = []; neverRefocus(doc); const f = el('INPUT'); doc.nodes.add(f); doc.dispatch('focusout', { target: f }); doc.activeElement = gsiFrame(); q.forEach((fn) => fn());
   return f.focusCalls === 0 && steal.field.focusCalls === 1;
+})());
+mustCatch('a guard that ignores the typing window (drags back a visitor who stopped typing long ago)', (() => {
+  const doc = fakeDoc(); const q: Array<() => void> = []; ignoresTheWindow(doc, (fn: any) => q.push(fn)); const f = el('INPUT'); doc.nodes.add(f); doc.dispatch('focusout', { target: f }); doc.activeElement = gsiFrame(); q.forEach((fn) => fn());
+  return f.focusCalls === 1 && scenario({ next: gsiFrame(), idleMs: TYPING_WINDOW_MS + 3000 }).field.focusCalls === 0;
 })());
 mustCatch('a guard that drags the visitor back from the body', (() => {
   const doc = fakeDoc(); const q: Array<() => void> = []; alwaysRefocus(doc, (fn: any) => q.push(fn)); const f = el('INPUT'); doc.nodes.add(f); doc.dispatch('focusout', { target: f }); doc.activeElement = el('BODY'); q.forEach((fn) => fn());
