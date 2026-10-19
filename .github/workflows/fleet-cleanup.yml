@@ -1,0 +1,52 @@
+# Daily 30-day retention cleanup for EVERY enabled site that has no cleanup workflow of its own
+# (owner, 2026-09-28: «every day … it removes and hides then deletes it, for everything»).
+# aqar, gathern and wasalt keep their own daily workflows; every other site whose
+# platform_retention_policy is enabled runs here, one after another, through the same engine
+# (scrapers/common/cleanup.py run_fleet → run): each site's own policy, 30-day/3-strike eligibility,
+# per-run cap, anomaly and fraction gates, known-live controls, and a fresh re-check of every
+# listing at its source before anything is deleted. A site is turned on only through
+# set_platform_retention(), which refuses without a clean dry run.
+#
+# Triggered daily by pg_cron (job gh-fleet-cleanup, migration 20260928210252). pg_cron dispatches with
+# NO inputs, so dry_run MUST default to "false" or the scheduled run would silently do nothing.
+name: Fleet cleanup (retention)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true = re-check + report, delete nothing"
+        required: false
+        default: "false"
+
+concurrency:
+  group: fleet-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      # Not pinned to one site, so it carries the wasalt transport like platform-cleanup.yml (see
+      # scripts/verify-wasalt-probing-workflows-carry-the-browser.ts); wasalt itself runs in its own
+      # workflow and is never in this loop.
+      - name: Install Chromium for the Cloudflare path
+        run: python -m playwright install --with-deps chromium
+      - name: Run fleet cleanup
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WASALT_PROXY_URL: ${{ secrets.WASALT_PROXY_URL }}
+          WASALT_BROWSER: "1"
+        run: |
+          exec xvfb-run -a python -m scrapers.common.cleanup --all-enabled \
+            ${{ inputs.dry_run == 'true' && '--dry-run' || '' }}

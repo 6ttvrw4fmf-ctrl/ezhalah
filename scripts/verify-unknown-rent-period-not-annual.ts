@@ -109,12 +109,17 @@ check('finalize() does not default Listing.rentPeriod to annual either',
   'Listing.rentPeriod is being defaulted to \'annual\' when the source published no period');
 
 // The single-period fetch branches are what kept this invisible; if they ever start admitting
-// NULL-period rows under an ANNUAL search, the card would be labelling them by the FILTER, not by
-// the source. Pin the strict equality.
-check('keptFiltersReq still filters ANNUAL searches to an explicit rent_period=\'annual\'',
-  /q\.rentPeriod === 'annual'\)\s*\{\s*\n\s*req = req\.eq\('rent_period', 'annual'\);/.test(REMOTE),
-  'the annual branch no longer requires an explicit annual rent_period — NULL-period rows would be '
+// PRICED NULL-period rows under an ANNUAL search, the card would be labelling them by the FILTER,
+// not by the source. Pin the strict equality. The one exception is a row with NO price (owner
+// 2026-09-28: price on request shows under every period) — it renders «Price on request» with no
+// suffix, so there is nothing for the filter to label.
+check('keptFiltersReq still filters ANNUAL searches to an explicit rent_period=\'annual\' (or no price at all)',
+  /q\.rentPeriod === 'annual'\)\s*\{\s*\n\s*req = req\.or\('rent_period\.eq\.annual,price_annual\.is\.null'\);/.test(REMOTE),
+  'the annual branch no longer requires an explicit annual rent_period — priced NULL-period rows would be '
   + 'swept into an annual-only result set');
+check('a price-on-request rental renders no period suffix under any period',
+  ['annual', 'monthly', null].every((p) => listingPriceString('Rent', p, null, null) === 'Price on request'),
+  'a price-on-request card now carries a period — admitting it under every period would label it by the filter');
 
 check('npm test runs this guard',
   npmTestRuns(REPO_ROOT, 'verify-unknown-rent-period-not-annual'),

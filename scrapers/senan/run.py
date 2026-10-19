@@ -16,7 +16,7 @@ area, rooms, REGA licence line). MEASURED 2026-09-24 (live API, every id fetched
   · Apex senanrealestate.sa 301s to www AND drops the path (/projects → /); BASE is the www host.
   · All 82 purpose=sell, product=office. Statuses: 75 available, 3 sold, 4 unavailable (a sold
     unit stays published with a «مباعة» badge → skipped `status_sold`). is_wafi_ad 1/82.
-  · Types: building_apartment 47 («شقة في عمارة» → Apartment), townhouse 26 (→ Villa, the fleet's
+  · Types: building_apartment 47 («شقة في عمارة» → Apartment), townhouse 26 (→ «تاون هاوس», the fleet's
     Townhouse fold), villa 5, floor 4. bedrooms 81/82, bathrooms 82/82, area 79/82 (+9 built_up_
     area, used as the printed م² when `area` is null — unit 44630 prints 438 م² from it).
   · PRICE: selling_price 82/82 (the unit price the page prints, e.g. 44630 «1,280,000 سعر البيع»).

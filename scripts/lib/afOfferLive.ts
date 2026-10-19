@@ -38,7 +38,7 @@
 // has already paid that price once (see HAS_TURN_SRC).
 
 import { resultsSentenceAtStartSource } from '../../e2e/lib/resultsSentence.mjs';
-import { clickWitnessed, isStable, MAX_CLICK_ATTEMPTS } from './liveClick.ts';
+import { clickWitnessed, dismissStrayOverlay, isStable, MAX_CLICK_ATTEMPTS } from './liveClick.ts';
 
 /** Find the offer, scroll it into view inside its own scroll container, and hand back a clickable
  *  viewport point. Runs in the page.
@@ -221,6 +221,8 @@ export async function openAfOffer(
         // The page moved under the pointer anyway. Say what took the click, let the conversation
         // settle, and measure again — never report a tap that the CTA did not receive.
         lastHit = w.hit;
+        // The miss most likely opened a listing: close it, or it takes every retry that follows.
+        await dismissStrayOverlay(page);
         prev = null;                            // re-establish stability before spending another click
         // A miss means the turn is still moving. Let the reveal cascade breathe rather than spending
         // the bounded attempts inside one second — the six of them should cover the settle, not race it.

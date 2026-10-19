@@ -97,36 +97,33 @@ check('the twin parser stays silent on a bare whole-area answer',
 // ── 4. TEMPLATE ↔ PARSER ROUND-TRIP ─────────────────────────────────────────────────────────────
 // Executed against the real source, so a reworded question that the parser can no longer read is a
 // loud failure rather than a fix that silently stops arming itself.
-const tplMatch = /export const wholeCityQuestion = \(cityAr: string\) => (`[^`]+`)/.exec(agentSrc);
-check('wholeCityQuestion() is exported from agent.tsx', !!tplMatch,
+check('wholeCityQuestion() is exported from agent.tsx and renders through the shared rotating pool',
+  /export const wholeCityQuestion = \(cityAr: string\) => wholeCityQuestionText\(cityAr\);/.test(agentSrc),
   'the question template must live in one named place so the parser can be pinned to it');
-const subjMatch = /export function wholeCityQuestionSubject[\s\S]*?exec\(\(text \?\? ''\)\.trim\(\)\)/.exec(agentSrc);
-check('wholeCityQuestionSubject() is exported from agent.tsx', !!subjMatch);
-
-if (tplMatch) {
-  // Rebuild both halves from the source text and prove they agree for real city names.
-  const tplBody = tplMatch[1].slice(1, -1); // strip the backticks
-  const render = (city: string) => tplBody.replace('${cityAr}', city);
-  const reMatch = /const m = (\/\^.*?\/u)\.exec/.exec(agentSrc);
-  check('the subject parser uses a single anchored regex', !!reMatch);
-  if (reMatch) {
-    // eslint-disable-next-line no-eval
-    const re: RegExp = (0, eval)(reMatch[1]);
-    for (const city of ['الدمام', 'جدة', 'أبها', 'المدينة المنورة', 'رأس تنورة']) {
-      const rendered = render(city);
-      const back = re.exec(rendered.trim())?.[1]?.trim() ?? null;
-      check(`round-trip «${city}»`, back === city,
-        `rendered=${rendered}\n      parsed back=${back}`);
+check('wholeCityQuestionSubject() is exported from agent.tsx and reads every phrasing of the pool',
+  /export const wholeCityQuestionSubject = \(text: string \| null \| undefined\): string \| null => wholeCitySubject\(text\);/.test(agentSrc));
+{
+  // The question is one of several phrasings now (owner 2026-10-11: never the same sentence for everyone), so the round
+  // trip is proven for EVERY phrasing × several cities, EXECUTING the real shared functions.
+  const { wholeCityQuestionText, wholeCityQuestionSubject: subject, WHOLE_CITY_ASK_AR, PIN } = await import('../src/data/questionExamples.ts');
+  const cities = ['الدمام', 'جدة', 'أبها', 'المدينة المنورة', 'رأس تنورة'];
+  for (const tpl of WHOLE_CITY_ASK_AR) {
+    for (const city of cities) {
+      const rendered = tpl.replace('{c}', city) + ' ' + PIN;
+      const back = subject(rendered);
+      check(`round-trip «${tpl.slice(0, 22)}…» × «${city}»`, back === city, `rendered=${rendered}\n      parsed back=${back}`);
     }
-    // A question that is NOT this one must not yield a subject — otherwise the ref would arm on the
-    // twin question or the district question and commit a city nobody asked about.
-    for (const other of [
-      'تقصد مدينة الرياض ولا منطقة الرياض كاملة؟',
-      '«حي البلد» موجود في أكثر من مدينة (جدة، مكة). أي مدينة تقصدها؟',
-      'في أي مدينة تبحث؟',
-    ]) {
-      check(`no subject parsed out of «${other.slice(0, 34)}…»`, re.exec(other.trim()) === null);
-    }
+  }
+  for (const city of cities) check(`the rendered question (any seed) reads back to «${city}»`, ['a', 'b', 'c', 'dd', 'e'].every((seed) => subject(wholeCityQuestionText(city, seed + city)) === city));
+  // A question that is NOT this one must not yield a subject — otherwise the ref would arm on the
+  // twin question or the district question and commit a city nobody asked about.
+  for (const other of [
+    'تقصد مدينة الرياض ولا منطقة الرياض كاملة؟',
+    '«حي البلد» موجود في أكثر من مدينة (جدة، مكة). أي مدينة تقصدها؟',
+    'في أي مدينة تبحث؟',
+    'وين تبي نبحث؟ مثلاً الرياض أو جدة 📍',
+  ]) {
+    check(`no subject parsed out of «${other.slice(0, 34)}…»`, subject(other) === null);
   }
 }
 

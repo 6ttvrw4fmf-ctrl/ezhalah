@@ -104,6 +104,12 @@ export const ROSTER_HOMES = new Set([
   'incident_route_owner',   // the surface->owner MAP; names every slug by construction, and its
                             // totality + agreement with alertRouting.ts is pinned separately by
                             // scripts/verify-incident-spine.ts
+  'ops_engineer_for_alert', // the legacy-slug -> LIVE-ENGINEER map (🔧 2026-10-11, migration
+                            // 20261011132418): names the three deleted routines that have a direct
+                            // heir (routine-1 -> scraping-engineer, routine-5 -> advanced_filter,
+                            // routine-11 -> lifecycle) to translate them, never to enumerate the
+                            // roster; its totality is proven inside the migration against the live
+                            // alert_event table. Not a second copy of incident_known_owners().
 ]);
 
 export const handRolledRosterIn = (fnName: string, body: string): number =>

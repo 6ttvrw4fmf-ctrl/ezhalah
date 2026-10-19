@@ -1,0 +1,72 @@
+# Weekly: the Ministry of Justice's own district sales figures → public.moj_district_sales, read by the
+# ad page's «أسعار البيع الفعلية» card (src/data/adPageData.ts → fetchMojSales). Job: scrapers/moj/sales.py.
+#
+# Triggered by pg_cron → workflow_dispatch (job gh-moj-district-sales, Saturdays 17:41 UTC; GitHub's own
+# schedule triggers were dropped project-wide). About 20 sequential, paused requests to the ministry's
+# public report per run, hard-capped in the script.
+#
+# Order matters: the barrier runs FIRST against the recorded ministry answers, then the live read, which
+# validates everything (live truth check, totals, completeness) before it writes a single row, then the
+# monitor re-reads 3 random stored rows. Any failure → red run → the alert job below → alert_event →
+# GitHub issue. Existing rows are untouched by a failed run.
+
+name: MoJ district sales
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "sync (read + write + monitor) · dry-run (read + report, no writes) · monitor"
+        required: false
+        default: sync
+
+concurrency:
+  group: moj-district-sales
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: scrapers/requirements.txt
+      - name: Install scraper dependencies
+        run: pip install -r scrapers/requirements.txt
+      - name: Barrier — recorded ministry answers + mutants
+        run: python scrapers/moj/test_moj_sales.py
+      - name: Read the ministry, validate, write, monitor (${{ inputs.mode || 'sync' }})
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MODE: ${{ inputs.mode || 'sync' }}
+        run: |
+          case "$MODE" in
+            sync) exec python -m scrapers.moj.sales ;;
+            dry-run) exec python -m scrapers.moj.sales --dry-run ;;
+            monitor) exec python -m scrapers.moj.sales --monitor ;;
+            *) echo "::error::unknown mode '$MODE'"; exit 1 ;;
+          esac
+
+  # Failure→alert bridge (same as every unattended workflow): one open alert per workflow, self-heals green.
+  alert:
+    needs: [sync]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bridge this run's result to alert_event
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: >-
+          node scripts/ops/raise-workflow-alert.mjs
+          --kind ingestion_check_failed
+          --workflow moj-district-sales.yml
+          --status ${{ contains(needs.*.result, 'failure') && 'failure' || (contains(needs.*.result, 'cancelled') && 'cancelled' || 'success') }}
+          --run-url ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

@@ -61,6 +61,24 @@ const GOOGLE_WEB_CLIENT_ID = '39473044808-06l9dgmb4jsta05h4c5hqdglbsoaqrb5.apps.
 // Keyed to the SAME `hl` value on every load for a given locale, so it's still one cacheable script.
 const gisSrc = (hl: 'ar' | 'en') => `https://accounts.google.com/gsi/client?hl=${hl}`;
 // FedCM resolves well under a second when it works; generous enough not to race a slow network.
+// Backlog 676 (measured on production 2026-10-18, iPhone emulation): the mobile One Tap sheet focuses
+// its own iframe when it renders, which closes the keyboard and swallows every character typed after it
+// — a visitor typing «المرموثة» in the city field kept «ال» (document.activeElement moved to the sheet's
+// IFRAME after the 2nd character and stayed there). So the prompt never STARTS while a text field has
+// focus: it waits for the next focusout and tries again (and keeps waiting if focus only moved to another
+// field). This is not a cancel(): Google never sees a dismissal, so no cooldown starts.
+export function isTextFieldFocused(doc: Pick<Document, 'activeElement'>): boolean {
+  const el = doc.activeElement as (Element & { isContentEditable?: boolean }) | null;
+  if (!el) return false;
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true;
+}
+export function deferWhileTyping(doc: Document, fn: () => void, settleMs = 150): boolean {
+  if (!isTextFieldFocused(doc)) return false;
+  const onOut = () => { doc.removeEventListener('focusout', onOut); setTimeout(fn, settleMs); };
+  doc.addEventListener('focusout', onOut);
+  return true;
+}
+
 const FEDCM_FALLBACK_MS = 4000;
 // getUser() must never be able to stall the prompt indefinitely (see the bounded race below).
 const GETUSER_TIMEOUT_MS = 2500;
@@ -205,6 +223,8 @@ export default function GoogleOneTap() {
 
     const start = () => {
       if (cancelled) return;
+      // A visitor typing keeps the prompt out (backlog 676): start again on the next focusout.
+      if (deferWhileTyping(document, () => { if (!cancelled) start(); })) { log('a text field has focus — the prompt waits for focusout'); return; }
       // No FedCM in this browser → the legacy path is the only one that can work; spending the single
       // attempt on FedCM there would guarantee no prompt.
       if (!fedcmSupported) { run(false); return; }

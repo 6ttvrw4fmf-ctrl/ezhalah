@@ -252,7 +252,23 @@ def map_listing(pid: str, card: dict, d: dict[str, Any]) -> tuple[Optional[tuple
     cap = {k: v for k, v in kv.items() if k not in _NEVER_STORE}
     row["source_capture"] = strip_pii_fields({"schema": "maqrat.details.v1", "fields": cap,
                                               "title": row["title"], "services": d["services"]})
+    if normalize.ad_expiry_state(row["license_expiry"]) == "expired":
+        # Its own ad licence ended. Still written (the gate is PR #5103's, the owner's call), but the
+        # list sighting does not certify it as checked-alive (2026-10-03).
+        db.mark_presence_unproven(row)
     return (row, category), ""
+
+
+# ── NO OWN-PAGE REMOVAL SIGNAL EXISTS (measured 2026-10-07, ♻️) ─────────────────────────────────
+# prune_unseen ran without verify_gone, so an ad missing from three complete walks was hidden on
+# absence alone (P1 unknown_treated_as_dead: MQR36, MQR78, MQR51). Measured from CI the same day
+# (oracle-feasibility-probe run 37618176662, 10 live + the 3 hidden, interleaved): every page answers
+# 200 with its own title and size, no marker separates them — the hidden ads' pages still render.
+# LISTING_LIVENESS.md §1: absence never kills. Until the source publishes a status (an API record,
+# a feed membership test, the licence end date), absence only counts strikes and nothing is hidden.
+def no_removal_signal(ad_number: str):
+    return ("unknown", "maqrat has no own-page removal signal (probe 37618176662: removed and live "
+                       "pages indistinguishable); absence never hides")
 
 
 def main() -> int:
@@ -309,7 +325,8 @@ def main() -> int:
         complete = unreadable == 0 and not a.limit and declared is not None and len(ids) >= declared
         for tbl, rr in (("maqrat_residential_listings", res), ("maqrat_commercial_listings", com)):
             if rr and complete:
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE)
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rr}, source=SOURCE,
+                                    verify_gone=no_removal_signal)
                 if n < 0:
                     print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows", flush=True)
                 elif n:

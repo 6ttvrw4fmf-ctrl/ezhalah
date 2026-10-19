@@ -34,6 +34,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
 BASE = "https://aqarnajran.com"
 SOURCE = "Aqar Najran"
@@ -44,6 +46,17 @@ _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 def session() -> cc.Session:
     s = cc.Session(impersonate="chrome124")
     s.headers.update({"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"})
+    return s
+
+
+def walk_session() -> cc.Session:
+    # 2026-10-05 (Scraping Engineer): one pinned profile, no retry — a single refused handshake or
+    # stalled connect failed the whole night (10-05 04:23 «wp-json returned no posts», ok 10-04 with
+    # 39 rows). Probe 3 profiles DIRECT, then the residential proxy (`proxy: true` → WASALT_PROXY_URL,
+    # spent only when DIRECT is refused), and keep the session that is served. The attempt log is the
+    # step-6 evidence if the site is truly down.
+    s, tried = retry_smarter_session(f"{BASE}/wp-json/wp/v2/posts?per_page=1&_fields=id", headers=dict(session().headers))
+    print(f"{SOURCE}: probe {' '.join(tried)}", flush=True)
     return s
 
 
@@ -233,22 +246,102 @@ def map_listing(post: dict) -> tuple[Optional[dict], str, str]:
 _IMG_RE = re.compile(r'<img[^>]+src="([^"]+)"')
 
 
+# THE PHOTO LIVES IN THE FEATURED IMAGE (measured 2026-10-07). All 39 active rows carried no photo
+# while every re-read page (source-reread 37577198963, 4/4) shows one: og:image and three JSON-LD
+# image entries. The posts keep their photo as the WordPress featured image (`featured_media`),
+# which the body-only read never asked for. It is now fetched per post from /wp/v2/media/<id>
+# (41 posts, so 41 small reads) and put first; body images still follow. A media read that fails is
+# simply absent — never a guess, never the site logo.
+def _usable_photo(u: Optional[str]) -> bool:
+    return bool(u) and "/wp-content/uploads/" in u and "logo" not in u.lower()
+
+
 def photos(post: dict) -> Optional[list[str]]:
-    urls = [u for u in dict.fromkeys(_IMG_RE.findall(post.get("content", {}).get("rendered", "")))
-            if "/wp-content/uploads/" in u and "logo" not in u.lower()
-            and not re.search(r"-\d{2,3}x\d{2,3}\.(?:png|jpe?g|webp)$", u)]
+    body = [u for u in _IMG_RE.findall(post.get("content", {}).get("rendered", ""))
+            if _usable_photo(u) and not re.search(r"-\d{2,3}x\d{2,3}\.(?:png|jpe?g|webp)$", u)]
+    featured = post.get("_featured_photo")
+    urls = list(dict.fromkeys(([featured] if _usable_photo(featured) else []) + body))
     return urls[:20] or None
 
 
+def attach_featured_photos(s: cc.Session, posts: list[dict]) -> int:
+    """Set post['_featured_photo'] from each post's featured_media; returns how many were read."""
+    got = 0
+    for post in posts:
+        mid = post.get("featured_media")
+        if not isinstance(mid, int) or mid <= 0:
+            continue
+        try:
+            r = s.get(f"{BASE}/wp-json/wp/v2/media/{mid}", params={"_fields": "source_url"}, timeout=40)
+            url = (r.json() or {}).get("source_url") if r.status_code == 200 else None
+        except Exception:  # noqa: BLE001 — a failed media read leaves the post without that photo
+            url = None
+        if _usable_photo(url):
+            post["_featured_photo"] = url
+            got += 1
+    return got
+
+
+# Why a REST walk may not be the whole catalogue. Non-empty → no prune this run.
+INCOMPLETE: list[str] = []
+
+# ── REMOVAL (measured 2026-10-02). Until then this crawler had NO removal step at all: a deleted
+# post stayed active here for good.
+#
+# There is no dead cohort to measure on: all 39 active rows were re-seen that day, and the site's 41
+# posts were last modified 2026-02-03. What the post's OWN url answers: 14 of 14 random catalogue
+# posts → 200 rendering the «البند / التفاصيل» table; a slug that never existed, a real slug with a
+# mangled tail and a wrong ?p= id → 404 (3 of 3) on a page without that table. No sold/rented
+# wording is on any of the 41 records. So a hard 404/410 is GONE, a 200 with the table is LIVE, and
+# everything else — a 200 without the table, every block — is UNKNOWN.
+_TABLE_HEAD_RE = re.compile(r"البند\s+التفاصيل")
+RES_TABLE, COM_TABLE = "aqarnajran_residential_listings", "aqarnajran_commercial_listings"
+
+
+def _signal(status, body, moved) -> Optional[str]:
+    """'live' | 'gone' | None — only what this post's own URL affirmatively answers."""
+    if status in (404, 410):
+        return "gone"
+    if status != 200 or moved:
+        return None
+    return "live" if _TABLE_HEAD_RE.search(body_text(body)) else None
+
+
+def _make_verify_gone(control: Optional[dict]):
+    """The removal oracle for db.prune_unseen. A 404 is believed only while a known-live ad from
+    this run (`control`) still reads live through the same session."""
+    url_for = stored_listing_url((RES_TABLE, COM_TABLE))
+    s = session()
+
+    def probe(ad_number: str, canary=None):
+        return LivenessProbe(platform="aqarnajran", signal=_signal, session=lambda: s,
+                             url_for=url_for, canary=canary).verify_gone(ad_number)
+
+    def canary() -> tuple[bool, str]:
+        if not control:
+            return False, "no row from this run to use as a positive control"
+        verdict, why = probe(control["ad_number"])
+        return verdict == "live", f"positive control {control['ad_number']}: {why}"
+
+    return lambda ad_number: probe(ad_number, canary=canary)
+
+
 def fetch_posts(s: cc.Session, limit: int = 0) -> list[dict]:
+    INCOMPLETE.clear()
     out: list[dict] = []
     page = 1
+    total = None        # the source's own count of its catalogue (x-wp-total: 41 on 2026-10-02)
     while True:
         r = s.get(f"{BASE}/wp-json/wp/v2/posts",
                   params={"per_page": 50, "page": page,
-                          "_fields": "id,link,title,content,date_gmt,modified_gmt"}, timeout=40)
+                          "_fields": "id,link,title,content,date_gmt,modified_gmt,featured_media"}, timeout=40)
         if r.status_code != 200:
+            if page == 1:
+                # Page 1 refused is a fact about our access, never "the site has no posts": say what
+                # the source answered (it used to break silently into «wp-json returned no posts»).
+                raise RuntimeError(f"wp-json posts page 1 → HTTP {r.status_code}")
             break
+        total = r.headers.get("x-wp-total")
         batch = r.json()
         if not batch:
             break
@@ -258,6 +351,8 @@ def fetch_posts(s: cc.Session, limit: int = 0) -> list[dict]:
         if len(batch) < 50:
             break
         page += 1
+    if str(len(out)) != str(total):     # a missing header is "cannot tell", never "complete"
+        INCOMPLETE.append(f"read {len(out)} posts, x-wp-total says {total}")
     return out
 
 
@@ -268,7 +363,7 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    s = session()
+    s = walk_session()
     dry = args.dry_run or bool(args.limit)
     run_id = None if dry else db.begin_run("aqarnajran")
     res: list[dict] = []
@@ -278,6 +373,7 @@ def main() -> int:
         if not posts:
             raise RuntimeError("wp-json returned no posts")
         print(f"{SOURCE}: {len(posts)} posts discovered", flush=True)
+        print(f"  featured photos read: {attach_featured_photos(s, posts)}", flush=True)
         skipped: dict[str, int] = {}
         for p in posts:
             row, cat, why = map_listing(p)
@@ -310,7 +406,26 @@ def main() -> int:
             source=SOURCE)
         if superseded:
             print(f"  retired {superseded} superseded sibling row(s) after a category flip")
+
+        # REMOVAL. An ad missing from this run is only a CANDIDATE: at three misses its own URL is
+        # re-read, and it is hidden only on a 404 (_signal). An ad that still renders heals the row
+        # — including one the crawler skips on purpose, which is not gone. No prune on a partial
+        # walk or a single-vertical run (--limit never gets here: it is a dry run).
+        pruned = 0
+        if INCOMPLETE:
+            print(f"  ⚠ REST walk incomplete — no prune: {'; '.join(INCOMPLETE)}")
+        elif args.type == "all":
+            verify_gone = _make_verify_gone((res + com)[0] if (res or com) else None)
+            for tbl, rows in ((RES_TABLE, res), (COM_TABLE, com)):
+                k = db.prune_unseen(tbl, {r["ad_number"] for r in rows}, source=SOURCE,
+                                    verify_gone=verify_gone)
+                if k < 0:
+                    print(f"  ⚠ {tbl}: prune guard tripped — kept existing active rows")
+                else:
+                    pruned += k
+        skip_notes = ", ".join(f"{k}x{v}" for k, v in sorted(skipped.items(), key=lambda x: -x[1]))
         healthy = db.end_run(run_id, ok=True, rows_seen=len(posts), rows_upserted=len(res) + len(com),
+                             notes=f"pruned={pruned} skipped: {skip_notes or 'none'}"[:300],
                              check_tables=["aqarnajran_residential_listings",
                                            "aqarnajran_commercial_listings"])
         if not healthy:

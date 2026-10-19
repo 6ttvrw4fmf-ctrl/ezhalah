@@ -72,7 +72,7 @@ check("...and still allows an explicit change to override",
 
 console.log("\n── deterministic floors found by this audit ──");
 check("an empty reply can never ship",
-  /if \(!r\.trim\(\)\) return locale === "en" \? "Got it — searching now\." : "تمام، أدوّر لك الحين\.";/.test(edge),
+  /if \(!r\.trim\(\)\) return searchingNowText\(locale === "en", seed, avoid\);/.test(edge),
   "«غرفتين» produced a turn with NO reply text — the user saw silence");
 check("the model is TOLD exactly one question per turn",
   /exactly ONE short question per turn — one question mark, never two questions stacked/.test(edge));

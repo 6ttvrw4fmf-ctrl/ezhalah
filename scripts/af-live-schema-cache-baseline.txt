@@ -43,13 +43,10 @@ verify-count-surfaces-share-the-results-purity-gate.ts | reconciles every scope-
 verify-clause-carrying-rpcs-are-templated.ts | asks the live catalog which functions inline af_eligibility_clause() via ops_af_clause_surfaces()
 verify-detector-total-matches-its-breakdown-live.ts | executes the real production detector functions through the publishable key
 verify-inactive-listing-is-not-searchable.ts | ops_lifecycle_inactive_still_searchable() plus a sample taken off location_search_candidates_ar
-verify-af-pill-removal-live.ts | browser journey with an anon replay of the same body as its DB-truth arm
 verify-strict-filter-parity-live.ts | live RPC total_count vs strict PostgREST ground truth on every once-permissive filter
 verify-guided-counts-carry-monthly-af-live.ts | live half: the advanced params must still bite server-side
 verify-ui-controls-have-predicates-live.ts | reads af_field_registry live; deliberately fails CLOSED on an unreachable registry, which is exactly why a reload currently reads as a registry problem
 verify-af-option-card-truth-live.ts | browser journey plus a captured-count RPC and an independent oracle per rendered option
-verify-af-remove-last-pill-live.ts | browser journey plus byte-comparison of the pre/post-AF search bodies
-verify-af-scope-change-live.ts | browser journey plus cohortAllows executed against live counts
 verify-af-agent-cta-live.ts | browser journey whose non-arrival classifier and count arm read PostgREST through imported helpers — invisible to a single-file text scan, found by the module-graph arm
 verify-af-card-evidence-live.ts | R12A.6: every committed AF answer visible on the returned card with the listing's OWN value; reads the listing's canonical columns back through an imported reader
 verify-combined-budget-live.ts | combined شراء+إيجار, each budget binding only its own deal; reads both legs' truth through an imported reader

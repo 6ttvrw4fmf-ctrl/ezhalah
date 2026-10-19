@@ -106,6 +106,7 @@ const DECLARED: Record<string, Verdict> = {
   'verify-aqargate-absence-cannot-deactivate.ts': 'offline-safe',  // re-measured in a clean venv (first run was red on a broken interpreter)
   'verify-aqarmonthly-coverage-beats-row-floor.ts': 'offline-safe',  // re-measured in a clean venv (first run was red on a broken interpreter)
   'verify-aqarmonthly-district-suffix-guard.ts': 'offline-safe',
+  'verify-af-score-measures-the-customer-path.ts': 'offline-safe',  // 2026-10-04: normal=0, SUPABASE_URL blackholed=0; its python harness stubs scrapers.common.db/cleanup/source_reread in sys.modules before exec, no client is ever built
   'verify-authoritative-null-price.ts': 'offline-safe',
   'verify-cleanup-anomaly-gate.ts': 'offline-safe',
   // Measured 2026-09-20 (routine #11, run 49535): normal exit 0, blackhole exit 0. It spawns python
@@ -117,6 +118,7 @@ const DECLARED: Record<string, Verdict> = {
   // harness replaces scrapers.common.db in sys.modules BEFORE importing the enricher, so no client is
   // ever constructed and the verdict cannot depend on production being reachable.
   'verify-enrich-ar-stops-before-the-ci-wall.ts': 'offline-safe',
+  'verify-every-site-has-the-full-lifecycle.ts': 'offline-safe',  // 2026-09-28: normal=0, SUPABASE_URL blackholed=0
   'verify-gathern-brackets-its-canary.ts': 'offline-safe',
   'verify-gathern-canary-pool-cannot-deadlock.ts': 'offline-safe',
   'verify-gathern-liveness-trust-gate.ts': 'offline-safe',

@@ -55,12 +55,12 @@ const OVERLAY_POSITION = (Platform.OS === 'web' ? 'fixed' : 'absolute') as any;
 // OAuth redirect landing target (Google/Apple/Supabase redirect back to a real URL) — it bounces
 // straight to '/' or '/agent' and is never UI a real user sees.
 export default function AuthModal() {
-  const { authOpen, closeAuth, signIn } = useApp();
+  const { authOpen, closeAuth, signIn, authNote } = useApp();
   if (!authOpen) return null;
-  return <Sheet onClose={closeAuth} onSignedIn={signIn} />;
+  return <Sheet onClose={closeAuth} onSignedIn={signIn} note={authNote} />;
 }
 
-function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: AuthUser) => void }) {
+function Sheet({ onClose, onSignedIn, note }: { onClose: () => void; onSignedIn: (u: AuthUser) => void; note?: string | null }) {
   const { isRTL } = useI18n();
   const reducedMotion = useReducedMotion();
   const closingRef = useRef(false);
@@ -158,7 +158,7 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
                   style={[s.grip, { cursor: 'grab', touchAction: 'none', userSelect: 'none' } as never]}
                 />
               )}
-              <AuthForm onRequestClose={close} onSignedIn={onSignedIn} backRef={backRef} />
+              <AuthForm onRequestClose={close} onSignedIn={onSignedIn} backRef={backRef} note={note} />
             </Animated.View>
           </Pressable>
         </Pressable>
@@ -174,7 +174,8 @@ function Sheet({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (u: A
 // modal (Sheet above) renders it full-size; the small draggable SignInCard renders it `compact`.
 // Only STYLES differ between the two; state, handlers, providers and copy are this one code path,
 // so there is never a second auth system to drift.
-export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
+export function AuthForm({ onRequestClose, onSignedIn, compact, backRef, note }: {
+  note?: string | null; // a shared link's «يوسف شاركك: …», shown above the heading
   onRequestClose: () => void;
   onSignedIn: (u: AuthUser) => void;
   compact?: boolean;
@@ -293,6 +294,8 @@ export function AuthForm({ onRequestClose, onSignedIn, compact, backRef }: {
               {/* ── main ───────────────────────────────────────────────── */}
               {step === 'main' && (
                 <>
+                  {/* What a shared link holds (owner 2026-10-18): «يوسف شاركك: شقق للإيجار في حي النرجس». */}
+                  {note ? <Text style={s.shareNote} accessibilityRole="text">{note}</Text> : null}
                   <Text style={[s.formHead, cp && c.formHead]}>{t('Sign in or create your free account')}</Text>
                   <Text style={[s.formSub, cp && c.formSub]}>{t('Sign in to unlock more of Ezhalah.')}</Text>
                   <Text style={[s.agree, cp && c.agree]}>
@@ -493,6 +496,10 @@ const s = StyleSheet.create({
   popEagle: { alignSelf: 'center', width: 100, height: 80, marginBottom: 14 },
 
   // Arabic typography: weights carry the hierarchy — no Latin letter-spacing on Arabic script.
+  shareNote: {
+    alignSelf: 'stretch', textAlign: 'center', fontSize: 14, lineHeight: 21, fontWeight: '600', color: colors.ink,
+    backgroundColor: '#EEF5EF', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, marginBottom: 12,
+  },
   formHead: { fontSize: 24, fontWeight: '800', color: colors.ink, textAlign: 'center', marginBottom: 6, lineHeight: 34 },
   formSub: { fontSize: 14.5, color: colors.body, textAlign: 'center', marginBottom: 10, lineHeight: 22 },
   // Owner 2026-09-04: the agreement line reads as its own, separate block below the intro — not

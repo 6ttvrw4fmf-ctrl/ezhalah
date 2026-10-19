@@ -95,6 +95,7 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 
@@ -115,8 +116,10 @@ _STATUS: dict[str, tuple[str, str]] = {}
 def session() -> cc.Session:
     # impersonate OWNS the User-Agent — setting one contradicts the TLS fingerprint
     # ([[feedback_impersonate_owns_the_user_agent]]), so only language is set here.
-    s = cc.Session(impersonate="chrome")
-    s.headers.update({"Accept-Language": "ar,en;q=0.7"})
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(BASE, headers={"Accept-Language": "ar,en;q=0.7"}, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     return s
 
 

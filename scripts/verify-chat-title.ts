@@ -178,7 +178,7 @@ check('B6. clearing the name hands the row back to auto-titling', /autoTitleForQ
 // The other half of owner rule 4: a re-run must not revert a user's name.
 check('B7. recordHistory consults canAutoRetitle before titling', /canAutoRetitle\(prior\)/.test(storeCode));
 check('B8. recordHistory keeps the prior title when it is manual',
-  /keepTitle \? prior!\.title : autoTitleForQuery/.test(storeCode));
+  /keepTitle \? prior!\.title :/.test(storeCode));
 check('B9. a chat turn is titled with a SUMMARY, not the raw message',
   /autoTitleForPrompt\(v,/.test(storeCode));
 check('B10. a chat turn also respects a manual title', /canAutoRetitle\(prev\)/.test(storeCode));

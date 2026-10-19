@@ -29,20 +29,121 @@ _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 # strict pattern so the surrounding brackets go too.
 _PHONE_LOOSE = re.compile(r"[\(\[\{«]{1,3}\s*0?5[\d\s\.\-]{7,}\s*[\)\]\}»]{1,3}")
 
+# Not inside the fraction of a map coordinate (2026-10-02). The three number branches below have
+# no digit guard, so they cut coordinates: «maps?q=21.5401234569…» became «21.[redacted]91211» and
+# aqargate's «adMapLatitude: 24.72201[redacted]6». Measured on every *_listings text column and
+# capture: 549 cuts sat in the fraction of a TWO-digit number (16-50, Saudi lat/long), up to 6
+# fraction digits in; every phone sat after a 1- or 3-digit one («0.5…», «966.5…», the typo
+# «996.5…»), and those must stay redacted. So: no match may start within the first 8 fraction
+# digits of a number whose whole part is exactly two digits. The SAME text guards these branches
+# in the DB floor (_redact_pii_sql) and both PII monitors; a test pins it.
+_NOT_IN_A_COORDINATE = "".join(
+    r"(?<!(?<![0-9٠-٩])[0-9٠-٩]{2}[.,٫]" + (r"[0-9٠-٩]{%d}" % k if k else "") + ")" for k in range(9)
+)
+
 # Saudi phone numbers + Arabic "واتساب <number>" (union of the strongest per-scraper patterns).
 _PHONE_RE = re.compile(
-    r"(?:\+?966|00966)\s*5\d[\d\s\-]{6,}"   # +966 5X…, 00966 5X…
-    r"|0?5\d{8}"                              # 05XXXXXXXX / 5XXXXXXXX
-    r"|\b920\d{5,8}\b"                        # 920… unified business lines. 5-8 trailing digits:
+    _NOT_IN_A_COORDINATE + r"(?:\+?966|00966)\s*5\d[\d\s\-]{6,}"   # +966 5X…, 00966 5X…
+    r"|" + _NOT_IN_A_COORDINATE + r"0?5\d{8}"                        # 05XXXXXXXX / 5XXXXXXXX
+    r"|" + _NOT_IN_A_COORDINATE + r"\b920\d{5,8}\b"  # 920… unified business lines. 5-8 trailing digits:
                                               # live aqar ad 109347 carried «للتواصل : 92015189»
                                               # (920 + FIVE digits), which the old 9200\d{4,8} /
                                               # 920\d{6} pair matched neither of. (2026-08-09)
     r"|واتس\S*\s*\d[\d\s\-]{6,}"              # واتساب/واتس اب followed by digits
 )
 
+# Contact numbers in the SHAPES the patterns above miss (night audit 2026-09-28: ~230 live aqar
+# descriptions still showed a phone). Measured on active rows: Arabic-Indic digits «٠٥٥١٢٣٤٥٦٧»
+# (109), a mobile split by spaces / dashes / dots «055 123 4567», «0 5 5 1 2 …» (86), the
+# international form with a bracketed trunk zero «+966 (0) 58 123 4567» (31), a Riyadh/Jeddah
+# landline «٠١١ …» (3) and «واتس اب : 5XXXXXXXX» (6). One pattern, every shape, either digit set;
+# no digit may touch either end, so REGA/FAL licences («٧٢٠٠…», «١١٠٠…»), CR numbers, prices and
+# areas never match. The SAME pattern text runs in the DB floor (_redact_pii_sql) — a test pins it.
+# International prefixes (2026-09-28, ksaaqar «هاتف 00962…»): after 966 any Saudi number
+# (landline «+966-11-500-8910», unified «+966 9200…», toll-free 800), not only a 5 mobile; «+» and
+# any country code, 8-15 digits; «00»/«٠٠» and any other country code only as the code, at most
+# one separator, then ONE unbroken run of 8-11 digits. Neither 966 nor 00 may follow «<digit>.»:
+# «?q=28.36,45.9661…» and «44.0012345678» are map coordinates, and the spaced «002673 0802 0801» is
+# a plan number (all measured on live rows) — none is a phone.
+# A mobile whose digit groups a right-to-left renderer reversed: «0502 33 44 00» stored as
+# «00 44 33 0502» (aqar + aqarcity «للتواصل : 00 44 33 0502», 6 live rows, 2026-10-02). Only that
+# exact shape — «00», two, two, then «05» + two, every group split by one separator — so a plan
+# number («002673 0802 0801») or a date can never match.
+_D = r"[0-9٠-٩]"
+_SEP = r"[\s.\-]?"
+_NOT_A_DECIMAL = r"(?<![0-9٠-٩][.,٫])"
+_PHONE_SHAPES_RE = re.compile(
+    r"واتس\S*(?:\s+اب)?\s*[:\-]?\s*\+?" + _D + r"(?:[\s\-]?" + _D + r"){7,11}"
+    + r"|(?<![0-9٠-٩])(?:"
+    + _NOT_A_DECIMAL + r"(?:\+|00|٠٠)?(?:966|٩٦٦)[\s.\-]*(?:\([0٠]\))?[\s.\-]*[0٠]?[1-9١-٩](?:" + _SEP + _D + r"){7,9}"
+    + r"|\+[\s.\-]*[1-9١-٩](?:" + _SEP + _D + r"){7,14}"
+    + r"|" + _NOT_A_DECIMAL + r"(?:00|٠٠)[1-9١-٩]" + _D + r"{0,2}" + _SEP + _D + r"{8,11}"
+    + r"|[0٠]" + _SEP + r"[5٥](?:" + _SEP + _D + r"){8}"
+    # A mobile WITHOUT its trunk zero, written in its spoken groups «5X XXX XXXX» / «5X-XXX-XX-XX» (🦅 Falcon
+    # 2026-10-16: 54 live aqar + 1 rightcompound descriptions, every one behind «للتواصل» / «للحجز
+    # والاستفسار», often wrapped in invisible direction marks; one ad showed «[redacted]» beside a second,
+    # spaced number). Only that grouping — 2, then 3, then 4 (or 2 + 2) — so a price grouped in threes or
+    # a list of sizes never matches; the unbroken «5XXXXXXXX» is already the legacy rule's.
+    + r"|[5٥]" + _D + r"[\s\-]" + _D + r"{3}[\s\-]?" + _D + r"{2}[\s\-]?" + _D + r"{2}"
+    + r"|(?:00|٠٠)[\s.\-]" + _D + r"{2}[\s.\-]" + _D + r"{2}[\s.\-][0٠][5٥]" + _D + r"{2}"
+    + r"|٥[٠-٩]{8}"
+    + r"|[0٠]" + _SEP + r"[1١][1-7١-٧](?:" + _SEP + _D + r"){7}"
+    + r")(?![0-9٠-٩])"
+)
+
+# A PERSON'S NAME behind a label (owner PDPL rule, 2026-09-27). REGA's standard ad block prints
+# «صاحب الترخيص : <licence holder>» and «الموظف المسؤول عن الإعلان: <employee>»; on 2026-09-27
+# dealapp alone showed 4,363 such names on result cards. The label stays, the name becomes
+# [redacted] — the same token phones get.
+#   • a whole-word qualifier in front makes the label a number/phone/role/terms field whose value is
+#     NOT a name and must survive: «رقم المعلن», «جوال المعلن», «صفة المعلن: وسيط», and — for the
+#     broker/marketer labels only — «عمولة الوسيط: على المشتري». Whole-word matters: «قريب من جامع
+#     صاحب الترخيص : <name>» ends in «مع» and «بدون عمولة صاحب الترخيص» has «عمولة»; both are names.
+#   • the name is letters only — at most 9 words on one line — and stops at a digit, punctuation,
+#     a stop word («رقم», «تاريخ», any qualifier, …) or the next «label:». So «المدينة: جدة
+#     الحي: النرجس» after a name is untouched: places, not people, and no place label is listed.
+# The SAME pattern text runs in the DB floor (_redact_pii_sql); a test pins the two byte-identical.
+_L = r"[ء-يA-Za-z]"    # one Arabic/Latin letter (U+0621..U+064A: no digits, punctuation or harakat)
+
+
+def _not_after(*words: str) -> str:
+    """Not preceded by any of these as a WHOLE word (fixed-width lookbehinds, valid in re and PG)."""
+    return "".join(rf"(?<!(?<!{_L}){w}\s)" for w in words)
+
+
+_QUALIFIERS = ("جوال", "رقم", "هاتف", "صفة", "صفه", "نوع", "تصنيف")   # «صفة المعلن: وسيط»
+_TERMS = ("عمولة", "عموله", "أتعاب", "اتعاب", "سعي")                  # «عمولة الوسيط: على المشتري»
+_TERMS_OF = _not_after(*_TERMS)
+_NAME_LABELS = (
+    r"(?:الموظف\s+)?(?:ال)?مس[ؤئو]ول(?:\s+عن)?\s+ال[إاأ]علان"
+    r"|الموظف\s+(?:ال)?مس[ؤئو]ول"
+    r"|صاحب\s+(?:ال)?ترخيص"
+    r"|(?:اسم\s+)?(?:ال)?معلن"
+    rf"|{_TERMS_OF}(?:اسم\s+)?(?:ال)?مسوق[ةه]?(?:\s+(?:ال)?عقاري[ةه]?)?"
+    rf"|{_TERMS_OF}(?:اسم\s+)?(?:ال)?وسيط(?:\s+(?:ال)?عقاري)?"
+    r"|اسم\s+(?:ال)?(?:مالك|موظف|وكيل)"
+)
+# Every qualifier is also a stop word. Otherwise «مسؤول الإعلان: <name> صفة المعلن: وسيط» swallows
+# «صفة» with the name, and the NEXT write (the trigger re-runs on every UPDATE) sees a bare
+# «المعلن: وسيط» and redacts the role — measured on 57 aqar rows, 2026-09-27. Redaction must be
+# idempotent.
+_STOP_WORDS = ("الرقم", "الجوال", "الهاتف", "تاريخ", "رخصة", "رخصه", "ترخيص", "الترخيص", "للتواصل",
+               "التواصل", "تواصل", "واتس", "واتساب", "الضمانات", "نأمل") + _QUALIFIERS + _TERMS
+_NOT_A_NAME_WORD = (
+    rf"(?!(?:{'|'.join(_STOP_WORDS)})(?!{_L})|{_L}+[ \t]*:|(?:{_NAME_LABELS})[ \t]*:)"
+)
+_NAME_LABEL_RE = re.compile(
+    rf"(?<!{_L})"                       # whole word: «صفة المعلن» must not match from its «معلن»
+    + _not_after(*_QUALIFIERS)
+    + rf"(و?(?:{_NAME_LABELS})[ \t]*:[ \t*]*(?:\r?\n[ \t*]*)?)"
+    + rf'(?:[\[(«"][ \t]*)?{_NOT_A_NAME_WORD}{_L}+(?:[ \t]+{_NOT_A_NAME_WORD}{_L}+){{0,8}}'
+    + r'(?:[ \t]*[\])»"])?'
+)
+
 
 def redact_pii(text: Any) -> Any:
-    """Remove Saudi contact numbers, WhatsApp/Telegram handles and emails from free text.
+    """Remove Saudi contact numbers, WhatsApp/Telegram handles, emails and labelled advertiser /
+    ad-officer names from free text.
     Returns the cleaned string (whitespace-collapsed), or None if nothing readable remains.
     Non-string input is returned unchanged."""
     if not isinstance(text, str) or not text:
@@ -50,7 +151,9 @@ def redact_pii(text: Any) -> Any:
     out = _WA_RE.sub(_REDACTED, text)
     out = _EMAIL_RE.sub(_REDACTED, out)
     out = _PHONE_LOOSE.sub(_REDACTED, out)
+    out = _PHONE_SHAPES_RE.sub(_REDACTED, out)
     out = _PHONE_RE.sub(_REDACTED, out)
+    out = _NAME_LABEL_RE.sub(r"\1" + _REDACTED, out)   # before the collapse: a line break ends a name
     out = re.sub(r"\s+", " ", out).strip()
     return out or None
 

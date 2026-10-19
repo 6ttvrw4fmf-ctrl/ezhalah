@@ -1,11 +1,11 @@
 // Arabic-locked listing display facts — the SAME derivation ResultCard.tsx uses for its own
 // headline (type / location / price), extracted so a second consumer (Read Aloud, owner 2026-08-19)
 // can never say something that disagrees with what the card actually shows. Always resolves to
-// Arabic regardless of the app's current UI locale — Read Aloud is Arabic-only by product decision,
-// independent of whichever locale the visible screen happens to be in.
+// Arabic in the *Ar helpers; the English speech helpers share ResultCard's catalog/transliteration.
 import type { Listing } from '@/data/listings';
-import { translate, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR } from '@/i18n';
+import { englishCatalogText, translate, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, type Locale } from '@/i18n';
 import { arabicOrPlaceholder } from './arabicText';
+import { translitPlace } from './translitPlace';
 
 // #1 (source-accurate, mirrors ResultCard.tsx): the RAW scraped type when it's already Arabic, else
 // the clean-type mapping translated to Arabic — never leaks a raw English type string.
@@ -26,9 +26,19 @@ export function listingLocationAr(listing: Listing): string {
   return listing.district ? `${listing.district}، ${city}` : city;
 }
 
-// Pre-formatted price string, Arabic currency/period suffixes (mirrors ResultCard's `tPrice(listing.price)`).
+// STAY-LENGTH PLATFORMS SHOW NO PRICE, ONLY THIS NOTE (owner rule 2026-10-02): Gathern and Aqar
+// Monthly (Aqar's DailyRenting vertical, the Gathern twin). A stay there is priced by its length —
+// the guest picks the dates on the platform — so one monthly figure misstates it. Display only: the
+// stored price, the monthly-only search and every filter/sort are unchanged.
+export const STAY_LENGTH_PRICE_NOTE = 'Tap to see prices by length of stay';
+export const isStayLengthPriced = (source: string): boolean => /gathern|aqar\s*monthly/i.test(source || '');
+
+// The price line every surface prints (card, Read Aloud, the agent's card summary).
+export function listingPrice(listing: Listing, loc: Locale): string {
+  return isStayLengthPriced(listing.source) ? translate(loc, STAY_LENGTH_PRICE_NOTE) : tPrice(listing.price, loc);
+}
 export function listingPriceAr(listing: Listing): string {
-  return tPrice(listing.price, 'ar');
+  return listingPrice(listing, 'ar');
 }
 
 // Platform display name from the raw scraped `source` slug — MOVED here from ResultCard.tsx
@@ -190,11 +200,31 @@ export function sourceName(source: string): string {
   if (s.includes('المسوق الافتراضي') || s.includes('vm-ksa') || s.includes('vmksa')) return 'المسوق الافتراضي';
   if (s.includes('مكسب العقارية') || s.includes('macsaib')) return 'مكسب العقارية';
   if (s.includes('maqrat')) return 'MAQRAT';                           // the site names itself «منصة MAQRAT», Latin only
+  if (s.includes('عرش العقارية') || s.includes('arshglobal')) return 'عرش العقارية';
+  if (s.includes('سوبر أوفيس') || s.includes('superoffice') || s.includes('super office')) return 'سوبر أوفيس';
+  if (s.includes('شموع العقار') || s.includes('shomou')) return 'شموع العقار';
+  if (s.includes('حراج') || s.includes('haraj')) return 'حراج';
+  if (s.includes('منصة مكتب') || s.includes('maktab')) return 'منصة مكتب';
+  if (s.includes('سرداب') || s.includes('sirdab')) return 'سرداب';
+  if (s.includes('عشاب العقارية') || s.includes('ashab.sa')) return 'عشاب العقارية';
+  if (s.includes('منافع العقارية') || s.includes('manafe')) return 'منافع العقارية';
+  if (s.includes('وجف العقارية') || s.includes('wajaf')) return 'وجف العقارية';
+  if (s.includes('البكيري العقارية') || s.includes('albukaeri')) return 'البكيري';
+  if (s.includes('ريادة العقارية') || s.includes('ryadah')) return 'ريادة العقارية';
+  if (s.includes('مجموعة صالح القرشي العقارية') || s.includes('sqcc')) return 'مجموعة صالح القرشي العقارية';
+  if (s.includes('دارا للتطوير العقاري') || s.includes('daraa')) return 'دارا للتطوير العقاري';
+  if (s.includes('مكتب طوية للعقار') || s.includes('tawia')) return 'مكتب طوية للعقار';
+  if (s.includes('مانزو') || s.includes('manzo')) return 'مانزو';
+  if (s.includes('الطابق الثامن') || s.includes('8floor') || s.includes('eightfloor')) return 'الطابق الثامن';
+  if (s.includes('حلول') || s.includes('holoul')) return 'حلول';
   if (s.includes('السوق المفتوح') || s.includes('opensooq')) return 'السوق المفتوح';
   if (s.includes('معرض نافذة') || s.includes('nafithh')) return 'معرض نافذة';
   if (s.includes('مباشر') || s.includes('mobasher')) return 'مباشر';
   if (s.includes('مؤاجرة') || s.includes('muajarh')) return 'مؤاجرة';
   if (s.includes('دلّالي') || s.includes('dallali')) return 'دلّالي';
+  if (s.includes('شركة مقام للتطوير العقاري') || s.includes('maqamco') || s.includes('maqam development')) return 'شركة مقام للتطوير العقاري';
+  if (s.includes('تطبيق أرض') || s.includes('earthapp')) return 'تطبيق أرض';
+  if (s.includes('نوافذ الوطن') || s.includes('nawafeth') || s.includes('nawafethalwatan')) return 'نوافذ الوطن';
   if (s.includes('re/max') || s.includes('remaxsa')) return 'RE/MAX';  // real SOURCE, no 'السعودية' suffix
   if (s.includes('قمرا') || s.includes('qmra')) return 'قمرا';
   if (s.includes('العجلان') || s.includes('alajlan')) return 'العجلان';
@@ -215,4 +245,16 @@ export function sourceName(source: string): string {
 // platform name can never drift from what's shown.
 export function listingPlatformAr(listing: Listing): string {
   return translate('ar', 'Hosted on {name}', { name: translate('ar', sourceName(listing.source)) });
+}
+
+// Same English catalog and place renderer as ResultCard; Arabic helpers stay canonical.
+export function listingTypeEn(listing: Listing): string {
+  return englishCatalogText(listing.type || listing.cleanType || '');
+}
+export function listingLocationEn(listing: Listing): string {
+  const city = translitPlace(translate('en', listing.city));
+  return listing.district ? `${translitPlace(translate('en', listing.district))}, ${city}` : city;
+}
+export function listingPlatformEn(listing: Listing): string {
+  return translate('en', 'Hosted on {name}', { name: englishCatalogText(sourceName(listing.source)) });
 }

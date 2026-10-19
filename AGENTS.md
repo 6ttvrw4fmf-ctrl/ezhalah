@@ -24,6 +24,50 @@ it and then do the four steps, or say plainly that you have not. Back-end-only w
 column, a sync) is not exempt: it is live when its effect shows on a real card. How to drive the
 browser from an agent session: `docs/ops/VERIFYING_PRODUCTION.md`.
 
+# OUR OWN ROBOTS MUST NOT TAKE PRODUCTION DOWN (2026-10-09 — permanent)
+
+Production has no separate test database: every live check, sweep, smoke and agent browser runs on the
+same database real users search. On 2026-10-09 20:00-21:00 UTC our robots were nearly all of the load —
+the Friday 🦅 audit's browser sweeps (Claude cloud, 17 machines, ~2,700 searches per half hour), CI live
+checks and an agent's local Playwright runs — and two migrations applied in that hour made PostgREST
+reload its schema cache under load: the reload needed more than authenticator's 8 s, failed, and EVERY
+API call answered 503 for about a minute (20:24 and 20:56). The CI web-runtime smoke failed on main
+and on PRs with `count=null`.
+
+1. **Before any live robot run** (a sweep, a smoke, a Playwright script, a burst of RPCs): check
+   `pg_stat_activity` on aannarbkwcymrotzwdbo — active `authenticator` queries > 8, or any running > 5 s
+   → wait. Re-check between batches, not only at the start.
+2. **At most 2 browsers against production at a time per session**, subagents included. Run the next
+   journey when one finishes; never fan out a sweep across many machines.
+3. **Apply migrations when the database is quiet** (rule 1). Every migration makes PostgREST reload its
+   schema cache; a busy reload is what takes the whole API down. Never send `notify pgrst, 'reload …'`
+   by hand while it is busy.
+4. **When search is slow, find the caller first:** group `edge_logs` by `request.cf.asOrganization`
+   and user agent (Anthropic = Claude cloud sessions, Microsoft = GitHub runners, `HeadlessChrome` =
+   any Playwright) before touching SQL.
+
+# CHAT LANGUAGE AND UI LANGUAGE ARE SEPARATE (owner, 2026-10-14 — permanent)
+
+English user message → English reply. Arabic → Arabic. Mixed Arabic/English → the language with more words, never more characters; numerals and emoji do not count as words. A tie retains established conversation language; a letterless follow-up inherits the most recent language-bearing turn, falling back to the UI language only without one. Typed messages stay verbatim.
+
+The language button changes only the UI, settings and displayed account name. Existing chat replies, summaries and closing notes retain their own language; switching never translates history, reruns a search or adds paid translation calls. Save a signed-in user's UI language choice on the device and restore it on refresh/return. Guest fresh loads stay Arabic-first. Canonical detail: `docs/ARCHITECTURE.md` i18n section. Guard: `scripts/verify-chat-language-is-not-interface-language.ts`.
+
+# GATHERN + AQAR MONTHLY SHOW NO PRICE — ONLY THE STAY-LENGTH NOTE (owner, 2026-10-02 — permanent)
+
+**Every Gathern and Aqar Monthly listing, today's and every new one we ingest, shows
+«اضغط للاطلاع على الأسعار حسب مدة الإقامة» where the price would be. Never a price.** Their stays are
+priced by length (the guest picks the dates on the platform), so one monthly figure misstates them.
+They stay under «شهري».
+
+- Render every price through `listingPrice()` in `src/lib/listingDisplay.ts` (card, Read Aloud, the
+  agent's card summary). Never print `listing.price` raw for these sources. Their details panel shows
+  no discount / pre-discount / nightly rows.
+- Display only. Scrapers keep storing the source's price (PRICE = SOURCE). Never NULL it: a NULL
+  price turns the row into «السعر عند الطلب», which is found under every rent period, not just «شهري».
+- A new stay-length (nightly / calendar-booked) platform joins `isStayLengthPriced()` only with the
+  owner's approval.
+- Guarded by `scripts/verify-stay-length-platforms-show-a-note-not-a-price.ts`.
+
 # Read this first — canonical rules + token efficiency (owner rule, 2026-08-10, confirmed permanent)
 
 **Reading order before any research task: `AGENTS.md` (this file) → `docs/ARCHITECTURE.md` →
@@ -130,6 +174,11 @@ outside the roster is decoration. Adjudicate every finding against source before
    and re-checked by a detector. Never silence a barrier to make it green: make it distinguish
    cases, and prove both directions. (Run #15 assumed absence meant silence on 13 aqaratikom rows;
    the source published «سنوي» on all 13.)
+
+**⛔ The eleven routines below were DELETED by the owner on 2026-09-27 — do NOT recreate them.** A
+new, smaller team is being built one engineer at a time; see the notice at the top of
+`docs/ops/ENGINEER_ROUTINES.md`. ⚡ Scraping Engineer: `docs/ops/SCRAPING_ENGINEER.md`. 🆕 New Listings
+Engineer: `docs/ops/NEW_LISTINGS_ENGINEER.md`. ♻️ Lifecycle Engineer: `docs/ops/LIFECYCLE_ENGINEER.md`. Routine numbers and routine-to-routine handoffs below are history.
 
 **GLOBAL ENGINEERING POLICY (owner, 2026-08-29, extended 2026-09-04) — binds ALL ELEVEN routines.
 Canonical text: `docs/ops/ENGINEER_ROUTINES.md` §G; the file wins over any routine prompt.** It said
@@ -590,6 +639,19 @@ named `<that timestamp>_<a name>.sql` (or recover it later from
 `supabase_migrations.schema_migrations.statements`, which is exact and queryable). Do not leave it
 for the next deploy, the drift sweep, or another session to clean up: the person/session that ran
 `apply_migration` is responsible, immediately.
+
+**Check the SQL's citations BEFORE you apply it, not in CI afterwards.** Write the SQL to a file
+first and run `node --experimental-strip-types scripts/check-migration-before-apply.ts <file.sql>`.
+Because `apply_migration` MINTS the version, any 14-digit timestamp written for *this* migration is a
+guess, and after applying, neither way out is free: correcting the text re-opens content-parity drift
+(condition #4/#5) on a file that is otherwise byte-exact, and keeping it costs a line in
+`scripts/migration-reference-baseline.txt` plus a bump to a ratchet that may only shrink — which is
+why two of its 31 entries exist. **Mint the version you cite, or cite nothing.** This runs the same
+predicate `verify-migration-references-resolve.ts` runs in `npm test`
+(`scripts/lib/migrationCitations.ts`), just before the irreversible step instead of after it: a guard
+after the point of no return is not a guard. Knowing about this class is demonstrably not enough to
+avoid it — on 2026-09-27 one session did it twice four hours apart, the second time after being
+caught by the first and writing the rule down.
 
 **The guard checks all FOUR drift conditions (owner extended it 2026-08-21), in both directions:**
 1. **applied-but-not-committed** — a migration live in prod with no git file (the classic drift).

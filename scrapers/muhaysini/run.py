@@ -273,8 +273,8 @@ OPEN QUESTIONS FOR ONBOARDING (none of these are guessed in code)
     field. Worth raising with the platform.
   · «لايوجد خدمات» (231 rows) is a BLANKET negative naming no specific utility, so it sets no
     column False. Does the owner read it as an explicit NO for electricity/water/sanitation?
-  · `latitude`/`longitude` are published on all 2,827 (and are real, not placeholders) but the
-    listing tables carry no coordinate columns, so they are not stored.
+  · `latitude`/`longitude` are published on all 2,827 (and are real, not placeholders). Since
+    2026-10-10 (backlog 312) they travel in additional_info.latitude/longitude, which the index reads.
   · ids 3220, 3697 and 2231 describe THEMSELVES as under construction in their own prose, and the
     platform publishes all three as ordinary `available` sales with full REGA licences. There is no
     source field to key an off-plan skip on (trap 7), so we publish them. If the owner wants such
@@ -305,7 +305,11 @@ from curl_cffi import requests as cc
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
-from scrapers.common.arabic_location import city_ar_for, find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.source_pin import sa_pin  # noqa: E402
+from scrapers.common.arabic_location import city_ar_for, find_district_in_text, norm_district_tok, to_catalog  # noqa: E402
+
+_DISTRICT_SPELLING = {(14, norm_district_tok("أبوكبير")): "حي ابو كبير",
+                      (14, norm_district_tok("أبوبريقاء")): "حي ابو بريقاء"}
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
@@ -345,7 +349,7 @@ _TYPE_OVERRIDES = {
                                             # TYPE_MAP_AR's «أرض تجارية» (souq24: «ارض تجارية»)
     "محطة وقود": "Gas Station",             # amaall / dealapp / rawasidark / souq24
     "محل تجاري": "Shop",                    # aalbarrak
-    "تاون هاوس": "Villa",                   # fleet fold Townhouse→Villa (justsa / aqalemhajer)
+    "تاون هاوس": "تاون هاوس",                   # fleet fold Townhouse→Villa (justsa / aqalemhajer)
     "مستشفى - مركز صحي": "Health Center",   # aqargate's «مستشفى، مركز صحي»
     "غرف عزاب": "Room",                     # bachelor ROOMS: «غرف»→Room, «عزاب»→tenant_category
 }
@@ -361,6 +365,12 @@ _UTILITY_COLS = {
     "صرف صحي": "sanitation",
     "ألياف ضوئية": "optical_fibers",
 }
+def pin_fields(rec: dict) -> dict:
+    """{latitude, longitude} from the ad's own pin, or {} when absent / outside Saudi / 0,0."""
+    lat, lng = sa_pin(rec.get("latitude"), rec.get("longitude"))
+    return {"latitude": lat, "longitude": lng} if lat is not None else {}
+
+
 # Published utilities with no column of their own; kept as raw words in additional_info.
 # «لايوجد خدمات» (231 rows) is an explicit but BLANKET negative — it names no specific utility, so
 # it sets nothing False (the abaad reading).
@@ -540,14 +550,33 @@ def _rent_fields(price: Optional[int], text: str) -> tuple[Optional[str], Option
         # labelled with that period, and here it is not — so discarding the figure would hide a
         # source-published price on the strength of a word that may describe a different number.
         # rent_period NULL already keeps the row out of period-scoped rent search.
-        return None, price
+        return _attached_period(text, price)
     if annual == price:
         return period, annual           # no conversion happened — nothing can have been distorted
     m = normalize._RENT_PERIOD_TOKEN_RE.search(text)
     if m and price is not None and _period_describes_the_stored_figure(
             text, price, m.start(), m.end()):
         return period, annual           # the prose attaches THAT period to THIS very figure
-    return None, price                  # uncorroborated conversion → UNKNOWN period, price verbatim
+    return _attached_period(text, price)  # uncorroborated → only a period attached to OUR figure, else UNKNOWN
+
+
+# The shared parser reads the FIRST period word in the ad, and muhaysini's generated descriptions open with
+# lifestyle prose: «الاحتياجات اليومية», «الروتين اليومي», «الاستخدام اليومي» put «يومي» (daily → no storable
+# period) ahead of the ad's own «30,000 ريال سعودي سنويًا». 205 of the 406 period-less rents that arrived on
+# 2026-10-16 carry a period word; 18009561 / 18009539 «… ريال سعودي سنويًا», 18010151 «3200 ريال سعودي شهريًا»
+# and 18013126 «42,000 ريال سعودي في السنة» all stored NULL (🆕 backlog #585). A storable period word ATTACHED
+# to the very figure we store (the nearest number, the same rule as above) is the ad's statement of it.
+_ATTACHED_PERIOD_RE = re.compile(r"(شهري|سنوي|(?:في|بال)\s*(?:ال)?(?:شهر|سنة|سنه))")
+
+
+def _attached_period(text: str, price: Optional[int]) -> tuple[Optional[str], Optional[int]]:
+    if price is None:
+        return None, price
+    for m in _ATTACHED_PERIOD_RE.finditer(text):
+        if _period_describes_the_stored_figure(text, price, m.start(), m.end()):
+            monthly = "شهر" in m.group(1)
+            return normalize.rent_period_and_annual(price, "شهري" if monthly else "سنوي")
+    return None, price
 
 
 def _rega(rec: dict[str, Any]) -> dict[str, Any]:
@@ -622,6 +651,12 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     district_raw = (_clean((rec.get("Neighborhood") or {}).get("name"))
                     or _clean(loc.get("district")))       # same fallback, same reason as the city
     district_ar = find_district_in_text(district_raw, city_id)
+    if district_ar is None and district_raw:
+        # A spelling of a catalogued district (ops_district_name_decision 'variant'): mapped here, never
+        # added to the catalog. 2026-10-19 (#657): المدينة's «أبوكبير» / «أبوبريقاء» are its catalogued
+        # «حي ابو كبير» / «حي ابو بريقاء» (7 + 6 ads).
+        alt = _DISTRICT_SPELLING.get((city_id, norm_district_tok(district_raw)))
+        district_ar = find_district_in_text(alt, city_id) if alt else None
 
     # ── The source's own field-applicability declaration (trap 3) ────────────────────────────────
     declared = {str(f) for f in ((rec.get("PropertyType") or {}).get("propertyFields") or [])}
@@ -785,6 +820,9 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
         "source_status": _clean(rec.get("status")),
         "ad_duration_expire": _clean(rec.get("adDurationExpire")),
         "mode_deed_location": redact_pii(_clean(rega.get("locationDescriptionOnMOJDeed"))),
+        # The ad's OWN map pin (backlog 312): muhaysini publishes latitude/longitude on every ad; the
+        # index's generic branch reads additional_info->>'latitude'. Out-of-Saudi / 0,0 -> not stored.
+        **pin_fields(rec),
     }
     row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v is not None})
     row["source_capture"] = strip_pii_fields({

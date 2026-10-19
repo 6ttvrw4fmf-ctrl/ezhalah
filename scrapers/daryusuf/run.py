@@ -88,8 +88,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
-from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
+from scrapers.common.http_liveness import LivenessProbe, stored_listing_url  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 BASE = "https://daryusuf.com"
 REST = f"{BASE}/wp-json/wp/v2"
@@ -102,8 +103,10 @@ FIELDS = "id,link,slug,status,title,content,excerpt,date_gmt,modified_gmt,portfo
 # ── transport ─────────────────────────────────────────────────────────────────────────────────────
 def session() -> cc.Session:
     # impersonate OWNS the User-Agent — only Accept-* are ours.
-    s = cc.Session(impersonate="chrome")
-    s.headers.update({"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"})
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(BASE, headers={"Accept": "application/json", "Accept-Language": "ar,en;q=0.7"}, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     return s
 
 
@@ -553,12 +556,39 @@ def _signal_for(pid: int):
     return _signal
 
 
+def _page_signal(status, body, moved):
+    """The ad's OWN web page: a 404/410 is gone; anything else is no opinion (the REST route stays
+    the only source of a "live" answer). The fleet's default own-page rule, nothing looser."""
+    if moved:
+        return None
+    return "gone" if status in (404, 410) else None
+
+
+_stored_url = stored_listing_url(("daryusuf_residential_listings", "daryusuf_commercial_listings"))
+
+
 def _verify_gone(ad_number: str) -> tuple[str, str]:
+    """REST first; when REST answers 401, the ad's own web page decides (2026-10-12).
+
+    WordPress answers GET /wp/v2/portfolio/<id> with 401 rest_forbidden for a post that is no longer
+    public, and the law reads a 401 as "about our access" (UNKNOWN), correctly — so DYS6824, DYS6511,
+    DYS9414 and DYS7846 sat at 3-17 strikes, shown, read UNKNOWN on every run since 09-26. The 401
+    stays UNKNOWN; the fallback reads the listing's own stored URL, where only a 404/410 is a removal."""
     pid = ad_number[len(PREFIX):]
     if not pid.isdigit():
         return "unknown", f"{ad_number!r} is not a {PREFIX}<post id> ad number"
-    return LivenessProbe(platform="daryusuf", signal=_signal_for(int(pid)), session=session,
+    rest = LivenessProbe(platform="daryusuf", signal=_signal_for(int(pid)), session=session,
                          url_for=lambda _a: f"{REST}/portfolio/{pid}?_fields=id,status").verify_gone(ad_number)
+    if rest[0] != "unknown" or "HTTP 401" not in (rest[1] or ""):
+        return rest
+    url = _stored_url(ad_number)
+    if not url:
+        return rest
+    page = LivenessProbe(platform="daryusuf", signal=_page_signal, session=session,
+                         url_for=lambda _a: url).verify_gone(ad_number)
+    if page[0] == "gone":
+        return "gone", f"REST 401 (post not public); its own page: {page[1]}"
+    return "unknown", f"{rest[1]}; its own page: {page[1]}"
 
 
 def _controls_live(ad_numbers: list[str]) -> bool:

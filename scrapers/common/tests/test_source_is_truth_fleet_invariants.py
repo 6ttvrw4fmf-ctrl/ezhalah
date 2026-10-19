@@ -191,6 +191,10 @@ SINGLE_PERIOD_PLATFORMS = {
     # (ops_rent_period_single_value_ok 20260924231422). A period the listing states, or a
     # daily/weekly rate, still wins in scrapers/tamyaz/run.py.
     "tamyaz",
+    # manafe added 2026-09-28: no page states a period; the OWNER attested yearly after the company's
+    # own Aqar cross-post of the same ad (REGA 7200942068) printed «125,000 /سنوي» for the «125000 ر.س»
+    # manafe shows (ops_rent_period_single_value_ok). A period the page ties to the price still wins.
+    "manafe",
 }
 
 # Matched on ONE line only: `\s+` spanning newlines turns an assignment followed by an unrelated

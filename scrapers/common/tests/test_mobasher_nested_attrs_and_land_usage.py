@@ -24,9 +24,10 @@ def test_industrial_usage_is_industrial_land_and_price_is_the_asking_total():
     assert why == "" and row["property_type"] == "Industrial Land" and row["price_total"] == 2000000
 
 
-def test_mixed_residential_commercial_land_waits_for_the_owner():
-    got, why = R.map_listing(_x(usage=("Residential", "Commercial")), {})
-    assert got is None and why.endswith("owner_question")
+def test_mixed_residential_commercial_land_is_commercial_land():
+    # owner 2026-09-27: «أرض سكني تجاري» on Mobasher is Commercial Land
+    (row, cat), why = R.map_listing(_x(usage=("Residential", "Commercial")), {})
+    assert why == "" and row["property_type"] == "Commercial Land" and cat == "commercial"
 
 
 def test_an_auction_row_never_maps():

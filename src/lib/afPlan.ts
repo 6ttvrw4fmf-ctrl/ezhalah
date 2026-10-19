@@ -102,7 +102,7 @@ export function applyScopeAnswer(tier: ScopeTier, q: SearchQuery, keys: string[]
   // A type pick BACKFILLS its group when the group step was skipped: the Filter home gates the whole
   // type row on having a selected group, so a type with no group would render as an invisible filter.
   const groups = effectiveGroups(q);
-  return { ...q, typeGroups: groups.length ? groups : groupsOf(keys), types: keys, type: null };
+  return { ...q, typeGroups: groups.length ? groups : groupsOf(keys, macroOf(q)), types: keys, type: null };
 }
 
 // The next scope tier to ask, or null when the scope is fully resolved. `askedIds` carries the ids

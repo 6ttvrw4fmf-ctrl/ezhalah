@@ -33,8 +33,9 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
+from scrapers.common import arabic_location as al
 from scrapers.common.db import sb, upsert_dealapp_commercial_batch, upsert_dealapp_residential_batch
-from scrapers.dealapp.run import _pin_sold_inactive, fetch_one, map_listing
+from scrapers.dealapp.run import TOWN_OF_PLACE_AR, _is_plot_code, _pin_sold_inactive, fetch_one, map_listing
 
 TABLES = {
     "dealapp_residential_listings": "residential",
@@ -45,14 +46,16 @@ CUTOFF = "2026-07-14"  # first crawl day fully on the decimal-safe to_int
 BATCH = 50
 
 
-def _candidates(table: str) -> list[dict]:
+def _candidates(table: str, plot_code_districts: bool = False, ambiguous_towns: bool = False) -> list[dict]:
     rows: list[dict] = []
     lo = 0
     while True:
+        q = sb().table(table).select("id,ad_number,scraped_at,price_total,price_annual,area_m2,neighborhood,"
+                                     "town:additional_info->>city_ar").eq("active", True)
+        if ambiguous_towns:
+            q = q.is_("city", "null")
         page = (
-            sb().table(table)
-            .select("id,ad_number,scraped_at,price_total,price_annual,area_m2")
-            .eq("active", True)
+            q
             .order("id")
             .range(lo, lo + PAGE - 1)
             .execute().data or []
@@ -72,6 +75,17 @@ def _candidates(table: str) -> list[dict]:
         a = r.get("area_m2")
         return isinstance(a, int) and a > 10_000
 
+    if ambiguous_towns:
+        # 2026-10-18: rows with no city whose town is a catalogue city in several regions (الكهفة, الدرب …); the current
+        # parser places them by their own pin (arabic_location.city_by_own_pin) or leaves them unplaced.
+        al._load()
+        def twin(town):
+            return len({cid for cid, _ in al._CITY.get(al.norm_ar(TOWN_OF_PLACE_AR.get(town or "", town)), [])}) > 1
+        return [r for r in rows if twin(r.get("town"))]
+    if plot_code_districts:
+        # 2026-10-18: rows whose stored district is a plot/plan code («حي 1051 مخطط رقم», «حي 33ج») and serve none;
+        # the current parser reads the title's district or the same-city deed block instead.
+        return [r for r in rows if r.get("neighborhood") and _is_plot_code(r["neighborhood"])]
     return [r for r in rows if is_candidate(r)]
 
 
@@ -80,13 +94,17 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0, help="cap candidates per table (0 = all)")
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--dry-run", action="store_true", help="fetch+parse+report, write nothing")
+    ap.add_argument("--plot-code-districts", action="store_true",
+                    help="candidates = active rows whose stored district is a plot/plan code (not the legacy set)")
+    ap.add_argument("--ambiguous-towns", action="store_true",
+                    help="candidates = active rows with no city whose town names a city in several regions")
     args = ap.parse_args()
 
     started = datetime.now(timezone.utc).isoformat()
     grand = {"candidates": 0, "repaired": 0, "gone": 0, "cat_flip": 0, "fetch_fail": 0, "changed_price": 0, "changed_area": 0}
 
     for table, category in TABLES.items():
-        cands = _candidates(table)
+        cands = _candidates(table, args.plot_code_districts, args.ambiguous_towns)
         if args.limit:
             cands = cands[: args.limit]
         grand["candidates"] += len(cands)
@@ -122,6 +140,8 @@ def main() -> int:
                 if row.get("area_m2") != old.get("area_m2"):
                     grand["changed_area"] += 1
                 grand["repaired"] += 1
+                if (row.get("additional_info") or {}).get("pin_city_id"):
+                    grand["pin_placed"] = grand.get("pin_placed", 0) + 1
                 buf.append(row)
                 if sold:
                     # The re-fetch found a source-confirmed SOLD/RENTED ad among candidates (repair

@@ -93,7 +93,7 @@ check('the trending district row prints NOTHING when narrowing is active and no 
   'under an active filter the scope count is not an acceptable fallback — show no number instead');
 check('the typed district row applies the same rule',
   /const n = hasDistrictNarrowing \? live : \(live \?\? opt\.listingCount\);/.test(index)
-  && /return label \? <Text style=\{s\.suggDist\}>\{label\}<\/Text> : null;/.test(index));
+  && /return label \? <Text style=\{(?:s\.suggDist|\[s\.suggDist, x\.suggDist\])\}>\{label\}<\/Text> : null;/.test(index));
 
 // ── 4. the counts still come from the results RPC with the full state (the pre-existing contract) ──
 const remote = read('src/data/remote.ts');

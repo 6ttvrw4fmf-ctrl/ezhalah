@@ -48,6 +48,7 @@ const BRIDGE_KINDS: Record<string, RoutineNumber> = {
   ingestion_check_failed: 1,    // ⚡ Junior Scraping
   seam_check_failed: 7,         // 🧵 Systems Seam
   barrier_check_failed: 10,     // 🧱 Bug Prevention & Barrier — the apparatus itself
+  lifecycle_check_failed: 11,   // ♻️ Listing Lifecycle — the nightly dead-visible score (2026-10-02)
 };
 
 /**

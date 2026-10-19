@@ -35,7 +35,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SOURCES = ['src/data/loaderPlatforms.ts', 'src/components/ResultCard.tsx', 'src/components/InfoModal.tsx'];
+const SOURCES = ['src/data/loaderPlatforms.ts', 'src/data/platformPickerProfiles.ts', 'src/components/ResultCard.tsx', 'src/components/InfoModal.tsx'];
 const EXEMPT = new Set(['eagle-night.jpg']);
 
 let failed = 0;
@@ -62,11 +62,14 @@ function pngHasAlpha(bytes: Buffer): boolean {
 console.log('\nPlatform logos are transparent PNGs (no white-box JPEGs)\n');
 
 // Gather every logo asset referenced by the rendering surfaces.
-const refs = new Map<string, string>(); // basename -> source file
+function logoAssetRefs(text: string): string[] {
+  return [...text.matchAll(/images\/((?:[a-z0-9_-]+\/)*[a-z0-9_-]+\.(?:png|jpe?g))/gi)].map(match => match[1]);
+}
+const refs = new Map<string, string>(); // path below assets/images -> source file
 for (const src of SOURCES) {
   const text = readFileSync(join(ROOT, src), 'utf8');
-  for (const m of text.matchAll(/images\/([a-z0-9_-]+\.(?:png|jpe?g))/gi)) {
-    refs.set(m[1], src);
+  for (const name of logoAssetRefs(text)) {
+    refs.set(name, src);
   }
 }
 check('found platform logo references to grade', refs.size >= 40, `${refs.size} refs`);
@@ -109,6 +112,8 @@ const mustCatch = (label: string, caught: boolean) => {
   console.log(`${caught ? 'PASS' : 'FAIL'}  (mutation) ${label}`);
   if (!caught) failed++;
 };
+mustCatch('a logo in a subfolder cannot disappear from the transparency scan',
+  logoAssetRefs("require('../../assets/images/platform-logos/nufouth-com.png')")[0] === 'platform-logos/nufouth-com.png');
 const PNG_SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 // A minimal buffer whose only meaningful bytes are the signature and the IHDR colour-type at offset 25.
 const pngWith = (colourType: number, withTRNS = false): Buffer => {

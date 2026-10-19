@@ -37,7 +37,23 @@ export const HIERARCHY: Record<Macro, SubGroup[]> = {
     // 'Facilities' group RETIRED 2026-07-07: its 5 types (Bank/School/Health Center/Telecom Tower/Parking) are now
     // gathered under the single 'Service Facilities' (مرافق خدمية) box above. They stay DISTINCT clean types
     // internally (SERVICE_FACILITY_TYPES / SUBGROUPS below) — DB never merged, cards show raw. [[filter-mapping-decisions-2026-07-06]]
-    { group: 'Commercial & Industrial Plots',     types: ['Commercial Land', 'Industrial Land'] },
+    // 'Residential Land' is a CROSS-MACRO SHORTCUT (owner 2026-10-03: «add أرض سكنية with those … so you can
+    // search lands all in one»): offered here too, but its HOME macro stays Residential (CLEAN_MACRO keeps
+    // the first macro that lists a type). Everything that reasons about a type's macro — the AI chat's
+    // category, the misfile-recovery scopes, the DeepSeek vocabulary — keeps reading Residential; only the
+    // filter OFFERS it on the commercial side, and the RPC category gate is dropped for such a scope
+    // (scopeCrossesMacro in src/lib/searchDefaults.ts) because the type_ar list is already exact.
+    // 'Raw Land' (أرض خام, owner 2026-10-09: «our own separate property type … under the Commercial
+    // section, الأراضي»). A FILTER box, not a source type: a raw land keeps its own type_ar (أرض تجارية /
+    // سكنية / صناعية / زراعية — the card still shows the source's word) and is TAGGED raw in the index
+    // (unit_subtype_ar = 'أرض خام', sync_raw_land_subtype, only on the source's own word). Its p_types
+    // token 'أرض خام' matches that tag in af_eligibility_clause (migration 20261009235607), so every
+    // count/result surface reads one definition and a raw residential plot is found under تجاري too.
+    // 'Other Land' (a plot whose source states NO usage — stored as the source's own word «أرض») is deliberately
+    // NOT a box here (owner 2026-10-11: «those lands are not searchable by property type, but searchable by
+    // other filters»). It stays a valid clean type — see UNBOXED_TYPES below — so the card, the type mapping and
+    // the category/city/price searches that name no property type all still find it.
+    { group: 'Commercial & Industrial Plots',     types: ['Commercial Land', 'Industrial Land', 'Residential Land', 'Raw Land'] },
   ],
 };
 
@@ -49,7 +65,11 @@ export const HIERARCHY: Record<Macro, SubGroup[]> = {
 export const SERVICE_FACILITY_TYPES = ['Bank', 'School', 'Health Center', 'Telecom Tower', 'Parking',
   // owner decision 2026-09-11 (ops_incident #172): four more source-published facility types join the
   // same box — see the RAW_TO_CLEAN comment for the sentinel story. Still one box, still a MIX.
-  'Hospital', 'Business Center', 'Resort', 'ATM Site'];
+  'Hospital', 'Business Center', 'Resort', 'ATM Site',
+  // owner rule 2026-09-28: a commercial space whose type fits no box above goes in مرافق خدمية, and its
+  // card keeps the source's own word — Aqar «قاعة للحجز» (event/meeting halls, category 108), SuperOffice
+  // «غرفة الاجتماعات», Sirdab «ساحات تخزين» and «تخزين ذاتي». 'Event Hall' is NOT 'Hall' (صالة → Commercial Building).
+  'Event Hall', 'Meeting Room', 'Storage Yard', 'Self Storage'];
 export const SUBGROUPS: Record<string, string[]> = { 'Service Facilities': SERVICE_FACILITY_TYPES };
 
 // Verified type_ar labels (as stored in search_listings_ar) for the facility types. Used to type-SCOPE
@@ -59,16 +79,25 @@ export const SUBGROUPS: Record<string, string[]> = { 'Service Facilities': SERVI
 export const FACILITY_TYPE_AR: Record<string, string> = {
   'Bank': 'بنك', 'School': 'مدرسة', 'Health Center': 'مركز صحي', 'Telecom Tower': 'برج اتصالات', 'Parking': 'مواقف',
   'Hospital': 'مستشفى', 'Business Center': 'مركز أعمال', 'Resort': 'منتجع', 'ATM Site': 'موقع صراف',
+  'Event Hall': 'قاعة', 'Meeting Room': 'غرفة اجتماعات', 'Storage Yard': 'ساحة تخزين', 'Self Storage': 'تخزين ذاتي',
 };
+
+// Clean types that are REAL (a stored value maps to them, the card shows them, they have a home macro) but are
+// deliberately offered as NO filter box and live in NO HIERARCHY group: a plot whose source states no usage
+// («أرض», 'Other Land'). Found by every search that names no property type — category, city, district, price,
+// area — never by choosing a box or a group, and never producible by the AI chat as a type (a type with no group
+// would be an active filter with no visible control to remove it — see groupOf).
+export const UNBOXED_TYPES = ['Other Land'];
 
 // Flat clean-type → macro lookup (derived from HIERARCHY, the single source).
 export const CLEAN_MACRO: Record<string, Macro> = (() => {
   const m: Record<string, Macro> = {};
   for (const macro of ['Residential', 'Commercial'] as Macro[])
-    for (const g of HIERARCHY[macro]) for (const t of g.types) m[t] = macro;
+    for (const g of HIERARCHY[macro]) for (const t of g.types) if (!(t in m)) m[t] = macro; // first macro = HOME macro
   // Facility sub-types are gathered under the 'Service Facilities' box (not HIERARCHY boxes) but remain valid
   // COMMERCIAL clean types for normalizeType + strict query + the AI agent. (owner 2026-07-07)
   for (const t of SERVICE_FACILITY_TYPES) m[t] = 'Commercial';
+  for (const t of UNBOXED_TYPES) m[t] = 'Commercial';   // «أرض»: home macro Commercial (DB migration 20261011020759)
   return m;
 })();
 
@@ -111,15 +140,23 @@ export const isGroup = (s: string): boolean => groupMembers(s).length > 0;
 // on there being a selected group — a type with no group would be an ACTIVE filter with no visible
 // control to remove it, the exact orphan pruneTypesToGroups() exists to prevent. Returns null for the
 // 5 service-facility types, which are real clean types but deliberately live in NO HIERARCHY group.
-export const groupOf = (type: string): string | null => {
-  for (const macro of ['Residential', 'Commercial'] as Macro[])
+// `prefer` = the macro the user is currently in: a cross-macro shortcut type (Residential Land) backfills
+// the group of THAT side, never a group from the other category (owner 2026-10-03).
+export const groupOf = (type: string, prefer?: Macro | null): string | null => {
+  const order: Macro[] = prefer === 'Commercial' ? ['Commercial', 'Residential'] : ['Residential', 'Commercial'];
+  for (const macro of order)
     for (const g of HIERARCHY[macro]) if (g.types.includes(type)) return g.group;
   return null;
 };
 
+// Whether a clean type is reachable under this macro's filter: its home macro, or a group on this side that
+// lists it as a cross-macro shortcut. Service-facility types live in no group and resolve by home macro.
+export const offeredUnder = (macro: Macro, type: string): boolean =>
+  (CLEAN_MACRO[type] ?? 'Residential') === macro || HIERARCHY[macro].some((g) => g.types.includes(type));
+
 // The groups implied by a set of clean types, deduped, in HIERARCHY order. The twin of groupsMembers().
-export const groupsOf = (types: string[]): string[] =>
-  [...new Set(types.map((t) => groupOf(t)).filter((g): g is string => g != null))];
+export const groupsOf = (types: string[], prefer?: Macro | null): string[] =>
+  [...new Set(types.map((t) => groupOf(t, prefer)).filter((g): g is string => g != null))];
 
 // ── raw → clean mapping ─────────────────────────────────────────────────────────────────────
 // Exact raw strings that map to a clean type regardless of source table. Order doesn't matter;
@@ -146,8 +183,18 @@ const RAW_TO_CLEAN: Record<string, string> = {
   // decision — it outnumbered Farm 5:1 live, so a merged "Farm" button mostly surfaced bare land).
   'Farm': 'Farm', 'Agriculture Plot': 'Agriculture Plot',
   // Land family
-  'Residential Land': 'Residential Land', 'Land': 'Residential Land',
+  'Residential Land': 'Residential Land',
   'Commercial Land': 'Commercial Land', 'Industrial Land': 'Industrial Land',
+  // Generic land with no stated usage → Other Land (owner 2026-10-10). Was 'Residential Land' — a guess;
+  // no live row stored 'Land' that day (0 «أرض» in search_listings_ar).
+  'Land': 'Other Land', 'أرض': 'Other Land',
+  // Aqar plots whose usage comes from the SELLER'S OWN description (Aqar's field silent, owner
+  // 2026-10-10) are stored as the seller's word so the card shows it — scrapers/aqar/enrich_residential.py
+  // LAND_DESCRIPTION_TYPES. «سكني تجاري» = Commercial Land (mixed-use rule, 2026-09-27).
+  'أرض سكني': 'Residential Land', 'أرض سكنية': 'Residential Land',
+  'أرض تجاري': 'Commercial Land', 'أرض تجارية': 'Commercial Land', 'أرض سكني تجاري': 'Commercial Land',
+  'أرض صناعي': 'Industrial Land', 'أرض صناعية': 'Industrial Land',
+  'أرض زراعي': 'Agriculture Plot', 'أرض زراعية': 'Agriculture Plot',
   // Commercial — retail & workspace
   'Office': 'Office', 'Showroom': 'Showroom', 'Bank': 'Bank',
   'Shop': 'Shop', 'Kiosk': 'Shop',
@@ -175,15 +222,21 @@ const RAW_TO_CLEAN: Record<string, string> = {
   'Business Center': 'Business Center', 'مركز أعمال': 'Business Center',
   'Resort': 'Resort', 'منتجع': 'Resort',
   'ATM Site': 'ATM Site', 'موقع صراف': 'ATM Site',
+  // owner rule 2026-09-28 (see SERVICE_FACILITY_TYPES): unplaceable commercial spaces, the source's own word.
+  'Event Hall': 'Event Hall', 'قاعة': 'Event Hall',
+  'Meeting Room': 'Meeting Room', 'غرفة اجتماعات': 'Meeting Room',
+  'Storage Yard': 'Storage Yard', 'ساحة تخزين': 'Storage Yard',
+  'Self Storage': 'Self Storage', 'تخزين ذاتي': 'Self Storage',
   // Long-tail dealapp raw types → existing clean types (owner-approved 2026-07-06; each verified against
   // the live listing — the card still shows the ORIGINAL scraped value). [[property-card-and-type-mapping-rule]]
-  'تاون هاوس': 'Villa',               // titled فيلا, 4br + garage + majlis
+  'تاون هاوس': 'Duplex',              // owner 2026-10-12: «town house is under duplex» (was Villa, 2026-07-06)
   'ملحق علوي': 'Apartment',           // روف / rooftop apartment, titled شقة
   'مجمع سكني': 'Residential Building', // residential compound
   'مكاتب مشتركة': 'Office',            // shared / co-working offices, titled مكتب
   'مخازن سحابية': 'Warehouse',         // cloud / self-storage, titled مستودع
   'درايف ثرو': 'Shop',                // drive-thru kiosk (كشك)
   'حوش': 'Residential Land',           // walled yard / plot, titled ارض
+  'أرض خام': 'Raw Land',               // the raw-land TAG token (see HIERARCHY 'Raw Land'); no source stores it as a type
   // Match-their-architecture sweep (2026-07-27): real raw types with zero taxonomy entry, each
   // verified live-in-DB before mapping (never guessed). [[feedback_ambiguous-mapping-ask-first-rule]]
   'إستراحة': 'Rest House',              // aqarcity hamza spelling variant of استراحة (11 rows, res table)
@@ -240,16 +293,16 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   // same reasoning as مجمع سكني above, kinds stays ['res'].
   'Residential Building':{ rawTypes: ['Building', 'مجمع سكني', 'مجمع', 'برج'], kinds: ['res'] },
   // Residential — Villas & Houses
-  'Villa':               { rawTypes: ['Villa', 'Palace', 'تاون هاوس', 'House'], kinds: ['res'] }, // فيلا search includes raw قصر + تاون هاوس + بيت (House folded in — few raw listings, owner request 2026-07-20)
-  'Duplex':              { rawTypes: ['Duplex'], kinds: BOTH }, // BOTH: see Studio note — october maps "duplex"→'Duplex' then routes it commercial via category_for_type
+  'Villa':               { rawTypes: ['Villa', 'Palace', 'House'], kinds: ['res'] }, // فيلا search includes raw قصر + بيت (House folded in — few raw listings, owner request 2026-07-20); تاون هاوس moved to Duplex (owner 2026-10-12)
+  'Duplex':              { rawTypes: ['Duplex', 'تاون هاوس'], kinds: BOTH }, // تاون هاوس = town house, filed under Duplex (owner 2026-10-12); // BOTH: see Studio note — october maps "duplex"→'Duplex' then routes it commercial via category_for_type
   // Residential — Vacation & Rural (Rest House/Farm appear in com tables too → both)
   'Rest House':          { rawTypes: ['Rest House', 'إستراحة'], kinds: BOTH }, // إستراحة = aqarcity hamza spelling variant of استراحة (11 rows, res table, verified live 2026-07-27)
   'Chalet':              { rawTypes: ['Chalet'], kinds: ['res'] },
   'Camp':                { rawTypes: ['Camp'], kinds: ['res'] },
   'Farm':                { rawTypes: ['Farm'], kinds: BOTH },
-  'Agriculture Plot':    { rawTypes: ['Agriculture Plot'], kinds: BOTH }, // split from Farm 2026-07-21 (owner: 1,254 vs 259 live, was masking real farms)
+  'Agriculture Plot':    { rawTypes: ['Agriculture Plot', 'أرض زراعي', 'أرض زراعية'], kinds: BOTH }, // split from Farm 2026-07-21 (owner: 1,254 vs 259 live, was masking real farms)
   // Residential — Plots (Residential Land + generic Land; appears in com tables too → both)
-  'Residential Land':    { rawTypes: ['Residential Land', 'Land', 'حوش'], kinds: BOTH },
+  'Residential Land':    { rawTypes: ['Residential Land', 'حوش', 'أرض سكني', 'أرض سكنية'], kinds: BOTH },
   // Commercial — Retail & Workspace
   'Office':              { rawTypes: ['Office', 'مكاتب مشتركة'], kinds: ['com'], extraTables: ['dealapp_residential_listings'] }, // مكاتب مشتركة = an office dealapp misfiled into its RES table; extraTables reaches it via مكتب WITHOUT widening kinds (which would dilute every office search)
   'Shop':                { rawTypes: ['Shop', 'Kiosk', 'درايف ثرو'], kinds: ['com'] },
@@ -274,13 +327,35 @@ export const CLEAN_TO_QUERY: Record<string, CleanQuery> = {
   'Business Center':     { rawTypes: ['Business Center', 'مركز أعمال'], kinds: BOTH },
   'Resort':              { rawTypes: ['Resort', 'منتجع'], kinds: BOTH },
   'ATM Site':            { rawTypes: ['ATM Site', 'موقع صراف'], kinds: BOTH },
+  // owner rule 2026-09-28: kinds BOTH — aqarmonthly's halls sit in its only (residential) table.
+  'Event Hall':          { rawTypes: ['Event Hall', 'قاعة'], kinds: BOTH },
+  'Meeting Room':        { rawTypes: ['Meeting Room', 'غرفة اجتماعات'], kinds: BOTH },
+  'Storage Yard':        { rawTypes: ['Storage Yard', 'ساحة تخزين'], kinds: BOTH },
+  'Self Storage':        { rawTypes: ['Self Storage', 'تخزين ذاتي'], kinds: BOTH },
   // ('Service Facilities' is DERIVED from SERVICE_FACILITY_TYPES right after this object — single source of truth.)
   'Gas Station':         { rawTypes: ['Gas Station', 'Station', 'محطة بنزين'], kinds: BOTH },
   'Staff Housing':       { rawTypes: ['سكن عمال'], kinds: BOTH },
   // Commercial — Plots (physically in RES tables on Aqar → both)
-  'Commercial Land':     { rawTypes: ['Commercial Land'], kinds: BOTH },
-  'Industrial Land':     { rawTypes: ['Industrial Land'], kinds: BOTH },
+  'Commercial Land':     { rawTypes: ['Commercial Land', 'أرض تجاري', 'أرض تجارية', 'أرض سكني تجاري'], kinds: BOTH },
+  'Industrial Land':     { rawTypes: ['Industrial Land', 'أرض صناعي', 'أرض صناعية'], kinds: BOTH },
+  // «أرض» (owner 2026-10-10): land whose source states no usage — a valid type but no box (UNBOXED_TYPES).
+  'Other Land':          { rawTypes: ['Land', 'أرض'], kinds: BOTH },
+  // أرض خام (owner 2026-10-09): the TAG token, not a stored type — matched against
+  // search_listings_ar.unit_subtype_ar by af_eligibility_clause. BOTH: raw lands sit in either kind.
+  'Raw Land':            { rawTypes: ['أرض خام'], kinds: BOTH },
 };
+
+// «أرض خام» is a TAG token, never a stored property_type (live 2026-10-10: the box counted Riyadh/بنبان
+// 167 and returned 0 — the card fetch asked the raw tables for property_type = 'أرض خام'). The SERVER
+// selection (p_types) keeps the token; the raw-table card fetch, which only re-reads ids the server
+// already chose, must ask for the land types those rows really carry.
+export const RAW_LAND_TOKEN = 'أرض خام';
+export const RAW_LAND_CARRIER_TYPES = ['Commercial Land', 'Industrial Land', 'Residential Land', 'Agriculture Plot', 'Other Land'];
+export function storedRawTypes(rawTypes: string[]): string[] {
+  if (!rawTypes.includes(RAW_LAND_TOKEN)) return rawTypes;
+  const carriers = RAW_LAND_CARRIER_TYPES.flatMap((t) => CLEAN_TO_QUERY[t]?.rawTypes ?? []);
+  return [...new Set([...rawTypes.filter((r) => r !== RAW_LAND_TOKEN), ...carriers])];
+}
 
 // «مرافق خدمية» (Service Facilities) = EXACTLY these 5 facility types, nothing else, EVER (owner 2026-07-07,
 // PERMANENT). Derived from SERVICE_FACILITY_TYPES so the fetch (rawTypes) and the match (SUBGROUPS) share ONE
@@ -313,6 +388,7 @@ export const EN_TO_AR: Record<string, string> = {
   // مرافق خدمية expansion (owner 2026-09-11): reverse entries so an EN-translated capture can never be
   // Latin-guarded into the «غير معروف» sentinel (the aqargate 'Compound' precedent above).
   'Hospital': 'مستشفى', 'Business Center': 'مركز أعمال', 'Resort': 'منتجع', 'ATM Site': 'موقع صراف',
+  'Event Hall': 'قاعة', 'Meeting Room': 'غرفة اجتماعات', 'Storage Yard': 'ساحة تخزين', 'Self Storage': 'تخزين ذاتي',
 };
 
 // DERIVED from CLEAN_TO_QUERY (the single source for a clean type's raw strings) + EN_TO_AR — so adding a

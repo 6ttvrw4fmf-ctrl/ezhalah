@@ -63,10 +63,10 @@ console.log('\nAdvanced Filter — the primary button advances, so it must not p
 // If this ever stops being true the rest of this file is arguing about the wrong button — fix the
 // premise here deliberately before relabelling anything.
 check('the primary rides onConfirm(sel)',
-  /onPress=\{\(\) => onConfirm\(sel\)\}/.test(primary),
+  /onPress=\{\(\) => (?:advance\(\(\) => )?onConfirm\(sel\)\)?\}/.test(primary),
   'af-confirm no longer calls onConfirm(sel)');
 check('onConfirm advances: onAgeConfirm commits WITHOUT the finish flag',
-  /const onAgeConfirm = \(keys: string\[\]\) => \{ void commitGuidedStep\(keys\); \}/.test(agentSrc),
+  /const onAgeConfirm = \(keys: string\[\]\) => commitGuidedStep\(keys\);/.test(agentSrc),
   'the primary may now be terminal — re-derive this barrier before changing its label');
 // `void` or `await` — PR #955 made the call awaited to close a duplicate-tap race. What this barrier
 // cares about is that a confirm ADVANCES (presentGuided on the next step) rather than finishing, so
@@ -122,9 +122,9 @@ mustCatch('the arity-branched «عرض N نتيجة» label coming back',
 mustCatch('a bare «عرض النتائج» on the primary',
   /t\('Show/.test(block(mut(cardSrc, "t('Continue')", "t('Show results')"), 'af-confirm', '</Tap>')));
 mustCatch('the premise silently flipping to a terminal primary',
-  !/const onAgeConfirm = \(keys: string\[\]\) => \{ void commitGuidedStep\(keys\); \}/.test(
-    mut(agentSrc, 'const onAgeConfirm = (keys: string[]) => { void commitGuidedStep(keys); }',
-      'const onAgeConfirm = (keys: string[]) => { void commitGuidedStep(keys, true); }')));
+  !/const onAgeConfirm = \(keys: string\[\]\) => commitGuidedStep\(keys\);/.test(
+    mut(agentSrc, 'const onAgeConfirm = (keys: string[]) => commitGuidedStep(keys);',
+      'const onAgeConfirm = (keys: string[]) => commitGuidedStep(keys, true);')));
 mustCatch('the removed af-skip-all early-exit creeping back into the card',
   /testID="af-skip-all"/.test(cardSrc + '\n<Pressable testID="af-skip-all" onPress={() => onSkipAll(sel)} />'));
 mustCatch('an onAgeSkipAll handler creeping back into agent.tsx',

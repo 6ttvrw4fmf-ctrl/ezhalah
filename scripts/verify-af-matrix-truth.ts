@@ -82,7 +82,9 @@ console.log(`\nAF matrix: ${allScopes().length} scopes × ${MODES.length} modes 
   `${certified.length} certified cells · ${nFields} (cell, field) · ${nOptions} options`);
 // THE FLOOR. 149 (cell, field) pairs and 886 options were measured on 2026-09-02 from the real
 // pool (742 before the 8 rich amenity chips joined every residential amenities cell: 742 + 8 × 18). Fewer means a certification silently vanished (or the lift stopped finding the pool).
-assert(nFields >= 149 && nOptions >= 886, `the matrix did not shrink below the measured floor (149 fields / 886 options; now ${nFields} / ${nOptions})`);
+// 2026-10-05: 886 → 855, measured, from ONE owner decision — age became a 4-rung one-tap ladder
+// (جديد · حتى سنتين · حتى ٥ · حتى ٩) instead of 5 buckets, and its upper rungs can fail the narrowing gate.
+assert(nFields >= 149 && nOptions >= 855, `the matrix did not shrink below the measured floor (149 fields / 855 options; now ${nFields} / ${nOptions})`);
 assert(L.questions.length >= 9, `the real pool was lifted (${L.questions.length} questions)`);
 
 // ── §1 gate == table; no cohort ⇒ nothing ────────────────────────────────────────────────────────

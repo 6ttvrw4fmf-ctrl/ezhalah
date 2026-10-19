@@ -145,6 +145,7 @@ export const ROUTING_RULES: ReadonlyArray<{ routine: RoutineNumber; test: RegExp
   { routine: 1, test: /^(liveness_cap_degraded|source_limited_contradicted|unprobed_source_waiver)/ },
   { routine: 1, test: /^gathern_liveness/ },
   { routine: 1, test: /^ingestion_check_failed$/ },
+  { routine: 1, test: /^moj_district_sales_stale$/ },   // the weekly MoJ job stopped running (its red runs arrive as ingestion_check_failed)
 
   // 6 👣 Journey & Persistence — chat/session/auth state, never matching itself.
   { routine: 6, test: /^(transcript_|filter_state_lost|chat_|session_|auth|sidebar)/ },

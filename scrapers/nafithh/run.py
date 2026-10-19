@@ -189,6 +189,10 @@ def map_listing(pid: str, d: dict[str, Any]) -> tuple[Optional[tuple[dict, str]]
     row["additional_info"] = strip_pii_fields({k: v for k, v in info.items() if v not in (None, "", "-", [])})
     cap = {k: v for k, v in kv.items() if k not in _NEVER_STORE}
     row["source_capture"] = strip_pii_fields({"schema": "nafithh.gallery.v1", "fields": cap, "title": row["title"]})
+    if normalize.ad_expiry_state(row["license_expiry"]) == "expired":
+        # Its own ad licence ended. Still written (the gate is PR #5103's, the owner's call), but the
+        # list sighting does not certify it as checked-alive (2026-10-03).
+        db.mark_presence_unproven(row)
     return (row, category), ""
 
 

@@ -104,7 +104,7 @@ check('ResultCard imports both helpers',
   /import\s*\{[^}]*\battrDisplayLabel\b[^}]*\}\s*from\s*'@\/lib\/arabicText'/s.test(card)
   && /import\s*\{[^}]*\btranslateTrailingPeriodWord\b[^}]*\}\s*from\s*'@\/lib\/arabicText'/s.test(card));
 check('the additional-info LABEL is rendered through attrDisplayLabel, with the row key',
-  /attrDisplayLabel\(\s*t\(r\.label\)\s*,\s*r\.key\s*,\s*locale\s*,\s*ATTRIBUTE_UNRESOLVED_AR\s*\)/.test(card));
+  /attrDisplayLabel\(\s*locale === 'en' \? englishCatalogText\(r\.label\) : t\(r\.label\)\s*,\s*r\.key\s*,\s*locale\s*,\s*ATTRIBUTE_UNRESOLVED_AR\s*\)/.test(card));
 check('arAttrValue\'s generic fallback goes through translateTrailingPeriodWord',
   /return translateTrailingPeriodWord\(v, locale\);/.test(card));
 check('the pre-fix label expression is GONE (it produced the placeholder for a published name)',

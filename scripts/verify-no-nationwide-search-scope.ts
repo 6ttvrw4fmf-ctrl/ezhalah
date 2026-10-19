@@ -44,7 +44,7 @@ const i18n = read('src/i18n.tsx');
     'the Kingdom-wide offer is gone from the city question');
   // The plain city ask must still exist — closing the scope must not remove the question that
   // replaces it, or a user with no city gets nothing at all.
-  check(/'في أي مدينة تبحث؟'/.test(agent),
+  check(/return cityQuestionAr\(userText, '', q\.type\);/.test(agent),
     'the plain city question still exists (it is what a Kingdom-wide request now falls through to)');
 }
 
@@ -92,7 +92,7 @@ const mustCatch = (what: string, caught: boolean) =>
 
 {
   // The 2026-06-24 invitation, restored inside the city question itself.
-  const readvertised = agent.replace("'في أي مدينة تبحث؟'",
+  const readvertised = agent.replace("cityQuestionAr(userText, '', q.type)",
     "'في أي مدينة تبحث؟ وإذا تبي كل المملكة قل لي، أبحث في كل مدن المملكة'");
   mustCatch('the Kingdom-wide invitation coming back into the city question',
     readvertised !== agent && /كل مدن المملكة/.test(readvertised) && /وإذا تبي كل المملكة/.test(readvertised));

@@ -56,7 +56,9 @@ const BASE = { p_deal: 'بيع', p_tables: ['aqar_residential_listings'], p_type
     && annual.includes(`and(rent_period_ar.eq.${encodeURIComponent('شهري')},rent_now_pay_later.is.true)`));
   const monthly = buildOracleQS({ ...BASE, p_deal: 'إيجار', p_rent_period: 'شهري' }).qs;
   check('monthly period = payment_monthly AND NOT rnpl (excludes the annual RNPL branch)',
-    monthly.includes('payment_monthly=is.true') && monthly.includes('rent_now_pay_later=not.is.true'));
+    monthly.includes('and(payment_monthly.is.true,rent_now_pay_later.not.is.true)'));
+  check('every period admits price on request (owner 2026-09-28)',
+    [annual, monthly].every((qs) => qs.includes('price_annual.is.null')));
   // 'كلاهما' (both periods) was UNHANDLED here until 2026-09-02; it is now translated verbatim from
   // the clause and proven in the inconclusive-by-default block below.
 }
@@ -125,7 +127,7 @@ const BASE = { p_deal: 'بيع', p_tables: ['aqar_residential_listings'], p_type
     const both = buildOracleQS({ ...BASE, p_deal: 'إيجار', p_rent_period: 'كلاهما' });
     check('p_rent_period=كلاهما under Rent translates (no longer unhandled)', both.unhandled.length === 0, JSON.stringify(both.unhandled));
     check('…as payment_monthly OR literal-annual OR (monthly-labelled AND RNPL) — all three arms, one or=()',
-      both.qs.includes(`or=(payment_monthly.is.true,rent_period_ar.eq.${encodeURIComponent('سنوي')},and(rent_period_ar.eq.${encodeURIComponent('شهري')},rent_now_pay_later.is.true))`));
+      both.qs.includes(`or=(payment_monthly.is.true,rent_period_ar.eq.${encodeURIComponent('سنوي')},and(rent_period_ar.eq.${encodeURIComponent('شهري')},rent_now_pay_later.is.true),price_annual.is.null)`));
     check('…and does NOT degrade to "no period filter" (an unpublished period must stay out)',
       !both.qs.includes('rent_period_ar=not.is.null') && both.qs.includes('or=(payment_monthly'));
     check('a period under a NON-Rent deal is REFUSED (the clause skips the period predicate for Buy rows; translating it would filter Buy rows by a rent column)',
@@ -434,6 +436,20 @@ const enc1 = (t: string) => encodeURIComponent(`"${t}"`);
   const { qs } = buildOracleQS(resMisfile, { typeMacros: MACROS });
   check('a `both`-macro type on a WRONG-kind arm B is pinned to the category’s kind (so it matches nothing)',
     qs.includes(`and(type_ar.in.(${enc1('عمارة')}),source_table.like.*${RES_SUFFIX})`), qs);
+}
+
+{
+  // RAW LAND IS A TAG (🔬 2026-10-12). The «Raw Land» token «أرض خام» is stored by no row as type_ar; production
+  // matches it on unit_subtype_ar. Run 38215288912 went red on every Raw Land cell (rpc=11 oracle=0 in جدة)
+  // because this translator emitted only `type_ar=in.(أرض خام)`. Both the single-scope and the two-arm path.
+  const raw = { p_deal: 'بيع', p_category: 'Commercial', p_cities: ['جدة'], p_types: ['أرض خام'] };
+  const single = buildOracleQS(raw, { typeMacros: MACROS }).qs;
+  const twoArm = buildOracleQS({ ...raw, p_tables: ['aldarim_commercial_listings'],
+    p_tables2: ['aqar_residential_listings'], p_types2: ['أرض خام'] }, { typeMacros: MACROS }).qs;
+  const tag = `unit_subtype_ar.eq.${enc1('أرض خام')}`;
+  check('the Raw Land token reaches the unit_subtype_ar TAG on the single-scope path', single.includes(tag), single);
+  check('…and on BOTH arms of a two-arm scope', twoArm.split(tag).length - 1 === 2, twoArm);
+  mustCatch('the pre-fix translation: «أرض خام» read as a stored type only', !`type_ar=in.(${enc1('أرض خام')})`.includes(tag));
 }
 
 if (mutFail) { console.error(`\n✗ ${mutFail} guard(s) are BLIND to their own defect\n`); process.exit(1); }

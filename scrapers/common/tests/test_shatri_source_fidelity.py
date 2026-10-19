@@ -664,6 +664,7 @@ def test_main_writes_both_tables_and_reports_the_skip_tally(monkeypatch):
     calls = {}
     posts = [POSTS[i] for i in (22251, 18501, 21820, 18906, 22208)]
     monkeypatch.setattr(R, "session", lambda: object())
+    monkeypatch.setattr(R, "retry_smarter_session", lambda *_a, **_k: (R.session(), []))
     monkeypatch.setattr(R, "fetch_terms", lambda s: TERMS)
     monkeypatch.setattr(R, "fetch_posts", lambda s, limit=0: (posts, len(posts)))
     monkeypatch.setattr(R, "fetch_media", lambda s, ids: MEDIA)
@@ -693,6 +694,7 @@ def test_main_never_prunes_a_limited_enumeration(monkeypatch):
     calls = {}
     posts = [POSTS[22251]]
     monkeypatch.setattr(R, "session", lambda: object())
+    monkeypatch.setattr(R, "retry_smarter_session", lambda *_a, **_k: (R.session(), []))
     monkeypatch.setattr(R, "fetch_terms", lambda s: TERMS)
     monkeypatch.setattr(R, "fetch_posts", lambda s, limit=0: (posts, 74))     # site says 74, we read 1
     monkeypatch.setattr(R, "fetch_media", lambda s, ids: MEDIA)

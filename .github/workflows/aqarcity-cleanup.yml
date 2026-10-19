@@ -1,6 +1,7 @@
-# Weekly aqarcity retention cleanup via the unified engine. Honors the aqarcity policy row. Deletes a
+# Aqarcity retention cleanup via the unified engine. Honors the aqarcity policy row. Deletes a
 # listing ONLY after re-fetching its aqarcity URL and finding the «الإعلان منتهي» expired banner on a
-# 200 page; every other 200 is live → self-heal. Triggered weekly by pg_cron (gh-aqarcity-cleanup).
+# 200 page; every other 200 is live → self-heal. Since 2026-09-28 the DAILY run is fleet-cleanup.yml
+# (aqarcity is enabled, so run_fleet covers it); this workflow stays for manual and bounded runs.
 name: Aqarcity cleanup
 on:
   workflow_dispatch:

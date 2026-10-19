@@ -96,16 +96,16 @@ check("groundReply neutralises the owner's exact reproduction case end-to-end",
 
 console.log("\n── the guard is WIRED on every reply path ──");
 check("groundReply() exists, now amenity-aware",
-  /function groundReply\(reply: string, locale: string, amenities: string\[\] = \[\]\): string/.test(edge));
+  /function groundReply\(reply: string, locale: string, amenities: string\[\] = \[\], seed = "", avoid = ""\): string/.test(edge));
 // M3 escaped the first version: the barrier proved the PATTERNS matched and the guard was WIRED, but
 // never that groundReply actually ACTS. Turning its body into `return r;` left every check green.
 check("groundReply actually neutralises — it is not a pass-through",
   edge.includes("if (!CLAIMS_INVENTORY.test(r) && !PROMISES_WIDENING.test(r) && !replyClaimsUnlistedAmenity(r, amenities)) return r;"),
   "without this early-return-ONLY-when-clean line the function returns every reply untouched");
 check("it neutralises rather than surgically editing Arabic prose",
-  /return locale === "en" \? "Got it — searching now\." : "تمام، أدوّر لك الحين\.";/.test(edge));
+  /return searchingNowText\(locale === "en", seed, avoid\);/.test(edge));
 check("the LISTINGS reply is grounded, now with the amenities it will actually carry",
-  /reply: groundReply\(replyOut, locale, outAmenities\),/.test(edge));
+  /reply: groundReply\(replyOut, locale, outAmenities, text, lastBotReply\),/.test(edge));
 // Composed with oneQuestionOnly() since 2026-08-29 (one clarification question per turn). Still
 // grounded — groundReply runs FIRST, so the claim/widening guard applies before any truncation.
 // Assert the GROUNDING, not the punctuation that follows it. This pinned the exact `...) });` tail
@@ -133,7 +133,7 @@ check("the LISTINGS reply is grounded, now with the amenities it will actually c
 // (2026-09-11) because it must win over a still-unresolved ambiguityReply once the one-question
 // ceiling is spent — see decide.ts's `unsearchable` doc.
 check("the MESSAGE reply is grounded, also amenity-aware",
-  /const reply = unsearchableReply \?\? ambiguityReply(?: \?\? \w+)* \?\? oneQuestionOnly\(groundReply\(lead\(out\.reply\), locale, outAmenities\)\);/.test(edge));
+  /const reply = unsearchableReply \?\? ambiguityReply(?: \?\? \w+)* \?\? oneQuestionOnly\(groundReply\(lead\(out\.reply\), locale, outAmenities, text, lastBotReply\)\);/.test(edge));
 const paths = (edge.match(/reply: groundReply\(|reply: oneQuestionOnly\(groundReply\(|const reply = unsearchableReply \?\? ambiguityReply(?: \?\? \w+)* \?\? oneQuestionOnly\(groundReply\(/g) ?? []).length;
 check(`every reply path goes through it (${paths} found)`, paths >= 2,
   "listings + the one unified clarification path (empty-search and the model's-own-question cases are now the SAME return)");

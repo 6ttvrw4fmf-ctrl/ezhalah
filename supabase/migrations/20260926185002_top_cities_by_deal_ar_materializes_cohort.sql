@@ -1,3 +1,4 @@
+
 -- PERFORMANCE, output-preserving: the "cohort" CTE (the big 30+ predicate filter) was referenced
 -- twice (once to compute "total", once for the per-city GROUP BY) and, un-hinted, Postgres was
 -- re-running the whole filter for each reference instead of reusing one materialization. Measured:

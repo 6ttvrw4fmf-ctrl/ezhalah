@@ -201,12 +201,38 @@ export function citationProblems(rows: IncidentRow[] | null, exists: ExistenceTe
       if (verdict === true) continue;
       const what = a.kind === 'fn' ? 'database function'
         : a.kind === 'symbol' ? 'name' : 'file';
+      // SAY WHAT WAS MEASURED, WHICH IS NOT "DOES NOT EXIST" (routine #10, 2026-09-27).
+      //
+      // Every existence test in this module reads the COMMITTED CHECKOUT and says so in its own
+      // docs — committedFunctions() greps supabase/migrations, treeMentionTest() greps tracked
+      // files. So a red line here means "no committed artefact defines this", which is a STRICT
+      // SUPERSET of "this does not exist": a `mon_detect_*` applied to production via
+      // apply_migration and never mirrored to git is alive, working, and still correctly flagged.
+      //
+      // MEASURED THE DAY THIS WORDING CHANGED: incident #839 (routine-3) cited
+      // mon_detect_price_drift_predicate_is_blind and #858 (routine-7) cited
+      // mon_detect_cron_abort_classifier_selftest. Both functions EXIST in production (pg_proc), and
+      // five migrations applied 07:18-10:50 UTC that morning define them — none committed. The old
+      // sentence told two engineers their barrier DOES NOT EXIST when it was running; the true cause
+      // was migration drift, already alerting as its own open P1 routed to routine-7-seam.
+      //
+      // THE VERDICT IS UNCHANGED AND MUST BE: an uncommitted barrier is not a durable barrier — it
+      // cannot be reviewed, and nothing in the repo records it. This only stops the report pointing
+      // at the wrong repair. A guard whose red sentence is not true of the tree is a guard people
+      // learn to scroll past, which is how this same file spent six days red in 2026-09-14.
+      const absent = a.kind === 'fn'
+        ? 'is defined by NO COMMITTED MIGRATION (it may be live in production and never mirrored '
+          + 'to supabase/migrations — that is migration drift, and an uncommitted barrier is still '
+          + 'not a durable one)'
+        : a.kind === 'symbol'
+          ? 'is MENTIONED NOWHERE in the committed checkout'
+          : 'IS NOT IN THE CHECKOUT';
       problems.push(
         verdict === null
           ? `incident #${row.id} (${row.state}, ${row.owner_routine}) cites the ${what} `
             + `"${a.name}" and its existence COULD NOT BE DETERMINED — UNKNOWN, not accepted`
           : `incident #${row.id} (${row.state}, ${row.owner_routine}) cites the ${what} `
-            + `"${a.name}", which DOES NOT EXIST — the incident reads as covered and is not`,
+            + `"${a.name}", which ${absent} — the incident reads as covered and is not`,
       );
     }
   }

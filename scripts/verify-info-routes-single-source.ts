@@ -97,7 +97,12 @@ check(`${INFO} holds the support form (subject/message/send states)`,
   /useState<'idle' \| 'sending' \| 'sent' \| 'error'>/.test(info) && info.includes('<SupportForm t={t} />'));
 check(`${INFO} holds the partnerships address`, info.includes('partners@ezhalah.com'));
 check(`${INFO} holds the About copy`,
-  ["'About Us'", "'Our role'", "'Disclaimer'"].filter((h) => info.includes(h)).length >= 2);
+  [
+    "'About Us'",
+    "'Ezhalah'",
+    "'Smarter property search, bringing the Saudi market together in one place.'",
+    "'Ezhalah is a search platform only. We do not own, list, sell, or rent properties, and we run no transactions and take no commission.'",
+  ].every((h) => info.includes(h)));
 
 // ── 5. no THIRD copy, anywhere in src/ ───────────────────────────────────────────────────────────
 // The address literal is the tell: every duplicate Support surface this repo has had carried one.

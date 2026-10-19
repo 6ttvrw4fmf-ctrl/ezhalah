@@ -242,7 +242,7 @@ def test_a_direct_read_that_names_the_unit_stamps_the_row():
 # ── 2. PRICE = SOURCE, TYPES, JSON-ONLY ROWS ────────────────────────────────────────────────────
 def test_json_only_rows_still_map_and_a_900_riyal_sale_stays_900():
     row, _ = _row(U373, None)
-    assert row["property_type"] == "Villa" and row["price_total"] == 1792000       # «تاون هاوس» → the fleet fold
+    assert row["property_type"] == "تاون هاوس" and row["price_total"] == 1792000       # «تاون هاوس» keeps its own name
     assert row["direction"] == "جنوب" and row["street_width_m"] == 30 and row["license_number"] == "7201001555"
     assert row["photo_urls"] == ["https://just.sa/das/includes/uploads/images/offer_20260808_195828_5f4cc1.webp"]
     assert "bathrooms" not in row or row["bathrooms"] is None
@@ -334,6 +334,7 @@ def test_the_skip_tally_and_detail_count_reach_end_run(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["run.py"])
     monkeypatch.setattr(R, "PAUSE", 0)
     monkeypatch.setattr(R, "session", lambda: None)
+    monkeypatch.setattr(R, "walk_session", lambda: R.session())   # no live probe offline
     monkeypatch.setattr(R, "fetch_catalogue", lambda s, limit=0: (units, len(units)))
     monkeypatch.setattr(R, "fetch_detail", lambda s, uid: R.parse_detail(DETAIL_672) if uid == 672 else None)
     monkeypatch.setattr(R.db, "begin_run", lambda src: 1)
@@ -354,6 +355,7 @@ def test_an_incomplete_enumeration_never_prunes(monkeypatch):
     pruned: list = []
     monkeypatch.setattr(sys, "argv", ["run.py", "--no-detail"])
     monkeypatch.setattr(R, "session", lambda: None)
+    monkeypatch.setattr(R, "walk_session", lambda: R.session())   # no live probe offline
     monkeypatch.setattr(R, "fetch_catalogue", lambda s, limit=0: ([U672], 80))   # site says 80, we got 1
     monkeypatch.setattr(R.db, "begin_run", lambda src: 1)
     monkeypatch.setattr(R.db, "_wasalt_batch", lambda t, rows: None)

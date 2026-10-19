@@ -36,11 +36,13 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize
+from scrapers.common.http_liveness import stored_listing_url
 from scrapers.common.arabic_location import to_catalog
 
 BASE = "https://fursaghyr.com"
 LIST = f"{BASE}/wp-json/fgh/v1/properties"
 MEDIA = f"{BASE}/wp-json/wp/v2/media"  # standard WP core media, open, no auth
+POSTS = f"{BASE}/wp-json/wp/v2/properties"  # the post's own record: its WordPress `status`
 MIN_INTERVAL = float(os.environ.get("SCRAPE_MIN_INTERVAL", "0.3"))
 
 # Fursaghyr rea.property_type (Arabic) → our canonical English taxonomy.
@@ -150,6 +152,73 @@ def fetch_all(s: cc.Session) -> list[dict]:
         items = j.get("items") if isinstance(j, dict) else j
         return items or []
     return []
+
+
+def _verify_gone(ad_number: str, s: Optional[cc.Session] = None) -> tuple[str, str]:
+    """The source's own status for ONE post. Its page answers 200 whether it is live or expired, so the
+    page proves nothing; WordPress's record says which (measured 2026-09-28: the 11 fgh-feed posts
+    read `publish`; FG24982/24984/24986/24993/25070/25111/25138/25158 — active here, out of the feed
+    since 08-27 — read `expired`; a made-up id reads 404 `rest_post_invalid_id`).
+    'publish' → live · 'expired' / rest_post_invalid_id → gone · anything else → UNKNOWN."""
+    pid = re.sub(r"\D", "", ad_number or "")
+    if not pid:
+        return "unknown", f"{ad_number!r} carries no post id"
+    _throttle()
+    try:
+        r = (s or session()).get(f"{POSTS}/{pid}", params={"_fields": "id,status"}, timeout=30)
+        body = r.json()
+    except Exception as e:
+        return "unknown", f"REST read failed ({type(e).__name__}) — never proof of removal"
+    if r.status_code == 200 and isinstance(body, dict) and str(body.get("id")) == pid:
+        st = body.get("status")
+        if st == "publish":
+            return "live", "REST 200 status=publish"
+        if st == "expired":
+            return "gone", "REST 200 status=expired — the source expired this ad (its page still answers 200)"
+        return "unknown", f"REST 200 with unrecognised status {st!r}"
+    if r.status_code == 404 and isinstance(body, dict) and body.get("code") == "rest_post_invalid_id":
+        return "gone", "REST 404 rest_post_invalid_id — the post was deleted at source"
+    if r.status_code == 401 and isinstance(body, dict) and body.get("code") == "rest_forbidden":
+        return _own_page_after_401(ad_number, s)
+    return "unknown", f"REST {r.status_code}"
+
+
+# A live ad's own page, set by main() from a post that read `publish` THIS run. The page fallback
+# below may only call a 404 "gone" after this control answered 200 through the same session.
+_CONTROL_URL: Optional[str] = None
+_control_ok: Optional[bool] = None
+_stored_url = stored_listing_url(("fursaghyr_residential_listings", "fursaghyr_commercial_listings"))
+
+
+def _own_page_after_401(ad_number: str, s: Optional[cc.Session]) -> tuple[str, str]:
+    """REST 401 rest_forbidden = the post is no longer public (trashed/draft). The law keeps a 401
+    UNKNOWN, so the ad's OWN page decides: 404/410 → gone, anything else → UNKNOWN (2026-10-19).
+    FG27710 left the feed 10-17, sat at 3 strikes shown for three nights, REST 401 on every read,
+    its page 404 (dead-visible 10-17/18/19). Same shape as daryusuf (2026-10-12)."""
+    global _control_ok
+    rest = "REST 401 rest_forbidden (post not public)"
+    url = _stored_url(ad_number)
+    if not url:
+        return "unknown", f"{rest}; no stored page URL"
+    sess = s or session()
+    if _control_ok is None:
+        _control_ok = False
+        if _CONTROL_URL:
+            _throttle()
+            try:
+                _control_ok = sess.get(_CONTROL_URL, timeout=30, allow_redirects=False).status_code == 200
+            except Exception:
+                _control_ok = False
+    if not _control_ok:
+        return "unknown", f"{rest}; live control page did not answer 200 — a 404 proves nothing"
+    _throttle()
+    try:
+        pr = sess.get(url, timeout=30, allow_redirects=False)
+    except Exception as e:
+        return "unknown", f"{rest}; own page read failed ({type(e).__name__})"
+    if pr.status_code in (404, 410):
+        return "gone", f"{rest}; its own page answers {pr.status_code} (control 200)"
+    return "unknown", f"{rest}; its own page answers {pr.status_code}"
 
 
 _FULLRES_RE = re.compile(r"-\d{2,4}x\d{2,4}(\.(?:png|jpe?g|webp))$", re.IGNORECASE)
@@ -399,6 +468,7 @@ def map_listing(item: dict, s: Optional[cc.Session] = None) -> tuple[Optional[di
 
 
 def main() -> int:
+    global _CONTROL_URL
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
     ap.add_argument("--limit", type=int, default=None,
@@ -419,8 +489,24 @@ def main() -> int:
     is_validation = bool(args.limit)
     run_id = db.begin_run("fursaghyr") if not is_validation else None
 
+    expired = 0
+    unread = 0
     try:
         for it in items:
+            # The feed carries no status. A post the source itself calls expired is not kept or
+            # refreshed here — it is left to prune_unseen, whose oracle reads the same status.
+            # FAIL CLOSED (audit 2026-10-02): only a record that READS `publish` is written. Until
+            # now an 'unknown' answer (REST failure, 401/403/5xx, a status nobody measured) was
+            # upserted active on the feed sighting alone — "could not read" written as "available".
+            # Measured 2026-10-02: 10 of 10 feed posts read publish; FG24965 (licence ended that
+            # day) had left the feed and read expired. An unread post is counted, never guessed.
+            verdict = _verify_gone(f"FG{it.get('id')}", s)[0]
+            if verdict == "gone":
+                expired += 1
+                continue
+            if verdict != "live":
+                unread += 1
+                continue
             row, cat = map_listing(it, s)
             if not row:
                 continue
@@ -428,6 +514,7 @@ def main() -> int:
                 continue
             (com if cat == "commercial" else res).append(row)
             seen += 1
+            _CONTROL_URL = _CONTROL_URL or row.get("listing_url")
 
         if res:
             db.upsert_fursaghyr_residential_batch(res)
@@ -451,7 +538,8 @@ def main() -> int:
 
             for tbl, rows_seen in (("fursaghyr_residential_listings", res),
                                    ("fursaghyr_commercial_listings", com)):
-                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Fursaghyr")
+                n = db.prune_unseen(tbl, {r["ad_number"] for r in rows_seen}, source="Fursaghyr",
+                                    verify_gone=lambda ad: _verify_gone(ad, s))
                 if n < 0:
                     print(f"⚠ {tbl}: prune guard tripped (0 scraped or collapse) — kept existing active")
                 else:
@@ -461,7 +549,7 @@ def main() -> int:
               + (f", {pruned} stale pruned" if not is_validation else " (validation, no prune)"))
         healthy = True
         if run_id is not None:
-            healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned}", check_tables=["fursaghyr_residential_listings", "fursaghyr_commercial_listings"])
+            healthy = db.end_run(run_id, ok=True, rows_seen=seen, rows_upserted=seen, notes=f"pruned={pruned} expired_in_feed={expired} status_unread_skipped={unread}", check_tables=["fursaghyr_residential_listings", "fursaghyr_commercial_listings"])
         if not healthy:
             print("✗ run demoted to unhealthy by end_run()'s RC-B guard — failing CI instead of a silent success.", flush=True)
         return 0 if healthy else 1

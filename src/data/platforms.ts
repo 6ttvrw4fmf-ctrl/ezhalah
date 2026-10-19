@@ -155,6 +155,40 @@ export const PLATFORMS: Platform[] = [
   { name: 'مكسب العقارية', domain: 'macsaib.sa', brand: 'Macsaib', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // maqrat: 83 REGA-licensed ads measured 2026-09-26 (58 sale + 24 rent + 1 «مجمع» left unmapped).
   { name: 'MAQRAT', domain: 'maqrat.com', brand: 'MAQRAT', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // arsh: 21 land listings measured 2026-09-27 (no prices — «السعر عند الطلب»; owner: include, treat as for sale).
+  { name: 'عرش العقارية', domain: 'arshglobal.com.sa', brand: 'Arsh', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // superoffice: 12 available private offices in Riyadh (of 177 offices; 165 booked, 7 meeting rooms skipped) measured 2026-09-27.
+  { name: 'سوبر أوفيس', domain: 'superoffice.sa', brand: 'SuperOffice', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  // haraj: حراج — public classifieds; ONLY REGA-licensed property offers are listed (owner 2026-10-16), ~7 of every 150 property-titled posts read on 2026-10-16.
+  { name: 'حراج', domain: 'haraj.com.sa', brand: 'Haraj', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // shomou: مكتب شموع العقار (Al-Ahsa) — 142 in-date ads of 1,028 listed (835 past their own end date) measured 2026-09-28.
+  { name: 'شموع العقار', domain: 'shomoalaqar.com.sa', brand: 'Shomou', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // maktab: منصة مكتب — 11 offices with in-date REGA ad licences (Riyadh + Tabuk) measured 2026-09-28.
+  { name: 'منصة مكتب', domain: 'maktab.sa', brand: 'Maktab', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // sirdab: 549 warehouses/shops/workshops/factories measured 2026-09-27 (15 storage units skipped).
+  { name: 'سرداب', domain: 'marketplace.sirdab.co', brand: 'Sirdab', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // ashab: 575 listings measured 2026-09-27 (239 single ads + 336 available units of 56 buildings; Buraidah/Qassim).
+  { name: 'عشاب العقارية', domain: 'ashab.sa', brand: 'Ashab', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // manafe: 77 listings measured 2026-09-27 (210 Jeddah buildings; only REGA-licensed, available units).
+  { name: 'منافع العقارية', domain: 'manafe.com.sa', brand: 'Manafe', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // wajaf: 44 Buraidah land/commercial listings measured 2026-09-27 (sold/reserved/let skipped).
+  { name: 'وجف العقارية', domain: 'wajaf.sa', brand: 'Wajaf', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // albukaeri: 28 direct-sale listings measured 2026-09-27 (Eastern Province, Riyadh).
+  { name: 'البكيري العقارية', domain: 'albukaeri.sa', brand: 'AlBukairi', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // ryadah: 18 buildings/compounds offering units measured 2026-09-27 (Khobar/Dammam; every price «عند الاتصال»).
+  { name: 'ريادة العقارية', domain: 'ryadah.com.sa', brand: 'Ryadah', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // sqcc: 31 listings measured 2026-09-27 (Dammam/Eastern Province; auctions excluded).
+  { name: 'مجموعة صالح القرشي العقارية', domain: 'sqcc.sa', brand: 'SQCC', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // daraa: 6 ready Makkah apartment projects measured 2026-09-27 (22 sold, 2 off-plan, 3 under construction skipped).
+  { name: 'دارا للتطوير العقاري', domain: 'daraa.sa', brand: 'Dara', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
+  // tawia: 5 Jubail listings measured 2026-09-27.
+  { name: 'مكتب طوية للعقار', domain: 'tawia.sa', brand: 'Tawia', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // manzo: 1 listing measured 2026-09-27 (Dhahran apartment, 48,000/yr). Owner: include.
+  { name: 'مانزو', domain: 'manzo.com.sa', brand: 'Manzo', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  // eightfloor: 2 Riyadh rentals measured 2026-09-27 (its 9 projects are off-plan — owner: excluded). Bare 8floor.sa has no DNS; www works.
+  { name: 'الطابق الثامن', domain: 'www.8floor.sa', brand: '8Floor', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
+  // holoul: 30 developer units for sale measured 2026-09-27 (of 238 feed rows: project+unit listed, REGA licence, ad type Sale).
+  { name: 'حلول', domain: 'holoul.io', brand: 'Holoul', phone: '+966 5X XXX 0000', allowsRent: false, allowsBuy: true },
   // opensooq: 78 real-estate items measured 2026-09-26 (72 kept: 2 under construction, 1 deal conflict, 1 multi-use plot, 2 duplicate posts skipped).
   { name: 'السوق المفتوح', domain: 'sa.opensooq.com', brand: 'OpenSooq', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // nafithh: 30 measured 2026-09-26 (22 sale + 8 rent; 2 «مجمع» unmapped). Server-rendered REGA blocks.
@@ -165,6 +199,12 @@ export const PLATFORMS: Platform[] = [
   { name: 'مؤاجرة', domain: 'muajarh.com', brand: 'Muajarh', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: false },
   // dallali: 7 measured 2026-09-26 (3 rent: 2 offices + 1 apartment; 4 KAEC plots). Open JSON API p1.dallali.com.
   { name: 'دلّالي', domain: 'dallali.com', brand: 'Dallali', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // maqam: Nuzul tenant, 50 of 130 `available` (47 kept: 3 Wafi off-plan excluded), measured 2026-09-26. NOT «مقام الوسام» (fahadalshahri).
+  { name: 'شركة مقام للتطوير العقاري', domain: 'property.maqamco.sa', brand: 'Maqam Development', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // earthapp: 54 active ads, 51 kept (47 land priced per m²), measured 2026-09-26. No listing photos exist on the source.
+  { name: 'تطبيق أرض', domain: 'earthapp.com.sa', brand: 'Earth App', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
+  // nawafeth: 20 REGA-licensed ads, 9 kept — 11 state neither sale nor rent in the title and are skipped, never guessed.
+  { name: 'نوافذ الوطن', domain: 'nawafethalwatan.com', brand: 'Nawafeth Alwatan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   { name: 'العجلان', domain: 'alajlan-re.com', brand: 'Al Ajlan', phone: '+966 5X XXX 0000', allowsRent: true, allowsBuy: true },
   // Onboarded 2026-09-20 (#3320). Deals from production search_listings_ar, except Fahadalshahri:
   // 0 rent rows today, but its scraper maps «للإيجار» to Rent — absence is not incapability.

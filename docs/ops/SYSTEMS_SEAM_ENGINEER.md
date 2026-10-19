@@ -513,6 +513,26 @@ failed," that finding belongs to whichever of #3/#4/#5 owns it — file it there
 
 ## PART 3 — DAILY SEAM SWEEP
 
+**Backlog gate, checked BEFORE step 1 (owner rule, 2026-09-26).** This routine runs more often than
+any of the other ten, yet the 2026-09-26 cross-routine audit found it carrying the single largest
+unfixed pile — 55 open incidents on its own surfaces, several with zero progress recorded since the
+day they were filed. PART 3 and PART 4 are both open-ended discovery with no built-in brake, so a
+routine that is good at finding seams and behind on fixing them just keeps finding more. Count your
+open incidents on owned surfaces (§G.6b's read, already mandatory) before doing anything else this
+run:
+
+- **Above ~20 open:** skip PART 3/4 discovery entirely this run. Spend the whole run driving existing
+  incidents to a terminal state (`incident_advance`/`incident_resolve`/`incident_handoff`/
+  `incident_block`/`incident_wont_fix` — never leave one merely re-read). Report
+  `BACKLOG GATE: N open, discovery skipped, cleared M this run`.
+- **20 or fewer:** run PART 3/4 as written, but do not open a NEW incident for a low-severity finding
+  (P2/P3 exploratory) if it would push the count back over ~20 — note it in the report instead and
+  pick it up next run.
+
+This gate does not apply to a genuine P0/P1 you find mid-run — fix or escalate that immediately,
+gate or no gate (§0's stop conditions still govern). The threshold is a rule of thumb, not a barrier;
+adjust it in this file if the real backlog shape changes, rather than silently ignoring it.
+
 1. Every scheduled cron job's actual execution log for the last 24h — fired, on time, succeeded.
 2. `mon_run_all_detectors()`: `failed` is empty, every count reflects genuinely NEW/escalated
    activity (read `open_alerts` in the same return — an all-zero sweep can sit on top of open

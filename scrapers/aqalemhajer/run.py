@@ -179,7 +179,7 @@ TYPE_OVERRIDES = {
     "ارضين متجاورتين": "Residential Land", "أرضين متجاورات": "Residential Land",
     "متجاورات": "Residential Land",                                            # 5 + 2 + 2
     "ارض تجارية": "Commercial Land",                                           # 7
-    "تاون هاوس": "Villa",                                                      # 6 (normalize: Townhouse→Villa)
+    "تاون هاوس": "تاون هاوس",                                                  # 6 (kept under its own name; search files it under Duplex)
     "شقق دبلكسية": "Apartment", "شقة دبلكسية": "Apartment", "شقة علوية": "Apartment",  # bossbih precedent
     "بيت عربي": "Villa", "بيت شعبي": "Villa",                                  # 2
     # A house sold WITH its flats is one lot; the head noun decides (بيت → Villa, the shared map).
@@ -625,6 +625,15 @@ def verify_gone_for(live_nid: str):
                              url_for=lambda _ad: f"{BASE}/{nid}",
                              canary=_canary_for(live_nid)).verify_gone(ad_number)
     return _verify_gone
+
+
+def _make_verify_gone(control: Optional[dict] = None):
+    """The one-argument oracle the daily direct check calls (fleet_liveness.SITES, 2026-10-08): the
+    crawl's own verify_gone_for, with the caller's control row as the in-run canary. No control (or
+    one from another numbering) gives a canary that cannot pass, so no removal is believed."""
+    ad = str((control or {}).get("ad_number") or "")
+    nid = ad[len(PREFIX):] if ad.startswith(PREFIX) and ad[len(PREFIX):].isdigit() else ""
+    return verify_gone_for(nid)
 
 
 def main() -> int:

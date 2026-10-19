@@ -1,8 +1,9 @@
+
 -- PERFORMANCE, output-preserving: district_options_ar's "live" CTE was calling
 -- norm_district_tok(district_ar) -- an IMMUTABLE but expensive ~8-step regexp/translate chain --
 -- on every row of the city's cohort, on every picker open. Measured (Riyadh, 54,924-row cohort):
 -- 577ms with the function call vs 72ms reading a plain column -- ~88% of this RPC's total latency.
--- migration 20260926184239 added public.search_listings_ar.district_norm_tok as a STORED GENERATED
+-- migration 20260926-a added public.search_listings_ar.district_norm_tok as a STORED GENERATED
 -- column (norm_district_tok(district_ar), verified 0 mismatches across all 267,516 rows). This
 -- migration is the two-line swap to actually read it: cohort now also selects district_norm_tok,
 -- and "live" groups on that stored column instead of recomputing the function. Applied via a

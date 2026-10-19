@@ -22,7 +22,7 @@ from typing import Any, Callable, Optional
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
-from scrapers.common.liveness_contract import direct_alive_patch
+from scrapers.common.liveness_contract import direct_alive_patch, presence_patch
 from scrapers.common.pii import is_free_text, redact_capture, redact_pii
 from scrapers.common.placeholder_tokens import PLACEHOLDER_TOKENS, is_placeholder
 
@@ -863,21 +863,48 @@ def _apply_direct_alive(r: dict[str, Any], *, now_iso: str, table: str) -> None:
         )
 
 
-def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
+# A transient key, never a column (2026-10-03). A crawler sets it on a row its list served while
+# the ad's OWN page or record could not be read this run, or says something nobody measured. The row
+# is written exactly as before; the list sighting just does not certify it (SOURCE_LIST_PRESENCE).
+_PRESENCE_UNPROVEN_KEY = "_presence_unproven"
+
+
+def mark_presence_unproven(row: dict[str, Any]) -> dict[str, Any]:
+    row[_PRESENCE_UNPROVEN_KEY] = True
+    return row
+
+
+def _wasalt_batch(table: str, rows: list[dict[str, Any]],
+                  strikes: Optional[dict[str, tuple[int, bool]]] = None) -> None:
     if not rows:
         return
     now = datetime.now(timezone.utc).isoformat()
+    # The REGISTRY decides whether a sighting is proof of life, not 300 call sites: the platform's
+    # registered policy (wasalt, and the SOURCE_LIST_PRESENCE sites admitted one by one) either
+    # declares presence_is_positive_evidence or presence_patch() returns nothing. Imported lazily:
+    # db must import without the registry. No platform key contains "_".
+    from scrapers.common.liveness_policies import POLICIES
+    _registered = POLICIES.get(table.split("_", 1)[0])
+    presence = _registered["policy"] if _registered else None
     seen: dict[str, dict[str, Any]] = {}
     for r in rows:
         r = dict(r)
+        unproven = r.pop(_PRESENCE_UNPROVEN_KEY, False)     # stripped always: it is not a column
         r["last_seen_at"] = now
         # Seen on the source THIS crawl → reset the consecutive-miss counter (prune_unseen only
         # deactivates after `grace` consecutive misses), and reactivate it: a listing that
         # reappears in the source is live again, so undo any earlier prune. `setdefault` so a
         # scraper that deliberately flags a row inactive (e.g. dealapp's مباع/مؤجر "sold" badge)
         # still wins, and _sanitize_price below can still force a price-typo row inactive.
-        r["missing_count"] = 0
-        r.setdefault("active", True)
+        held = (strikes or {}).get(r["ad_number"])
+        if held:
+            # The listing's OWN PAGE has it under strike (a direct read) and the caller could not
+            # read that page live. A feed sighting is weaker evidence than the page, so it may
+            # refresh the row's data but not clear the strikes or un-hide it (gathern, 2026-10-02).
+            r["missing_count"], r["active"] = held
+        else:
+            r["missing_count"] = 0
+            r.setdefault("active", True)
         _sanitize_price(r)
         _unknown_must_not_overwrite_known(r)
         _redact_user_visible_text(r)
@@ -889,6 +916,11 @@ def _wasalt_batch(table: str, rows: list[dict[str, Any]]) -> None:
         # after the marker was set, and the stamp must be judged against the row's FINAL state.
         # Also strips the transient key, which must never reach PostgREST.
         _apply_direct_alive(r, now_iso=now, table=table)
+        if presence is not None and r.get("active") is True and not held and not unproven:
+            # Being served by the source's own feed is proof of life ONLY for a platform whose
+            # registered policy declares it (presence_patch returns {} for every other policy),
+            # and never for a row whose own page is under strike: the page outranks the feed.
+            r.update(presence_patch(presence, now_iso=now))
         seen[r["ad_number"]] = r
     # SOURCE IS TRUTH across a BATCH, not just a row (owner rule 2026-08-09, see
     # `_unknown_must_not_overwrite_known`). That guard drops a None/unread key from each row so a
@@ -941,6 +973,16 @@ def _ad_shard(ad_number: Optional[str], shards: int) -> Optional[int]:
     if not m:
         return None
     return int(m.group()) % max(1, shards)
+
+
+# Every collapse/coverage trip of prune_unseen() this process, until end_run() writes them into the run's
+# notes. A tripped guard withholds the whole prune, and most callers flatten its -1 into «pruned=0», so the
+# trip used to vanish: gathern's prune tripped EVERY day from at least 2026-09-21 to 2026-09-28 (re-saw
+# ~4.4k of ~28k active) while writing «pruned=0» and ok=true, and ~23k listings whose gathern.co page was
+# 404 stayed in search. end_run() appends «prune guard tripped: …», the phrase
+# mon_detect_enumeration_incomplete() already watches — so a withheld prune alerts on every platform
+# without trusting 144 call sites to report it.
+_PRUNE_TRIPS: list[str] = []
 
 
 def prune_unseen(
@@ -1044,9 +1086,12 @@ def prune_unseen(
         return -1  # nothing scraped → site almost certainly down → keep everything active
     gone = [r for r in existing if r["ad_number"] not in seen]
     if len(existing) >= min_active_guard:
+        resaw = f"re-saw {len(existing) - len(gone)} of {len(existing)} active"
         if len(gone) > max_prune_frac * len(existing):
+            _PRUNE_TRIPS.append(f"{table} collapse ({resaw})")
             return -1  # collapse guard: a big fraction vanished at once → treat as a broken crawl
         if (len(existing) - len(gone)) / len(existing) < min_coverage:
+            _PRUNE_TRIPS.append(f"{table} coverage ({resaw}, floor {min_coverage:.0%})")
             return -1  # partial-scrape guard: saw too little of the catalog to trust a prune
     if not gone:
         return 0
@@ -1063,6 +1108,14 @@ def prune_unseen(
         doomed = new_missing >= grace
         if doomed:
             payload["active"] = False
+        if doomed and verify_gone is None:
+            # ABSENCE NEVER HIDES (LISTING_LIVENESS.md §1-§3; owner decision 2026-10-05). A caller
+            # with no oracle used to deactivate on three crawl misses alone: on 2026-10-09 abwbna
+            # and shomou hid 4 rows that way with no source reading, and 46 sites in
+            # scrapers/absence-only-prune.txt still could. Such a row is now hidden only when ITS OWN
+            # stored URL answers 404/410 while a page this crawl just saw still answers live; any
+            # other answer is UNKNOWN and the row keeps its strike, shown.
+            verify_gone = own_page_status_oracle(c, table, seen)
         if doomed and verify_gone is not None:
             # Only rows about to be deactivated are probed — a strike that is merely ticking up
             # costs nothing and needs no network call.
@@ -1170,9 +1223,14 @@ def prune_unseen(
             # Probed and confirmed GONE — a look, and the one that most needs recording: without it
             # a killed row keeps a stale last_seen_at and can outrank never-looked-at rows in the
             # next staleness-ordered worklist (migration 20260924).
+            # deactivated_at is written HERE, not left to trg_set_deactivated_at: 27 platforms'
+            # tables never had that trigger (2026-10-03), so their hides carried no date and were
+            # invisible to the hidden counts, the unverified-hide monitor, auto-recovery and the
+            # 30-day clock. The trigger keeps a value it is given, so both paths agree.
+            _now = datetime.now(timezone.utc).isoformat()
             ads, payload = confirmed_gone, {
                 "missing_count": new_missing, "active": False,
-                "last_liveness_probe_at": datetime.now(timezone.utc).isoformat()}
+                "deactivated_at": _now, "last_liveness_probe_at": _now}
             if not ads:
                 continue
         for i in range(0, len(ads), 200):
@@ -1181,6 +1239,186 @@ def prune_unseen(
         if doomed:
             killed += len(ads)
     return killed
+
+
+OWN_PAGE_ORACLE = "own_page_status.default"
+
+# Ads whose OWN page or record THIS process read as sold or rented, ad_number → the words it printed.
+# A crawler that drops such an ad from its rows (rather than storing it) calls note_read_gone(), so
+# the default oracle above can tell "the crawl read it sold" from "the crawl did not see it": the
+# first is a direct reading, the second is absence (2026-10-09, backlog 300).
+_READ_GONE: dict[str, str] = {}
+_SOLD_OR_RENTED = ("مباع", "تم البيع", "بيعت", "مؤجر", "تم التأجير", "تم تأجير")
+
+
+def note_read_gone(ad_number: Optional[str], status_text: Optional[str]) -> bool:
+    """Record that this ad's own page/record says sold or rented. Any other status (reserved, coming
+    soon, missing, unreadable) records nothing: it is not a removal. Returns whether it was recorded."""
+    s = (status_text or "").strip()
+    if not ad_number or not s or not any(w in s for w in _SOLD_OR_RENTED):
+        return False
+    _READ_GONE[str(ad_number)] = s[:80]
+    return True
+_OWN_PAGE_CONTROLS = 3
+_OWN_PAGE_MAX_READS = 300
+
+
+def _own_page_status_signal(status, body, path_changed):
+    """A bare 404/410 on the listing's OWN path is the only removal this default can see. A redirect
+    elsewhere, a 200 of any shape, or anything unreadable is no opinion (UNKNOWN), never a death."""
+    if status in (404, 410) and not path_changed:
+        return "gone"
+    return None
+
+
+_END_DATE_KEYS = ("license_expiry",)
+_END_DATE_INFO_KEYS = ("ad_end_date", "license_end_date", "expired_at", "end_date")
+
+
+def _published_end_passed(row: Optional[dict]) -> Optional[str]:
+    """The stored source-published end date when it has passed (normalize.ad_expiry_state), else None.
+    No date, an unreadable date or a future one is None: never evidence."""
+    if not row:
+        return None
+    from scrapers.common import normalize
+    info = row.get("additional_info") if isinstance(row.get("additional_info"), dict) else {}
+    for raw in [row.get(k) for k in _END_DATE_KEYS] + [info.get(k) for k in _END_DATE_INFO_KEYS]:
+        if isinstance(raw, str) and normalize.ad_expiry_state(raw) == "expired":
+            return raw
+    return None
+
+
+def _own_page_session():
+    try:
+        from curl_cffi import requests as cc
+        return cc.Session(impersonate="chrome124")
+    except Exception:  # noqa: BLE001 — plain requests is still a direct read
+        import requests
+        return requests.Session()
+
+
+READ_GONE_MAX_READS = 60   # own-page reads per table per run when a prune is guarded or skipped
+
+
+def strike_read_gone(table: str, seen_ads, source: Optional[str], verify_gone=None, *,
+                     max_prune_frac: float = 0.30, min_active_guard: int = 8,
+                     max_reads: int = READ_GONE_MAX_READS) -> int:
+    """Strike ONLY the unseen active rows whose OWN page reads gone (2026-10-12).
+
+    For a crawl whose absence prune was refused (a guard tripped, or the walk fell short) — the
+    direct readings must not be thrown away with the absence (the dealapp lesson of 10-06, muktamel
+    10-07). opensooq: 27 of 97 ads read «هذا الإعلان غير متوفر» on their own pages four runs running
+    while the guard (re-saw 49 of 72) discarded every prune. manzo: a 2-ad catalogue whose walk never
+    matched the API's count, so its dead ad's strike counter froze at 2 for days, on screen.
+
+    Each unseen row's own page is read through `verify_gone` (default: own_page_status_oracle, which
+    needs a seen page to answer live first). UNKNOWN and live rows are counted as seen (kept, shown);
+    only read-gone rows take a strike, at most the collapse cap's worth (oldest-seen first; the cap
+    is respected, never raised). prune_unseen then runs with its grace and its at-grace re-read."""
+    seen = {str(a) for a in seen_ads if a}
+    if not seen:
+        return 0       # nothing seen this run: the source may be down — no control, no reading
+    c = sb()
+    q = c.table(table).select("ad_number,last_seen_at").eq("active", True)
+    if source:
+        q = q.eq("source", source)
+    rows = [r for r in (_execute(q.range(0, 999), what=table + ".read_gone_slice").data or [])
+            if r.get("ad_number")]
+    if verify_gone is None:
+        verify_gone = own_page_status_oracle(c, table, seen)
+    unseen = sorted((r for r in rows if r["ad_number"] not in seen),
+                    key=lambda r: str(r.get("last_seen_at") or ""))[:max_reads]
+    gone: list[str] = []
+    for r in unseen:
+        try:
+            got = verify_gone(r["ad_number"])
+        except Exception as e:  # noqa: BLE001 — an oracle that throws is UNKNOWN, never gone
+            print(f"{table}: verify_gone({r['ad_number']}) raised {type(e).__name__}: {e} → unknown")
+            continue
+        verdict = (got[0] if isinstance(got, (tuple, list)) else got) or "unknown"
+        if str(verdict).lower() == "gone":
+            gone.append(r["ad_number"])
+    if len(rows) >= min_active_guard:
+        gone = gone[:int(max_prune_frac * len(rows))]
+    if not gone:
+        print(f"{table}: no unseen ad read gone on its own page — nothing struck", flush=True)
+        return 0
+    print(f"{table}: striking only the {len(gone)} ad(s) whose own page read gone", flush=True)
+    return prune_unseen(table, {r["ad_number"] for r in rows} - set(gone), source=source,
+                        verify_gone=verify_gone, min_coverage=0.0, max_prune_frac=max_prune_frac,
+                        min_active_guard=min_active_guard)
+
+
+def own_page_status_oracle(c, table: str, seen, *, session=None):
+    """verify_gone for a prune_unseen caller that supplied none (see the call site).
+
+    Each at-grace row is read at its own stored `listing_url`. Before any removal a known-live control
+    must answer: up to three ads THIS crawl just saw, read the same way, at least one of which answers
+    200 with a body and no 404/410 (a source that answers blocks with 404, like gathern, fails here and
+    removes nothing). Memoised per call, both ways. No URL, no control, any failure: UNKNOWN."""
+    from scrapers.common.http_liveness import LivenessProbe
+
+    s = session or _own_page_session()
+    rows: dict[str, Optional[dict]] = {}
+
+    def row_of(ad_number: str) -> Optional[dict]:
+        if ad_number not in rows:
+            try:   # "*": tables differ in which end-date columns they carry
+                r = _execute(c.table(table).select("*").eq("ad_number", ad_number).limit(1),
+                             what=table + ".own_page_url")
+                data = getattr(r, "data", None) or []
+                rows[ad_number] = data[0] if data else None
+            except Exception:  # noqa: BLE001 — a failed lookup is UNKNOWN, never a kill
+                rows[ad_number] = None
+        return rows[ad_number]
+
+    def url_for(ad_number: str):
+        row = row_of(ad_number)
+        return (row.get("listing_url") or None) if row else None
+
+    state: dict[str, Any] = {}
+
+    def canary() -> tuple[bool, str]:
+        if "v" in state:
+            return state["v"]
+        state["v"] = (False, "no known-live control from this crawl answered live")
+        for ad in sorted(str(a) for a in seen)[:_OWN_PAGE_CONTROLS]:
+            url = url_for(ad)
+            if not url:
+                continue
+            try:
+                r = s.get(url, timeout=45, allow_redirects=True)
+            except Exception:  # noqa: BLE001
+                continue
+            if r.status_code == 200 and (r.text or "") and _own_page_status_signal(
+                    r.status_code, r.text, False) is None:
+                state["v"] = (True, f"control {ad} answers 200")
+                break
+        return state["v"]
+
+    probe = LivenessProbe(platform=table, signal=_own_page_status_signal, session=lambda: s,
+                          url_for=url_for, canary=canary, attempts=1, backoff=0.0)
+    reads = [0]
+
+    def verify_gone(ad_number: str):
+        # A held row stays at grace and is read again next crawl, so the budget bounds a crawl's
+        # cost; a row past it is UNKNOWN (kept, shown), never a kill.
+        if reads[0] >= _OWN_PAGE_MAX_READS:
+            return "unknown", f"{OWN_PAGE_ORACLE}: read budget of {_OWN_PAGE_MAX_READS} spent this run"
+        said = _READ_GONE.get(str(ad_number))     # the crawl read its own page as sold/rented
+        if said:
+            return "gone", f"{OWN_PAGE_ORACLE}: its own page read «{said}» this run"
+        # The ad's OWN published end date (licence / ad end, as the source printed it and the crawl
+        # stored it) has passed: the source itself says the ad is over, which is why its complete
+        # list stopped serving it (shomou, earthapp, maktab, opensooq …: 2026-10-09, 15 of 31 such
+        # hides; their pages still answer 200). That is the source's statement, not our clock.
+        ended = _published_end_passed(row_of(ad_number))
+        if ended:
+            return "gone", f"{OWN_PAGE_ORACLE}: the ad's own published end date {ended} has passed"
+        reads[0] += 1
+        verdict, why = probe.verify_gone(ad_number)
+        return verdict, f"{OWN_PAGE_ORACLE}: {why}"[:300]
+    return verify_gone
 
 
 # The verdict a res/com supersession records, and the oracle that names WHY it was recorded.
@@ -1447,6 +1685,11 @@ def retire_superseded_siblings(
     return retired
 
 
+#: Written to a run's notes by a caller that checked its own prices (see end_run); read by
+#: mon_check_run_field_ranges to skip only its windowed null-price check for that one run.
+OWN_PRICE_CHECK_MARK = "own_price_check"
+
+
 def end_run(
     run_id: int,
     *,
@@ -1458,6 +1701,7 @@ def end_run(
     floor: int = 0,
     degraded: bool = False,
     check_tables: Optional[list[str]] = None,
+    price_null_checked_by_caller: bool = False,
 ) -> bool:
     """Finalize a scrape_runs row. Returns the EFFECTIVE ok actually written.
 
@@ -1494,19 +1738,29 @@ def end_run(
             # Monitoring must never fail an already-committed run — the rows are written either
             # way, this only affects whether the run is HONESTLY reported as degraded.
             try:
+                if price_null_checked_by_caller:
+                    # The caller ran the null-price regression check on its OWN rows, telling a
+                    # source-published «no price» from a failed read (scrapers/aqar/price_tally.py).
+                    # This marker on THIS run's own record is what lets mon_check_run_field_ranges
+                    # skip only its windowed version of that one check — which, on a table 95 jobs
+                    # write at once, judges a run on its neighbours' rows. Every other check still
+                    # runs, and a run without the marker (every other scraper) is judged as before.
+                    _execute(sb().table("scrape_runs").update({"notes": OWN_PRICE_CHECK_MARK}).eq("id", run_id),
+                             what="scrape_runs.mark_own_price_check")
                 run_row = _execute(
                     sb().table("scrape_runs").select("platform, started_at").eq("id", run_id),
                     what="scrape_runs.select_for_check",
                 ).data[0]
                 for tbl in check_tables:
+                    params = {
+                        "p_run_id": run_id,
+                        "p_platform": run_row["platform"],
+                        "p_table": tbl,
+                        "p_since": run_row["started_at"],
+                        "p_placeholder_tokens": list(PLACEHOLDER_TOKENS),
+                    }
                     field_bad = _execute(
-                        sb().rpc("mon_check_run_field_ranges", {
-                            "p_run_id": run_id,
-                            "p_platform": run_row["platform"],
-                            "p_table": tbl,
-                            "p_since": run_row["started_at"],
-                            "p_placeholder_tokens": list(PLACEHOLDER_TOKENS),
-                        }),
+                        sb().rpc("mon_check_run_field_ranges", params),
                         what="mon_check_run_field_ranges",
                     ).data
                     if field_bad:
@@ -1520,6 +1774,10 @@ def end_run(
     if demotions:
         tag = "RC-B demoted ok=False: " + "; ".join(demotions)
         final_notes = f"{notes} | {tag}" if notes else tag
+    if _PRUNE_TRIPS:
+        tag = "prune guard tripped: " + "; ".join(_PRUNE_TRIPS)
+        final_notes = f"{final_notes} | {tag}" if final_notes else tag
+        _PRUNE_TRIPS.clear()
     _execute(
         sb().table("scrape_runs").update(
             {
@@ -1607,6 +1865,142 @@ def upsert_opensooq_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("opensooq_commercial_listings", rows)
 
 
+def upsert_holoul_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("holoul_residential_listings", rows)
+
+
+def upsert_holoul_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("holoul_commercial_listings", rows)
+
+
+def upsert_eightfloor_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("eightfloor_residential_listings", rows)
+
+
+def upsert_eightfloor_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("eightfloor_commercial_listings", rows)
+
+
+def upsert_manzo_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("manzo_residential_listings", rows)
+
+
+def upsert_manzo_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("manzo_commercial_listings", rows)
+
+
+def upsert_arsh_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("arsh_residential_listings", rows)
+
+
+def upsert_arsh_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("arsh_commercial_listings", rows)
+
+
+def upsert_superoffice_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("superoffice_residential_listings", rows)
+
+
+def upsert_superoffice_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("superoffice_commercial_listings", rows)
+
+
+def upsert_haraj_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("haraj_residential_listings", rows)
+
+
+def upsert_haraj_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("haraj_commercial_listings", rows)
+
+
+def upsert_shomou_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("shomou_residential_listings", rows)
+
+
+def upsert_shomou_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("shomou_commercial_listings", rows)
+
+
+def upsert_maktab_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("maktab_residential_listings", rows)
+
+
+def upsert_maktab_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("maktab_commercial_listings", rows)
+
+
+def upsert_sirdab_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sirdab_residential_listings", rows)
+
+
+def upsert_sirdab_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sirdab_commercial_listings", rows)
+
+
+def upsert_ashab_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ashab_residential_listings", rows)
+
+
+def upsert_ashab_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ashab_commercial_listings", rows)
+
+
+def upsert_manafe_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("manafe_residential_listings", rows)
+
+
+def upsert_manafe_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("manafe_commercial_listings", rows)
+
+
+def upsert_wajaf_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("wajaf_residential_listings", rows)
+
+
+def upsert_wajaf_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("wajaf_commercial_listings", rows)
+
+
+def upsert_albukaeri_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("albukaeri_residential_listings", rows)
+
+
+def upsert_albukaeri_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("albukaeri_commercial_listings", rows)
+
+
+def upsert_ryadah_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ryadah_residential_listings", rows)
+
+
+def upsert_ryadah_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("ryadah_commercial_listings", rows)
+
+
+def upsert_sqcc_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sqcc_residential_listings", rows)
+
+
+def upsert_sqcc_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("sqcc_commercial_listings", rows)
+
+
+def upsert_daraa_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("daraa_residential_listings", rows)
+
+
+def upsert_daraa_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("daraa_commercial_listings", rows)
+
+
+def upsert_tawia_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("tawia_residential_listings", rows)
+
+
+def upsert_tawia_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("tawia_commercial_listings", rows)
+
+
 def upsert_vmksa_residential_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("vmksa_residential_listings", rows)
 
@@ -1621,6 +2015,32 @@ def upsert_macsaib_residential_batch(rows: list[dict[str, Any]]) -> None:
 
 def upsert_macsaib_commercial_batch(rows: list[dict[str, Any]]) -> None:
     _wasalt_batch("macsaib_commercial_listings", rows)
+
+
+def upsert_maqam_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("maqam_residential_listings", rows)
+
+
+def upsert_maqam_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("maqam_commercial_listings", rows)
+
+
+
+
+def upsert_earthapp_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("earthapp_residential_listings", rows)
+
+
+def upsert_earthapp_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("earthapp_commercial_listings", rows)
+
+
+def upsert_nawafeth_residential_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nawafeth_residential_listings", rows)
+
+
+def upsert_nawafeth_commercial_batch(rows: list[dict[str, Any]]) -> None:
+    _wasalt_batch("nawafeth_commercial_listings", rows)
 
 
 def upsert_wahadat_residential_batch(rows: list[dict[str, Any]]) -> None:
@@ -1995,11 +2415,14 @@ def upsert_october_commercial_batch(rows: list[dict[str, Any]]) -> None:
 
 # additional_info keys OWNED by the Tier-2 `--backfill-details` pass (detail-page fields the LIST
 # crawl never produces). The crawl rebuilds additional_info from scratch, so a plain full-row upsert
-# would drop these on every sighting — the same wipe as the description column (PR #210). Crawl keys
-# and these are disjoint, so we carry them forward from the stored row before upserting.
+# would drop these on every sighting — the same wipe as the description column (PR #210). We carry
+# them forward from the stored row before upserting. rating / reviews_count are the one overlap: the
+# crawl writes them when the list API rates the unit (the crawl wins), and leaves them out when the
+# list sends 0/0 — then the unit page's own score, read by the backfill, carries forward.
 _GATHERN_DETAIL_AI_KEYS = (
     "suitability", "house_rules", "check_in", "check_out",
     "guest_capacity", "booking_count", "views_count", "rate_text", "extra_sections",
+    "rating", "reviews_count",
 )
 
 
@@ -2022,7 +2445,7 @@ def _preserve_gathern_detail_ai(table: str, rows: list[dict[str, Any]]) -> None:
     """Read-modify-write: fetch the stored additional_info for these ad_numbers and carry the
     backfill-owned detail keys forward, so the crawl's fresh blob doesn't wipe them.
     ponytail: small race vs a concurrent backfill write; fine — crawl and backfill are separate
-    scheduled jobs and backfill only touches desc-NULL rows. Upgrade to a Postgres `||` upsert RPC
+    scheduled jobs and backfill only touches rows missing a description or a review count. Upgrade to a Postgres `||` upsert RPC
     if they ever run together."""
     ads = [r["ad_number"] for r in rows if r.get("ad_number")]
     if not ads:
@@ -2038,13 +2461,14 @@ def _preserve_gathern_detail_ai(table: str, rows: list[dict[str, Any]]) -> None:
     _carry_forward_ai(rows, stored, _GATHERN_DETAIL_AI_KEYS)
 
 
-def upsert_gathern_residential_batch(rows: list[dict[str, Any]]) -> None:
+def upsert_gathern_residential_batch(rows: list[dict[str, Any]],
+                                      strikes: Optional[dict[str, tuple[int, bool]]] = None) -> None:
     """Gathern (gathern.co) MONTHLY furnished residential units only (source='Gathern').
 
     Carries the Tier-2 detail fields forward first (see _preserve_gathern_detail_ai) so the crawl's
     full-row upsert doesn't wipe additional_info — same class of bug as the description wipe (PR #210)."""
     _preserve_gathern_detail_ai("gathern_residential_listings", rows)
-    _wasalt_batch("gathern_residential_listings", rows)
+    _wasalt_batch("gathern_residential_listings", rows, strikes=strikes)
 
 
 def upsert_gathern_commercial_batch(rows: list[dict[str, Any]]) -> None:

@@ -308,6 +308,7 @@ import argparse
 import re
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
@@ -333,6 +334,10 @@ SLUG = "reinvest"
 RES_TABLE = "reinvest_residential_listings"
 COM_TABLE = "reinvest_commercial_listings"
 PAGE_SIZE = 1000
+# The one-page roster (~880 rows) answered HTTP 500 on every try of four crawls on 2026-10-08
+# (04:32–05:20 UTC), and on 10-01/10-07 too, while the same walk in small pages is ordinary API work.
+# When the big page fails, the walk is retried in pages of this size before the run gives up.
+FALLBACK_PAGE_SIZE = 100
 # The roster does not carry the resolved per-listing fields, so every slug needs its own record
 # (measured: 813 of them in 41 s at 10 workers, 813/813 answering 200).
 WORKERS = 8
@@ -719,14 +724,31 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
 
 
 # ── FETCH ────────────────────────────────────────────────────────────────────────────────────────
+# The roster API throws short bursts of HTTP 500 and stalls past the read timeout, each fine minutes
+# later: 2026-10-01 «Operation timed out after 60000 ms» and 2026-10-07 «page 1 returned 500» both
+# killed the whole night's crawl on its first request, and the 04:58 re-crawl read all 891 rows. The
+# old loop retried only gateway statuses (500 is not one), with no pause, and let a transport error
+# escape on the first try. Now: any 5xx / 429 / transport error is retried with a growing pause
+# (~75 s in all); a 4xx is believed at once; still failing → the run fails loudly, as before.
+_JSON_ATTEMPTS = 5
+_JSON_BACKOFF_S = 5.0
+
+
 def _json(s: cc.Session, url: str, *, what: str) -> dict:
-    r = None
-    for _ in range(3):
-        r = s.get(url, timeout=60)
-        if r.status_code not in TRANSIENT_STATUSES:
+    r, err = None, None
+    for attempt in range(_JSON_ATTEMPTS):
+        try:
+            r, err = s.get(url, timeout=60), None
+        except Exception as exc:  # noqa: BLE001 — a timeout / reset is retried, then reported
+            r, err = None, exc
+        if r is not None and not (r.status_code >= 500 or r.status_code == 429
+                                  or r.status_code in TRANSIENT_STATUSES):
             break
+        if attempt + 1 < _JSON_ATTEMPTS:
+            time.sleep(_JSON_BACKOFF_S * (attempt + 1))
     if r is None or r.status_code != 200:
-        raise RuntimeError(f"{what} returned {getattr(r, 'status_code', 'no response')}")
+        got = getattr(r, "status_code", None) or (f"no response ({err})" if err else "no response")
+        raise RuntimeError(f"{what} returned {got}")
     try:
         body = r.json()
     except ValueError as exc:
@@ -743,8 +765,17 @@ def fetch_roster(s: cc.Session, limit: int = 0) -> list[dict]:
     — that is what the website's counter is for (see declared_totals). A page that repeats itself
     stops the walk rather than looping forever.
     """
+    try:
+        return _walk_roster(s, PAGE_SIZE, limit)
+    except RuntimeError as exc:
+        print(f"{SOURCE}: roster in pages of {PAGE_SIZE} failed ({exc}) — walking it in pages of "
+              f"{FALLBACK_PAGE_SIZE}", flush=True)
+        return _walk_roster(s, FALLBACK_PAGE_SIZE, limit)
+
+
+def _walk_roster(s: cc.Session, page_size: int, limit: int = 0) -> list[dict]:
     rows: dict[str, dict] = {}
-    url: Optional[str] = f"{API}?per_page={PAGE_SIZE}&page=1"
+    url: Optional[str] = f"{API}?per_page={page_size}&page=1"
     pages = 0
     while url:
         body = _json(s, url, what=f"{API} page {pages + 1}")
@@ -760,7 +791,11 @@ def fetch_roster(s: cc.Session, limit: int = 0) -> list[dict]:
             break                       # page repeated itself
         if limit and len(rows) >= limit:
             return list(rows.values())[:limit]
-        url = _clean((body.get("links") or {}).get("next"))
+        # The endpoint's own `links.next` drops per_page (10-08: pages of 100 → page 2 came back at
+        # the default size, every row a repeat, and the walk stopped at 100 of ~900). The page size
+        # is ours, so is the next URL; `links.next` only says whether there is one.
+        nxt = _clean((body.get("links") or {}).get("next"))
+        url = f"{API}?per_page={page_size}&page={pages + 1}" if nxt and len(batch) >= page_size else None
     print(f"{SOURCE}: roster {len(rows)} listings over {pages} page(s)", flush=True)
     return list(rows.values())
 

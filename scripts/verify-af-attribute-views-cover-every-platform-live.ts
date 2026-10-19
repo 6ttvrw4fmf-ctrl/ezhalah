@@ -26,8 +26,8 @@
 // it scans far more than it needs to.
 import { resolvePublicSupabase } from './lib/public-supabase.ts';
 import { rpcProbeOutcome, outcomeIsUsable } from './lib/liveHalf.ts';
-import {
 import { postgrestFetch } from './lib/postgrestRetry.ts';
+import {
   attributeViewGaps,
   describeAttributeGaps,
   type AttrCoverageRow,

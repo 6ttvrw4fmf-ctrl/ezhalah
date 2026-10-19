@@ -1,3 +1,4 @@
+
 -- PERFORMANCE: district_options_ar()'s "live" CTE was calling norm_district_tok(district_ar) --
 -- an IMMUTABLE but expensive chain of ~8 regexp_replace/translate calls -- on every row of a
 -- city's cohort, on every single picker open. Measured: 577ms with the function call vs 72ms

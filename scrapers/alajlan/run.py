@@ -91,6 +91,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 BASE = "https://alajlan-re.com"
 DATA_URL = f"{BASE}/data/projects.json"
@@ -117,8 +118,10 @@ _PAYMENT_SPLIT_RE = re.compile(r"دفع")  # دفعة / دفعتين / دفعا�
 
 
 def session() -> cc.Session:
-    s = cc.Session(impersonate="chrome")
-    s.headers.update({"Accept": "application/json, text/plain, */*", "Referer": f"{BASE}/"})
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(BASE, headers={"Accept": "application/json, text/plain, */*", "Referer": f"{BASE}/"}, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     return s
 
 

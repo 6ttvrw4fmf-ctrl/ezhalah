@@ -568,6 +568,7 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
 
     title = _redact(_strip_tags(item.get("title")))
     description = _redact(_strip_tags(desc_html) or _strip_tags(item.get("excerpt")))
+    street_w, facade = normalize.street_from_prose(description)
 
     # Featured first (it is slide 1 on the live flexslider AND our card thumbnail), then the rest
     # of the post's own gallery in attachment-id order (see _gallery). `not in` dedupes the
@@ -619,11 +620,40 @@ def map_listing(item: dict, mp: dict, desc_html: Optional[str],
         "neighborhood": district,
         "title": title,
         "description": description,
+        # eaqartabuk publishes no facade or street field, so the ad text is the only place they are stated
+        # («غربيه شارع 25 متر»). 168 served lands, which answer ONLY street width and direction, had neither
+        # (🔬 2026-10-11). normalize.street_from_prose: one street or nothing; a corner plot stays NULL.
+        "street_width_m": street_w,
+        "direction": facade,
         "photo_urls": photos,
         "date_added": item.get("date") or None,
         "additional_info": info,
+        **feature_answers(features),
+        # eaqartabuk's feature checklist has no furnished item, so the ad's own words are the statement (law §2):
+        # «مفروشة» / «مؤثثة» yes, «غير مفروشة» / «الغير مفروش» no, partly furnished or silence unknown (🔬 2026-10-16,
+        # backlog 552). Omitted when unknown, so an unstated ad never writes a value.
+        **furnished_answer(description),
     }
     return row, category
+
+
+def furnished_answer(description: Optional[str]) -> dict[str, bool]:
+    f = normalize.amenities_from_lines(description).get("furnished")
+    return {} if f is None else {"furnished": f}
+
+
+# eaqartabuk publishes a STRUCTURED feature checklist (candles-map «features»: «مصعد», «مطبخ», «مداخل خاصة»,
+# «كراج», «غرفة غسيل» …). It was filed in additional_info only, so the 90 lifts, 36 kitchens, 176 private
+# entrances, 12 garages and 154 laundry rooms it listed on active ads were NULL to the Advanced Filter
+# (🔬 2026-10-12, backlog 461). A LISTED feature is a yes; an unlisted one stays UNKNOWN — an unticked box on
+# the advertiser's form is not a stated «no». Labels that are not the unit («بجانب الطريق المزدحم») map nothing.
+FEATURE_COLUMNS = {"مصعد": "elevator", "مطبخ": "kitchen", "مداخل خاصة": "private_entrance",
+                   "مدخل خاص": "private_entrance", "كراج": "parking", "غرفة غسيل": "laundry_room"}
+
+
+def feature_answers(features) -> dict[str, bool]:
+    return {FEATURE_COLUMNS[f.strip()]: True for f in (features or [])
+            if isinstance(f, str) and f.strip() in FEATURE_COLUMNS}
 
 
 def main() -> int:

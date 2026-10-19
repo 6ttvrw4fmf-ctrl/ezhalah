@@ -53,6 +53,7 @@ from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii  # noqa: E402
+from scrapers.common.http import retry_smarter_session  # noqa: E402
 
 BASE = "https://livingcompound.com"
 SOURCE = "LivingCompound"
@@ -61,8 +62,10 @@ PAUSE = 1.0
 
 
 def session() -> cc.Session:
-    s = cc.Session(impersonate="chrome")
-    s.headers.update({"Accept": "text/html,application/xhtml+xml", "Accept-Language": "ar,en;q=0.7"})
+    # 3 browser profiles DIRECT, then the residential proxy when the job has it (owner 10-05:
+    # every crawler on the shared resilient path; backlog 63). The session owns the profile.
+    s, tried = retry_smarter_session(BASE, headers={"Accept": "text/html,application/xhtml+xml", "Accept-Language": "ar,en;q=0.7"}, timeout=40)
+    print(f"  route: {' · '.join(tried)}", flush=True)
     return s
 
 
@@ -80,9 +83,9 @@ _DISTRICT_EN_AR = {
     ("جدة", "fyha"): "حي الفيحاء", ("جدة", "fayha"): "حي الفيحاء", ("جدة", "ruwais"): "حي الرويس",
     ("جدة", "rabwah"): "حي الربوة", ("جدة", "khalidiyyah"): "حي الخالدية",
 }
-# The site's own taxonomy words → Arabic canon (townhouse→Villa is the fleet override).
-_TYPE_EN_AR = {"villa": "فيلا", "apartment": "شقة", "town houses": "فيلا", "town house": "فيلا",
-               "townhouse": "فيلا", "compound villa": "فيلا", "office": "مكتب", "store": "محل",
+# The site's own taxonomy words → Arabic canon (a town house keeps its own name, owner 2026-10-12).
+_TYPE_EN_AR = {"villa": "فيلا", "apartment": "شقة", "town houses": "تاون هاوس", "town house": "تاون هاوس",
+               "townhouse": "تاون هاوس", "compound villa": "فيلا", "office": "مكتب", "store": "محل",
                "duplex": "دوبلكس", "studio": "استوديو", "penthouse": "شقة"}
 
 

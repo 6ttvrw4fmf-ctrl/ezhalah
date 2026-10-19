@@ -187,7 +187,7 @@ def test_land_filed_commercial_by_the_office_is_commercial_land_and_use_flags_do
     assert _row(_variant(LAND, is_for_residential=False, is_for_commercial=True))["property_type"] == "Residential Land"
     assert _row(_variant(NOPRICE, category="commercial"))["property_type"] == "Commercial Building"
     assert _row(_variant(LAND, type="building_apartment"))["property_type"] == "Apartment"
-    assert _row(_variant(LAND, type="townhouse"))["property_type"] == "Villa"
+    assert _row(_variant(LAND, type="townhouse"))["property_type"] == "تاون هاوس"
 
 
 # ── COUNTERS, AMENITIES, FACADE, STREETS ─────────────────────────────────────────────────────────

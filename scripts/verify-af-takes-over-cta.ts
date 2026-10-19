@@ -80,7 +80,7 @@ check('closing the flow restores the CTA by setting ageFlow back to null',
 // it is recorded on the step (walking Back restores it AS a skip) while still contributing no
 // predicate, because the query rebuild skips empty-keyed steps outright.
 check('Skip still advances without applying a restriction, and stays recorded as open',
-  /onAgeSkip = \(\) => \{ void commitGuidedStep\(\[\]\); \}/.test(code)
+  /onAgeSkip = \(\) => (?:\{ void commitGuidedStep\(\[\]\); \}|commitGuidedStep\(\[\]\);)/.test(code)
   && /if \(!st\.keys\.length\) continue;/.test(stepsSrc),
   'Skip must keep meaning "no preference", never a filter');
 check('the AF card still receives its live count callback',

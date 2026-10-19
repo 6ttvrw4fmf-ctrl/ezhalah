@@ -19,7 +19,10 @@ recurring in any form, on any field.
    `resolve_slug()` (pre-existing, unchanged) are the ONLY sanctioned way to turn a source's raw
    city/district text into a catalog id. Never-guess by construction: a twin city name (ambiguous
    across regions) only resolves via a `region_hint` or (new) a matching `district_ar` that narrows
-   the candidate set to exactly one city — never a coin-flip. `PLACEHOLDER_TOKENS`/`is_placeholder()`
+   the candidate set to exactly one city — never a coin-flip. Aqar Monthly (2026-10-18): when its
+   slug resolves no city, `_resolve_location()` retries once with the region of Aqar's own
+   `city_id` (`AQAR_CITY_REGION`, measured ≥ 96% one region per id) as the hint — it never overrides
+   a city the slug resolved. `PLACEHOLDER_TOKENS`/`is_placeholder()`
    (in the dependency-free `scrapers/common/placeholder_tokens.py`, imported by both this module and
    `db.py` with zero circular-import risk) mean a placeholder value showing up as raw input is
    treated as absent, never "resolved" to itself.
