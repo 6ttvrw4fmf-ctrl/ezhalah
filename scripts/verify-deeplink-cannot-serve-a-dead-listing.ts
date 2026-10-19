@@ -64,6 +64,9 @@ const stubClient = () => ({
 const PRELUDE = `
 type Listing = Record<string, any>;
 const LIST_SELECT = 'id';
+// remote.ts builds the select per table since 2026-10-19 (the aqar tables add the discount columns);
+// the stub keeps the lifted fetch selecting exactly what the test expects.
+const listSelectFor = () => LIST_SELECT;
 const DEEPLINK_TABLES = ['aqar_residential_listings'];
 const LISTING_CACHE = new Map<number, any>();
 const finalize = (rows: any[]) => rows;          // identity: this barrier is about WHICH rows arrive

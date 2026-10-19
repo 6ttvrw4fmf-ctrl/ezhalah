@@ -2,7 +2,7 @@
 // headline (type / location / price), extracted so a second consumer (Read Aloud, owner 2026-08-19)
 // can never say something that disagrees with what the card actually shows. Always resolves to
 // Arabic in the *Ar helpers; the English speech helpers share ResultCard's catalog/transliteration.
-import type { Listing } from '@/data/listings';
+import type { Listing, ListingDiscount } from '@/data/listings';
 import { englishCatalogText, translate, tPrice, LOCATION_UNRESOLVED_AR, TYPE_UNRESOLVED_AR, type Locale } from '@/i18n';
 import { arabicOrPlaceholder } from './arabicText';
 import { translitPlace } from './translitPlace';
@@ -39,6 +39,29 @@ export function listingPrice(listing: Listing, loc: Locale): string {
 }
 export function listingPriceAr(listing: Listing): string {
   return listingPrice(listing, 'ar');
+}
+
+// A DISCOUNT IS SHOWN ONLY WHEN THE SOURCE PUBLISHED ONE, AND ONLY NEXT TO THE FINAL PRICE
+// (owner 2026-10-19: «show the final price with the discount; no discount → the normal price»).
+// Buy only: aqar's discounted Buy page prints «~~60,000,000~~ 45,000,000 خصم 25%», and
+// price_original / discount_pct carry exactly those two facts (price_total is already the 45M).
+// Rent rows carry a discount_pct but no usable price_original, so they show nothing until a scraper
+// stores both. Stay-length platforms show no price at all (rule above), and a derived price has no
+// published figure to strike. Every guard returns null — a card without a discount line is the
+// card as it was, never a wrong line.
+export function listingDiscountFrom(
+  deal: unknown, source: unknown, priceTotal: unknown, priceOriginal: unknown, discountPct: unknown,
+): ListingDiscount | null {
+  if (deal !== 'Buy') return null;
+  if (isStayLengthPriced(typeof source === 'string' ? source : '')) return null;
+  if (typeof priceTotal !== 'number' || !(priceTotal > 0)) return null;
+  if (typeof priceOriginal !== 'number' || !Number.isFinite(priceOriginal) || !(priceOriginal > priceTotal)) return null;
+  if (typeof discountPct !== 'number' || !Number.isInteger(discountPct) || discountPct <= 0 || discountPct >= 100) return null;
+  return { original: priceOriginal, pct: discountPct };
+}
+// The struck-through line, formatted like every Buy price (listingPriceString → tPrice): «ر.س 1,250,000».
+export function listingDiscountOldPrice(discount: ListingDiscount, loc: Locale): string {
+  return tPrice(`SAR ${discount.original.toLocaleString('en-US')}`, loc);
 }
 
 // Platform display name from the raw scraped `source` slug — MOVED here from ResultCard.tsx

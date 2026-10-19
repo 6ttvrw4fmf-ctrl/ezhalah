@@ -1,5 +1,5 @@
 // The main link's WhatsApp/iMessage card carries LIVE, TRUE numbers — or none (owner 2026-10-18).
-//   «محرك بحث عقاري بالذكاء الاصطناعي: 149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.»
+//   «149 موقع · 385,330 إعلان · 346 مدينة» (2026-10-19; the sentence form was cut at the city count)
 //
 // EXECUTED, not grepped: the real builder (inlined in middleware.ts since 2026-10-19) runs against PostgREST-shaped bodies,
 // including the failure shapes supabase-js/PostgREST really produce (error objects, null, empty arrays,
@@ -7,11 +7,15 @@
 // The middleware is then executed with a stubbed fetch: people pass through untouched, bots get the card,
 // a failing database still gets a card (the fallback), never a thrown error.
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { liftSymbols } from './lib/liftSymbols.ts';
 import {
   homeCardDescription, homeCardFactsFrom, homeCardHtml, isPreviewBot,
   HOME_CARD_FALLBACK_AR, HOME_CARD_IMAGE_PATH, HOME_CARD_TITLE_AR, HOME_CARD_HEADLINE_AR,
 } from '../middleware.ts';
 
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !detail ? '' : `  — ${detail}`}`); };
 const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches ${label}`, caught);
@@ -19,7 +23,27 @@ const mustCatch = (label: string, caught: boolean) => check(`(mutation) catches 
 const SITES = Array.from({ length: 149 }, (_, i) => `site${i}`);
 const SCALE = [{ city_count: 346, listing_count: 385330, district_count: 5547 }];
 const good = homeCardDescription(homeCardFactsFrom(SITES, SCALE));
-check('the owner-approved numbers line, exact digits', good === '149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.', good);
+
+// SITES ARE COUNTED LIKE THE APP (owner 2026-10-19: the app says 148, the RPC lists 149 slugs because
+// `aqarmonthly` is a source but not a platform). EXECUTED: the app's real normalizeSource() is lifted
+// from loaderPlatforms.ts and run over a realistic slug list; the card's count must equal the number of
+// distinct platforms the app would show. If SOURCE_TOKENS ever folds another pair, this goes red.
+{
+  const lp = await liftSymbols(join(root, 'src/data/loaderPlatforms.ts'), [
+    { header: 'const SOURCE_TOKENS: Array<[string, string]> = [', endsWith: /^\];$/ },
+    { header: 'export function normalizeSource(' },
+  ], ['normalizeSource']);
+  const normalizeSource = lp.normalizeSource as (raw: string) => string | null;
+  const REAL_SLUGS = ['aqar', 'aqaralriyadh', 'aqaralsaudia', 'aqaratikom', 'aqarcity', 'aqargate', 'aqarmonthly', 'aqarnajran',
+    'dealapp', 'eaqartabuk', 'goldendeal', 'ksaaqar', 'wasalt', 'gathern', 'haraj', 'abeea', 'sakan', 'remal'];
+  const appCount = new Set(REAL_SLUGS.map((x) => normalizeSource(x) ?? x)).size;
+  const cardCount = homeCardFactsFrom(REAL_SLUGS, SCALE).sites;
+  check(`the card counts sites exactly as the app does over the real slugs (app ${appCount}, card ${cardCount})`, cardCount === appCount);
+  check('aqarmonthly folds into aqar: 150 raw slugs with both → 149 sites', homeCardFactsFrom([...SITES, 'aqar', 'aqarmonthly'].slice(1), SCALE).sites === 149);
+  mustCatch('a card that counts raw slugs (149 where the app shows 148)', REAL_SLUGS.length !== cardCount);
+}
+check('the owner-approved numbers line, exact digits (2026-10-19: counts only, middle dots, no tail)', good === '149 موقع · 385,330 إعلان · 346 مدينة', good);
+mustCatch('the «و…في…، كلها في مكان واحد.» line WhatsApp cut at the city count', good !== '149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.');
 check('the owner-approved title', HOME_CARD_HEADLINE_AR === 'إزهله، محرك بحث عقاري بالذكاء الاصطناعي');
 // IT ALL SHOWS (owner 2026-10-18: «the message doesn't show fully»). WhatsApp's small card shows ~2 lines
 // of title and ~2 lines of description before cutting. Measured against the BIGGEST numbers we could reach.

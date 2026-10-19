@@ -13,7 +13,7 @@ import { CARD_WIDE_BREAKPOINT } from '@/lib/responsive';
 import { whenNear } from '@/lib/nearViewport';
 import { useAtLeast } from '@/lib/useAtLeast';
 import { sourceName } from '@/lib/listingDisplay';
-import { isStayLengthPriced, listingPrice } from '@/lib/listingDisplay';
+import { isStayLengthPriced, listingPrice, listingDiscountOldPrice } from '@/lib/listingDisplay';
 import { afEvidence, AMENITY_COL, type ActiveAf } from '@/lib/afEvidence';
 import { typeImg } from '@/theme/propertyIcons';
 import { GoldShineButton, GoldSurface } from './CardReveal';
@@ -272,6 +272,12 @@ export function ResultCard({
           <View style={card.lpPriceRow}>
             <View style={card.lpPriceCol}>
               <Text style={stay ? card.stayNote : [card.price, card.lpPrice]} numberOfLines={stay ? 2 : 1}>{listingPrice(listing, locale)}</Text>
+              {listing.discount ? (
+                <View style={card.discountRow} testID="card-discount">
+                  <Text style={card.discountOld} numberOfLines={1}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
+                  <View style={card.discountBadge}><Text style={card.discountBadgeTx}>{t('Discount {pct}%', { pct: listing.discount.pct })}</Text></View>
+                </View>
+              ) : null}
             </View>
             {listing.source_url ? (
               <View style={card.lpCta}>
@@ -430,6 +436,14 @@ export function ResultCard({
         </Text>
         <Text style={isStayLengthPriced(listing.source) ? [card.stayNote, row && card.stayNoteRow] : [card.price, row && card.priceRow, tight && card.priceTight]} numberOfLines={isStayLengthPriced(listing.source) ? 2 : 1}>{listingPrice(listing, locale)}</Text>
         </View>
+        {/* Source-published discount (owner 2026-10-19): the old price struck through + «خصم X٪»,
+            under the final price. Rendered only when the source showed one — see listingDiscountFrom(). */}
+        {listing.discount ? (
+          <View style={card.discountRow} testID="card-discount">
+            <Text style={card.discountOld} numberOfLines={1}>{listingDiscountOldPrice(listing.discount, locale)}</Text>
+            <View style={card.discountBadge}><Text style={card.discountBadgeTx}>{t('Discount {pct}%', { pct: listing.discount.pct })}</Text></View>
+          </View>
+        ) : null}
         <View style={card.locRow}>
           <Ionicons name="location-outline" size={12} color={colors.primary} />
           <Text style={card.locText}>{place(cityAr) || LOCATION_UNRESOLVED_AR}, {t('Saudi Arabia')}</Text>
@@ -1567,6 +1581,11 @@ const card = StyleSheet.create({
   price: { fontSize: 20, fontWeight: '800', color: colors.primary, maxWidth: '100%', flexShrink: 0 },
   // Gathern / Aqar Monthly price line is a sentence, not a figure: same colour, sized as a prompt to tap.
   stayNote: { fontSize: 13, fontWeight: '700', color: colors.primary, maxWidth: '100%', flexShrink: 1 },
+  // Discount line under the price: struck-through original + amber «خصم X٪» pill, on the price's edge.
+  discountRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 2 },
+  discountOld: { fontSize: 12.5, color: colors.muted, fontWeight: '500', textDecorationLine: 'line-through' },
+  discountBadge: { backgroundColor: colors.amberBg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  discountBadgeTx: { fontSize: 11.5, fontWeight: '700', color: colors.amberInk },
   // Guest-rating chip (Gathern) — star + score, with a muted review-count suffix. Sits just under
   // the price; only rendered when the listing actually carries a rating. (Gathern Tier-1.)
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },

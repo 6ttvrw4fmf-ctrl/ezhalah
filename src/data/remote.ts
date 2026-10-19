@@ -15,6 +15,7 @@ import { arabicOrPlaceholder } from '@/lib/arabicText';
 import { decodeEntities } from '@/lib/htmlEntities';
 import { dedupePhotoUrls, photoDisplayUrl } from '@/lib/photoUrl';
 import { TYPE_UNRESOLVED_AR } from '@/i18n';
+import { listingDiscountFrom } from '@/lib/listingDisplay';
 import { orderByScope, type Scope, type RankedRow } from '@/lib/platformDiversity';
 import { rotationSeed } from '@/lib/rotationSeed';
 import { truncateGlyphs } from '@/lib/typedReveal';
@@ -1491,7 +1492,7 @@ export type FetchListingsResult = { listings: Listing[] | null; pageCandidates: 
 // on the strict-contract fields. (filter contract.)
 function keptFiltersReq(q: SearchQuery, table?: string) {
   const tbl = table ?? tableFor(q);
-  let req = supabase!.from(tbl).select(LIST_SELECT).eq('active', true);
+  let req = supabase!.from(tbl).select(listSelectFor(tbl)).eq('active', true);
   if (!q.bothDeals && !q.dealCombined) req = req.eq('transaction_type', q.deal === 'Buy' ? 'Buy' : 'Rent');
   const types = dbTypesFor(q);
   if (types && types.length) req = req.in('property_type', types);
@@ -1945,7 +1946,7 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
     // did, and on the 60 tables with no retention policy there is no hard delete to eventually end it.
     // Proven with the production ANON key, not privileged SQL: ids 585260 / 629782 / 4744698 each
     // returned a full card payload carrying "active": false.
-    const { data, error } = await supabase.from(table).select(LIST_SELECT).eq('id', id).eq('active', true).limit(1);
+    const { data, error } = await supabase.from(table).select(listSelectFor(table)).eq('id', id).eq('active', true).limit(1);
     if (error || !data || !data.length) continue;
     const [row] = finalize(data, table.includes('_commercial') ? 'com' : 'res');
     if (row) { row.sourceTable = table; LISTING_CACHE.set(row.id, row); return row; }
@@ -1958,7 +1959,7 @@ export async function fetchListingById(id: number): Promise<Listing | null> {
 // across DEEPLINK_TABLES could hand back another table's row that merely shares the id.
 export async function fetchListingCards(table: string, ids: number[]): Promise<Listing[]> {
   if (!supabase || !ids.length || !SEARCHABLE_TABLES.includes(table)) return [];
-  const { data, error } = await bounded(supabase.from(table).select(LIST_SELECT).in('id', ids).eq('active', true).limit(ids.length));
+  const { data, error } = await bounded(supabase.from(table).select(listSelectFor(table)).in('id', ids).eq('active', true).limit(ids.length));
   if (error || !data) return [];
   const rows = finalize(data, table.includes('_commercial') ? 'com' : 'res');
   for (const r of rows) r.sourceTable = table;
@@ -1994,6 +1995,18 @@ const LIST_SELECT = [
   // Free-text fields for the street / "near X" search (Q3) — present on all 63 platform tables.
   'title', 'description',
 ].join(', ');
+
+// Source-published discount columns (owner 2026-10-19): the struck-through original and the badge %.
+// ONLY the aqar tables carry them. 65 platform tables (wasalt, dealapp, gathern, aqarmonthly, …) have no
+// such column, and PostgREST fails the WHOLE select over an unknown column — the CI smoke measured that
+// as count=null on every search when these two names sat in LIST_SELECT (PR #7689, run 2795). So the
+// select is built per table: the discount columns are asked for only where they exist. A table without
+// them yields no `price_original` on the row, and finalize() builds no discount — the card as before.
+const DISCOUNT_COLUMN_TABLES = new Set(['aqar_residential_listings', 'aqar_commercial_listings']);
+const DISCOUNT_COLUMNS = 'price_original, discount_pct';
+function listSelectFor(table: string): string {
+  return DISCOUNT_COLUMN_TABLES.has(table) ? `${LIST_SELECT}, ${DISCOUNT_COLUMNS}` : LIST_SELECT;
+}
 
 // Map raw DB rows → in-app `Listing` shape. `kind` = which table-kind the rows came from (res/com),
 // needed to normalize the ambiguous "Building" type (residential vs commercial) into the clean type.
@@ -2059,6 +2072,8 @@ function finalize(rows: any[], kind: SourceKind = 'res'): Listing[] {
       // whether to SHOW it (and the «سعر المتر 1» placeholder rule) lives in ResultCard, so this
       // field always means "what the source published", nothing else.
       pricePerMeter: typeof r.price_per_meter === 'number' ? r.price_per_meter : null,
+      // Shown as «~~old~~ خصم X٪» under the (already discounted) price. Null = no line at all.
+      discount: priceIsDerived ? null : listingDiscountFrom(deal, r.source ?? 'Aqar', r.price_total, r.price_original, r.discount_pct),
       priceIsDerived,
       area: r.area_m2 ?? 0,
       beds: r.bedrooms ?? 0,
