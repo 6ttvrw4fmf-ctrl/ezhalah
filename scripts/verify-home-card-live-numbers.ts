@@ -1,7 +1,7 @@
 // The main link's WhatsApp/iMessage card carries LIVE, TRUE numbers — or none (owner 2026-10-18).
 //   «محرك بحث عقاري بالذكاء الاصطناعي: 149 موقع و385,330 إعلان في 346 مدينة، كلها في مكان واحد.»
 //
-// EXECUTED, not grepped: the real builder (src/lib/homeCard.ts) runs against PostgREST-shaped bodies,
+// EXECUTED, not grepped: the real builder (inlined in middleware.ts since 2026-10-19) runs against PostgREST-shaped bodies,
 // including the failure shapes supabase-js/PostgREST really produce (error objects, null, empty arrays,
 // zero counts). A failed read must print the number-free fallback, never «0 موقع» or a partial line.
 // The middleware is then executed with a stubbed fetch: people pass through untouched, bots get the card,
@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import {
   homeCardDescription, homeCardFactsFrom, homeCardHtml, isPreviewBot,
   HOME_CARD_FALLBACK_AR, HOME_CARD_IMAGE_PATH, HOME_CARD_TITLE_AR,
-} from '../src/lib/homeCard.ts';
+} from '../middleware.ts';
 
 let failed = 0;
 const check = (label: string, ok: boolean, detail = '') => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${ok || !detail ? '' : `  — ${detail}`}`); };
