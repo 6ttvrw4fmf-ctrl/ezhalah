@@ -15,7 +15,7 @@ import { usePromptInsets } from '@/lib/bottomPromptInset';
 import { useVisualViewportRoot } from '@/lib/visualViewportFrame';
 import { installTapDebug } from '@/lib/tapDebug';
 import Head from 'expo-router/head';
-import { OG_IMAGE, SHARE_BLURB_AR, SHARE_LINK, SHARE_TITLE_AR } from '@/lib/share';
+import { OG_IMAGE, SHARE_BLURB_AR, SHARE_CARD_DESC_AR, SHARE_LINK, SHARE_TITLE_AR } from '@/lib/share';
 import Sidebar, { useDocked } from '@/components/Sidebar';
 import InfoModal from '@/components/InfoModal';
 import AuthModal from '@/components/AuthModal';
@@ -189,7 +189,7 @@ function ShareMeta() {
       <meta property="og:site_name" content={SHARE_TITLE_AR} />
       <meta property="og:locale" content="ar_SA" />
       <meta property="og:title" content={SHARE_TITLE_AR} />
-      <meta property="og:description" content={SHARE_BLURB_AR} />
+      <meta property="og:description" content={SHARE_CARD_DESC_AR} />
       <meta property="og:url" content={SHARE_LINK} />
       <meta property="og:image" content={OG_IMAGE} />
       <meta property="og:image:width" content="192" />
@@ -198,7 +198,7 @@ function ShareMeta() {
       {/* The owner selected the square eagle icon; preserve it without a landscape crop. */}
       <meta name="twitter:card" content="summary" />
       <meta name="twitter:title" content={SHARE_TITLE_AR} />
-      <meta name="twitter:description" content={SHARE_BLURB_AR} />
+      <meta name="twitter:description" content={SHARE_CARD_DESC_AR} />
       <meta name="twitter:image" content={OG_IMAGE} />
     </Head>
   );

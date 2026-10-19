@@ -44,3 +44,33 @@ def test_no_city_tagged_two_cities_or_another_region_places_nothing(monkeypatch)
     assert R.resolve_location([2994], TREE, "شقق لوفر الخور تاور – الخور الشرقية")[1] is None   # district + region only
     assert R.resolve_location([734, 1049, 1050], TREE, "x")[1] is None                         # الخبر AND الدمام
     assert R.resolve_location([734, 16], TREE, "x")[1] is None                                 # جدة is not in الشرقية
+
+
+# 2026-10-18 (owner, the المبرز pattern): «المدينة: الخور , الشرقية» (/ar/project/56418/, 28 units) names a district and
+# its REGION, no city. Placed only when the catalogue has that district in exactly ONE city of the region.
+TREE2 = {**TREE, 2634: {"name": "الشبيلي الشرقية", "parent": 2720}}
+
+
+def _seed_khor(monkeypatch, *, dammam_has_khor=False):
+    _seed(monkeypatch)
+    monkeypatch.setitem(_al._CITY, "الخبر", [(_KHOBAR, 5)])
+    monkeypatch.setitem(_al._CITY, "الدمام", [(_DAMMAM, 5)])
+    monkeypatch.setitem(_al._CID_AR, _KHOBAR, "الخبر")
+    k = _al.norm_district_tok("حي الخور")
+    monkeypatch.setitem(_al._DISTRICT_BY_CITY, _KHOBAR, {_al.norm_district_tok("حي الحمراء"), k})
+    monkeypatch.setitem(_al._DISTRICT_AR_BY_CITY, (_KHOBAR, k), "حي الخور")
+    if dammam_has_khor:
+        monkeypatch.setitem(_al._DISTRICT_BY_CITY, _DAMMAM, {k})
+
+
+def test_a_district_one_city_of_its_region_owns_places_the_project(monkeypatch):
+    _seed_khor(monkeypatch)
+    city_ar, city_id, rid, district = R.resolve_location([2994], TREE2, "شقق لوفر الخور تاور – الخور الشرقية")
+    assert (city_ar, city_id, rid, district) == ("الخبر", _KHOBAR, 5, "حي الخور")
+
+
+def test_a_district_two_cities_share_or_none_has_places_nothing(monkeypatch):
+    _seed_khor(monkeypatch, dammam_has_khor=True)
+    assert R.resolve_location([2994], TREE2, "x")[1] is None                       # الخبر AND الدمام
+    _seed_khor(monkeypatch)
+    assert R.resolve_location([2634], TREE2, "شقق برج ويف – الشبيلي الشرقية")[1] is None   # no city has it
