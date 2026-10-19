@@ -54,7 +54,14 @@ export function homeCardDescription(f: HomeCardFacts | null | undefined): string
 
 /** Read the counts out of the two RPC bodies as PostgREST returns them; null when a body is unusable. */
 export function homeCardFactsFrom(platformsBody: unknown, scaleBody: unknown): HomeCardFacts {
-  const sites = Array.isArray(platformsBody) && platformsBody.every((x) => typeof x === 'string') ? platformsBody.length : null;
+  // COUNT SITES THE WAY THE APP DOES (owner 2026-10-19: «148»). loader_active_platforms_ar lists 149
+  // source slugs, but the app shows one tile per PLATFORM and folds `aqarmonthly` (Aqar's DailyRenting
+  // vertical) into Aqar — src/data/loaderPlatforms.ts SOURCE_TOKENS ['aqarmonthly', 'Aqar']. This file
+  // imports nothing local (Vercel's edge bundler), so the one fold is restated here; the barrier
+  // (scripts/verify-home-card-live-numbers.ts) executes the app's real normalizeSource() against the
+  // same slugs and fails if the two counts ever disagree.
+  const sites = Array.isArray(platformsBody) && platformsBody.every((x) => typeof x === 'string')
+    ? new Set(platformsBody.map((x) => (x === 'aqarmonthly' ? 'aqar' : x))).size : null;
   const row = Array.isArray(scaleBody) ? scaleBody[0] : scaleBody;
   const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : null);
   const r = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
