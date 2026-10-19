@@ -73,12 +73,32 @@ class _Resp:
 
 
 class _Sess:
-    def __init__(self, hops):
-        self.hops, self.calls = hops, []
+    def __init__(self, hops, final=None):
+        self.hops, self.calls, self.final = hops, [], final
 
     def get(self, url, allow_redirects=False, timeout=20):
         self.calls.append(url)
+        if allow_redirects:
+            r = _Resp(200)
+            r.url = self.final or url
+            return r
         return self.hops.get(url, _Resp(200))
+
+
+def test_resolve_redirect_falls_back_to_the_clients_own_follow():
+    # the manual hop reads nothing (a 200 shell), so the client follows and reports the final URL
+    s = _Sess({}, final="https://www.google.com/maps/place/25%C2%B018'N/@25.3152163,49.6193885,17z/data=x")
+    assert resolve_redirect(s, "https://maps.app.goo.gl/y") == s.final
+    assert pin_from_short_link("https://maps.app.goo.gl/y", lambda u: resolve_redirect(s, u)) == {
+        "latitude": 25.3152163, "longitude": 49.6193885}
+    # a manual hop that raises also falls back rather than failing the ad
+    class _Boom(_Sess):
+        def get(self, url, allow_redirects=False, timeout=20):
+            if not allow_redirects:
+                raise RuntimeError("no manual hops here")
+            return super().get(url, allow_redirects, timeout)
+    b = _Boom({}, final="https://maps.google.com?q=25.3152163,49.6193885&entry=gps")
+    assert resolve_redirect(b, "https://maps.app.goo.gl/z") == b.final
 
 
 def test_resolve_redirect_stops_at_the_maps_url_without_loading_it():

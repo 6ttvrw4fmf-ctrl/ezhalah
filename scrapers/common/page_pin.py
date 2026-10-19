@@ -28,7 +28,7 @@ from scrapers.common.source_pin import pin_dict
 _NUM = r"(-?\d{1,2}\.\d{3,})"
 _JSONLD_GEO = re.compile(r'"geo"\s*:\s*\{[^{}]*?"latitude"\s*:\s*"?' + _NUM + r'"?[^{}]*?"longitude"\s*:\s*"?' + _NUM + r'"?', re.S)
 _MAPS_LINK = re.compile(
-    r"(?:maps/place/|maps/search/|maps\?q=|[?&]q=|[?&]query=|[?&]ll=|maps/@)" + _NUM + r"\s*(?:,|%2C)\s*" + _NUM)
+    r"(?:maps/place/|maps/search/|maps\?q=|[?&]q=|[?&]query=|[?&]ll=|maps/@|/@)" + _NUM + r"\s*(?:,|%2C)\s*" + _NUM)
 _LATLNG_CTOR = re.compile(r"google\.maps\.LatLng\(\s*" + _NUM + r"\s*,\s*" + _NUM + r"\s*\)")
 _EXACT_ON = re.compile(r"show_exact_location\s*=\s*true")
 _SHORT_LINK = re.compile(r"https://(?:maps\.app\.goo\.gl|goo\.gl/maps)/[A-Za-z0-9_-]+")
@@ -72,15 +72,25 @@ def pin_from_short_link(url: Optional[str], resolve: Callable[[str], Optional[st
 
 
 def resolve_redirect(session, url: str, hops: int = 4) -> Optional[str]:
-    """The URL a short link lands on, following up to `hops` redirects WITHOUT loading Maps itself."""
+    """The URL a short link lands on. First by hand, hop by hop, so Maps itself is never loaded
+    (measured 2026-10-19: goo.gl → maps.google.com?q=LAT,LNG on the first hop). If that reads
+    nothing — a client that cannot do a manual hop, or a shape we do not know — let the client
+    follow the redirects itself and read the final URL it reports."""
     cur = url
-    for _ in range(hops):
-        r = session.get(cur, allow_redirects=False, timeout=20)
-        loc = r.headers.get("location") or r.headers.get("Location")
-        if r.status_code in (301, 302, 303, 307, 308) and loc:
-            cur = loc
-            if _MAPS_LINK.search(cur):
-                return cur
-            continue
-        return cur if _MAPS_LINK.search(cur) else None
-    return cur if _MAPS_LINK.search(cur) else None
+    try:
+        for _ in range(hops):
+            r = session.get(cur, allow_redirects=False, timeout=20)
+            loc = r.headers.get("location") or r.headers.get("Location")
+            if r.status_code in (301, 302, 303, 307, 308) and loc:
+                cur = loc
+                if _MAPS_LINK.search(cur):
+                    return cur
+                continue
+            break
+    except Exception:  # noqa: BLE001 — fall through to the client's own follow
+        pass
+    if _MAPS_LINK.search(cur):
+        return cur
+    r = session.get(url, allow_redirects=True, timeout=30)
+    final = str(getattr(r, "url", "") or "")
+    return final if _MAPS_LINK.search(final) else None
