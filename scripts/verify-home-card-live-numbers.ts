@@ -6,7 +6,9 @@
 // zero counts). A failed read must print the number-free fallback, never «0 موقع» or a partial line.
 // The middleware is then executed with a stubbed fetch: people pass through untouched, bots get the card,
 // a failing database still gets a card (the fallback), never a thrown error.
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   homeCardDescription, homeCardFactsFrom, homeCardHtml, isPreviewBot,
   HOME_CARD_FALLBACK_AR, HOME_CARD_IMAGE_PATH, HOME_CARD_TITLE_AR,
@@ -56,7 +58,15 @@ for (const ua of ['Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleW
 process.env.EXPO_PUBLIC_SUPABASE_KEY = 'test-key';
 const realFetch = globalThis.fetch;
 let dbCalls = 0;
-const mw = (await import('../middleware.ts')).default as (r: Request) => Promise<Response | undefined>;
+// middleware.ts imports './src/lib/homeCard' WITHOUT '.ts' — Vercel's edge bundler refuses the extension
+// (every production deploy failed on it, 2026-10-19). Node needs it, so run a copy with the path made absolute.
+const MW_IMPORT = "from './src/lib/homeCard';";
+const mwSrc = readFileSync(new URL('../middleware.ts', import.meta.url), 'utf8');
+check("middleware imports homeCard with no '.ts' extension (the edge bundler rejects it)", mwSrc.includes(MW_IMPORT) && !/from '[^']+\.ts'/.test(mwSrc));
+const mwFile = join(mkdtempSync(join(tmpdir(), 'mw-')), 'middleware.ts');
+writeFileSync(mwFile, mwSrc.replace(MW_IMPORT, `from '${new URL('../src/lib/homeCard.ts', import.meta.url).href}';`));
+const mwUrl = new URL(`file://${mwFile}`).href;
+const mw = (await import(mwUrl)).default as (r: Request) => Promise<Response | undefined>;
 const req = (ua: string) => new Request('https://ezhalah-app.vercel.app/', { headers: { 'user-agent': ua } });
 
 globalThis.fetch = (async (url: string) => { dbCalls++; return new Response(JSON.stringify(String(url).includes('platforms') ? SITES : SCALE), { status: 200 }); }) as typeof fetch;
@@ -66,7 +76,7 @@ const botHtml = botRes ? await botRes.text() : '';
 check('WhatsApp gets the card with live numbers', !!botRes && botHtml.includes(good), botHtml.slice(0, 200));
 
 // A failing database: the card still answers, with the fallback (fresh module so nothing is kept).
-const mw2 = (await import('../middleware.ts?fail')).default as (r: Request) => Promise<Response | undefined>;
+const mw2 = (await import(`${mwUrl}?fail`)).default as (r: Request) => Promise<Response | undefined>;
 globalThis.fetch = (async () => new Response('{"message":"boom"}', { status: 503 })) as typeof fetch;
 const failRes = await mw2(req('WhatsApp/2.24'));
 const failHtml = failRes ? await failRes.text() : '';

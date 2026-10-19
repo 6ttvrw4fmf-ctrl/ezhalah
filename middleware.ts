@@ -9,7 +9,9 @@
 // The numbers are read with a hard timeout and kept for 10 minutes in this edge instance, so a burst of
 // shares costs the database at most two small reads per instance per 10 minutes. Any failure prints the
 // line WITHOUT numbers (src/lib/homeCard.ts) — never a zero, never a guess.
-import { homeCardDescription, homeCardFactsFrom, homeCardHtml, isPreviewBot, type HomeCardFacts } from './src/lib/homeCard.ts';
+// No '.ts' on this import: Vercel's edge bundler rejects it ("referencing unsupported modules"), which
+// failed every production deploy from #7593 on. The verify script rewrites the path to load it under Node.
+import { homeCardDescription, homeCardFactsFrom, homeCardHtml, isPreviewBot, type HomeCardFacts } from './src/lib/homeCard';
 
 export const config = { matcher: '/' };
 
