@@ -62,7 +62,9 @@ from curl_cffi import requests as cc
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
-from scrapers.common.arabic_location import find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.arabic_location import find_district_in_text, norm_district_tok, to_catalog  # noqa: E402
+
+_DISTRICT_SPELLING = {(11, norm_district_tok("المريدسية")): "حي المريديسية"}
 from scrapers.common.http import retry_smarter_session  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
 
@@ -257,6 +259,11 @@ def map_page(d: dict[str, Any], ad_id: str, url: str, unit_of: Optional[str] = N
     plot = (d["features"].get("المرافق") or {}).get("رقم القطعة")
     city_id, region_id = to_catalog(city_ar) if city_ar else (None, None)
     district_ar = find_district_in_text("حي " + district_raw, city_id) if (city_id and district_raw) else None
+    if district_ar is None and city_id and district_raw:
+        # A spelling of a catalogued district (ops_district_name_decision 'variant'): mapped here, never
+        # added to the catalog. 2026-10-19 (#657): «المريدسية» is بريدة's «حي المريديسية» (9 ads).
+        alt = _DISTRICT_SPELLING.get((city_id, norm_district_tok(district_raw)))
+        district_ar = find_district_in_text(alt, city_id) if alt else None
     facades = d["features"].get("الواجهات") or {}
     licence = re.sub(r"\D", "", d["spec"].get("ترخيص الاعلان") or building_licence or "")
     age_raw = d["spec"].get("عمر العقار")

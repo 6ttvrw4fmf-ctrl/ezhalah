@@ -223,7 +223,9 @@ def resolve_district_words(text: str, city_id: Optional[int]) -> tuple[Optional[
     return hit, words[0]   # the one-word read, exactly as before
 
 
-_DISTRICT_SPELLING = {(11, norm_district_tok("الوسيطي")): "حي الوسيطا"}
+_DISTRICT_SPELLING = {(11, norm_district_tok("الوسيطي")): "حي الوسيطا",
+                      # 2026-10-19 (#657): «المريدسية» is بريدة's «حي المريديسية» (sadiqeltajer 3 + ashab 9).
+                      (11, norm_district_tok("المريدسية")): "حي المريديسية"}
 
 
 def resolve_district(text: str, city_id: Optional[int]) -> Optional[str]:
