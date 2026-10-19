@@ -65,6 +65,8 @@ import Sidebar, { useDocked } from '@/components/Sidebar';
 import { ResultCard } from '@/components/ResultCard';
 import type { Listing } from '@/data/listings';
 import { ResultCardGrid } from '@/components/ResultCardGrid';
+import { DeadCardShade } from '@/components/DeadCardShade';
+import { cardKey, fetchGoneKeys } from '@/lib/deadCards';
 import { parseQuery, respond } from '@/data/agent';
 import { fetchListingsForQuery } from '@/data/remote';
 import { buildLocationProbeQuery, replyAfterLocationProbe } from '@/lib/agentLocationProbe';
@@ -761,6 +763,23 @@ export default function Agent() {
   // Per-message "Load More" in flight, so a double-tap can't double-fetch the same page.
   const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
+  // History chats (owner 2026-10-18): a reopened saved chat (`hid`) shows its cards frozen at search time.
+  // Ask once per opened chat (and again only when more cards appear) which were removed at their source
+  // since; those cards stay in place and are shaded «انتهى الإعلان» (DeadCardShade), never removed.
+  const [goneKeys, setGoneKeys] = useState<Set<string>>(() => new Set());
+  const goneCheckedRef = useRef<string>('');
+  useEffect(() => {
+    if (!hid) return;
+    const cards = msgs.flatMap((x) => (x.role === 'results' && !x.typing ? x.result.listings : []));
+    const stamp = `${hid}:${cards.length}`;
+    if (cards.length === 0 || goneCheckedRef.current === stamp) return;
+    goneCheckedRef.current = stamp;
+    // No cancel on re-render: «removed at the source» is a fact about the listing, true in any chat, so a
+    // late answer can only add correct marks (a cancelled first answer would leave this chat unchecked).
+    void fetchGoneKeys(cards).then((gone) => {
+      if (gone.size) setGoneKeys((prev) => new Set([...prev, ...gone]));
+    });
+  }, [hid, msgs]);
   const [typed, setTyped] = useState('');
   // The source picker owns the exact websites selected for this conversation.
   const [platformPickerOpen, setPlatformPickerOpen] = useState(false);
@@ -4698,6 +4717,7 @@ export default function Agent() {
                           // only unique per source table — matches the de-dup identity), so cards
                           // already on screen NEVER re-animate — only newly-revealed ones enter softly.
                           <CardIn key={`${l.source}:${l.id}`} {...cardInMotion(m.id, i)}>
+                            <DeadCardShade dead={goneKeys.has(cardKey(l) ?? '')}>
                             <MemoResultCard
                               listing={l}
                               variant="compact"
@@ -4706,6 +4726,7 @@ export default function Agent() {
                               activeAf={activeAf}
                               onOpen={() => { trackOpen(l); openAd(l); }}
                             />
+                            </DeadCardShade>
                           </CardIn>
                         ))}
                       </ResultCardGrid>
