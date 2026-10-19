@@ -568,7 +568,7 @@ type DistrictFns = {
   districtEmbedUrl: (d: { query: string; district: string; city: string }, hl?: string) => string;
 };
 const liftDistrict = async (file: string): Promise<DistrictFns> => (await liftSymbols(file, [
-  { header: 'export const DISTRICT_MAP_PLATFORMS: ', endsWith: /\];$/ },  // a one-line const: end on its own line
+  { header: 'export const DISTRICT_MAP_PLATFORMS: ', endsWith: /^\];$/ },  // the list closes with `];` on its own line
   { header: 'export function aqarTownFromUrl(' },
   { header: 'export function districtPlace(' },
   { header: 'export const districtEmbedUrl = (' },
@@ -594,6 +594,9 @@ const districtProblems = (f: DistrictFns): string[] => {
   // Aqar + Aqar Monthly (owner 2026-10-17) + Wasalt (owner 2026-10-19: «map Wasalt like Aqar»); nobody else yet.
   if (f.districtPlace({ platform: 'dealapp', district_ar: 'حي الساحل', city_ar: 'جدة' }) !== null) out.push('only Aqar, Aqar Monthly and Wasalt get the district map for now (dealapp must not)');
   if (f.districtPlace({ platform: 'wasalt', district_ar: 'حي الساحل', city_ar: 'جدة' })?.query !== 'حي الساحل، جدة') out.push('Wasalt gets the district map (owner 2026-10-19)');
+  for (const p of ['sakan', 'abralosol', 'nofodh', 'arkaan', 'bossbih', 'ksaaqar', 'mustqr', 'aqalemhajer', 'alshawaf', 'reinvest']) {
+    if (f.districtPlace({ platform: p, district_ar: 'حي الساحل', city_ar: 'جدة' })?.query !== 'حي الساحل، جدة') out.push(`${p} gets the district map (owner 2026-10-19, the ten largest native-preview sites)`);
+  }
   if (f.districtPlace({ platform: 'aqarmonthly', district_ar: 'حي الملز', city_ar: 'الرياض' })?.query !== 'حي الملز، الرياض') out.push('Aqar Monthly gets the district map too (owner 2026-10-17)');
   const prev = process.env.EXPO_PUBLIC_GOOGLE_MAPS_EMBED_KEY;
   try {
@@ -609,7 +612,7 @@ const districtProblems = (f: DistrictFns): string[] => {
   return out;
 };
 const districtReal = districtProblems(await liftDistrict(DATA));
-check('district border: Aqar + Aqar Monthly + Wasalt only, «حي X، City» by name, the city when no district, the town the ad link names when no city, the free embed (keyless or place mode)', districtReal.length === 0, districtReal.join('\n      '));
+check('district border: Aqar + Aqar Monthly + Wasalt + the ten largest native-preview sites, «حي X، City» by name, the city when no district, the town the ad link names when no city, the free embed (keyless or place mode)', districtReal.length === 0, districtReal.join('\n      '));
 const mustCatchDistrict = async (what: string, from: string, to: string) => {
   if (!DATA_SRC.includes(from)) { failed++; console.log(`FAIL  mutation anchor missing: ${what}`); return; }
   const file = join(mkdtempSync(join(tmpdir(), 'ad-district-')), 'adPageData.ts');
@@ -623,8 +626,9 @@ await mustCatchDistrict('a country-only link accepted as a town', "const text = 
 await mustCatchDistrict('any site\'s link accepted as the town source', "if (u.hostname.replace(/^www\\./, '').toLowerCase() !== 'sa.aqar.fm') return null;", '');
 await mustCatchDistrict('no district → nothing (the city fallback lost)', "if (!district || district === 'غير معروف') return { query: city, district: '', city };", "if (!district || district === 'غير معروف') return null;");
 await mustCatchDistrict('the district map spreading past Aqar', "if (!DISTRICT_MAP_PLATFORMS.includes(String(row?.platform ?? '').trim().toLowerCase())) return null;", '');
-await mustCatchDistrict('Aqar Monthly dropped from the district map', "export const DISTRICT_MAP_PLATFORMS: readonly string[] = ['aqar', 'aqarmonthly', 'wasalt'];", "export const DISTRICT_MAP_PLATFORMS: readonly string[] = ['aqar', 'wasalt'];");
-await mustCatchDistrict('Wasalt dropped from the district map', "export const DISTRICT_MAP_PLATFORMS: readonly string[] = ['aqar', 'aqarmonthly', 'wasalt'];", "export const DISTRICT_MAP_PLATFORMS: readonly string[] = ['aqar', 'aqarmonthly'];");
+await mustCatchDistrict('Aqar Monthly dropped from the district map', "  'aqar', 'aqarmonthly', 'wasalt',", "  'aqar', 'wasalt',");
+await mustCatchDistrict('Wasalt dropped from the district map', "  'aqar', 'aqarmonthly', 'wasalt',", "  'aqar', 'aqarmonthly',");
+await mustCatchDistrict('one of the ten sites dropped from the district map', "'sakan', 'abralosol', 'nofodh',", "'abralosol', 'nofodh',");
 await mustCatchDistrict('the district embed losing the name', '`https://maps.google.com/maps?q=${q}&t=h&hl=${hl}&output=embed`', '`https://maps.google.com/maps?t=h&hl=${hl}&output=embed`');
 const districtWired = (dataSrc: string, previewSrc: string) =>
   /if \(!pin\) setArea\(districtPlace\(row, listingOpenUrl\(l\)\)\);/.test(previewSrc)   // only when the source published no pin; the ad's own link feeds the town fallback
