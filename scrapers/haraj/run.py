@@ -39,7 +39,8 @@ from urllib.parse import quote, unquote
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize as N  # noqa: E402
-from scrapers.common.arabic_location import REGION_EN_TO_ID, catalog_district, resolve  # noqa: E402
+from scrapers.common.arabic_location import REGION_EN_TO_ID, catalog_district, city_ar_for, resolve, same_city  # noqa: E402
+from scrapers.common.district_bridge import bridge_rows, bridge_unique, norm_en  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_capture, redact_pii  # noqa: E402
 from scrapers.haraj import parse as P  # noqa: E402
@@ -182,6 +183,28 @@ def deal_conflict(title: Optional[str], p: dict) -> Optional[str]:
     return None
 
 
+def licence_district(p: dict, city_id: Optional[int]) -> tuple[Optional[str], Optional[str]]:
+    """(district, district_source) from REGA's licence location when the deed names a city but no «الحي:» (owner
+    2026-10-19): only when the licence's city IS the deed's city (same_city: by name or the catalogue alias table).
+    English locations go through the shared EN→AR bridge (unique key, confirmed in this city's catalogue)."""
+    deed = p.get("deed_city_ar")
+    city, district, form = P.licence_place(p.get("licence_location"))
+    if not (deed and city_id and district):
+        return None, None
+    if form == "en":
+        city_en = N.map_city(city_ar_for(city_id) or "")
+        if not city_en or city.lower() != city_en.lower():
+            return None, None
+        ar = bridge_unique(bridge_rows(city_en), norm_en).get(norm_en(district) or "")
+        return (ar, "licence_location_en_bridge") if ar and catalog_district(city_id, ar) else (None, None)
+    if form == "text":
+        words = re.sub(r"[.،,]", " ", city).split()
+        same = any(same_city(" ".join(words[:k]), deed) for k in (1, 2, 3))
+    else:
+        same = same_city(city, deed)
+    return (district, "licence_location") if same else (None, None)
+
+
 def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: Any = None
              ) -> tuple[Optional[dict], str, str, dict]:
     """(row, category, skip_reason, facts). row is None exactly when the post must not be a listing."""
@@ -216,6 +239,13 @@ def map_post(pid: str, ld: dict, page_html: str, verdict: str, why: str, today: 
     facts["city_resolved"] = bool(city_id)
     if not city_id:
         return None, category, "city_not_in_catalog", facts
+    if p["district_source"] in (None, "post_neighbourhood"):
+        lic_d, lic_src = licence_district(p, city_id)
+        if lic_d:
+            p["district_ar"], p["district_source"] = lic_d, lic_src
+            facts["district_raw_ar"] = lic_d
+            district = catalog_district(city_id, lic_d)
+            facts["district_resolved"] = bool(district)
 
     raw_text = p["description_raw_lines"]
     free_text = raw_text[:raw_text.find(P.LICENCE_HEAD)] if P.LICENCE_HEAD in raw_text else raw_text

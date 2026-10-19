@@ -226,6 +226,33 @@ def licence_location_ar(raw: Optional[str]) -> tuple[Optional[str], Optional[str
     return tuple(_clean(x) for x in parts)  # type: ignore[return-value]
 
 
+_EN_PART = re.compile(r"[A-Za-z][A-Za-z0-9 .'()-]*")
+_TEXT_HAYY = re.compile(r"(?:^|\s)(?:حي|حى)\s+((?:[ء-ي]+\s+){0,2}[ء-ي]+)\s+(?:ب|في\s+|فى\s+)?"
+                        r"(?:مدينة|مدينه|محافظة|محافظه|بلدة|بلده)\s+(.+)$", re.S)
+
+
+def licence_place(raw: Optional[str]) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """(city, district, form) REGA's «وصف موقع العقار» names, read exactly (owner 2026-10-19):
+    «منطقة القصيم, بريدة, الليوان» → form "ar"; «Riyadh Region, Riyadh, Al Khair» → form "en" (English as written,
+    never transliterated here); «حي المليداء بمدينة بريدة .» → form "text", city = the words after the marker.
+    Anything else, or a silent district («Not Determined», «غير محدد»), names no district."""
+    parts = [x.strip() for x in re.split(r"[,،]", raw or "")]
+    if len(parts) == 3 and all(_EN_PART.fullmatch(x) for x in parts):
+        city, district, form = parts[1], _clean(parts[2]), "en"
+        if district and district.lower() == "not determined":
+            district = None
+    else:
+        _, city, district = licence_location_ar(raw)
+        district, form = _district_word(district), "ar"
+        m = _TEXT_HAYY.search(raw or "") if len(parts) == 1 else None
+        if m:
+            city, district, form = m.group(2).strip(), re.sub(r"\s+(?:في|فى)$", "", m.group(1)), "text"
+    # a district that only repeats its city («Hail Region, Alshiyhiuh, Alshiyhiuh», «العدايا, العدايا») names a village
+    if not (city and district) or re.sub(r"\W", "", district.lower()) == re.sub(r"\W", "", city.lower()):
+        return None, None, None
+    return city, district, form
+
+
 _NO_DISTRICT = frozenset({"غير معروف", "غير معروفه", "غير معروفة", "غير معرف", "مجهول", "بدون", "لا يوجد", "لايوجد"})
 
 
@@ -290,6 +317,7 @@ def parse_post(ld: dict[str, Any], page_html: str = "") -> dict[str, Any]:
         "date_modified": ld.get("dateModified"),
         # DEED lines first (REGA's «وصف موقع العقار حسب الصك»), then the first «المدينة:» anywhere, then the
         # post's own addressLocality.
+        "deed_city_ar": _clean(deed.get("المدينة")),
         "city_ar": _clean(deed.get("المدينة")) or loc3[1] or _field(desc, r"المدينة") or
                    ((ld.get("address") or {}).get("addressLocality")),
         "district_ar": district,                   # see the precedence note above
