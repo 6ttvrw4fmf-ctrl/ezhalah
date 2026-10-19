@@ -60,7 +60,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.http_liveness import decide  # noqa: E402
 from scrapers.common.arabic_location import (  # noqa: E402
-    _REGION_AR_FOR, find_district_in_text, norm_ar, to_catalog,
+    _REGION_AR_FOR, catalog_district, city_ar_for, find_district_in_text, norm_ar, only_city_with_district, to_catalog,
 )
 
 SITE = "https://rakez.sa"
@@ -386,6 +386,16 @@ def resolve_location(term_ids: list[int], tree: dict[int, dict], title: Optional
             city_ar, city_id, region_id = next(iter(cities.values()))
             others = [tree[t]["name"] for t in sorted(tagged, key=depth, reverse=True) if tree[t]["name"] != city_ar]
             chain = others[:1] + [city_ar]     # the district candidate first, as the tree walk leaves it
+
+    if not city_id and chain and len(chain) >= 2:
+        # «المدينة: الخور , الشرقية» (/ar/project/56418/, 28 live units with no city, 2026-10-18): a district and its
+        # REGION, no city. Placed only when that district belongs to exactly ONE catalogue city of the region (owner
+        # 2026-10-18, the المبرز pattern) — «الخور» is الخبر's alone; a district two cities share places nothing.
+        rid = _bare_region_labels().get(norm_ar(chain[-1]))
+        cid = only_city_with_district(chain[0], rid) if rid is not None else None
+        if cid:
+            city_ar, city_id, region_id = city_ar_for(cid), cid, rid
+            return city_ar, city_id, region_id, catalog_district(cid, chain[0])
 
     if not city_id:
         # The tree skipped the city (البندرية → الشرقية, no الخبر): the project's OWN title states it.
