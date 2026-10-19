@@ -27,6 +27,20 @@ def bridge_rows(city_en: str) -> tuple[tuple[str, str], ...]:
     return tuple((str(r.get("district_en") or ""), str(r.get("district_ar") or "")) for r in rows)
 
 
+def norm_en(name: Optional[str]) -> Optional[str]:
+    """«Al Munsiyah District» / «An Narjis» / «Al-Arid» → «munsiyah» / «narjis» / «arid» (rightcompound's key, shared
+    so a new caller reads the bridge the same way)."""
+    if not name:
+        return None
+    n = re.sub(r"\b(?:district|dist)\b\.?", " ", name.strip().lower())
+    n = re.sub(r"[^a-z\s-]", " ", n)
+    n = re.sub(r"^\s*(?:the\s+)?(?:al|an|ar|as|ad|ash|at)[\s-]+", "", n)
+    n = re.sub(r"^\s*the\s+", "", n)
+    n = re.sub(r"^\s*al(?=[a-z]{4})", "", n)
+    n = re.sub(r"\s+", " ", n).strip()
+    return n or None
+
+
 def bridge_unique(rows, norm: Callable[[Optional[str]], Optional[str]]) -> dict[str, str]:
     """{norm(en): district_ar} for the keys with exactly one Arabic answer; Arabic-keyed rows are ignored."""
     seen: dict[str, set[str]] = {}
