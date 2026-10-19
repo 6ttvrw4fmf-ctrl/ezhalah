@@ -36,6 +36,7 @@ if str(ROOT.parent) not in sys.path:
     sys.path.insert(0, str(ROOT.parent))
 
 from scrapers.common import db, normalize
+from scrapers.common.http_liveness import stored_listing_url
 from scrapers.common.arabic_location import to_catalog
 
 BASE = "https://fursaghyr.com"
@@ -177,7 +178,47 @@ def _verify_gone(ad_number: str, s: Optional[cc.Session] = None) -> tuple[str, s
         return "unknown", f"REST 200 with unrecognised status {st!r}"
     if r.status_code == 404 and isinstance(body, dict) and body.get("code") == "rest_post_invalid_id":
         return "gone", "REST 404 rest_post_invalid_id — the post was deleted at source"
+    if r.status_code == 401 and isinstance(body, dict) and body.get("code") == "rest_forbidden":
+        return _own_page_after_401(ad_number, s)
     return "unknown", f"REST {r.status_code}"
+
+
+# A live ad's own page, set by main() from a post that read `publish` THIS run. The page fallback
+# below may only call a 404 "gone" after this control answered 200 through the same session.
+_CONTROL_URL: Optional[str] = None
+_control_ok: Optional[bool] = None
+_stored_url = stored_listing_url(("fursaghyr_residential_listings", "fursaghyr_commercial_listings"))
+
+
+def _own_page_after_401(ad_number: str, s: Optional[cc.Session]) -> tuple[str, str]:
+    """REST 401 rest_forbidden = the post is no longer public (trashed/draft). The law keeps a 401
+    UNKNOWN, so the ad's OWN page decides: 404/410 → gone, anything else → UNKNOWN (2026-10-19).
+    FG27710 left the feed 10-17, sat at 3 strikes shown for three nights, REST 401 on every read,
+    its page 404 (dead-visible 10-17/18/19). Same shape as daryusuf (2026-10-12)."""
+    global _control_ok
+    rest = "REST 401 rest_forbidden (post not public)"
+    url = _stored_url(ad_number)
+    if not url:
+        return "unknown", f"{rest}; no stored page URL"
+    sess = s or session()
+    if _control_ok is None:
+        _control_ok = False
+        if _CONTROL_URL:
+            _throttle()
+            try:
+                _control_ok = sess.get(_CONTROL_URL, timeout=30, allow_redirects=False).status_code == 200
+            except Exception:
+                _control_ok = False
+    if not _control_ok:
+        return "unknown", f"{rest}; live control page did not answer 200 — a 404 proves nothing"
+    _throttle()
+    try:
+        pr = sess.get(url, timeout=30, allow_redirects=False)
+    except Exception as e:
+        return "unknown", f"{rest}; own page read failed ({type(e).__name__})"
+    if pr.status_code in (404, 410):
+        return "gone", f"{rest}; its own page answers {pr.status_code} (control 200)"
+    return "unknown", f"{rest}; its own page answers {pr.status_code}"
 
 
 _FULLRES_RE = re.compile(r"-\d{2,4}x\d{2,4}(\.(?:png|jpe?g|webp))$", re.IGNORECASE)
@@ -427,6 +468,7 @@ def map_listing(item: dict, s: Optional[cc.Session] = None) -> tuple[Optional[di
 
 
 def main() -> int:
+    global _CONTROL_URL
     ap = argparse.ArgumentParser()
     ap.add_argument("--type", choices=["residential", "commercial", "all"], default="all")
     ap.add_argument("--limit", type=int, default=None,
@@ -472,6 +514,7 @@ def main() -> int:
                 continue
             (com if cat == "commercial" else res).append(row)
             seen += 1
+            _CONTROL_URL = _CONTROL_URL or row.get("listing_url")
 
         if res:
             db.upsert_fursaghyr_residential_batch(res)
