@@ -306,7 +306,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scrapers.common import db, normalize  # noqa: E402
 from scrapers.common.source_pin import sa_pin  # noqa: E402
-from scrapers.common.arabic_location import city_ar_for, find_district_in_text, to_catalog  # noqa: E402
+from scrapers.common.arabic_location import city_ar_for, find_district_in_text, norm_district_tok, to_catalog  # noqa: E402
+
+_DISTRICT_SPELLING = {(14, norm_district_tok("أبوكبير")): "حي ابو كبير",
+                      (14, norm_district_tok("أبوبريقاء")): "حي ابو بريقاء"}
 from scrapers.common.http import TRANSIENT_STATUSES  # noqa: E402
 from scrapers.common.http_liveness import LivenessProbe  # noqa: E402
 from scrapers.common.pii import redact_pii, strip_pii_fields  # noqa: E402
@@ -648,6 +651,12 @@ def map_listing(rec: dict[str, Any]) -> tuple[Optional[dict], str, str]:
     district_raw = (_clean((rec.get("Neighborhood") or {}).get("name"))
                     or _clean(loc.get("district")))       # same fallback, same reason as the city
     district_ar = find_district_in_text(district_raw, city_id)
+    if district_ar is None and district_raw:
+        # A spelling of a catalogued district (ops_district_name_decision 'variant'): mapped here, never
+        # added to the catalog. 2026-10-19 (#657): المدينة's «أبوكبير» / «أبوبريقاء» are its catalogued
+        # «حي ابو كبير» / «حي ابو بريقاء» (7 + 6 ads).
+        alt = _DISTRICT_SPELLING.get((city_id, norm_district_tok(district_raw)))
+        district_ar = find_district_in_text(alt, city_id) if alt else None
 
     # ── The source's own field-applicability declaration (trap 3) ────────────────────────────────
     declared = {str(f) for f in ((rec.get("PropertyType") or {}).get("propertyFields") or [])}
