@@ -52,7 +52,7 @@ from scrapers.common.http import retry_smarter_session
 from scrapers.common.http_liveness import LivenessProbe
 from scrapers.common import normalize as N
 from scrapers.common.pii import redact_capture, redact_pii
-from scrapers.common.page_pin import pin_from_html
+from scrapers.common.page_pin import pin_from_html, pin_from_short_link, resolve_redirect, short_maps_link
 
 BASE = "https://abralosol.com"
 SOURCE = "Abr Alosol"
@@ -410,7 +410,9 @@ def _detail(s: cc.Session, nid: str) -> dict:
         "photo_urls": photos,
         "label": label,
         "age_raw": age_raw,
-        "pin": pin_from_html(page),   # the «الموقع» google.com/maps/place/LAT,LNG link (owner 2026-10-19)
+        # The «الموقع» link: google.com/maps/place/LAT,LNG, or a maps.app.goo.gl short link that is
+        # followed by redirect (measured 2026-10-19: ad 7890 carries only the short form).
+        "pin": pin_from_html(page) or pin_from_short_link(short_maps_link(page), lambda u: resolve_redirect(s, u)),
     }
 
 

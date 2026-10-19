@@ -20,15 +20,18 @@ A pin outside Saudi Arabia, at 0,0 or not numeric is rejected by sa_pin(). Nothi
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import Callable, Optional
+from html import unescape
+from urllib.parse import unquote
 
 from scrapers.common.source_pin import pin_dict
 
 _NUM = r"(-?\d{1,2}\.\d{3,})"
 _JSONLD_GEO = re.compile(r'"geo"\s*:\s*\{[^{}]*?"latitude"\s*:\s*"?' + _NUM + r'"?[^{}]*?"longitude"\s*:\s*"?' + _NUM + r'"?', re.S)
 _MAPS_LINK = re.compile(
-    r"(?:maps/place/|maps/search/|maps\?q=|[?&]q=|[?&]query=|[?&]ll=|maps/@)" + _NUM + r"\s*(?:,|%2C)\s*" + _NUM)
+    r"(?:maps/place/|maps/search/|maps\?q=|[?&]q=|[?&]query=|[?&]ll=|maps/@|/@)" + _NUM + r"\s*(?:,|%2C)\s*" + _NUM)
 _LATLNG_CTOR = re.compile(r"google\.maps\.LatLng\(\s*" + _NUM + r"\s*,\s*" + _NUM + r"\s*\)")
 _EXACT_ON = re.compile(r"show_exact_location\s*=\s*true")
 _SHORT_LINK = re.compile(r"https://(?:maps\.app\.goo\.gl|goo\.gl/maps)/[A-Za-z0-9_-]+")
@@ -65,22 +68,92 @@ def pin_from_short_link(url: Optional[str], resolve: Callable[[str], Optional[st
         final = resolve(url)
     except Exception:  # noqa: BLE001 — a failed hop is "no pin this fetch", never a crash
         return {}
+    final = _maps_url_in(final)
     if not final:
         return {}
     m = _MAPS_LINK.search(final)
     return pin_dict(m.group(1), m.group(2)) if m else {}
 
 
+_DEBUG_LEFT = [3]   # the first few resolutions of a run are printed, so a crawl log shows what Google answered
+
+
+def _maps_url_in(candidate: Optional[str]) -> Optional[str]:
+    """The candidate itself when it carries a pair — also after URL-decoding, because Google's
+    consent interstitial for datacenter addresses hides the Maps URL inside `continue=…%3Fq%3D…`."""
+    if not candidate:
+        return None
+    for form in (candidate, unquote(candidate), unquote(unquote(candidate))):
+        if _MAPS_LINK.search(form):
+            return form
+    return None
+
+
+def _maps_url_in_body(text: Optional[str]) -> Optional[str]:
+    """A Maps URL carrying a pair inside a page BODY. Measured on the GitHub runner 2026-10-19:
+    goo.gl answers a datacenter address with HTTP 200 and no Location at all — an interstitial
+    page whose markup names the destination (a link, a form's continue=, a script). The body is
+    HTML-unescaped and URL-decoded before the search; only a pair inside Saudi Arabia survives
+    sa_pin() afterwards, so a stray number cannot become a pin."""
+    if not text:
+        return None
+    body = text[:400_000]
+    for form in (body, unescape(body), unquote(unescape(body))):
+        m = _MAPS_LINK.search(form)
+        if m:
+            return form[max(0, m.start() - 60):m.end()]
+    return None
+
+
+def _hop_proxies() -> Optional[dict]:
+    """Owner 2026-10-19 («ok use the proxy»): Google answers GitHub runners with a script page
+    instead of the goo.gl redirect, so ONLY this hop goes through the Saudi residential proxy when
+    the job has it (WASALT_PROXY_URL — a few KB per new ad). Site pages never use it from here."""
+    purl = os.environ.get("WASALT_PROXY_URL", "").strip()
+    return {"http": purl, "https": purl} if purl else None
+
+
 def resolve_redirect(session, url: str, hops: int = 4) -> Optional[str]:
-    """The URL a short link lands on, following up to `hops` redirects WITHOUT loading Maps itself."""
-    cur = url
-    for _ in range(hops):
-        r = session.get(cur, allow_redirects=False, timeout=20)
-        loc = r.headers.get("location") or r.headers.get("Location")
-        if r.status_code in (301, 302, 303, 307, 308) and loc:
-            cur = loc
-            if _MAPS_LINK.search(cur):
-                return cur
-            continue
-        return cur if _MAPS_LINK.search(cur) else None
-    return cur if _MAPS_LINK.search(cur) else None
+    """The URL a short link lands on. First by hand, hop by hop, so Maps itself is never loaded
+    (measured 2026-10-19: goo.gl → maps.google.com?q=LAT,LNG on the first hop). If that reads
+    nothing — a client that cannot do a manual hop, or a shape we do not know — let the client
+    follow the redirects itself and read the final URL it reports (decoded, see _maps_url_in)."""
+    cur, seen, hit = url, [], None
+    proxies = _hop_proxies()
+    if proxies:
+        seen.append("via proxy")
+    try:
+        for _ in range(hops):
+            r = session.get(cur, allow_redirects=False, timeout=20, proxies=proxies)
+            loc = r.headers.get("location") or r.headers.get("Location")
+            seen.append(f"{r.status_code}→{(loc or '')[:90]}")
+            if r.status_code in (301, 302, 303, 307, 308) and loc:
+                cur = loc
+                hit = _maps_url_in(cur)
+                if hit:
+                    break
+                continue
+            body = getattr(r, "text", None) or ""
+            hit = _maps_url_in_body(body)     # a 200 interstitial names the destination
+            if hit:
+                seen.append("pair in body")
+            else:
+                # Diagnostic for the crawl log: what did Google answer? (title + the first Maps/redirect hint)
+                t = re.search(r"<title>(.{0,80})", body, re.S)
+                g = re.search(r".{0,40}(?:google\.[a-z.]+/maps|http-equiv|window\.location|sorry|unusual traffic|consent)[^<]{0,120}", body, re.I)
+                seen.append(f"body {len(body)}B title={t.group(1).strip() if t else chr(63)} hint={g.group(0).strip() if g else chr(45)}")
+            break
+    except Exception as e:  # noqa: BLE001 — fall through to the client's own follow
+        seen.append(f"manual hop raised {type(e).__name__}")
+    if not hit:
+        try:
+            r = session.get(url, allow_redirects=True, timeout=30, proxies=proxies)
+            final = str(getattr(r, "url", "") or "")
+            seen.append(f"follow→{final[:90]}")
+            hit = _maps_url_in(final) or _maps_url_in_body(getattr(r, "text", None))
+        except Exception as e:  # noqa: BLE001
+            seen.append(f"follow raised {type(e).__name__}")
+    if _DEBUG_LEFT[0] > 0:
+        _DEBUG_LEFT[0] -= 1
+        print(f"   ⓘ short-link pin {url[:60]}: {' | '.join(seen)} → {'pin' if hit else 'none'}", flush=True)
+    return hit

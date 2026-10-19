@@ -73,12 +73,32 @@ class _Resp:
 
 
 class _Sess:
-    def __init__(self, hops):
-        self.hops, self.calls = hops, []
+    def __init__(self, hops, final=None):
+        self.hops, self.calls, self.final = hops, [], final
 
-    def get(self, url, allow_redirects=False, timeout=20):
+    def get(self, url, allow_redirects=False, timeout=20, proxies=None):
         self.calls.append(url)
+        if allow_redirects:
+            r = _Resp(200)
+            r.url = self.final or url
+            return r
         return self.hops.get(url, _Resp(200))
+
+
+def test_resolve_redirect_falls_back_to_the_clients_own_follow():
+    # the manual hop reads nothing (a 200 shell), so the client follows and reports the final URL
+    s = _Sess({}, final="https://www.google.com/maps/place/25%C2%B018'N/@25.3152163,49.6193885,17z/data=x")
+    assert resolve_redirect(s, "https://maps.app.goo.gl/y") == s.final
+    assert pin_from_short_link("https://maps.app.goo.gl/y", lambda u: resolve_redirect(s, u)) == {
+        "latitude": 25.3152163, "longitude": 49.6193885}
+    # a manual hop that raises also falls back rather than failing the ad
+    class _Boom(_Sess):
+        def get(self, url, allow_redirects=False, timeout=20, proxies=None):
+            if not allow_redirects:
+                raise RuntimeError("no manual hops here")
+            return super().get(url, allow_redirects, timeout)
+    b = _Boom({}, final="https://maps.google.com?q=25.3152163,49.6193885&entry=gps")
+    assert resolve_redirect(b, "https://maps.app.goo.gl/z") == b.final
 
 
 def test_resolve_redirect_stops_at_the_maps_url_without_loading_it():
@@ -96,7 +116,7 @@ def _src(p: str) -> str:
 
 def test_each_scraper_writes_the_pin_into_additional_info():
     assert 'out["pin"] = pin_from_html(page)' in _src("sakan") and '**(p.get("pin") or {}),' in _src("sakan")
-    assert '"pin": pin_from_html(page),' in _src("abralosol") and '**(detail.get("pin") or {}),' in _src("abralosol")
+    assert '"pin": pin_from_html(page) or pin_from_short_link(' in _src("abralosol") and '**(detail.get("pin") or {}),' in _src("abralosol")
     assert '"pin": pin_from_html(body),' in _src("nofodh") and '**(rec.get("pin") or {}),' in _src("nofodh")
     assert '"pin": pin_from_html(art) or pin_from_html(page_html),' in _src("bossbih") and '**(detail.get("pin") or {}),' in _src("bossbih")
     aq = _src("aqalemhajer")
@@ -109,3 +129,64 @@ def test_the_six_sites_are_on_the_border_map_meanwhile():
     data = (ROOT / "src" / "data" / "adPageData.ts").read_text(encoding="utf-8")
     for p in ("sakan", "abralosol", "nofodh", "bossbih", "aqalemhajer", "reinvest"):
         assert f"'{p}'" in data.split("DISTRICT_MAP_PLATFORMS")[1].split("];")[0]
+
+
+def test_abralosol_and_bossbih_follow_a_short_link_too():
+    # measured 2026-10-19: abralosol 7890 links its pin only as maps.app.goo.gl; the office sites share one template
+    ab = _src("abralosol")
+    assert 'pin_from_html(page) or pin_from_short_link(short_maps_link(page), lambda u: resolve_redirect(s, u))' in ab
+    bo = _src("bossbih")
+    assert 'd["pin"] = pin_from_short_link(short_maps_link(r.text), lambda u: resolve_redirect(s, u))' in bo
+
+
+def test_a_consent_interstitial_still_yields_the_pin():
+    # Google answers a datacenter address with consent.google.com and hides the Maps URL, encoded,
+    # in `continue=`; the pair must still be read from it.
+    consent = ("https://consent.google.com/m?continue=https%3A%2F%2Fwww.google.com%2Fmaps%3Fq%3D25.3152163"
+               "%2C49.6193885%26entry%3Dgps&gl=US&m=0&pc=m&uxe=eomtm&hl=en")
+    s = _Sess({"https://maps.app.goo.gl/c": _Resp(302, consent)})
+    assert resolve_redirect(s, "https://maps.app.goo.gl/c") is not None
+    assert pin_from_short_link("https://maps.app.goo.gl/c", lambda u: resolve_redirect(s, u)) == {
+        "latitude": 25.3152163, "longitude": 49.6193885}
+    # and a consent page reached only through the client's own follow
+    s2 = _Sess({}, final=consent)
+    assert pin_from_short_link("https://maps.app.goo.gl/d", lambda u: resolve_redirect(s2, u)) == {
+        "latitude": 25.3152163, "longitude": 49.6193885}
+
+
+def test_a_200_interstitial_names_the_destination_in_its_body():
+    # Measured on the GitHub runner 2026-10-19: goo.gl → HTTP 200, no Location, the page body
+    # carries the Maps URL (here as a consent form's encoded continue= and as an escaped link).
+    body = ('<html><form action="https://consent.google.com/save"><input name="continue" '
+            'value="https://www.google.com/maps?q=25.3152163%2C49.6193885&amp;entry=gps"></form>'
+            '<a href="https://www.google.com/maps?q=25.3152163,49.6193885&amp;entry=gps">open</a></html>')
+    r = _Resp(200)
+    r.text = body
+    s = _Sess({"https://maps.app.goo.gl/e": r})
+    assert pin_from_short_link("https://maps.app.goo.gl/e", lambda u: resolve_redirect(s, u)) == {
+        "latitude": 25.3152163, "longitude": 49.6193885}
+    # a 200 body with no Maps URL at all still yields nothing (never a geocode, never a guess)
+    r2 = _Resp(200)
+    r2.text = "<html>nothing here</html>"
+    s2 = _Sess({"https://maps.app.goo.gl/f": r2})
+    assert pin_from_short_link("https://maps.app.goo.gl/f", lambda u: resolve_redirect(s2, u)) == {}
+
+
+def test_the_short_link_hop_uses_the_proxy_only_when_the_job_has_one(monkeypatch):
+    # owner 2026-10-19 («ok use the proxy»): only the goo.gl hop, only when WASALT_PROXY_URL is set
+    class _Cap(_Sess):
+        def __init__(self, hops):
+            super().__init__(hops)
+            self.kw = []
+
+        def get(self, url, allow_redirects=False, timeout=20, proxies=None):
+            self.kw.append(proxies)
+            return super().get(url, allow_redirects, timeout)
+    monkeypatch.setenv("WASALT_PROXY_URL", "http://user:pw@gw.example:823")
+    s = _Cap({"https://maps.app.goo.gl/p": _Resp(302, "https://maps.google.com?q=25.3152163,49.6193885&entry=gps")})
+    assert resolve_redirect(s, "https://maps.app.goo.gl/p") is not None
+    assert s.kw == [{"http": "http://user:pw@gw.example:823", "https": "http://user:pw@gw.example:823"}]
+    monkeypatch.delenv("WASALT_PROXY_URL")
+    s2 = _Cap({"https://maps.app.goo.gl/p": _Resp(302, "https://maps.google.com?q=25.3152163,49.6193885&entry=gps")})
+    assert resolve_redirect(s2, "https://maps.app.goo.gl/p") is not None
+    assert s2.kw == [None]

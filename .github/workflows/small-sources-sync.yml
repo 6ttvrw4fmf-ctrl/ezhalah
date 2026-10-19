@@ -153,7 +153,9 @@ jobs:
           - { source: ialqarawi,   cmd: "python -m scrapers.ialqarawi.run --type all", tmo: 45, proxy: true }
           #   bossbih: 10 index pages + ~1,485 detail pages, sequential, 0.25s pause + ~0.2s
           #   response → ~11 min.
-          - { source: bossbih,     cmd: "python -m scrapers.bossbih.run --type all", tmo: 60 }
+          # bossbih + aqalemhajer: `proxy: true` (owner 2026-10-19) ONLY for the maps.app.goo.gl pin hop in
+          # scrapers/common/page_pin.py — Google answers the runner with a script page instead of the redirect.
+          - { source: bossbih,     cmd: "python -m scrapers.bossbih.run --type all", tmo: 60, proxy: true }
           #   alshawaf: 26 index pages + ~987 detail pages, sequential, 0.3s pause + ~0.7s
           #   response → ~17 min.
           - { source: alshawaf,    cmd: "python -m scrapers.alshawaf.run --type all", tmo: 60 }
@@ -188,7 +190,7 @@ jobs:
           #   docstring records no live wall-clock (coverage was measured offline over saved
           #   pages): ~27 min at a 1 s response, ~47 min at 2 s from a US runner. 90 (the workflow
           #   default) keeps >=2x at 2 s; re-size from the first dispatched run's duration.
-          - { source: aqalemhajer,    cmd: "python -m scrapers.aqalemhajer.run --type all", tmo: 90 }
+          - { source: aqalemhajer,    cmd: "python -m scrapers.aqalemhajer.run --type all", tmo: 90, proxy: true }
           #   sakani: 15 API pages + 282 detail records at 1.5 s (measured 740 s dry run).
           - { source: sakani,         cmd: "python -m scrapers.sakani.run --type all", tmo: 45, proxy: true }
           #   API / REST sources whose whole catalogue is one page or a handful of calls:
