@@ -46,7 +46,8 @@ const mutants: [string, string][] = [
   ['region change ignored', body.replace('is distinct from (excluded.city_ar, excluded.region_ar)', 'is distinct from (excluded.city_ar, public.listings_arabic_locations.region_ar)')],
   ['pin arm only in a comment', body.replace(`         ${NARROW}\n`, `         -- ${NARROW}\n`)],
 ];
-for (const [name, m] of mutants) ok(`mutant caught: ${name}`, m !== body && problems(m).length > 0);
+const mustCatch = (what: string, caught: boolean) => ok(`(mutation) catches ${what}`, caught);
+for (const [name, m] of mutants) mustCatch(name, m !== body && problems(m).length > 0);
 
 // The scraper half: the pick is only ever written with its provenance.
 const run = readFileSync(join(import.meta.dirname, '..', 'scrapers', 'dealapp', 'run.py'), 'utf8');
